@@ -113,3 +113,23 @@ dotnet_diagnostic.S2699.severity = none
 ; Test data literals.
 dotnet_diagnostic.S109.severity = none
 dotnet_diagnostic.CA1861.severity = none
+
+; ==========================================================================
+; API surface stub (S01), src/FuzzyRegex root only.
+;
+; The public API exists as signatures before the parser and engine do, because the ported test
+; suite cannot compile against types that are not there (design spec section 15, amendment 2).
+; Every member throws NotImplementedException, which makes three rules fire on every one of them
+; for reasons that are true of a stub and false of the finished type.
+;
+; DELETE THIS BLOCK IN PHASE 2, when the members gain bodies. If it survives past then it starts
+; hiding real findings, which is the opposite of what it is for.
+; ==========================================================================
+[src/FuzzyRegex/*.cs]
+; NotImplementedException: the point of the slice.
+dotnet_diagnostic.MA0025.severity = none
+; "Make this a static method": true only while the body ignores instance state.
+dotnet_diagnostic.S2325.severity = none
+; "Remove unused parameter": true only while the body ignores its arguments.
+dotnet_diagnostic.IDE0060.severity = none
+

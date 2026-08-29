@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>FuzzyRegex</RootNamespace>
+    <RootNamespace>Fuzzy.Text.RegularExpressions</RootNamespace>
     <!-- The shipped public API must carry XML docs (design spec section 7). -->
     <WarningsNotAsErrors></WarningsNotAsErrors>
     <NoWarn></NoWarn>

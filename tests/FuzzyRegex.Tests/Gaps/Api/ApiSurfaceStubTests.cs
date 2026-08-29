@@ -1,0 +1,157 @@
+using AwesomeAssertions;
+
+namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
+
+/// <summary>
+/// Proves the public API surface is still a stub. S01 wrote signatures only; phase 2 puts a
+/// parser and an engine behind them, at which point these tests flip into real ones rather than
+/// being deleted - so the moment the stub stops being a stub is visible in a diff.
+/// </summary>
+/// <remarks>
+/// These are gap tests, not ported ones: they pin our own scaffolding, so they do not count
+/// towards the parity percentage.
+/// </remarks>
+public sealed class ApiSurfaceStubTests
+{
+    [Test]
+    public void Constructing_a_pattern_throws_because_the_engine_is_not_written_yet()
+    {
+        Action construct = () => _ = new FuzzyRegex("a");
+
+        construct.Should().Throw<NotImplementedException>();
+    }
+
+    [Test]
+    public void A_null_pattern_is_rejected_before_the_stub_gives_up()
+    {
+        // Validation at a trust boundary is real code even in a stub, so it is tested like real
+        // code: the ArgumentNullException must win over the NotImplementedException.
+        Action construct = () => _ = new FuzzyRegex(null!);
+
+        construct.Should().Throw<ArgumentNullException>().WithParameterName("pattern");
+    }
+
+    [Test]
+    [Arguments(0)]
+    [Arguments(-5)]
+    public void A_non_positive_match_timeout_is_rejected(int milliseconds)
+    {
+        // Not -1: TimeSpan.FromMilliseconds(-1) *is* Timeout.InfiniteTimeSpan, so it is the
+        // "no limit" sentinel rather than a negative timeout. The next test pins that.
+
+        Action construct = () => _ = new FuzzyRegex(
+            "a",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromMilliseconds(milliseconds));
+
+        construct.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("matchTimeout");
+    }
+
+    [Test]
+    public void An_infinite_match_timeout_is_accepted()
+    {
+        Action construct = () => _ = new FuzzyRegex(
+            "a",
+            FuzzyRegexOptions.None,
+            FuzzyRegex.InfiniteMatchTimeout);
+
+        // Reaching the stub's own throw means validation let it through.
+        construct.Should().Throw<NotImplementedException>();
+    }
+
+    [Test]
+    public void Minus_one_millisecond_is_the_infinite_sentinel_not_a_negative_timeout()
+    {
+        // Matches Regex.InfiniteMatchTimeout, which is likewise Timeout.InfiniteTimeSpan.
+        FuzzyRegex.InfiniteMatchTimeout.Should().Be(TimeSpan.FromMilliseconds(-1));
+    }
+
+    [Test]
+    public void The_static_conveniences_are_stubs_too()
+    {
+        Action isMatch = () => _ = FuzzyRegex.IsMatch("abc", "a");
+
+        isMatch.Should().Throw<NotImplementedException>();
+    }
+
+    [Test]
+    public void Option_values_are_upstream_flag_values_so_the_parser_port_can_use_them_directly()
+    {
+        // upstream/regex/_regex_core.py lines 73-90 (class RegexFlag).
+        ((int)FuzzyRegexOptions.IgnoreCase).Should().Be(0x2);
+        ((int)FuzzyRegexOptions.Multiline).Should().Be(0x8);
+        ((int)FuzzyRegexOptions.Singleline).Should().Be(0x10);
+        ((int)FuzzyRegexOptions.IgnorePatternWhitespace).Should().Be(0x40);
+        ((int)FuzzyRegexOptions.Version1).Should().Be(0x100);
+        ((int)FuzzyRegexOptions.RightToLeft).Should().Be(0x400);
+        ((int)FuzzyRegexOptions.BestMatch).Should().Be(0x1000);
+        ((int)FuzzyRegexOptions.Version0).Should().Be(0x2000);
+        ((int)FuzzyRegexOptions.FullCase).Should().Be(0x4000);
+        ((int)FuzzyRegexOptions.EnhanceMatch).Should().Be(0x8000);
+        ((int)FuzzyRegexOptions.Posix).Should().Be(0x10000);
+    }
+
+    [Test]
+    public void Every_option_has_a_distinct_bit()
+    {
+        FuzzyRegexOptions[] options = Enum.GetValues<FuzzyRegexOptions>();
+
+        options.Should().OnlyHaveUniqueItems();
+    }
+
+    [Test]
+    public void The_surface_can_express_every_upstream_operation_the_ported_suite_calls()
+    {
+        // Not a behaviour test - a compilation test. S01 exists to be the compilation target for
+        // S02-S05, and each of these upstream operations has no other member to translate onto.
+        // If a signature changes in phase 2 and one of these stops binding, this fails to build,
+        // which is exactly the moment the ported suite would have stopped building too.
+        Type surface = typeof(FuzzyRegex);
+
+        surface.GetMethod(nameof(FuzzyRegex.FullMatch), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .Should().NotBeNull("upstream fullmatch is used 71 times in test_regex.py");
+        surface.GetMethod(nameof(FuzzyRegex.MatchAtStart), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .Should().NotBeNull("upstream match is anchored at pos and is not our Match");
+        surface.GetMethod(nameof(FuzzyRegex.ReplaceFormat), [typeof(string), typeof(string), typeof(int)])
+            .Should().NotBeNull("upstream subf uses str.format templates, not $1 templates");
+
+        typeof(Match).GetProperty(nameof(Match.LastGroupNumber))
+            .Should().NotBeNull("upstream lastindex is not derivable from Groups");
+        typeof(Match).GetProperty(nameof(Match.LastGroupName))
+            .Should().NotBeNull("upstream lastgroup is not derivable from Groups");
+        typeof(Match).GetMethod(nameof(Match.ResultFormat), [typeof(string)])
+            .Should().NotBeNull("upstream expandf takes str.format templates");
+    }
+
+    [Test]
+    public void Escape_carries_both_of_upstreams_flags_because_all_four_combinations_differ()
+    {
+        // Oracle, 2026-08-29: escape('foo!?') is foo!\? but escape('foo!?', special_only=False)
+        // is foo\!\?; escape('a b') is a\ b but escape('a b', literal_spaces=True) is 'a b'.
+        // A single-argument Escape could not produce all four.
+        System.Reflection.MethodInfo? escape = typeof(FuzzyRegex)
+            .GetMethod(nameof(FuzzyRegex.Escape), [typeof(string), typeof(bool), typeof(bool)]);
+
+        escape.Should().NotBeNull();
+        escape!.GetParameters().Select(p => p.Name).Should()
+            .Equal("input", "specialOnly", "literalSpaces");
+    }
+
+    [Test]
+    public void A_parse_exception_carries_the_pattern_and_the_offset()
+    {
+        var error = new FuzzyRegexParseException("bad set", "[a-", 2);
+
+        error.Pattern.Should().Be("[a-");
+        error.Offset.Should().Be(2);
+    }
+
+    [Test]
+    public void A_parse_exception_without_a_position_reports_no_offset()
+    {
+        var error = new FuzzyRegexParseException("bad set");
+
+        error.Pattern.Should().BeNull();
+        error.Offset.Should().Be(-1);
+    }
+}

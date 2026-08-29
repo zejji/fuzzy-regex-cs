@@ -1,4 +1,4 @@
-namespace FuzzyRegex.Tests.Ported.Anchors;
+namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors;
 
 /// <summary>
 /// Ported from <c>upstream/regex/tests/test_regex.py</c>. Written skipped ahead of the engine,

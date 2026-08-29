@@ -1,4 +1,4 @@
-namespace FuzzyRegex.Tests.Conventions;
+namespace Fuzzy.Text.RegularExpressions.Tests.Conventions;
 
 /// <summary>
 /// The conventions <c>tools/PortTools.psm1</c> relies on when it turns a TRX report into
@@ -9,7 +9,7 @@ namespace FuzzyRegex.Tests.Conventions;
 internal static class PortedTestConventions
 {
     /// <summary>Namespace every ported upstream test lives under.</summary>
-    public const string PortedNamespaceRoot = "FuzzyRegex.Tests.Ported";
+    public const string PortedNamespaceRoot = "Fuzzy.Text.RegularExpressions.Tests.Ported";
 
     /// <summary>
     /// Returns one message per violated convention; an empty sequence means all conventions hold.
@@ -46,7 +46,7 @@ internal static class PortedTestConventions
 
     /// <summary>
     /// Extracts the feature area from a ported test's namespace:
-    /// <c>FuzzyRegex.Tests.Ported.Lookaround</c> yields <c>Lookaround</c>.
+    /// <c>Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround</c> yields <c>Lookaround</c>.
     /// </summary>
     public static bool TryGetFeatureArea(string @namespace, out string area)
     {

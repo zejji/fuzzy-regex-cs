@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>FuzzyRegex.Benchmarks</RootNamespace>
+    <RootNamespace>Fuzzy.Text.RegularExpressions.Benchmarks</RootNamespace>
     <IsPackable>false</IsPackable>
     <!-- BenchmarkDotNet requires optimised, non-attached builds to produce valid numbers. -->
     <Optimize>true</Optimize>

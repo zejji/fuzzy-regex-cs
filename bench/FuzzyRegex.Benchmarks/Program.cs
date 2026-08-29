@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Running;
 
-namespace FuzzyRegex.Benchmarks;
+namespace Fuzzy.Text.RegularExpressions.Benchmarks;
 
 /// <summary>Entry point for the BenchmarkDotNet suite. Driven by the <c>benchmark</c> skill.</summary>
 internal static class Program

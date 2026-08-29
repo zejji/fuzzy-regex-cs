@@ -12,6 +12,9 @@ BenchmarkDotNet.Artifacts/
 # Test / coverage output
 TestResults/
 *.trx
+# ...but the Pester fixture is an input, not output: tools/tests/PortTools.Tests.ps1 reads it,
+# so without this the tooling tests fail on every fresh clone and in CI.
+!tools/tests/fixtures/*.trx
 coverage*.xml
 coverage*.json
 

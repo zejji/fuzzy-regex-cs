@@ -15,7 +15,7 @@ Describe 'Read-TestResults' {
 
     It 'identifies a test by class and name so the identity survives a rerun' {
         ($script:Results | Where-Object Name -eq 'Caret_matches_start').Id |
-            Should -Be 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Caret_matches_start'
+            Should -Be 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Caret_matches_start'
     }
 
     It 'normalises the TRX NotExecuted outcome to Skipped' {
@@ -59,33 +59,33 @@ Describe 'Test-Ratchet' {
     BeforeAll { $script:Results = Read-TestResults -TrxPath $script:Fixture }
 
     It 'is green when every baselined test still passes and nothing failed' {
-        $passing = @('FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Caret_matches_start')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Caret_matches_start')
         $results = $script:Results | Where-Object Outcome -ne 'Failed'
         (Test-Ratchet -Results $results -BaselinePassing $passing).IsGreen | Should -BeTrue
     }
 
     It 'is red when a baselined test now fails' {
-        $passing = @('FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end')
         $verdict = Test-Ratchet -Results $script:Results -BaselinePassing $passing
         $verdict.IsGreen | Should -BeFalse
-        $verdict.Regressions | Should -Contain 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end'
+        $verdict.Regressions | Should -Contain 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end'
     }
 
     It 'is red when a baselined test has disappeared from the run' {
-        $passing = @('FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Deleted_test')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Deleted_test')
         $verdict = Test-Ratchet -Results $script:Results -BaselinePassing $passing
         $verdict.IsGreen | Should -BeFalse
-        $verdict.Missing | Should -Contain 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Deleted_test'
+        $verdict.Missing | Should -Contain 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Deleted_test'
     }
 
     It 'is red when any test fails, even one that was never in the baseline' {
         $verdict = Test-Ratchet -Results $script:Results -BaselinePassing @()
         $verdict.IsGreen | Should -BeFalse
-        $verdict.Failures | Should -Contain 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end'
+        $verdict.Failures | Should -Contain 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end'
     }
 
     It 'treats a baselined test that became skipped as a regression' {
-        $passing = @('FuzzyRegex.Tests.Ported.Lookaround.LookbehindTests.Lookbehind_is_variable_length')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround.LookbehindTests.Lookbehind_is_variable_length')
         $results = $script:Results | Where-Object Outcome -ne 'Failed'
         $verdict = Test-Ratchet -Results $results -BaselinePassing $passing
         $verdict.IsGreen | Should -BeFalse
@@ -94,16 +94,16 @@ Describe 'Test-Ratchet' {
     It 'stays red on a missing test unless removals are explicitly accepted' {
         # Renaming or deleting a test removes it from the run, which is indistinguishable from
         # losing coverage. The operator has to say so on purpose.
-        $passing = @('FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Renamed_away')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Renamed_away')
         $results = $script:Results | Where-Object Outcome -ne 'Failed'
 
         $verdict = Test-Ratchet -Results $results -BaselinePassing $passing -AcceptRemovals
         $verdict.IsGreen | Should -BeTrue
-        $verdict.Missing | Should -Contain 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Renamed_away'
+        $verdict.Missing | Should -Contain 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Renamed_away'
     }
 
     It 'still goes red on a real regression even when removals are accepted' {
-        $passing = @('FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end')
+        $passing = @('Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Dollar_matches_end')
         (Test-Ratchet -Results $script:Results -BaselinePassing $passing -AcceptRemovals).IsGreen |
             Should -BeFalse
     }
@@ -121,8 +121,8 @@ Describe 'Update-Baseline' {
 
         $saved = Get-Content $path -Raw | ConvertFrom-Json
         $saved.passing | Should -Be @(
-            'FuzzyRegex.Tests.Gaps.SurrogateTests.Surrogate_pair_indices',
-            'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Caret_matches_start')
+            'Fuzzy.Text.RegularExpressions.Tests.Gaps.SurrogateTests.Surrogate_pair_indices',
+            'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Caret_matches_start')
         $saved.upstreamCommit | Should -Be 'abc123'
     }
 }
@@ -133,7 +133,7 @@ Describe 'Get-BaselinePassing' {
         Update-Baseline -Results (Read-TestResults -TrxPath $script:Fixture) -BaselinePath $path -UpstreamCommit 'abc123'
 
         Get-BaselinePassing -BaselinePath $path |
-            Should -Contain 'FuzzyRegex.Tests.Ported.Anchors.AnchorTests.Caret_matches_start'
+            Should -Contain 'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Caret_matches_start'
     }
 
     It 'yields an empty set the ratchet can bind on the very first run, with no baseline yet' {

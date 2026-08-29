@@ -1,9 +1,12 @@
 # FuzzyRegex: porting mrab-regex to .NET - design spec
 
 Date: 2026-08-29
-Status: agreed (design approved in planning session). Amended 2026-08-29 during Phase 0 - see
-"Amendments" at the end; the amended text is inline, so this file remains the single source.
-Working name: **FuzzyRegex** (NuGet id and namespace; rename is cheap any time before first publish)
+Status: agreed (design approved in planning session). Amended 2026-08-29 during Phase 0 and
+slice S01 - see "Amendments" at the end; the amended text is inline, so this file remains the
+single source.
+Working name: **FuzzyRegex** (NuGet id, assembly and entry type; the namespace is
+`Fuzzy.Text.RegularExpressions` - see amendment 8. Rename is cheap any time before first
+publish)
 
 ## 1. Summary
 
@@ -70,7 +73,7 @@ Four areas mirror upstream one-to-one so that upstream diffs map mechanically on
 | `Parsing/` | `_regex_core.py` | parser, node tree, optimizer, bytecode emitter |
 | `Engine/` | `_regex.c` | bytecode VM, backtracking matcher, fuzzy states |
 | `Unicode/` | `_regex_unicode.c` | generated C#; `ReadOnlySpan<byte>` static-data pattern |
-| root namespace | `_main.py` | public API |
+| root namespace `Fuzzy.Text.RegularExpressions` | `_main.py` | public API |
 
 `docs/PORTMAP.md` records upstream symbol -> C# type/member, appended as each slice lands. This
 map is what makes future upstream syncs mechanical.
@@ -339,6 +342,27 @@ amended text is inline above; this list is the record of what changed and why.
    mechanism open). Read/Write/Edit/Glob/Grep/TodoWrite/Skill/Task/Agent, and Bash restricted to
    `dotnet`, `git`, `pwsh` and `python`. An unattended session must not be able to run arbitrary
    commands on the machine. Decided by the project owner.
+
+8. **The root namespace is `Fuzzy.Text.RegularExpressions`, not `FuzzyRegex`** (section 4). Made
+   during S01, 2026-08-29. A type cannot be named after the namespace that contains it and stay
+   reachable: with namespace `FuzzyRegex` and entry type `FuzzyRegex`, a consumer who writes
+   `using FuzzyRegex;` then gets `error CS0118: 'FuzzyRegex' is a namespace but is used like a
+   type` on `new FuzzyRegex(...)`, and `error CS0234` on `FuzzyRegex.IsMatch(...)`. Measured with
+   a throwaway project referencing the built library, not reasoned about. The namespace moved
+   rather than the type, mirroring `System.Text.RegularExpressions`; the assembly, the NuGet
+   package and every directory keep the name `FuzzyRegex`. Test and benchmark namespaces moved
+   with it, because `FuzzyRegex.Tests.*` declared the colliding namespace too. Decided by the
+   project owner.
+
+   Verified after the move: `using Fuzzy.Text.RegularExpressions;` alone gives unqualified access
+   to `FuzzyRegex`, `Match`, `Group` and `FuzzyCounts`. Importing
+   `System.Text.RegularExpressions` as well makes **seven** names ambiguous (CS0104), measured:
+   `Match`, `Group`, `Capture`, `MatchCollection`, `GroupCollection`, `CaptureCollection` and
+   `MatchEvaluator`. A single type alias therefore does not clear it; the workaround is a
+   namespace alias (`using FR = Fuzzy.Text.RegularExpressions;`, then `FR.Match`) or per-type
+   aliases for each name actually used. Still an explicit, diagnosable clash rather than the hard
+   block it replaced, but it is not a one-liner - and it is the price of mirroring `Regex`'s type
+   names, which the owner chose deliberately.
 
 7. **The CI oracle is built from the pinned submodule, not installed from PyPI** (sections 5 and
    6). Upstream tags releases it never publishes - the original pin, 2026.8.12, is one of them -

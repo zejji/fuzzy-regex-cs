@@ -15,8 +15,8 @@ that a future upstream change to that test maps onto ours by eye.
 ## Where a test goes
 
 ```
-tests/FuzzyRegex.Tests/Ported/<Area>/<Thing>Tests.cs   namespace FuzzyRegex.Tests.Ported.<Area>
-tests/FuzzyRegex.Tests/Gaps/<Area>/<Thing>Tests.cs     namespace FuzzyRegex.Tests.Gaps.<Area>
+tests/FuzzyRegex.Tests/Ported/<Area>/<Thing>Tests.cs   namespace Fuzzy.Text.RegularExpressions.Tests.Ported.<Area>
+tests/FuzzyRegex.Tests/Gaps/<Area>/<Thing>Tests.cs     namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.<Area>
 ```
 
 `<Area>` is the feature area and it **is** the row in `docs/STATUS.md`: the status generator reads
@@ -30,7 +30,7 @@ fail the build if you break it.
 ```csharp
 using AwesomeAssertions;
 
-namespace FuzzyRegex.Tests.Ported.Quantifiers;
+namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Quantifiers;
 
 public sealed class SearchStarPlusTests
 {

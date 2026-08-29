@@ -25,7 +25,7 @@ Notable methods in range: `test_search_star_plus`, `test_basic_regex_sub`,
 `test_finditer`, `test_inline_flags`, `test_dollar_matches_twice`, `test_subscripting_match`,
 `test_new_named_groups`, plus the numbered `test_bug_*` regression methods in range.
 
-Suggested feature areas (namespace `FuzzyRegex.Tests.Ported.<Area>`): `Basics`, `Substitution`,
+Suggested feature areas (namespace `Fuzzy.Text.RegularExpressions.Tests.Ported.<Area>`): `Basics`, `Substitution`,
 `Splitting`, `FindAll`, `Groups`, `Quantifiers`, `Escapes`, `CharacterClasses`, `CaseFolding`,
 `Flags`.
 

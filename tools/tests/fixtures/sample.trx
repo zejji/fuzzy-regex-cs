@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="00000000-0000-0000-0000-000000000001" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult executionId="e1" testId="t1" testName="Caret_matches_start" outcome="Passed" />
+    <UnitTestResult executionId="e2" testId="t2" testName="Dollar_matches_end" outcome="Failed">
+      <Output>
+        <ErrorInfo><Message>Expected 3 but found 4</Message></ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e3" testId="t3" testName="Lookbehind_is_variable_length" outcome="NotExecuted">
+      <Output>
+        <DebugTrace>Skipped: needs:lookbehind - variable-length lookbehind is not implemented</DebugTrace>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e4" testId="t4" testName="Surrogate_pair_indices" outcome="Passed" />
+    <UnitTestResult executionId="e5" testId="t5" testName="Best_match_picks_least_cost" outcome="NotExecuted">
+      <Output>
+        <DebugTrace>Skipped: needs:fuzzy-bestmatch - BESTMATCH is not implemented</DebugTrace>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Caret_matches_start" id="t1">
+      <Execution id="e1" />
+      <TestMethod className="Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests" name="Caret_matches_start" />
+    </UnitTest>
+    <UnitTest name="Dollar_matches_end" id="t2">
+      <Execution id="e2" />
+      <TestMethod className="Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests" name="Dollar_matches_end" />
+    </UnitTest>
+    <UnitTest name="Lookbehind_is_variable_length" id="t3">
+      <Execution id="e3" />
+      <TestMethod className="Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround.LookbehindTests" name="Lookbehind_is_variable_length" />
+    </UnitTest>
+    <UnitTest name="Surrogate_pair_indices" id="t4">
+      <Execution id="e4" />
+      <TestMethod className="Fuzzy.Text.RegularExpressions.Tests.Gaps.SurrogateTests" name="Surrogate_pair_indices" />
+    </UnitTest>
+    <UnitTest name="Best_match_picks_least_cost" id="t5">
+      <Execution id="e5" />
+      <TestMethod className="Fuzzy.Text.RegularExpressions.Tests.Ported.Fuzzy.BestMatchTests" name="Best_match_picks_least_cost" />
+    </UnitTest>
+  </TestDefinitions>
+</TestRun>

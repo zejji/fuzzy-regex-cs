@@ -49,7 +49,7 @@ whole upstream suite ahead of the engine.
    testing the thing.
 3. **Implement to green**, in small steps, running the tests as you go.
 4. **Any behaviour you discover that no test covers becomes a test**, in the matching
-   `FuzzyRegex.Tests.Ported.<Area>` or `FuzzyRegex.Tests.Gaps.<Area>` namespace.
+   `Fuzzy.Text.RegularExpressions.Tests.Ported.<Area>` or `Fuzzy.Text.RegularExpressions.Tests.Gaps.<Area>` namespace.
 
 Port faithfully. `Parsing/` mirrors `upstream/regex/_regex_core.py` and `Engine/` mirrors
 `upstream/src/_regex.c`, structure and all, so that a future upstream diff maps onto our files

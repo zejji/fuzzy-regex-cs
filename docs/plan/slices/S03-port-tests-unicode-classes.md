@@ -43,6 +43,6 @@ Additionally:
 
 - [ ] Every test with non-BMP data carries a comment stating the codepoint span upstream expects
       and the UTF-16 span we assert.
-- [ ] A matching gap test exists in `FuzzyRegex.Tests.Gaps.Surrogates` for each distinct
+- [ ] A matching gap test exists in `Fuzzy.Text.RegularExpressions.Tests.Gaps.Surrogates` for each distinct
       surrogate situation encountered, pinning the UTF-16 behaviour on purpose rather than as a
       side effect of translation.

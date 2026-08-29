@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>FuzzyRegex.OracleTests</RootNamespace>
+    <RootNamespace>Fuzzy.Text.RegularExpressions.OracleTests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>

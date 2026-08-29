@@ -1,6 +1,6 @@
 using AwesomeAssertions;
 
-namespace FuzzyRegex.Tests.Conventions;
+namespace Fuzzy.Text.RegularExpressions.Tests.Conventions;
 
 /// <summary>
 /// Guards the conventions the generated status board parses. See
@@ -9,9 +9,9 @@ namespace FuzzyRegex.Tests.Conventions;
 public sealed class PortedTestConventionsTests
 {
     [Test]
-    [Arguments("FuzzyRegex.Tests.Ported.Lookaround", "Lookaround")]
-    [Arguments("FuzzyRegex.Tests.Ported.Anchors", "Anchors")]
-    [Arguments("FuzzyRegex.Tests.Ported.Fuzzy.BestMatch", "Fuzzy")]
+    [Arguments("Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround", "Lookaround")]
+    [Arguments("Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors", "Anchors")]
+    [Arguments("Fuzzy.Text.RegularExpressions.Tests.Ported.Fuzzy.BestMatch", "Fuzzy")]
     public void TryGetFeatureArea_takes_the_segment_after_the_ported_root(string ns, string expected)
     {
         PortedTestConventions.TryGetFeatureArea(ns, out string area).Should().BeTrue();
@@ -19,8 +19,8 @@ public sealed class PortedTestConventionsTests
     }
 
     [Test]
-    [Arguments("FuzzyRegex.Tests.Ported")]
-    [Arguments("FuzzyRegex.Tests.Gaps.Surrogates")]
+    [Arguments("Fuzzy.Text.RegularExpressions.Tests.Ported")]
+    [Arguments("Fuzzy.Text.RegularExpressions.Tests.Gaps.Surrogates")]
     [Arguments("SomethingElse.Ported.Anchors")]
     public void TryGetFeatureArea_rejects_namespaces_outside_the_ported_root(string ns)
     {
@@ -50,19 +50,19 @@ public sealed class PortedTestConventionsTests
     [Test]
     public void Validate_accepts_a_conforming_test()
         => PortedTestConventions
-            .Validate([("FuzzyRegex.Tests.Ported.Anchors", "Caret_matches_start", "needs:anchors")])
+            .Validate([("Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors", "Caret_matches_start", "needs:anchors")])
             .Should().BeEmpty();
 
     [Test]
     public void Validate_reports_a_test_outside_the_ported_root()
         => PortedTestConventions
-            .Validate([("FuzzyRegex.Tests.Misplaced", "Some_test", "needs:anchors")])
-            .Should().ContainSingle().Which.Should().Contain("FuzzyRegex.Tests.Ported.<FeatureArea>");
+            .Validate([("Fuzzy.Text.RegularExpressions.Tests.Misplaced", "Some_test", "needs:anchors")])
+            .Should().ContainSingle().Which.Should().Contain("Fuzzy.Text.RegularExpressions.Tests.Ported.<FeatureArea>");
 
     [Test]
     public void Validate_reports_a_skip_reason_that_names_no_capability()
         => PortedTestConventions
-            .Validate([("FuzzyRegex.Tests.Ported.Anchors", "Some_test", "todo")])
+            .Validate([("Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors", "Some_test", "todo")])
             .Should().ContainSingle().Which.Should().Contain("must start with needs:");
 
     /// <summary>

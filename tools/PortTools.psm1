@@ -14,8 +14,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:PortedNamespaceRoot = 'FuzzyRegex.Tests.Ported.'
-$script:TestNamespaceRoot = 'FuzzyRegex.Tests.'
+$script:PortedNamespaceRoot = 'Fuzzy.Text.RegularExpressions.Tests.Ported.'
+$script:TestNamespaceRoot = 'Fuzzy.Text.RegularExpressions.Tests.'
 $script:TrxNamespace = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
 
 function Read-TestResults {
@@ -96,7 +96,7 @@ function Get-FeatureArea {
 
     .DESCRIPTION
         The area is the namespace segment below the ported root, so
-        FuzzyRegex.Tests.Ported.Lookaround.LookbehindTests reports 'Lookaround'. Tests outside
+        Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround.LookbehindTests reports 'Lookaround'. Tests outside
         the ported root (gap tests, convention tests) report their own segment and are excluded
         from the parity figure - parity means parity with upstream's suite.
     #>
