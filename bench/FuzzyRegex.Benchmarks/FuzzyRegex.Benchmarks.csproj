@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Fuzzy.Text.RegularExpressions.Benchmarks</RootNamespace>
@@ -16,5 +15,4 @@
   <ItemGroup>
     <ProjectReference Include="../../src/FuzzyRegex/FuzzyRegex.csproj" />
   </ItemGroup>
-
 </Project>

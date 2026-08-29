@@ -9,24 +9,18 @@ public class FuzzyRegexParseException : Exception
 {
     /// <summary>Initializes a new instance with a default message.</summary>
     public FuzzyRegexParseException()
-        : this("The pattern could not be parsed.")
-    {
-    }
+        : this("The pattern could not be parsed.") { }
 
     /// <summary>Initializes a new instance with the given message.</summary>
     /// <param name="message">A description of what was wrong with the pattern.</param>
     public FuzzyRegexParseException(string message)
-        : base(message)
-    {
-    }
+        : base(message) { }
 
     /// <summary>Initializes a new instance with the given message and cause.</summary>
     /// <param name="message">A description of what was wrong with the pattern.</param>
     /// <param name="innerException">The exception that caused this one.</param>
     public FuzzyRegexParseException(string message, Exception innerException)
-        : base(message, innerException)
-    {
-    }
+        : base(message, innerException) { }
 
     /// <summary>
     /// Initializes a new instance describing where in the pattern parsing failed.

@@ -40,4 +40,5 @@ public readonly record struct FuzzyCounts(int Substitutions, int Insertions, int
 public readonly record struct FuzzyChanges(
     IReadOnlyList<int> Substitutions,
     IReadOnlyList<int> Insertions,
-    IReadOnlyList<int> Deletions);
+    IReadOnlyList<int> Deletions
+);

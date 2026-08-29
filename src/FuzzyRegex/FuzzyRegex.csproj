@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <RootNamespace>Fuzzy.Text.RegularExpressions</RootNamespace>
     <!-- The shipped public API must carry XML docs (design spec section 7). -->
@@ -26,5 +25,4 @@
     <InternalsVisibleTo Include="FuzzyRegex.OracleTests" />
     <InternalsVisibleTo Include="FuzzyRegex.Benchmarks" />
   </ItemGroup>
-
 </Project>

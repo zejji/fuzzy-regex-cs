@@ -10,9 +10,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// </remarks>
 public class Capture
 {
-    internal Capture()
-    {
-    }
+    internal Capture() { }
 
     /// <summary>The position in the subject at which the captured text starts.</summary>
     public int Index => throw new NotImplementedException();
@@ -38,9 +36,7 @@ public class Capture
 /// </summary>
 public class Group : Capture
 {
-    internal Group()
-    {
-    }
+    internal Group() { }
 
     /// <summary>Whether the group took part in the match.</summary>
     public bool Success => throw new NotImplementedException();
@@ -63,9 +59,7 @@ public class Group : Capture
 /// </summary>
 public sealed class Match : Group
 {
-    internal Match()
-    {
-    }
+    internal Match() { }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
     public GroupCollection Groups => throw new NotImplementedException();

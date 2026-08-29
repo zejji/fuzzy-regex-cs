@@ -18,7 +18,9 @@ internal static class PortedTestConventions
     /// The ported tests to check: the declaring type's full namespace, the test's display name,
     /// and the reason from its <c>[Skip]</c> attribute, or <see langword="null"/> when not skipped.
     /// </param>
-    public static IReadOnlyList<string> Validate(IEnumerable<(string Namespace, string TestName, string? SkipReason)> tests)
+    public static IReadOnlyList<string> Validate(
+        IEnumerable<(string Namespace, string TestName, string? SkipReason)> tests
+    )
     {
         ArgumentNullException.ThrowIfNull(tests);
 
@@ -29,15 +31,17 @@ internal static class PortedTestConventions
             if (!TryGetFeatureArea(ns, out _))
             {
                 violations.Add(
-                    $"{ns}.{testName}: ported tests must live in '{PortedNamespaceRoot}.<FeatureArea>', " +
-                    $"so the status board can group them by feature area.");
+                    $"{ns}.{testName}: ported tests must live in '{PortedNamespaceRoot}.<FeatureArea>', "
+                        + $"so the status board can group them by feature area."
+                );
             }
 
             if (skipReason is not null && ParseWaitingOn(skipReason) is null)
             {
                 violations.Add(
-                    $"{ns}.{testName}: skip reason \"{skipReason}\" must start with needs:<capability>, " +
-                    $"e.g. \"needs:lookbehind - variable-length lookbehind is not implemented\".");
+                    $"{ns}.{testName}: skip reason \"{skipReason}\" must start with needs:<capability>, "
+                        + $"e.g. \"needs:lookbehind - variable-length lookbehind is not implemented\"."
+                );
             }
         }
 
@@ -91,9 +95,12 @@ internal static class PortedTestConventions
         }
 
         int end = prefix.Length;
-        while (end < skipReason.Length && (char.IsAsciiLetterLower(skipReason[end])
-                                           || char.IsAsciiDigit(skipReason[end])
-                                           || skipReason[end] == '-'))
+        while (
+            end < skipReason.Length
+            && (
+                char.IsAsciiLetterLower(skipReason[end]) || char.IsAsciiDigit(skipReason[end]) || skipReason[end] == '-'
+            )
+        )
         {
             end++;
         }
@@ -107,9 +114,8 @@ internal static class PortedTestConventions
             return null;
         }
 
-        bool endsCleanly = end == skipReason.Length
-                           || char.IsWhiteSpace(skipReason[end])
-                           || skipReason[end] is '-' or ':';
+        bool endsCleanly =
+            end == skipReason.Length || char.IsWhiteSpace(skipReason[end]) || skipReason[end] is '-' or ':';
 
         return endsCleanly ? tag : null;
     }

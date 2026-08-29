@@ -10,6 +10,6 @@ public sealed class AnchorTests
     [Test]
     [Skip("needs:anchors - the VM has no anchor opcodes yet")]
     [Property("Upstream", "RegexTests.test_bigcharset")]
-    public void Caret_matches_at_the_start_of_the_subject()
-        => Assert.Fail("Enabled by the slice that delivers needs:anchors.");
+    public void Caret_matches_at_the_start_of_the_subject() =>
+        Assert.Fail("Enabled by the slice that delivers needs:anchors.");
 }

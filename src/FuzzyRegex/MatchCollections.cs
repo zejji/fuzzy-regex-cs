@@ -8,9 +8,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// </summary>
 public sealed class CaptureCollection : IReadOnlyList<Capture>
 {
-    internal CaptureCollection()
-    {
-    }
+    internal CaptureCollection() { }
 
     /// <summary>The number of captures.</summary>
     public int Count => throw new NotImplementedException();
@@ -33,9 +31,7 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// </summary>
 public sealed class GroupCollection : IReadOnlyList<Group>
 {
-    internal GroupCollection()
-    {
-    }
+    internal GroupCollection() { }
 
     /// <summary>The number of groups, including group 0.</summary>
     public int Count => throw new NotImplementedException();
@@ -63,9 +59,7 @@ public sealed class GroupCollection : IReadOnlyList<Group>
 /// </summary>
 public sealed class MatchCollection : IReadOnlyList<Match>
 {
-    internal MatchCollection()
-    {
-    }
+    internal MatchCollection() { }
 
     /// <summary>The number of matches.</summary>
     public int Count => throw new NotImplementedException();

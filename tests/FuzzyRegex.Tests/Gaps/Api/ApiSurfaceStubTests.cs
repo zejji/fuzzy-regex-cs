@@ -39,10 +39,8 @@ public sealed class ApiSurfaceStubTests
         // Not -1: TimeSpan.FromMilliseconds(-1) *is* Timeout.InfiniteTimeSpan, so it is the
         // "no limit" sentinel rather than a negative timeout. The next test pins that.
 
-        Action construct = () => _ = new FuzzyRegex(
-            "a",
-            FuzzyRegexOptions.None,
-            TimeSpan.FromMilliseconds(milliseconds));
+        Action construct = () =>
+            _ = new FuzzyRegex("a", FuzzyRegexOptions.None, TimeSpan.FromMilliseconds(milliseconds));
 
         construct.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("matchTimeout");
     }
@@ -50,10 +48,7 @@ public sealed class ApiSurfaceStubTests
     [Test]
     public void An_infinite_match_timeout_is_accepted()
     {
-        Action construct = () => _ = new FuzzyRegex(
-            "a",
-            FuzzyRegexOptions.None,
-            FuzzyRegex.InfiniteMatchTimeout);
+        Action construct = () => _ = new FuzzyRegex("a", FuzzyRegexOptions.None, FuzzyRegex.InfiniteMatchTimeout);
 
         // Reaching the stub's own throw means validation let it through.
         construct.Should().Throw<NotImplementedException>();
@@ -78,7 +73,9 @@ public sealed class ApiSurfaceStubTests
     public void Option_values_are_upstream_flag_values_so_the_parser_port_can_use_them_directly()
     {
         // upstream/regex/_regex_core.py lines 73-90 (class RegexFlag).
-        ((int)FuzzyRegexOptions.IgnoreCase).Should().Be(0x2);
+        ((int)FuzzyRegexOptions.IgnoreCase)
+            .Should()
+            .Be(0x2);
         ((int)FuzzyRegexOptions.Multiline).Should().Be(0x8);
         ((int)FuzzyRegexOptions.Singleline).Should().Be(0x10);
         ((int)FuzzyRegexOptions.IgnorePatternWhitespace).Should().Be(0x40);
@@ -108,19 +105,31 @@ public sealed class ApiSurfaceStubTests
         // which is exactly the moment the ported suite would have stopped building too.
         Type surface = typeof(FuzzyRegex);
 
-        surface.GetMethod(nameof(FuzzyRegex.FullMatch), [typeof(string), typeof(int), typeof(int), typeof(bool)])
-            .Should().NotBeNull("upstream fullmatch is used 71 times in test_regex.py");
-        surface.GetMethod(nameof(FuzzyRegex.MatchAtStart), [typeof(string), typeof(int), typeof(int), typeof(bool)])
-            .Should().NotBeNull("upstream match is anchored at pos and is not our Match");
-        surface.GetMethod(nameof(FuzzyRegex.ReplaceFormat), [typeof(string), typeof(string), typeof(int)])
-            .Should().NotBeNull("upstream subf uses str.format templates, not $1 templates");
+        surface
+            .GetMethod(nameof(FuzzyRegex.FullMatch), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .Should()
+            .NotBeNull("upstream fullmatch is used 71 times in test_regex.py");
+        surface
+            .GetMethod(nameof(FuzzyRegex.MatchAtStart), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .Should()
+            .NotBeNull("upstream match is anchored at pos and is not our Match");
+        surface
+            .GetMethod(nameof(FuzzyRegex.ReplaceFormat), [typeof(string), typeof(string), typeof(int)])
+            .Should()
+            .NotBeNull("upstream subf uses str.format templates, not $1 templates");
 
-        typeof(Match).GetProperty(nameof(Match.LastGroupNumber))
-            .Should().NotBeNull("upstream lastindex is not derivable from Groups");
-        typeof(Match).GetProperty(nameof(Match.LastGroupName))
-            .Should().NotBeNull("upstream lastgroup is not derivable from Groups");
-        typeof(Match).GetMethod(nameof(Match.ResultFormat), [typeof(string)])
-            .Should().NotBeNull("upstream expandf takes str.format templates");
+        typeof(Match)
+            .GetProperty(nameof(Match.LastGroupNumber))
+            .Should()
+            .NotBeNull("upstream lastindex is not derivable from Groups");
+        typeof(Match)
+            .GetProperty(nameof(Match.LastGroupName))
+            .Should()
+            .NotBeNull("upstream lastgroup is not derivable from Groups");
+        typeof(Match)
+            .GetMethod(nameof(Match.ResultFormat), [typeof(string)])
+            .Should()
+            .NotBeNull("upstream expandf takes str.format templates");
     }
 
     [Test]
@@ -129,12 +138,13 @@ public sealed class ApiSurfaceStubTests
         // Oracle, 2026-08-29: escape('foo!?') is foo!\? but escape('foo!?', special_only=False)
         // is foo\!\?; escape('a b') is a\ b but escape('a b', literal_spaces=True) is 'a b'.
         // A single-argument Escape could not produce all four.
-        System.Reflection.MethodInfo? escape = typeof(FuzzyRegex)
-            .GetMethod(nameof(FuzzyRegex.Escape), [typeof(string), typeof(bool), typeof(bool)]);
+        System.Reflection.MethodInfo? escape = typeof(FuzzyRegex).GetMethod(
+            nameof(FuzzyRegex.Escape),
+            [typeof(string), typeof(bool), typeof(bool)]
+        );
 
         escape.Should().NotBeNull();
-        escape!.GetParameters().Select(p => p.Name).Should()
-            .Equal("input", "specialOnly", "literalSpaces");
+        escape!.GetParameters().Select(p => p.Name).Should().Equal("input", "specialOnly", "literalSpaces");
     }
 
     [Test]

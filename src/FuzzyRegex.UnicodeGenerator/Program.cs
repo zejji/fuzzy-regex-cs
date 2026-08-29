@@ -9,8 +9,9 @@ internal static class Program
     private static int Main()
     {
         Console.Error.WriteLine(
-            "FuzzyRegex.UnicodeGenerator is not implemented yet; it is built in the Unicode slice.\n" +
-            "See docs/plan/ROADMAP.md and upstream/tools/build_regex_unicode.py.");
+            "FuzzyRegex.UnicodeGenerator is not implemented yet; it is built in the Unicode slice.\n"
+                + "See docs/plan/ROADMAP.md and upstream/tools/build_regex_unicode.py."
+        );
 
         return 2;
     }
