@@ -98,6 +98,29 @@ for, so a future reader can tell an omission from an oversight.
 | The `regex.L` (LOCALE) row of the loop in `test_flags` | `LOCALE` not surfaced on `FuzzyRegexOptions`. |
 | The `\L<options>` assertions in `test_case_folding` (#37-38) | Named lists deferred in S01. |
 
+### Upstream test methods in lines 1008-1740 not ported (S03)
+
+None. All 19 methods in the range - `test_properties`, `test_word_class`, `test_search_anchor`,
+`test_search_reverse`, `test_atomic`, `test_possessive`, `test_zerowidth`,
+`test_scoped_and_inline_flags`, `test_repeated_repeats`, `test_lookbehind`,
+`test_unmatched_in_sub`, `test_bug_10328`, `test_overlapped`, `test_splititer`, `test_grapheme`,
+`test_word_boundary`, `test_line_boundary`, `test_branch_reset`, `test_set` - are ported. The
+assertions dropped from inside them are in the next table.
+
+### Assertions omitted from methods that are otherwise ported (S03)
+
+| Where | Why not |
+|---|---|
+| `test_properties` #1-3 and #5-16, and the 28 `(?L)`/`(?a)` rows of the table at lines 1146-1176 | `bytes` patterns; this port is `char`-based. 43 assertions in all, the largest single omission in the range. |
+| `test_properties` #64-68, the `\X` block at lines 1112-1120 | Duplicated verbatim in `test_grapheme` (lines 1533-1542) and ported there. Confirmed identical apart from one blank line. |
+| `test_search_reverse` #27, #29, #31, #33 | `endpos=-1` is Python's index-from-the-end convention. Our API takes a `length`, so `endpos=-1` and `endpos=3` are the same call on a four-character subject; the `endpos=3` form is ported. |
+| `test_zerowidth` #2, #14, #15, #18, #19; `test_unmatched_in_sub` #2, #5, #8; `test_bug_10328` #2 | The pre-3.7 branch of a `sys.version_info` guard. Only the `>= 3.7` branch is a useful oracle. |
+| `test_zerowidth` #13, #17, #21, #23; `test_splititer` #2 | `regex.splititer`, deferred in S01. `Split` returns the same pieces. |
+| `test_lookbehind` #26; the `(?V0)([][-])` assertion in `test_set` (lines 1734-1735) | `repr(type(regex.compile(...)))`, a Python type-identity check. |
+
+`word_set` at `test_properties` line 1125 is assigned and never read upstream, so there is nothing
+to port from it.
+
 ## Where we diverge from upstream's structure
 
 A faithful port keeps upstream's shape so diffs map across. Anywhere we have moved away from it -

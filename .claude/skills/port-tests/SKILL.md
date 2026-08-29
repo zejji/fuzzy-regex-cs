@@ -104,8 +104,13 @@ code units, and our public API follows .NET (design spec section 4).
 - **Never guess.** Verify against Python, and paste what you actually saw:
 
   ```powershell
+  $env:PYTHONIOENCODING = 'utf-8'; $env:PYTHONDONTWRITEBYTECODE = '1'
   python -c "import regex; m = regex.search(r'...', '...'); print(m.span())"
   ```
+
+  `PYTHONIOENCODING` because the Windows console codepage cannot print most of what you will be
+  checking, and `PYTHONDONTWRITEBYTECODE` because running the oracle from inside `upstream/`
+  otherwise leaves a `__pycache__` directory that makes the submodule show as dirty.
 
 - Every such test also gets a sibling in `Gaps/Surrogates` pinning the UTF-16 behaviour directly:
   the ported suite proves parity, the gap tests prove we did the translation on purpose.
