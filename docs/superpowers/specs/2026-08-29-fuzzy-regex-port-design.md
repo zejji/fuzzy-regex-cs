@@ -1,0 +1,277 @@
+# FuzzyRegex: porting mrab-regex to .NET - design spec
+
+Date: 2026-08-29
+Status: agreed (design approved in planning session; implementation plan to follow)
+Working name: **FuzzyRegex** (NuGet id and namespace; rename is cheap any time before first publish)
+
+## 1. Summary
+
+Port [mrab-regex](https://github.com/mrabarnett/mrab-regex) (the Python `regex` PyPI package) to a
+.NET 10+ class library. mrab-regex is a complete alternative regex engine whose headline feature,
+fuzzy (approximate) matching with per-error-type budgets (`{e<=2}`, `{2i+2d+1s<=4}`,
+`{s<=2:[a-z]}`, `BESTMATCH`, `ENHANCEMATCH`), has **no .NET equivalent** (verified 2026-08-29:
+nothing on NuGet or GitHub offers pattern-level approximate matching; existing packages such as
+FuzzySharp are whole-string similarity scorers only, and no TRE binding for .NET exists).
+
+This is a full-feature port: recursion, variable-length lookbehind, POSIX leftmost-longest,
+nested sets, branch reset, named lists, partial matches, capture lists, Unicode 17.0.0
+properties/scripts/blocks - everything upstream does - plus fuzzy matching.
+
+## 2. Decisions record
+
+Agreed with the project owner on 2026-08-29:
+
+| Decision | Choice |
+|---|---|
+| Scope | Full feature port (not fuzzy-only subset) |
+| Engine strategy | Faithful port of upstream architecture first; optimize hot paths later behind green tests |
+| Public API | Mirror System.Text.RegularExpressions shapes, plus extensions for mrab-only features |
+| Parity | Semantic parity (same matches for same pattern+text, upstream Unicode tables) with .NET conventions (UTF-16 code-unit indices) |
+| Distribution | Private GitHub repo now, built to full OSS discipline; flip public later. NuGet publish at 1.0 |
+| v1.0 definition | All applicable upstream tests ported and passing + our gap tests + benchmark gate (>= Python regex on medians, no pathological regressions) + API docs |
+| Execution process | Approach A: test-first parity ratchet, session-sized slices (details in section 8) |
+| Test stack | TUnit + AwesomeAssertions (+ NSubstitute where seams exist), Microsoft.Testing.Platform runner |
+| Upstream reference | Git submodule `upstream/` pinned at release SHA |
+
+## 3. Upstream facts (evidence, gathered 2026-08-29)
+
+Pinned submodule commit: `1760a20647f1c2ddcc025128407fe6f7edb905a1` (2026-08-12, "Support Python 3.15").
+Default branch is `hg`. License: `Apache-2.0 AND CNRI-Python` (additions Apache-2.0; core derived
+from CPython's `re`, CNRI Python 1.6 license). Our LICENSE/NOTICE must carry both attributions.
+
+| Upstream file | Lines | Role |
+|---|---|---|
+| `src/_regex.c` | 26,655 | matching engine: bytecode VM, backtracker, fuzzy error-budget states |
+| `src/_regex_unicode.c` | 31,586 | **generated** Unicode 17.0.0 tables (generator: `tools/build_regex_unicode.py`, 1,785 lines) |
+| `regex/_regex_core.py` | 4,676 | pattern parser -> node tree -> optimizer -> bytecode emitter |
+| `regex/_main.py` | 759 | public API layer |
+| `regex/tests/test_regex.py` | 4,540 | 102 test methods, ~1,544 assertions |
+
+Hand-port surface is therefore ~32k lines plus test translation; the 31.6k-line Unicode file is
+regenerated, not hand-ported.
+
+Release cadence (from changelog): multiple releases per month; engine/semantic bug fixes dominate
+over pure Unicode data bumps (recent examples: fuzzy-matching segfault and out-of-bounds-read
+fixes in 2026.7.19, fuzzy `{e<=0}` 210x slowdown fix in 2026.1.15). Upstream sync must therefore
+handle logic diffs routinely - a key reason for the faithful-structure decision.
+
+Fuzzy algorithm: backtracking matcher with error-counting states (not automaton-based), per-type
+budgets checked during backtracking; `BESTMATCH` searches for the least-cost match, `ENHANCEMATCH`
+improves an already-found match. Prior art in other ecosystems uses tagged-NFA edit-distance
+automata (TRE, RE-flex) - relevant only as background; we port upstream's approach for parity.
+
+## 4. Architecture
+
+Four areas mirror upstream one-to-one so that upstream diffs map mechanically onto our files:
+
+| Ours | Upstream source | Notes |
+|---|---|---|
+| `Parsing/` | `_regex_core.py` | parser, node tree, optimizer, bytecode emitter |
+| `Engine/` | `_regex.c` | bytecode VM, backtracking matcher, fuzzy states |
+| `Unicode/` | `_regex_unicode.c` | generated C#; `ReadOnlySpan<byte>` static-data pattern |
+| root namespace | `_main.py` | public API |
+
+`docs/PORTMAP.md` records upstream symbol -> C# type/member, appended as each slice lands. This
+map is what makes future upstream syncs mechanical.
+
+**String semantics (highest-risk design point).** Upstream matches per Unicode codepoint; .NET
+strings are UTF-16 code units. The engine iterates codepoints (decoding surrogate pairs inline);
+all public indices and lengths are UTF-16 code units, matching built-in `Regex` conventions.
+Ported tests translate expected indices wherever non-BMP characters appear. This area gets
+dedicated gap tests beyond the ported suite.
+
+**Runtime discipline.** Compiled pattern objects are immutable and thread-safe (both upstream and
+.NET `Regex` promise this). Matching state lives in structs; backtracking stacks rent from
+`ArrayPool`; input flows as `ReadOnlySpan<char>`. No `unsafe` before benchmarks prove the need.
+
+**Public API sketch** (final shapes settled in the implementation plan for Phase 2):
+`FuzzyRegex` class shaped like `System.Text.RegularExpressions.Regex` (constructors with options,
+`IsMatch`/`Match`/`Matches`/`Replace`/`Split`, static conveniences, `MatchTimeout`), `Match`/`Group`
+shapes likewise, plus mrab-only members: `Group.Captures` as full capture list, `Match.FuzzyCounts`
+(substitutions, insertions, deletions), partial-match support, options flags for `BestMatch`,
+`EnhanceMatch`, `Posix`, `Version0/Version1` semantics.
+
+## 5. Testing regimen
+
+Correctness strategy has three legs; all three exist before performance work starts.
+
+1. **Ported suite first.** Phase 1 translates all of `test_regex.py` to TUnit before any engine
+   code is written. Every ported test carries its upstream test name (and assertion index where a
+   Python method fans out to many TUnit tests). Tests for unimplemented features start as
+   `[Skip("S<nn>")]`, naming the slice that will enable them.
+2. **Parity ratchet.** A committed baseline records the passing-test count per feature area. CI
+   (Windows, Linux, macOS) fails if any previously-passing test fails or the count drops. A "fix"
+   that breaks something cannot merge. This is the primary defence against review-loop churn and
+   agent regressions.
+3. **Differential oracle.** A property-based harness generates patterns and inputs, runs both this
+   library and locally-installed Python `regex`, and diffs results. Every divergence is minimized
+   into a permanent ordinary test. Runs on demand and on a scheduled CI job, not per-commit.
+
+Gap tests we add beyond the ported suite: surrogate/UTF-16 edge cases, `MatchTimeout`,
+Span-based API contracts, thread-safety smoke tests, and any behaviour the oracle finds.
+
+Per-slice workflow is TDD: un-skip the slice's tests, watch them fail, implement to green.
+Status reporting is generated, never hand-maintained: a script reads skip attributes plus test
+results and writes `docs/STATUS.md` (parity percentage per feature area).
+
+## 6. Unicode pipeline
+
+Port `tools/build_regex_unicode.py` to a C# console tool (`src/FuzzyRegex.UnicodeGenerator`) that
+reads UCD 17.0.0 data files and emits the table sources. Correctness is proven by oracle tests
+(`\p{...}` behaviour compared against Python for every property, script and block, sampled across
+all planes), not by reviewing generated output. An upstream Unicode bump becomes: drop in new UCD
+files, regenerate, run the oracle.
+
+## 7. Repo layout and conventions
+
+```
+global.json                        # SDK pin + Microsoft.Testing.Platform test runner
+Directory.Build.props              # net10.0, LangVersion latest, nullable, TreatWarningsAsErrors,
+                                   # analyzer set (adapted from an earlier internal monorepo)
+Directory.Packages.props           # central package management, transitive pinning
+.editorconfig
+src/FuzzyRegex/
+src/FuzzyRegex.UnicodeGenerator/
+tests/FuzzyRegex.Tests/            # ported upstream tests + gap tests
+tests/FuzzyRegex.OracleTests/      # differential harness vs Python regex (dev + scheduled CI)
+bench/FuzzyRegex.Benchmarks/       # BenchmarkDotNet
+upstream/                          # git submodule -> mrabarnett/mrab-regex @ pinned SHA
+docs/                              # this spec, ROADMAP, slice files, PORTMAP, generated STATUS
+tools/                             # run-slices driver, status generator scripts
+.claude/skills/                    # port-slice, port-tests, sync-upstream, benchmark
+.github/workflows/                 # ci.yml (3-OS build+test+ratchet), oracle.yml (scheduled)
+```
+
+Copied from the monorepo: central package management, TUnit/AwesomeAssertions versions, analyzer
+packages (build-time only, zero runtime cost), warnings-as-errors, `global.json` with the
+Microsoft.Testing.Platform runner. Not copied: Husky hooks, Bitbucket CI, application-stack
+packages. OSS discipline from day one: LICENSE (Apache-2.0) + NOTICE (upstream Apache-2.0 and
+CNRI-Python attribution), README, CHANGELOG, XML docs on public API, semver.
+
+## 8. Work tracking and context management
+
+Principle (best-evidenced practice, and the pattern Anthropic's own migration kit uses):
+**derive status from the repo; never maintain it as prose an agent must remember to update.**
+LLM performance degrades with context length ("context rot"), and hand-synced TODO lists are the
+documented failure mode for long agent projects.
+
+- **Slice files as the work queue.** `docs/plan/slices/S07-lookaround.md` holds scope, upstream
+  line references and done-criteria for one session-sized slice. Completing a slice = moving the
+  file to `docs/plan/slices/done/` with closing notes appended. Listing the directory *is* the
+  todo list: atomic, visible in git, impossible to half-update.
+- **No duplicated status.** `docs/plan/ROADMAP.md` lists phases and points at slice files; it
+  never restates their status. Parity status lives only in generated `docs/STATUS.md`.
+- **Tiny hand-maintained state.** `docs/plan/STATE.md` (current slice, blockers, next action;
+  30 lines max; rewritten, never appended, at each session end) and `docs/plan/DECISIONS.md`
+  (append-only dated one-liners).
+- **Slices are authored just-in-time**, one phase ahead only; detailed plans written months early
+  rot like TODO lists do.
+- **Fresh session per slice.** No long-lived orchestrator context. Each slice runs in a fresh
+  Claude Code process following the `port-slice` skill: read STATE.md + roadmap + slice file +
+  generated status (small, fixed context); work test-first; finish with ratchet green, commit,
+  STATE.md rewritten, slice file moved.
+- **Model mix.** Opus is the main agent for slice sessions; Sonnet subagents handle mechanical
+  batches (test translation, table checks, searches); Fable is reserved for architecture changes,
+  upstream-sync analysis and escalation when a slice has failed twice. Rationale: the ratchet, not
+  the orchestrator's memory, protects quality; Fable costs ~2x Opus per token with always-on
+  thinking.
+- **Review discipline.** One blind reviewer pass per slice. The reviewer must name a concrete
+  defect with a failing test or reproduction; style nits and speculative rewrites are out of
+  scope. Fix, re-run ratchet, done. No multi-pass review loops - the ratchet and oracle replace
+  them.
+- Issue-tracker tooling for agents (e.g. beads) evaluated and rejected: overkill for a solo
+  project; the file-queue plus derived status covers the same need.
+
+## 9. Autonomous operation and allowance budget
+
+Requirement: once the plan is agreed, the port should proceed effectively autonomously, consuming
+only a defined sub-portion of the owner's Claude allowance so other work continues in parallel.
+Owner-facing start/pause/resume instructions and the full safeguard list live in
+`docs/plan/OPERATIONS.md`.
+
+Mechanism (exact details validated as a Phase 0 task, not assumed):
+
+- **Driver script** `tools/run-slices.ps1`: a loop that (1) checks the budget gate, (2) launches a
+  fresh `claude -p` (print-mode) process running the `port-slice` skill, (3) verifies the session
+  ended with ratchet green and a commit, (4) repeats until a stop condition: budget exhausted,
+  configured slice count reached, phase boundary reached, or two consecutive failures (which
+  parks the slice and stops for human attention).
+- **Budget gate, primary (deterministic):** `docs/plan/budget.json` configures max slice sessions
+  per week and per day. Session counting is local and exact, so the project's share of allowance
+  is predictable from measured tokens-per-slice (measured during Phase 0/1 and recorded).
+- **Budget gate, secondary (authoritative):** before each run, a cheap subagent checks live usage
+  and skips the run if overall plan usage exceeds a configured threshold (e.g. 60%), leaving
+  headroom for other work. Candidate mechanisms, in validation order: Claude-in-Chrome reading
+  the claude.ai usage page; local accounting from Claude Code session logs (ccusage-style).
+  Phase 0 validates which is reliable; if neither is, the deterministic cap alone stands.
+- **Human checkpoints stay at phase boundaries:** the driver never crosses a phase boundary
+  autonomously. The owner reviews progress, adjusts slice plans for the next phase, and restarts
+  the driver.
+
+## 10. Upstream sync (post-1.0 maintenance)
+
+- `upstream/` submodule pins the exact upstream commit our release tracks; our release notes state
+  the upstream version.
+- `sync-upstream` skill: bump the submodule; read the changelog delta; `git diff old..new -- src/
+  regex/`; map hunks to our files via PORTMAP.md; port one changelog entry at a time, test-first
+  (port the upstream test change first where one exists). Expected steady-state cost: roughly one
+  session per month.
+
+## 11. Performance plan
+
+Correctness gates first; optimization is Phase 7 and benchmark-driven throughout.
+
+- BenchmarkDotNet suite: literal-heavy, class-heavy, backtracking-heavy, fuzzy (short and long
+  inputs, varying error budgets), BESTMATCH workloads.
+- Baselines committed as JSON: Python `regex` measured via pyperf on the same machine; built-in
+  `System.Text.RegularExpressions` where features overlap.
+- v1.0 gate: at least parity with Python `regex` on median workloads, no pathological regressions.
+- Optimization levers in order: allocation elimination (Span, stackalloc, ArrayPool),
+  `SearchValues<char>` literal prefilters, struct layout and devirtualization of the VM dispatch,
+  and only then `unsafe`. Source-generated compiled patterns (like .NET's regex source generator)
+  are explicitly post-1.0: the bytecode design does not preclude them, and building them now is
+  speculative.
+
+## 12. Phasing and estimates
+
+| Phase | Content | Sessions (est.) | Main model |
+|---|---|---|---|
+| 0 | Scaffolding: solution, props, CI, skills, driver script, budget-gate validation, AGENTS.md, slice files for Phase 1 | 1-2 | Opus |
+| 1 | Port full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
+| 2 | Parser/compiler (`_regex_core.py`) + API skeleton | 5-8 | Opus |
+| 3 | VM core: literals, classes, quantifiers, groups, backrefs, anchors | 10-15 | Opus |
+| 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
+| 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
+| 6 | Oracle hardening + gap tests | 3-5 | Opus/Sonnet |
+| 7 | Benchmarks + optimization | 5-10 | Opus |
+| 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
+
+Total roughly 42-69 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
++/-50% uncertainty; the generated status board makes the true rate visible within the first two
+phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through.
+
+## 13. Risks and mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Codepoint vs UTF-16 semantics produce subtle divergences | Dedicated gap tests; oracle harness; indices translated systematically during test port (Phase 1 conventions in `port-tests` skill) |
+| A 26.7k-line C interpreter hides coupling that resists slicing | Faithful structure keeps upstream as the reference at every step; slices ordered by upstream's own feature dependencies; escalate to Fable after two failed attempts |
+| Review loops break working code | Parity ratchet in CI; reviewer must prove findings with failing tests; single review pass per slice |
+| Estimates wrong, allowance strain | Deterministic session budget; measured tokens-per-slice after Phase 1; phase-boundary human checkpoints allow re-planning |
+| Upstream moves while we port | Submodule pin; we port a fixed SHA and sync forward post-1.0 via the sync-upstream skill |
+| Generated Unicode tables wrong | Oracle property tests across all planes, not manual review |
+| Python oracle unavailable in CI | Oracle job is scheduled/dev-only; ported suite + ratchet are the merge gate |
+
+## 14. References (all fetched 2026-08-29)
+
+- Upstream: https://github.com/mrabarnett/mrab-regex (branch `hg`), https://pypi.org/project/regex/
+- License facts: PyPI JSON `license_expression: "Apache-2.0 AND CNRI-Python"`; upstream LICENSE.txt
+- No .NET equivalent: NuGet/GitHub survey (FuzzySharp, FuzzyString, BlueSimilarity are whole-string
+  similarity only; no TRE binding for .NET found)
+- Migration methodology: https://claude.com/blog/ai-code-migration and
+  https://github.com/anthropics/code-migration-kit-with-claude-code ("progress is implicit in file
+  system state"); Bun Zig->Rust port precedent
+- Approximate-matching algorithms background: TRE tagged-NFA (Laurikari, SPIRE 2000,
+  http://laurikari.net/ville/spire2000-tnfa.pdf); RE-flex FuzzyMatcher
+- Context degradation: Chroma "context rot" study coverage (https://redis.io/blog/context-rot/);
+  subagent-isolation guidance in Claude Code best-practice writeups

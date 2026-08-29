@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.vs/
+*.user
+
+# Build output
+bin/
+obj/
+artifacts/
+BenchmarkDotNet.Artifacts/
+
+# Test / coverage output
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# Local-only
+*.local.*
+.claude/worktrees/
