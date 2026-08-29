@@ -225,7 +225,12 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
   inputs, varying error budgets), BESTMATCH workloads.
 - Baselines committed as JSON: Python `regex` measured via pyperf on the same machine; built-in
   `System.Text.RegularExpressions` where features overlap.
-- v1.0 gate: at least parity with Python `regex` on median workloads, no pathological regressions.
+- v1.0 gate (mechanical, checked by the benchmark suite on the same machine): for every workload
+  in the suite, our median time (BenchmarkDotNet) must be <= the Python `regex` median (pyperf)
+  for the equivalent operation, with one tolerance: no more than 10% of workloads may be slower,
+  and none by more than 1.25x. "Workload" means each named benchmark case (pattern + input
+  corpus + operation), not an average across cases - an overall-mean win cannot hide a badly
+  regressed case. Workloads Python cannot express (Span APIs, etc.) are excluded from the gate.
 - Optimization levers in order: allocation elimination (Span, stackalloc, ArrayPool),
   `SearchValues<char>` literal prefilters, struct layout and devirtualization of the VM dispatch,
   and only then `unsafe`. Source-generated compiled patterns (like .NET's regex source generator)
