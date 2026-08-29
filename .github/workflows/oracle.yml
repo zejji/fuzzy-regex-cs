@@ -1,0 +1,59 @@
+name: Differential oracle
+
+# Runs our engine and the Python regex module over generated patterns and inputs and diffs the
+# results. Scheduled and on demand only, never a merge gate: the oracle needs Python, it is
+# property-based so its runtime varies, and a flaky ground truth must not be able to block a
+# merge. Every divergence it finds is minimised into an ordinary permanent test instead.
+
+on:
+  schedule:
+    # 03:00 UTC on Mondays.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+
+jobs:
+  oracle:
+    name: Oracle vs Python regex
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the oracle
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install regex
+          python -c "import regex; print('oracle regex version:', regex.__version__)"
+
+      - name: Run the oracle
+        # --ignore-exit-code 8 tolerates "zero tests ran". The harness itself arrives in phase 6;
+        # until then this project is empty, and a scheduled job that always fails just teaches
+        # everyone to ignore red. Exit code 8 means only that no test ran - an actual oracle
+        # failure reports a different code and still fails the job. Remove this flag in phase 6.
+        run: dotnet test tests/FuzzyRegex.OracleTests --configuration Release -- --ignore-exit-code 8
+
+      - name: Upload divergences
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-divergences
+          path: TestResults/
+          if-no-files-found: ignore

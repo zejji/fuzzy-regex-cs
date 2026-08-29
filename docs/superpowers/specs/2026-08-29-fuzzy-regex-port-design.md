@@ -1,7 +1,8 @@
 # FuzzyRegex: porting mrab-regex to .NET - design spec
 
 Date: 2026-08-29
-Status: agreed (design approved in planning session; implementation plan to follow)
+Status: agreed (design approved in planning session). Amended 2026-08-29 during Phase 0 - see
+"Amendments" at the end; the amended text is inline, so this file remains the single source.
 Working name: **FuzzyRegex** (NuGet id and namespace; rename is cheap any time before first publish)
 
 ## 1. Summary
@@ -98,9 +99,19 @@ Correctness strategy has three legs; all three exist before performance work sta
 1. **Ported suite first.** Phase 1 translates all of `test_regex.py` to TUnit before any engine
    code is written. Every ported test carries its upstream test name (and assertion index where a
    Python method fans out to many TUnit tests). Tests for unimplemented features start as
-   `[Skip("S<nn>")]`, naming the slice that will enable them.
-2. **Parity ratchet.** A committed baseline records the passing-test count per feature area. CI
-   (Windows, Linux, macOS) fails if any previously-passing test fails or the count drops. A "fix"
+   `[Skip("needs:<capability>")]` - for example `[Skip("needs:lookbehind - variable-length
+   lookbehind is not implemented")]` - naming the **capability** that will enable them.
+   (Amendment 1, 2026-08-29: this originally said `[Skip("S<nn>")]`, naming the slice. That
+   cannot work: Phase 1 writes ~1,544 skipped tests, but section 8 authors slices one phase
+   ahead only, so the slice ids for Phases 3-5 do not exist when the tests are written. A
+   capability is something Phase 1 genuinely knows, and "tests waiting on `lookbehind`: 47" is
+   what a slice author actually needs from the status board. Each slice file declares the
+   capability tags it delivers.)
+2. **Parity ratchet.** A committed baseline (`tests/parity-baseline.json`) records the sorted
+   **set of passing test ids**, not a per-area count (Amendment 5: a count lets a swap - one test
+   enabled, another quietly broken - pass unnoticed, and the id set makes a slice's diff show
+   exactly which tests it enabled). CI (Windows, Linux, macOS) fails if any previously-passing
+   test fails, disappears from the run, or any test fails at all. A "fix"
    that breaks something cannot merge. This is the primary defence against review-loop churn and
    agent regressions.
 3. **Differential oracle.** A property-based harness generates patterns and inputs, runs both this
@@ -199,11 +210,10 @@ Mechanism (exact details validated as a Phase 0 task, not assumed):
 - **Budget gate, primary (deterministic):** `docs/plan/budget.json` configures max slice sessions
   per week and per day. Session counting is local and exact, so the project's share of allowance
   is predictable from measured tokens-per-slice (measured during Phase 0/1 and recorded).
-- **Budget gate, secondary (authoritative):** before each run, a cheap subagent checks live usage
-  and skips the run if overall plan usage exceeds a configured threshold (e.g. 60%), leaving
-  headroom for other work. Candidate mechanisms, in validation order: Claude-in-Chrome reading
-  the claude.ai usage page; local accounting from Claude Code session logs (ccusage-style).
-  Phase 0 validates which is reliable; if neither is, the deterministic cap alone stands.
+- **Budget gate, secondary (validated 2026-08-29 - see Amendment 3):** rolling 24-hour and
+  7-day token windows summed from `~/.claude/projects/**/*.jsonl`, counted globally across every
+  session on the machine, plus a back-off while a recorded rate-limit reset is still in the
+  future. There is no live plan-utilisation check, because no local source reports one.
 - **Human checkpoints stay at phase boundaries:** the driver never crosses a phase boundary
   autonomously. The owner reviews progress, adjusts slice plans for the next phase, and restarts
   the driver.
@@ -242,7 +252,7 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | Phase | Content | Sessions (est.) | Main model |
 |---|---|---|---|
 | 0 | Scaffolding: solution, props, CI, skills, driver script, budget-gate validation, AGENTS.md, slice files for Phase 1 | 1-2 | Opus |
-| 1 | Port full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
+| 1 | Public API surface stub, then port the full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
 | 2 | Parser/compiler (`_regex_core.py`) + API skeleton | 5-8 | Opus |
 | 3 | VM core: literals, classes, quantifiers, groups, backrefs, anchors | 10-15 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
@@ -250,6 +260,11 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | 6 | Oracle hardening + gap tests | 3-5 | Opus/Sonnet |
 | 7 | Benchmarks + optimization | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
+
+(Amendment 2, 2026-08-29: Phase 1's first slice writes the public API surface as signatures only,
+every member throwing. Without it the ported tests cannot compile, so "port the whole suite in
+Phase 1" and "API skeleton in Phase 2" were mutually exclusive as written. Phase 2 keeps the same
+scope, implementing the parser and compiler behind that surface.)
 
 Total roughly 42-69 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
 +/-50% uncertainty; the generated status board makes the true rate visible within the first two
@@ -280,3 +295,44 @@ phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through
   http://laurikari.net/ville/spire2000-tnfa.pdf); RE-flex FuzzyMatcher
 - Context degradation: Chroma "context rot" study coverage (https://redis.io/blog/context-rot/);
   subagent-isolation guidance in Claude Code best-practice writeups
+
+
+## 15. Amendments
+
+Made during Phase 0 (2026-08-29), each because the spec as written could not be executed. The
+amended text is inline above; this list is the record of what changed and why.
+
+1. **Skip markers name a capability, not a slice** (section 5). Section 5 required
+   `[Skip("S<nn>")]` while section 8 authors slices one phase ahead only, so Phase 1 would have
+   had to invent slice ids for work months away. Skip reasons are now `needs:<capability>` and
+   slice files declare the tags they deliver. Decided by the project owner.
+
+2. **Phase 1 opens with a public API surface stub** (section 12). Ported tests cannot compile
+   against an API that does not exist, so "port the whole suite in Phase 1" and "API skeleton in
+   Phase 2" contradicted each other. Phase 1 slice S01 writes signatures only. Decided by the
+   project owner.
+
+3. **No live plan-utilisation gate exists** (section 9). Phase 0 validated all three candidate
+   mechanisms and none is usable unattended:
+   - `~/.claude/stats-cache.json` lagged 45 days on the day it was checked and carries no plan
+     denominator;
+   - a `rateLimit` record appears in the session logs only *after* a request has been rejected
+     with HTTP 429 - useful as a back-off signal, useless as a headroom signal;
+   - the claude.ai usage page needs an interactive browser, which an unattended `claude -p`
+     driver has not got.
+
+   Section 9 anticipated this ("if neither is, the deterministic cap alone stands"). The
+   deterministic slice caps are therefore the gate, strengthened with rolling token windows
+   computed from the session logs, which are exact and current.
+
+4. **Per-slice cost is measured from `claude -p --output-format json`**, which returns `usage`,
+   `total_cost_usd`, `is_error` and `permission_denials`. More reliable than scraping logs, and
+   it also lets the driver notice a slice that stalled on the tool allowlist.
+
+5. **The ratchet baseline is a set of test ids, not a count** (section 5). Strictly stronger, and
+   it makes the diff of a slice self-documenting.
+
+6. **The driver runs with a scoped tool allowlist**, not a permission bypass (section 9 left the
+   mechanism open). Read/Write/Edit/Glob/Grep/TodoWrite/Skill/Task/Agent, and Bash restricted to
+   `dotnet`, `git`, `pwsh` and `python`. An unattended session must not be able to run arbitrary
+   commands on the machine. Decided by the project owner.

@@ -1,0 +1,115 @@
+; Coding style and analyzer configuration.
+; See https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/configuration-files
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+max_line_length = 120
+
+[*.{json,yml,yaml,md,ps1,psm1,csproj,props,targets,slnx}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+; Generated code (Unicode tables, source generators) is excluded from analysis.
+[*.g.cs]
+generated_code = true
+
+[*.cs]
+; --- Language conventions -------------------------------------------------
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
+csharp_style_expression_bodied_lambdas = when_on_single_line:suggestion
+csharp_style_expression_bodied_local_functions = when_on_single_line:suggestion
+dotnet_style_prefer_conditional_expression_over_return = false:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = false:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_readonly_field = true:warning
+csharp_style_prefer_readonly_struct = true:warning
+csharp_style_prefer_readonly_struct_member = true:warning
+
+; --- Naming ---------------------------------------------------------------
+dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+; --- Global analyzer adjustments -----------------------------------------
+; CA1051: Do not declare visible instance fields.
+; Matching-state structs expose fields deliberately; properties cost indirection on hot paths.
+dotnet_diagnostic.CA1051.severity = none
+
+; MA0002/MA0011: require an explicit StringComparer/IFormatProvider.
+; InvariantGlobalization is on and the engine is ordinal by construction; the rule fires
+; constantly on ordinal-by-definition code and hides real findings.
+dotnet_diagnostic.MA0002.severity = none
+dotnet_diagnostic.MA0011.severity = none
+
+; MA0048: file name must match type name. Ported files are named after their upstream
+; counterpart and may hold the small helper types upstream declares alongside.
+dotnet_diagnostic.MA0048.severity = suggestion
+
+; ==========================================================================
+; Faithful-port relaxations.
+;
+; src/FuzzyRegex/Parsing and src/FuzzyRegex/Engine are hand-ports of _regex_core.py and
+; _regex.c. Their shape must track upstream so that upstream diffs map mechanically onto our
+; files (design spec section 4) and so `sync-upstream` stays a mechanical exercise. Rules that
+; would force restructuring - method length, complexity, nesting, magic numbers - are therefore
+; suppressed here and here only. Correctness and security rules are untouched.
+;
+; Removing a suppression is a deliberate act: it means that area has been optimised away from
+; upstream's structure on purpose, and PORTMAP.md should say so.
+; ==========================================================================
+[src/FuzzyRegex/{Parsing,Engine}/**.cs]
+; Method is too long / has too many lines.
+dotnet_diagnostic.MA0051.severity = none
+dotnet_diagnostic.S138.severity = none
+; Cognitive and cyclomatic complexity.
+dotnet_diagnostic.S3776.severity = none
+dotnet_diagnostic.S1541.severity = none
+dotnet_diagnostic.CA1502.severity = none
+; Too many parameters / too many boolean conditions / nesting depth / too many cases.
+dotnet_diagnostic.S107.severity = none
+dotnet_diagnostic.S1067.severity = none
+dotnet_diagnostic.S134.severity = none
+dotnet_diagnostic.S1479.severity = none
+; Magic numbers: bytecode opcodes and table offsets are numeric by nature.
+dotnet_diagnostic.S109.severity = none
+; Commented-out code: upstream C/Python lines are quoted beside their port as the reference.
+dotnet_diagnostic.S125.severity = none
+; Switch should have a default / if-else chains: ports mirror upstream dispatch exactly.
+dotnet_diagnostic.S131.severity = none
+; NotImplementedException: members land slice by slice; the parity ratchet, not an analyzer,
+; is what proves an unimplemented member is still unimplemented.
+dotnet_diagnostic.MA0025.severity = none
+
+; --- Tests ----------------------------------------------------------------
+[tests/**/*.cs]
+; Long, vertically-structured test methods are more readable than extracted helpers.
+dotnet_diagnostic.MA0051.severity = none
+dotnet_diagnostic.S138.severity = none
+; Underscores in test names: ported tests carry their upstream Python method name.
+dotnet_diagnostic.CA1707.severity = none
+; Assertions live in AwesomeAssertions extension methods the analyzer cannot see.
+dotnet_diagnostic.S2699.severity = none
+; Test data literals.
+dotnet_diagnostic.S109.severity = none
+dotnet_diagnostic.CA1861.severity = none

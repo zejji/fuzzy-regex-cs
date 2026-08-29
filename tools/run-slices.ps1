@@ -1,0 +1,317 @@
+<#
+.SYNOPSIS
+    Runs port slices autonomously: budget gate, fresh Claude session, verify, repeat.
+
+.DESCRIPTION
+    One loop iteration is one slice (design spec section 9):
+
+      1. pick the next pending slice from docs/plan/slices/,
+      2. refuse to cross a phase boundary,
+      3. check the budget gate,
+      4. run a fresh `claude -p` session on the port-slice skill,
+      5. verify the slice really landed - the session succeeded, a commit was made, the working
+         tree is clean, the slice file moved to done/ and the ratchet is green,
+      6. log what it cost, and go again.
+
+    It stops at the first of: no pending slices (phase boundary), a phase change, the budget
+    gate, -MaxSlices, or two consecutive failures - which parks the slice with a note in
+    docs/plan/STATE.md and waits for a human.
+
+    Every session is fresh. Context is never carried between slices: that is the whole point
+    (design spec section 8).
+
+.PARAMETER MaxSlices
+    Stop after this many successful slices. Default: run until another stop condition fires.
+
+.PARAMETER DryRun
+    Show what the driver would do - which slice, and the budget verdict - and start nothing.
+
+.EXAMPLE
+    tools/run-slices.ps1
+    tools/run-slices.ps1 -MaxSlices 3
+    tools/run-slices.ps1 -DryRun
+#>
+[CmdletBinding()]
+param(
+    [int]$MaxSlices = [int]::MaxValue,
+    [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
+    [switch]$DryRun
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'PortTools.psm1') -Force
+
+$slicesDir = Join-Path $repoRoot 'docs/plan/slices'
+$statePath = Join-Path $repoRoot 'docs/plan/STATE.md'
+$sliceLogPath = Join-Path $repoRoot 'docs/plan/slice-log.jsonl'
+$budgetPath = Join-Path $repoRoot 'docs/plan/budget.json'
+$sessionLogRoot = Join-Path $env:USERPROFILE '.claude/projects'
+
+# The unattended session may edit the repo, build, test and commit - and nothing else. A tool
+# outside this list stalls the slice rather than doing something unreviewed on the machine.
+$allowedTools = @(
+    'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'Skill', 'Task', 'Agent',
+    'Bash(dotnet *)', 'Bash(git *)', 'Bash(pwsh *)', 'Bash(python *)'
+)
+
+function Get-PendingSlice {
+    Get-ChildItem -LiteralPath $slicesDir -Filter 'S*.md' -File -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        Select-Object -First 1
+}
+
+function Get-SlicePhase {
+    param([System.IO.FileInfo]$SliceFile)
+
+    foreach ($line in Get-Content -LiteralPath $SliceFile.FullName -TotalCount 20) {
+        if ($line -match '^\s*phase:\s*(\d+)\s*$') { return [int]$Matches[1] }
+    }
+
+    throw "$($SliceFile.Name) has no 'phase:' line in its front matter; the driver cannot tell which phase it belongs to."
+}
+
+function Get-GitState {
+    [pscustomobject]@{
+        Head    = (git -C $repoRoot rev-parse HEAD).Trim()
+        IsClean = -not (git -C $repoRoot status --porcelain)
+    }
+}
+
+function Invoke-SliceSession {
+    <#
+        Runs one fresh Claude session. The prompt is deliberately tiny - the port-slice skill
+        self-orients from STATE.md, the roadmap, the slice file and the generated status, so a
+        long briefing here would only add stale context.
+    #>
+    param([int]$TimeoutMinutes)
+
+    $process = $null
+
+    try {
+        # ProcessStartInfo.ArgumentList, not Start-Process -ArgumentList. Start-Process joins the
+        # list with spaces and quotes nothing, so 'Bash(dotnet *)' would reach the CLI as two
+        # separate tokens and the scoped Bash allowlist - the entire safety boundary for an
+        # unattended session - would silently not apply. ArgumentList quotes each argument.
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = 'claude'
+        $startInfo.WorkingDirectory = $repoRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardInput = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+
+        $arguments = @(
+            '-p', '--model', $Model, '--output-format', 'json',
+            '--permission-mode', 'acceptEdits', '--allowedTools'
+        ) + $allowedTools
+        foreach ($argument in $arguments) { $startInfo.ArgumentList.Add($argument) }
+
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+
+        # Start draining both streams before waiting: a full pipe buffer would deadlock a session
+        # that runs for an hour and prints as it goes.
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+
+        # The prompt goes on stdin because --allowedTools is variadic and would otherwise swallow
+        # a trailing prompt argument.
+        $process.StandardInput.Write("Invoke the port-slice skill.`n")
+        $process.StandardInput.Close()
+
+        if (-not $process.WaitForExit($TimeoutMinutes * 60 * 1000)) {
+            $process.Kill($true)
+            return [pscustomobject]@{
+                Ok = $false; Reason = "the session exceeded $TimeoutMinutes minutes and was killed"
+                TotalTokens = 0; CostUsd = 0
+            }
+        }
+
+        $raw = $stdout.GetAwaiter().GetResult()
+        if (-not $raw) {
+            $error = $stderr.GetAwaiter().GetResult()
+            return [pscustomobject]@{
+                Ok = $false; Reason = "the session produced no output: $error"; TotalTokens = 0; CostUsd = 0
+            }
+        }
+
+        try {
+            $response = $raw | ConvertFrom-Json
+        }
+        catch {
+            $head = $raw.Substring(0, [Math]::Min(200, $raw.Length))
+            return [pscustomobject]@{
+                Ok = $false; Reason = "the session output was not JSON: $head"; TotalTokens = 0; CostUsd = 0
+            }
+        }
+
+        $tokens = 0
+        $usage = $response.PSObject.Properties['usage']?.Value
+        if ($usage) {
+            foreach ($field in 'input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens') {
+                $value = $usage.PSObject.Properties[$field]?.Value
+                if ($value) { $tokens += [long]$value }
+            }
+        }
+
+        $denials = @($response.PSObject.Properties['permission_denials']?.Value)
+        if ($denials.Count -gt 0) {
+            # Worth surfacing: a slice that stalled on the allowlist is a driver configuration
+            # problem, not a porting problem, and the fix is a human decision.
+            Write-Host "  permission denials: $($denials.Count) - check the allowlist in this script" -ForegroundColor Yellow
+        }
+
+        return [pscustomobject]@{
+            Ok          = (-not $response.is_error) -and ($response.subtype -eq 'success')
+            Reason      = if ($response.is_error) { "the session reported an error: $($response.result)" } else { $null }
+            TotalTokens = $tokens
+            CostUsd     = $response.PSObject.Properties['total_cost_usd']?.Value
+            SessionId   = $response.session_id
+        }
+    }
+    finally {
+        if ($process -and -not $process.HasExited) { $process.Kill($true) }
+    }
+}
+
+function Test-SliceLanded {
+    <#
+        Gathers the facts, then asks Get-SliceFailureReason (in PortTools.psm1, where it is
+        tested) for the verdict. Returns the failure reason, or nothing if the slice landed.
+    #>
+    param([string]$HeadBefore, [string]$SliceName)
+
+    $git = Get-GitState
+
+    # check-ratchet.ps1 THROWS rather than exiting non-zero when there is no test report, which
+    # is exactly what a session that commits non-compiling code leaves behind. Unhandled, that
+    # would kill the driver right here - before the slice could be logged, rolled back or parked,
+    # so the two-failure rule would never fire.
+    $ratchetError = $null
+    try {
+        & (Join-Path $PSScriptRoot 'check-ratchet.ps1') | Out-Host
+        if ($LASTEXITCODE -ne 0) { $ratchetError = 'the parity ratchet is red' }
+    }
+    catch {
+        $ratchetError = "the parity ratchet could not run: $($_.Exception.Message)"
+    }
+
+    return Get-SliceFailureReason `
+        -HeadBefore $HeadBefore `
+        -HeadAfter $git.Head `
+        -IsClean $git.IsClean `
+        -SliceStillPending (Test-Path -LiteralPath (Join-Path $slicesDir $SliceName)) `
+        -RatchetError $ratchetError
+}
+
+function Undo-FailedSlice {
+    <#
+        Puts the tree back exactly as the slice found it, so a retry starts from known-good state.
+
+        Resetting to $HeadBefore rather than to HEAD matters: a session can commit its work and
+        move its slice file to done/ and still leave the ratchet red. Resetting to HEAD would
+        keep that commit, stranding the slice in done/ where it would never be retried while the
+        driver marched on over a red tree.
+
+        `git clean -fd` without -x, deliberately: docs/plan/slice-log.jsonl is gitignored, and
+        the budget gate counts slices from it. Removing it would reset the driver's own cap and
+        let it run unlimited sessions in a day.
+    #>
+    param([string]$HeadBefore)
+
+    git -C $repoRoot reset --hard $HeadBefore | Out-Null
+    git -C $repoRoot clean -fd docs src tests bench tools | Out-Null
+}
+
+function Add-ParkNote {
+    param([string]$SliceName, [string]$Reason)
+
+    $note = @(
+        ''
+        "## PARKED $(Get-Date -Format 'yyyy-MM-dd HH:mm') - needs a human"
+        ''
+        "Slice $SliceName failed twice. Last reason: $Reason"
+        ''
+        'The driver has stopped. Investigate, then either fix the slice and restart the driver,'
+        'or run the slice interactively (escalating to a stronger model if it has already failed'
+        'twice on Opus).'
+    )
+    Add-Content -LiteralPath $statePath -Value ($note -join "`n") -Encoding utf8
+}
+
+# ---------------------------------------------------------------------------------------------
+
+$budget = Get-Content -LiteralPath $budgetPath -Raw | ConvertFrom-Json
+$startingPhase = $null
+$completed = 0
+$consecutiveFailures = 0
+
+while ($completed -lt $MaxSlices) {
+    $slice = Get-PendingSlice
+    if (-not $slice) {
+        Write-Host 'Stopping: no pending slices left. This is a phase boundary - author the next phase and restart.' -ForegroundColor Cyan
+        break
+    }
+
+    $phase = Get-SlicePhase -SliceFile $slice
+    if ($null -eq $startingPhase) { $startingPhase = $phase }
+    if ($phase -ne $startingPhase) {
+        Write-Host "Stopping: $($slice.Name) belongs to phase $phase and this run started on phase $startingPhase. Phase boundaries are a human checkpoint." -ForegroundColor Cyan
+        break
+    }
+
+    $verdict = Test-BudgetGate -Budget $budget -SliceLogPath $sliceLogPath `
+        -TokensLastDay (Get-SessionTokenUsage -LogRoot $sessionLogRoot -Since ([datetime]::UtcNow.AddDays(-1))) `
+        -TokensLastWeek (Get-SessionTokenUsage -LogRoot $sessionLogRoot -Since ([datetime]::UtcNow.AddDays(-7))) `
+        -RateLimitResetsAt (Get-RateLimitResetsAt -LogRoot $sessionLogRoot)
+
+    Write-Host ''
+    Write-Host "Next slice: $($slice.Name) (phase $phase)" -ForegroundColor Cyan
+    Write-Host ("  budget: {0} slices today, {1} this week; {2:N0} tokens today, {3:N0} this week" -f `
+            $verdict.SlicesToday, $verdict.SlicesThisWeek, $verdict.TokensLastDay, $verdict.TokensLastWeek) -ForegroundColor DarkGray
+
+    if (-not $verdict.Allowed) {
+        Write-Host "Stopping: budget gate says no - $($verdict.Reason)." -ForegroundColor Yellow
+        break
+    }
+
+    if ($DryRun) {
+        Write-Host 'Dry run: would start a slice session here.' -ForegroundColor DarkGray
+        break
+    }
+
+    $headBefore = (Get-GitState).Head
+    Write-Host "  running $Model session..." -ForegroundColor DarkGray
+    $session = Invoke-SliceSession -TimeoutMinutes $budget.sliceTimeoutMinutes
+
+    $failureReason = if (-not $session.Ok) { $session.Reason } else { Test-SliceLanded -HeadBefore $headBefore -SliceName $slice.Name }
+
+    if (-not $failureReason) {
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'completed' -TotalTokens $session.TotalTokens
+        $completed++
+        $consecutiveFailures = 0
+        Write-Host ("  done: {0} ({1:N0} tokens, `${2:N2})" -f $slice.BaseName, $session.TotalTokens, $session.CostUsd) -ForegroundColor Green
+        continue
+    }
+
+    $consecutiveFailures++
+    Write-Host "  FAILED ($consecutiveFailures of 2): $failureReason" -ForegroundColor Red
+
+    # Roll back before logging: the rollback restores tracked files to $headBefore, and a park
+    # note written before it would be reverted by it.
+    Undo-FailedSlice -HeadBefore $headBefore
+
+    if ($consecutiveFailures -ge 2) {
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' -TotalTokens $session.TotalTokens
+        Add-ParkNote -SliceName $slice.BaseName -Reason $failureReason
+        Write-Host "Stopping: $($slice.BaseName) failed twice and has been parked. See docs/plan/STATE.md." -ForegroundColor Red
+        break
+    }
+
+    Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'failed' -TotalTokens $session.TotalTokens
+}
+
+Write-Host ''
+Write-Host "Driver finished. Slices completed this run: $completed." -ForegroundColor Cyan

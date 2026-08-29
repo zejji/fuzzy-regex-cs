@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>FuzzyRegex</RootNamespace>
+    <!-- The shipped public API must carry XML docs (design spec section 7). -->
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+    <NoWarn></NoWarn>
+    <IsPackable>true</IsPackable>
+    <PackageId>FuzzyRegex</PackageId>
+    <Description>A .NET port of mrab-regex: a full-featured regex engine with fuzzy (approximate) matching and per-error-type budgets.</Description>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>regex;fuzzy;approximate-matching;levenshtein;unicode</PackageTags>
+    <RepositoryUrl>https://github.com/zejji/fuzzy-regex-cs</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../NOTICE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FuzzyRegex.Tests" />
+    <InternalsVisibleTo Include="FuzzyRegex.OracleTests" />
+    <InternalsVisibleTo Include="FuzzyRegex.Benchmarks" />
+  </ItemGroup>
+
+</Project>

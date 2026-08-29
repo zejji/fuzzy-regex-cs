@@ -1,0 +1,12 @@
+# One line-ending convention everywhere. CI regenerates docs/STATUS.md on Windows, Linux and
+# macOS and fails the build on any diff, so a CRLF/LF flip would rewrite every line and break
+# that check on two legs out of three.
+* text=auto eol=lf
+
+# Binary and generated content that must not be touched.
+*.png binary
+*.snk binary
+*.trx text eol=lf
+
+# The upstream submodule is vendored read-only; its diffs are not ours to review.
+upstream/** linguist-vendored

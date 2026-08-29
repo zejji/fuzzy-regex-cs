@@ -22,3 +22,9 @@ coverage*.json
 # Local-only
 *.local.*
 .claude/worktrees/
+
+# The slice driver's own session log. Machine-local operational data, and gitignored on purpose:
+# the budget gate counts slices from it, and `git clean -fd` during a failed-slice rollback would
+# otherwise delete it and reset the driver's daily cap to zero. Measured tokens-per-slice get
+# written into the slice's closing notes, which is where they belong for the record.
+docs/plan/slice-log.jsonl

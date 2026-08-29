@@ -1,0 +1,79 @@
+name: CI
+
+# The merge gate: build, test and the parity ratchet on all three operating systems.
+# A change cannot land if any previously-passing test stops passing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+
+jobs:
+  build-and-ratchet:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # upstream/ is the reference the port is measured against, and check-ratchet.ps1
+          # stamps its commit into the status board.
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Tooling tests (Pester)
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0.0')) {
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+          }
+          ./tools/run-tool-tests.ps1
+
+      - name: Test and enforce the parity ratchet
+        shell: pwsh
+        run: ./tools/check-ratchet.ps1 -Configuration Release
+
+      - name: The generated status board must be up to date
+        shell: pwsh
+        run: |
+          # check-ratchet.ps1 rewrites docs/STATUS.md. If that changes anything, the committed
+          # board was stale - regenerate it and commit rather than letting the numbers drift.
+          $diff = git diff --name-only -- docs/STATUS.md
+          if ($diff) {
+            git --no-pager diff -- docs/STATUS.md
+            throw 'docs/STATUS.md is out of date. Run tools/check-ratchet.ps1 and commit the result.'
+          }
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults/
+          if-no-files-found: warn

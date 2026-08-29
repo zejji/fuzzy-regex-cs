@@ -1,8 +1,11 @@
 # Operating the port
 
 How to start, pause and resume the autonomous port. Written for the project owner; agents follow
-the `port-slice` skill, not this file. The driver script and skills referenced here are built in
-Phase 0; until Phase 0 is complete, use the bootstrap instructions.
+the `port-slice` skill, not this file.
+
+**Phase 0 is complete (2026-08-29).** Everything below is live: the driver, the skills, the
+ratchet and the budget gate all exist and have been exercised. The "starting the port" section
+is kept as the record of how it was bootstrapped.
 
 ## One-time prerequisites
 
@@ -10,6 +13,20 @@ Phase 0; until Phase 0 is complete, use the bootstrap instructions.
 - Python 3.12+ with `pip install regex` (the differential oracle; version noted in
   `docs/plan/DECISIONS.md` when first installed).
 - `git submodule update --init` after cloning.
+
+## Everyday commands
+
+```powershell
+tools/check-ratchet.ps1                  # suite + parity ratchet + regenerate docs/STATUS.md
+tools/check-ratchet.ps1 -UpdateBaseline  # record the new passing set, once it is GREEN
+tools/check-ratchet.ps1 -AcceptRemovals  # a baselined test was renamed or deliberately deleted
+tools/run-tool-tests.ps1                 # Pester tests for the tooling itself
+tools/run-slices.ps1 -DryRun             # what the driver would do next, without spending anything
+```
+
+The ratchet goes red when a baselined test disappears from the run, which is what a rename looks
+like from the outside. `-AcceptRemovals` is the sanctioned way through, and it lists every test
+it let go. Never hand-edit `tests/parity-baseline.json`.
 
 ## Starting the port (first time)
 
@@ -36,8 +53,23 @@ verifies ratchet green + commit made -> next slice. It stops at: budget exhauste
 `-MaxSlices` reached, or two consecutive slice failures (slice is parked with notes in
 `docs/plan/STATE.md`).
 
-Budget is configured in `docs/plan/budget.json` (sessions per day/week, overall-usage threshold).
-Adjust it whenever you need more allowance for other work; the driver reads it before every slice.
+Budget is configured in `docs/plan/budget.json`; the driver reads it before every slice, so
+edits take effect immediately without stopping it.
+
+Two different jobs in that file, and it matters which you reach for:
+
+- **Slice caps per day and week are the rationing.** They are exact - the driver counts its own
+  sessions in `docs/plan/slice-log.jsonl`. Turn these down when you need more allowance for
+  other work.
+- **Token caps are a circuit breaker**, set well above typical usage so they only catch a
+  runaway. They count every Claude Code session on the machine, not just the port's.
+
+There is no live "percentage of plan used" check. Phase 0 established that nothing local reports
+it: the stats cache lags by weeks, a rate-limit record only appears after a request has already
+been refused, and the claude.ai usage page needs a browser the unattended driver has not got.
+The driver does back off while a recorded rate-limit reset is still in the future.
+
+After Phase 1, recalibrate: `docs/plan/slice-log.jsonl` will hold what each slice actually cost.
 
 ## Pausing
 
