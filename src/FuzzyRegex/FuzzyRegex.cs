@@ -238,7 +238,9 @@ public sealed class FuzzyRegex
     /// <summary>Replaces matches with an expanded replacement template.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="replacement">
-    /// The replacement template, in which the usual group references stand for captured groups.
+    /// The replacement template, in upstream's syntax: <c>\1</c> and <c>\g&lt;name&gt;</c> stand
+    /// for captured groups and <c>$</c> is ordinary text. See <see cref="Match.Result(string)"/>
+    /// for why this is not <c>Regex</c>'s <c>$1</c> language.
     /// </param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -286,8 +288,15 @@ public sealed class FuzzyRegex
     /// count of splits, not of resulting pieces, which is what the <c>count</c> argument of
     /// <c>Regex.Split</c> means. The names differ because the meanings do.
     /// </param>
-    /// <returns>The pieces of the subject.</returns>
-    public string[] Split(string input, int maxSplits = -1) => throw new NotImplementedException();
+    /// <returns>
+    /// The pieces of the subject, with <see langword="null"/> where a capturing group did not
+    /// take part in a match. Upstream puts <c>None</c> there; the built-in <c>Regex.Split</c>
+    /// instead omits the entry, which loses the difference between a group that matched nothing
+    /// and one that never ran. Verified against the local oracle 2026-08-29:
+    /// <c>regex.split('(x)|(1)', 'a1b')</c> is <c>['a', None, '1', 'b']</c> where
+    /// <c>Regex.Split("a1b", "(x)|(1)")</c> is <c>["a", "1", "b"]</c>.
+    /// </returns>
+    public string?[] Split(string input, int maxSplits = -1) => throw new NotImplementedException();
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template. Upstream
@@ -419,8 +428,11 @@ public sealed class FuzzyRegex
     /// <param name="input">The subject to split.</param>
     /// <param name="pattern">The pattern to split on.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
-    /// <returns>The pieces of the subject.</returns>
-    public static string[] Split(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
+    /// <returns>
+    /// The pieces of the subject, with <see langword="null"/> where a capturing group did not
+    /// take part in a match. See <see cref="Split(string, int)"/>.
+    /// </returns>
+    public static string?[] Split(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
         throw new NotImplementedException();
 
     /// <summary>

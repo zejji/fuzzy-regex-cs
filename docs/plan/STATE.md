@@ -4,9 +4,9 @@ Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 1 - port the upstream test suite.
 
-**Last completed:** S01b, CSharpier formatting and Husky.Net git hooks (2026-08-29).
+**Last completed:** S02, upstream tests for lines 1-1007 (2026-08-29).
 
-**Current slice:** none. Next is `docs/plan/slices/S02-port-tests-core.md`.
+**Current slice:** none. Next is `docs/plan/slices/S03-port-tests-unicode-classes.md`.
 
 **Next action:** run `tools/run-slices.ps1`, or open a fresh session and invoke `port-slice`.
 
@@ -14,17 +14,18 @@ Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Worth knowing before the next slice:**
 
-- **Run `dotnet tool restore` then `dotnet husky install` once per clone** - `.husky/_/` is
-  gitignored, so without it the hooks are inert. **PowerShell 7 is required**, and now says so in
-  OPERATIONS.md: 5.1 cannot parse `tools/PortTools.psm1`.
-- **Write S02-S05 tests formatted** (`dotnet csharpier format .` before committing) or the hook
-  does it and the diff is noisier. CI fails on unformatted code. `.editorconfig` is the only
-  formatting config: no `.csharpierrc`, no `.csharpierignore`, deliberately.
-- **pre-commit formats only; pre-push runs the ratchet.** A failing test does not block a commit
-  (the point of TDD) but does block a push. pre-commit refuses a commit when a staged `.cs` file
-  also has unstaged edits, since the `git add` after formatting would sweep them in.
-- **Read `docs/VERIFICATION.md` before any review or fix.** One pass per *unreviewed change*;
-  reviewers hand over a reproduction, never prose; reproduce every finding yourself first.
-- **Root namespace is `Fuzzy.Text.RegularExpressions`.** `Match` means .NET's `Match` (search
-  anywhere); upstream's anchored `match` is `MatchAtStart`; statics take `(input, pattern, options)`.
-- **`.editorconfig` suppresses** MA0025, S2325, IDE0060 for `src/FuzzyRegex/*.cs`; Phase 2 deletes it.
+- **Literal `\uXXXX` text does not survive the authoring toolchain** - it silently decodes to the
+  real character before reaching disk. S03 ports `test_properties` and is Unicode-dense, so this
+  will bite. Build backslashes from `chr(92)` when scripting, prefer literal UTF-8 or `\xNN`, and
+  byte-scan the result for stray control characters afterwards.
+- **Reuse S02's 22 capability tags** (listed in its closing notes) before coining any new one; the
+  vocabulary also reserves `named-lists` and `version-flags`, still unused.
+- **A tag is a scheduling contract.** Tag the capability least likely to land first, and never
+  un-skip by tag alone - read the prose, since a test may need two capabilities.
+- **Replacement templates are upstream's language** (`\1`, `\g<name>`, `\n`), not `Regex`'s `$1`;
+  **`Split` returns `string?[]`** with `null` for a group that did not participate. Both in
+  DECISIONS.md.
+- **Machine-check expected values against the local `regex` oracle.** These tests never execute, so
+  reading them against the Python is the only gate; that sweep found the one wrong value in S02.
+  Delegate porting in parallel if you like, but build centrally - the four S02 agents each verified
+  in isolation and collectively missed 7 analyzer errors only a whole-project build shows.

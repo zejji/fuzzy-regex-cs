@@ -107,11 +107,20 @@ public sealed class Match : Group
     public Match NextMatch() => throw new NotImplementedException();
 
     /// <summary>
-    /// Expands a replacement template against this match, so <c>$1</c> and <c>${name}</c> become
-    /// the text those groups captured. Upstream <c>Match.expand</c>; the built-in <c>Regex</c>
-    /// calls it <c>Result</c>.
+    /// Expands a replacement template against this match, so <c>\1</c> and <c>\g&lt;name&gt;</c>
+    /// become the text those groups captured. Upstream <c>Match.expand</c>; the built-in
+    /// <c>Regex</c> calls it <c>Result</c>.
     /// </summary>
-    /// <param name="replacement">The replacement template.</param>
+    /// <remarks>
+    /// The template language is upstream's, not <c>Regex</c>'s: the escape character is
+    /// <c>\</c>, so <c>\1</c>, <c>\g&lt;name&gt;</c>, <c>\n</c>, <c>\x41</c> and
+    /// <c>\N{LATIN CAPITAL LETTER A}</c> all mean what they mean upstream, and <c>$</c> is
+    /// ordinary text. The two languages cannot both be honoured because they disagree about
+    /// <c>\</c> - verified against both engines 2026-08-29: for the template <c>\n</c>,
+    /// <c>regex.sub('.', r'\n', 'x')</c> gives a newline where
+    /// <c>Regex.Replace("x", ".", @"\n")</c> gives a backslash followed by <c>n</c>.
+    /// </remarks>
+    /// <param name="replacement">The replacement template, in upstream's syntax.</param>
     /// <returns>The expanded text.</returns>
     public string Result(string replacement) => throw new NotImplementedException();
 

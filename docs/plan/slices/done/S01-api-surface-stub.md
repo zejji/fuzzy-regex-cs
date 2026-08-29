@@ -230,3 +230,13 @@ noting because a documentation defect in a port survives every test you can writ
 
 The fixes corrected text the reviewer had already read and added no new surface, so under the new
 rule they needed no further pass. That is the rule working, not the rule being dodged.
+
+---
+
+**Superseded in part by S02 (2026-08-29).** The note above describes `Replace` and `Result` as
+taking `$1` templates. They do not: S02 settled the replacement-template language as **upstream's**
+(`\1`, `\g<name>`, `\n`, `\x41`, `\N{...}`, with `$` as ordinary text), because the two languages
+disagree about `\` and cannot both be honoured. The contrast S01 was drawing still holds - upstream's
+`expandf`/`subf` really are a separate `str.format`-style language from the one `expand`/`sub` take -
+only the name of the second language was wrong. See `docs/plan/DECISIONS.md` and
+`src/FuzzyRegex/Match.cs`. Left in place rather than rewritten: the slice records are history.
