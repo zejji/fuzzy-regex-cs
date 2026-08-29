@@ -37,11 +37,27 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install the oracle
+      - name: Build the oracle from the pinned upstream source
+        # Built from upstream/, not installed from PyPI, so the ground truth is exactly the
+        # commit this port targets. Free here: the Linux runners already have a C compiler.
+        # PyPI is not always an option anyway - upstream tags releases that are never published,
+        # which is true of the currently pinned 2026.8.12.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install regex
-          python -c "import regex; print('oracle regex version:', regex.__version__)"
+          python -m pip install ./upstream
+
+      - name: The oracle must be the pinned upstream version
+        # A silently mismatched oracle would produce divergences that are version drift rather
+        # than port defects, and cost a session to chase down.
+        run: |
+          python - <<'CHECK'
+          import pathlib, re, regex
+          pinned = re.search(r'^version = "(.+)"',
+                             pathlib.Path('upstream/pyproject.toml').read_text(encoding='utf-8'),
+                             re.M).group(1)
+          print(f"oracle {regex.__version__}, pinned upstream {pinned}")
+          assert regex.__version__ == pinned, "the oracle is not the pinned upstream version"
+          CHECK
 
       - name: Run the oracle
         # --ignore-exit-code 8 tolerates "zero tests ran". The harness itself arrives in phase 6;

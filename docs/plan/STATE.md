@@ -23,7 +23,8 @@ skill.
 - The budget gate has no live plan-utilisation check - none exists locally. It runs on
   deterministic slice caps plus rolling token windows from the session logs. `budget.json`
   currently holds estimates; S05 recalibrates them from `slice-log.jsonl`.
-- The Python oracle is `regex` 2026.7.19, one release behind the pinned submodule
-  (2026.8.12 has no PyPI release). Rule the version gap out before blaming the port.
+- The local Python oracle is `regex` 2026.7.19; the pin is 2026.8.12. Measured, not assumed:
+  the only differences are version strings and a changelog, so behaviour is identical. CI
+  builds the oracle from `upstream/` and asserts the versions match.
 - No baseline exists for the engine yet: the ratchet currently guards 21 tooling and convention
   tests. It gains teeth as the ported suite lands.

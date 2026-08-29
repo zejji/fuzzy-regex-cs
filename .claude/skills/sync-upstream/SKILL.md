@@ -89,13 +89,45 @@ Then:
 - rewrite `docs/plan/STATE.md`,
 - append a dated line to `docs/plan/DECISIONS.md` for anything a future sync would re-derive.
 
-## A note on the Python oracle version
+## Getting the oracle onto the commit you are syncing to
 
-The oracle compares against the `regex` module installed from PyPI, which can lag the commit our
-submodule pins (checked 2026-08-29: the pinned 2026.8.12 commit had no PyPI release, so the
-oracle ran 2026.7.19). Before blaming the port for a divergence, check whether the gap is just a
-version difference - and if it matters, build the submodule itself instead:
+The oracle must be the upstream you are porting, or its divergences are version drift and you
+will spend a session chasing your own tail.
+
+**First, measure the gap - do not assume it.** Upstream tags releases it never publishes to
+PyPI, and many commits touch nothing that affects matching:
 
 ```powershell
-python -m pip install ./upstream        # needs a C compiler
+git -C upstream diff --stat <newest published tag>..<the commit you are pinning> -- src/ regex/
 ```
+
+- **Only `pyproject.toml`, `changelog.txt`, `.github/`, and `__version__` changed:** behaviour is
+  identical, and the PyPI release is a valid oracle. Say so in `docs/plan/DECISIONS.md`, with the
+  commit range, so nobody re-derives it. (This was the case for the original 2026.8.12 pin,
+  checked 2026-08-29.)
+- **Anything under `src/` or `regex/` changed:** the PyPI release is not good enough. Build from
+  the submodule.
+
+```powershell
+python -m pip install ./upstream
+python -c "import regex; print(regex.__version__)"   # must equal upstream/pyproject.toml
+```
+
+That needs a C compiler. **Linux and macOS already have one**, which is why `oracle.yml` builds
+from `upstream/` on every scheduled run and asserts the version matches - CI is always the
+exact-match oracle, at no cost.
+
+**Windows does not.** As of 2026-08-29 this machine has no MSVC at all, and installing it is
+about 3-7 GB:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools `
+  --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+Deliberately not installed yet. Do it the first time the diff above shows real changes, not
+before - and record the date in `docs/plan/DECISIONS.md` when you do.
+
+If you would rather not install it, the fallbacks are: lean on CI's oracle run, or run the
+comparison inside WSL (`apt install build-essential python3-dev`, about 200 MB) and accept that
+the harness has to cross that boundary.

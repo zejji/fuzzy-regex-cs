@@ -10,8 +10,12 @@ is kept as the record of how it was bootstrapped.
 ## One-time prerequisites
 
 - .NET 10 SDK (version pinned in `global.json`).
-- Python 3.12+ with `pip install regex` (the differential oracle; version noted in
-  `docs/plan/DECISIONS.md` when first installed).
+- Python 3.12+ with `pip install regex` (the differential oracle).
+  - No C compiler is needed locally today. The PyPI release and the pinned upstream commit
+    differ only in version strings, so they behave identically, and CI builds the oracle from
+    `upstream/` for the exact-match check. If a future sync pins a commit that genuinely differs
+    from a published release, you will need MSVC Build Tools with the C++ workload to run
+    `pip install ./upstream` on Windows; the `sync-upstream` skill covers it.
 - `git submodule update --init` after cloning.
 
 ## Everyday commands

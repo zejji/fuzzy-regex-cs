@@ -115,7 +115,9 @@ Correctness strategy has three legs; all three exist before performance work sta
    that breaks something cannot merge. This is the primary defence against review-loop churn and
    agent regressions.
 3. **Differential oracle.** A property-based harness generates patterns and inputs, runs both this
-   library and locally-installed Python `regex`, and diffs results. Every divergence is minimized
+   library and Python `regex`, and diffs results. In CI the oracle is **built from the pinned
+   `upstream/` submodule** rather than installed from PyPI, so the ground truth is exactly the
+   commit being ported, and the job asserts the two versions match (Amendment 7). Every divergence is minimized
    into a permanent ordinary test. Runs on demand and on a scheduled CI job, not per-commit.
 
 Gap tests we add beyond the ported suite: surrogate/UTF-16 edge cases, `MatchTimeout`,
@@ -281,6 +283,7 @@ phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through
 | Upstream moves while we port | Submodule pin; we port a fixed SHA and sync forward post-1.0 via the sync-upstream skill |
 | Generated Unicode tables wrong | Oracle property tests across all planes, not manual review |
 | Python oracle unavailable in CI | Oracle job is scheduled/dev-only; ported suite + ratchet are the merge gate |
+| Oracle is a different upstream version than the port targets, so divergences are version drift | CI builds the oracle from the pinned submodule and asserts the version; before trusting a PyPI release locally, diff the pin against it over `src/` and `regex/` and record the result (`sync-upstream`) |
 
 ## 14. References (all fetched 2026-08-29)
 
@@ -336,3 +339,17 @@ amended text is inline above; this list is the record of what changed and why.
    mechanism open). Read/Write/Edit/Glob/Grep/TodoWrite/Skill/Task/Agent, and Bash restricted to
    `dotnet`, `git`, `pwsh` and `python`. An unattended session must not be able to run arbitrary
    commands on the machine. Decided by the project owner.
+
+7. **The CI oracle is built from the pinned submodule, not installed from PyPI** (sections 5 and
+   6). Upstream tags releases it never publishes - the original pin, 2026.8.12, is one of them -
+   so PyPI is not always even an option, and a version-mismatched oracle reports drift as port
+   defects. The Linux runners already have a C compiler, so this costs nothing there;
+   `oracle.yml` asserts the built version equals `upstream/pyproject.toml`.
+
+   No C compiler is installed on the Windows dev box, deliberately. Checked 2026-08-29: the diff
+   from the newest published release (2026.7.19) to the pin touches only `pyproject.toml`,
+   `changelog.txt`, `.github/` and the `__version__` string, leaving `src/_regex.c`,
+   `src/_regex_unicode.c`, `regex/_regex_core.py` and the test suite byte-identical. The local
+   PyPI oracle is therefore behaviour-identical to the pin, and 3-7 GB of MSVC Build Tools would
+   buy a different version string and nothing else. `sync-upstream` says how to measure the gap
+   at each sync and when installing the toolchain becomes necessary.
