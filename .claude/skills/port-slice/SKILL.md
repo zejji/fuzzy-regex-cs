@@ -72,10 +72,34 @@ tools/check-ratchet.ps1                  # must print GREEN
 tools/check-ratchet.ps1 -UpdateBaseline  # only once it is green
 ```
 
-Then one blind review pass: ask a subagent to review the diff for defects, with the instruction
-that a finding must come with a failing test or a concrete reproduction. Style opinions and
-speculative rewrites are out of scope - reject them. Fix real findings, re-run the ratchet, and
-move on. One pass. No loops.
+Then one blind review pass over the diff. Brief the subagent to hand over a **reproduction** -
+the exact command and its output, or a failing test - not prose. Do not ask it for explanations or
+proposed corrections: prompts that request those measurably raise misjudgement rates. Style
+opinions and speculative rewrites are out of scope; reject them unread.
+
+Treat every finding as a hypothesis and reproduce it yourself before touching code. Roughly four
+in five candidate findings do not survive that gate, and acting on one that should have been
+killed is how a review breaks working code.
+
+Then, in this order:
+
+1. **Fix the real findings**, re-run the ratchet, and move on. **No critique loops** - reviewer
+   opines, code changes, reviewer opines again is banned. Repairing against a red ratchet, a
+   failing test or an oracle divergence is *not* a critique loop; that is ground truth, and two
+   rounds of it is the sweet spot. If two rounds have not fixed it, stop and think instead of
+   iterating.
+2. **If the fixes added public API, changed tooling, or touched anything the reviewer never saw,
+   run one more blind pass over that delta only.** This is not a second opinion on reviewed code;
+   it is a first pass over unreviewed code, and skipping it is how S01 shipped ~200 lines of
+   unreviewed public API. Judge it by what changed, not by how the first pass went.
+
+From phase 3 onward, also run the differential oracle locally before you commit any slice that
+touches the engine, and minimise every divergence into a permanent test. The ported suite passing
+is evidence of parity, not proof of it - see design spec amendment 10.
+
+All of this is stated compactly, with the evidence and a paste-ready reviewer brief, in
+`docs/VERIFICATION.md`. Read that before deciding these rules are bureaucracy; the full reasoning
+is in design spec section 8 and amendments 9 and 10.
 
 Then:
 

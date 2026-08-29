@@ -4,31 +4,29 @@ Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 1 - port the upstream test suite.
 
-**Last completed:** S01, public API surface stub (2026-08-29). Six files under `src/FuzzyRegex/`,
-signatures and XML docs only, every member throwing. 11 gap tests. Ratchet green at 32 passing.
+**Last completed:** S01, public API surface stub (2026-08-29), then a research-grounded revision of
+the review and verification discipline (spec amendments 9 and 10).
 
-**Current slice:** none in flight. Next is `docs/plan/slices/S01b-formatting-and-git-hooks.md`
-(CSharpier plus a pre-commit hook), then S02.
+**Current slice:** none. Next is `docs/plan/slices/S01b-formatting-and-git-hooks.md`, then S02.
 
-**Next action:** run `tools/run-slices.ps1`, or open a fresh session and invoke the `port-slice`
-skill.
+**Next action:** run `tools/run-slices.ps1`, or open a fresh session and invoke `port-slice`.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **The root namespace is now `Fuzzy.Text.RegularExpressions`, not `FuzzyRegex`.** A type cannot
-  be named after its own namespace and stay reachable - `using FuzzyRegex;` gave CS0118 on
-  `new FuzzyRegex(...)`. Measured, not reasoned. Directories, project files, assembly names and
-  the NuGet id are unchanged; only C# namespaces moved, tests and benchmarks included. Design
-  spec amendment 8 has the detail.
-- **Ported tests need no using directive** to name `FuzzyRegex`, `Match` or `Group`: the
-  enclosing namespace finds them.
-- **`Match` means .NET's `Match`** - search anywhere, i.e. upstream's `search`. Upstream's
-  anchored `match` is `MatchAtStart`. Static conveniences take `(input, pattern, options)`,
-  `Regex`'s order, not upstream's. `pos`/`endpos` are `beginning`/`length`. Full list in the S01
-  closing notes, which S02 should read before translating anything.
-- **`.editorconfig` carries a temporary block** suppressing MA0025, S2325 and IDE0060 for
-  `src/FuzzyRegex/*.cs`. Phase 2 deletes it when the members gain bodies.
-- A namespace change makes the ratchet go RED on the old test ids. `-AcceptRemovals` is the
-  documented way through; it is not a licence to use it when tests genuinely disappear.
+- **Review discipline changed - read `docs/VERIFICATION.md` first.** It is short and it is the
+  single source. Headlines: one pass per *unreviewed change*, not per slice; reviewers hand over a
+  reproduction, never prose; reproduce every finding yourself before acting (four in five do not
+  survive); critique loops banned, but repair against a red ratchet or oracle divergence is not one
+  and gets two rounds.
+- **The differential oracle moved to the start of Phase 3**, before the first VM slice, and runs
+  locally in every engine slice after that. Passing the ported suite is evidence of parity, not
+  proof (amendment 10). Phase 6 keeps oracle *hardening* only.
+- **Root namespace is `Fuzzy.Text.RegularExpressions`** - a type cannot be named after its own
+  namespace and stay reachable. Directories, assembly names and NuGet id unchanged. Ported tests
+  need no using directive for `FuzzyRegex`, `Match` or `Group`.
+- **`Match` means .NET's `Match`** (search anywhere); upstream's anchored `match` is `MatchAtStart`;
+  statics take `(input, pattern, options)`. Full list in the S01 closing notes.
+- **`.editorconfig` temporarily suppresses** MA0025, S2325, IDE0060 for `src/FuzzyRegex/*.cs`;
+  Phase 2 deletes that block.

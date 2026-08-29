@@ -70,6 +70,11 @@ SDK. Without it `dotnet test` fails with a VSTest message.
 - **UTF-16, not codepoints.** Public indices and lengths are UTF-16 code units, matching .NET
   `Regex`. Upstream indexes by codepoint. Any test whose data contains a non-BMP character needs
   its indices recomputed - verified against Python, never reasoned about.
+- **Verification discipline is in `docs/VERIFICATION.md`.** Read it before any review, fix or
+  engine slice; it is short and it is the single source. The three rules that catch people out:
+  a review finding is a hypothesis until *you* reproduce it (four in five do not survive); one
+  review pass per **unreviewed change**, not per slice; and passing the ported suite is evidence
+  of parity, not proof of it.
 - **Stop rather than guess.** Write the blocker into STATE.md, commit, stop.
 - **No `Co-Authored-By` trailer in commit messages.** This repository does not use one.
 

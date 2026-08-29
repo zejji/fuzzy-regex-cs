@@ -211,3 +211,22 @@ surfaced: a fix you cannot commit is not a fix.
 - The ratchet did its job on the rename: 21 baselined test ids vanished and it went RED until
   `-AcceptRemovals` was passed. Expect the same on any future namespace change.
 - `Sort-Object Name` in `run-slices.ps1` is why the new `S01b` tooling slice runs before S02.
+
+## Addendum: the delta review (2026-08-29, after the commit)
+
+The new rule was applied retroactively to S01's own fix batch - the ~200 lines of public API the
+first reviewer never saw. It found two more defects, both mine, both the same mistake:
+
+1. `FuzzyRegex.Escape`'s XML doc said `Regex.Escape` is closest to `special_only=False`. Backwards.
+   `Regex.Escape("foo!?")` is `foo!\?`, which is upstream's *default*; `special_only=False` gives
+   `foo\!\?`. Over printable ASCII the default disagrees with `Regex.Escape` on 5 characters of 95,
+   against 19 of 95 for `special_only=False`.
+2. `PORTMAP.md` said `regex.Scanner` is "not in `__all__`'s public contract in the way the rest is".
+   It is in `__all__`, sitting between `template` and the rest.
+
+Both were claims about an external system that I reasoned my way to instead of running - the one
+thing the house rules say never to do. The engine had no bug; the map of the engine did. Worth
+noting because a documentation defect in a port survives every test you can write.
+
+The fixes corrected text the reviewer had already read and added no new surface, so under the new
+rule they needed no further pass. That is the rule working, not the rule being dodged.

@@ -60,7 +60,7 @@ Recorded so the omissions are visible and countable rather than silently missing
 | `concurrent=` argument | Releases the GIL. .NET has no GIL, so there is nothing to release. | S01 |
 | `regex.purge`, `regex.cache_all` | Control upstream's pattern cache, a Python-module-global. Not referenced by any upstream test. | S01 |
 | `Pattern.splititer` | Lazy `split`. `Split` returns the same pieces; a caller who wants laziness can stream the array. Revisit if a ported test needs the laziness itself. | S01 |
-| `Pattern.scanner`, `regex.Scanner` | Not in `__all__`'s public contract in the way the rest is, and used by 11 lines of the upstream suite. Deferred to the slice that ports `test_scanner`. | S01 |
+| `Pattern.scanner`, `regex.Scanner` | Public (both are in `__all__`), but a stateful lexer-style API with no `Regex` counterpart, used by 11 lines of the upstream suite. Deferred to the slice that ports `test_scanner`, which is where its shape can be chosen against real tests. | S01 |
 | `Pattern.named_lists` | One upstream test uses it. Deferred to the slice that ports named lists. | S01 |
 | `Match.detach_string` | Drops the match's reference to the subject so Python can free it. .NET's GC needs no such hint. | S01 |
 | `regex.template`, `TEMPLATE`/`T` flag | Present upstream only because Python's `re` has it; upstream does not implement behaviour for it. | S01 |

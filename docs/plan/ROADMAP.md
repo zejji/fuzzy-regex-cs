@@ -13,10 +13,10 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 0 | Scaffolding: solution, build props, CI, skills, driver script, budget gate, slice files for phase 1 | 1-2 | Opus |
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | Parser and compiler (`_regex_core.py`), public API | 5-8 | Opus |
-| 3 | VM core: literals, classes, quantifiers, groups, backrefs, anchors | 10-15 | Opus |
+| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
-| 6 | Oracle hardening, Unicode generator, gap tests | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes), Unicode generator, gap tests | 3-5 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 
@@ -26,6 +26,16 @@ against evidence rather than trusted.
 
 Fuzzy matching - the reason this port exists - is usable at the end of phase 5, about two thirds
 of the way through.
+
+**Phase 3 opens with the differential oracle, not with the VM.** The oracle was originally phase 6
+work, which left phases 3-5 - the entire engine - resting on the ported suite and the ratchet
+alone. Those two cannot carry it: passing the original project's own tests is evidence of parity,
+not proof of it, and the published figure for the closest analogue is that 72% of transpiled
+functions were semantically equivalent *despite compiling and passing the existing tests*. The
+infrastructure already exists from phase 0 (`tests/FuzzyRegex.OracleTests/`, `oracle.yml`,
+Python `regex` installed), so this is a change of when the harness gets written, not of what has
+to be built. Design spec amendment 10 has the evidence and the one caveat that does not apply
+to us.
 
 ## Candidates parked for later
 

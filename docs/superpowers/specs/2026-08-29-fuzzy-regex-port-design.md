@@ -117,11 +117,21 @@ Correctness strategy has three legs; all three exist before performance work sta
    test fails, disappears from the run, or any test fails at all. A "fix"
    that breaks something cannot merge. This is the primary defence against review-loop churn and
    agent regressions.
-3. **Differential oracle.** A property-based harness generates patterns and inputs, runs both this
-   library and Python `regex`, and diffs results. In CI the oracle is **built from the pinned
-   `upstream/` submodule** rather than installed from PyPI, so the ground truth is exactly the
-   commit being ported, and the job asserts the two versions match (Amendment 7). Every divergence is minimized
-   into a permanent ordinary test. Runs on demand and on a scheduled CI job, not per-commit.
+3. **Differential oracle, from the first executing slice.** A property-based harness generates
+   patterns and inputs, runs both this library and Python `regex`, and diffs results. In CI the
+   oracle is **built from the pinned `upstream/` submodule** rather than installed from PyPI, so
+   the ground truth is exactly the commit being ported, and the job asserts the two versions
+   match (Amendment 7). Every divergence is minimized into a permanent ordinary test. The
+   scheduled CI job stays scheduled - it needs Python and its runtime varies, so it is not a
+   merge gate - but the harness is **stood up at the start of Phase 3 and run locally in every
+   slice that touches the engine** (Amendment 10).
+
+   Legs 1 and 2 cannot substitute for this, and that is measured rather than assumed. In the
+   closest published analogue - verifying LLM-transpiled C into Rust - only **72% of transpiled
+   functions were semantically equivalent to the original despite compiling and passing the
+   existing tests**, ranging from 56.3% to 92.1% by codebase; differential testing against the
+   reference caught the rest at 85.7-88.2% precision and 100% recall (RustAssure,
+   arXiv:2510.07604). Passing upstream's own suite is evidence of parity, not proof of it.
 
 Gap tests we add beyond the ported suite: surrogate/UTF-16 edge cases, `MatchTimeout`,
 Span-based API contracts, thread-safety smoke tests, and any behaviour the oracle finds.
@@ -191,10 +201,34 @@ documented failure mode for long agent projects.
   upstream-sync analysis and escalation when a slice has failed twice. Rationale: the ratchet, not
   the orchestrator's memory, protects quality; Fable costs ~2x Opus per token with always-on
   thinking.
-- **Review discipline.** One blind reviewer pass per slice. The reviewer must name a concrete
-  defect with a failing test or reproduction; style nits and speculative rewrites are out of
-  scope. Fix, re-run ratchet, done. No multi-pass review loops - the ratchet and oracle replace
-  them.
+- **Review discipline.** One blind reviewer pass per *unreviewed change*, with a hard evidence
+  gate. The reviewer must name a concrete defect and hand over the reproduction - the command and
+  its output, or a failing test. Style nits, speculative rewrites and prose rationale are out of
+  scope and are rejected unread. Fix, re-run the ratchet, done.
+
+  Three things this does **not** mean (Amendment 9):
+
+  - **No critique loops.** Reviewer opines, code changes, reviewer opines again is the pattern
+    that breaks working code, and it is banned. Automated code review is genuinely this
+    imprecise: four of the techniques benchmarked in arXiv:2509.01494 scored **under 10%
+    precision** (2.79-9.22%), and LLM reviewers systematically over-flag *correct* code as
+    defective (arXiv:2603.00539).
+  - **Repairing against execution feedback is not a critique loop**, and is not capped at one
+    round. A red ratchet, a failing test or an oracle divergence is ground truth, not an opinion.
+    Measured: two repair rounds against error tracebacks capture **76-95% of the total achievable
+    improvement** across seven models, with no model regressing (arXiv:2604.10508). Two rounds,
+    then stop and think rather than iterate.
+  - **A pass covers the diff it read.** If fixing the findings adds public API, changes tooling,
+    or touches anything the reviewer did not see, that delta is *unreviewed* and gets its own
+    single pass. Reviewing changed-since-review code is coverage, not a second opinion.
+
+  The operational form of all this, with a paste-ready reviewer brief, is `docs/VERIFICATION.md`.
+  This section is the reasoning; that file is what an agent actually reads.
+
+  The evidence gate is the load-bearing part, and it is what makes one pass enough. An adversarial
+  refutation gate of the same shape killed **~79% of 171 candidate findings** before they were
+  acted on (arXiv:2604.19049), and in agentic repair, removing execution-grounded validation
+  increased unnecessary repairs by **131.7%** (arXiv:2604.10800).
 - Issue-tracker tooling for agents (e.g. beads) evaluated and rejected: overkill for a solo
   project; the file-queue plus derived status covers the same need.
 
@@ -259,10 +293,10 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | 0 | Scaffolding: solution, props, CI, skills, driver script, budget-gate validation, AGENTS.md, slice files for Phase 1 | 1-2 | Opus |
 | 1 | Public API surface stub, then port the full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
 | 2 | Parser/compiler (`_regex_core.py`) + API skeleton | 5-8 | Opus |
-| 3 | VM core: literals, classes, quantifiers, groups, backrefs, anchors | 10-15 | Opus |
+| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
 | 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
-| 6 | Oracle hardening + gap tests | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests | 3-5 | Opus/Sonnet |
 | 7 | Benchmarks + optimization | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 
@@ -281,11 +315,12 @@ phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through
 |---|---|
 | Codepoint vs UTF-16 semantics produce subtle divergences | Dedicated gap tests; oracle harness; indices translated systematically during test port (Phase 1 conventions in `port-tests` skill) |
 | A 26.7k-line C interpreter hides coupling that resists slicing | Faithful structure keeps upstream as the reference at every step; slices ordered by upstream's own feature dependencies; escalate to Fable after two failed attempts |
-| Review loops break working code | Parity ratchet in CI; reviewer must prove findings with failing tests; single review pass per slice |
+| Review loops break working code | Parity ratchet in CI; hard evidence gate (reviewer hands over a reproduction, not an opinion); one pass per unreviewed change; critique loops banned, execution-feedback repair capped at two rounds (section 8) |
 | Estimates wrong, allowance strain | Deterministic session budget; measured tokens-per-slice after Phase 1; phase-boundary human checkpoints allow re-planning |
 | Upstream moves while we port | Submodule pin; we port a fixed SHA and sync forward post-1.0 via the sync-upstream skill |
 | Generated Unicode tables wrong | Oracle property tests across all planes, not manual review |
 | Python oracle unavailable in CI | Oracle job is scheduled/dev-only; ported suite + ratchet are the merge gate |
+| Port passes upstream's suite but is still semantically wrong | The failure mode legs 1 and 2 cannot catch (72% semantic equivalence despite passing tests, arXiv:2510.07604). Oracle harness stood up before the first VM slice and run locally in every engine slice, not left to Phase 6 |
 | Oracle is a different upstream version than the port targets, so divergences are version drift | CI builds the oracle from the pinned submodule and asserts the version; before trusting a PyPI release locally, diff the pin against it over `src/` and `regex/` and record the result (`sync-upstream`) |
 
 ## 14. References (all fetched 2026-08-29)
@@ -343,6 +378,20 @@ amended text is inline above; this list is the record of what changed and why.
    `dotnet`, `git`, `pwsh` and `python`. An unattended session must not be able to run arbitrary
    commands on the machine. Decided by the project owner.
 
+7. **The CI oracle is built from the pinned submodule, not installed from PyPI** (sections 5 and
+   6). Upstream tags releases it never publishes - the original pin, 2026.8.12, is one of them -
+   so PyPI is not always even an option, and a version-mismatched oracle reports drift as port
+   defects. The Linux runners already have a C compiler, so this costs nothing there;
+   `oracle.yml` asserts the built version equals `upstream/pyproject.toml`.
+
+   No C compiler is installed on the Windows dev box, deliberately. Checked 2026-08-29: the diff
+   from the newest published release (2026.7.19) to the pin touches only `pyproject.toml`,
+   `changelog.txt`, `.github/` and the `__version__` string, leaving `src/_regex.c`,
+   `src/_regex_unicode.c`, `regex/_regex_core.py` and the test suite byte-identical. The local
+   PyPI oracle is therefore behaviour-identical to the pin, and 3-7 GB of MSVC Build Tools would
+   buy a different version string and nothing else. `sync-upstream` says how to measure the gap
+   at each sync and when installing the toolchain becomes necessary.
+
 8. **The root namespace is `Fuzzy.Text.RegularExpressions`, not `FuzzyRegex`** (section 4). Made
    during S01, 2026-08-29. A type cannot be named after the namespace that contains it and stay
    reachable: with namespace `FuzzyRegex` and entry type `FuzzyRegex`, a consumer who writes
@@ -364,16 +413,45 @@ amended text is inline above; this list is the record of what changed and why.
    block it replaced, but it is not a one-liner - and it is the price of mirroring `Regex`'s type
    names, which the owner chose deliberately.
 
-7. **The CI oracle is built from the pinned submodule, not installed from PyPI** (sections 5 and
-   6). Upstream tags releases it never publishes - the original pin, 2026.8.12, is one of them -
-   so PyPI is not always even an option, and a version-mismatched oracle reports drift as port
-   defects. The Linux runners already have a C compiler, so this costs nothing there;
-   `oracle.yml` asserts the built version equals `upstream/pyproject.toml`.
+9. **Review discipline reworded: the evidence gate is what matters, not the pass count**
+   (section 8). Made 2026-08-29 after the S01 review, on published evidence rather than taste.
+   The original wording, "one pass, no loops", conflated two different loops. Banning the critique
+   loop is right and the evidence is strong. Capping *execution-feedback repair* at one round was
+   not: two rounds against error tracebacks capture 76-95% of achievable improvement across seven
+   models with no model regressing (arXiv:2604.10508). The wording also let a real gap through -
+   fixes made in response to a review shipped unreviewed, because "one pass" was read as one pass
+   per *slice* rather than one pass per *unreviewed change*. That is how S01 committed roughly 200
+   lines of new public API that no reviewer had seen.
 
-   No C compiler is installed on the Windows dev box, deliberately. Checked 2026-08-29: the diff
-   from the newest published release (2026.7.19) to the pin touches only `pyproject.toml`,
-   `changelog.txt`, `.github/` and the `__version__` string, leaving `src/_regex.c`,
-   `src/_regex_unicode.c`, `regex/_regex_core.py` and the test suite byte-identical. The local
-   PyPI oracle is therefore behaviour-identical to the pin, and 3-7 GB of MSVC Build Tools would
-   buy a different version string and nothing else. `sync-upstream` says how to measure the gap
-   at each sync and when installing the toolchain becomes necessary.
+   Two supporting rules added: the reviewer hands over a reproduction rather than prose (an
+   adversarial gate of this shape killed ~79% of 171 candidate findings, arXiv:2604.19049), and
+   the reviewer prompt must not ask for explanations or proposed corrections, which measurably
+   *raise* misjudgement rates (arXiv:2603.00539).
+
+   Evidence limits, recorded so nobody over-reads this: arXiv:2604.10508 tested Llama, Qwen and
+   Gemini models on HumanEval-style benchmarks, not a frontier model on a 30k-line port;
+   arXiv:2310.01798's self-correction result is about *reasoning* tasks, not code specifically;
+   and no study found compares LLM review against symbolic or differential verification head to
+   head. The direction is well supported, the magnitudes are not ours.
+
+10. **The differential oracle moves from Phase 6 to the start of Phase 3** (sections 5 and 12).
+   Made 2026-08-29. Section 5 called the oracle one of three correctness legs but scheduled it
+   *after* the entire engine (Phases 2-5), leaving legs 1 and 2 to carry every engine slice alone.
+   Those two legs cannot carry it: in the closest published analogue, 72% of LLM-transpiled
+   functions were semantically equivalent despite compiling and passing the existing tests, and
+   differential testing against the reference is what found the rest (arXiv:2510.07604). Finding a
+   divergence in the slice that introduced it costs minutes; finding it in Phase 6 means
+   archaeology across the whole engine.
+
+   Cost is low: `tests/FuzzyRegex.OracleTests/` and `.github/workflows/oracle.yml` already exist
+   (Phase 0), and Python `regex` is already installed locally, so the change is when the harness
+   gets written, not whether the infrastructure exists. The scheduled CI job stays scheduled and
+   stays off the merge path. Phase 6 keeps oracle *hardening* - broader generators, all Unicode
+   planes - which is a different job from having an oracle at all.
+
+   One caveat specific to regex engines: cross-engine differential testing is normally undermined
+   by dialect divergence, since POSIX and PCRE disagree on semantics (arXiv:2603.00311). It does
+   not apply here. We are not comparing dialects; we are comparing one implementation against the
+   exact upstream commit it is a port of, which is the ideal case for the technique. Where the
+   oracle genuinely cannot reach, that paper's metamorphic relations from Kleene algebra are the
+   complement to reach for in Phase 6.

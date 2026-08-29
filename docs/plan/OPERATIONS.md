@@ -122,13 +122,22 @@ After Phase 1, recalibrate: `docs/plan/slice-log.jsonl` will hold what each slic
    memory, so reporting cannot rot.
 5. **Fresh context per slice + small fixed briefing files** (STATE.md <= 30 lines): no long-lived
    degraded context making quiet mistakes.
-6. **Review with proof:** the per-slice blind reviewer must demonstrate defects with a failing
-   test or reproduction; cosmetic or speculative findings are rejected. One pass, no loops.
+6. **Review with proof:** the blind reviewer must hand over a reproduction - the command and its
+   output, or a failing test. Prose rationale, style nits and speculative rewrites are rejected
+   unread. One pass per *unreviewed change*, which is not the same as one pass per slice: if
+   fixing the findings adds public API or touches tooling, that delta has not been reviewed and
+   gets its own pass. Critique loops (reviewer opines, code changes, reviewer opines again) are
+   banned; repairing against a red ratchet or an oracle divergence is not a critique loop and is
+   capped at two rounds. Rules and evidence: `docs/VERIFICATION.md`; full reasoning: design spec
+   section 8 and amendment 9.
 7. **Phase-boundary human gates:** you re-plan with real data roughly every 1-3 weeks; the
    machine never runs months unattended.
 8. **Budget gate before every slice:** the project cannot eat allowance reserved for other work.
-9. **Oracle differential testing:** an independent ground truth (Python regex itself) catches
-   what ported tests miss.
+9. **Oracle differential testing, from the first executing slice:** an independent ground truth
+   (Python `regex` itself) catches what ported tests structurally cannot. Passing upstream's own
+   suite is evidence of parity, not proof - see amendment 10. The harness is stood up at the start
+   of Phase 3 and run locally in every engine slice; the scheduled CI job stays off the merge
+   path.
 10. **Upstream pinned:** the port targets a fixed SHA; upstream churn cannot destabilise it.
 
 ## Files that matter when you glance at the project
