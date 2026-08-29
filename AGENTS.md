@@ -71,6 +71,7 @@ SDK. Without it `dotnet test` fails with a VSTest message.
   `Regex`. Upstream indexes by codepoint. Any test whose data contains a non-BMP character needs
   its indices recomputed - verified against Python, never reasoned about.
 - **Stop rather than guess.** Write the blocker into STATE.md, commit, stop.
+- **No `Co-Authored-By` trailer in commit messages.** This repository does not use one.
 
 ## Licensing
 
