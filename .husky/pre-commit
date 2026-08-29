@@ -1,0 +1,24 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Formatting only, and deliberately nothing else. The suite runs on pre-push and in CI; a
+# pre-commit hook that ran it would double the test time of every unattended slice (the driver
+# has already run check-ratchet.ps1 seconds earlier) and would refuse the failing-test commits
+# that test-first development is made of. Reasoning in full: docs/plan/slices/done/S01b.
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR -z -- '*.cs' | tr '\0' '\n')
+[ -z "$staged" ] && exit 0
+
+# A file that is staged *and* has further unstaged edits cannot be re-staged safely: the
+# `git add` below would sweep those edits into the commit. Refuse rather than commit content
+# nobody chose.
+partial=$(printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git diff --name-only --)
+if [ -n "$partial" ]; then
+  echo "pre-commit: partially staged, so formatting cannot be re-staged safely:"
+  printf '%s\n' "$partial" | sed 's/^/  /'
+  echo "Stage them fully, or run 'dotnet csharpier format .' and stage the result."
+  exit 1
+fi
+
+printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 dotnet csharpier format || exit 1
+printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git add

@@ -1,0 +1,7 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# The last moment before work leaves the machine, and far rarer than a commit, so waiting for
+# the suite here is proportionate. CI remains the real gate: a local hook is absent in a fresh
+# clone until `dotnet husky install` runs, and is one --no-verify away from being skipped.
+pwsh -NoProfile -File tools/check-ratchet.ps1

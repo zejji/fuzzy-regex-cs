@@ -44,6 +44,15 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Formatting must be clean
+        # The real formatting gate. The pre-commit hook is absent in a fresh clone until
+        # `dotnet husky install` runs and is one --no-verify away from being skipped, so it
+        # cannot be the thing that holds the line. This can.
+        run: dotnet csharpier check .
+
       - name: Build
         run: dotnet build --configuration Release --no-restore
 

@@ -10,6 +10,11 @@ is kept as the record of how it was bootstrapped.
 ## One-time prerequisites
 
 - .NET 10 SDK (version pinned in `global.json`).
+- **PowerShell 7 (`pwsh`)**, not the Windows-bundled PowerShell 5.1. Every script under
+  `tools/` runs on it, and `PortTools.psm1` uses null-conditional and ternary syntax that
+  5.1 cannot even parse - `Import-Module ./tools/PortTools.psm1` under 5.1 fails at
+  `PortTools.psm1:387`. The `pre-push` hook calls `check-ratchet.ps1` through `pwsh`, so
+  without it every push fails. `winget install Microsoft.PowerShell`.
 - Python 3.12+ with `pip install regex` (the differential oracle).
   - No C compiler is needed locally today. The PyPI release and the pinned upstream commit
     differ only in version strings, so they behave identically, and CI builds the oracle from
@@ -17,6 +22,9 @@ is kept as the record of how it was bootstrapped.
     from a published release, you will need MSVC Build Tools with the C++ workload to run
     `pip install ./upstream` on Windows; the `sync-upstream` skill covers it.
 - `git submodule update --init` after cloning.
+- `dotnet tool restore` then `dotnet husky install` after cloning, which pins CSharpier
+  and Husky.Net locally and writes the `pre-commit` (formatting) and `pre-push`
+  (`check-ratchet.ps1`) hooks. Neither hook is a gate - CI is - but they catch drift early.
 
 ## Everyday commands
 
@@ -26,6 +34,7 @@ tools/check-ratchet.ps1 -UpdateBaseline  # record the new passing set, once it i
 tools/check-ratchet.ps1 -AcceptRemovals  # a baselined test was renamed or deliberately deleted
 tools/run-tool-tests.ps1                 # Pester tests for the tooling itself
 tools/run-slices.ps1 -DryRun             # what the driver would do next, without spending anything
+dotnet csharpier format .                # formatting; CI fails the build on any drift
 ```
 
 The ratchet goes red when a baselined test disappears from the run, which is what a rename looks

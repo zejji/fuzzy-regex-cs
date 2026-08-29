@@ -41,6 +41,8 @@ upstream/                   read-only submodule, pinned to the commit we track
 ## Commands
 
 ```powershell
+dotnet tool restore; dotnet husky install     # fresh clone, once: formatting + git hooks
+dotnet csharpier format .                     # CI fails on unformatted code
 dotnet build                                  # analyzers are errors; there is no warning tier
 dotnet test tests/FuzzyRegex.Tests            # the suite
 tools/check-ratchet.ps1                       # suite + parity ratchet + regenerate STATUS.md
@@ -51,6 +53,13 @@ tools/run-slices.ps1 -DryRun                  # what the autonomous driver would
 
 `global.json` sets `test.runner` to Microsoft.Testing.Platform, which TUnit needs on the .NET 10
 SDK. Without it `dotnet test` fails with a VSTest message.
+
+Everything under `tools/` needs **PowerShell 7** (`pwsh`); the Windows-bundled 5.1 cannot parse
+`PortTools.psm1`.
+
+The hooks `dotnet husky install` writes are formatting on `pre-commit` and
+`tools/check-ratchet.ps1` on `pre-push`. Tests deliberately do not run on commit: mid-slice
+commits are meant to contain failing tests, and the driver has just run the suite anyway.
 
 ## House rules
 
