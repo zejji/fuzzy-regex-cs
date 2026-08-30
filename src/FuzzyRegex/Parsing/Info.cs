@@ -161,16 +161,17 @@ internal sealed class Info
 
         if (ParseFunctions.IsDigitName(name))
         {
-            // BigInteger for the same reason as ParseName: upstream's int() has no width, so a
-            // number too large for an int is simply not in open_groups. int.Parse threw
-            // OverflowException out through parse_escape's catch, which is neither upstream's
-            // error nor the needs:backrefs seam the delimited path is supposed to reach.
-            System.Numerics.BigInteger number = System.Numerics.BigInteger.Parse(
-                name,
-                System.Globalization.CultureInfo.InvariantCulture
-            );
-
-            return number >= int.MinValue && number <= int.MaxValue && OpenGroups.Contains((int)number);
+            // The same Python int() as ParseName and the three group-resolving nodes: unbounded,
+            // and accepting any Unicode decimal digit. int.Parse threw OverflowException out
+            // through parse_escape's catch, which is neither upstream's error nor the backreference
+            // the delimited path is supposed to reach, and BigInteger.Parse threw FormatException
+            // on `\g<١>`, which upstream resolves to group 1. TryParseGroupNumber saturates at
+            // int.MaxValue, and a number that large is never an open group either way.
+            //
+            // A false return here also covers the `²` case - a str.isdigit digit with no decimal
+            // value - where upstream would raise ValueError. Unreachable: parse_name converts the
+            // same name first and rejects it before this is called.
+            return ParseFunctions.TryParseGroupNumber(name, out int number) && OpenGroups.Contains(number);
         }
 
         // Upstream's dict.get returns None when the name is unknown, and None is never in

@@ -136,7 +136,9 @@ public sealed class CompileParityTests
     {
         if (thrown is NotImplementedException && thrown.Message.StartsWith("needs:", StringComparison.Ordinal))
         {
-            Skip.Test(thrown.Message);
+            // Fully qualified: S11's (*SKIP) node is Parsing.Skip, which this file's usings also
+            // bring into scope, so the bare name is ambiguous.
+            TUnit.Core.Skip.Test(thrown.Message);
         }
     }
 }

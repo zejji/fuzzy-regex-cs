@@ -37,10 +37,10 @@ public sealed class GroupReferenceFallbackTests
 
     /// <summary>
     /// The same overflowing number on the <em>delimited</em> path, which does not fall back to
-    /// literals: upstream raises "invalid group reference" and our port throws its
-    /// <c>needs:backrefs</c> seam, because S11 owns <c>RefGroup</c>. What S07 has to guarantee is
-    /// only that the number does not blow up on the way there - an <see cref="OverflowException"/>
-    /// is neither upstream's error nor the seam, and it escapes <c>parse_escape</c>'s catch.
+    /// literals: upstream raises "invalid group reference", and since S11 landed <c>RefGroup</c>
+    /// so do we. What S07 had to guarantee is only that the number does not blow up on the way
+    /// there - an <see cref="OverflowException"/> is neither upstream's error nor the seam that
+    /// stood here before, and it escapes <c>parse_escape</c>'s catch.
     /// </summary>
     /// <remarks>
     /// Found by the S07 review of the <c>ParseName</c> fix: <c>Info.IsOpenGroup</c> parsed the

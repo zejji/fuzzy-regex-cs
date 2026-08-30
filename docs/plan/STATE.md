@@ -3,34 +3,34 @@
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 2 - parser, compiler, Unicode tables, pattern-level public API. Eight slices (S06-S13);
-S06 to S10 done, three pending.
+S06 to S11 done, two pending.
 
 **Current slice:** none in flight. The tree is clean.
 
-**Where S10 left the port:** ratchet GREEN, 1447 passing tests (baseline 1447), 3843 total, nothing
-failing; overall parity 0.7%. Sets and set operators, POSIX classes, properties, `\N{...}`,
-`(?#...)`, case folding and the whole inline-flag surface are ported. `character-classes` drops
-from 573 waiting tests to 114, `unicode-properties` to 95, `case-folding` to 69. `quantifiers`
-(179) is now the biggest block, then `fuzzy-syntax` (162) and `substitution` (148) - all three
-need a matching engine, which is Phase 3.
+**Where S11 left the port:** ratchet GREEN, 1692 passing tests (baseline 1692), 3865 total, nothing
+failing; overall parity 0.7%. **The parser is finished apart from S13's two constructs.** Every
+`(?` form, backreferences, group calls, recursion, conditionals, lookaround, atomic groups, branch
+reset, the verbs, `\R` and `\X` are ported. 1443 of the corpus's 1662 rows pass and none fails;
+all 219 skips are S13's - 127 `fuzzy-syntax`, 62 `substitution`, 30 `named-lists`.
 
-**Next action:** S11, `docs/plan/slices/S11-groups-references-lookaround.md` - backreferences,
-group calls, conditionals, lookaround, atomic groups and verbs. `parse_paren` throws for every
-`(?` form it owns; nothing else blocks it.
+**Next action:** S12, `docs/plan/slices/S12-replacement-templates-and-escape.md`. Nothing blocks it:
+`PatternCompiler.CompileReplacement` is the last shape-only seam and the 62 template corpus rows
+are its oracle.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **S11's scope lists `parse_comment` (`:978`); S10 already ported it.** Skip that bullet.
-- **Un-skip nothing speculatively in S11.** Every `groups`/`named-groups`/`branch-reset` test needs
-  a match, so the slice's evidence is corpus rows, not newly passing upstream tests.
-- **A differential wave beats the corpus for anything the upstream suite is thin on.** S10's found
-  the `in_set` defect and three upstream-internal-error patterns the corpus never reaches. The
-  recorder is `.scratch/s10_diff_record.py`; the C# comparison half was scratch and is gone.
-- **Suspect the parser before the tables.** The Unicode tables are checked against upstream
-  exhaustively; the corpus is not. A row that disagrees only in set-member order is a set-order
-  leak - S10 landed the sort as `RegexBase.RenderKey`, so check that first.
+- **The corpus is blind to whole constructs, so measure before trusting it.**
+  `.scratch/corpus_coverage.py` (rewrite it, it was scratch) found zero rows for relative group
+  calls. A differential wave found two real defects S11 would otherwise have shipped.
+- **The wave recipe:** import `tools/record-compile-corpus.py` for its set-order patches and
+  `Recorder`, feed your own pattern list, and compare against a scratch console in `.scratch/wave/`
+  whose `AssemblyName` is `FuzzyRegex.Benchmarks` so `InternalsVisibleTo` reaches the parser.
+- **Three divergence classes are expected and recorded** - UTF-16 offsets, `NotSupportedException`
+  where upstream's `ValueError` escapes, and Unicode 17.0 versus the host's 16.0.0. Check PORTMAP's
+  "Where we diverge" before treating a wave divergence as a defect.
+- **`fuzzy = false` is hard-coded twice in `PatternCompiler.Compile`** and both become real in S13.
 - **Regenerating anything Unicode:** `tools/transliterate-unicode.py`, then
   `tools/build-character-names.py`, then `tools/build-lowercase.py`, then
   `tools/record-unicode-fixtures.py` - in that order. `oracle.yml` runs all four with `--check`.

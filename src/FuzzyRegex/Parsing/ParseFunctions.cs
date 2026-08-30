@@ -39,6 +39,26 @@ internal static class ParseFunctions
     private static readonly string[] _setOps = ["||", "~~", "&&", "--"];
 
     /// <summary>
+    /// Upstream <c>VERBS</c> (lines 4671-4676): the backtracking control verbs <c>(*FAIL)</c>,
+    /// <c>(*F)</c>, <c>(*PRUNE)</c> and <c>(*SKIP)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's table holds four shared singleton nodes; these are factories, because a node
+    /// built here is handed straight into the parse tree and this port builds a fresh one each
+    /// time, as <see cref="PositionEscape"/> does.
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<string, Func<RegexBase>> Verbs = new Dictionary<
+        string,
+        Func<RegexBase>
+    >(StringComparer.Ordinal)
+    {
+        ["FAIL"] = static () => new Failure(),
+        ["F"] = static () => new Failure(),
+        ["PRUNE"] = static () => new Prune(),
+        ["SKIP"] = static () => new Skip(),
+    };
+
+    /// <summary>
     /// Whether a character has more than one case. Upstream <c>is_cased_i</c>
     /// (<c>upstream/regex/_regex_core.py</c> lines 362-364), which asks the engine's
     /// <c>get_all_cases</c> - a four-level lookup into the generated Unicode tables
@@ -82,6 +102,73 @@ internal static class ParseFunctions
     internal static Character MakeCharacter(Info info, int value, bool inSet = false) =>
         // A character set is built case-sensitively.
         inSet ? new Character(value) : new Character(value, caseFlags: MakeCaseFlags(info));
+
+    /// <summary>Upstream <c>make_ref_group</c> (lines 437-439).</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="name">The group name or number, as the pattern wrote it.</param>
+    /// <param name="position">Where the reference started, for the error messages.</param>
+    /// <returns>The backreference.</returns>
+    internal static RefGroup MakeRefGroup(Info info, string name, int position) =>
+        new(info, name, position, caseFlags: MakeCaseFlags(info));
+
+    /// <summary>
+    /// Python's <c>int(text)</c> as the three group-resolving nodes call it: the value if the text
+    /// is a number, otherwise a signal to look the text up as a name.
+    /// </summary>
+    /// <param name="text">The group name or number, as the pattern wrote it.</param>
+    /// <param name="group">The number, saturated to <see cref="int"/>'s range.</param>
+    /// <returns><see langword="false"/> where upstream's <c>int()</c> raises <c>ValueError</c>.</returns>
+    /// <remarks>
+    /// <para>
+    /// <see cref="BigInteger"/> and not <see cref="int"/>, because Python's <c>int</c> has no width:
+    /// <c>\g&lt;99999999999999999999&gt;</c> parses there and is then rejected by the range check as
+    /// "invalid group reference". Narrowing with <see cref="int.TryParse(string, out int)"/> would
+    /// fail the parse instead and reach the name lookup, giving "unknown group". Saturating is safe
+    /// because a group count can never approach <see cref="int.MaxValue"/>, so a saturated value is
+    /// on the same side of every range check as the true one.
+    /// </para>
+    /// <para>
+    /// <see cref="PythonStr.TryParseInt"/> and not <c>BigInteger.Parse</c>, because Python's
+    /// <c>int()</c> accepts <b>any</b> Unicode decimal digit and the invariant culture accepts only
+    /// ASCII ones: <c>(?P=١)</c> is a reference to group 1 upstream, and reaches this method with
+    /// the name still spelled in Arabic-Indic digits. Pinned by <c>UnicodeDigitGroupNameTests</c>.
+    /// </para>
+    /// </remarks>
+    internal static bool TryParseGroupNumber(string text, out int group)
+    {
+        if (!PythonStr.TryParseInt(text, out BigInteger value))
+        {
+            group = 0;
+            return false;
+        }
+
+        group = value > int.MaxValue ? int.MaxValue : (int)value;
+        return true;
+    }
+
+    /// <summary>
+    /// Python's <c>int(name)</c> where upstream lets its <c>ValueError</c> escape: the one
+    /// <c>parse_name</c> call whose result is compared against <c>min_group</c>.
+    /// </summary>
+    /// <param name="name">The name, already known to satisfy <c>str.isdigit</c>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="NotSupportedException">
+    /// The name is a <c>str.isdigit</c> digit with no <i>decimal</i> value - <c>²</c> and its kin.
+    /// </exception>
+    /// <remarks>
+    /// <c>str.isdigit</c> is <c>Numeric_Type</c> of <c>Decimal</c> <b>or</b> <c>Digit</c> while
+    /// <c>int()</c> takes only <c>Decimal</c>, so <c>(?P=²)</c> reaches <c>int("²")</c> and upstream
+    /// raises an uncaught <c>ValueError: invalid literal for int() with base 10: '²'</c> - measured
+    /// 2026-08-30. As with the three patterns in <c>UpstreamInternalErrorTests</c>, there is no
+    /// specified behaviour to port; what matters is that the pattern is rejected rather than
+    /// quietly compiled.
+    /// </remarks>
+    private static BigInteger ParsePythonInt(string name) =>
+        PythonStr.TryParseInt(name, out BigInteger value)
+            ? value
+            : throw new NotSupportedException(
+                $"int('{name}') would raise ValueError: the name is a digit with no decimal value"
+            );
 
     /// <summary>Upstream <c>make_property</c> (lines 445-450).</summary>
     /// <param name="info">The parse state.</param>
@@ -446,9 +533,7 @@ internal static class ParseFunctions
                 if (ch is '=' or '!')
                 {
                     // (?<=... or (?<!...: lookbehind.
-                    throw new NotImplementedException(
-                        "needs:lookbehind - parse_lookaround and the LookAround node are not ported yet (S11)"
-                    );
+                    return ParseLookaround(source, info, behind: true, positive: ch == '=');
                 }
 
                 // (?<...: a named capture group.
@@ -458,9 +543,8 @@ internal static class ParseFunctions
 
             if (ch is '=' or '!')
             {
-                throw new NotImplementedException(
-                    "needs:lookaround - parse_lookaround and the LookAround node are not ported yet (S11)"
-                );
+                // (?=... or (?!...: lookahead.
+                return ParseLookaround(source, info, behind: false, positive: ch == '=');
             }
 
             if (ch == 'P')
@@ -478,38 +562,37 @@ internal static class ParseFunctions
 
             if (ch == '(')
             {
-                throw new NotImplementedException(
-                    "needs:conditionals - parse_conditional and the Conditional node are not ported yet (S11)"
-                );
+                // (?(...: a conditional subpattern.
+                return ParseConditional(source, info);
             }
 
             if (ch == '>')
             {
-                throw new NotImplementedException(
-                    "needs:atomic - parse_atomic and the Atomic node are not ported yet (S11)"
-                );
+                // (?>...: an atomic subpattern.
+                return ParseAtomic(source, info);
             }
 
             if (ch == '|')
             {
-                throw new NotImplementedException("needs:branch-reset - parse_common is not ported yet (S11)");
+                // (?|...: a common/reset groups branch.
+                return ParseCommon(source, info);
             }
 
             if (ch is 'R' or (>= '0' and <= '9'))
             {
-                throw new NotImplementedException(
-                    "needs:recursion - parse_call_group and the CallGroup node are not ported yet (S11)"
-                );
+                // (?R...: probably a call to a group.
+                return ParseCallGroup(source, info, ch, savedPos2);
             }
 
             if (ch == '&')
             {
-                throw new NotImplementedException("needs:recursion - parse_call_named_group is not ported yet (S11)");
+                // (?&...: a call to a named group.
+                return ParseCallNamedGroup(source, info, savedPos2);
             }
 
             if (ch is '+' or '-' && RegexFlags.IsDigit(source.Peek()))
             {
-                throw new NotImplementedException("needs:recursion - parse_rel_call_group is not ported yet (S11)");
+                return ParseRelCallGroup(source, info, ch, savedPos2);
             }
 
             // (?...: probably a flags subpattern.
@@ -533,14 +616,18 @@ internal static class ParseFunctions
             // redundant: TryGetRuneAt throws rather than answering false for index 0 of "".
             if (word.Length > 0 && Rune.TryGetRuneAt(word, 0, out Rune firstRune) && PythonStr.IsAlpha(firstRune.Value))
             {
-                throw new NotImplementedException(
-                    "needs:backtracking-verbs - the VERBS table and its nodes are not ported yet (S11)"
-                );
+                if (!Verbs.TryGetValue(word, out Func<RegexBase>? verb))
+                {
+                    throw new FuzzyRegexParseException("unknown verb", source.String, savedPos2);
+                }
+
+                source.Expect(")");
+
+                return verb();
             }
 
             // Upstream falls through to an unnamed capture group when the word is not alphabetic,
             // without rewinding to savedPos2 - the rewind below goes all the way back to savedPos.
-            _ = savedPos2;
         }
 
         // (...: an unnamed capture group.
@@ -595,6 +682,225 @@ internal static class ParseFunctions
         source.Expect(")");
     }
 
+    /// <summary>Upstream <c>parse_lookaround</c> (lines 995-1005).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="behind">Whether this looks behind rather than ahead.</param>
+    /// <param name="positive">Whether the subpattern must match or must not.</param>
+    /// <returns>The lookaround.</returns>
+    internal static RegexBase ParseLookaround(Source source, Info info, bool behind, bool positive)
+    {
+        int savedFlags = info.Flags;
+        RegexBase subpattern;
+        try
+        {
+            subpattern = ParsePattern(source, info);
+            source.Expect(")");
+        }
+        finally
+        {
+            info.Flags = savedFlags;
+            source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
+        }
+
+        return new LookAround(behind, positive, subpattern);
+    }
+
+    /// <summary>Upstream <c>parse_conditional</c> (lines 1007-1048).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The conditional.</returns>
+    internal static RegexBase ParseConditional(Source source, Info info)
+    {
+        int savedFlags = info.Flags;
+        int savedPos = source.Pos;
+        int ch = source.Get();
+        if (ch == '?')
+        {
+            // (?(?...
+            ch = source.Get();
+            if (ch is '=' or '!')
+            {
+                // (?(?=... or (?(?!...: lookahead conditional.
+                return ParseLookaroundConditional(source, info, behind: false, positive: ch == '=');
+            }
+
+            if (ch == '<')
+            {
+                // (?(?<...
+                ch = source.Get();
+                if (ch is '=' or '!')
+                {
+                    // (?(?<=... or (?(?<!...: lookbehind conditional.
+                    return ParseLookaroundConditional(source, info, behind: true, positive: ch == '=');
+                }
+            }
+
+            source.Pos = savedPos;
+            throw new FuzzyRegexParseException("expected lookaround conditional", source.String, source.Pos);
+        }
+
+        source.Pos = savedPos;
+        RegexBase yesBranch;
+        RegexBase noBranch;
+        string group;
+        try
+        {
+            group = ParseName(source, allowNumeric: true);
+            source.Expect(")");
+            yesBranch = ParseSequence(source, info);
+            noBranch = source.MatchText("|") ? ParseSequence(source, info) : new Sequence();
+
+            source.Expect(")");
+        }
+        finally
+        {
+            info.Flags = savedFlags;
+            source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
+        }
+
+        if (yesBranch.IsEmpty() && noBranch.IsEmpty())
+        {
+            return new Sequence();
+        }
+
+        return new Conditional(info, group, yesBranch, noBranch, savedPos);
+    }
+
+    /// <summary>Upstream <c>parse_lookaround_conditional</c> (lines 1050-1068).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="behind">Whether the test looks behind rather than ahead.</param>
+    /// <param name="positive">Whether the test must match or must not.</param>
+    /// <returns>The conditional.</returns>
+    internal static RegexBase ParseLookaroundConditional(Source source, Info info, bool behind, bool positive)
+    {
+        int savedFlags = info.Flags;
+        RegexBase subpattern;
+        try
+        {
+            subpattern = ParsePattern(source, info);
+            source.Expect(")");
+        }
+        finally
+        {
+            info.Flags = savedFlags;
+            source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
+        }
+
+        RegexBase yesBranch = ParseSequence(source, info);
+        RegexBase noBranch = source.MatchText("|") ? ParseSequence(source, info) : new Sequence();
+
+        source.Expect(")");
+
+        return new LookAroundConditional(behind, positive, subpattern, yesBranch, noBranch);
+    }
+
+    /// <summary>Upstream <c>parse_atomic</c> (lines 1070-1080).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The atomic subpattern.</returns>
+    internal static RegexBase ParseAtomic(Source source, Info info)
+    {
+        int savedFlags = info.Flags;
+        RegexBase subpattern;
+        try
+        {
+            subpattern = ParsePattern(source, info);
+            source.Expect(")");
+        }
+        finally
+        {
+            info.Flags = savedFlags;
+            source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
+        }
+
+        return new Atomic(subpattern);
+    }
+
+    /// <summary>Upstream <c>parse_common</c> (lines 1082-1098).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The branch-reset group's branches.</returns>
+    internal static RegexBase ParseCommon(Source source, Info info)
+    {
+        // Capture group numbers in different branches can reuse the group numbers.
+        int initialGroupCount = info.GroupCount;
+        List<RegexBase> branches = [ParseSequence(source, info)];
+        int finalGroupCount = info.GroupCount;
+        while (source.MatchText("|"))
+        {
+            info.GroupCount = initialGroupCount;
+            branches.Add(ParseSequence(source, info));
+            finalGroupCount = Math.Max(finalGroupCount, info.GroupCount);
+        }
+
+        info.GroupCount = finalGroupCount;
+        source.Expect(")");
+
+        return branches.Count == 1 ? branches[0] : new Branch(branches);
+    }
+
+    /// <summary>Upstream <c>parse_call_group</c> (lines 1100-1109).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="ch">The character that started the call: <c>R</c>, or the first digit.</param>
+    /// <param name="pos">Where the call started, for the error messages.</param>
+    /// <returns>The group call.</returns>
+    internal static RegexBase ParseCallGroup(Source source, Info info, int ch, int pos)
+    {
+        string group = ch == 'R' ? "0" : ((char)ch).ToString() + source.GetWhile(RegexFlags.IsDigit);
+
+        source.Expect(")");
+
+        return new CallGroup(info, group, pos);
+    }
+
+    /// <summary>Upstream <c>parse_rel_call_group</c> (lines 1111-1124).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="ch">The sign, <c>+</c> or <c>-</c>.</param>
+    /// <param name="pos">Where the call started, for the error messages.</param>
+    /// <returns>The group call.</returns>
+    /// <remarks>
+    /// The offset is a <see cref="BigInteger"/> for the same reason as
+    /// <see cref="ParseLimitedQuantifier"/>: Python's <c>int()</c> has no width, so
+    /// <c>(?+99999999999999999999)</c> is arithmetic upstream performs and reports as an unknown
+    /// group, not an overflow. The sum is only narrowed once it is known to be in range.
+    /// </remarks>
+    internal static RegexBase ParseRelCallGroup(Source source, Info info, int ch, int pos)
+    {
+        string digits = source.GetWhile(RegexFlags.IsDigit);
+        if (digits.Length == 0)
+        {
+            throw new FuzzyRegexParseException("missing relative group number", source.String, source.Pos);
+        }
+
+        BigInteger offset = BigInteger.Parse(digits, CultureInfo.InvariantCulture);
+        BigInteger group = ch == '+' ? info.GroupCount + offset : info.GroupCount - offset + 1;
+        if (group <= 0)
+        {
+            throw new FuzzyRegexParseException("invalid relative group number", source.String, source.Pos);
+        }
+
+        source.Expect(")");
+
+        return new CallGroup(info, group.ToString(CultureInfo.InvariantCulture), pos);
+    }
+
+    /// <summary>Upstream <c>parse_call_named_group</c> (lines 1126-1131).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="pos">Where the call started, for the error messages.</param>
+    /// <returns>The group call.</returns>
+    internal static RegexBase ParseCallNamedGroup(Source source, Info info, int pos)
+    {
+        string group = ParseName(source);
+        source.Expect(")");
+
+        return new CallGroup(info, group, pos);
+    }
+
     /// <summary>Upstream <c>parse_extension</c> (lines 942-976).</summary>
     /// <param name="source">The scanner.</param>
     /// <param name="info">The parse state.</param>
@@ -612,13 +918,20 @@ internal static class ParseFunctions
         if (ch == '=')
         {
             // (?P=...: a named group reference.
-            throw new NotImplementedException("needs:backrefs - the RefGroup node is not ported yet (S11)");
+            string name = ParseName(source, allowNumeric: true);
+            source.Expect(")");
+            if (info.IsOpenGroup(name))
+            {
+                throw new FuzzyRegexParseException("cannot refer to an open group", source.String, savedPos);
+            }
+
+            return MakeRefGroup(info, name, savedPos);
         }
 
         if (ch is '>' or '&')
         {
             // (?P>...: a call to a group.
-            throw new NotImplementedException("needs:recursion - parse_call_named_group is not ported yet (S11)");
+            return ParseCallNamedGroup(source, info, savedPos);
         }
 
         source.Pos = savedPos;
@@ -793,20 +1106,26 @@ internal static class ParseFunctions
         {
             int minGroup = allowGroup0 ? 0 : 1;
 
-            // BigInteger, not int: Python's int() has no fixed width, so upstream compares the
-            // value against min_group, finds a huge number is not below it, and carries on to
-            // fail on the missing ">" instead - which parse_escape catches and degrades to
-            // literals. int.Parse would throw OverflowException straight through that catch and
-            // turn `\g<99999999999` into an error upstream does not raise. Info.IsOpenGroup
-            // parses the same name and needs the same treatment. Pinned by
-            // GroupReferenceFallbackTests.
+            // PythonStr.TryParseInt, not BigInteger.Parse: Python's int() has no fixed width, so
+            // upstream compares the value against min_group, finds a huge number is not below it,
+            // and carries on to fail on the missing ">" instead - which parse_escape catches and
+            // degrades to literals. int.Parse would throw OverflowException straight through that
+            // catch and turn `\g<99999999999` into an error upstream does not raise. It also
+            // accepts any Unicode decimal digit, which BigInteger.Parse does not: `\g<١>` is a
+            // reference to group 1 upstream. Info.IsOpenGroup and CallGroup/RefGroup/Conditional's
+            // fix_groups parse the same name and go through the same function. Pinned by
+            // GroupReferenceFallbackTests and UnicodeDigitGroupNameTests.
+            //
+            // The && short-circuits exactly as upstream's `not allow_numeric or int(name) < ...`
+            // does, so a numeric name is never converted where numbers are not allowed - which is
+            // what keeps `(?<²>a)` a plain "bad character in group name".
             //
             // Not identical above 4300 digits: CPython 3.11+ caps int(str) at
             // sys.get_int_max_str_digits() and raises ValueError, so upstream rejects
             // `\g<` + 4301 nines where we compile it. Deliberately not ported - that limit is a
             // CPython interpreter setting, changeable at runtime and with no .NET equivalent,
             // not part of the regex grammar. Measured 2026-08-30, see DECISIONS.
-            if (!allowNumeric || BigInteger.Parse(name, CultureInfo.InvariantCulture) < minGroup)
+            if (!allowNumeric || ParsePythonInt(name) < minGroup)
             {
                 throw new FuzzyRegexParseException("bad character in group name", source.String, source.Pos);
             }
@@ -907,14 +1226,22 @@ internal static class ParseFunctions
 
         if (ch == 'R' && !inSet)
         {
-            throw new NotImplementedException("needs:escapes - \\R needs the Atomic node (S11)");
+            // A line ending.
+            List<int> charset = [0x0A, 0x0B, 0x0C, 0x0D];
+            if (info.GuessEncoding == RegexFlags.Unicode)
+            {
+                charset.AddRange([0x85, 0x2028, 0x2029]);
+            }
+
+            return new Atomic(
+                new Branch([new String([0x0D, 0x0A]), new SetUnion(info, [.. charset.Select(c => new Character(c))])])
+            );
         }
 
         if (ch == 'X' && !inSet)
         {
-            // Grapheme._compile builds an Atomic(Sequence([LazyRepeat(AnyAll(), 1, None),
-            // GraphemeBoundary()])) (lines 2919-2932), so the node waits for Atomic in S11.
-            throw new NotImplementedException("needs:grapheme - the Grapheme node needs Atomic (S11)");
+            // A grapheme cluster.
+            return new Grapheme();
         }
 
         if (RegexFlags.IsAlpha(ch))
@@ -1040,7 +1367,7 @@ internal static class ParseFunctions
             throw new FuzzyRegexParseException("cannot refer to an open group", source.String, source.Pos);
         }
 
-        throw new NotImplementedException("needs:backrefs - the RefGroup node is not ported yet (S11)");
+        return MakeRefGroup(info, digits, source.Pos);
     }
 
     /// <summary>Upstream <c>parse_octal_escape</c> (lines 1372-1391).</summary>
@@ -1130,6 +1457,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseGroupRef(Source source, Info info)
     {
         source.Expect("<");
+        int savedPos = source.Pos;
         string name = ParseName(source, allowNumeric: true);
         source.Expect(">");
         if (info.IsOpenGroup(name))
@@ -1137,7 +1465,7 @@ internal static class ParseFunctions
             throw new FuzzyRegexParseException("cannot refer to an open group", source.String, source.Pos);
         }
 
-        throw new NotImplementedException("needs:backrefs - the RefGroup node is not ported yet (S11)");
+        return MakeRefGroup(info, name, savedPos);
     }
 
     /// <summary>Upstream <c>parse_named_char</c> (lines 1437-1451).</summary>
@@ -1868,20 +2196,53 @@ internal static class ParseFunctions
     /// <param name="parsed">The parsed pattern.</param>
     internal static void CheckGroupFeatures(Info info, RegexBase parsed)
     {
-        // Upstream reads `parsed` to decide whether the pattern as a whole is fuzzy, inside the
-        // loop below.
-        _ = parsed;
+        Dictionary<(int Group, bool Reverse, bool Fuzzy), int> callRefs = [];
+        List<(RegexBase Group, bool Reverse, bool Fuzzy)> additionalGroups = [];
 
-        if (info.GroupCalls.Count > 0)
+        foreach ((RegexBase call, bool reverse, bool fuzzy) in info.GroupCalls)
         {
-            // The body of upstream's loop needs CallRef, Fuzzy and the group-call nodes.
-            throw new NotImplementedException(
-                "needs:recursion - group calls need the CallRef and CallGroup nodes (S11)"
-            );
+            var callGroup = (CallGroup)call;
+
+            // Look up the reference of this group call.
+            (int, bool, bool) key = (callGroup.GroupNumber, reverse, fuzzy);
+            if (!callRefs.TryGetValue(key, out int reference))
+            {
+                // This group doesn't have a reference yet, so look up its features.
+                if (callGroup.GroupNumber == 0)
+                {
+                    // Calling the pattern as a whole.
+                    bool rev = (info.Flags & RegexFlags.Reverse) != 0;
+
+                    // Upstream: fuz = isinstance(parsed, Fuzzy). The Fuzzy node arrives in S13.
+                    const bool fuz = false;
+                    if ((rev, fuz) != (reverse, fuzzy))
+                    {
+                        // The pattern as a whole doesn't have the features we want, so we'll need
+                        // to make a copy of it with the desired features.
+                        additionalGroups.Add((new CallRef(callRefs.Count, parsed), reverse, fuzzy));
+                    }
+                }
+                else
+                {
+                    // Calling a capture group.
+                    (Group group, bool defReverse, bool defFuzzy) = info.DefinedGroups[callGroup.GroupNumber];
+                    if ((defReverse, defFuzzy) != (reverse, fuzzy))
+                    {
+                        // The group doesn't have the features we want, so we'll need to make a copy
+                        // of it with the desired features.
+                        additionalGroups.Add((group, reverse, fuzzy));
+                    }
+                }
+
+                reference = callRefs.Count;
+                callRefs[key] = reference;
+            }
+
+            callGroup.CallRefIndex = reference;
         }
 
-        info.CallRefs = [];
-        info.AdditionalGroups = [];
+        info.CallRefs = callRefs;
+        info.AdditionalGroups = additionalGroups;
     }
 
     /// <summary>Upstream <c>_get_required_string</c> (lines 4460-4479).</summary>

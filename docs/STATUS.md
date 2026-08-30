@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 1856 | 1412 | 444 | 0 |
+| Gaps | 1878 | 1657 | 221 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,57 +61,57 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
+| `fuzzy-syntax` | 184 |
 | `quantifiers` | 179 |
-| `fuzzy-syntax` | 162 |
 | `substitution` | 148 |
 | `ignore-case` | 144 |
-| `escapes` | 135 |
+| `escapes` | 134 |
 | `character-classes` | 114 |
-| `backrefs` | 112 |
 | `unicode-properties` | 95 |
-| `conditionals` | 93 |
 | `anchors` | 87 |
 | `partial` | 82 |
-| `lookaround` | 75 |
 | `parse-errors` | 71 |
 | `case-folding` | 69 |
-| `lookbehind` | 62 |
-| `named-lists` | 48 |
-| `recursion` | 48 |
+| `conditionals` | 58 |
+| `named-lists` | 50 |
 | `fuzzy-matching` | 48 |
 | `right-to-left` | 47 |
-| `backtracking-verbs` | 44 |
 | `basic-matching` | 40 |
+| `backrefs` | 40 |
 | `find-all` | 37 |
 | `groups` | 34 |
+| `backtracking-verbs` | 34 |
+| `recursion` | 33 |
+| `lookaround` | 32 |
 | `inline-flags` | 29 |
-| `branch-reset` | 28 |
 | `fuzzy-counts` | 28 |
 | `ascii-flag` | 28 |
 | `set-operations` | 24 |
 | `splitting` | 23 |
 | `named-groups` | 23 |
-| `atomic` | 19 |
+| `branch-reset` | 21 |
 | `alternation` | 18 |
-| `word-flag` | 18 |
 | `fuzzy-bestmatch` | 18 |
-| `line-boundaries` | 17 |
+| `word-flag` | 18 |
 | `fuzzy-budget` | 17 |
+| `line-boundaries` | 17 |
 | `define-groups` | 15 |
-| `captures` | 12 |
+| `lookbehind` | 13 |
 | `escape-function` | 12 |
+| `captures` | 12 |
 | `version-flags` | 11 |
 | `format` | 11 |
-| `grapheme` | 11 |
+| `fuzzy-changes` | 8 |
+| `grapheme` | 8 |
 | `possessive` | 8 |
 | `posix-matching` | 8 |
-| `fuzzy-changes` | 8 |
 | `full-match` | 7 |
+| `atomic` | 7 |
 | `fuzzy-enhancematch` | 6 |
 | `keep-marker` | 6 |
 | `overlapped` | 4 |
 | `comments` | 4 |
-| `fuzzy-deletion` | 3 |
 | `fuzzy-insertion` | 3 |
+| `fuzzy-deletion` | 3 |
 | `fuzzy-substitution` | 3 |
 

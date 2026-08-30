@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Fuzzy.Text.RegularExpressions.Unicode;
@@ -67,6 +68,96 @@ internal static class PythonStr
         // Runes, not chars: Python iterates codepoints, so a supplementary-plane digit such as
         // MATHEMATICAL BOLD DIGIT ZERO is one character to it and two to us.
         return text.Length > 0 && text.EnumerateRunes().All(rune => IsDigit(rune.Value));
+    }
+
+    /// <summary>
+    /// Python's <c>int(text)</c> over a run of digits, as upstream calls it on a group name.
+    /// </summary>
+    /// <param name="text">The digits.</param>
+    /// <param name="value">The value.</param>
+    /// <returns><see langword="false"/> where Python's <c>int()</c> raises <c>ValueError</c>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Not <see cref="System.Numerics.BigInteger.TryParse(string, out System.Numerics.BigInteger)"/>:
+    /// Python's <c>int()</c> accepts any Unicode <b>decimal</b> digit, so <c>int("١٢")</c> is 12,
+    /// which is why <c>(?P=١)</c> compiles upstream to a reference to group 1. It is also
+    /// <i>narrower</i> than <see cref="IsDigit"/>, which is <c>Numeric_Type</c> of <c>Decimal</c>
+    /// <b>or</b> <c>Digit</c>: <c>"²".isdigit()</c> is true but <c>int("²")</c> raises, and
+    /// upstream lets that <c>ValueError</c> escape.
+    /// </para>
+    /// <para>
+    /// <see cref="System.Numerics.BigInteger"/>, because Python's <c>int</c> has no width and
+    /// upstream's range checks depend on the true value; the callers narrow it.
+    /// </para>
+    /// <para>
+    /// The digit <i>value</i> comes from <see cref="DecimalValue"/> over upstream's own tables, not
+    /// from <see cref="CharUnicodeInfo"/>. It has to: <see cref="IsDigit"/> reads upstream's
+    /// tables, which are Unicode 17.0.0, and .NET's are older, so the ten codepoints
+    /// U+11DE0-U+11DE9 added in 17.0 would be a digit to the <c>isdigit</c> gate and not a decimal
+    /// digit to the conversion - and the port would throw where upstream compiles. Found by the
+    /// second S11 review pass, which is the same reason the port resolves <c>\N{...}</c> against
+    /// 17.0.0 rather than the host's (PORTMAP, "Character names are Unicode 17.0.0").
+    /// </para>
+    /// </remarks>
+    internal static bool TryParseInt(string text, out System.Numerics.BigInteger value)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        value = System.Numerics.BigInteger.Zero;
+        if (text.Length == 0)
+        {
+            return false;
+        }
+
+        // Runes, not chars: MATHEMATICAL BOLD DIGIT ZERO and friends are decimal digits above the
+        // BMP, and Python iterates codepoints.
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            int digit = DecimalValue(rune.Value);
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            value = (value * 10) + digit;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// CPython's <c>Py_UNICODE_TODECIMAL</c>: a codepoint's decimal value, or -1 if it has none.
+    /// </summary>
+    /// <param name="codepoint">The codepoint.</param>
+    /// <returns>0 to 9, or -1.</returns>
+    /// <remarks>
+    /// <para>
+    /// Upstream's tables carry <c>Numeric_Type</c> but no numeric <i>value</i>, so the value is
+    /// derived from where the codepoint sits in its own run of decimal digits. Every script's
+    /// digits are ten consecutive codepoints starting at its zero; a few runs abut, so taking the
+    /// offset from the start of the maximal run modulo ten is what recovers the digit - the five
+    /// mathematical digit blocks U+1D7CE-U+1D7FF are one 50-long run, and U+1D7F9 is a 3.
+    /// </para>
+    /// <para>
+    /// Verified exhaustively against <see cref="CharUnicodeInfo.GetDecimalDigitValue(string, int)"/>
+    /// for every codepoint that table knows, by
+    /// <c>Gaps/Unicode/PythonStrTests.Every_decimal_digits_value_matches_dotnets_table</c>.
+    /// </para>
+    /// </remarks>
+    internal static int DecimalValue(int codepoint)
+    {
+        if (!Encodings.HasProperty(_codes.Value.NumericDecimal, (uint)codepoint))
+        {
+            return -1;
+        }
+
+        int start = codepoint;
+        while (start > 0 && Encodings.HasProperty(_codes.Value.NumericDecimal, (uint)(start - 1)))
+        {
+            start--;
+        }
+
+        return (codepoint - start) % 10;
     }
 
     /// <summary>Python's <c>str.isidentifier</c>, as upstream calls it.</summary>

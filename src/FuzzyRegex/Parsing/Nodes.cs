@@ -2,10 +2,9 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
 /// The parse-tree node types. Port of the node classes in <c>upstream/regex/_regex_core.py</c>
-/// lines 1940-4108, of which this slice carries the ones a pattern of literals, dots and groups
-/// needs: <see cref="RegexBase"/>, <see cref="Any"/>, <see cref="AnyAll"/>, <see cref="AnyU"/>,
-/// <see cref="Character"/>, <see cref="String"/>, <see cref="Literal"/>,
-/// <see cref="PrecompiledCode"/>, <see cref="Sequence"/> and <see cref="Group"/>.
+/// lines 1940-4108. Which of them are ported is recorded in <c>docs/PORTMAP.md</c>, not listed
+/// here, so that the list cannot go stale: as of S11 only <c>Fuzzy</c> and <c>StringSet</c> are
+/// outstanding, both S13's.
 /// </summary>
 /// <remarks>
 /// Common base class for all nodes. Upstream <c>RegexBase</c> (lines 1941-2008).
@@ -362,6 +361,25 @@ internal sealed class EndOfWord : ZeroWidthBase
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfWord;
 }
 
+/// <summary><c>(*FAIL)</c> and <c>(*F)</c>. Upstream <c>Failure</c> (lines 2780-2784).</summary>
+/// <remarks>
+/// Upstream declares no <c>_opcode</c> here and overrides <c>_compile</c> to emit the bare opcode
+/// with no flags word, so <see cref="ZeroWidthOpcode"/> is the missing attribute, not
+/// <see cref="Opcode.Failure"/> written a different way.
+/// </remarks>
+internal sealed class Failure : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode =>
+        throw new NotSupportedException($"{nameof(Failure)} has no _opcode; upstream would raise AttributeError");
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.Failure],
+        ];
+}
+
 /// <summary><c>\K</c>. Upstream <c>Keep</c> (lines 3142-3144).</summary>
 internal sealed class Keep : ZeroWidthBase
 {
@@ -369,11 +387,37 @@ internal sealed class Keep : ZeroWidthBase
     protected override Opcode ZeroWidthOpcode => Opcode.Keep;
 }
 
+/// <summary><c>(*PRUNE)</c>. Upstream <c>Prune</c> (lines 3366-3370).</summary>
+/// <remarks>No <c>_opcode</c> upstream either; see <see cref="Failure"/>.</remarks>
+internal sealed class Prune : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode =>
+        throw new NotSupportedException($"{nameof(Prune)} has no _opcode; upstream would raise AttributeError");
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.Prune],
+        ];
+}
+
 /// <summary><c>\G</c>. Upstream <c>SearchAnchor</c> (lines 3498-3500).</summary>
 internal sealed class SearchAnchor : ZeroWidthBase
 {
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.SearchAnchor;
+}
+
+/// <summary><c>(*SKIP)</c>. Upstream <c>Skip</c> (lines 3987-3989).</summary>
+/// <remarks>
+/// Unlike <see cref="Failure"/> and <see cref="Prune"/>, upstream gives this one an <c>_opcode</c>
+/// and no <c>_compile</c>, so it takes the base class's flags word.
+/// </remarks>
+internal sealed class Skip : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.Skip;
 }
 
 /// <summary><c>^</c> under <c>MULTILINE</c>. Upstream <c>StartOfLine</c> (lines 3991-3993).</summary>
@@ -722,6 +766,118 @@ internal sealed class Range : RegexBase
 }
 
 /// <summary>
+/// A backreference, <c>\1</c>, <c>(?P=name)</c> or <c>\g&lt;name&gt;</c>. Upstream
+/// <c>RefGroup</c> (<c>upstream/regex/_regex_core.py</c> lines 3449-3496).
+/// </summary>
+/// <remarks>
+/// The group is written as text and resolved by <see cref="FixGroups"/>, as in
+/// <see cref="CallGroup"/>.
+/// </remarks>
+internal sealed class RefGroup : RegexBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.RefGroup,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.RefGroupIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.RefGroup,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.RefGroupFld,
+        [(RegexFlags.NoCase, true)] = Opcode.RefGroupRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.RefGroupIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.RefGroupRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.RefGroupFldRev,
+    };
+
+    private readonly Info _info;
+    private readonly int _position;
+    private readonly string _groupText;
+
+    /// <summary>Initializes a backreference.</summary>
+    /// <param name="info">The parse state, which the reference resolves its group against.</param>
+    /// <param name="group">The group name or number, as the pattern wrote it.</param>
+    /// <param name="position">Where the reference started, for the error messages.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    internal RefGroup(Info info, string group, int position, int caseFlags = RegexFlags.NoCase)
+    {
+        _info = info;
+        _groupText = group;
+        _position = position;
+        CaseFlags = RegexFlags.CaseFlagsCombination(caseFlags);
+    }
+
+    /// <summary>The group number, resolved by <see cref="FixGroups"/>. Upstream <c>group</c>.</summary>
+    internal int GroupNumber { get; private set; }
+
+    /// <inheritdoc />
+    internal override int CaseFlags { get; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
+    {
+        if (ParseFunctions.TryParseGroupNumber(_groupText, out int group))
+        {
+            GroupNumber = group;
+        }
+        else if (_info.GroupIndex.TryGetValue(_groupText, out int named))
+        {
+            GroupNumber = named;
+        }
+        else
+        {
+            throw new FuzzyRegexParseException("unknown group", pattern, _position);
+        }
+
+        if (GroupNumber < 1 || GroupNumber > _info.GroupCount)
+        {
+            throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Upstream reads a <c>self.pattern</c> it does not have; see <see cref="CallGroup.RemoveCaptures"/>.</remarks>
+    internal override RegexBase RemoveCaptures() =>
+        throw new NotSupportedException(
+            $"{nameof(RefGroup)} has no pattern attribute; upstream would raise AttributeError"
+        );
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => RegexFlags.Unlimited;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({nameof(RefGroup)},{GroupNumber},{CaseFlags})"
+        );
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is RefGroup other && GroupNumber == other.GroupNumber && CaseFlags == other.CaseFlags;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <see cref="GroupNumber"/> is left out: it is only known after <see cref="FixGroups"/>, so
+    /// hashing it would let a node's hash change while it sat in a set. See
+    /// <see cref="CallGroup.GetHashCode"/>.
+    /// </remarks>
+    public override int GetHashCode() => HashCode.Combine(typeof(RefGroup), CaseFlags);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        return
+        [
+            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)GroupNumber],
+        ];
+    }
+}
+
+/// <summary>
 /// <c>.</c> outside <see cref="FuzzyRegexOptions.Singleline"/>: any character but a newline.
 /// Upstream <c>Any</c> (<c>upstream/regex/_regex_core.py</c> lines 2040-2057).
 /// </summary>
@@ -783,6 +939,90 @@ internal sealed class AnyU : Any
 {
     /// <inheritdoc />
     protected override (Opcode Forward, Opcode Reverse) Opcodes => (Opcode.AnyU, Opcode.AnyURev);
+}
+
+/// <summary>
+/// An atomic subpattern, <c>(?&gt;...)</c>. Upstream <c>Atomic</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2074-2128).
+/// </summary>
+/// <remarks>
+/// Upstream defines no <c>_key</c> here, so <c>__hash__</c> falls back to <c>RegexBase</c>'s - the
+/// class alone - while <c>__eq__</c> is overridden to compare the subpattern. Ours does the same:
+/// the hash ignores the mutable <see cref="Subpattern"/>, which <c>pack_characters</c> reassigns.
+/// </remarks>
+internal sealed class Atomic : RegexBase
+{
+    /// <summary>Initializes an atomic subpattern.</summary>
+    /// <param name="subpattern">What the group matches.</param>
+    internal Atomic(RegexBase subpattern)
+    {
+        Subpattern = subpattern;
+    }
+
+    /// <summary>What the group matches. Upstream <c>subpattern</c>.</summary>
+    internal RegexBase Subpattern { get; set; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        Subpattern.FixGroups(pattern, reverse, fuzzy);
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse)
+    {
+        Subpattern = Subpattern.Optimise(info, reverse);
+
+        return Subpattern.IsEmpty() ? Subpattern : this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Subpattern = Subpattern.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase RemoveCaptures()
+    {
+        Subpattern = Subpattern.RemoveCaptures();
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => Subpattern.CanBeAffix();
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
+
+    /// <inheritdoc />
+    internal override bool HasSimpleStart() => Subpattern.HasSimpleStart();
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => Subpattern.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => Subpattern.MaxWidth();
+
+    /// <inheritdoc />
+    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) =>
+        Subpattern.GetRequiredString(reverse);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is Atomic other && Subpattern.Equals(other.Subpattern);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => typeof(Atomic).GetHashCode();
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.Atomic],
+            .. Subpattern.Compile(reverse, fuzzy),
+            [(uint)Opcode.End],
+        ];
 }
 
 /// <summary>
@@ -1312,6 +1552,164 @@ internal sealed class Branch : RegexBase
 }
 
 /// <summary>
+/// A call to a group - <c>(?R)</c>, <c>(?1)</c>, <c>(?&amp;name)</c> and friends. Upstream
+/// <c>CallGroup</c> (<c>upstream/regex/_regex_core.py</c> lines 2526-2570).
+/// </summary>
+/// <remarks>
+/// Upstream's <c>self.group</c> starts as whatever the pattern wrote and becomes an <c>int</c> in
+/// <c>fix_groups</c>. Here it starts as the text and <see cref="GroupNumber"/> holds the resolved
+/// number, which is also what equality compares once <see cref="FixGroups"/> has run.
+/// <see cref="ParseFunctions.ParseRelCallGroup"/> hands over a number already, which upstream keeps
+/// as an <c>int</c> and this port renders as digits: the only difference is which form <c>_key</c>
+/// carries <i>before</i> <c>fix_groups</c>, and nothing compares nodes before then.
+/// </remarks>
+internal sealed class CallGroup : RegexBase
+{
+    private readonly Info _info;
+    private readonly int _position;
+    private readonly string _groupText;
+
+    /// <summary>Initializes a group call.</summary>
+    /// <param name="info">The parse state, which the call resolves its group against.</param>
+    /// <param name="group">The group name or number, as the pattern wrote it.</param>
+    /// <param name="position">Where the call started, for the error messages.</param>
+    internal CallGroup(Info info, string group, int position)
+    {
+        _info = info;
+        _groupText = group;
+        _position = position;
+    }
+
+    /// <summary>The group number, resolved by <see cref="FixGroups"/>. Upstream <c>group</c>.</summary>
+    internal int GroupNumber { get; private set; }
+
+    /// <summary>
+    /// Which of the pattern's group-call references this call uses. Upstream <c>call_ref</c>, set
+    /// by <c>_check_group_features</c>.
+    /// </summary>
+    internal int CallRefIndex { get; set; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
+    {
+        // Upstream's int(self.group), whose ValueError falls through to the name lookup.
+        if (ParseFunctions.TryParseGroupNumber(_groupText, out int group))
+        {
+            GroupNumber = group;
+        }
+        else if (_info.GroupIndex.TryGetValue(_groupText, out int named))
+        {
+            GroupNumber = named;
+        }
+        else
+        {
+            throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
+        }
+
+        if (GroupNumber < 0 || GroupNumber > _info.GroupCount)
+        {
+            throw new FuzzyRegexParseException("unknown group", pattern, _position);
+        }
+
+        if (GroupNumber > 0 && _info.OpenGroupCount[GroupNumber] > 1)
+        {
+            throw new FuzzyRegexParseException("ambiguous group reference", pattern, _position);
+        }
+
+        _info.GroupCalls.Add((this, reverse, fuzzy));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream's body reads <c>self.pattern</c>, which <c>CallGroup</c> does not have, so this
+    /// raises <c>AttributeError</c> there rather than the parse error it means to. Unreachable
+    /// either way: <c>remove_captures</c> is only called by <c>Scanner</c>, which is not ported.
+    /// </remarks>
+    internal override RegexBase RemoveCaptures() =>
+        throw new NotSupportedException(
+            $"{nameof(CallGroup)} has no pattern attribute; upstream would raise AttributeError"
+        );
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => RegexFlags.Unlimited;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({nameof(CallGroup)},{GroupNumber})");
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is CallGroup other && GroupNumber == other.GroupNumber;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The type alone, because <see cref="GroupNumber"/> is only known after <see cref="FixGroups"/>
+    /// and hashing it would let a node's hash change while it sat in a set. Equal nodes still hash
+    /// equal, which is all a hash has to promise; <see cref="Branch"/> does the same.
+    /// </remarks>
+    public override int GetHashCode() => typeof(CallGroup).GetHashCode();
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.GroupCall, (uint)CallRefIndex],
+        ];
+}
+
+/// <summary>
+/// One extra copy of a group, or of the whole pattern, emitted for a call that needs it under a
+/// different direction or fuzziness. Upstream <c>CallRef</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2572-2579).
+/// </summary>
+/// <remarks>
+/// Upstream never calls <c>RegexBase.__init__</c> here, so the node has no <c>_key</c> and both
+/// <c>__eq__</c> and <c>__hash__</c> raise <c>AttributeError</c>; it also has no <c>max_width</c>.
+/// It is only ever appended to <c>info.additional_groups</c> and compiled.
+/// </remarks>
+internal sealed class CallRef : RegexBase
+{
+    private readonly int _ref;
+    private readonly RegexBase _parsed;
+
+    /// <summary>Initializes an extra copy of a group.</summary>
+    /// <param name="reference">The group-call reference this copy answers.</param>
+    /// <param name="parsed">The group, or the whole parsed pattern.</param>
+    internal CallRef(int reference, RegexBase parsed)
+    {
+        _ref = reference;
+        _parsed = parsed;
+    }
+
+    /// <inheritdoc />
+    internal override long MaxWidth() =>
+        throw new NotSupportedException($"{nameof(CallRef)} has no max_width; upstream would raise AttributeError");
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reference equality, not upstream's <c>AttributeError</c>. A node with no <c>_key</c> has no
+    /// identity beyond itself, and throwing from <see cref="object.Equals(object)"/> or
+    /// <see cref="object.GetHashCode"/> is the defect S3877 exists to catch - it breaks any
+    /// collection or debugger that touches the node. Nothing compares a <c>CallRef</c>: it is
+    /// appended to <c>info.additional_groups</c> and compiled.
+    /// </remarks>
+    public override bool Equals(object? obj) => ReferenceEquals(this, obj);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream calls <c>self.parsed._compile(...)</c>, not <c>compile</c>. The two are the same
+    /// call for every node - <c>RegexBase.compile</c> only forwards - so this uses the public one.
+    /// </remarks>
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.CallRef, (uint)_ref],
+            .. _parsed.Compile(reverse, fuzzy),
+            [(uint)Opcode.End],
+        ];
+}
+
+/// <summary>
 /// One literal character. Upstream <c>Character</c> (<c>upstream/regex/_regex_core.py</c> lines
 /// 2581-2653).
 /// </summary>
@@ -1439,6 +1837,181 @@ internal sealed class Character : RegexBase
         }
 
         return code.Compile(reverse, fuzzy);
+    }
+}
+
+/// <summary>
+/// A conditional subpattern, <c>(?(1)yes|no)</c>. Upstream <c>Conditional</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2655-2742).
+/// </summary>
+/// <remarks>
+/// The group is written as text and resolved by <see cref="FixGroups"/>, as in
+/// <see cref="CallGroup"/>. <c>DEFINE</c> is not a keyword: it resolves to group 0 only when the
+/// pattern has no group of that name.
+/// </remarks>
+internal sealed class Conditional : RegexBase
+{
+    private readonly Info _info;
+    private readonly int _position;
+    private readonly string _groupText;
+    private int? _group;
+
+    /// <summary>Initializes a conditional subpattern.</summary>
+    /// <param name="info">The parse state, which the conditional resolves its group against.</param>
+    /// <param name="group">The group name or number, as the pattern wrote it.</param>
+    /// <param name="yesItem">What to match when the group took part.</param>
+    /// <param name="noItem">What to match when it did not.</param>
+    /// <param name="position">Where the conditional started, for the error messages.</param>
+    internal Conditional(Info info, string group, RegexBase yesItem, RegexBase noItem, int position)
+    {
+        _info = info;
+        _groupText = group;
+        YesItem = yesItem;
+        NoItem = noItem;
+        _position = position;
+    }
+
+    private Conditional(Info info, string group, int? resolved, RegexBase yesItem, RegexBase noItem, int position)
+        : this(info, group, yesItem, noItem, position)
+    {
+        _group = resolved;
+    }
+
+    /// <summary>What to match when the group took part. Upstream <c>yes_item</c>.</summary>
+    internal RegexBase YesItem { get; set; }
+
+    /// <summary>What to match when the group did not take part. Upstream <c>no_item</c>.</summary>
+    internal RegexBase NoItem { get; set; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
+    {
+        if (ParseFunctions.TryParseGroupNumber(_groupText, out int group))
+        {
+            _group = group;
+        }
+        else if (_info.GroupIndex.TryGetValue(_groupText, out int named))
+        {
+            _group = named;
+        }
+        else if (string.Equals(_groupText, "DEFINE", StringComparison.Ordinal))
+        {
+            // 'DEFINE' is a special name unless there's a group with that name.
+            _group = 0;
+        }
+        else
+        {
+            throw new FuzzyRegexParseException("unknown group", pattern, _position);
+        }
+
+        if (_group < 0 || _group > _info.GroupCount)
+        {
+            throw new FuzzyRegexParseException("invalid group reference", pattern, _position);
+        }
+
+        YesItem.FixGroups(pattern, reverse, fuzzy);
+        NoItem.FixGroups(pattern, reverse, fuzzy);
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse) =>
+        new Conditional(
+            info,
+            _groupText,
+            _group,
+            YesItem.Optimise(info, reverse),
+            NoItem.Optimise(info, reverse),
+            _position
+        );
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        YesItem = YesItem.PackCharacters(info);
+        NoItem = NoItem.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream's body falls off the end and returns <c>None</c>, which its one caller would then
+    /// store in place of the node - a bug, and unreachable, because <c>remove_captures</c> is only
+    /// called by <c>Scanner</c>, which is not ported. The mutations are upstream's; returning
+    /// <see langword="this"/> rather than a null is the divergence, recorded in PORTMAP.
+    /// </remarks>
+    internal override RegexBase RemoveCaptures()
+    {
+        YesItem = YesItem.RemoveCaptures();
+        NoItem = NoItem.RemoveCaptures();
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => YesItem.IsAtomic() && NoItem.IsAtomic();
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => YesItem.CanBeAffix() && NoItem.CanBeAffix();
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    {
+        HashSet<RegexBase?> firstset = YesItem.GetFirstset(reverse);
+        firstset.UnionWith(NoItem.GetFirstset(reverse));
+        return firstset;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => YesItem.IsEmpty() && NoItem.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => Math.Max(YesItem.MaxWidth(), NoItem.MaxWidth());
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The <i>resolved</i> group only. Upstream compares <c>self.group</c>, which <c>fix_groups</c>
+    /// has by then replaced with the number - the text is gone - so <c>(?(1)a|b)</c> and
+    /// <c>(?(one)a|b)</c> naming the same group are equal, and <c>Branch.optimise</c> hoists them
+    /// as a common prefix. Comparing the text as well made them unequal and left the branch
+    /// unhoisted, which the S11 review caught as a bytecode divergence on
+    /// <c>(?&lt;one&gt;x)(?:(?(1)a|b)c|(?(one)a|b)d)</c>.
+    /// </remarks>
+    public override bool Equals(object? obj) =>
+        obj is Conditional other
+        && _group == other._group
+        && YesItem.Equals(other.YesItem)
+        && NoItem.Equals(other.NoItem);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, so a <c>Conditional</c> is
+    /// unhashable there. Everything ours compares is mutable - the group is resolved by
+    /// <see cref="FixGroups"/>, the two items are reassigned by <c>pack_characters</c> - so the
+    /// hash is the type alone, as on <see cref="Branch"/>.
+    /// </remarks>
+    public override int GetHashCode() => typeof(Conditional).GetHashCode();
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        List<uint[]> code =
+        [
+            [(uint)Opcode.GroupExists, (uint)_group!.Value],
+        ];
+        code.AddRange(YesItem.Compile(reverse, fuzzy));
+
+        List<uint[]> addCode = NoItem.Compile(reverse, fuzzy);
+        if (addCode.Count > 0)
+        {
+            code.Add([(uint)Opcode.Next]);
+            code.AddRange(addCode);
+        }
+
+        code.Add([(uint)Opcode.End]);
+
+        return code;
     }
 }
 
@@ -2673,6 +3246,320 @@ internal sealed class Group : RegexBase
 
         return code;
     }
+}
+
+/// <summary>
+/// A lookahead or lookbehind, <c>(?=)</c>, <c>(?!)</c>, <c>(?&lt;=)</c> or <c>(?&lt;!)</c>. Upstream
+/// <c>LookAround</c> (<c>upstream/regex/_regex_core.py</c> lines 3150-3216).
+/// </summary>
+internal sealed class LookAround : RegexBase
+{
+    /// <summary>Initializes a lookaround.</summary>
+    /// <param name="behind">Whether it looks behind rather than ahead.</param>
+    /// <param name="positive">Whether the subpattern must match or must not.</param>
+    /// <param name="subpattern">What is asserted.</param>
+    internal LookAround(bool behind, bool positive, RegexBase subpattern)
+    {
+        Behind = behind;
+        Positive = positive;
+        Subpattern = subpattern;
+    }
+
+    /// <summary>Whether it looks behind rather than ahead. Upstream <c>behind</c>.</summary>
+    internal bool Behind { get; }
+
+    /// <inheritdoc />
+    internal override bool Positive { get; }
+
+    /// <summary>What is asserted. Upstream <c>subpattern</c>.</summary>
+    internal RegexBase Subpattern { get; set; }
+
+    /// <inheritdoc />
+    /// <remarks>The subpattern is fixed under <see cref="Behind"/>, not under the caller's direction.</remarks>
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        Subpattern.FixGroups(pattern, Behind, fuzzy);
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse)
+    {
+        RegexBase subpattern = Subpattern.Optimise(info, Behind);
+        if (Positive && subpattern.IsEmpty())
+        {
+            return subpattern;
+        }
+
+        return new LookAround(Behind, Positive, subpattern);
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Subpattern = Subpattern.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase RemoveCaptures() => Subpattern.RemoveCaptures();
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => Subpattern.IsAtomic();
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => Subpattern.CanBeAffix();
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
+        Positive && Behind == reverse ? Subpattern.GetFirstset(reverse) : [null];
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => Positive && Subpattern.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => 0;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is LookAround other
+        && Behind == other.Behind
+        && Positive == other.Positive
+        && Subpattern.Equals(other.Subpattern);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, so this node is unhashable there;
+    /// ours hashes the immutable part, as <see cref="Branch"/> does.
+    /// </remarks>
+    public override int GetHashCode() => HashCode.Combine(typeof(LookAround), Behind, Positive);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream compiles the subpattern with <c>compile(self.behind)</c> - one argument - so the
+    /// fuzzy flag is <b>not</b> passed down, even though it is folded into this node's own flags.
+    /// </remarks>
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        if (reverse)
+        {
+            flags |= NodeFlags.Reverse;
+        }
+
+        return
+        [
+            [(uint)Opcode.Lookaround, flags, Behind ? 0u : 1u],
+            .. Subpattern.Compile(Behind),
+            [(uint)Opcode.End],
+        ];
+    }
+}
+
+/// <summary>
+/// A conditional on a lookaround, <c>(?(?=...)yes|no)</c>. Upstream
+/// <c>LookAroundConditional</c> (<c>upstream/regex/_regex_core.py</c> lines 3218-3301).
+/// </summary>
+internal sealed class LookAroundConditional : RegexBase
+{
+    /// <summary>Initializes a lookaround conditional.</summary>
+    /// <param name="behind">Whether the test looks behind rather than ahead.</param>
+    /// <param name="positive">Whether the test must match or must not.</param>
+    /// <param name="subpattern">The test.</param>
+    /// <param name="yesItem">What to match when the test succeeds.</param>
+    /// <param name="noItem">What to match when it fails.</param>
+    internal LookAroundConditional(
+        bool behind,
+        bool positive,
+        RegexBase subpattern,
+        RegexBase yesItem,
+        RegexBase noItem
+    )
+    {
+        Behind = behind;
+        Positive = positive;
+        Subpattern = subpattern;
+        YesItem = yesItem;
+        NoItem = noItem;
+    }
+
+    /// <summary>Whether the test looks behind rather than ahead. Upstream <c>behind</c>.</summary>
+    internal bool Behind { get; }
+
+    /// <inheritdoc />
+    internal override bool Positive { get; }
+
+    /// <summary>The test. Upstream <c>subpattern</c>.</summary>
+    internal RegexBase Subpattern { get; set; }
+
+    /// <summary>What to match when the test succeeds. Upstream <c>yes_item</c>.</summary>
+    internal RegexBase YesItem { get; set; }
+
+    /// <summary>What to match when the test fails. Upstream <c>no_item</c>.</summary>
+    internal RegexBase NoItem { get; set; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
+    {
+        Subpattern.FixGroups(pattern, reverse, fuzzy);
+        YesItem.FixGroups(pattern, reverse, fuzzy);
+        NoItem.FixGroups(pattern, reverse, fuzzy);
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse) =>
+        new LookAroundConditional(
+            Behind,
+            Positive,
+            Subpattern.Optimise(info, Behind),
+            YesItem.Optimise(info, Behind),
+            NoItem.Optimise(info, Behind)
+        );
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Subpattern = Subpattern.PackCharacters(info);
+        YesItem = YesItem.PackCharacters(info);
+        NoItem = NoItem.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Upstream returns <c>None</c> here too; see <see cref="Conditional.RemoveCaptures"/>.</remarks>
+    internal override RegexBase RemoveCaptures()
+    {
+        Subpattern = Subpattern.RemoveCaptures();
+        YesItem = YesItem.RemoveCaptures();
+        NoItem = NoItem.RemoveCaptures();
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => Subpattern.IsAtomic() && YesItem.IsAtomic() && NoItem.IsAtomic();
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => Subpattern.CanBeAffix() && YesItem.CanBeAffix() && NoItem.CanBeAffix();
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() =>
+        Subpattern.ContainsGroup() || YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream's expression is <c>a and b or c</c>, which Python groups as <c>(a and b) or c</c>.
+    /// </remarks>
+    internal override bool IsEmpty() => (Subpattern.IsEmpty() && YesItem.IsEmpty()) || NoItem.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => Math.Max(YesItem.MaxWidth(), NoItem.MaxWidth());
+
+    /// <inheritdoc />
+    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) => (MaxWidth(), null);
+
+    /// <inheritdoc />
+    /// <remarks><c>behind</c> and <c>positive</c> are deliberately outside equality, as upstream.</remarks>
+    public override bool Equals(object? obj) =>
+        obj is LookAroundConditional other
+        && Subpattern.Equals(other.Subpattern)
+        && YesItem.Equals(other.YesItem)
+        && NoItem.Equals(other.NoItem);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => typeof(LookAroundConditional).GetHashCode();
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        List<uint[]> code =
+        [
+            [(uint)Opcode.Conditional, Positive ? 1u : 0u, Behind ? 0u : 1u],
+        ];
+        code.AddRange(Subpattern.Compile(Behind, fuzzy));
+        code.Add([(uint)Opcode.Next]);
+        code.AddRange(YesItem.Compile(reverse, fuzzy));
+
+        List<uint[]> addCode = NoItem.Compile(reverse, fuzzy);
+        if (addCode.Count > 0)
+        {
+            code.Add([(uint)Opcode.Next]);
+            code.AddRange(addCode);
+        }
+
+        code.Add([(uint)Opcode.End]);
+
+        return code;
+    }
+}
+
+/// <summary>
+/// <c>\X</c>, one extended grapheme cluster. Upstream <c>Grapheme</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2919-2932).
+/// </summary>
+internal sealed class Grapheme : RegexBase
+{
+    /// <inheritdoc />
+    internal override long MaxWidth() => RegexFlags.Unlimited;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is Grapheme;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => typeof(Grapheme).GetHashCode();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Match at least 1 character until a grapheme boundary is reached. Note that this is the same
+    /// whether matching forwards or backwards.
+    /// </remarks>
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        var graphemeMatcher = new Atomic(new Sequence([new LazyRepeat(new AnyAll(), 1, null), new GraphemeBoundary()]));
+
+        return graphemeMatcher.Compile(reverse, fuzzy);
+    }
+}
+
+/// <summary>
+/// The boundary test inside <see cref="Grapheme"/>. Upstream <c>GraphemeBoundary</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2934-2936).
+/// </summary>
+/// <remarks>
+/// Upstream's is not a <c>RegexBase</c> at all - it is a bare class with a <c>compile</c> method,
+/// which works there because the <c>Sequence</c> holding it only ever calls that. C# needs it in
+/// the node hierarchy to sit in a <c>Sequence</c>, so everything else a node must answer throws
+/// with the attribute upstream would be missing.
+/// </remarks>
+internal sealed class GraphemeBoundary : RegexBase
+{
+    /// <inheritdoc />
+    internal override long MaxWidth() =>
+        throw new NotSupportedException(
+            $"{nameof(GraphemeBoundary)} has no max_width; upstream would raise AttributeError"
+        );
+
+    /// <inheritdoc />
+    /// <remarks>Reference equality, for the reason given on <see cref="CallRef.Equals"/>.</remarks>
+    public override bool Equals(object? obj) => ReferenceEquals(this, obj);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
+        [
+            [(uint)Opcode.GraphemeBoundary, 1],
+        ];
 }
 
 /// <summary>
