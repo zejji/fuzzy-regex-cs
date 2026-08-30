@@ -201,7 +201,7 @@ public sealed class ApiSurfaceTests
         );
 
         escape.Should().NotBeNull();
-        escape!.GetParameters().Select(p => p.Name).Should().Equal("input", "specialOnly", "literalSpaces");
+        escape.GetParameters().Select(p => p.Name).Should().Equal("input", "specialOnly", "literalSpaces");
     }
 
     [Test]
