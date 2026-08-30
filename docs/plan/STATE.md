@@ -2,34 +2,35 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase:** 1 - port the upstream test suite.
+**Phase:** 1 is COMPLETE. Phase 2 - parser, compiler and public API - has no slice files yet.
 
-**Last completed:** S04, upstream tests for lines 1741-3083 (2026-08-30).
+**Last completed:** S05, upstream tests for lines 3084-4540 (2026-08-30).
 
-**Current slice:** none. Next is `docs/plan/slices/S05-port-tests-hg-bugs.md`, the last of phase 1.
+**Current slice:** none. `docs/plan/slices/` is empty, so `tools/run-slices.ps1` stops here at the
+phase boundary. This is the owner checkpoint described in `docs/plan/OPERATIONS.md`.
 
-**Next action:** run `tools/run-slices.ps1`, or open a fresh session and invoke `port-slice`.
-When the queue empties the driver stops at the phase boundary and phase 2 slices need authoring.
+**Next action:** owner reviews `docs/STATUS.md`, then authors and approves the Phase 2 slices.
+Do not start engine work before those exist.
 
 **Blockers:** none.
 
+**Where phase 1 finished:** 1966 ported upstream tests across 31 feature areas, all skipped, plus
+15 gap tests and 21 convention tests. Ratchet GREEN at 2002 tests, baseline 34. All 102 upstream
+test methods accounted for: 91 ported, 11 recorded in `docs/PORTMAP.md` as not ported with a
+reason. The biggest capabilities waiting are at the bottom of `docs/STATUS.md`; that table is what
+Phase 2 slice authoring should work from.
+
 **Worth knowing before the next slice:**
 
-- **Non-BMP data has still not appeared.** Lines 1-3083 contain no code point above U+FFFF,
-  measured slice by slice. S03 predicted it for S04 and was wrong. Measure the S05 range first;
-  if it is BMP too, phase 1 never needed the surrogate work at all.
-- **Generate a table, do not transcribe it.** `test_various` was 524 rows: extracted with `ast`,
-  re-run through the oracle for ground truth, emitted as C#, then read back out of the built DLL
-  by reflection and compared row by row. If `test_hg_bugs` is table-shaped, do the same.
-- **A delegation brief that enumerates the allowed API can silently narrow the port.** S04's
-  brief omitted `Replace` and `Groups.Count`, and the agent duly reported two portable assertions
-  as unportable. Point the agent at the source and name the *exclusions* instead.
-- **Build centrally.** Third slice running that whole-project build caught what agents could not:
-  two `<see cref>` references broken by a signature change, Sonar S4144 on identical method
-  bodies, CA1716 on a namespace named `Partial`.
-- **Reuse the 49-tag vocabulary** before coining (bottom of `docs/STATUS.md`). S04 added 17.
-- **Machine-check every expected value against the local `regex` oracle**, with
-  `PYTHONDONTWRITEBYTECODE=1` and `PYTHONIOENCODING=utf-8` set. These tests never execute, so
-  reading them against Python is the only gate.
-- **Confusable BMP characters go in as `(char)0xNNNN`**, not literal UTF-8, and are verified by
-  reflecting the built assembly - ß/İ/ı/ﬆ all appear in S04 and none are distinguishable by eye.
+- **Non-BMP data exists after all, at two sites**, both in S05: `test_hg_bugs` #373 and #433-434.
+  A range scan must resolve `\N{...}` names via `unicodedata.lookup`, not just look for astral
+  literals and `\U` escapes - that omission hid the second site from S05's own measurement.
+- **`cat -A` is the only cheap way to see a backslash or an invisible character.** The Read tool
+  renders `\\X` and `\X` identically, and Edit/Write decode a `\uXXXX` escape before it reaches
+  disk. Write escape text from a Python script; prefer `char.ConvertFromUtf32` for astral chars.
+- **Build centrally, once, at the end.** Parallel agents each running `dotnet build` in a shared
+  tree see each other's half-written files and one of them "fixed" that by renaming siblings to
+  `*.bak`. The single central build is also what caught every analyzer failure.
+- **Phase 2 must not un-skip by tag alone** - read the skip prose first (DECISIONS, 2026-08-29).
+- `docs/plan/slice-log.jsonl` is still empty: no slice has ever run under the driver, so there is
+  no measured tokens-per-slice figure. S05's closing notes give the transcript-derived estimate.

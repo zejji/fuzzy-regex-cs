@@ -143,6 +143,48 @@ Every other method in the range is ported: `test_various`, `test_replacement`,
 | `test_issue_18468` #2, #23 (the `StrSubclass` halves), #3-6, #12-16, #20-22, #28-32 | `str`/`bytes` subclasses, `bytearray` and `memoryview`. The method exists to check that `sub`, `split`, `findall` and `group` return plain `str`/`bytes` whatever subclass went in - a Python typing question with no C# equivalent, since `string` is sealed. Each distinct behaviour is ported once from its `str` form. |
 | `test_issue_18468` #10-11 | The pre-3.7 branch of a `sys.version_info` guard; only the `>= 3.7` branch (#8-9) is a useful oracle. |
 
+### Upstream test methods in lines 3084-4540 not ported (S05)
+
+Six methods sit in S05's range. Five are ported - `test_hg_bugs`, `test_fuzzy_ext`,
+`test_subscripted_captures`, `test_more_zerowidth` and `test_line_ending` - and one is not.
+
+| Upstream method | Why not |
+|---|---|
+| `test_main` (4536-4537) | The `unittest.main(verbosity=2)` runner entry point, not a test. It is the 102nd method only because it sits at module level rather than in the class. |
+
+With this slice every one of upstream's 102 test methods is accounted for: 91 ported, 11 recorded
+here as not ported. Verified by listing the methods out of the Python source and matching them
+against the `[Property("Upstream", ...)]` attributes actually present in `tests/`, not by assuming.
+
+### Assertions omitted from methods that are otherwise ported (S05)
+
+`test_hg_bugs` holds 498 assertions by the counting rule above. 475 are ported and these 23 are
+not.
+
+| Where | Why not |
+|---|---|
+| `test_hg_bugs` #68-70 | `bytes` patterns; the `str` forms are #65-67 and are ported. |
+| `test_hg_bugs` #128-141 | `bytes` patterns - the "Posix in ASCII" half of Issue 23692. The "Posix in Unicode" half (#114-127) is ported and covers the same fourteen POSIX bracket classes. |
+| `test_hg_bugs` #234-235 | `bytes` patterns (Hg issues 197 and 198), both `assertRaises` on a bad pattern. |
+| `test_hg_bugs` #83, #86 | The pre-3.7 branch of a `sys.version_info` guard; only the `>= 3.7` branch (#82, #85) is a useful oracle. |
+| `test_hg_bugs` #106 | Needs the `DEBUG` flag, which is not surfaced on `FuzzyRegexOptions`. The assertion only checks that compiling with `DEBUG` succeeds; upstream's own comment says it exists because Python 2 had no `ascii` builtin. |
+| `test_hg_bugs` #227 | Hg issue 195: `pickle.dumps`/`pickle.loads` round-trip of a compiled pattern. Python's serialisation protocol, with no C# counterpart. |
+| `test_line_ending` #2 | `bytes` pattern; the `str` form is #1 and is ported. |
+
+`test_hg_bugs` #58 **is** ported, but not as the flag test it looks like. Upstream writes
+`regex.sub(r"(\w+)", r"[\1]", subject, regex.WORD)`, and the fourth positional parameter of
+`regex.sub` is `count`, not `flags` - so `regex.WORD` is used as a replacement count and the WORD
+flag is never applied. Measured against the local oracle on 2026-08-30: the call with no fourth
+argument, and the call with `flags=regex.WORD`, both give the identical result. It is ported as a
+plain `Replace` with no options.
+
+### Not ported: API upstream has and we do not (S05)
+
+| Upstream symbol | Why not | Decided |
+|---|---|---|
+| `Match.allcaptures`, `Match.allspans` | Convenience tuples over every group's captures and spans. `Groups` and `Group.Captures` already carry the same information, and a test-porting slice must not widen the public surface. `test_hg_bugs` #435-436 (Git issue 474) is ported through `m.Groups.Select(g => g.Captures...)`, with a comment saying so. Revisit in phase 2 if the shape is wanted for its own sake. | S05 |
+| `Match.groupdict`, `Match.capturesdict` | Python dictionaries keyed by group name. Expressed through `Groups["name"]` and `Groups["name"].Captures` at each of the nine `(?(DEFINE)...)` assertions that use them. | S05 |
+
 ## Where we diverge from upstream's structure
 
 A faithful port keeps upstream's shape so diffs map across. Anywhere we have moved away from it -
