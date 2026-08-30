@@ -124,6 +124,19 @@ dotnet_diagnostic.S2699.severity = none
 ; Test data literals.
 dotnet_diagnostic.S109.severity = none
 dotnet_diagnostic.CA1861.severity = none
+; Sonar disables these two in test code of its own accord, but it detects a test project by
+; looking for a test framework it recognises among the references, and it does not know TUnit.
+; Until S10 the projects also referenced NSubstitute, which it DOES know, so the classification
+; worked by accident; removing that unused dependency made both rules start firing. Restoring
+; Sonar's own intent explicitly, rather than keeping a mock library nothing uses as a marker.
+; S1313 reads upstream's regex test patterns - 'a::bc', 'b::c', '192.168.0.1' - as hardcoded IP
+; addresses. They are pattern strings copied from the suite we are a port of; editing them would
+; corrupt the test data.
+dotnet_diagnostic.S1313.severity = none
+; S3011 flags reflection over non-public members. ApiSurfaceTests exists precisely to assert that
+; no mutable non-public state has crept into the public types, so the accessibility bypass is the
+; test rather than a risk in it.
+dotnet_diagnostic.S3011.severity = none
 
 ; ==========================================================================
 ; API surface stub (S01), src/FuzzyRegex root only.

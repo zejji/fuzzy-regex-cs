@@ -21,7 +21,7 @@ public sealed class RegressionsGraphemeTests
     private const string _boy = "\U0001F466";
 
     // U+200D ZERO WIDTH JOINER.
-    private const string _zwj = "‍";
+    private const string _zwj = "\u200D";
 
     // U+2103 DEGREE CELSIUS SIGN.
     private const string _degreeCelsius = "℃";
