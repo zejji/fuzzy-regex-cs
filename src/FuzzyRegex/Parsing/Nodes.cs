@@ -151,6 +151,204 @@ internal abstract class RegexBase
 }
 
 /// <summary>
+/// Base class for the zero-width nodes - the anchors and word boundaries. Upstream
+/// <c>ZeroWidthBase</c> (<c>upstream/regex/_regex_core.py</c> lines 2011-2038).
+/// </summary>
+/// <remarks>
+/// Upstream's <c>_key</c> is <c>(self.__class__, self.positive)</c>, so <c>encoding</c> is
+/// deliberately <b>not</b> part of equality: <c>Boundary()</c> and
+/// <c>Boundary(encoding=ASCII_ENCODING)</c> compare equal even though they compile to different
+/// flag words. <c>Branch</c>'s prefix and suffix splitting hoists on that equality, so the
+/// divergence would be observable in the bytecode.
+/// </remarks>
+/// <param name="positive">Whether the node asserts the position or its complement.</param>
+/// <param name="encoding">The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends.</param>
+internal abstract class ZeroWidthBase(bool positive = true, int encoding = 0) : RegexBase
+{
+    /// <inheritdoc />
+    internal override bool Positive { get; } = positive;
+
+    /// <summary>The encoding this node's word rules come from. Upstream <c>encoding</c>.</summary>
+    internal int Encoding { get; } = encoding;
+
+    /// <summary>The opcode this node compiles to. Upstream <c>_opcode</c>.</summary>
+    protected abstract Opcode ZeroWidthOpcode { get; }
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [null];
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => 0;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is ZeroWidthBase other && GetType() == other.GetType() && Positive == other.Positive;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(GetType(), Positive);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        if (reverse)
+        {
+            flags |= NodeFlags.Reverse;
+        }
+
+        flags |= (uint)Encoding << NodeFlags.EncodingShift;
+
+        return
+        [
+            [(uint)ZeroWidthOpcode, flags],
+        ];
+    }
+}
+
+/// <summary><c>\b</c> and <c>\B</c>. Upstream <c>Boundary</c> (lines 2130-2132).</summary>
+internal sealed class Boundary : ZeroWidthBase
+{
+    /// <summary>Initializes a word-boundary assertion.</summary>
+    /// <param name="positive">Whether this is <c>\b</c> or <c>\B</c>.</param>
+    /// <param name="encoding">The encoding whose word rules apply.</param>
+    internal Boundary(bool positive = true, int encoding = 0)
+        : base(positive, encoding) { }
+
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.Boundary;
+}
+
+/// <summary><c>\b</c> under the <c>WORD</c> flag. Upstream <c>DefaultBoundary</c> (lines 2744-2746).</summary>
+internal sealed class DefaultBoundary : ZeroWidthBase
+{
+    /// <summary>Initializes a default word-boundary assertion.</summary>
+    /// <param name="positive">Whether this is <c>\b</c> or <c>\B</c>.</param>
+    internal DefaultBoundary(bool positive = true)
+        : base(positive) { }
+
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.DefaultBoundary;
+}
+
+/// <summary><c>\M</c> under the <c>WORD</c> flag. Upstream <c>DefaultEndOfWord</c> (lines 2748-2750).</summary>
+internal sealed class DefaultEndOfWord : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.DefaultEndOfWord;
+}
+
+/// <summary><c>\m</c> under the <c>WORD</c> flag. Upstream <c>DefaultStartOfWord</c> (lines 2752-2754).</summary>
+internal sealed class DefaultStartOfWord : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.DefaultStartOfWord;
+}
+
+/// <summary><c>$</c> under <c>MULTILINE</c>. Upstream <c>EndOfLine</c> (lines 2756-2758).</summary>
+internal class EndOfLine : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfLine;
+}
+
+/// <summary><c>$</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>EndOfLineU</c> (lines 2760-2762).</summary>
+internal sealed class EndOfLineU : EndOfLine
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfLineU;
+}
+
+/// <summary><c>\Z</c> and <c>\z</c>. Upstream <c>EndOfString</c> (lines 2764-2766).</summary>
+internal sealed class EndOfString : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfString;
+}
+
+/// <summary><c>$</c> outside <c>MULTILINE</c>. Upstream <c>EndOfStringLine</c> (lines 2768-2770).</summary>
+internal class EndOfStringLine : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLine;
+}
+
+/// <summary><c>$</c> under <c>WORD</c>. Upstream <c>EndOfStringLineU</c> (lines 2772-2774).</summary>
+internal sealed class EndOfStringLineU : EndOfStringLine
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLineU;
+}
+
+/// <summary><c>\M</c>. Upstream <c>EndOfWord</c> (lines 2776-2778).</summary>
+internal sealed class EndOfWord : ZeroWidthBase
+{
+    /// <summary>Initializes an end-of-word assertion.</summary>
+    /// <param name="encoding">The encoding whose word rules apply.</param>
+    internal EndOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.EndOfWord;
+}
+
+/// <summary><c>\K</c>. Upstream <c>Keep</c> (lines 3142-3144).</summary>
+internal sealed class Keep : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.Keep;
+}
+
+/// <summary><c>\G</c>. Upstream <c>SearchAnchor</c> (lines 3498-3500).</summary>
+internal sealed class SearchAnchor : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.SearchAnchor;
+}
+
+/// <summary><c>^</c> under <c>MULTILINE</c>. Upstream <c>StartOfLine</c> (lines 3991-3993).</summary>
+internal class StartOfLine : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.StartOfLine;
+}
+
+/// <summary><c>^</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>StartOfLineU</c> (lines 3995-3997).</summary>
+internal sealed class StartOfLineU : StartOfLine
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.StartOfLineU;
+}
+
+/// <summary><c>^</c> outside <c>MULTILINE</c>, and <c>\A</c>. Upstream <c>StartOfString</c> (lines 3999-4001).</summary>
+internal sealed class StartOfString : ZeroWidthBase
+{
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.StartOfString;
+}
+
+/// <summary><c>\m</c>. Upstream <c>StartOfWord</c> (lines 4003-4005).</summary>
+internal sealed class StartOfWord : ZeroWidthBase
+{
+    /// <summary>Initializes a start-of-word assertion.</summary>
+    /// <param name="encoding">The encoding whose word rules apply.</param>
+    internal StartOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
+    /// <inheritdoc />
+    protected override Opcode ZeroWidthOpcode => Opcode.StartOfWord;
+}
+
+/// <summary>
 /// Bytecode written straight out, with no node of its own. Upstream <c>PrecompiledCode</c>
 /// (<c>upstream/regex/_regex_core.py</c> lines 3303-3308).
 /// </summary>
@@ -234,6 +432,535 @@ internal sealed class AnyU : Any
 {
     /// <inheritdoc />
     protected override (Opcode Forward, Opcode Reverse) Opcodes => (Opcode.AnyU, Opcode.AnyURev);
+}
+
+/// <summary>
+/// Alternatives, tried left to right. Upstream <c>Branch</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2134-2524).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="Optimise"/> is the densest routine in the parser: it flattens nested branches, hoists
+/// a common prefix (or, matching right to left, a common suffix) out of the alternatives, reduces
+/// runs of single-character alternatives to a set, and prepends a cheap first-set precheck.
+/// </para>
+/// <para>
+/// <b>Not ported: <c>_merge_common_prefixes</c>, <c>_is_simple_character</c> and
+/// <c>_flush_char_prefix</c></b> (lines 2386-2415, 2445-2469). Nothing in the upstream package
+/// calls <c>_merge_common_prefixes</c>, and it could not work if anything did: line 2409 calls the
+/// five-parameter <c>_flush_char_prefix</c> with four arguments, which is a <c>TypeError</c>. Its
+/// two helpers have no other caller. See PORTMAP's "Where we diverge".
+/// </para>
+/// </remarks>
+internal sealed class Branch : RegexBase
+{
+    /// <summary>Initializes an alternation.</summary>
+    /// <param name="branches">The alternatives, in pattern order.</param>
+    internal Branch(List<RegexBase> branches)
+    {
+        Branches = branches;
+    }
+
+    /// <summary>The alternatives. Upstream <c>branches</c>.</summary>
+    internal List<RegexBase> Branches { get; private set; }
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
+    {
+        foreach (RegexBase b in Branches)
+        {
+            b.FixGroups(pattern, reverse, fuzzy);
+        }
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse)
+    {
+        if (Branches.Count == 0)
+        {
+            return new Sequence();
+        }
+
+        // Flatten branches within branches.
+        List<RegexBase> branches = FlattenBranches(info, reverse, Branches);
+
+        // Move any common prefix or suffix out of the branches.
+        List<RegexBase> prefix;
+        List<RegexBase> suffix;
+        if (reverse)
+        {
+            (suffix, branches) = SplitCommonSuffix(info, branches);
+            prefix = [];
+        }
+        else
+        {
+            (prefix, branches) = SplitCommonPrefix(info, branches);
+            suffix = [];
+        }
+
+        // Try to reduce adjacent single-character branches to sets.
+        branches = ReduceToSet(info, reverse, branches);
+
+        List<RegexBase> sequence;
+        if (branches.Count > 1)
+        {
+            sequence = [new Branch(branches)];
+
+            if (prefix.Count == 0 || suffix.Count == 0)
+            {
+                // We might be able to add a quick precheck before the branches.
+                RegexBase? firstset = AddPrecheck(info, reverse, branches);
+
+                if (firstset is not null)
+                {
+                    if (reverse)
+                    {
+                        sequence.Add(firstset);
+                    }
+                    else
+                    {
+                        sequence.Insert(0, firstset);
+                    }
+                }
+            }
+        }
+        else
+        {
+            sequence = branches;
+        }
+
+        return Sequence.MakeSequence([.. prefix, .. sequence, .. suffix]);
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Branches = [.. Branches.Select(b => b.PackCharacters(info))];
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase RemoveCaptures()
+    {
+        Branches = [.. Branches.Select(b => b.RemoveCaptures())];
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => Branches.TrueForAll(b => b.IsAtomic());
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => Branches.TrueForAll(b => b.CanBeAffix());
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => Branches.Exists(b => b.ContainsGroup());
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    {
+        HashSet<RegexBase?> fs = [];
+        foreach (RegexBase b in Branches)
+        {
+            fs.UnionWith(b.GetFirstset(reverse));
+        }
+
+        // Upstream's `return fs or set([None])`.
+        return fs.Count > 0 ? fs : [null];
+    }
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => Branches.TrueForAll(b => b.IsEmpty());
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => Branches.Max(b => b.MaxWidth());
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is Branch other && Branches.SequenceEqual(other.Branches);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, which makes <c>Branch</c> unhashable
+    /// in Python; nothing ever puts one in a set. <see cref="Branches"/> is reassigned by
+    /// <c>pack_characters</c> and <c>remove_captures</c>, so hashing it would break the "equal
+    /// objects hash equal, and a hash does not change" contract. A constant hash keeps both, at the
+    /// cost of collisions in a set nothing builds.
+    /// </remarks>
+    public override int GetHashCode() => typeof(Branch).GetHashCode();
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        if (Branches.Count == 0)
+        {
+            return [];
+        }
+
+        List<uint[]> code =
+        [
+            [(uint)Opcode.Branch],
+        ];
+        foreach (RegexBase b in Branches)
+        {
+            code.AddRange(b.Compile(reverse, fuzzy));
+            code.Add([(uint)Opcode.Next]);
+        }
+
+        code[^1] = [(uint)Opcode.End];
+
+        return code;
+    }
+
+    /// <summary>Upstream <c>Branch._flatten_branches</c> (lines 2237-2248).</summary>
+    private static List<RegexBase> FlattenBranches(Info info, bool reverse, List<RegexBase> branches)
+    {
+        // Flatten the branches so that there aren't branches of branches.
+        List<RegexBase> newBranches = [];
+        foreach (RegexBase branch in branches)
+        {
+            RegexBase b = branch.Optimise(info, reverse);
+            if (b is Branch nested)
+            {
+                newBranches.AddRange(nested.Branches);
+            }
+            else
+            {
+                newBranches.Add(b);
+            }
+        }
+
+        return newBranches;
+    }
+
+    /// <summary>Upstream <c>Branch._split_common_prefix</c> (lines 2250-2290).</summary>
+    private static (List<RegexBase> Prefix, List<RegexBase> Branches) SplitCommonPrefix(
+        Info info,
+        List<RegexBase> branches
+    )
+    {
+        List<List<RegexBase>> alternatives = Alternatives(branches);
+
+        // What is the maximum possible length of the prefix?
+        int maxCount = alternatives.Min(a => a.Count);
+
+        // What is the longest common prefix?
+        List<RegexBase> prefix = alternatives[0];
+        int pos = 0;
+        while (pos < maxCount && prefix[pos].CanBeAffix() && alternatives.TrueForAll(a => a[pos].Equals(prefix[pos])))
+        {
+            pos++;
+        }
+
+        int count = pos;
+
+        if ((info.Flags & RegexFlags.Unicode) != 0)
+        {
+            // We need to check that we're not splitting a sequence of characters which could form
+            // part of full case-folding.
+            while (count > 0 && !alternatives.TrueForAll(a => CanSplit(a, count)))
+            {
+                count--;
+            }
+        }
+
+        // No common prefix is possible.
+        if (count == 0)
+        {
+            return ([], branches);
+        }
+
+        // Rebuild the branches.
+        List<RegexBase> newBranches = [];
+        foreach (List<RegexBase> a in alternatives)
+        {
+            newBranches.Add(Sequence.MakeSequence([.. a.Skip(count)]));
+        }
+
+        return ([.. prefix.Take(count)], newBranches);
+    }
+
+    /// <summary>Upstream <c>Branch._split_common_suffix</c> (lines 2292-2331).</summary>
+    private static (List<RegexBase> Suffix, List<RegexBase> Branches) SplitCommonSuffix(
+        Info info,
+        List<RegexBase> branches
+    )
+    {
+        List<List<RegexBase>> alternatives = Alternatives(branches);
+
+        // What is the maximum possible length of the suffix?
+        int maxCount = alternatives.Min(a => a.Count);
+
+        // What is the longest common suffix? Upstream indexes from the end with a negative
+        // subscript; `back` counts the same positions forwards.
+        List<RegexBase> suffix = alternatives[0];
+        int back = 0;
+        while (
+            back < maxCount
+            && suffix[suffix.Count - 1 - back].CanBeAffix()
+            && alternatives.TrueForAll(a => a[a.Count - 1 - back].Equals(suffix[suffix.Count - 1 - back]))
+        )
+        {
+            back++;
+        }
+
+        int count = back;
+
+        if ((info.Flags & RegexFlags.Unicode) != 0)
+        {
+            while (count > 0 && !alternatives.TrueForAll(a => CanSplitRev(a, count)))
+            {
+                count--;
+            }
+        }
+
+        // No common suffix is possible.
+        if (count == 0)
+        {
+            return ([], branches);
+        }
+
+        // Rebuild the branches.
+        List<RegexBase> newBranches = [];
+        foreach (List<RegexBase> a in alternatives)
+        {
+            newBranches.Add(Sequence.MakeSequence([.. a.Take(a.Count - count)]));
+        }
+
+        return ([.. suffix.Skip(suffix.Count - count)], newBranches);
+    }
+
+    /// <summary>
+    /// Upstream's "get the items in the branches" preamble, written out identically in
+    /// <c>_split_common_prefix</c> and <c>_split_common_suffix</c> (lines 2253-2259, 2295-2301).
+    /// </summary>
+    /// <remarks>
+    /// The lists a <see cref="Sequence"/> contributes are its own <see cref="Sequence.Items"/>, not
+    /// copies, exactly as upstream. Neither caller mutates them.
+    /// </remarks>
+    private static List<List<RegexBase>> Alternatives(List<RegexBase> branches)
+    {
+        List<List<RegexBase>> alternatives = [];
+        foreach (RegexBase b in branches)
+        {
+            alternatives.Add(b is Sequence sequence ? sequence.Items : [b]);
+        }
+
+        return alternatives;
+    }
+
+    /// <summary>Upstream <c>Branch._can_split</c> (lines 2333-2356).</summary>
+    private static bool CanSplit(List<RegexBase> items, int count)
+    {
+        // Check the characters either side of the proposed split.
+        if (!IsFullCase(items, count - 1))
+        {
+            return true;
+        }
+
+        if (!IsFullCase(items, count))
+        {
+            return true;
+        }
+
+        // Check whether a 1-1 split would be OK.
+        if (IsFolded(PySlice(items, count - 1, count + 1)))
+        {
+            return false;
+        }
+
+        // Check whether a 1-2 split would be OK.
+        if (IsFullCase(items, count + 2) && IsFolded(PySlice(items, count - 1, count + 2)))
+        {
+            return false;
+        }
+
+        // Check whether a 2-1 split would be OK.
+        if (IsFullCase(items, count - 2) && IsFolded(PySlice(items, count - 2, count + 1)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>Branch._can_split_rev</c> (lines 2358-2383).</summary>
+    private static bool CanSplitRev(List<RegexBase> items, int count)
+    {
+        int end = items.Count;
+
+        // Check the characters either side of the proposed split.
+        if (!IsFullCase(items, end - count))
+        {
+            return true;
+        }
+
+        if (!IsFullCase(items, end - count - 1))
+        {
+            return true;
+        }
+
+        // Check whether a 1-1 split would be OK.
+        if (IsFolded(PySlice(items, end - count - 1, end - count + 1)))
+        {
+            return false;
+        }
+
+        // Check whether a 1-2 split would be OK.
+        if (IsFullCase(items, end - count + 2) && IsFolded(PySlice(items, end - count - 1, end - count + 2)))
+        {
+            return false;
+        }
+
+        // Check whether a 2-1 split would be OK.
+        if (IsFullCase(items, end - count - 2) && IsFolded(PySlice(items, end - count - 2, end - count + 1)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>Branch._reduce_to_set</c> (lines 2417-2443).</summary>
+    private static List<RegexBase> ReduceToSet(Info info, bool reverse, List<RegexBase> branches)
+    {
+        // Can the branches be reduced to a set?
+        List<RegexBase> newBranches = [];
+        HashSet<RegexBase> items = [];
+        int caseFlags = RegexFlags.NoCase;
+        foreach (RegexBase b in branches)
+        {
+            // Upstream's isinstance check also names Property and SetBase, which arrive in S10.
+            if (b is Character)
+            {
+                // Branch starts with a single character.
+                if (b.CaseFlags != caseFlags)
+                {
+                    // Different case sensitivity, so flush.
+                    FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+
+                    caseFlags = b.CaseFlags;
+                }
+
+                items.Add(b.WithFlags(caseFlags: RegexFlags.NoCase));
+            }
+            else
+            {
+                FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+
+                newBranches.Add(b);
+            }
+        }
+
+        FlushSetMembers(info, reverse, items, caseFlags, newBranches);
+
+        return newBranches;
+    }
+
+    /// <summary>Upstream <c>Branch._flush_set_members</c> (lines 2471-2484).</summary>
+    private static void FlushSetMembers(
+        Info info,
+        bool reverse,
+        HashSet<RegexBase> items,
+        int caseFlags,
+        List<RegexBase> newBranches
+    )
+    {
+        // Flush the set members.
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        if (items.Count > 1)
+        {
+            // Upstream: SetUnion(info, list(items)).optimise(info, reverse). This is also one of the
+            // two points PORTMAP's "Where we diverge" requires the members to be sorted at, because
+            // a Python set of nodes has no stable order; the sort lands with the set node.
+            _ = (info, reverse);
+            throw new NotImplementedException(
+                "needs:character-classes - reducing alternatives to a set needs the SetUnion node (S10)"
+            );
+        }
+
+        RegexBase item = items.First();
+
+        newBranches.Add(item.WithFlags(caseFlags: caseFlags));
+
+        items.Clear();
+    }
+
+    /// <summary>Upstream <c>Branch._is_full_case</c> (lines 2486-2493).</summary>
+    private static bool IsFullCase(List<RegexBase> items, int i)
+    {
+        if (i < 0 || i >= items.Count)
+        {
+            return false;
+        }
+
+        return items[i] is Character { Positive: true } item
+            && (item.CaseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase;
+    }
+
+    /// <summary>Upstream <c>Branch._is_folded</c> (lines 2495-2515).</summary>
+    private static bool IsFolded(List<RegexBase> items)
+    {
+        if (items.Count < 2)
+        {
+            return false;
+        }
+
+        foreach (RegexBase i in items)
+        {
+            if (i is not Character { Positive: true } character || character.CaseFlags == RegexFlags.NoCase)
+            {
+                return false;
+            }
+        }
+
+        // Upstream folds the run with _regex.fold_case and compares it against every character in
+        // _regex.get_expand_on_folding(), both of which are the generated Unicode tables.
+        throw new NotImplementedException(
+            "needs:case-folding - deciding whether a run folds together needs the Unicode tables (S09)"
+        );
+    }
+
+    /// <summary>Upstream <c>Branch._add_precheck</c> (lines 2178-2191).</summary>
+    /// <remarks>
+    /// <c>type(branch) is Literal</c> is an exact type test, and the only place a
+    /// <see cref="Literal"/> is built is <c>Sequence._fix_full_casefold</c>, so this returns
+    /// <see langword="null"/> for everything a pattern without full case folding can produce.
+    /// </remarks>
+    private static RegexBase? AddPrecheck(Info info, bool reverse, List<RegexBase> branches)
+    {
+        HashSet<int> charset = [];
+        foreach (RegexBase branch in branches)
+        {
+            // Upstream's `type(branch) is Literal` is an exact type test; Literal is sealed, so
+            // the pattern match is the same test.
+            if (branch is Literal literal && literal.CaseFlags == RegexFlags.NoCase)
+            {
+                charset.Add(literal.Characters[reverse ? ^1 : 0]);
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        if (charset.Count == 0)
+        {
+            return null;
+        }
+
+        return ParseFunctions.CheckFirstset(info, reverse, [.. charset.Select(c => (RegexBase?)new Character(c))]);
+    }
+
+    /// <summary>Python's <c>items[start:end]</c>, which clamps rather than throwing.</summary>
+    private static List<RegexBase> PySlice(List<RegexBase> items, int start, int end)
+    {
+        int from = Math.Clamp(start, 0, items.Count);
+        int to = Math.Clamp(end, from, items.Count);
+        return items.GetRange(from, to - from);
+    }
 }
 
 /// <summary>
@@ -640,7 +1367,7 @@ internal sealed class Sequence : RegexBase
         long total = 0;
         foreach (RegexBase s in Items)
         {
-            total += s.MaxWidth();
+            total = Widths.Add(total, s.MaxWidth());
         }
 
         return total;
@@ -655,7 +1382,7 @@ internal sealed class Sequence : RegexBase
         foreach (RegexBase s in seq)
         {
             (long ofs, RegexBase? req) = s.GetRequiredString(reverse);
-            offset += ofs;
+            offset = Widths.Add(offset, ofs);
             if (req is not null)
             {
                 return (offset, req);
@@ -837,6 +1564,259 @@ internal sealed class Group : RegexBase
         }
 
         return code;
+    }
+}
+
+/// <summary>
+/// A greedy repeat, <c>a*</c> or <c>a{2,3}</c>. Upstream <c>GreedyRepeat</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2938-3028).
+/// </summary>
+internal class GreedyRepeat : RegexBase
+{
+    /// <summary>Initializes a repeat.</summary>
+    /// <param name="subpattern">What is repeated.</param>
+    /// <param name="minCount">The minimum number of repeats.</param>
+    /// <param name="maxCount">The maximum, or <see langword="null"/> for unlimited.</param>
+    internal GreedyRepeat(RegexBase subpattern, long minCount, long? maxCount)
+    {
+        Subpattern = subpattern;
+        MinCount = minCount;
+        MaxCount = maxCount;
+    }
+
+    /// <summary>What is repeated. Upstream <c>subpattern</c>.</summary>
+    internal RegexBase Subpattern { get; set; }
+
+    /// <summary>The minimum number of repeats. Upstream <c>min_count</c>.</summary>
+    internal long MinCount { get; }
+
+    /// <summary>
+    /// The maximum number of repeats, or <see langword="null"/> for unlimited. Upstream
+    /// <c>max_count</c>, whose <c>None</c> this keeps as <see langword="null"/> rather than
+    /// collapsing to <see cref="RegexFlags.Unlimited"/>: <c>max_width</c> and
+    /// <c>get_required_string</c> both branch on which of the two it is.
+    /// </summary>
+    internal long? MaxCount { get; }
+
+    /// <summary>The opcode this repeat compiles to. Upstream <c>_opcode</c>.</summary>
+    protected virtual Opcode RepeatOpcode => Opcode.GreedyRepeat;
+
+    /// <inheritdoc />
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        Subpattern.FixGroups(pattern, reverse, fuzzy);
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse) =>
+        // Upstream's `type(self)(...)`, so a lazy or possessive repeat stays what it was.
+        Recreate(Subpattern.Optimise(info, reverse));
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Subpattern = Subpattern.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase RemoveCaptures()
+    {
+        Subpattern = Subpattern.RemoveCaptures();
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => MinCount == MaxCount && Subpattern.IsAtomic();
+
+    /// <inheritdoc />
+    internal override bool CanBeAffix() => false;
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse)
+    {
+        HashSet<RegexBase?> fs = Subpattern.GetFirstset(reverse);
+        if (MinCount == 0)
+        {
+            fs.Add(null);
+        }
+
+        return fs;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => Subpattern.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() =>
+        MaxCount is null ? RegexFlags.Unlimited : Widths.Multiply(Subpattern.MaxWidth(), MaxCount.Value);
+
+    /// <inheritdoc />
+    internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse)
+    {
+        long maxCount = MaxCount ?? RegexFlags.Unlimited;
+        if (MinCount == 0)
+        {
+            return (Math.Min(Widths.Multiply(Subpattern.MaxWidth(), maxCount), RegexFlags.Unlimited), null);
+        }
+
+        (long ofs, RegexBase? req) = Subpattern.GetRequiredString(reverse);
+        if (req is not null)
+        {
+            return (ofs, req);
+        }
+
+        return (Math.Min(Widths.Multiply(Subpattern.MaxWidth(), maxCount), RegexFlags.Unlimited), null);
+    }
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is GreedyRepeat other
+        && GetType() == other.GetType()
+        && Subpattern.Equals(other.Subpattern)
+        && MinCount == other.MinCount
+        && MaxCount == other.MaxCount;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, so a repeat is unhashable in Python;
+    /// see <see cref="Branch.GetHashCode"/> for why this port supplies one anyway.
+    /// <see cref="Subpattern"/> is reassigned by <c>pack_characters</c>, so only the immutable part
+    /// is hashed - equal repeats still hash equal, which is all a hash has to promise.
+    /// </remarks>
+    public override int GetHashCode() => HashCode.Combine(GetType(), MinCount, MaxCount);
+
+    /// <summary>Upstream's <c>type(self)(subpattern, self.min_count, self.max_count)</c>.</summary>
+    /// <param name="subpattern">The new subpattern.</param>
+    /// <returns>A repeat of the same kind over the new subpattern.</returns>
+    protected virtual GreedyRepeat Recreate(RegexBase subpattern) => new(subpattern, MinCount, MaxCount);
+
+    /// <summary>The repeat's own three words. Upstream's <c>repeat</c> local (lines 2981-2985).</summary>
+    /// <returns>The opcode, the minimum and the maximum.</returns>
+    protected uint[] RepeatCode() => [(uint)RepeatOpcode, (uint)MinCount, (uint)(MaxCount ?? RegexFlags.Unlimited)];
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint[] repeat = RepeatCode();
+
+        List<uint[]> subpattern = Subpattern.Compile(reverse, fuzzy);
+        if (subpattern.Count == 0)
+        {
+            return [];
+        }
+
+        return [repeat, .. subpattern, [(uint)Opcode.End]];
+    }
+}
+
+/// <summary>
+/// A lazy repeat, <c>a*?</c>. Upstream <c>LazyRepeat</c> (<c>upstream/regex/_regex_core.py</c>
+/// lines 3146-3148).
+/// </summary>
+internal sealed class LazyRepeat : GreedyRepeat
+{
+    /// <summary>Initializes a lazy repeat.</summary>
+    /// <param name="subpattern">What is repeated.</param>
+    /// <param name="minCount">The minimum number of repeats.</param>
+    /// <param name="maxCount">The maximum, or <see langword="null"/> for unlimited.</param>
+    internal LazyRepeat(RegexBase subpattern, long minCount, long? maxCount)
+        : base(subpattern, minCount, maxCount) { }
+
+    /// <inheritdoc />
+    protected override Opcode RepeatOpcode => Opcode.LazyRepeat;
+
+    /// <inheritdoc />
+    protected override GreedyRepeat Recreate(RegexBase subpattern) => new LazyRepeat(subpattern, MinCount, MaxCount);
+}
+
+/// <summary>
+/// A possessive repeat, <c>a*+</c>. Upstream <c>PossessiveRepeat</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3030-3058).
+/// </summary>
+/// <remarks>
+/// It keeps <c>GreedyRepeat</c>'s opcode and wraps the repeat in an <c>ATOMIC</c> instead.
+/// </remarks>
+internal sealed class PossessiveRepeat : GreedyRepeat
+{
+    /// <summary>Initializes a possessive repeat.</summary>
+    /// <param name="subpattern">What is repeated.</param>
+    /// <param name="minCount">The minimum number of repeats.</param>
+    /// <param name="maxCount">The maximum, or <see langword="null"/> for unlimited.</param>
+    internal PossessiveRepeat(RegexBase subpattern, long minCount, long? maxCount)
+        : base(subpattern, minCount, maxCount) { }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => true;
+
+    /// <inheritdoc />
+    protected override GreedyRepeat Recreate(RegexBase subpattern) =>
+        new PossessiveRepeat(subpattern, MinCount, MaxCount);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        List<uint[]> subpattern = Subpattern.Compile(reverse, fuzzy);
+        if (subpattern.Count == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            [(uint)Opcode.Atomic],
+            RepeatCode(),
+            .. subpattern,
+            [(uint)Opcode.End],
+            [(uint)Opcode.End],
+        ];
+    }
+}
+
+/// <summary>
+/// Arithmetic on the widths <c>max_width</c> reports.
+/// </summary>
+/// <remarks>
+/// Upstream's widths are Python <c>int</c>s, which never overflow;
+/// <c>(?:a{4294967294}){4294967294}</c> is a legal pattern whose product does not fit in
+/// <see cref="long"/>. Every consumer either compares the result against
+/// <see cref="RegexFlags.Unlimited"/> or takes the minimum of the two, so saturating at
+/// <see cref="long.MaxValue"/> is indistinguishable from unbounded arithmetic, and far cheaper than
+/// making every width a <c>BigInteger</c>.
+/// </remarks>
+internal static class Widths
+{
+    /// <summary>Multiplies two widths, saturating instead of overflowing.</summary>
+    /// <param name="left">The first width.</param>
+    /// <param name="right">The second width.</param>
+    /// <returns>The product, or <see cref="long.MaxValue"/> if it would overflow.</returns>
+    internal static long Multiply(long left, long right)
+    {
+        try
+        {
+            return checked(left * right);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
+    }
+
+    /// <summary>Adds two widths, saturating instead of overflowing.</summary>
+    /// <param name="left">The first width.</param>
+    /// <param name="right">The second width.</param>
+    /// <returns>The sum, or <see cref="long.MaxValue"/> if it would overflow.</returns>
+    internal static long Add(long left, long right)
+    {
+        try
+        {
+            return checked(left + right);
+        }
+        catch (OverflowException)
+        {
+            return long.MaxValue;
+        }
     }
 }
 

@@ -76,7 +76,8 @@ internal static class Corpus
             // order (sorted) to write it as JSON, and asserting on that invented order would fail a
             // correct port.
             [.. row.GetProperty("namedListIndexes").EnumerateArray().Select(ReadStringSet)],
-            row.GetProperty("reqOffset").GetInt32(),
+            // Int64: an offset is a repeat's maximum width, which runs to UNLIMITED - 1.
+            row.GetProperty("reqOffset").GetInt64(),
             [.. row.GetProperty("reqChars").EnumerateArray().Select(c => c.GetInt32())],
             row.GetProperty("reqFlags").GetInt32(),
             row.GetProperty("groupCount").GetInt32()
@@ -169,7 +170,7 @@ public sealed record CompileRow(
     IReadOnlyDictionary<string, int> GroupIndex,
     IReadOnlyDictionary<string, IReadOnlySet<string>> CompiledNamedLists,
     IReadOnlyList<IReadOnlySet<string>> NamedListIndexes,
-    int ReqOffset,
+    long ReqOffset,
     IReadOnlyList<int> ReqChars,
     int ReqFlags,
     int GroupCount

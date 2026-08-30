@@ -22,14 +22,6 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// </remarks>
 internal static class ParseFunctions
 {
-    /// <summary>
-    /// Upstream <c>POSITION_ESCAPES</c> keys (lines 4636-4644): the alphabetic escapes that mean a
-    /// position rather than a character. Only the key set is needed to decide what is ported; the
-    /// values differ by encoding flag and arrive with the anchors.
-    /// </summary>
-    private static readonly System.Collections.Frozen.FrozenSet<char> _positionEscapes =
-        System.Collections.Frozen.FrozenSet.ToFrozenSet(['A', 'b', 'B', 'K', 'm', 'M', 'Z', 'z']);
-
     /// <summary>Upstream <c>CHARSET_ESCAPES</c> keys (lines 4606-4613).</summary>
     private static readonly System.Collections.Frozen.FrozenSet<char> _charsetEscapes =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(['d', 'D', 'h', 's', 'S', 'w', 'W']);
@@ -114,7 +106,7 @@ internal static class ParseFunctions
             return branches[0];
         }
 
-        throw new NotImplementedException("needs:alternation - the Branch node is not ported yet (S08)");
+        return new Branch(branches);
     }
 
     /// <summary>Upstream <c>parse_sequence</c> (lines 462-546).</summary>
@@ -185,21 +177,57 @@ internal static class ParseFunctions
                         );
 
                     case '^':
+                        // The start of a line or the string.
+                        if ((info.Flags & RegexFlags.Multiline) != 0)
+                        {
+                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new StartOfLineU() : new StartOfLine());
+                        }
+                        else
+                        {
+                            sequence.Add(new StartOfString());
+                        }
+
+                        break;
+
                     case '$':
-                        throw new NotImplementedException(
-                            "needs:anchors - the zero-width position nodes are not ported yet (S08)"
-                        );
+                        // The end of a line or the string.
+                        if ((info.Flags & RegexFlags.Multiline) != 0)
+                        {
+                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new EndOfLineU() : new EndOfLine());
+                        }
+                        else
+                        {
+                            sequence.Add(
+                                (info.Flags & RegexFlags.Word) != 0 ? new EndOfStringLineU() : new EndOfStringLine()
+                            );
+                        }
+
+                        break;
 
                     case '?':
                     case '*':
                     case '+':
                     case '{':
-                        // Upstream tries a quantifier first, then a fuzzy constraint, and only
-                        // then falls back to a literal - so a lone '{' that is neither reaches
-                        // this port's throw rather than becoming the literal it should be.
-                        throw new NotImplementedException(
-                            "needs:quantifiers - parse_quantifier and the repeat nodes are not ported yet (S08)"
-                        );
+                        // Looks like a quantifier.
+                        (long MinCount, long? MaxCount)? counts = ParseQuantifier(source, info, ch);
+                        if (counts is not null)
+                        {
+                            // It _is_ a quantifier.
+                            ApplyQuantifier(source, info, counts.Value, caseFlags, ch, savedPos, sequence);
+                            sequence.Add(null);
+                        }
+                        else
+                        {
+                            // It's not a quantifier. Maybe it's a fuzzy constraint. Upstream parses
+                            // one here and, when there is none, falls through to "the element was
+                            // just a literal" - which is what makes `a{`, `{}` and `{x}` ordinary
+                            // literal braces. Telling those two apart needs the whole fuzzy
+                            // constraint grammar (parse_fuzzy_item and its eight helpers, S13), so
+                            // there is no narrower seam to throw at than this one.
+                            ParseFuzzy(source, info, ch, caseFlags);
+                        }
+
+                        break;
 
                     default:
                         // A literal.
@@ -216,6 +244,179 @@ internal static class ParseFunctions
 
         return new Sequence([.. sequence.Where(item => item is not null).Select(item => item!)]);
     }
+
+    /// <summary>Upstream <c>apply_quantifier</c> (lines 558-588).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="counts">The minimum and maximum repeat counts.</param>
+    /// <param name="caseFlags">The case flags in force; upstream takes it and does not use it.</param>
+    /// <param name="ch">The quantifier character; upstream takes it and overwrites it immediately.</param>
+    /// <param name="savedPos">Where the quantifier started, for the error messages.</param>
+    /// <param name="sequence">The sequence so far, whose last element the quantifier applies to.</param>
+    internal static void ApplyQuantifier(
+        Source source,
+        Info info,
+        (long MinCount, long? MaxCount) counts,
+        int caseFlags,
+        int ch,
+        int savedPos,
+        List<RegexBase?> sequence
+    )
+    {
+        _ = (info, caseFlags, ch);
+
+        RegexBase? element = sequence[^1];
+        sequence.RemoveAt(sequence.Count - 1);
+        if (element is null)
+        {
+            throw sequence.Count > 0
+                ? new FuzzyRegexParseException("multiple repeat", source.String, savedPos)
+                : new FuzzyRegexParseException("nothing to repeat", source.String, savedPos);
+        }
+
+        if (element is GreedyRepeat)
+        {
+            // GreedyRepeat covers LazyRepeat and PossessiveRepeat, which derive from it, exactly as
+            // upstream's isinstance tuple does.
+            throw new FuzzyRegexParseException("multiple repeat", source.String, savedPos);
+        }
+
+        (long minCount, long? maxCount) = counts;
+        int savedPos2 = source.Pos;
+        int suffix = source.Get();
+
+        Func<RegexBase, long, long?, GreedyRepeat> repeated;
+        if (suffix == '?')
+        {
+            // The "?" suffix that means it's a lazy repeat.
+            repeated = static (s, min, max) => new LazyRepeat(s, min, max);
+        }
+        else if (suffix == '+')
+        {
+            // The "+" suffix that means it's a possessive repeat.
+            repeated = static (s, min, max) => new PossessiveRepeat(s, min, max);
+        }
+        else
+        {
+            // No suffix means that it's a greedy repeat.
+            source.Pos = savedPos2;
+            repeated = static (s, min, max) => new GreedyRepeat(s, min, max);
+        }
+
+        // Ignore the quantifier if it applies to a zero-width item or the number of repeats is
+        // fixed at 1.
+        if (!element.IsEmpty() && (minCount != 1 || maxCount != 1))
+        {
+            element = repeated(element, minCount, maxCount);
+        }
+
+        sequence.Add(element);
+    }
+
+    /// <summary>Upstream <c>parse_quantifier</c> (lines 606-619).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state; upstream takes it and does not use it.</param>
+    /// <param name="ch">The character that looked like a quantifier.</param>
+    /// <returns>The repeat counts, or <see langword="null"/> if this is not a quantifier.</returns>
+    internal static (long MinCount, long? MaxCount)? ParseQuantifier(Source source, Info info, int ch)
+    {
+        _ = info;
+
+        // Upstream _QUANTIFIERS (line 604).
+        switch (ch)
+        {
+            case '?':
+                return (0, 1);
+            case '*':
+                return (0, null);
+            case '+':
+                return (1, null);
+            case '{':
+                // Looks like a limited repeated element, eg. 'a{2,3}'.
+                return ParseLimitedQuantifier(source);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Upstream <c>is_above_limit</c> (lines 621-623).</summary>
+    /// <param name="count">The count, or <see langword="null"/> for unlimited.</param>
+    /// <returns><see langword="true"/> if the count is at or above <see cref="RegexFlags.Unlimited"/>.</returns>
+    internal static bool IsAboveLimit(BigInteger? count) => count is not null && count.Value >= RegexFlags.Unlimited;
+
+    /// <summary>Upstream <c>parse_limited_quantifier</c> (lines 625-653).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <returns>The repeat counts, or <see langword="null"/> if this is not a quantifier after all.</returns>
+    /// <remarks>
+    /// The counts are <see cref="BigInteger"/> while they are being read, because upstream's
+    /// <c>int()</c> has no width and <c>a{99999999999999999999</c> - no closing brace - must reach
+    /// the "not a quantifier" return rather than overflow on the way there. Only counts that have
+    /// passed <see cref="IsAboveLimit"/> are narrowed, and those fit in a <see cref="uint"/>.
+    /// </remarks>
+    internal static (long MinCount, long? MaxCount)? ParseLimitedQuantifier(Source source)
+    {
+        int savedPos = source.Pos;
+        string minDigits = ParseCount(source);
+        BigInteger minCount;
+        BigInteger? maxCount;
+        if (source.MatchText(","))
+        {
+            string maxDigits = ParseCount(source);
+
+            // No minimum means 0 and no maximum means unlimited.
+            minCount = minDigits.Length == 0 ? 0 : BigInteger.Parse(minDigits, CultureInfo.InvariantCulture);
+            maxCount = maxDigits.Length == 0 ? null : BigInteger.Parse(maxDigits, CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            if (minDigits.Length == 0)
+            {
+                source.Pos = savedPos;
+                return null;
+            }
+
+            minCount = BigInteger.Parse(minDigits, CultureInfo.InvariantCulture);
+            maxCount = minCount;
+        }
+
+        if (!source.MatchText("}"))
+        {
+            source.Pos = savedPos;
+            return null;
+        }
+
+        if (IsAboveLimit(minCount) || IsAboveLimit(maxCount))
+        {
+            throw new FuzzyRegexParseException("repeat count too big", source.String, savedPos);
+        }
+
+        if (maxCount is not null && minCount > maxCount.Value)
+        {
+            throw new FuzzyRegexParseException("min repeat greater than max repeat", source.String, savedPos);
+        }
+
+        return ((long)minCount, maxCount is null ? null : (long)maxCount.Value);
+    }
+
+    /// <summary>Upstream <c>parse_fuzzy</c> (lines 655-677).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="ch">The character that started the constraint.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <returns>The constraints, never - this throws until S13.</returns>
+    internal static object? ParseFuzzy(Source source, Info info, int ch, int caseFlags)
+    {
+        _ = (source, info, ch, caseFlags);
+
+        throw new NotImplementedException(
+            "needs:fuzzy-syntax - parse_fuzzy_item and the cost grammar are not ported yet (S13)"
+        );
+    }
+
+    /// <summary>Upstream <c>parse_count</c> (lines 846-848).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <returns>The digits, which may be empty.</returns>
+    internal static string ParseCount(Source source) => source.GetWhile(RegexFlags.IsDigit);
 
     /// <summary>Upstream <c>parse_paren</c> (lines 850-940).</summary>
     /// <param name="source">The scanner.</param>
@@ -654,7 +855,8 @@ internal static class ParseFunctions
 
         if (ch == 'G' && !inSet)
         {
-            throw new NotImplementedException("needs:anchors - the SearchAnchor node is not ported yet (S08)");
+            // A search anchor.
+            return new SearchAnchor();
         }
 
         if (ch == 'L' && !inSet)
@@ -678,7 +880,7 @@ internal static class ParseFunctions
 
         if (ch == 'R' && !inSet)
         {
-            throw new NotImplementedException("needs:escapes - \\R needs the Atomic, Branch and SetUnion nodes (S08)");
+            throw new NotImplementedException("needs:escapes - \\R needs the Atomic (S11) and SetUnion (S10) nodes");
         }
 
         if (ch == 'X' && !inSet)
@@ -690,11 +892,13 @@ internal static class ParseFunctions
         {
             // An alphabetic escape sequence.
             // Positional escapes aren't allowed inside a character set.
-            if (!inSet && _positionEscapes.Contains((char)ch))
+            if (!inSet)
             {
-                throw new NotImplementedException(
-                    "needs:anchors - the zero-width position nodes are not ported yet (S08)"
-                );
+                RegexBase? position = PositionEscape(info, ch);
+                if (position is not null)
+                {
+                    return position;
+                }
             }
 
             if (_charsetEscapes.Contains((char)ch))
@@ -720,6 +924,50 @@ internal static class ParseFunctions
 
         // A literal.
         return MakeCharacter(info, ch, inSet);
+    }
+
+    /// <summary>
+    /// The four positional-escape tables and the choice between them: upstream
+    /// <c>POSITION_ESCAPES</c>, <c>ASCII_POSITION_ESCAPES</c>, <c>UNICODE_POSITION_ESCAPES</c> and
+    /// <c>WORD_POSITION_ESCAPES</c> (lines 4635-4668), selected as <c>parse_escape</c> selects them
+    /// (lines 1304-1315).
+    /// </summary>
+    /// <param name="info">The parse state, whose flags choose the table.</param>
+    /// <param name="ch">The escape letter.</param>
+    /// <returns>The node, or <see langword="null"/> if this letter is not a positional escape.</returns>
+    /// <remarks>
+    /// A function rather than four dictionaries because upstream's tables differ only in the four
+    /// word-related entries, and its entries are shared singleton nodes - which these are not, and
+    /// need not be, since every node this port builds is immutable.
+    /// </remarks>
+    internal static RegexBase? PositionEscape(Info info, int ch)
+    {
+        bool word = (info.Flags & RegexFlags.Word) != 0;
+
+        int encoding = 0;
+        if (!word)
+        {
+            if ((info.Flags & RegexFlags.Ascii) != 0)
+            {
+                encoding = RegexFlags.AsciiEncoding;
+            }
+            else if ((info.Flags & RegexFlags.Unicode) != 0)
+            {
+                encoding = RegexFlags.UnicodeEncoding;
+            }
+        }
+
+        return ch switch
+        {
+            'A' => new StartOfString(),
+            'b' => word ? new DefaultBoundary() : new Boundary(true, encoding),
+            'B' => word ? new DefaultBoundary(false) : new Boundary(false, encoding),
+            'K' => new Keep(),
+            'm' => word ? new DefaultStartOfWord() : new StartOfWord(encoding),
+            'M' => word ? new DefaultEndOfWord() : new EndOfWord(encoding),
+            'Z' or 'z' => new EndOfString(),
+            _ => (RegexBase?)null,
+        };
     }
 
     /// <summary>Upstream <c>parse_numeric_escape</c> (lines 1339-1370).</summary>
@@ -989,10 +1237,6 @@ internal static class ParseFunctions
     /// <returns>The set node to scan for, or <see langword="null"/> when there is no useful one.</returns>
     internal static RegexBase? CheckFirstset(Info info, bool reverse, HashSet<RegexBase?> fs)
     {
-        // Upstream passes both to SetUnion(info, ...).optimise(info, reverse, in_set=True), which
-        // is the line this slice throws at instead of building.
-        _ = (info, reverse);
-
         if (fs.Count == 0 || fs.Contains(null))
         {
             return null;
@@ -1017,11 +1261,28 @@ internal static class ParseFunctions
             return null;
         }
 
-        // Upstream builds SetUnion(info, list(members), ...) here and optimises it. That is also
-        // one of the two points PORTMAP's "Where we diverge" requires the members to be sorted at,
-        // because a Python set of nodes has no stable order; the sort lands with the set node.
+        // Build the firstset. Upstream:
+        //     fs = SetUnion(info, list(members), case_flags=case_flags & ~FULLCASE, zerowidth=True)
+        //     return fs.optimise(info, reverse, in_set=True)
+        int setCaseFlags = RegexFlags.CaseFlagsCombination(caseFlags & ~RegexFlags.FullCase);
+
+        if (members.Count == 1)
+        {
+            // SetUnion.optimise's one-member case (lines 3939-3943) hands the member back with the
+            // set's flags rather than building a set at all, so the commonest firstset of all - a
+            // pattern that starts with one known character - needs no SetUnion node. The member's
+            // own optimise is then the identity for a Character (line 2608), which is the only node
+            // a firstset can hold until the set types land.
+            RegexBase only = members.First();
+            return only.WithFlags(positive: only.Positive, caseFlags: setCaseFlags, zerowidth: true);
+        }
+
+        // More than one member needs the real SetUnion. That is also one of the two points
+        // PORTMAP's "Where we diverge" requires the members to be sorted at, because a Python set
+        // of nodes has no stable order; the sort lands with the set node.
+        _ = (info, reverse);
         throw new NotImplementedException(
-            "needs:character-classes - the first-set optimisation needs the SetUnion node (S10)"
+            "needs:character-classes - a firstset of more than one member needs the SetUnion node (S10)"
         );
     }
 
@@ -1064,7 +1325,7 @@ internal static class ParseFunctions
     /// <param name="parsed">The parsed pattern.</param>
     /// <param name="flags">The resolved flags.</param>
     /// <returns>The required string's offset, characters and case flags.</returns>
-    internal static (int ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(RegexBase parsed, int flags)
+    internal static (long ReqOffset, int[] ReqChars, int ReqFlags) GetRequiredString(RegexBase parsed, int flags)
     {
         (long reqOffset, RegexBase? required) = parsed.GetRequiredString((flags & RegexFlags.Reverse) != 0);
 
@@ -1098,7 +1359,10 @@ internal static class ParseFunctions
             _ => throw new NotSupportedException($"{required.GetType().Name} has no folded_characters"),
         };
 
-        return ((int)reqOffset, reqChars, reqFlags);
+        // No narrowing cast: the offset can be as large as UNLIMITED - 1 = 4294967294, which an
+        // int cannot hold. Truncating it turned '(?:a{65535}){0,65535}b's offset of 4294836225
+        // into -131071 (found writing Gaps/Parsing/RepeatWidthOverflowTests.cs).
+        return (reqOffset, reqChars, reqFlags);
     }
 
     /// <summary>

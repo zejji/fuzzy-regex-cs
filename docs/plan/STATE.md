@@ -3,35 +3,33 @@
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 2 - parser, compiler, Unicode tables, pattern-level public API. Eight slices (S06-S13);
-S06 and S07 done, six pending.
+S06, S07 and S08 done, five pending.
 
-**Last completed:** S07 (2026-08-30), the parser and compiler skeleton. `src/FuzzyRegex/Parsing/`
-now ports `_regex_core.py`'s spine - flags, all 81 opcodes, `Source`, `Info`, the node classes,
-the parse functions and `PatternCompiler.Compile`. `FuzzyRegex`'s constructor compiles for real.
-Ratchet green at 3685 tests, 514 passing (was 37). Corpus: 436 of 1547 compile rows and 16 of 50
-error rows match upstream exactly; no row fails.
+**Current slice:** none in flight. The tree is clean.
 
-**Current slice:** none in flight. Next is `docs/plan/slices/S08-quantifiers-alternation-anchors.md`.
+**Where S08 left the port:** ratchet GREEN, 786 passing tests (baseline 786), 3688 total.
+Compile-parity corpus at 693 of 1547 compiles and 23 of 50 errors, nothing failing. `quantifiers`
+fell from 460 waiting tests to 179, `anchors` from 261 to 87, `alternation` off the board.
+`character-classes` is now the biggest block at 573, which is what S10 delivers.
 
-**Next action:** `tools/run-slices.ps1 -MaxSlices 1`. Phase boundary is after S13.
+**Next action:** S09, `docs/plan/slices/S09-unicode-tables.md` - transliterate
+`upstream/src/_regex_unicode.c` into `src/FuzzyRegex/Unicode/`, port the C helpers the parser
+calls, and build the `\N{name}` table. It is the gate on S10 and on 573 waiting tests.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **Throw a `needs:` tag where upstream consults a table, not at the top of a branch.** S07's
-  review found `\p`, `\P`, `\N` and `\g` throwing on sight when upstream reaches a plain literal
-  through all four if the delimiter is absent. Six corpus rows and two ported tests were skipping
-  for capabilities they did not need. Port the whole function's control flow first.
-- **The driver deletes a slice that does not commit.** Two S07 attempts reached a green ratchet
-  and lost everything by ending the turn while a review subagent was still running; under
-  `claude -p` that ends the process. `port-slice` now requires the reviewer to be a blocking call
-  read in the same turn, and forbids ending a session with uncommitted work. `Undo-FailedSlice`
-  now stashes with `-u` before resetting, so the next failure is recoverable - check
-  `git stash list` before assuming work is gone.
-- **The driver allowlist has two halves.** `Bash(...)` rules do not govern the `PowerShell` tool,
-  and `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` is set globally on this machine, so both families must
-  be listed or the session is silently denied. Verified 2026-08-30.
-- **`is_cased_i`, `str.isdigit`, `str.isidentifier` and `str.isalpha` are ASCII-only** until S09,
-  which deletes all four seams. PORTMAP's "Where we diverge" carries the rows to remove.
-- **S08 owns `^` and `$`**: `FlagsTests` is retagged `needs:anchors` and turns on there.
+- **S09 deletes four ASCII-only seams**: `is_cased_i`, `str.isdigit`, `str.isidentifier` and
+  `str.isalpha` all answer only below U+0080 today and throw `needs:unicode-tables` above it.
+  PORTMAP's "Where we diverge" carries the rows to remove. S08 added two more seams S09 owns:
+  `Branch._is_folded` (needs `fold_case` and `get_expand_on_folding`) and, from S07,
+  `Sequence._flush_characters`.
+- **A green corpus does not cover a boundary the corpus never reaches.** `CompiledPattern.ReqOffset`
+  was an `int` that silently truncated any offset above 2^31, and 693 rows passed with the bug in
+  place; it was found only by writing a gap test for a pattern upstream's own compiler cannot
+  compile. Prefer a `Gaps/` test over a corpus row for anything at a numeric limit.
+- **Upstream's bytecode for a pattern its C compiler chokes on** is still readable: monkeypatch
+  `regex._regex.compile` to capture its arguments and raise instead of calling through. Calling
+  through is what made the dead S08 session look hung. Recipe in DECISIONS, 2026-08-30.
+- **Scratch lives in `.scratch/`** (gitignored). The driver fails any slice whose tree is dirty.

@@ -39,6 +39,10 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// </param>
 /// <param name="ReqOffset">
 /// Where the required string starts, or -1 when the offset is unbounded, or 0 when there is none.
+/// A <c>long</c> because the offset is a repeat's maximum width and a repeat count runs to
+/// <c>UNLIMITED - 1</c> = 4294967294, which does not fit in an <see cref="int"/>: upstream hands
+/// the C compiler a Python <c>int</c> that it reads as a <c>Py_ssize_t</c>
+/// (<c>upstream/src/_regex.c</c>). Pinned by <c>Gaps/Parsing/RepeatWidthOverflowTests.cs</c>.
 /// </param>
 /// <param name="ReqChars">The required string, as codepoints, after case folding.</param>
 /// <param name="ReqFlags">The case flags the required string must be compared under.</param>
@@ -49,7 +53,7 @@ internal sealed record CompiledPattern(
     IReadOnlyDictionary<string, int> GroupIndex,
     IReadOnlyDictionary<string, IReadOnlySet<string>> NamedLists,
     IReadOnlyList<IReadOnlySet<string>> NamedListIndexes,
-    int ReqOffset,
+    long ReqOffset,
     IReadOnlyList<int> ReqChars,
     int ReqFlags,
     int GroupCount

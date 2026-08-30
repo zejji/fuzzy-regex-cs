@@ -136,7 +136,7 @@ internal static class PatternCompiler
         parsed = parsed.PackCharacters(info);
 
         // Get the required string.
-        (int reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(parsed, info.Flags);
+        (long reqOffset, int[] reqChars, int reqFlags) = ParseFunctions.GetRequiredString(parsed, info.Flags);
 
         // Build the named lists.
         Dictionary<string, IReadOnlySet<string>> namedListsBuilt = new(StringComparer.Ordinal);

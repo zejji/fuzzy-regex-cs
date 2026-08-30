@@ -18,11 +18,10 @@ public sealed class FlagsTests
     [Arguments(FuzzyRegexOptions.Multiline)]
     [Arguments(FuzzyRegexOptions.IgnorePatternWhitespace)]
     [Arguments(FuzzyRegexOptions.Singleline)]
-    // Retagged in S07 from needs:pattern-properties. The pattern-level properties this slice
-    // delivers are not what holds this test back: '^' and '$' are, and the first-set optimisation
-    // upstream then runs over "pattern" needs the SetUnion node too. Both arrive in S08, and a
-    // skip reason that names the wrong capability sends the next slice to the wrong place.
-    [Skip("needs:anchors - ^ and $ have no zero-width position nodes yet")]
+    // Retagged in S07 from needs:pattern-properties, then turned on in S08 with the zero-width
+    // position nodes. S07 expected the first set over the word "pattern" to need the SetUnion node
+    // as well, and it does not, because SetUnion.optimise hands a one-member set straight back
+    // (upstream/regex/_regex_core.py lines 3939-3943).
     [Property("Upstream", "RegexTests.test_flags#1")]
     public void Compiling_with_each_flag_succeeds(FuzzyRegexOptions options) =>
         new FuzzyRegex("^pattern$", options).Should().NotBeNull();
