@@ -333,6 +333,45 @@ Describe 'Test-BudgetGate' {
     }
 }
 
+Describe 'Read-Budget' {
+    It 'reads the budget file' {
+        $path = Join-Path $TestDrive 'budget-ok.json'
+        '{"maxSlicesPerDay":5,"sliceTimeoutMinutes":180}' | Set-Content -LiteralPath $path -Encoding utf8
+
+        (Read-Budget -Path $path -LastGood $null).sliceTimeoutMinutes | Should -Be 180
+    }
+
+    It 'keeps the last budget that parsed when the file is caught mid-save' {
+        # The driver re-reads this file before every slice, so it will eventually read one the
+        # operator is halfway through saving. A parse failure there must not kill an unattended
+        # run that has been going for hours.
+        $path = Join-Path $TestDrive 'budget-torn.json'
+        '{"maxSlicesPerDay":5,"sliceTimeout' | Set-Content -LiteralPath $path -Encoding utf8
+        $lastGood = [pscustomobject]@{ maxSlicesPerDay = 5; sliceTimeoutMinutes = 180 }
+
+        $budget = Read-Budget -Path $path -LastGood $lastGood -WarningAction SilentlyContinue
+
+        $budget.sliceTimeoutMinutes | Should -Be 180
+    }
+
+    It 'keeps the last budget when the file has been truncated to nothing' {
+        # An empty file parses to nothing rather than throwing, so it would silently null the
+        # budget and blow up on the first property read instead.
+        $path = Join-Path $TestDrive 'budget-empty.json'
+        Set-Content -LiteralPath $path -Value '' -Encoding utf8
+        $lastGood = [pscustomobject]@{ sliceTimeoutMinutes = 180 }
+
+        (Read-Budget -Path $path -LastGood $lastGood -WarningAction SilentlyContinue).sliceTimeoutMinutes |
+            Should -Be 180
+    }
+
+    It 'throws on the very first read, because there is no last good budget to fall back on' {
+        # No budget at all is not the same as a torn read: carrying on would mean running with
+        # no caps whatsoever.
+        { Read-Budget -Path (Join-Path $TestDrive 'no-budget.json') -LastGood $null } | Should -Throw
+    }
+}
+
 Describe 'Write-SliceLogEntry' {
     It 'appends one JSON line per slice attempt so the gate can count them' {
         $path = Join-Path $TestDrive 'slice-log.jsonl'
@@ -344,6 +383,35 @@ Describe 'Write-SliceLogEntry' {
         ($lines[0] | ConvertFrom-Json).slice | Should -Be 'S01'
         ($lines[1] | ConvertFrom-Json).outcome | Should -Be 'failed'
         ($lines[0] | ConvertFrom-Json).totalTokens | Should -Be 1234
+    }
+
+    It 'records a rate-limited attempt as such, so it is not read back as a broken slice' {
+        $path = Join-Path $TestDrive 'slice-log-rl.jsonl'
+        Write-SliceLogEntry -Path $path -Slice 'S08' -Outcome 'rate-limited' -TotalTokens 42
+
+        (Get-Content $path | ConvertFrom-Json).outcome | Should -Be 'rate-limited'
+    }
+
+    It 'records the rescue details, so rescued work can be found from the log alone' {
+        $path = Join-Path $TestDrive 'slice-log-rescue.jsonl'
+        $rescue = [pscustomobject]@{
+            StashLabel   = 'slice-rescue S08 2026-08-30 12:00:00'
+            BranchName   = 'slice-rescue/S08-20260830-120000'
+            AbandonedSha = 'deadbee'
+        }
+
+        Write-SliceLogEntry -Path $path -Slice 'S08' -Outcome 'failed' -TotalTokens 1 -Rescue $rescue
+
+        $entry = Get-Content $path | ConvertFrom-Json
+        $entry.rescue.branch | Should -Be 'slice-rescue/S08-20260830-120000'
+        $entry.rescue.abandonedSha | Should -Be 'deadbee'
+    }
+
+    It 'writes no rescue field when nothing was rescued' {
+        $path = Join-Path $TestDrive 'slice-log-norescue.jsonl'
+        Write-SliceLogEntry -Path $path -Slice 'S08' -Outcome 'completed' -TotalTokens 1
+
+        (Get-Content $path | ConvertFrom-Json).PSObject.Properties.Name | Should -Not -Contain 'rescue'
     }
 }
 
@@ -446,13 +514,65 @@ Describe 'Undo-FailedSlice' {
             'green work' | Set-Content (Join-Path $repo 'src/new.txt')
             $head = (git -C $repo rev-parse HEAD).Trim()
 
-            $label = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07-parser-skeleton'
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07-parser-skeleton'
 
-            $label | Should -Match 'slice-rescue S07-parser-skeleton'
+            $rescue.StashLabel | Should -Match 'slice-rescue S07-parser-skeleton'
             git -C $repo stash list | Should -Match 'slice-rescue'
             # The rescued file is gone from the tree but recoverable from the stash.
             Test-Path (Join-Path $repo 'src/new.txt') | Should -BeFalse
             git -C $repo stash show --include-untracked --name-only 'stash@{0}' | Should -Contain 'src/new.txt'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'pins the rescued work to a permanent branch, which a stash drop cannot destroy' {
+        # A stash entry is invisible unless somebody thinks to run `git stash list`, and
+        # `git stash clear` deletes the lot. A branch shows up in `git branch` and survives.
+        $repo = script:New-ScratchRepo
+        try {
+            'green work' | Set-Content (Join-Path $repo 'src/new.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S08-compiler'
+
+            $rescue.BranchName | Should -Match '^slice-rescue/S08-compiler-\d{8}-\d{6}$'
+            git -C $repo branch --list $rescue.BranchName | Should -Not -BeNullOrEmpty
+
+            git -C $repo stash clear
+            git -C $repo stash apply $rescue.BranchName | Out-Null
+            Get-Content (Join-Path $repo 'src/new.txt') | Should -Be 'green work'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'records the SHA of the commit the reset is about to throw away' {
+        # A session can commit and still fail the ratchet. Without the SHA that commit survives
+        # only in the reflog, where nobody looks and gc eventually collects it.
+        $repo = script:New-ScratchRepo
+        try {
+            $head = (git -C $repo rev-parse HEAD).Trim()
+            'bad' | Set-Content (Join-Path $repo 'src/bad.txt')
+            git -C $repo add -A
+            git -C $repo commit --quiet -m 'a slice that failed the ratchet'
+            $committed = (git -C $repo rev-parse HEAD).Trim()
+
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S08'
+
+            $rescue.AbandonedSha | Should -Be $committed
+            # The SHA is worth recording only if it still resolves to the work after the reset.
+            (git -C $repo show --stat $committed | Out-String) | Should -Match 'src/bad.txt'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'reports no abandoned SHA when the session never committed' {
+        $repo = script:New-ScratchRepo
+        try {
+            'work' | Set-Content (Join-Path $repo 'src/new.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            (Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S08').AbandonedSha |
+                Should -BeNullOrEmpty
         }
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
     }
@@ -508,14 +628,15 @@ Describe 'Undo-FailedSlice' {
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
     }
 
-    It 'reports nothing and creates no stash when the tree was already clean' {
+    It 'reports no stash and no branch when the tree was already clean' {
         $repo = script:New-ScratchRepo
         try {
             $head = (git -C $repo rev-parse HEAD).Trim()
 
-            $label = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07'
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07'
 
-            $label | Should -BeNullOrEmpty
+            $rescue.StashLabel | Should -BeNullOrEmpty
+            $rescue.BranchName | Should -BeNullOrEmpty
             git -C $repo stash list | Should -BeNullOrEmpty
         }
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
@@ -527,8 +648,15 @@ Describe 'Undo-FailedSlice' {
             'work' | Set-Content (Join-Path $repo 'src/new.txt')
             $head = (git -C $repo rev-parse HEAD).Trim()
 
-            { Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName '' } | Should -Not -Throw
+            # Should -Not -Throw runs the block in its own scope, so the result has to come out
+            # through $script: rather than a local.
+            { $script:EmptyNameRescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName '' } |
+                Should -Not -Throw
             git -C $repo stash list | Should -Match 'slice-rescue'
+            # No dangling separator: a component starting with a hyphen is read as an option by
+            # every later git command, and a branch nobody can name is no better than no branch.
+            $script:EmptyNameRescue.BranchName | Should -Match '^slice-rescue/\d{8}-\d{6}$'
+            git -C $repo branch --list $script:EmptyNameRescue.BranchName | Should -Not -BeNullOrEmpty
         }
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
     }

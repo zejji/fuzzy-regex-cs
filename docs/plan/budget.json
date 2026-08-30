@@ -32,11 +32,18 @@
     "roughly 50M tokens whether or not it lands, and the day S07 ran spent three slices of cap on",
     "one slice of progress. Five leaves room for a slice to fail once and still be retried the",
     "same day. NOTE the interaction with maxSlicesPerWeek, still 12: at five a day the weekly cap",
-    "now binds after two and a half busy days, which is the next number to revisit."
+    "now binds after two and a half busy days, which is the next number to revisit.",
+    "",
+    "sliceTimeoutMinutes raised 120 -> 180 on 2026-08-30: a single `dotnet build` that APPEARED to",
+    "hang cost a slice about 12 minutes of its 120. The build itself was fine - the stall was in",
+    "the harness background-output mechanism returning empty - which is exactly why the ceiling",
+    "matters: the session cannot tell the two apart, and burns the clock either way. At that rate",
+    "a slice with a couple of stalls runs out of clock with the work nearly done and gets rolled",
+    "back."
   ],
   "maxSlicesPerDay": 5,
   "maxSlicesPerWeek": 12,
   "maxTokensPerDay": 6000000000,
   "maxTokensPerWeek": 35000000000,
-  "sliceTimeoutMinutes": 120
+  "sliceTimeoutMinutes": 180
 }

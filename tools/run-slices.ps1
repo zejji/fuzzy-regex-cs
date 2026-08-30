@@ -17,6 +17,10 @@
     gate, -MaxSlices, or two consecutive failures - which parks the slice with a note in
     docs/plan/STATE.md and waits for a human.
 
+    A session killed by the account's usage limit is NOT one of those failures: the slice was
+    never broken, so it is rescued and logged but not counted, and the budget gate stops the run
+    on the next iteration with the reset time.
+
     Every session is fresh. Context is never carried between slices: that is the whole point
     (design spec section 8).
 
@@ -224,13 +228,38 @@ function Test-SliceLanded {
 }
 
 function Add-ParkNote {
-    param([string]$SliceName, [string]$Reason)
+    param([string]$SliceName, [string]$Reason, [object]$Rescue)
 
     $note = @(
         ''
         "## PARKED $(Get-Date -Format 'yyyy-MM-dd HH:mm') - needs a human"
         ''
         "Slice $SliceName failed twice. Last reason: $Reason"
+    )
+
+    # The rescued work is the first thing whoever picks this up will want, and the recovery
+    # commands are exactly the ones nobody remembers under pressure. Spell them out here rather
+    # than leaving them in console output that has long since scrolled away.
+    if ($Rescue.BranchName) {
+        $note += @(
+            ''
+            "The last attempt's uncommitted work is on branch ``$($Rescue.BranchName)``:"
+            ''
+            "    git stash apply $($Rescue.BranchName)     # restores it into the working tree"
+            "    git show $($Rescue.BranchName)            # or just look at it first"
+        )
+    }
+    if ($Rescue.AbandonedSha) {
+        $note += @(
+            ''
+            "It also made a commit, discarded by the rollback but still reachable as ``$($Rescue.AbandonedSha)``:"
+            ''
+            "    git show $($Rescue.AbandonedSha)"
+            "    git cherry-pick $($Rescue.AbandonedSha)"
+        )
+    }
+
+    $note += @(
         ''
         'The driver has stopped. Investigate, then either fix the slice and restart the driver,'
         'or run the slice interactively (escalating to a stronger model if it has already failed'
@@ -241,7 +270,10 @@ function Add-ParkNote {
 
 # ---------------------------------------------------------------------------------------------
 
-$budget = Get-Content -LiteralPath $budgetPath -Raw | ConvertFrom-Json
+# Read inside the loop, not here: budget.json says editing it takes effect immediately, and that
+# is only true if the driver re-reads it every time round. $null seeds the first read, which is
+# the one Read-Budget refuses to paper over.
+$budget = $null
 $startingPhase = $null
 $completed = 0
 $consecutiveFailures = 0
@@ -259,6 +291,8 @@ while ($completed -lt $MaxSlices) {
         Write-Host "Stopping: $($slice.Name) belongs to phase $phase and this run started on phase $startingPhase. Phase boundaries are a human checkpoint." -ForegroundColor Cyan
         break
     }
+
+    $budget = Read-Budget -Path $budgetPath -LastGood $budget
 
     $verdict = Test-BudgetGate -Budget $budget -SliceLogPath $sliceLogPath `
         -TokensLastDay (Get-SessionTokenUsage -LogRoot $sessionLogRoot -Since ([datetime]::UtcNow.AddDays(-1))) `
@@ -294,24 +328,48 @@ while ($completed -lt $MaxSlices) {
         continue
     }
 
-    $consecutiveFailures++
-    Write-Host "  FAILED ($consecutiveFailures of 2): $failureReason" -ForegroundColor Red
+    # A session killed by the account's usage limit is not a broken slice, and counting it as one
+    # parks a slice nobody has any reason to investigate. Get-RateLimitResetsAt only reports a
+    # reset that a request actually hit and that is still in the future, so its presence here is
+    # the classification.
+    $rateLimitResetsAt = Get-RateLimitResetsAt -LogRoot $sessionLogRoot
+
+    if ($rateLimitResetsAt) {
+        Write-Host "  RATE-LIMITED, not failed: the account allowance ran out mid-slice, resetting at $($rateLimitResetsAt.ToString('u'))" -ForegroundColor Magenta
+    }
+    else {
+        $consecutiveFailures++
+        Write-Host "  FAILED ($consecutiveFailures of 2): $failureReason" -ForegroundColor Red
+    }
 
     # Roll back before logging: the rollback restores tracked files to $headBefore, and a park
     # note written before it would be reverted by it.
-    $rescued = Undo-FailedSlice -RepoRoot $repoRoot -HeadBefore $headBefore -SliceName $slice.BaseName
-    if ($rescued) {
-        Write-Host "  uncommitted work stashed as '$rescued' - recover with: git stash list" -ForegroundColor DarkGray
+    $rescue = Undo-FailedSlice -RepoRoot $repoRoot -HeadBefore $headBefore -SliceName $slice.BaseName
+    if ($rescue.BranchName) {
+        Write-Host "  work rescued onto branch $($rescue.BranchName) - restore with: git stash apply $($rescue.BranchName)" -ForegroundColor DarkGray
+    }
+    if ($rescue.AbandonedSha) {
+        Write-Host "  its commit $($rescue.AbandonedSha) was rolled back - inspect with: git show $($rescue.AbandonedSha)" -ForegroundColor DarkGray
+    }
+
+    if ($rateLimitResetsAt) {
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'rate-limited' `
+            -TotalTokens $session.TotalTokens -Rescue $rescue
+        # No sleep. The budget gate at the top of the next iteration refuses to start while the
+        # reset is in the future, so the driver stops there of its own accord and says why.
+        continue
     }
 
     if ($consecutiveFailures -ge 2) {
-        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' -TotalTokens $session.TotalTokens
-        Add-ParkNote -SliceName $slice.BaseName -Reason $failureReason
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' `
+            -TotalTokens $session.TotalTokens -Rescue $rescue
+        Add-ParkNote -SliceName $slice.BaseName -Reason $failureReason -Rescue $rescue
         Write-Host "Stopping: $($slice.BaseName) failed twice and has been parked. See docs/plan/STATE.md." -ForegroundColor Red
         break
     }
 
-    Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'failed' -TotalTokens $session.TotalTokens
+    Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'failed' `
+        -TotalTokens $session.TotalTokens -Rescue $rescue
 }
 
 Write-Host ''

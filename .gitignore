@@ -37,3 +37,11 @@ __pycache__/
 # otherwise delete it and reset the driver's daily cap to zero. Measured tokens-per-slice get
 # written into the slice's closing notes, which is where they belong for the record.
 docs/plan/slice-log.jsonl
+
+# Throwaway scratch for a working session: oracle scripts, build logs, TRX probes, one-off
+# Python. Gitignored rather than banned, because the driver fails any slice whose working tree
+# is dirty at the end and four forgotten scratch-*.py files at the repo root nearly threw away
+# S08 (2026-08-30). Inside the repo so the sandboxed unattended session can actually write here,
+# and ignored so a file left behind can never fail a slice. `git clean -fd` (no -x) leaves it
+# alone, and `git stash push -u` does not pick it up.
+.scratch/

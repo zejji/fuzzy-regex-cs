@@ -123,10 +123,13 @@ Then:
 2. Rewrite `docs/plan/STATE.md` (rewrite it, never append; 30 lines maximum).
 3. Append a dated one-liner to `docs/plan/DECISIONS.md` for any decision a future session would
    otherwise have to re-derive.
-4. Commit everything in one commit: `S<nn>: <what landed>`.
+4. Run `git status --porcelain` and read every line. Each one is either part of this slice or
+   scratch you forgot to delete - there is no third category. Delete the scratch; never commit it.
+5. Commit everything in one commit: `S<nn>: <what landed>`, then check `git status --porcelain`
+   prints nothing at all.
 
-The commit is the slice. A session that ends without a green ratchet and a commit has not
-completed a slice, and the driver will treat it as a failure.
+The commit is the slice. A session that ends without a green ratchet, a commit and a clean tree
+has not completed a slice, and the driver will treat it as a failure.
 
 ## Working under the driver
 
@@ -145,8 +148,13 @@ rejects, all of which have already burned turns on real slices:
 - **Heredocs and `-c` script blocks are refused outright** ("contains script block that may
   execute arbitrary code"). To run Python, `Write` a `.py` file and run `python thatfile.py`.
 - **Glob patterns inside a shell path always need approval.** Use the `Glob` tool instead.
-- **Writes outside the repository are blocked**, `/tmp` included. Keep scratch files in the repo
-  root, and delete them before you commit.
+- **Throwaway scratch goes in `.scratch/`, never anywhere else in the working tree.** Oracle
+  scripts, build logs, TRX probes, one-off Python: write them to `.scratch/` at the repo root.
+  It is gitignored, so a file you forget cannot dirty the tree; it is inside the repo, so the
+  sandbox lets you write there when the session scratchpad may not. This matters because a
+  scratch file anywhere else is a slice-killer - the driver fails any slice whose working tree
+  is dirty at the end, and four forgotten `scratch-*.py` files at the repo root came within one
+  commit of throwing away the whole of S08 (2026-08-30).
 - **Use the `Read`, `Edit` and `Grep` tools, not `cat`, `sed -i` and `grep`.** They are always
   allowed, they never trip the decomposition rule, and an `Edit` is visible in the transcript
   where a `sed -i` is not.

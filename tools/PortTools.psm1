@@ -509,6 +509,46 @@ function Test-BudgetGate {
     }
 }
 
+function Read-Budget {
+    <#
+    .SYNOPSIS
+        Reads docs/plan/budget.json, falling back to the last values that parsed.
+
+    .DESCRIPTION
+        The driver re-reads the budget before every slice so that editing the file takes effect
+        without stopping an unattended run. That guarantee has a cost: sooner or later the driver
+        reads the file while an editor is halfway through saving it, and a half-written file is
+        not JSON. Killing a run that has been going for hours over a transient torn read would be
+        a worse failure than briefly using slightly stale caps, so a failed re-read warns and
+        keeps the last good budget.
+
+        The FIRST read is different, and deliberately not forgiving: with no last good value there
+        are no caps at all, and a driver running uncapped is exactly what the budget gate exists
+        to prevent.
+
+    .PARAMETER LastGood
+        The budget from the previous successful read, or $null on the first read.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowNull()][object]$LastGood
+    )
+
+    try {
+        $budget = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json
+        # An empty file parses to nothing rather than throwing, and truncate-then-write is how
+        # most editors save, so this is the likeliest state to catch mid-save.
+        if ($null -eq $budget) { throw "$Path is empty" }
+        return $budget
+    }
+    catch {
+        if ($null -eq $LastGood) { throw }
+        Write-Warning "Could not read $Path ($($_.Exception.Message)); keeping the last budget that parsed."
+        return $LastGood
+    }
+}
+
 function Get-SliceLogEntry {
     <#
     .SYNOPSIS
@@ -540,14 +580,22 @@ function Write-SliceLogEntry {
 
     .DESCRIPTION
         Failed attempts are logged too: a slice that burned allowance and produced nothing still
-        spent the budget, so the gate must count it.
+        spent the budget, so the gate must count it. 'rate-limited' is logged as its own outcome
+        rather than as a failure - the allowance ran out, the slice was not broken - and the
+        distinction matters when these records are read back to calibrate the caps.
+
+    .PARAMETER Rescue
+        What Undo-FailedSlice saved, when a failed attempt had work to save. Recording the branch
+        and the abandoned commit here means the rescued work is findable from the log alone,
+        without anyone having to notice a line of console output that scrolled past hours ago.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Slice,
-        [Parameter(Mandatory)][ValidateSet('completed', 'failed', 'parked')][string]$Outcome,
-        [long]$TotalTokens = 0
+        [Parameter(Mandatory)][ValidateSet('completed', 'failed', 'parked', 'rate-limited')][string]$Outcome,
+        [long]$TotalTokens = 0,
+        [AllowNull()][object]$Rescue
     )
 
     $entry = [ordered]@{
@@ -555,6 +603,14 @@ function Write-SliceLogEntry {
         slice       = $Slice
         outcome     = $Outcome
         totalTokens = $TotalTokens
+    }
+
+    if ($Rescue -and ($Rescue.StashLabel -or $Rescue.BranchName -or $Rescue.AbandonedSha)) {
+        $entry.rescue = [ordered]@{
+            stash        = $Rescue.StashLabel
+            branch       = $Rescue.BranchName
+            abandonedSha = $Rescue.AbandonedSha
+        }
     }
 
     if ($PSCmdlet.ShouldProcess($Path, "Log slice $Slice as $Outcome")) {
@@ -580,6 +636,19 @@ function Undo-FailedSlice {
         used to delete that work outright. Stashing changes nothing about the retry, which still
         starts from a clean tree as designed, but the work stops being unrecoverable.
 
+        A stash ALONE is not enough, though. It is invisible unless somebody thinks to run
+        `git stash list`, and one `git stash clear` destroys every rescue at once. So the stash
+        commit is also pinned to a permanent branch, slice-rescue/<slice>-<timestamp>, which shows
+        up in `git branch` and outlives any stash operation. `git branch <name> refs/stash` right
+        after the push is the cheapest way to do that: the stash commit already holds the tracked
+        changes and, because the push used --include-untracked, the untracked files too, and
+        `git stash apply <branch>` restores both. `git stash create` cannot be used instead - it
+        does not capture untracked files, which is most of what a failed slice leaves behind.
+
+        And a session that DID commit but left the ratchet red loses that commit to the reset
+        below, where it survives only in the reflog until gc collects it. Its SHA is captured
+        before the reset so the log and the park note can name it.
+
         RESET: to $HeadBefore rather than to HEAD. A session can commit its work and move its
         slice file to done/ and still leave the ratchet red. Resetting to HEAD would keep that
         commit, stranding the slice in done/ where it would never be retried while the driver
@@ -595,7 +664,8 @@ function Undo-FailedSlice {
         tested against a scratch repository - it is the one function here that can destroy work.
 
     .OUTPUTS
-        The stash label when work was rescued, otherwise nothing.
+        An object with StashLabel, BranchName (both null when the tree was already clean) and
+        AbandonedSha (null when the session made no commit).
     #>
     [CmdletBinding()]
     param(
@@ -604,19 +674,35 @@ function Undo-FailedSlice {
         [AllowEmptyString()][string]$SliceName = ''
     )
 
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $label = $null
+    $branch = $null
+
     if (git -C $RepoRoot status --porcelain) {
         $label = "slice-rescue $SliceName $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')".Replace('  ', ' ')
         git -C $RepoRoot stash push --include-untracked --message $label | Out-Null
+
+        # No trailing separator when the slice name is empty: a branch called
+        # 'slice-rescue/-20260830-...' starts a path component with a hyphen, which every later
+        # git command would try to parse as an option.
+        $branch = if ($SliceName) { "slice-rescue/$SliceName-$stamp" } else { "slice-rescue/$stamp" }
+        git -C $RepoRoot branch $branch refs/stash | Out-Null
     }
+
+    $headNow = (git -C $RepoRoot rev-parse HEAD).Trim()
+    $abandoned = if ($headNow -ne $HeadBefore) { $headNow } else { $null }
 
     git -C $RepoRoot reset --hard $HeadBefore | Out-Null
     git -C $RepoRoot clean -fd docs src tests bench tools | Out-Null
 
-    return $label
+    [pscustomobject]@{
+        StashLabel   = $label
+        BranchName   = $branch
+        AbandonedSha = $abandoned
+    }
 }
 
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
-    New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate,
+    New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice
