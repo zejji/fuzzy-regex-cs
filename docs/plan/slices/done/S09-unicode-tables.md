@@ -109,15 +109,104 @@ tests; exhaustive property parity is proven in Phase 3 through the match oracle,
 
 ## Done when
 
-- [ ] `src/FuzzyRegex/Unicode/` builds; analyzers quiet (generated code); `dotnet build` time
+- [x] `src/FuzzyRegex/Unicode/` builds; analyzers quiet (generated code); `dotnet build` time
       and assembly size recorded in the closing notes.
-- [ ] The three fixture tests pass; the table-consumption assertion in the script holds.
-- [ ] `oracle.yml` re-runs the transliterator and the fixture generators and fails on drift.
-- [ ] `docs/PORTMAP.md`: file-level map updated; every ported C helper listed.
-- [ ] DECISIONS: the transliteration decision, the name-table decision and the 17.0.0-versus-
+- [x] The three fixture tests pass; the table-consumption assertion in the script holds.
+- [x] `oracle.yml` re-runs the transliterator and the fixture generators and fails on drift.
+- [x] `docs/PORTMAP.md`: file-level map updated; every ported C helper listed.
+- [x] DECISIONS: the transliteration decision, the name-table decision and the 17.0.0-versus-
       `unicodedata` divergence, each with the measurement behind it.
-- [ ] Ratchet GREEN, blind review (hunt: signed versus unsigned in table indices, `<<` on
+- [x] Ratchet GREEN, blind review (hunt: signed versus unsigned in table indices, `<<` on
       `byte` promoting to `int` where C stayed unsigned, a struct array field order swap), commit.
+
+## Closing notes (2026-08-30)
+
+**What landed.** The whole of `upstream/src/_regex_unicode.c` and its header, plus the Unicode
+half of `_regex.c`, plus a character-name table Python has and .NET does not.
+
+- `tools/transliterate-unicode.py` (620 lines) writes six `src/FuzzyRegex/Unicode/*.g.cs` files:
+  253 tables (402,293 values), 100 transliterated lookup functions, the 101-entry property
+  dispatch switch, and every `#define`. It walks a cursor over the C and fails on any construct
+  it has not seen, so a future upstream file cannot silently lose a table.
+- `Unicode/UnicodeCasing.cs` hand-ports the four functions whose bodies do not fit the
+  three-level-walk shape. `Unicode/Encodings.cs` ports `unicode_has_property` and both encodings'
+  casing functions. `Unicode/RegexModule.cs` ports the five functions `_regex_core.py` imports.
+  `Unicode/PythonStr.cs` rebuilds CPython's three `str` predicates from those tables.
+- `tools/build-character-names.py` writes `UnicodeCharacterNames.g.cs`: 40,951 stored names and
+  14 computed ranges. `Unicode/CharacterNames.cs` is the `unicodedata.lookup` equivalent.
+- **The four ASCII-only seams S07 left are gone**: `is_cased_i`, `str.isdigit`,
+  `str.isidentifier` and `str.isalpha` all answer for the whole codepoint range now, and
+  PORTMAP's two "Temporary" divergence rows are deleted. `\N{...}` parsing itself is S10's
+  (`parse_named_char`), as are the `needs:case-folding` seams in `Nodes.cs`.
+
+**Numbers.** Ratchet GREEN. 851 passing (baseline was 786), 3,749 total, 0 failing. Gaps went
+755 to 819: 64 new tests, of which 61 are this slice's and 3 are corpus rows the rewiring
+unblocked. `unicode-tables` is off the waiting board. A clean `dotnet build -c Release` takes
+**4.0s** even with a 1.5 MB and a 1.85 MB generated file in it, so compile time is not a
+constraint. The assembly is **3.52 MB**, of which the name table is about 2.1 MB - the measured
+figure the slice asked for, with the word-tokenised upgrade path recorded in DECISIONS and in a
+comment on `CharacterNames.cs`.
+
+**Verification, and what it actually proves.** Four fixtures, not three:
+
+1. **Tables.** A length and a SHA-256 per table, taken by a second, deliberately naive parse of
+   the same C file that shares no code with the transliterator. A generated `AllTables()`
+   accessor lets the C# walk all 253 and compare. Without this, 402,293 numbers would rest on
+   the transliterator agreeing with itself.
+2. **Casing.** `get_all_cases` and `fold_case` over every codepoint from 0 to 0x10FFFF, across
+   (Unicode, ASCII) x (simple, full) plus the no-`IGNORECASE` case: nine digests, about two
+   seconds of C#.
+3. **Properties.** The whole 185-property, 5,200-pair dictionary hashed, and
+   `has_property_value` over every pair at 1,595 codepoints. Exhaustive property parity is
+   Phase 3's, through the match oracle.
+4. **Python `str` predicates.** Exhaustive, minus the 4,803 codepoints new in Unicode 17.0.
+
+The character-name table is verified in **Python**, not C#, and that is deliberate: the host's
+`unicodedata` is an implementation independent of the UCD files the generator reads, so making it
+the oracle is worth far more than any digest. All 148,853 names it knows round-trip, and every
+algorithmic name we compute resolves back through `unicodedata.lookup`. `oracle.yml` re-runs all
+three generators with `--check` weekly.
+
+**Surprises.**
+
+- **`unicodedata.name` and `unicodedata.lookup` disagree in CPython.** `name(chr(0x17000))`
+  raises `ValueError` while `lookup("TANGUT IDEOGRAPH-17000")` resolves it. Verifying the
+  algorithmic ranges by *computing* the name and asking `lookup` covers all 14 ranges; verifying
+  by iterating codepoints and asking `name` silently skips Tangut's 6,145.
+- **`re_get_property[86]` is a NULL entry**, not a function. `RE_PROP_SCX` is many-valued so
+  `unicode_has_property` branches away before indexing the table. The transliterator now asserts
+  the NULL set is exactly `[86]`.
+- **`Rune.TryGetRuneAt(s, 0, out _)` throws on an empty string** rather than returning false,
+  which is not what its name suggests. Both call sites needed a length guard.
+- **`ReadOnlySpan<T>`'s indexer takes an `int`** where a C array takes any integral type, so
+  every transliterated table index needs an explicit cast, and `v >> offset` needs one too.
+- **The two `get_all_cases.ascii.*` digests are identical**, which is correct:
+  `ascii_full_case_fold` never returns more than one codepoint, so the `None` marker is never
+  appended.
+
+**For the next slice (S10).** The tables are there and proved; `RegexModule.FoldCase`,
+`GetAllCases`, `GetExpandOnFolding`, `HasPropertyValue` and `GetProperties` are the five entry
+points, and `UnicodeCharacterNames.TryLookup` is what `parse_named_char` needs. The
+`needs:case-folding` seams in `Nodes.cs` (`Character`'s constructor, `Branch._is_folded`,
+`Sequence`) are still there and are S10's, as the slice file says. If a corpus row disagrees
+only in set-member order, suspect a third set-order leak before suspecting these tables: they
+are checked against upstream exhaustively and the corpus is not.
+
+**Review.** One blind pass over the hand-written C#, the three generators and the tests, briefed
+to hunt wrong tables and indices, signed/unsigned and shift mistakes, loop bounds in the
+run-terminated script-extensions walk, C# APIs that throw where the code assumes false, and
+vacuous assertions - and to hand over reproductions rather than opinions. **Two findings raised,
+two reproduced, two fixed**, both wrong upstream line numbers in doc comments: `UnicodeCasing.cs`
+paired the four hand-ported function names with their line numbers in a different order, and both
+`RE_EncodingTable` citations were seven lines past the declaration. Neither is behaviour, but a
+wrong line number is exactly what makes a future sync archaeological, which is what PORTMAP
+exists to prevent. Nothing functional was found: the reviewer independently re-derived
+`re_get_script_extensions` and all 101 property functions over every codepoint from the C, and
+differentially tested `fold_case` on 30,000 multi-codepoint strings and `unicodedata.lookup` on
+189,000 queries, with no disagreement. Its one coverage observation - that the committed casing
+tests fold a single codepoint at a time - was closed by adding
+`Fold_case_folds_a_whole_run`, nine oracle-measured cases. **A second blind pass covered that
+new test and the three comment corrections**, since the first reviewer never saw them.
 
 ## Notes
 

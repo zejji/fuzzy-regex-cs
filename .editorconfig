@@ -69,16 +69,22 @@ dotnet_diagnostic.MA0048.severity = suggestion
 ; ==========================================================================
 ; Faithful-port relaxations.
 ;
-; src/FuzzyRegex/Parsing and src/FuzzyRegex/Engine are hand-ports of _regex_core.py and
-; _regex.c. Their shape must track upstream so that upstream diffs map mechanically onto our
-; files (design spec section 4) and so `sync-upstream` stays a mechanical exercise. Rules that
-; would force restructuring - method length, complexity, nesting, magic numbers - are therefore
-; suppressed here and here only. Correctness and security rules are untouched.
+; src/FuzzyRegex/Parsing, src/FuzzyRegex/Engine and src/FuzzyRegex/Unicode are hand-ports of
+; _regex_core.py, _regex.c and _regex_unicode.c. Their shape must track upstream so that upstream
+; diffs map mechanically onto our files (design spec section 4) and so `sync-upstream` stays a
+; mechanical exercise. Rules that would force restructuring - method length, complexity, nesting,
+; magic numbers - are therefore suppressed here and here only. Correctness and security rules are
+; untouched.
+;
+; Unicode/ was added in S09. Its hand-written files are the C helpers _regex_core.py calls
+; (unicode_has_property, the encoding tables, the module-level functions) plus the four generated
+; lookup functions the transliterator cannot shape; its *.g.cs files are marked generated_code
+; above and see no analysis at all.
 ;
 ; Removing a suppression is a deliberate act: it means that area has been optimised away from
 ; upstream's structure on purpose, and PORTMAP.md should say so.
 ; ==========================================================================
-[src/FuzzyRegex/{Parsing,Engine}/**.cs]
+[src/FuzzyRegex/{Parsing,Engine,Unicode}/**.cs]
 ; Method is too long / has too many lines.
 dotnet_diagnostic.MA0051.severity = none
 dotnet_diagnostic.S138.severity = none

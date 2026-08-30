@@ -70,6 +70,22 @@ jobs:
         # fourth place where a set becomes an ordered list, this is what says so.
         run: python tools/record-compile-corpus.py --verify-determinism
 
+      - name: The transliterated Unicode tables must be current
+        # src/FuzzyRegex/Unicode/*.g.cs is upstream/src/_regex_unicode.c, mechanically. This
+        # re-runs the transliteration against the pinned submodule and diffs it byte for byte, so
+        # a hand-edit or a stale file cannot survive a week.
+        run: python tools/transliterate-unicode.py --check
+
+      - name: The character-name table must be current
+        # Downloads the Unicode 17.0.0 UCD and re-verifies every name against this runner's own
+        # unicodedata - an implementation independent of those files - before diffing the table.
+        run: python tools/build-character-names.py --check
+
+      - name: The Unicode fixtures must be current
+        # The casing, property and str-predicate digests, taken from the oracle built above
+        # rather than from a developer's locally installed regex.
+        run: python tools/record-unicode-fixtures.py --check
+
       - name: Run the oracle
         # --ignore-exit-code 8 tolerates "zero tests ran". The harness itself arrives in phase 6;
         # until then this project is empty, and a scheduled job that always fails just teaches

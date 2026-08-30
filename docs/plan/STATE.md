@@ -3,33 +3,36 @@
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 2 - parser, compiler, Unicode tables, pattern-level public API. Eight slices (S06-S13);
-S06, S07 and S08 done, five pending.
+S06 to S09 done, four pending.
 
 **Current slice:** none in flight. The tree is clean.
 
-**Where S08 left the port:** ratchet GREEN, 786 passing tests (baseline 786), 3688 total.
-Compile-parity corpus at 693 of 1547 compiles and 23 of 50 errors, nothing failing. `quantifiers`
-fell from 460 waiting tests to 179, `anchors` from 261 to 87, `alternation` off the board.
-`character-classes` is now the biggest block at 573, which is what S10 delivers.
+**Where S09 left the port:** ratchet GREEN, 851 passing tests (baseline 851), 3749 total, nothing
+failing. The whole of `_regex_unicode.c` is transliterated into `src/FuzzyRegex/Unicode/*.g.cs`
+(253 tables, 104 functions), the `_regex.c` helpers over it are hand-ported beside them, and
+`\N{...}` has a Unicode 17.0.0 name table. `unicode-tables` is off the waiting board and the four
+ASCII-only seams S07 left are deleted. `character-classes` is still the biggest block at 573.
 
-**Next action:** S09, `docs/plan/slices/S09-unicode-tables.md` - transliterate
-`upstream/src/_regex_unicode.c` into `src/FuzzyRegex/Unicode/`, port the C helpers the parser
-calls, and build the `\N{name}` table. It is the gate on S10 and on 573 waiting tests.
+**Next action:** S10, `docs/plan/slices/S10-character-classes-and-case-folding.md` - sets,
+properties, case folding and inline flags. It is the biggest slice of the phase and everything it
+needs from S09 is in place and proved.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **S09 deletes four ASCII-only seams**: `is_cased_i`, `str.isdigit`, `str.isidentifier` and
-  `str.isalpha` all answer only below U+0080 today and throw `needs:unicode-tables` above it.
-  PORTMAP's "Where we diverge" carries the rows to remove. S08 added two more seams S09 owns:
-  `Branch._is_folded` (needs `fold_case` and `get_expand_on_folding`) and, from S07,
-  `Sequence._flush_characters`.
-- **A green corpus does not cover a boundary the corpus never reaches.** `CompiledPattern.ReqOffset`
-  was an `int` that silently truncated any offset above 2^31, and 693 rows passed with the bug in
-  place; it was found only by writing a gap test for a pattern upstream's own compiler cannot
-  compile. Prefer a `Gaps/` test over a corpus row for anything at a numeric limit.
-- **Upstream's bytecode for a pattern its C compiler chokes on** is still readable: monkeypatch
-  `regex._regex.compile` to capture its arguments and raise instead of calling through. Calling
-  through is what made the dead S08 session look hung. Recipe in DECISIONS, 2026-08-30.
+- **S10's five entry points are `RegexModule.FoldCase`, `GetAllCases`, `GetExpandOnFolding`,
+  `HasPropertyValue` and `GetProperties`**, plus `UnicodeCharacterNames.TryLookup` for
+  `parse_named_char`. The `needs:case-folding` seams in `Nodes.cs` - `Character`'s constructor,
+  `Branch._is_folded`, `Sequence` - are S10's, as is `is_cased_i`'s remaining `LOCALE` seam.
+- **Suspect the parser before the tables.** The tables are checked against upstream exhaustively
+  (every codepoint, every property/value pair); the corpus is not. A row that disagrees only in
+  set-member order is a third set-order leak, not a folding bug.
+- **Regenerating anything Unicode:** `tools/transliterate-unicode.py`, then
+  `tools/build-character-names.py` (downloads the UCD, cached in `.scratch/`), then
+  `tools/record-unicode-fixtures.py` - in that order, because the last reads the second's output.
+  `oracle.yml` runs all three with `--check`.
+- **Local `regex` is 2026.7.19; upstream is pinned at 2026.8.12.** The Unicode tables have not
+  changed since 2025-10-20, so the fixtures agree either way, but CI regenerates them against a
+  build of the pinned submodule.
 - **Scratch lives in `.scratch/`** (gitignored). The driver fails any slice whose tree is dirty.

@@ -61,15 +61,11 @@ public sealed class GroupReferenceFallbackTests
     /// reference, and the escape degrades to literals.
     /// </summary>
     /// <remarks>
-    /// Skipped, not fixed. Reaching the fallback means getting past <c>IsDigitName</c>, which
-    /// throws its <c>needs:unicode-tables</c> seam on any non-ASCII name because Python's
-    /// <c>str.isdigit</c> is Unicode-aware. Upstream's answer here does not actually depend on
-    /// those tables - no definition of "digit" contains e-acute - but deciding that in general is
-    /// S09's job, and widening the seam on one example is how a port acquires a guess. S09 turns
-    /// this test on.
+    /// Reaching the fallback means getting past <c>IsDigitName</c>, which threw a
+    /// <c>needs:unicode-tables</c> seam on any non-ASCII name until S09 gave it Python's
+    /// Unicode-aware <c>str.isdigit</c>.
     /// </remarks>
     [Test]
-    [Skip("needs:unicode-tables - IsDigitName cannot judge a non-ASCII name until S09")]
     public void Group_ref_with_a_non_ascii_undelimited_name_falls_back_to_literals()
     {
         CompiledPattern compiled = PatternCompiler.Compile("\\g<\u00e9");

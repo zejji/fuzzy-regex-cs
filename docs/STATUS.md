@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 1701 | 755 | 946 | 0 |
+| Gaps | 1771 | 829 | 942 | 0 |
 
 ## Tests waiting on a capability
 
@@ -77,8 +77,8 @@ What the next slice should deliver, biggest win first.
 | `lookaround` | 70 |
 | `fuzzy-matching` | 48 |
 | `right-to-left` | 47 |
-| `lookbehind` | 46 |
 | `named-lists` | 46 |
+| `lookbehind` | 46 |
 | `recursion` | 42 |
 | `basic-matching` | 40 |
 | `find-all` | 37 |
@@ -86,8 +86,8 @@ What the next slice should deliver, biggest win first.
 | `groups` | 34 |
 | `inline-flags` | 29 |
 | `branch-reset` | 28 |
-| `ascii-flag` | 28 |
 | `fuzzy-counts` | 28 |
+| `ascii-flag` | 28 |
 | `set-operations` | 24 |
 | `splitting` | 23 |
 | `named-groups` | 23 |
@@ -95,23 +95,22 @@ What the next slice should deliver, biggest win first.
 | `alternation` | 18 |
 | `word-flag` | 18 |
 | `fuzzy-bestmatch` | 18 |
-| `line-boundaries` | 17 |
 | `fuzzy-budget` | 17 |
+| `line-boundaries` | 17 |
 | `define-groups` | 15 |
 | `captures` | 12 |
 | `comments` | 12 |
 | `escape-function` | 12 |
 | `version-flags` | 11 |
 | `named-characters` | 11 |
-| `grapheme` | 11 |
 | `format` | 11 |
-| `posix-matching` | 8 |
-| `fuzzy-changes` | 8 |
+| `grapheme` | 11 |
 | `possessive` | 8 |
+| `fuzzy-changes` | 8 |
+| `posix-matching` | 8 |
 | `full-match` | 7 |
 | `keep-marker` | 6 |
 | `fuzzy-enhancematch` | 6 |
-| `unicode-tables` | 4 |
 | `overlapped` | 4 |
 | `fuzzy-deletion` | 3 |
 | `fuzzy-insertion` | 3 |

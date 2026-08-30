@@ -27,9 +27,11 @@ and the status board; reach for the spec when a decision needs its reasoning.
 ```
 src/FuzzyRegex/Parsing/     port of upstream/regex/_regex_core.py
 src/FuzzyRegex/Engine/      port of upstream/src/_regex.c
-src/FuzzyRegex/Unicode/     generated tables - never hand-edit
+src/FuzzyRegex/Unicode/     tables and the C helpers over them; *.g.cs is generated
 src/FuzzyRegex/             public API (port of upstream/regex/_main.py)
-tools/transliterate-unicode.py   writes Unicode/ from upstream/src/_regex_unicode.c (S09)
+tools/transliterate-unicode.py   writes Unicode/*.g.cs from upstream/src/_regex_unicode.c
+tools/build-character-names.py   writes UnicodeCharacterNames.g.cs from the Unicode 17.0.0 UCD
+tools/record-unicode-fixtures.py writes the Unicode oracle fixtures for the test suite
 tests/FuzzyRegex.Tests/Ported/     translated upstream tests - counts towards parity
 tests/FuzzyRegex.Tests/Gaps/       our own tests - does not count towards parity
 tests/FuzzyRegex.OracleTests/      differential harness against Python regex
@@ -71,9 +73,9 @@ commits are meant to contain failing tests, and the driver has just run the suit
 - **Never weaken a test to get green.** If a ported test looks wrong, prove it by running the
   Python `regex` module and quoting the output, then record the finding in DECISIONS.md.
 - **Never edit generated files by hand:** `docs/STATUS.md`, `tests/parity-baseline.json`,
-  `src/FuzzyRegex/Unicode/`.
+  `src/FuzzyRegex/Unicode/*.g.cs`, `tests/FuzzyRegex.Tests/Gaps/Unicode/*.json`.
 - **Never disable an analyzer to get a build.** `.editorconfig` already relaxes, for
-  `Parsing/` and `Engine/` only, the rules a faithful port must break (method length,
+  `Parsing/`, `Engine/` and `Unicode/` only, the rules a faithful port must break (method length,
   complexity, nesting, magic numbers, commented-out upstream reference lines). Correctness and
   security rules are errors everywhere and stay that way.
 - **UTF-16, not codepoints.** Public indices and lengths are UTF-16 code units, matching .NET

@@ -27,5 +27,9 @@
       never depend on the working directory. Regenerate with tools/record-compile-corpus.py.
     -->
     <EmbeddedResource Include="Gaps/CompileParity/corpus.json" />
+    <!-- The Unicode table and casing digests. Regenerate with tools/record-unicode-fixtures.py. -->
+    <EmbeddedResource Include="Gaps/Unicode/unicode-fixtures.json" />
+    <!-- What the character-name table should be. Regenerate with tools/build-character-names.py. -->
+    <EmbeddedResource Include="Gaps/Unicode/character-names.json" />
   </ItemGroup>
 </Project>

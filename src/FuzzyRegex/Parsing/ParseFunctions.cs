@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Numerics;
+using System.Text;
+using Fuzzy.Text.RegularExpressions.Unicode;
 
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
@@ -36,32 +38,14 @@ internal static class ParseFunctions
     /// <param name="ch">The codepoint to test.</param>
     /// <returns><see langword="true"/> if the character is cased.</returns>
     /// <remarks>
-    /// Deliberate corner cut, S07. Below U+0080 the answer is exactly "is it an ASCII letter", and
-    /// upstream's ASCII and Unicode encodings agree there; above it they do not, and the answer
-    /// needs the tables. Measured against the built oracle on 2026-08-30: over codepoints 0-127
-    /// both <c>get_all_cases(regex.UNICODE, cp)</c> and <c>get_all_cases(regex.ASCII, cp)</c>
-    /// report exactly the 52 codepoints A-Z and a-z as cased, and they first disagree at U+00B5.
-    /// <b>Ceiling:</b> any pattern with a non-ASCII character under <c>IGNORECASE</c>, or under the
-    /// <c>LOCALE</c> encoding, throws instead of compiling. <b>Upgrade path:</b> S09 transliterates
-    /// <c>re_get_all_cases</c> and this becomes a call to it.
+    /// The <c>LOCALE</c> encoding still throws <c>needs:locale-flag</c>: its casing comes from the
+    /// C locale, not from a table.
     /// </remarks>
     internal static bool IsCasedI(Info info, int ch)
     {
-        if ((info.Flags & RegexFlags.Locale) != 0)
-        {
-            throw new NotImplementedException(
-                "needs:locale-flag - the LOCALE encoding's casing depends on the C locale (S09)"
-            );
-        }
+        ArgumentNullException.ThrowIfNull(info);
 
-        if (ch >= 0x80)
-        {
-            throw new NotImplementedException(
-                "needs:unicode-tables - deciding whether a non-ASCII character is cased needs the Unicode tables (S09)"
-            );
-        }
-
-        return RegexFlags.IsAlpha(ch);
+        return RegexModule.GetAllCases(info.Flags, (uint)ch).Length > 1;
     }
 
     /// <summary>Upstream <c>make_case_flags</c> (lines 419-427).</summary>
@@ -513,19 +497,20 @@ internal static class ParseFunctions
             // (*...
             int savedPos2 = source.Pos;
             string word = source.GetWhile(c => c is ')' or '>', include: false);
-            if (word.Length > 0)
+
+            // Upstream's test is word[:1].isalpha(), which is Unicode-aware: measured against the
+            // local oracle 2026-08-30, '(*e)' and '(*Ab)' both fail with "unknown verb" at
+            // position 2 while '(*\U0001F600)' falls through to "nothing to repeat" at 1, so the
+            // branch really does turn on Unicode letterhood and not on being ASCII. word[:1] is
+            // one codepoint to Python, so a supplementary-plane first character is one character
+            // there and a surrogate pair here; TryGetRuneAt reunites them, and answers false for
+            // an unpaired surrogate, which is not alphabetic either. The length check is not
+            // redundant: TryGetRuneAt throws rather than answering false for index 0 of "".
+            if (word.Length > 0 && Rune.TryGetRuneAt(word, 0, out Rune firstRune) && PythonStr.IsAlpha(firstRune.Value))
             {
-                // Upstream's test is word[:1].isalpha(), which is Unicode-aware: measured against
-                // the local oracle 2026-08-30, '(*e)' and '(*Ab)' both fail with "unknown verb"
-                // at position 2 while '(*\U0001F600)' falls through to "nothing to repeat" at 1,
-                // so the branch really does turn on Unicode letterhood and not on being ASCII.
-                RequireAscii(word[..1]);
-                if (RegexFlags.IsAlpha(word[0]))
-                {
-                    throw new NotImplementedException(
-                        "needs:backtracking-verbs - the VERBS table and its nodes are not ported yet (S11)"
-                    );
-                }
+                throw new NotImplementedException(
+                    "needs:backtracking-verbs - the VERBS table and its nodes are not ported yet (S11)"
+                );
             }
 
             // Upstream falls through to an unnamed capture group when the word is not alphabetic,
@@ -784,33 +769,19 @@ internal static class ParseFunctions
     /// <param name="name">The candidate name.</param>
     /// <returns><see langword="true"/> if every character is a digit.</returns>
     /// <remarks>
-    /// Python's version is Unicode-aware (superscript two is a digit to it), so anything outside
-    /// ASCII throws rather than guessing. <b>Upgrade path:</b> S09's Unicode tables.
+    /// Python's version is Unicode-aware - superscript two is a digit to it - so this goes through
+    /// the Unicode tables rather than testing for <c>0</c> to <c>9</c>.
     /// </remarks>
-    internal static bool IsDigitName(string name)
-    {
-        RequireAscii(name);
-        return name.Length > 0 && name.All(c => RegexFlags.IsDigit(c));
-    }
+    internal static bool IsDigitName(string name) => PythonStr.IsDigitString(name);
 
     /// <summary>Python's <c>str.isidentifier</c>, which upstream uses to validate a group name.</summary>
     /// <param name="name">The candidate name.</param>
     /// <returns><see langword="true"/> if it is a legal Python identifier.</returns>
     /// <remarks>
     /// Python's version accepts any character with the Unicode <c>XID_Start</c> or
-    /// <c>XID_Continue</c> property, so anything outside ASCII throws rather than guessing.
-    /// <b>Upgrade path:</b> S09's Unicode tables.
+    /// <c>XID_Continue</c> property, so this goes through the Unicode tables.
     /// </remarks>
-    internal static bool IsIdentifierName(string name)
-    {
-        RequireAscii(name);
-        if (name.Length == 0 || (!RegexFlags.IsAlpha(name[0]) && name[0] != '_'))
-        {
-            return false;
-        }
-
-        return name.All(c => RegexFlags.IsAlnum(c) || c == '_');
-    }
+    internal static bool IsIdentifierName(string name) => PythonStr.IsIdentifier(name);
 
     /// <summary>Upstream <c>parse_escape</c> (lines 1256-1337).</summary>
     /// <param name="source">The scanner.</param>
@@ -1411,15 +1382,5 @@ internal static class ParseFunctions
         }
 
         return text[start..end];
-    }
-
-    private static void RequireAscii(string name)
-    {
-        if (name.Any(c => c >= 0x80))
-        {
-            throw new NotImplementedException(
-                "needs:unicode-tables - a non-ASCII group name needs Python's Unicode identifier rules (S09)"
-            );
-        }
     }
 }
