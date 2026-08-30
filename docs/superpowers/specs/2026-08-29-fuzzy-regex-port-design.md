@@ -2,8 +2,8 @@
 
 Date: 2026-08-29
 Status: agreed (design approved in planning session). Amended 2026-08-29 during Phase 0 and
-slice S01 - see "Amendments" at the end; the amended text is inline, so this file remains the
-single source.
+slice S01, and 2026-08-30 at the Phase 1 checkpoint - see "Amendments" at the end; the amended
+text is inline, so this file remains the single source.
 Working name: **FuzzyRegex** (NuGet id, assembly and entry type; the namespace is
 `Fuzzy.Text.RegularExpressions` - see amendment 8. Rename is cheap any time before first
 publish)
@@ -142,11 +142,18 @@ results and writes `docs/STATUS.md` (parity percentage per feature area).
 
 ## 6. Unicode pipeline
 
-Port `tools/build_regex_unicode.py` to a C# console tool (`src/FuzzyRegex.UnicodeGenerator`) that
-reads UCD 17.0.0 data files and emits the table sources. Correctness is proven by oracle tests
-(`\p{...}` behaviour compared against Python for every property, script and block, sampled across
-all planes), not by reviewing generated output. An upstream Unicode bump becomes: drop in new UCD
-files, regenerate, run the oracle.
+The tables are **transliterated from upstream's generated `src/_regex_unicode.c`** by a script
+(`tools/transliterate-unicode.py`), not regenerated from UCD data files (Amendment 11, 2026-08-30;
+this originally said "port `tools/build_regex_unicode.py` to a C# console tool"). Upstream commits
+the generated C, so copying its numbers gives table parity by construction, where a second
+generator would be a second 1,800-line program whose only check is comparison with the first. An
+upstream Unicode bump becomes: bump the submodule, re-run the script, run the oracle. The one
+piece of data upstream does not ship is the character-name table behind `\N{...}` (upstream leans
+on CPython's `unicodedata`); that is generated once from the UCD 17.0.0 `UnicodeData.txt` and
+`NameAliases.txt` by a script in `tools/`. Correctness is proven by oracle tests (`\p{...}`
+behaviour compared against Python for every property, script and block, sampled across all
+planes), not by reviewing generated output. The tables land in Phase 2 (slice S09), because the
+parser consults them; see `docs/plan/2026-08-30-phase2-decisions.md`.
 
 ## 7. Repo layout and conventions
 
@@ -292,11 +299,11 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 |---|---|---|---|
 | 0 | Scaffolding: solution, props, CI, skills, driver script, budget-gate validation, AGENTS.md, slice files for Phase 1 | 1-2 | Opus |
 | 1 | Public API surface stub, then port the full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
-| 2 | Parser/compiler (`_regex_core.py`) + API skeleton | 5-8 | Opus |
+| 2 | Compile-parity corpus, then parser/compiler (`_regex_core.py`), Unicode tables, pattern-level API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
 | 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) | 3-5 | Opus/Sonnet |
 | 7 | Benchmarks + optimization | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 
@@ -455,3 +462,20 @@ amended text is inline above; this list is the record of what changed and why.
    exact upstream commit it is a port of, which is the ideal case for the technique. Where the
    oracle genuinely cannot reach, that paper's metamorphic relations from Kleene algebra are the
    complement to reach for in Phase 6.
+
+11. **Unicode tables are transliterated from upstream's generated C, land in Phase 2, and a
+   character-name table is generated for `\N{...}`** (sections 6 and 12). Made 2026-08-30 at the
+   Phase 1 checkpoint. Two findings forced it. First, the parser consults the Unicode data at
+   fourteen call sites (`fold_case`, `get_all_cases`, `get_expand_on_folding`,
+   `has_property_value`, `get_properties`): `\p{...}`, POSIX classes and every case-insensitive
+   pattern change the bytecode according to those tables, so a Phase 6 delivery would have left
+   most of Phase 2 unverifiable. Second, `_regex_unicode.c` is entirely generated (about 250
+   data arrays, three struct arrays, 104 lookup functions of roughly twenty statement shapes),
+   so reading it and writing C# gives parity by construction, whereas porting the 1,785-line
+   generator gives a second program to get right and nothing a pinned port can use. `\N{name}` is
+   the exception: upstream uses CPython's `unicodedata.lookup`, .NET has no character-name API,
+   and 41 ported tests need it, so a name table is generated from UCD 17.0.0 (34,137 stored
+   names after the algorithmic ranges are computed; roughly 200-300 KB). Options, measurements
+   and the divergence from CPython 3.14's 16.0.0 `unicodedata` are in
+   `docs/plan/2026-08-30-phase2-decisions.md`. Phase 2 also opens with a compile-parity corpus
+   (slice S06) for the same reason Phase 3 opens with the oracle. Decided by the project owner.

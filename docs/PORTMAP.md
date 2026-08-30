@@ -12,8 +12,8 @@ is ported; absence means it is not (yet).
 |---|---|
 | `regex/_regex_core.py` | `src/FuzzyRegex/Parsing/` |
 | `src/_regex.c` | `src/FuzzyRegex/Engine/` |
-| `src/_regex_unicode.c` | `src/FuzzyRegex/Unicode/` (generated - do not hand-edit) |
-| `tools/build_regex_unicode.py` | `src/FuzzyRegex.UnicodeGenerator/` |
+| `src/_regex_unicode.c` | `src/FuzzyRegex/Unicode/` (transliterated by `tools/transliterate-unicode.py` in S09 - do not hand-edit) |
+| `tools/build_regex_unicode.py` | not ported: upstream commits its output and we transliterate that (`docs/plan/2026-08-30-phase2-decisions.md`, decision A) |
 | `regex/_main.py` | `src/FuzzyRegex/` (namespace `Fuzzy.Text.RegularExpressions`) |
 | `regex/tests/test_regex.py` | `tests/FuzzyRegex.Tests/Ported/` |
 

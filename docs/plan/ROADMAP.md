@@ -12,11 +12,11 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 |---|---|---:|---|
 | 0 | Scaffolding: solution, build props, CI, skills, driver script, budget gate, slice files for phase 1 | 1-2 | Opus |
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
-| 2 | Parser and compiler (`_regex_core.py`), public API | 5-8 | Opus |
+| 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes), Unicode generator, gap tests | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests | 3-5 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 
@@ -36,6 +36,16 @@ infrastructure already exists from phase 0 (`tests/FuzzyRegex.OracleTests/`, `or
 Python `regex` installed), so this is a change of when the harness gets written, not of what has
 to be built. Design spec amendment 10 has the evidence and the one caveat that does not apply
 to us.
+
+**Phase 2 opens with a compile-parity corpus, and carries the Unicode tables.** Both changes were
+made at the Phase 1 checkpoint (2026-08-30). The parser's output is bytecode, and upstream's
+bytecode is observable by intercepting `_regex.compile` while upstream's own suite runs: 1,534
+patterns, 46 parse errors and 62 replacement templates, bit-exact. That is the oracle for a phase
+in which nothing can match yet, so it is slice S06 and every later slice is verified against it.
+The Unicode tables were parked in Phase 6, but the parser consults them for `\p{...}`, for every
+case-insensitive pattern and for `\N{...}`, so they cannot wait; they are S09, transliterated
+from upstream's generated C rather than regenerated. The reasoning and the measurements are in
+`docs/plan/2026-08-30-phase2-decisions.md`. The estimate moved from 5-8 to 8 sessions.
 
 ## Candidates parked for later
 

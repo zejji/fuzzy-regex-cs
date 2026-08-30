@@ -1,7 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/FuzzyRegex/FuzzyRegex.csproj" />
-    <Project Path="src/FuzzyRegex.UnicodeGenerator/FuzzyRegex.UnicodeGenerator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj" />

@@ -2,35 +2,29 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase:** 1 is COMPLETE. Phase 2 - parser, compiler and public API - has no slice files yet.
+**Phase:** 2 - parser, compiler, Unicode tables, pattern-level public API. Eight slices authored
+and approved by the owner on 2026-08-30 (S06-S13). None started.
 
-**Last completed:** S05, upstream tests for lines 3084-4540 (2026-08-30).
+**Last completed:** Phase 1 checkpoint (2026-08-30): slice files, decisions A-D, spec amendment
+11, generator project deleted.
 
-**Current slice:** none. `docs/plan/slices/` is empty, so `tools/run-slices.ps1` stops here at the
-phase boundary. This is the owner checkpoint described in `docs/plan/OPERATIONS.md`.
+**Current slice:** none in flight. Next is `docs/plan/slices/S06-compile-parity-corpus.md`.
 
-**Next action:** owner reviews `docs/STATUS.md`, then authors and approves the Phase 2 slices.
-Do not start engine work before those exist.
+**Next action:** `tools/run-slices.ps1` (Opus by default). Phase boundary is after S13.
 
 **Blockers:** none.
 
-**Where phase 1 finished:** 1966 ported upstream tests across 31 feature areas, all skipped, plus
-15 gap tests and 21 convention tests. Ratchet GREEN at 2002 tests, baseline 34. All 102 upstream
-test methods accounted for: 91 ported, 11 recorded in `docs/PORTMAP.md` as not ported with a
-reason. The biggest capabilities waiting are at the bottom of `docs/STATUS.md`; that table is what
-Phase 2 slice authoring should work from.
-
 **Worth knowing before the next slice:**
 
-- **Non-BMP data exists after all, at two sites**, both in S05: `test_hg_bugs` #373 and #433-434.
-  A range scan must resolve `\N{...}` names via `unicodedata.lookup`, not just look for astral
-  literals and `\U` escapes - that omission hid the second site from S05's own measurement.
-- **`cat -A` is the only cheap way to see a backslash or an invisible character.** The Read tool
-  renders `\\X` and `\X` identically, and Edit/Write decode a `\uXXXX` escape before it reaches
-  disk. Write escape text from a Python script; prefer `char.ConvertFromUtf32` for astral chars.
-- **Build centrally, once, at the end.** Parallel agents each running `dotnet build` in a shared
-  tree see each other's half-written files and one of them "fixed" that by renaming siblings to
-  `*.bak`. The single central build is also what caught every analyzer failure.
-- **Phase 2 must not un-skip by tag alone** - read the skip prose first (DECISIONS, 2026-08-29).
-- `docs/plan/slice-log.jsonl` is still empty: no slice has ever run under the driver, so there is
-  no measured tokens-per-slice figure. S05's closing notes give the transcript-derived estimate.
+- **Nothing in Phase 2 can match a string.** The ported suite verifies almost none of it; the
+  S06 compile-parity corpus (upstream's exact bytecode for 1534 patterns) is the oracle, and
+  every slice's done-criterion is "its corpus rows pass, no row fails".
+- **Phase 2 changed the plan in four places**; the reasoning is in
+  `docs/plan/2026-08-30-phase2-decisions.md` and the one-liners in DECISIONS (2026-08-30).
+  Read it if anything in a slice looks like a departure from the spec.
+- **84 upstream compiles are nondeterministic** (set order). S06 sorts at two named points on
+  both sides; S07 and S08 must sort identically or the corpus will disagree on those rows.
+- **Slices are vertical.** Every function not yet ported throws `NotImplementedException`
+  naming the construct; the corpus tests turn that into a skip and anything else into a failure.
+- **S07 adds the first instance fields** to `FuzzyRegex`: the `initonly` reflection test
+  (DECISIONS 2026-08-29) is due there. Build centrally, once, at the end of a slice (S05 notes).

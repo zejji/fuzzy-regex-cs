@@ -29,7 +29,7 @@ src/FuzzyRegex/Parsing/     port of upstream/regex/_regex_core.py
 src/FuzzyRegex/Engine/      port of upstream/src/_regex.c
 src/FuzzyRegex/Unicode/     generated tables - never hand-edit
 src/FuzzyRegex/             public API (port of upstream/regex/_main.py)
-src/FuzzyRegex.UnicodeGenerator/   port of upstream/tools/build_regex_unicode.py
+tools/transliterate-unicode.py   writes Unicode/ from upstream/src/_regex_unicode.c (S09)
 tests/FuzzyRegex.Tests/Ported/     translated upstream tests - counts towards parity
 tests/FuzzyRegex.Tests/Gaps/       our own tests - does not count towards parity
 tests/FuzzyRegex.OracleTests/      differential harness against Python regex
