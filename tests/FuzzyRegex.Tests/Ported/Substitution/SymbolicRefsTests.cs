@@ -11,7 +11,6 @@ public sealed class SymbolicRefsTests
     [Test]
     // Upstream asserts a specific message (MISSING_GT = "missing >"); we assert only the
     // exception type since our parser's messages are not decided yet.
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#1")]
     public void Replace_with_an_unterminated_named_group_reference_throws()
     {
@@ -21,7 +20,6 @@ public sealed class SymbolicRefsTests
     }
 
     [Test]
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#2")]
     public void Replace_with_an_empty_named_group_reference_throws()
     {
@@ -31,7 +29,6 @@ public sealed class SymbolicRefsTests
     }
 
     [Test]
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#3")]
     public void Replace_with_a_bare_g_and_no_angle_brackets_throws()
     {
@@ -43,7 +40,6 @@ public sealed class SymbolicRefsTests
     [Test]
     [Arguments(@"\g<a a>")]
     [Arguments(@"\g<1a1>")]
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#4-5")]
     public void Replace_with_a_malformed_group_name_throws(string replacement)
     {
@@ -54,7 +50,6 @@ public sealed class SymbolicRefsTests
 
     [Test]
     // upstream raises IndexError
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#6")]
     public void Replace_with_a_reference_to_an_unknown_group_name_throws()
     {
@@ -76,7 +71,6 @@ public sealed class SymbolicRefsTests
         FuzzyRegex.Replace("xx", "(?P<a>x)|(?P<b>y)", @"\2").Should().Be("");
 
     [Test]
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate \\g<name> template syntax")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#9")]
     public void Replace_with_a_negative_group_number_throws()
     {

@@ -9,7 +9,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Escapes;
 public sealed class EscapeFunctionTests
 {
     [Test]
-    [Skip("needs:escape-function - FuzzyRegex.Escape is unimplemented")]
     [Property("Upstream", "RegexTests.test_re_escape#1")]
     public void Escaping_the_empty_string_returns_the_empty_string() => FuzzyRegex.Escape("").Should().Be("");
 
@@ -18,7 +17,7 @@ public sealed class EscapeFunctionTests
     // loop are the same invariant repeated over data, not independent behaviours, and 256 rows adds
     // bulk without adding signal.
     [Test]
-    [Skip("needs:escape-function - FuzzyRegex.Escape is unimplemented")]
+    [Skip("needs:basic-matching - Escape lands in S12; this assertion also needs MatchAtStart")]
     [Property("Upstream", "RegexTests.test_re_escape#2-3")]
     public void Every_code_point_0_to_255_matches_itself_once_escaped()
     {
@@ -33,7 +32,7 @@ public sealed class EscapeFunctionTests
     }
 
     [Test]
-    [Skip("needs:escape-function - FuzzyRegex.Escape is unimplemented")]
+    [Skip("needs:basic-matching - Escape lands in S12; this assertion also needs MatchAtStart")]
     [Property("Upstream", "RegexTests.test_re_escape#4")]
     public void Escaping_all_256_code_points_together_still_matches_them_all()
     {
@@ -46,7 +45,6 @@ public sealed class EscapeFunctionTests
     }
 
     [Test]
-    [Skip("needs:escape-function - FuzzyRegex.Escape is unimplemented")]
     [Property("Upstream", "RegexTests.test_bug_612074#1")]
     public void Escaping_a_character_for_use_inside_a_set_compiles()
     {

@@ -244,13 +244,104 @@ internal static class PatternCompiler
     /// (<c>upstream/regex/_regex_core.py</c> lines 1902-1918) reads from the pattern. Templates
     /// are therefore verifiable before any pattern compiles.
     /// </remarks>
-    /// <param name="template">The replacement template.</param>
+    /// <param name="replacement">The replacement template.</param>
     /// <param name="groupCount">The pattern's capture group count, for validating <c>\g&lt;n&gt;</c>.</param>
     /// <param name="groupIndex">The pattern's group names, for resolving <c>\g&lt;name&gt;</c>.</param>
     /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
     internal static IReadOnlyList<object> CompileReplacement(
-        string template,
+        string replacement,
         int groupCount,
         IReadOnlyDictionary<string, int> groupIndex
-    ) => throw new NotImplementedException("needs:substitution - the template compiler is not ported yet");
+    )
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        // NOT PORTED: the replacement cache, for the same reason the pattern cache is not.
+        var source = new Source(replacement);
+        List<object> compiled = [];
+        List<long> literal = [];
+
+        while (true)
+        {
+            int ch = source.Get();
+            if (ch == Source.EndOfSource)
+            {
+                break;
+            }
+
+            if (ch == '\\')
+            {
+                // ParseFunctions.CompileReplacement returns either a group number or the character
+                // codes of a literal. It returns items (plural) in order to handle a 2-character
+                // literal (an invalid escape sequence).
+                (bool isGroup, long[] items) = ParseFunctions.CompileReplacement(source, groupCount, groupIndex);
+                if (isGroup)
+                {
+                    // It's a group, so first flush the literal.
+                    if (literal.Count > 0)
+                    {
+                        compiled.Add(MakeString(literal));
+                        literal.Clear();
+                    }
+
+                    foreach (long item in items)
+                    {
+                        compiled.Add((int)item);
+                    }
+                }
+                else
+                {
+                    literal.AddRange(items);
+                }
+            }
+            else
+            {
+                literal.Add(ch);
+            }
+        }
+
+        // Flush the literal.
+        if (literal.Count > 0)
+        {
+            compiled.Add(MakeString(literal));
+        }
+
+        return compiled;
+    }
+
+    /// <summary>
+    /// Upstream's <c>make_string</c> closure (<c>upstream/regex/_main.py</c> lines 703-704):
+    /// <c>"".join(chr(c) for c in char_codes)</c>.
+    /// </summary>
+    /// <remarks>
+    /// A codepoint above U+10FFFF is reachable - <c>\UFFFFFFFF</c> is a well-formed escape that
+    /// <c>parse_repl_hex_escape</c> does not range-check - and upstream fails it here, with an
+    /// uncaught <c>ValueError</c> from <c>chr()</c> rather than with its own error type. As with
+    /// the patterns in <c>Gaps/Parsing/UpstreamInternalErrorTests</c>, there is no specified
+    /// behaviour to port; what matters is that the template is rejected.
+    /// </remarks>
+    private static string MakeString(List<long> charCodes)
+    {
+        var text = new System.Text.StringBuilder(charCodes.Count);
+        foreach (long code in charCodes)
+        {
+            if (code <= char.MaxValue)
+            {
+                // Includes a lone surrogate, which chr() also produces happily.
+                text.Append((char)code);
+            }
+            else if (code <= 0x10FFFF)
+            {
+                text.Append(char.ConvertFromUtf32((int)code));
+            }
+            else
+            {
+                throw new NotSupportedException(
+                    $"chr({code}) would raise ValueError: chr() arg not in range(0x110000)"
+                );
+            }
+        }
+
+        return text.ToString();
+    }
 }

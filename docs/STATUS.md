@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 0.7%** (14 of 1966 ported upstream tests passing).
+**Overall parity: 1.6%** (32 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -23,7 +23,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Captures | 8 | 0 | 8 | 0 | 0.0% |
 | CaseFolding | 69 | 0 | 69 | 0 | 0.0% |
 | CharacterClasses | 52 | 0 | 52 | 0 | 0.0% |
-| Escapes | 103 | 0 | 103 | 0 | 0.0% |
+| Escapes | 103 | 2 | 101 | 0 | 1.9% |
 | FindAll | 27 | 0 | 27 | 0 | 0.0% |
 | Flags | 20 | 4 | 16 | 0 | 20.0% |
 | Format | 11 | 0 | 11 | 0 | 0.0% |
@@ -38,10 +38,10 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 0 | 16 | 0 | 0.0% |
 | Quantifiers | 53 | 0 | 53 | 0 | 0.0% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 5 | 459 | 0 | 1.1% |
+| Regressions | 464 | 14 | 450 | 0 | 3.0% |
 | Reverse | 37 | 0 | 37 | 0 | 0.0% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
-| Substitution | 88 | 0 | 88 | 0 | 0.0% |
+| Substitution | 88 | 7 | 81 | 0 | 8.0% |
 | UnicodeProperties | 70 | 0 | 70 | 0 | 0.0% |
 | Various | 524 | 0 | 524 | 0 | 0.0% |
 | ZeroWidth | 14 | 0 | 14 | 0 | 0.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 1878 | 1657 | 221 | 0 |
+| Gaps | 1918 | 1759 | 159 | 0 |
 
 ## Tests waiting on a capability
 
@@ -63,24 +63,24 @@ What the next slice should deliver, biggest win first.
 |---|---:|
 | `fuzzy-syntax` | 184 |
 | `quantifiers` | 179 |
-| `substitution` | 148 |
 | `ignore-case` | 144 |
 | `escapes` | 134 |
 | `character-classes` | 114 |
 | `unicode-properties` | 95 |
 | `anchors` | 87 |
+| `substitution` | 86 |
 | `partial` | 82 |
-| `parse-errors` | 71 |
 | `case-folding` | 69 |
+| `parse-errors` | 63 |
 | `conditionals` | 58 |
 | `named-lists` | 50 |
 | `fuzzy-matching` | 48 |
 | `right-to-left` | 47 |
-| `basic-matching` | 40 |
+| `basic-matching` | 42 |
 | `backrefs` | 40 |
 | `find-all` | 37 |
-| `groups` | 34 |
 | `backtracking-verbs` | 34 |
+| `groups` | 34 |
 | `recursion` | 33 |
 | `lookaround` | 32 |
 | `inline-flags` | 29 |
@@ -91,22 +91,21 @@ What the next slice should deliver, biggest win first.
 | `named-groups` | 23 |
 | `branch-reset` | 21 |
 | `alternation` | 18 |
-| `fuzzy-bestmatch` | 18 |
 | `word-flag` | 18 |
-| `fuzzy-budget` | 17 |
+| `fuzzy-bestmatch` | 18 |
 | `line-boundaries` | 17 |
+| `fuzzy-budget` | 17 |
 | `define-groups` | 15 |
 | `lookbehind` | 13 |
-| `escape-function` | 12 |
 | `captures` | 12 |
 | `version-flags` | 11 |
 | `format` | 11 |
+| `possessive` | 8 |
 | `fuzzy-changes` | 8 |
 | `grapheme` | 8 |
-| `possessive` | 8 |
 | `posix-matching` | 8 |
-| `full-match` | 7 |
 | `atomic` | 7 |
+| `full-match` | 7 |
 | `fuzzy-enhancematch` | 6 |
 | `keep-marker` | 6 |
 | `overlapped` | 4 |

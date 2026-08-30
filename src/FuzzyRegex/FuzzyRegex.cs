@@ -55,6 +55,12 @@ public sealed class FuzzyRegex
     private static readonly int _unexposedFlags = ~Enum.GetValues<FuzzyRegexOptions>()
         .Aggregate(0, (mask, option) => mask | (int)option);
 
+    /// <summary>
+    /// Upstream <c>_METACHARS</c> (<c>upstream/regex/_main.py</c> line 445): the characters
+    /// <see cref="Escape(string, bool, bool)"/> escapes when <c>specialOnly</c> is set.
+    /// </summary>
+    private const string _metachars = "()[]{}?*+|^$\\.-#&~";
+
     private readonly Parsing.CompiledPattern _compiled;
     private readonly string[] _groupNames;
     private readonly int[] _groupNumbers;
@@ -201,6 +207,20 @@ public sealed class FuzzyRegex
     public int GroupNumberFromName(string name) => _compiled.GroupIndex.GetValueOrDefault(name, -1);
 
     /// <summary>
+    /// Compiles a replacement template against this pattern's groups and discards the result,
+    /// which is all this port can do with it until the engine lands. Upstream compiles the
+    /// template before it starts matching, so a malformed one is rejected whether or not the
+    /// pattern matches: measured against <c>regex</c> 2026.7.19 on 2026-08-31,
+    /// <c>regex.sub('x', r'\g&lt;bad', 'z')</c> raises <c>missing &gt;</c> on a subject with no
+    /// match at all, while <c>regex.sub('x', r'\2', 'z')</c> returns <c>'z'</c> - the
+    /// group-number check happens during expansion, which needs a match.
+    /// </summary>
+    /// <param name="replacement">The replacement template.</param>
+    /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
+    private void ValidateReplacement(string replacement) =>
+        _ = Parsing.PatternCompiler.CompileReplacement(replacement, _compiled.GroupCount, _compiled.GroupIndex);
+
+    /// <summary>
     /// Adapts the public named-list shape to the compiler's. The compiler takes a list because
     /// <c>StringSet.__init__</c> sorts its branches by length with a stable sort, so the caller's
     /// order survives among equal-length members; the public surface takes an
@@ -339,7 +359,12 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <returns>The subject with the matches replaced.</returns>
-    public string Replace(string input, string replacement, int count = -1) => throw new NotImplementedException();
+    /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
+    public string Replace(string input, string replacement, int count = -1)
+    {
+        ValidateReplacement(replacement);
+        throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Replaces matches with an expanded replacement template, reporting how many were replaced.
@@ -350,8 +375,12 @@ public sealed class FuzzyRegex
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <returns>The subject with the matches replaced.</returns>
-    public string Replace(string input, string replacement, int count, out int replacements) =>
+    /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
+    public string Replace(string input, string replacement, int count, out int replacements)
+    {
+        ValidateReplacement(replacement);
         throw new NotImplementedException();
+    }
 
     /// <summary>Replaces matches with text computed per match.</summary>
     /// <param name="input">The subject to search.</param>
@@ -505,12 +534,15 @@ public sealed class FuzzyRegex
     /// <param name="replacement">The replacement template.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
     /// <returns>The subject with the matches replaced.</returns>
+    /// <exception cref="FuzzyRegexParseException">
+    /// The pattern or the template is not valid.
+    /// </exception>
     public static string Replace(
         string input,
         string pattern,
         string replacement,
         FuzzyRegexOptions options = FuzzyRegexOptions.None
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options).Replace(input, replacement);
 
     /// <summary>
     /// Replaces matches with text computed per match. Upstream <c>regex.sub</c> with a callable.
@@ -579,13 +611,45 @@ public sealed class FuzzyRegex
     /// <c>escape('foo!?', special_only=False)</c> is <c>foo\!\?</c>; <c>escape('a b')</c> is
     /// <c>a\ b</c> but <c>escape('a b', literal_spaces=True)</c> is <c>a b</c>.
     /// </remarks>
-    public static string Escape(string input, bool specialOnly = true, bool literalSpaces = false) =>
-        throw new NotImplementedException();
+    /// <exception cref="ArgumentNullException"><paramref name="input"/> is null.</exception>
+    public static string Escape(string input, bool specialOnly = true, bool literalSpaces = false)
+    {
+        ArgumentNullException.ThrowIfNull(input);
 
-    /// <summary>Reverses <see cref="Escape(string, bool, bool)"/>.</summary>
-    /// <param name="input">The escaped text.</param>
-    /// <returns>The unescaped text.</returns>
-    public static string Unescape(string input) => throw new NotImplementedException();
+        var escaped = new System.Text.StringBuilder(input.Length);
+
+        // Whole codepoints, as upstream iterates a Python str: a non-BMP character takes one
+        // backslash, not one per surrogate. Written out rather than using EnumerateRunes because
+        // that replaces a lone surrogate with U+FFFD, and a lone surrogate is a legal char here
+        // exactly as it is a legal element of a Python str.
+        int i = 0;
+        while (i < input.Length)
+        {
+            int length =
+                char.IsHighSurrogate(input[i]) && i + 1 < input.Length && char.IsLowSurrogate(input[i + 1]) ? 2 : 1;
+            int c = length == 2 ? char.ConvertToUtf32(input[i], input[i + 1]) : input[i];
+
+            // Upstream writes this as two loops, one per value of special_only; one loop with the
+            // condition inside it says the same thing without repeating the surrogate walk.
+            bool escape =
+                (c is not ' ' || !literalSpaces)
+                && (
+                    specialOnly
+                        ? (c <= char.MaxValue && _metachars.Contains((char)c)) || Parsing.Source.IsSpace(c)
+                        : !Parsing.RegexFlags.IsAlnum(c)
+                );
+
+            if (escape)
+            {
+                escaped.Append('\\');
+            }
+
+            escaped.Append(input, i, length);
+            i += length;
+        }
+
+        return escaped.ToString();
+    }
 
     /// <summary>Returns <see cref="Pattern"/>.</summary>
     /// <returns>The pattern this instance was compiled from.</returns>

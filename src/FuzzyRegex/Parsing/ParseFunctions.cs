@@ -2085,6 +2085,238 @@ internal static class ParseFunctions
         throw UnknownProperty(source, "unknown property");
     }
 
+    /// <summary>Upstream <c>_compile_replacement</c> (lines 1801-1871).</summary>
+    /// <param name="source">The scanner, positioned just after the backslash.</param>
+    /// <param name="groupCount">The pattern's capture group count, for <c>\g&lt;n&gt;</c>.</param>
+    /// <param name="groupIndex">The pattern's group names, for <c>\g&lt;name&gt;</c>.</param>
+    /// <returns>
+    /// Whether the escape is a group reference, and the group number if it is or the character
+    /// codes it stands for if it is not. Upstream returns a list rather than a single item so that
+    /// an invalid escape can give back both the backslash and the character after it.
+    /// <see cref="long"/> rather than <see cref="int"/> because <c>\UFFFFFFFF</c> is a legal
+    /// escape here - upstream leaves it to fail in <c>chr()</c> - and does not fit an
+    /// <see cref="int"/>.
+    /// </returns>
+    /// <remarks>
+    /// Upstream's <c>is_unicode</c> is always true here and its <c>source.sep</c> is always a
+    /// <c>str</c>, because this port has no bytes templates - so <c>\u</c>, <c>\U</c> and
+    /// <c>\N{...}</c> are always available and the octal mask is always <c>0x1FF</c>.
+    /// </remarks>
+    /// <exception cref="FuzzyRegexParseException">The escape is not valid.</exception>
+    internal static (bool IsGroup, long[] Items) CompileReplacement(
+        Source source,
+        int groupCount,
+        IReadOnlyDictionary<string, int> groupIndex
+    )
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        // Upstream: octal_mask = 0xFF for a bytes template, 0x1FF for a str one.
+        const int octalMask = 0x1FF;
+
+        int ch = source.Get();
+        if (RegexFlags.IsAlpha(ch))
+        {
+            // An alphabetic escape sequence.
+            if (RegexFlags.CharacterEscapes.TryGetValue((char)ch, out char value))
+            {
+                return (false, [value]);
+            }
+
+            if (RegexFlags.HexEscapes.TryGetValue((char)ch, out int expectedLength))
+            {
+                // A hexadecimal escape sequence.
+                return (false, [ParseReplHexEscape(source, expectedLength, (char)ch)]);
+            }
+
+            if (ch == 'g')
+            {
+                // A group preference.
+                return (true, [CompileReplGroup(source, groupCount, groupIndex)]);
+            }
+
+            if (ch == 'N')
+            {
+                // A named character.
+                int? named = ParseReplNamedChar(source);
+                if (named is not null)
+                {
+                    return (false, [named.Value]);
+                }
+            }
+
+            throw new FuzzyRegexParseException($"bad escape \\{(char)ch}", source.String, source.Pos);
+        }
+
+        if (ch == '0')
+        {
+            // An octal escape sequence.
+            var octal = new StringBuilder().Append('0');
+            while (octal.Length < 3)
+            {
+                int savedPos = source.Pos;
+                ch = source.Get();
+                if (!RegexFlags.IsOctDigit(ch))
+                {
+                    source.Pos = savedPos;
+                    break;
+                }
+
+                octal.Append((char)ch);
+            }
+
+            return (false, [Convert.ToInt32(octal.ToString(), 8) & octalMask]);
+        }
+
+        if (RegexFlags.IsDigit(ch))
+        {
+            // Either an octal escape sequence (3 digits) or a group reference (max 2 digits).
+            string digits = ((char)ch).ToString();
+            int savedPos = source.Pos;
+            ch = source.Get();
+            if (RegexFlags.IsDigit(ch))
+            {
+                digits += (char)ch;
+                savedPos = source.Pos;
+                ch = source.Get();
+
+                // Upstream: `if ch and is_octal(digits + ch)`. The end of the template is falsy
+                // there and EndOfSource is not an octal digit here, so the two agree.
+                if (RegexFlags.IsOctDigit(ch) && digits.All(c => RegexFlags.IsOctDigit(c)))
+                {
+                    // An octal escape sequence.
+                    return (false, [Convert.ToInt32(digits + (char)ch, 8) & octalMask]);
+                }
+            }
+
+            // A group reference. At most two ASCII digits, so int.Parse cannot overflow -
+            // unlike the \g<...> path, which takes an unbounded Python int.
+            source.Pos = savedPos;
+            return (true, [int.Parse(digits, CultureInfo.InvariantCulture)]);
+        }
+
+        if (ch == '\\')
+        {
+            // An escaped backslash is a backslash.
+            return (false, ['\\']);
+        }
+
+        if (ch == Source.EndOfSource)
+        {
+            // A trailing backslash.
+            throw new FuzzyRegexParseException("bad escape (end of pattern)", source.String, source.Pos);
+        }
+
+        // An escaped non-backslash is a backslash followed by the literal.
+        return (false, ['\\', ch]);
+    }
+
+    /// <summary>Upstream <c>parse_repl_hex_escape</c> (lines 1873-1883).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="expectedLength">How many hex digits the escape takes.</param>
+    /// <param name="type">The escape letter, for the error message.</param>
+    /// <returns>The value the escape spells.</returns>
+    /// <remarks>
+    /// No range check, unlike <see cref="ParseHexEscape"/>: upstream leaves <c>\UFFFFFFFF</c> to
+    /// fail later in <c>chr()</c>. See <c>PatternCompiler.MakeString</c>.
+    /// </remarks>
+    private static long ParseReplHexEscape(Source source, int expectedLength, char type)
+    {
+        var digits = new List<char>();
+        for (int i = 0; i < expectedLength; i++)
+        {
+            int ch = source.Get();
+            if (!RegexFlags.IsHexDigit(ch))
+            {
+                throw new FuzzyRegexParseException(
+                    $"incomplete escape \\{type}{new string([.. digits])}",
+                    source.String,
+                    source.Pos
+                );
+            }
+
+            digits.Add((char)ch);
+        }
+
+        return long.Parse(new string([.. digits]), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Upstream <c>parse_repl_named_char</c> (lines 1885-1900).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <returns>The codepoint, or <see langword="null"/> when there is no <c>{...}</c> here.</returns>
+    /// <remarks>
+    /// The name characters are <c>ALPHA | {" "}</c>, which is <b>narrower</b> than the pattern-side
+    /// <c>parse_named_char</c>'s <c>NAMED_CHAR_PART</c> (<c>ALNUM | {" ", "-"}</c>): a digit or a
+    /// hyphen ends the name here, so the <c>}</c> is not found and the whole thing rewinds to a
+    /// literal <c>N</c>.
+    /// </remarks>
+    private static int? ParseReplNamedChar(Source source)
+    {
+        int savedPos = source.Pos;
+        if (source.MatchText("{"))
+        {
+            string name = source.GetWhile(c => RegexFlags.IsAlpha(c) || c == ' ');
+
+            if (source.MatchText("}"))
+            {
+                // Upstream's unicodedata.lookup, whose KeyError becomes this error.
+                if (!UnicodeCharacterNames.TryLookup(name, out int value))
+                {
+                    throw new FuzzyRegexParseException("undefined character name", source.String, source.Pos);
+                }
+
+                return value;
+            }
+        }
+
+        source.Pos = savedPos;
+        return null;
+    }
+
+    /// <summary>Upstream <c>compile_repl_group</c> (lines 1902-1918).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="groupCount">The pattern's capture group count.</param>
+    /// <param name="groupIndex">The pattern's group names.</param>
+    /// <returns>The group number the reference resolves to.</returns>
+    /// <remarks>
+    /// Upstream raises <c>IndexError("unknown group")</c> for a name the pattern does not have,
+    /// which is not its own <c>error</c> type and carries no offset. The port raises
+    /// <see cref="ArgumentException"/>: the template is a caller's argument, it is what
+    /// <c>Regex</c> raises for the same mistake, and it is what the ported
+    /// <c>SymbolicRefsTests</c> asserts. Recorded in <c>docs/PORTMAP.md</c>.
+    /// </remarks>
+    private static int CompileReplGroup(Source source, int groupCount, IReadOnlyDictionary<string, int> groupIndex)
+    {
+        source.Expect("<");
+        string name = ParseName(source, allowNumeric: true, allowGroup0: true);
+
+        source.Expect(">");
+        if (IsDigitName(name))
+        {
+            // Python's unbounded int(), as everywhere a group name is read as a number.
+            BigInteger index = ParsePythonInt(name);
+            if (index < 0 || index > groupCount)
+            {
+                throw new FuzzyRegexParseException("invalid group reference", source.String, source.Pos);
+            }
+
+            return (int)index;
+        }
+
+        // CA2208, S3928 and MA0015 all want the paramName to name a parameter of *this* method.
+        // They are right in general and wrong here: the argument at fault is the public
+        // `replacement` parameter of FuzzyRegex.Replace and Match.Result, which is what a caller
+        // can act on, and this private helper sits three frames below it. The alternatives are a
+        // paramName naming one of this method's own arguments, which would be false, or an extra
+        // parameter carrying a string the Source already holds, which is worse code for nothing.
+        // Disapplied here and nowhere else; see DECISIONS 2026-08-31.
+#pragma warning disable CA2208, S3928, MA0015
+        return groupIndex.TryGetValue(name, out int number)
+            ? number
+            : throw new ArgumentException("unknown group", "replacement");
+#pragma warning restore CA2208, S3928, MA0015
+    }
+
     /// <summary>
     /// The three <c>CHARSET_ESCAPES</c> tables and the choice between them: upstream
     /// <c>CHARSET_ESCAPES</c>, <c>ASCII_CHARSET_ESCAPES</c> and <c>UNICODE_CHARSET_ESCAPES</c>

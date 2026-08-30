@@ -28,13 +28,18 @@ public sealed class RegressionsParseErrorTests
 
     // Hg issue 80: Escape characters throws an exception.
     [Test]
-    [Skip("needs:parse-errors - a trailing backslash in a replacement string does not raise")]
+    // Split into message and offset by S12, as this class's remarks require. The template is
+    // compiled before any matching happens, so this raises even though the engine does not exist
+    // yet - measured against regex 2026.7.19 on 2026-08-31 with a subject that cannot match:
+    //     '\\'         on 'z': error msg='bad escape (end of pattern)' pos=1
     [Property("Upstream", "RegexTests.test_hg_bugs#55")]
     public void Trailing_backslash_in_a_replacement_string_reports_its_position()
     {
         Action act = () => FuzzyRegex.Replace("x", "x", "\\");
 
-        act.Should().Throw<FuzzyRegexParseException>().WithMessage("bad escape (end of pattern) at position 1");
+        var error = act.Should().Throw<FuzzyRegexParseException>().Which;
+        error.Message.Should().Be("bad escape (end of pattern)");
+        error.Offset.Should().Be(1);
     }
 
     // Hg issue 95: 'pos' for regex.error.
