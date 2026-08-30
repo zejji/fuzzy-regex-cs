@@ -54,6 +54,17 @@ dotnet_naming_style.underscore_camel.capitalization = camel_case
 ; --- Global analyzer adjustments -----------------------------------------
 ; CA1051: Do not declare visible instance fields.
 ; Matching-state structs expose fields deliberately; properties cost indirection on hot paths.
+;
+; INCOMPLETE, and deliberately left that way for now. The struct this was written for does not
+; exist yet - the Engine arrives in Phase 3 - so CA1051 fires zero times today. When it does
+; land, this line alone will NOT be enough: Sonar's S1104 says the same thing, is not suppressed
+; anywhere, and defaults to warning, which TreatWarningsAsErrors turns into a build error on
+; exactly that shape. MA0008 (add StructLayoutAttribute) fires on it too. Measured 2026-08-31
+; against this file unmodified, with a representative struct at src/FuzzyRegex/Engine/ZState.cs:
+;   ZState.cs(7,16): error S1104: Make this field 'private' and encapsulate it in a 'public' property.
+;   ZState.cs(4,15): error MA0008: Add StructLayoutAttribute
+; Add S1104 and MA0008 in the engine scope in the slice that lands the struct, not before -
+; suppressing rules for code that does not exist yet only hides findings in the meantime.
 dotnet_diagnostic.CA1051.severity = none
 
 ; MA0002/MA0011: require an explicit StringComparer/IFormatProvider.
