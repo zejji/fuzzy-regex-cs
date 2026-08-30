@@ -180,8 +180,18 @@ rejects, all of which have already burned turns on real slices:
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in
   DECISIONS.md.
-- **Never disable an analyzer to get a build.** The per-directory relaxations in `.editorconfig`
-  already cover what a faithful port legitimately needs.
+- **Never disable an analyzer to get a build - but do decide each finding on its merits.** The
+  two honest options are to fix the underlying problem or to disapply the rule, and which is
+  right is a question about the rule, not about your deadline. Keep and obey rules that improve
+  correctness, catch real defects or protect type-safety. Disapply rules that are noise here,
+  buy nothing, or would force worse code - a faithful port cannot edit upstream's test data to
+  satisfy an analyzer that misreads a regex pattern as an IP address. What is banned is
+  suppressing to reach green without deciding, and contorting code to satisfy a rule that offers
+  nothing. When you disapply: use the narrowest scope that matches the reason, put it in
+  `.editorconfig` beside the existing per-directory relaxations, and write the reason - what the
+  rule wanted, and why it does not apply here. Say in your closing notes which option you chose
+  and why. A whole-repo disable is right only when the rule is wrong for the whole repo, and
+  that claim needs saying out loud.
 - **Never edit `docs/STATUS.md` or `tests/parity-baseline.json` by hand.** Both are generated.
 - **Stop rather than guess.** If the slice is blocked, write the blocker into STATE.md, commit
   that, and stop. A parked slice is cheap; a wrong slice built on a guess is not.
