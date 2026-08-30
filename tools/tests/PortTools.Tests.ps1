@@ -419,3 +419,117 @@ Describe 'Get-SliceFailureReason' {
         Get-SliceFailureReason @facts | Should -Match 'no commit'
     }
 }
+
+Describe 'Undo-FailedSlice' {
+    BeforeAll {
+        # A real repository, not a mock. This function's whole job is destroying and preserving
+        # work on disk, and every bug it has had was in what git actually did.
+        function script:New-ScratchRepo {
+            $path = Join-Path ([System.IO.Path]::GetTempPath()) "undo-slice-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $path | Out-Null
+            git -C $path init --quiet
+            git -C $path config user.email 'test@example.com'
+            git -C $path config user.name 'Test'
+            New-Item -ItemType Directory -Path (Join-Path $path 'docs/plan') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $path 'src') -Force | Out-Null
+            'baseline' | Set-Content (Join-Path $path 'src/kept.txt')
+            'docs/plan/slice-log.jsonl' | Set-Content (Join-Path $path '.gitignore')
+            git -C $path add -A
+            git -C $path commit --quiet -m 'baseline'
+            $path
+        }
+    }
+
+    It 'rescues uncommitted work into a stash instead of deleting it' {
+        $repo = script:New-ScratchRepo
+        try {
+            'green work' | Set-Content (Join-Path $repo 'src/new.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            $label = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07-parser-skeleton'
+
+            $label | Should -Match 'slice-rescue S07-parser-skeleton'
+            git -C $repo stash list | Should -Match 'slice-rescue'
+            # The rescued file is gone from the tree but recoverable from the stash.
+            Test-Path (Join-Path $repo 'src/new.txt') | Should -BeFalse
+            git -C $repo stash show --include-untracked --name-only 'stash@{0}' | Should -Contain 'src/new.txt'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'leaves the tree at HeadBefore, not at HEAD, when the session committed a red slice' {
+        # The case the reset was written for: a session commits and still fails. Resetting to
+        # HEAD would keep that commit and strand the slice.
+        $repo = script:New-ScratchRepo
+        try {
+            $head = (git -C $repo rev-parse HEAD).Trim()
+            'bad' | Set-Content (Join-Path $repo 'src/bad.txt')
+            git -C $repo add -A
+            git -C $repo commit --quiet -m 'a slice that failed the ratchet'
+
+            Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07' | Out-Null
+
+            (git -C $repo rev-parse HEAD).Trim() | Should -Be $head
+            Test-Path (Join-Path $repo 'src/bad.txt') | Should -BeFalse
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'keeps the gitignored slice log, because the budget gate counts from it' {
+        # -u rather than -a, and clean -fd rather than -fdx. Removing the log would reset the
+        # driver's own daily cap and let it run unlimited sessions.
+        $repo = script:New-ScratchRepo
+        try {
+            $log = Join-Path $repo 'docs/plan/slice-log.jsonl'
+            '{"slice":"S07"}' | Set-Content $log
+            'work' | Set-Content (Join-Path $repo 'src/new.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07' | Out-Null
+
+            Test-Path $log | Should -BeTrue
+            Get-Content $log | Should -Be '{"slice":"S07"}'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'leaves the working tree clean so the retry starts from known-good state' {
+        $repo = script:New-ScratchRepo
+        try {
+            'work' | Set-Content (Join-Path $repo 'src/new.txt')
+            'edit' | Add-Content (Join-Path $repo 'src/kept.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07' | Out-Null
+
+            git -C $repo status --porcelain | Should -BeNullOrEmpty
+            Get-Content (Join-Path $repo 'src/kept.txt') | Should -Be 'baseline'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'reports nothing and creates no stash when the tree was already clean' {
+        $repo = script:New-ScratchRepo
+        try {
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            $label = Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName 'S07'
+
+            $label | Should -BeNullOrEmpty
+            git -C $repo stash list | Should -BeNullOrEmpty
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'tolerates an empty slice name rather than throwing under StrictMode' {
+        $repo = script:New-ScratchRepo
+        try {
+            'work' | Set-Content (Join-Path $repo 'src/new.txt')
+            $head = (git -C $repo rev-parse HEAD).Trim()
+
+            { Undo-FailedSlice -RepoRoot $repo -HeadBefore $head -SliceName '' } | Should -Not -Throw
+            git -C $repo stash list | Should -Match 'slice-rescue'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+}

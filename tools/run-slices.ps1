@@ -223,37 +223,6 @@ function Test-SliceLanded {
         -RatchetError $ratchetError
 }
 
-function Undo-FailedSlice {
-    <#
-        Puts the tree back exactly as the slice found it, so a retry starts from known-good state.
-
-        Resetting to $HeadBefore rather than to HEAD matters: a session can commit its work and
-        move its slice file to done/ and still leave the ratchet red. Resetting to HEAD would
-        keep that commit, stranding the slice in done/ where it would never be retried while the
-        driver marched on over a red tree.
-
-        `git clean -fd` without -x, deliberately: docs/plan/slice-log.jsonl is gitignored, and
-        the budget gate counts slices from it. Removing it would reset the driver's own cap and
-        let it run unlimited sessions in a day.
-    #>
-    param([string]$HeadBefore, [string]$SliceName)
-
-    # Stash before resetting. "No commit was made" is not the same failure as "the ratchet is
-    # red": a session can reach a green tree and still miss the commit, and S07 attempt 1 did
-    # exactly that - the reset below deleted 50 minutes of good work and 54.5M tokens. Stashing
-    # first changes nothing about the retry, which still starts from a clean tree as designed,
-    # but the work stops being unrecoverable. `-u` takes untracked files and leaves IGNORED ones,
-    # so docs/plan/slice-log.jsonl survives and the budget gate keeps its count.
-    if (git -C $repoRoot status --porcelain) {
-        $label = "slice-rescue $SliceName $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-        git -C $repoRoot stash push --include-untracked --message $label | Out-Null
-        Write-Host "  uncommitted work stashed as '$label' - recover with: git stash list" -ForegroundColor DarkGray
-    }
-
-    git -C $repoRoot reset --hard $HeadBefore | Out-Null
-    git -C $repoRoot clean -fd docs src tests bench tools | Out-Null
-}
-
 function Add-ParkNote {
     param([string]$SliceName, [string]$Reason)
 
@@ -330,7 +299,10 @@ while ($completed -lt $MaxSlices) {
 
     # Roll back before logging: the rollback restores tracked files to $headBefore, and a park
     # note written before it would be reverted by it.
-    Undo-FailedSlice -HeadBefore $headBefore -SliceName $slice.BaseName
+    $rescued = Undo-FailedSlice -RepoRoot $repoRoot -HeadBefore $headBefore -SliceName $slice.BaseName
+    if ($rescued) {
+        Write-Host "  uncommitted work stashed as '$rescued' - recover with: git stash list" -ForegroundColor DarkGray
+    }
 
     if ($consecutiveFailures -ge 2) {
         Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' -TotalTokens $session.TotalTokens

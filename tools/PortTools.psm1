@@ -566,7 +566,57 @@ function Write-SliceLogEntry {
     }
 }
 
+function Undo-FailedSlice {
+    <#
+    .SYNOPSIS
+        Puts the working tree back where a failed slice found it, without destroying its work.
+
+    .DESCRIPTION
+        Two jobs that used to be one, and conflating them cost this port ~100M tokens.
+
+        RESCUE: whatever the session left uncommitted is stashed first. "No commit was made" is
+        not the same failure as "the ratchet is red" - a session can reach a green tree and still
+        miss the commit, and both S07 attempts did exactly that on 2026-08-30. The reset below
+        used to delete that work outright. Stashing changes nothing about the retry, which still
+        starts from a clean tree as designed, but the work stops being unrecoverable.
+
+        RESET: to $HeadBefore rather than to HEAD. A session can commit its work and move its
+        slice file to done/ and still leave the ratchet red. Resetting to HEAD would keep that
+        commit, stranding the slice in done/ where it would never be retried while the driver
+        marched on over a red tree.
+
+        `git clean -fd` without -x, deliberately, and `git stash push -u` rather than -a for the
+        same reason: docs/plan/slice-log.jsonl is gitignored and the budget gate counts slices
+        from it. Removing it would reset the driver's own cap and let it run unlimited sessions
+        in a day.
+
+    .PARAMETER RepoRoot
+        The repository to act on. A parameter rather than a script-scope variable so this can be
+        tested against a scratch repository - it is the one function here that can destroy work.
+
+    .OUTPUTS
+        The stash label when work was rescued, otherwise nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$HeadBefore,
+        [AllowEmptyString()][string]$SliceName = ''
+    )
+
+    $label = $null
+    if (git -C $RepoRoot status --porcelain) {
+        $label = "slice-rescue $SliceName $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')".Replace('  ', ' ')
+        git -C $RepoRoot stash push --include-untracked --message $label | Out-Null
+    }
+
+    git -C $RepoRoot reset --hard $HeadBefore | Out-Null
+    git -C $RepoRoot clean -fd docs src tests bench tools | Out-Null
+
+    return $label
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate,
-    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason
+    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice
