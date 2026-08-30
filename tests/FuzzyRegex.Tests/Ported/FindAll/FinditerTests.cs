@@ -10,7 +10,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 /// <remarks>
 /// Upstream's <c>finditer</c> returns a lazy iterator; a Python
 /// <c>assertRaises(StopIteration, ...)</c> after the last item becomes an assertion on
-/// <see cref="MatchCollection.Count"/> here, since <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions)"/> is eager.
+/// <see cref="MatchCollection.Count"/> here, since <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}})"/> is eager.
 /// </remarks>
 public sealed class FinditerTests
 {

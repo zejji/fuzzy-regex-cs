@@ -57,6 +57,24 @@ public sealed class FuzzyRegex
     public FuzzyRegex(string pattern, FuzzyRegexOptions options)
         : this(pattern, options, InfiniteMatchTimeout) { }
 
+    /// <summary>
+    /// Compiles a pattern with the given options and the named lists its <c>\L&lt;name&gt;</c>
+    /// references need.
+    /// </summary>
+    /// <param name="pattern">The pattern to compile.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name. Upstream passes these as keyword arguments to <c>regex.compile</c>.
+    /// </param>
+    /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
+    public FuzzyRegex(
+        string pattern,
+        FuzzyRegexOptions options,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>> namedLists
+    )
+        : this(pattern, options, InfiniteMatchTimeout, namedLists) { }
+
     /// <summary>Compiles a pattern with the given options and match timeout.</summary>
     /// <param name="pattern">The pattern to compile.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -64,12 +82,21 @@ public sealed class FuzzyRegex
     /// How long a single matching operation may run before it is abandoned, or
     /// <see cref="InfiniteMatchTimeout"/> for no limit.
     /// </param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="matchTimeout"/> is neither <see cref="InfiniteMatchTimeout"/> nor positive.
     /// </exception>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
-    public FuzzyRegex(string pattern, FuzzyRegexOptions options, TimeSpan matchTimeout)
+    public FuzzyRegex(
+        string pattern,
+        FuzzyRegexOptions options,
+        TimeSpan matchTimeout,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
+    )
     {
         // Argument validation is real even while the body is a stub: it is a trust boundary, and
         // phase 2 replaces the throw below, not these checks.
@@ -92,6 +119,13 @@ public sealed class FuzzyRegex
 
     /// <summary>The options this instance was compiled with.</summary>
     public FuzzyRegexOptions Options => throw new NotImplementedException();
+
+    /// <summary>
+    /// The named lists this instance was compiled with, keyed by name. Upstream
+    /// <c>Pattern.named_lists</c>, which returns each list as a <c>frozenset</c>; the values here
+    /// are therefore sets, not the caller's original ordering.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlySet<string>> NamedLists => throw new NotImplementedException();
 
     /// <summary>
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
@@ -332,9 +366,17 @@ public sealed class FuzzyRegex
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match.</returns>
-    public static Match Match(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
-        throw new NotImplementedException();
+    public static Match Match(
+        string input,
+        string pattern,
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
+    ) => throw new NotImplementedException();
 
     /// <summary>
     /// Finds the match starting at the start of the subject. Upstream <c>regex.match</c>.
@@ -342,30 +384,48 @@ public sealed class FuzzyRegex
     /// <param name="input">The subject to match.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match there.</returns>
     public static Match MatchAtStart(
         string input,
         string pattern,
-        FuzzyRegexOptions options = FuzzyRegexOptions.None
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
     ) => throw new NotImplementedException();
 
     /// <summary>Finds the match covering the whole subject. Upstream <c>regex.fullmatch</c>.</summary>
     /// <param name="input">The subject to match.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match all of it.</returns>
-    public static Match FullMatch(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
-        throw new NotImplementedException();
+    public static Match FullMatch(
+        string input,
+        string pattern,
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
+    ) => throw new NotImplementedException();
 
     /// <summary>Finds every match in the subject. Upstream <c>regex.finditer</c>.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
     /// <returns>The matches, leftmost first.</returns>
     public static MatchCollection Matches(
         string input,
         string pattern,
-        FuzzyRegexOptions options = FuzzyRegexOptions.None
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
     ) => throw new NotImplementedException();
 
     /// <summary>Counts the matches in the subject.</summary>

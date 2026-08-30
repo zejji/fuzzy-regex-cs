@@ -47,6 +47,8 @@ is ported; absence means it is not (yet).
 | `pos` / `endpos` arguments | `_main.py:252` onwards | `beginning` / `length` (`endpos` = `beginning + length`) | S01 |
 | `partial=True` argument | `_main.py:252` onwards | `partial` parameter | S01 |
 | `overlapped=True` argument | `_main.py:341` onwards | `overlapped` parameter | S01 |
+| `**kwargs` named lists (`regex.compile(p, name=[...])`) | `_main.py:460` (`_compile`) | `namedLists` parameter on the `FuzzyRegex` constructor and on the static `Match`, `MatchAtStart`, `FullMatch` and `Matches`, typed `IReadOnlyDictionary<string, IReadOnlyCollection<string>>` | S04 |
+| `Pattern.named_lists` | `_main.py` | `FuzzyRegex.NamedLists`, typed `IReadOnlyDictionary<string, IReadOnlySet<string>>` because upstream returns each list as a `frozenset` | S04 |
 
 Signatures only in S01. Every member throws `NotImplementedException`; phase 2 puts a parser and
 an engine behind them.
@@ -61,7 +63,6 @@ Recorded so the omissions are visible and countable rather than silently missing
 | `regex.purge`, `regex.cache_all` | Control upstream's pattern cache, a Python-module-global. Not referenced by any upstream test. | S01 |
 | `Pattern.splititer` | Lazy `split`. `Split` returns the same pieces; a caller who wants laziness can stream the array. Revisit if a ported test needs the laziness itself. | S01 |
 | `Pattern.scanner`, `regex.Scanner` | Public (both are in `__all__`), but a stateful lexer-style API with no `Regex` counterpart, used by 11 lines of the upstream suite. Deferred to the slice that ports `test_scanner`, which is where its shape can be chosen against real tests. | S01 |
-| `Pattern.named_lists` | One upstream test uses it. Deferred to the slice that ports named lists. | S01 |
 | `Match.detach_string` | Drops the match's reference to the subject so Python can free it. .NET's GC needs no such hint. | S01 |
 | `regex.template`, `TEMPLATE`/`T` flag | Present upstream only because Python's `re` has it; upstream does not implement behaviour for it. | S01 |
 | `ASCII`, `LOCALE`, `UNICODE`, `WORD`, `DEBUG` flags | Not yet surfaced on `FuzzyRegexOptions`. `WORD` in particular changes `\b` semantics and needs the engine before it means anything. Add in the slice that needs them. | S01 |
@@ -120,6 +121,27 @@ assertions dropped from inside them are in the next table.
 
 `word_set` at `test_properties` line 1125 is assigned and never read upstream, so there is nothing
 to port from it.
+
+### Upstream test methods in lines 1741-3083 not ported (S04)
+
+| Upstream method | Why not |
+|---|---|
+| `test_copy` (2876-2918) | Python's copy protocol: `copy.copy`/`copy.deepcopy` on a pattern, a match and an iterator, plus `detach_string`. Patterns are immutable so upstream returns the same object; .NET has no equivalent protocol and no `detach_string` (see the row above). 15 assertions. |
+
+Every other method in the range is ported: `test_various`, `test_replacement`,
+`test_common_prefix`, `test_captures`, `test_guards`, `test_turkic`, `test_named_lists`,
+`test_fuzzy`, `test_recursive`, `test_format`, `test_fullmatch`, `test_issue_18468` and
+`test_partial`.
+
+### Assertions omitted from methods that are otherwise ported (S04)
+
+| Where | Why not |
+|---|---|
+| `test_named_lists` #4-6 | `bytes` patterns; the `str` forms are #1-3 and are ported. |
+| `test_fuzzy` #57-62, #65 | `bytes` patterns. #57-62 repeat the `\L<words>{e<=1}` findall block of #51-56 and #65 repeats #63. |
+| `test_recursive` #29 | Commented out in the upstream source itself (`#self.assertEqual(...)`, line 2869, with the note "The next regex should and does match. Perl 5.14 agrees."). Never executed upstream either. The index is still counted so the numbering stays aligned with the file. |
+| `test_issue_18468` #2, #23 (the `StrSubclass` halves), #3-6, #12-16, #20-22, #28-32 | `str`/`bytes` subclasses, `bytearray` and `memoryview`. The method exists to check that `sub`, `split`, `findall` and `group` return plain `str`/`bytes` whatever subclass went in - a Python typing question with no C# equivalent, since `string` is sealed. Each distinct behaviour is ported once from its `str` form. |
+| `test_issue_18468` #10-11 | The pre-3.7 branch of a `sys.version_info` guard; only the `>= 3.7` branch (#8-9) is a useful oracle. |
 
 ## Where we diverge from upstream's structure
 

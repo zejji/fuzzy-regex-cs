@@ -8,7 +8,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 /// </summary>
 /// <remarks>
 /// There is no <c>findall</c> on this API; every assertion here uses
-/// <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions)"/> instead. Upstream's
+/// <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}})"/> instead. Upstream's
 /// <c>findall</c> yields the whole match when the pattern has no groups, the text of the one
 /// group when it has exactly one, and a tuple of group texts when it has two or more; a
 /// tuple-valued case here becomes one assertion per group index rather than one assertion on a
