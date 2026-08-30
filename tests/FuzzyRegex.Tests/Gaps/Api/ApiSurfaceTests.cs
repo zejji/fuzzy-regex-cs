@@ -1,31 +1,42 @@
+using System.Reflection;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 
 /// <summary>
-/// Proves the public API surface is still a stub. S01 wrote signatures only; phase 2 puts a
-/// parser and an engine behind them, at which point these tests flip into real ones rather than
-/// being deleted - so the moment the stub stops being a stub is visible in a diff.
+/// Pins the public API surface: what it promises, what it validates, and which parts of it are
+/// still waiting on the engine.
 /// </summary>
 /// <remarks>
+/// <para>
+/// S01 wrote this file as <c>ApiSurfaceStubTests</c>, where every assertion was "this member
+/// throws <see cref="NotImplementedException"/>", with the note that phase 2 would flip them into
+/// real ones rather than delete them. S07 is that phase: the constructor compiles, so the
+/// pattern-level members assert on what it produced. The matching members are still stubs -
+/// the engine is phase 3 - and are still pinned as such.
+/// </para>
+/// <para>
 /// These are gap tests, not ported ones: they pin our own scaffolding, so they do not count
 /// towards the parity percentage.
+/// </para>
 /// </remarks>
-public sealed class ApiSurfaceStubTests
+public sealed class ApiSurfaceTests
 {
     [Test]
-    public void Constructing_a_pattern_throws_because_the_engine_is_not_written_yet()
+    public void Constructing_a_pattern_compiles_it()
     {
-        Action construct = () => _ = new FuzzyRegex("a");
+        FuzzyRegex pattern = new("a");
 
-        construct.Should().Throw<NotImplementedException>();
+        pattern.Pattern.Should().Be("a");
+        pattern.ToString().Should().Be("a");
+        pattern.GroupNumbers.Should().Equal(0);
     }
 
     [Test]
-    public void A_null_pattern_is_rejected_before_the_stub_gives_up()
+    public void A_null_pattern_is_rejected_before_anything_is_compiled()
     {
-        // Validation at a trust boundary is real code even in a stub, so it is tested like real
-        // code: the ArgumentNullException must win over the NotImplementedException.
+        // Validation at a trust boundary is tested like the real code it is: the
+        // ArgumentNullException must win over anything the compiler would say.
         Action construct = () => _ = new FuzzyRegex(null!);
 
         construct.Should().Throw<ArgumentNullException>().WithParameterName("pattern");
@@ -46,12 +57,19 @@ public sealed class ApiSurfaceStubTests
     }
 
     [Test]
-    public void An_infinite_match_timeout_is_accepted()
+    public void An_infinite_match_timeout_is_accepted_and_reported_back()
     {
-        Action construct = () => _ = new FuzzyRegex("a", FuzzyRegexOptions.None, FuzzyRegex.InfiniteMatchTimeout);
+        FuzzyRegex pattern = new("a", FuzzyRegexOptions.None, FuzzyRegex.InfiniteMatchTimeout);
 
-        // Reaching the stub's own throw means validation let it through.
-        construct.Should().Throw<NotImplementedException>();
+        pattern.MatchTimeout.Should().Be(FuzzyRegex.InfiniteMatchTimeout);
+    }
+
+    [Test]
+    public void A_positive_match_timeout_is_reported_back()
+    {
+        FuzzyRegex pattern = new("a", FuzzyRegexOptions.None, TimeSpan.FromSeconds(2));
+
+        pattern.MatchTimeout.Should().Be(TimeSpan.FromSeconds(2));
     }
 
     [Test]
@@ -62,11 +80,43 @@ public sealed class ApiSurfaceStubTests
     }
 
     [Test]
-    public void The_static_conveniences_are_stubs_too()
+    public void The_matching_members_are_still_stubs()
     {
+        // The engine is phase 3. When this starts failing, the slice that made it fail should
+        // replace it with real assertions, exactly as S07 did to its predecessor.
         Action isMatch = () => _ = FuzzyRegex.IsMatch("abc", "a");
+        Action match = () => _ = new FuzzyRegex("a").Match("abc");
 
         isMatch.Should().Throw<NotImplementedException>();
+        match.Should().Throw<NotImplementedException>();
+    }
+
+    [Test]
+    public void Options_hides_the_upstream_flags_this_port_does_not_expose()
+    {
+        // upstream/regex/_main.py lines 570-574 OR UNICODE (0x20) into every str pattern's flags,
+        // and the version bit is always added, so the raw resolved flags for "a" are 0x2020 - a
+        // number with no name in FuzzyRegexOptions. What a caller sees is the version alone.
+        new FuzzyRegex("a")
+            .Options.Should()
+            .Be(FuzzyRegexOptions.Version0);
+    }
+
+    [Test]
+    public void Every_instance_field_of_FuzzyRegex_is_initonly()
+    {
+        // The type promises to be safe to share between threads (see its own doc comment, and
+        // DECISIONS 2026-08-29). Immutability is how that promise is kept, and this is the gate:
+        // S07 is the slice that gave FuzzyRegex instance fields at all. Auto-properties count -
+        // a `{ get; }` property compiles to an initonly backing field.
+        FieldInfo[] mutable =
+        [
+            .. typeof(FuzzyRegex)
+                .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(field => !field.IsInitOnly),
+        ];
+
+        mutable.Should().BeEmpty("FuzzyRegex is documented as safe to share between threads");
     }
 
     [Test]
@@ -89,11 +139,18 @@ public sealed class ApiSurfaceStubTests
     }
 
     [Test]
-    public void Every_option_has_a_distinct_bit()
+    public void Every_option_is_an_upstream_flag_bit()
     {
+        // S07 removed ExplicitCapture, the one option with no upstream counterpart (DECISIONS
+        // 2026-08-30, decision C). This is what stops another one being added by accident: every
+        // option must be a bit upstream's RegexFlag defines, because the compile-parity corpus
+        // can only verify constructs upstream has.
+        const int allUpstreamFlags = 0x1FFFF;
+
         FuzzyRegexOptions[] options = Enum.GetValues<FuzzyRegexOptions>();
 
         options.Should().OnlyHaveUniqueItems();
+        options.Should().AllSatisfy(option => ((int)option & ~allUpstreamFlags).Should().Be(0));
     }
 
     [Test]
@@ -101,8 +158,8 @@ public sealed class ApiSurfaceStubTests
     {
         // Not a behaviour test - a compilation test. S01 exists to be the compilation target for
         // S02-S05, and each of these upstream operations has no other member to translate onto.
-        // If a signature changes in phase 2 and one of these stops binding, this fails to build,
-        // which is exactly the moment the ported suite would have stopped building too.
+        // If a signature changes and one of these stops binding, this fails to build, which is
+        // exactly the moment the ported suite would have stopped building too.
         Type surface = typeof(FuzzyRegex);
 
         surface
@@ -138,7 +195,7 @@ public sealed class ApiSurfaceStubTests
         // Oracle, 2026-08-29: escape('foo!?') is foo!\? but escape('foo!?', special_only=False)
         // is foo\!\?; escape('a b') is a\ b but escape('a b', literal_spaces=True) is 'a b'.
         // A single-argument Escape could not produce all four.
-        System.Reflection.MethodInfo? escape = typeof(FuzzyRegex).GetMethod(
+        MethodInfo? escape = typeof(FuzzyRegex).GetMethod(
             nameof(FuzzyRegex.Escape),
             [typeof(string), typeof(bool), typeof(bool)]
         );

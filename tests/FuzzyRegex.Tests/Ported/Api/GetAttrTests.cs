@@ -16,12 +16,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Api;
 public sealed class GetAttrTests
 {
     [Test]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
     [Property("Upstream", "RegexTests.test_getattr#1")]
     public void Pattern_returns_the_compiled_text() => new FuzzyRegex("(?i)(a)(b)").Pattern.Should().Be("(?i)(a)(b)");
 
     [Test]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
     [Property("Upstream", "RegexTests.test_getattr#2")]
     public void Options_reports_the_inline_flag_and_the_default_version()
     {
@@ -37,13 +35,11 @@ public sealed class GetAttrTests
     // NOT PORTED: regex.compile(b"(?i)(a)(b)").flags - a bytes pattern; our port is char-based.
 
     [Test]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
     [Property("Upstream", "RegexTests.test_getattr#4")]
     public void GroupNumbers_counts_the_capturing_groups() =>
         (new FuzzyRegex("(?i)(a)(b)").GroupNumbers.Count - 1).Should().Be(2);
 
     [Test]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
     [Property("Upstream", "RegexTests.test_getattr#5")]
     public void GroupNames_are_the_group_numbers_when_none_are_named()
     {
@@ -55,7 +51,6 @@ public sealed class GetAttrTests
     }
 
     [Test]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
     [Property("Upstream", "RegexTests.test_getattr#6")]
     public void GroupNumberFromName_resolves_named_groups()
     {

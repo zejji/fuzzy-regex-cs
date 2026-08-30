@@ -18,7 +18,11 @@ public sealed class FlagsTests
     [Arguments(FuzzyRegexOptions.Multiline)]
     [Arguments(FuzzyRegexOptions.IgnorePatternWhitespace)]
     [Arguments(FuzzyRegexOptions.Singleline)]
-    [Skip("needs:pattern-properties - Pattern is a compile stub")]
+    // Retagged in S07 from needs:pattern-properties. The pattern-level properties this slice
+    // delivers are not what holds this test back: '^' and '$' are, and the first-set optimisation
+    // upstream then runs over "pattern" needs the SetUnion node too. Both arrive in S08, and a
+    // skip reason that names the wrong capability sends the next slice to the wrong place.
+    [Skip("needs:anchors - ^ and $ have no zero-width position nodes yet")]
     [Property("Upstream", "RegexTests.test_flags#1")]
     public void Compiling_with_each_flag_succeeds(FuzzyRegexOptions options) =>
         new FuzzyRegex("^pattern$", options).Should().NotBeNull();

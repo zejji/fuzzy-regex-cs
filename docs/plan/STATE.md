@@ -3,31 +3,35 @@
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
 **Phase:** 2 - parser, compiler, Unicode tables, pattern-level public API. Eight slices (S06-S13);
-S06 done, seven pending.
+S06 and S07 done, six pending.
 
-**Last completed:** S06 (2026-08-30), the compile-parity corpus. 1547 compiles, 50 parse errors,
-62 replacement templates, 29,322 bytecode integers, recorded from upstream's own suite and
-deterministic over four runs. Ratchet green at 3664 tests, 37 passing.
+**Last completed:** S07 (2026-08-30), the parser and compiler skeleton. `src/FuzzyRegex/Parsing/`
+now ports `_regex_core.py`'s spine - flags, all 81 opcodes, `Source`, `Info`, the node classes,
+the parse functions and `PatternCompiler.Compile`. `FuzzyRegex`'s constructor compiles for real.
+Ratchet green at 3685 tests, 514 passing (was 37). Corpus: 436 of 1547 compile rows and 16 of 50
+error rows match upstream exactly; no row fails.
 
-**Current slice:** none in flight. Next is `docs/plan/slices/S07-parser-skeleton.md`.
+**Current slice:** none in flight. Next is `docs/plan/slices/S08-quantifiers-alternation-anchors.md`.
 
-**Next action:** `tools/run-slices.ps1` (Opus by default). Phase boundary is after S13.
+**Next action:** `tools/run-slices.ps1 -MaxSlices 1`. Phase boundary is after S13.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **The corpus is now the gate.** `PatternCompiler.Compile` / `.CompileReplacement` in
-  `src/FuzzyRegex/Parsing/` are the seam; a row skips only for a `NotImplementedException` whose
-  message starts with `needs:<tag>`, and anything else fails. Read S06's closing notes in
-  `slices/done/` before starting - they list what the corpus cannot check and why.
-- **S07 and S08 must sort at two named points** (`_check_firstset`, `Branch._flush_set_members`)
-  exactly as `tools/record-compile-corpus.py`'s `_render_key` does, or the corpus disagrees on
-  those rows. PORTMAP's "Where we diverge" has the rule. A **third** order leak was found and
-  fixed at the recorder's input; the port sorts nothing for that one.
-- **S07 adds the first instance fields** to `FuzzyRegex`: the `initonly` reflection test
-  (DECISIONS 2026-08-29) is due there. Build centrally, once, at the end of a slice (S05 notes).
-- **Regenerate the fixture with `python tools/record-compile-corpus.py`** if upstream moves; CI
-  checks it with `--check` and `--verify-determinism` in `oracle.yml`. Never hand-edit it.
-- **Phase 2 changed the plan in four places**; reasoning in
-  `docs/plan/2026-08-30-phase2-decisions.md`, one-liners in DECISIONS (2026-08-30).
+- **Throw a `needs:` tag where upstream consults a table, not at the top of a branch.** S07's
+  review found `\p`, `\P`, `\N` and `\g` throwing on sight when upstream reaches a plain literal
+  through all four if the delimiter is absent. Six corpus rows and two ported tests were skipping
+  for capabilities they did not need. Port the whole function's control flow first.
+- **The driver deletes a slice that does not commit.** Two S07 attempts reached a green ratchet
+  and lost everything by ending the turn while a review subagent was still running; under
+  `claude -p` that ends the process. `port-slice` now requires the reviewer to be a blocking call
+  read in the same turn, and forbids ending a session with uncommitted work. `Undo-FailedSlice`
+  now stashes with `-u` before resetting, so the next failure is recoverable - check
+  `git stash list` before assuming work is gone.
+- **The driver allowlist has two halves.** `Bash(...)` rules do not govern the `PowerShell` tool,
+  and `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` is set globally on this machine, so both families must
+  be listed or the session is silently denied. Verified 2026-08-30.
+- **`is_cased_i`, `str.isdigit`, `str.isidentifier` and `str.isalpha` are ASCII-only** until S09,
+  which deletes all four seams. PORTMAP's "Where we diverge" carries the rows to remove.
+- **S08 owns `^` and `$`**: `FlagsTests` is retagged `needs:anchors` and turns on there.

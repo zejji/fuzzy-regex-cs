@@ -100,6 +100,11 @@ dotnet_diagnostic.S131.severity = none
 ; NotImplementedException: members land slice by slice; the parity ratchet, not an analyzer,
 ; is what proves an unimplemented member is still unimplemented.
 dotnet_diagnostic.MA0025.severity = none
+; S3871: exceptions must be public. Upstream's ParseError, _UnscopedFlagSet and _FirstSetError
+; are control flow inside the parser - one rewinds the scanner, one restarts the parse, one
+; skips an optimisation. Making them public would put three types nobody can usefully catch on
+; the shipped surface, which is a restructuring, not a fix. Added S07.
+dotnet_diagnostic.S3871.severity = none
 
 ; --- Tests ----------------------------------------------------------------
 [tests/**/*.cs]

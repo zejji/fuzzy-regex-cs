@@ -1,10 +1,17 @@
 namespace Fuzzy.Text.RegularExpressions;
 
 /// <summary>
-/// Thrown when a pattern cannot be parsed. Upstream <c>regex.error</c>, defined as
+/// Thrown when a pattern cannot be compiled. Upstream <c>regex.error</c>, defined as
 /// <c>class error(Exception)</c> in <c>upstream/regex/_regex_core.py</c>, which likewise carries
 /// the pattern and the offset at which parsing failed.
 /// </summary>
+/// <remarks>
+/// A handful of rejections upstream expresses as a plain <c>ValueError</c> rather than as its own
+/// error type - conflicting version or encoding flags, and a named list the pattern never uses -
+/// are also reported through this type, with no <see cref="Pattern"/> or <see cref="Offset"/>,
+/// because upstream's <c>ValueError</c> carries neither (S07; see the reasoning at the throw
+/// sites in <c>Parsing/PatternCompiler.cs</c>).
+/// </remarks>
 public class FuzzyRegexParseException : Exception
 {
     /// <summary>Initializes a new instance with a default message.</summary>

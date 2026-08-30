@@ -35,14 +35,29 @@ public delegate string MatchEvaluator(Match match);
 /// lengths are UTF-16 code units throughout (design spec section 4).
 /// </para>
 /// <para>
-/// This type is a surface stub. Every member throws <see cref="NotImplementedException"/> until
-/// phase 2 puts a parser and an engine behind it.
+/// The constructor compiles for real from S07 onwards, and the pattern-level members below it
+/// report what it produced. The matching members still throw
+/// <see cref="NotImplementedException"/>: the engine lands in phase 3.
 /// </para>
 /// </remarks>
 public sealed class FuzzyRegex
 {
     /// <summary>A <see cref="MatchTimeout"/> value meaning "never time out".</summary>
     public static readonly TimeSpan InfiniteMatchTimeout = Timeout.InfiniteTimeSpan;
+
+    /// <summary>
+    /// The flags upstream resolves a pattern to but <see cref="FuzzyRegexOptions"/> has no name
+    /// for, and which <see cref="Options"/> therefore hides. <c>UNICODE</c> in particular is on
+    /// every compiled pattern, because <c>_main._compile</c> ORs it into any <c>str</c> pattern
+    /// that named no encoding (<c>upstream/regex/_main.py</c> lines 570-574); upstream's own
+    /// <c>test_getattr</c> expects to see it and this port's translation of that test does not.
+    /// </summary>
+    private static readonly int _unexposedFlags = ~Enum.GetValues<FuzzyRegexOptions>()
+        .Aggregate(0, (mask, option) => mask | (int)option);
+
+    private readonly Parsing.CompiledPattern _compiled;
+    private readonly string[] _groupNames;
+    private readonly int[] _groupNumbers;
 
     /// <summary>Compiles a pattern with no options and no timeout.</summary>
     /// <param name="pattern">The pattern to compile.</param>
@@ -98,8 +113,7 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
     )
     {
-        // Argument validation is real even while the body is a stub: it is a trust boundary, and
-        // phase 2 replaces the throw below, not these checks.
+        // Argument validation is real and comes first: it is a trust boundary.
         ArgumentNullException.ThrowIfNull(pattern);
 
         if (matchTimeout != InfiniteMatchTimeout && matchTimeout <= TimeSpan.Zero)
@@ -111,40 +125,72 @@ public sealed class FuzzyRegex
             );
         }
 
-        throw new NotImplementedException("The parser and engine land in phase 2.");
+        Pattern = pattern;
+        MatchTimeout = matchTimeout;
+        _compiled = Parsing.PatternCompiler.Compile(pattern, (int)options, ToCompilerNamedLists(namedLists));
+
+        // Group 0 is the whole match and has no name of its own, so it is listed by its number,
+        // as every group without a name is.
+        Dictionary<int, string> nameByNumber = _compiled.GroupIndex.ToDictionary(
+            entry => entry.Value,
+            entry => entry.Key
+        );
+        _groupNumbers = [.. Enumerable.Range(0, _compiled.GroupCount + 1)];
+        _groupNames =
+        [
+            .. _groupNumbers.Select(number =>
+                nameByNumber.TryGetValue(number, out string? name)
+                    ? name
+                    : number.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ),
+        ];
     }
 
     /// <summary>The pattern this instance was compiled from.</summary>
-    public string Pattern => throw new NotImplementedException();
+    public string Pattern { get; }
 
-    /// <summary>The options this instance was compiled with.</summary>
-    public FuzzyRegexOptions Options => throw new NotImplementedException();
+    /// <summary>
+    /// The options this instance was compiled with, plus whatever the pattern's own inline flags
+    /// and the default version added - upstream's <c>info.flags | version</c>, which is what
+    /// <c>Pattern.flags</c> reports. So <c>new FuzzyRegex("(?i)a").Options</c> includes
+    /// <see cref="FuzzyRegexOptions.IgnoreCase"/> even though the caller passed none.
+    /// </summary>
+    /// <remarks>
+    /// The upstream flags this port does not expose - <c>ASCII</c>, <c>LOCALE</c>, <c>UNICODE</c>,
+    /// <c>WORD</c>, <c>DEBUG</c> and <c>TEMPLATE</c> - are masked off rather than surfaced as
+    /// numbers with no name.
+    /// </remarks>
+    public FuzzyRegexOptions Options => (FuzzyRegexOptions)(_compiled.Flags & ~_unexposedFlags);
 
     /// <summary>
     /// The named lists this instance was compiled with, keyed by name. Upstream
     /// <c>Pattern.named_lists</c>, which returns each list as a <c>frozenset</c>; the values here
     /// are therefore sets, not the caller's original ordering.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlySet<string>> NamedLists => throw new NotImplementedException();
+    public IReadOnlyDictionary<string, IReadOnlySet<string>> NamedLists => _compiled.NamedLists;
 
     /// <summary>
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
     /// </summary>
-    public TimeSpan MatchTimeout => throw new NotImplementedException();
+    public TimeSpan MatchTimeout { get; }
 
     /// <summary>
     /// The names of the pattern's groups, by ascending group number. Unnamed groups are
     /// represented by their number as text, as the built-in <c>Regex</c> does.
     /// </summary>
-    public IReadOnlyList<string> GroupNames => throw new NotImplementedException();
+    public IReadOnlyList<string> GroupNames => _groupNames;
 
     /// <summary>The numbers of the pattern's groups, ascending, group 0 first.</summary>
-    public IReadOnlyList<int> GroupNumbers => throw new NotImplementedException();
+    public IReadOnlyList<int> GroupNumbers => _groupNumbers;
 
     /// <summary>Finds the name of a group given its number.</summary>
     /// <param name="number">The group number.</param>
     /// <returns>The group's name, or its number as text if it has none.</returns>
-    public string GroupNameFromNumber(int number) => throw new NotImplementedException();
+    /// <exception cref="ArgumentOutOfRangeException">The pattern has no such group.</exception>
+    public string GroupNameFromNumber(int number) =>
+        number >= 0 && number < _groupNames.Length
+            ? _groupNames[number]
+            : throw new ArgumentOutOfRangeException(nameof(number), number, "the pattern has no such group");
 
     /// <summary>
     /// Finds the number of a group given its name. Upstream exposes the same mapping as
@@ -152,7 +198,22 @@ public sealed class FuzzyRegex
     /// </summary>
     /// <param name="name">The group name.</param>
     /// <returns>The group's number, or <c>-1</c> if the pattern has no such group.</returns>
-    public int GroupNumberFromName(string name) => throw new NotImplementedException();
+    public int GroupNumberFromName(string name) => _compiled.GroupIndex.GetValueOrDefault(name, -1);
+
+    /// <summary>
+    /// Adapts the public named-list shape to the compiler's. The compiler takes a list because
+    /// <c>StringSet.__init__</c> sorts its branches by length with a stable sort, so the caller's
+    /// order survives among equal-length members; the public surface takes an
+    /// <see cref="IReadOnlyCollection{T}"/>, which does not promise one (DECISIONS 2026-08-30).
+    /// </summary>
+    private static Dictionary<string, IReadOnlyList<string>>? ToCompilerNamedLists(
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists
+    ) =>
+        namedLists?.ToDictionary(
+            entry => entry.Key,
+            entry => (IReadOnlyList<string>)[.. entry.Value],
+            StringComparer.Ordinal
+        );
 
     /// <summary>Whether the pattern matches anywhere in the given part of the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -528,5 +589,5 @@ public sealed class FuzzyRegex
 
     /// <summary>Returns <see cref="Pattern"/>.</summary>
     /// <returns>The pattern this instance was compiled from.</returns>
-    public override string ToString() => throw new NotImplementedException();
+    public override string ToString() => Pattern;
 }

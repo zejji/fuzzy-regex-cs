@@ -24,7 +24,8 @@ public sealed class CorpusFixtureTests
         Corpus.Templates().Should().HaveCountGreaterThan(20);
         Corpus.RegexVersion.Should().NotBeNullOrWhiteSpace();
         Corpus.UpstreamCommit.Should().HaveLength(40);
-        Corpus.DefaultVersion.Should().Be(Parsing.PatternCompiler.DefaultVersion);
+        // Fully qualified: Tests.Gaps.Parsing exists too, and would otherwise win the lookup.
+        Corpus.DefaultVersion.Should().Be(RegularExpressions.Parsing.PatternCompiler.DefaultVersion);
     }
 
     [Test]

@@ -75,10 +75,10 @@ anything non-obvious (AGENTS.md house rules).
 
 ## Done when
 
-- [ ] Corpus rows within scope pass, the rest skip with a `needs:` reason; no row fails.
-- [ ] `pattern-properties` tests pass; `ApiSurfaceStubTests` rewritten; `initonly` test in.
-- [ ] `docs/PORTMAP.md` lists every symbol ported, with `_regex_core.py` line numbers.
-- [ ] Ratchet GREEN, baseline updated, blind review (brief it to hunt: a Python `dict` iterated
+- [x] Corpus rows within scope pass, the rest skip with a `needs:` reason; no row fails.
+- [x] `pattern-properties` tests pass; `ApiSurfaceStubTests` rewritten; `initonly` test in.
+- [x] `docs/PORTMAP.md` lists every symbol ported, with `_regex_core.py` line numbers.
+- [x] Ratchet GREEN, baseline updated, blind review (brief it to hunt: a Python `dict` iterated
       where insertion order matters, `str` indexing that is codepoint-based upstream, an
       off-by-one between `Source.pos` and `FuzzyRegexParseException.Offset`), commit.
 
@@ -92,3 +92,76 @@ anything non-obvious (AGENTS.md house rules).
   and `ApiSurfaceStubTests`, which lists the option values.
 - The decisions document above is the background for anything in this phase that looks like a
   departure from the spec as first written.
+
+## Closing notes (2026-08-30)
+
+**Landed.** `src/FuzzyRegex/Parsing/` now holds the spine of `_regex_core.py`: `RegexFlags`,
+`Opcode` (all 81, generated from upstream's table), `Source`, `Info`, the node classes
+(`RegexBase`, `Any`/`AnyAll`/`AnyU`, `Character`, `String`/`Literal`, `Sequence`, `Group`,
+`PrecompiledCode`), `ParseFunctions`, and `PatternCompiler.Compile` as the real port of
+`_main._compile`'s tail. `FuzzyRegex`'s constructor compiles for real and the pattern properties
+are live.
+
+**Parity.** 514 tests passing, up from 37. Compile-parity corpus: **436 of 1547 compile rows** and
+**16 of 50 error rows** match upstream's bytecode and messages exactly; the remaining rows skip
+with a `needs:` tag. **No row fails.** Templates (62) are S12 and skip as a block.
+
+**Plan corrections**, all recorded in DECISIONS: `is_cased_i` is a hard S09 dependency and is
+answered ASCII-only here, which is what let `(?i)` patterns compile a phase early; `FlagsTests`
+was retagged from `needs:pattern-properties` to `needs:anchors` because it compiles `^pattern$`;
+and `test_getattr#2` was ported wrong in S02 - it dropped upstream's `regex.U`, proved against the
+oracle rather than papered over. A fourth, found late: `Gaps/Parsing` as a namespace shadows
+`Fuzzy.Text.RegularExpressions.Parsing`, fixed by qualifying the one clashing reference.
+
+**Review.** Two blind passes ran. The first raised three findings, all reproduced and all fixed -
+the important one being that `\p`, `\P`, `\N` and `\g` threw their `needs:` tags on sight, when
+upstream reaches an ordinary literal through all four when the delimiter is absent; that had six
+corpus rows and two ported tests skipping for capabilities they do not need. The fixes added ~130
+lines the first reviewer never saw, so a second pass ran over that delta alone, as VERIFICATION
+rule 4 requires. It raised two findings and confirmed both against upstream:
+
+- `\g<99999999999` - Python's `int()` is arbitrary precision, so upstream parses the number, fails
+  on the missing `>`, and degrades the escape to literals. Our `int.Parse` threw
+  `OverflowException` straight through `parse_escape`'s catch. **Fixed** with `BigInteger.Parse`.
+- `\g<` + a non-ASCII name - upstream degrades to literals here too, but reaching that path means
+  getting past `IsDigitName`, which throws its `needs:unicode-tables` seam on any non-ASCII input.
+  **Not fixed, deliberately**: upstream's answer does not depend on the Unicode tables, but
+  deciding that in general is S09's job and widening the seam on one example is how a port
+  acquires a guess. Recorded as a skipped test that S09 turns on.
+
+Both are pinned in `Gaps/Parsing/GroupReferenceFallbackTests.cs` with the oracle output that
+proves them.
+
+A **third pass** then ran over that fix delta - the `BigInteger` change, the new test file and the
+two tooling patches - because rule 4 counts unreviewed changes, not slices. It raised four
+findings and all four survived reproduction, which is well above the usual one-in-five:
+
+1. **The `BigInteger` fix was incomplete.** `Info.IsOpenGroup` parsed the same name with
+   `int.Parse` one call later, so the *delimited* `\g<99999999999>` still threw
+   `OverflowException` where upstream raises "invalid group reference". Fixed at the second site;
+   the delimited path now reaches its `needs:backrefs` seam like every other `\g<N>`. Pinned by a
+   test proven red against the unfixed file.
+2. **Two allowlist entries were dead and the diagnosis behind them was wrong.** The denial came
+   from the `PowerShell` tool, not Bash - this machine sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`
+   globally and the child inherits it - and `Bash(...)` rules never govern it. Corrected to carry
+   both families; verified by driving `claude -p` with the committed array, zero denials.
+3. **"Python's `int()` never overflows" is false above 4300 digits.** CPython 3.11+ caps
+   `int(str)` and raises `ValueError`. Recorded as a deliberate divergence rather than ported: it
+   is an interpreter setting with no .NET equivalent, not regex grammar.
+4. **A prose claim contradicted by its own commit** - the skill said the driver deletes the work
+   with `git reset --hard`, which the stash added in the same commit had already made false.
+
+Findings 1 and 2 were code; 3 and 4 were corrections to claims this slice itself wrote. The
+lesson worth carrying: a fix that changes one call site of a ported Python builtin should be
+grepped for its siblings before it is called done.
+
+**For the next slice.** The `needs:` placement rule from the first review is the general one for
+the rest of Phase 2: port the whole function's control flow and throw only where upstream consults
+a table or builds a node this slice does not have. Throwing at the top of a branch silently
+over-skips.
+
+**Process.** This slice took three attempts. The first two were unattended driver runs that both
+reached a green ratchet and then died without committing, because the session ended its turn while
+a review subagent was still running and `claude -p` ends the process when the turn ends; the
+driver's rollback then deleted the work. `port-slice` and `tools/run-slices.ps1` were both fixed
+in this commit - see DECISIONS.

@@ -16,7 +16,14 @@ namespace Fuzzy.Text.RegularExpressions;
 /// and the upstream spelling is given here, so a <c>System.Text.RegularExpressions</c> user needs
 /// no new vocabulary. Upstream flags this port does not yet expose - <c>ASCII</c>, <c>LOCALE</c>,
 /// <c>UNICODE</c>, <c>WORD</c>, <c>DEBUG</c> and <c>TEMPLATE</c> - are simply absent rather than
-/// present and ignored.
+/// present and ignored. Every one of them can still be set from inside a pattern, as
+/// <c>(?a)</c>, <c>(?L)</c>, <c>(?u)</c> and <c>(?w)</c>.
+/// </para>
+/// <para>
+/// There is no <c>ExplicitCapture</c>. It has no upstream counterpart, so nothing in the
+/// compile-parity corpus could verify it and it would have been the only unverified logic in the
+/// parser; a caller who wants a non-capturing group writes <c>(?:...)</c>, as upstream's users do
+/// (DECISIONS 2026-08-30, decision C).
 /// </para>
 /// </remarks>
 [Flags]
@@ -86,11 +93,4 @@ public enum FuzzyRegexOptions
     /// Upstream <c>VERSION1</c> / <c>V1</c>, and upstream's default.
     /// </summary>
     Version1 = 0x100,
-
-    /// <summary>
-    /// Only named groups capture; unnamed <c>(...)</c> groups behave as <c>(?:...)</c>. Has no
-    /// upstream counterpart - upstream expresses this per-group with <c>(?:...)</c> - so it takes
-    /// the first bit above upstream's range.
-    /// </summary>
-    ExplicitCapture = 0x20000,
 }

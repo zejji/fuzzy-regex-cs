@@ -54,7 +54,24 @@ $sessionLogRoot = Join-Path $env:USERPROFILE '.claude/projects'
 # outside this list stalls the slice rather than doing something unreviewed on the machine.
 $allowedTools = @(
     'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'Skill', 'Task', 'Agent',
-    'Bash(dotnet *)', 'Bash(git *)', 'Bash(pwsh *)', 'Bash(python *)'
+    # TWO tools, two sets of rules. This machine sets CLAUDE_CODE_USE_POWERSHELL_TOOL=1 in
+    # ~/.claude/settings.json, which the child session inherits, so it reaches for the PowerShell
+    # tool as readily as Bash - and PowerShell tool calls are matched against 'PowerShell(...)'
+    # rules, never 'Bash(...)'. A Bash-only allowlist silently denies every PowerShell call.
+    # Measured 2026-08-30: with only the Bash rules below, `dotnet --version | Select-Object
+    # -Last 1` was denied; adding the PowerShell mirrors ran it.
+    'Bash(dotnet *)', 'Bash(git *)', 'Bash(pwsh *)', 'Bash(python *)',
+    'PowerShell(dotnet *)', 'PowerShell(git *)', 'PowerShell(pwsh *)', 'PowerShell(python *)',
+
+    # Claude Code decomposes a compound command and requires EVERY part to match, so
+    # `dotnet build ... | Select-Object -Last 60` is denied on the filter, not on dotnet. These
+    # read, filter and print; none of them writes, deletes or executes. Mutating tools (sed -i
+    # and friends) stay out on purpose: edits belong in the Edit tool, where they are visible in
+    # the transcript. The cmdlets are PowerShell-only - `Select-Object` is not a command in Git
+    # Bash - and head/tail/grep are Bash-only, so each name goes on the side that has it.
+    'Bash(head *)', 'Bash(tail *)', 'Bash(grep *)',
+    'PowerShell(Select-Object *)', 'PowerShell(Select-String *)',
+    'PowerShell(Get-Content *)', 'PowerShell(Get-ChildItem *)'
 )
 
 function Get-PendingSlice {
@@ -219,7 +236,19 @@ function Undo-FailedSlice {
         the budget gate counts slices from it. Removing it would reset the driver's own cap and
         let it run unlimited sessions in a day.
     #>
-    param([string]$HeadBefore)
+    param([string]$HeadBefore, [string]$SliceName)
+
+    # Stash before resetting. "No commit was made" is not the same failure as "the ratchet is
+    # red": a session can reach a green tree and still miss the commit, and S07 attempt 1 did
+    # exactly that - the reset below deleted 50 minutes of good work and 54.5M tokens. Stashing
+    # first changes nothing about the retry, which still starts from a clean tree as designed,
+    # but the work stops being unrecoverable. `-u` takes untracked files and leaves IGNORED ones,
+    # so docs/plan/slice-log.jsonl survives and the budget gate keeps its count.
+    if (git -C $repoRoot status --porcelain) {
+        $label = "slice-rescue $SliceName $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+        git -C $repoRoot stash push --include-untracked --message $label | Out-Null
+        Write-Host "  uncommitted work stashed as '$label' - recover with: git stash list" -ForegroundColor DarkGray
+    }
 
     git -C $repoRoot reset --hard $HeadBefore | Out-Null
     git -C $repoRoot clean -fd docs src tests bench tools | Out-Null
@@ -301,7 +330,7 @@ while ($completed -lt $MaxSlices) {
 
     # Roll back before logging: the rollback restores tracked files to $headBefore, and a park
     # note written before it would be reverted by it.
-    Undo-FailedSlice -HeadBefore $headBefore
+    Undo-FailedSlice -HeadBefore $headBefore -SliceName $slice.BaseName
 
     if ($consecutiveFailures -ge 2) {
         Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' -TotalTokens $session.TotalTokens

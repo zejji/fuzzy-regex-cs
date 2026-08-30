@@ -68,14 +68,24 @@ Keep the judgement in this session.
 In this order. Every step, every time.
 
 ```powershell
-tools/check-ratchet.ps1                  # must print GREEN
-tools/check-ratchet.ps1 -UpdateBaseline  # only once it is green
+pwsh -File tools/check-ratchet.ps1                  # must print GREEN
+pwsh -File tools/check-ratchet.ps1 -UpdateBaseline  # only once it is green
 ```
 
 Then one blind review pass over the diff. Brief the subagent to hand over a **reproduction** -
 the exact command and its output, or a failing test - not prose. Do not ask it for explanations or
 proposed corrections: prompts that request those measurably raise misjudgement rates. Style
 opinions and speculative rewrites are out of scope; reject them unread.
+
+**Wait for the reviewer inside the same turn.** Dispatch it as a blocking call and read its
+report as the tool result. Never write a progress message like "review still running, commit to
+follow" and end your turn: the driver runs you under `claude -p`, where ending your turn ends the
+process, and a session that ends before the commit is a failed slice - the driver stashes your
+work and resets the tree to where you found it, so the next attempt starts from scratch. If a
+reviewer has not reported yet, you are not finished - stay in the turn. This is not hypothetical:
+S07's first attempt reached a green ratchet, 495 passing tests and 410 matching corpus rows, then
+ended its turn to wait for a background reviewer and lost the lot (2026-08-30, 54.5M tokens; the
+rescue stash was added afterwards, in response to that failure).
 
 Treat every finding as a hypothesis and reproduce it yourself before touching code. Roughly four
 in five candidate findings do not survive that gate, and acting on one that should have been
@@ -118,7 +128,35 @@ Then:
 The commit is the slice. A session that ends without a green ratchet and a commit has not
 completed a slice, and the driver will treat it as a failure.
 
+## Working under the driver
+
+The unattended session runs with a scoped Bash allowlist and a sandbox. These are the shapes it
+rejects, all of which have already burned turns on real slices:
+
+- **Compound commands are decomposed, and every part must match the allowlist.** `dotnet build
+  ... | Select-Object -Last 60` is rejected on the filter, not on `dotnet`, and so is
+  `dotnet run ... ; grep ...`. Run one command per call and read the output, or pipe only into
+  something the allowlist names.
+- **The `Bash` and `PowerShell` tools have separate allowlists, and separate vocabularies.**
+  `head`, `tail` and `grep` are allowed on the Bash side; `Select-Object`, `Select-String`,
+  `Get-Content` and `Get-ChildItem` on the PowerShell side. Piping `dotnet` into `Select-Object`
+  from the Bash tool fails twice over - wrong rule family, and the cmdlet does not exist in Git
+  Bash. Pick the tool that owns the filter you want.
+- **Heredocs and `-c` script blocks are refused outright** ("contains script block that may
+  execute arbitrary code"). To run Python, `Write` a `.py` file and run `python thatfile.py`.
+- **Glob patterns inside a shell path always need approval.** Use the `Glob` tool instead.
+- **Writes outside the repository are blocked**, `/tmp` included. Keep scratch files in the repo
+  root, and delete them before you commit.
+- **Use the `Read`, `Edit` and `Grep` tools, not `cat`, `sed -i` and `grep`.** They are always
+  allowed, they never trip the decomposition rule, and an `Edit` is visible in the transcript
+  where a `sed -i` is not.
+
 ## Rules that are not negotiable
+
+- **Never end a session with uncommitted work.** Committing is the last thing you do and it is
+  not optional. If you are out of road - blocked, out of budget, or the slice is wrong - write
+  the blocker into STATE.md and commit *that*, so the next session starts from a clean tree.
+  Work left uncommitted is work the driver throws away.
 
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in
