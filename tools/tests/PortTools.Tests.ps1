@@ -111,6 +111,26 @@ Describe 'Test-Ratchet' {
     It 'reports the passing count so a drop is visible even without named regressions' {
         (Test-Ratchet -Results $script:Results -BaselinePassing @()).PassingCount | Should -Be 2
     }
+
+    It 'tells apart two tests whose ids differ only in case' {
+        # A parameterised test that asserts case-insensitive behaviour produces exactly this:
+        # Known_names_resolve(LATIN SMALL LETTER A) and Known_names_resolve(latin small letter a)
+        # are different tests with ids that differ only in case. PowerShell's default hashtable
+        # and Sort-Object -Unique are both case-insensitive, so before this the ratchet kept one
+        # of them and silently stopped watching the other.
+        $results = @(
+            [pscustomobject]@{ Id = 'X.Resolves(ABC)'; Outcome = 'Passed' }
+            [pscustomobject]@{ Id = 'X.Resolves(abc)'; Outcome = 'Skipped' }
+        )
+
+        $verdict = Test-Ratchet -Results $results -BaselinePassing @('X.Resolves(abc)', 'X.Resolves(ABC)')
+
+        # -BeExactly, not -Contain: Pester's -Contain and -Be are themselves case-insensitive,
+        # so they would pass whichever id survived.
+        $verdict.IsGreen | Should -BeFalse
+        $verdict.Regressions.Count | Should -Be 1
+        $verdict.Regressions[0] | Should -BeExactly 'X.Resolves(abc)'
+    }
 }
 
 Describe 'Update-Baseline' {
@@ -124,6 +144,28 @@ Describe 'Update-Baseline' {
             'Fuzzy.Text.RegularExpressions.Tests.Gaps.SurrogateTests.Surrogate_pair_indices',
             'Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors.AnchorTests.Caret_matches_start')
         $saved.upstreamCommit | Should -Be 'abc123'
+    }
+
+    It 'keeps both of two passing tests whose ids differ only in case' {
+        # Sort-Object -Unique is case-insensitive, so it used to collapse these into one and the
+        # baseline stopped covering the other. Found by S09, whose \N{...} tests assert exactly
+        # this kind of case-insensitivity.
+        $path = Join-Path $TestDrive 'case.json'
+        $results = @(
+            [pscustomobject]@{ Id = 'X.Resolves(ABC)'; Outcome = 'Passed' }
+            [pscustomobject]@{ Id = 'X.Resolves(abc)'; Outcome = 'Passed' }
+        )
+
+        Update-Baseline -Results $results -BaselinePath $path -UpstreamCommit 'abc123'
+
+        # -BeExactly on each element, not -Contain: Pester's -Contain is case-insensitive and
+        # would pass on a baseline that had kept only one of the two.
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        $ids = @($saved.passing)
+        $saved.passingCount | Should -Be 2
+        $ids.Count | Should -Be 2
+        @($ids | Where-Object { $_ -cmatch '^X\.Resolves\(ABC\)$' }).Count | Should -Be 1
+        @($ids | Where-Object { $_ -cmatch '^X\.Resolves\(abc\)$' }).Count | Should -Be 1
     }
 }
 

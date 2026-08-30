@@ -32,6 +32,10 @@ needs from S09 is in place and proved.
   `tools/build-character-names.py` (downloads the UCD, cached in `.scratch/`), then
   `tools/record-unicode-fixtures.py` - in that order, because the last reads the second's output.
   `oracle.yml` runs all three with `--check`.
+- **The ratchet now keys test ids ordinally.** S09 found that `Update-Baseline` and `Test-Ratchet`
+  used PowerShell's case-insensitive defaults, so two tests whose names differ only in case
+  collapsed into one and the gate stopped watching the other. S10 writes case-folding tests, so
+  keep an eye on the baseline count matching the reported passing count.
 - **Local `regex` is 2026.7.19; upstream is pinned at 2026.8.12.** The Unicode tables have not
   changed since 2025-10-20, so the fixtures agree either way, but CI regenerates them against a
   build of the pinned submodule.

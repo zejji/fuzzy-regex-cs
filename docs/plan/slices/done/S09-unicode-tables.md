@@ -183,6 +183,14 @@ three generators with `--check` weekly.
 - **The two `get_all_cases.ascii.*` digests are identical**, which is correct:
   `ascii_full_case_fold` never returns more than one codepoint, so the `None` marker is never
   appended.
+- **The ratchet itself had a hole, found by this slice's own test names.** PowerShell's default
+  hashtable and `Sort-Object -Unique` are case-insensitive, so `Update-Baseline` recorded 860
+  passing tests as 855 and `Test-Ratchet` kept only one of each case-only-differing pair - which
+  is exactly what a test of case-insensitive lookup produces. Fixed at the root in
+  `PortTools.psm1` (ordinal dictionary, `-CaseSensitive` sort) with two Pester tests, written
+  first and re-checked by reverting the fix. Pester's own `-Contain` and `-Be` are
+  case-insensitive too, so the assertions use `-BeExactly` and `-cmatch`. S10 will write far more
+  such names, so this had to be the root fix and not a rename of four `[Arguments]`.
 
 **For the next slice (S10).** The tables are there and proved; `RegexModule.FoldCase`,
 `GetAllCases`, `GetExpandOnFolding`, `HasPropertyValue` and `GetProperties` are the five entry
