@@ -156,3 +156,13 @@ inner-set semantics each demonstrated to fail when violated.
   .NET exception type for a `ValueError` rejection (the test pins the message only, deliberately,
   because the type is the porting slice's call).
 - `docs/plan/2026-08-30-phase2-decisions.md` is unchanged and still the reasoning for the phase.
+
+**Review.** The slice session did not record a blind review, so the owner ran one afterwards
+(2026-08-30, Opus, `docs/VERIFICATION.md` brief). Findings raised: 0. Independently of the
+recorder, the reviewer replayed all 1547 compile rows, 50 error rows and 62 template rows through
+the installed `regex` module (0 mismatches), regenerated the fixture byte-identically in a clean
+worktree, ran ten seam mutants (wrong integer, wrong message, wrong offset, wrong exception type,
+`NotImplementedException` without the `needs:` prefix), all of which failed rather than skipped or
+passed, and showed `--check` rejecting a changed integer, a removed row, a changed commit hash and
+a reformatted file, and `--verify-determinism` failing with the sort patches disabled. The
+`port-slice` skill now requires this paragraph in every slice's closing notes.

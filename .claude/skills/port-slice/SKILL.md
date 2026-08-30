@@ -104,7 +104,12 @@ is in design spec section 8 and amendments 9 and 10.
 Then:
 
 1. `git mv docs/plan/slices/S<nn>-*.md docs/plan/slices/done/` and append closing notes to the
-   file: what landed, anything surprising, anything the next slice should know.
+   file: what landed, anything surprising, anything the next slice should know, and a
+   **"Review" paragraph stating the outcome of the blind pass: findings raised, findings
+   reproduced, findings fixed, and whether a second pass over unreviewed changes was needed.**
+   A slice whose closing notes do not say this has not recorded its review, and the owner will
+   treat it as not reviewed (S06 shipped without the record, and nobody can now tell). Tick the
+   slice file's "Done when" boxes as you go; an unticked box is a visible gap.
 2. Rewrite `docs/plan/STATE.md` (rewrite it, never append; 30 lines maximum).
 3. Append a dated one-liner to `docs/plan/DECISIONS.md` for any decision a future session would
    otherwise have to re-derive.
