@@ -59,6 +59,17 @@ jobs:
           assert regex.__version__ == pinned, "the oracle is not the pinned upstream version"
           CHECK
 
+      - name: The compile-parity corpus must be current
+        # The corpus is the only oracle Phase 2 has, so a stale one would send every parser slice
+        # chasing divergences that are really upstream drift. Regenerated here against the oracle
+        # built from upstream/ above, and diffed byte for byte against what is committed.
+        run: python tools/record-compile-corpus.py --check
+
+      - name: The corpus recorder must be deterministic
+        # Two runs under different PYTHONHASHSEED values must agree. If a future upstream adds a
+        # fourth place where a set becomes an ordered list, this is what says so.
+        run: python tools/record-compile-corpus.py --verify-determinism
+
       - name: Run the oracle
         # --ignore-exit-code 8 tolerates "zero tests ran". The harness itself arrives in phase 6;
         # until then this project is empty, and a scheduled job that always fails just teaches

@@ -20,4 +20,12 @@
   <ItemGroup>
     <ProjectReference Include="../../src/FuzzyRegex/FuzzyRegex.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The compile-parity corpus, embedded rather than copied to the output directory so the tests
+      never depend on the working directory. Regenerate with tools/record-compile-corpus.py.
+    -->
+    <EmbeddedResource Include="Gaps/CompileParity/corpus.json" />
+  </ItemGroup>
 </Project>

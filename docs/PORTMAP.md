@@ -49,6 +49,9 @@ is ported; absence means it is not (yet).
 | `overlapped=True` argument | `_main.py:341` onwards | `overlapped` parameter | S01 |
 | `**kwargs` named lists (`regex.compile(p, name=[...])`) | `_main.py:460` (`_compile`) | `namedLists` parameter on the `FuzzyRegex` constructor and on the static `Match`, `MatchAtStart`, `FullMatch` and `Matches`, typed `IReadOnlyDictionary<string, IReadOnlyCollection<string>>` | S04 |
 | `Pattern.named_lists` | `_main.py` | `FuzzyRegex.NamedLists`, typed `IReadOnlyDictionary<string, IReadOnlySet<string>>` because upstream returns each list as a `frozenset` | S04 |
+| `_main._compile` (the tail: parse, optimise, compile) | `_main.py:460-686` | `Parsing.PatternCompiler.Compile` - **shape only in S06**, still throws; the pattern cache is not ported | S06 |
+| The `_regex.compile(...)` argument tuple | `_main.py:660-663` | `Parsing.CompiledPattern` (record). `index_group` omitted: it is `GroupIndex` inverted | S06 |
+| `_main._compile_replacement_helper` | `_main.py:687-741` | `Parsing.PatternCompiler.CompileReplacement` - **shape only in S06**. Takes the group count and group index rather than a pattern, because `compile_repl_group` (`_regex_core.py:1902-1918`) reads nothing else from it | S06 |
 
 Signatures only in S01. Every member throws `NotImplementedException`; phase 2 puts a parser and
 an engine behind them.
@@ -193,4 +196,5 @@ sync of that area more expensive.
 
 | Area | How it differs | Why | Slice |
 |---|---|---|---|
-| _(nothing yet)_ | | | |
+| Set-member order in `_check_firstset` (`_regex_core.py:380-411`) and `Branch._flush_set_members` (`:2470-2483`) | Both turn a Python `set` of parse nodes into a list. **We sort at both points, and so does the recorder**, by the node's `_key` rendered with the class *name* in place of the class *object*, recursing into nested nodes and tuples (`_render_key` in `tools/record-compile-corpus.py`). | `RegexBase.__hash__` hashes `self._key`, whose first element is the class object, whose hash is its address - so upstream's bytecode for these two paths differs from one Python process to the next. Measured 2026-08-30 with the sort disabled: eight runs disagreed on 111 of 1547 compiles, and no two runs disagreed on the same rows (51 for one pair of runs, 82 for another), so any single pair undercounts. The seed is not what varies - a class object's hash is its address, so every fresh process is a fresh sample. Set-member order carries no matching semantics, so sorting is safe, and it is the only way the corpus can be a byte-exact oracle. Canonicalising in the comparator instead would need a bytecode decoder - Phase 3 work, and a second thing to get right. | S06 |
+| Named-list member order (`StringSet.__init__`, `_regex_core.py:4088-4100`) | **Not a port divergence**: the port keeps whatever order its caller gave. The *recorder* sorts each named list before handing it to upstream, and the fixture stores it sorted, so the fixture's order is the order upstream compiled in. | `StringSet` sorts its branches by length only, a stable sort, so two equal-length members keep the caller's iteration order - and upstream's suite passes a `set` (`test_regex.py:2578-2579`). The leak is in the caller's container, not in upstream's logic, so it is fixed at the input rather than in the compiler. | S06 |

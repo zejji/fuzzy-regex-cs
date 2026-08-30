@@ -110,3 +110,49 @@ the roadmap says, because until the VM exists there is nothing to run it against
   check.
 - The corpus is what upstream's suite happens to compile. It is not exhaustive and it says
   nothing about matching. Both gaps belong to Phase 3 and Phase 6, deliberately.
+
+## Closing notes (2026-08-30)
+
+**Landed.** `tools/record-compile-corpus.py`, the fixture at
+`tests/FuzzyRegex.Tests/Gaps/CompileParity/corpus.json`, the `PatternCompiler` /
+`CompiledPattern` seam in `src/FuzzyRegex/Parsing/`, 1655 corpus tests plus 3 tests that pin the
+fixture itself, and two CI steps in `oracle.yml`. Ratchet green: 3664 tests, 37 passing (34 + the
+3 new fixture tests), 3627 skipped, 0 failing.
+
+**Counts, which differ from the ones this slice was written with.** 1547 compiles (not 1534), 50
+errors (not 46), 62 templates, 29,322 bytecode integers (not 29,219). `cache_it=False` accounts
+for the extra compiles; the four extra errors are `ValueError` rejections the original probe never
+saw. Both in DECISIONS.
+
+**Determinism.** Four runs, byte-identical. The order hazard turned out to have **three** sites,
+not two: the third is `StringSet.__init__` reading the caller's container, which upstream's own
+suite hands a `set`. Fixed at the input rather than in the compiler, so the port sorts nothing.
+The slice's "84 nondeterministic rows" figure is not a fixed number - see DECISIONS.
+
+**Teeth, proven four times rather than once.** (1) One fixture integer flipped with the seam
+hard-coded: the row failed, correct value passed. (2) A `ValueError` row with the recorded message
+passed; one word changed, it failed. (3) `WithStrictOrdering` demonstrated to constrain inner
+collections, which is why it is not used. (4) The replacement assertion's outer-order and
+inner-set semantics each demonstrated to fail when violated.
+
+**What the next slices should know.**
+
+- The seam is `PatternCompiler.Compile(pattern, flags, namedLists, defaultVersion)` and
+  `PatternCompiler.CompileReplacement(template, groupCount, groupIndex)`. `flags` is a raw `int`
+  of upstream's `RegexFlag` bits, not `FuzzyRegexOptions`: the corpus compiles under `ASCII`
+  (0x80), `LOCALE` (0x4), `UNICODE` (0x20) and `WORD` (0x200), none of which the public enum has.
+- **Replacement templates need no compiled pattern.** `compile_repl_group` reads only
+  `pattern.groups` and `pattern.groupindex`, so S12 can turn on all 62 template rows without the
+  parser being finished.
+- A row skips only for a `NotImplementedException` whose message starts with `needs:`. Any other
+  exception, and any wrong value, fails. Give every unported construct its own tag - that tag is
+  what the status board's "waiting on a capability" table is built from, and it is how the next
+  slice is chosen.
+- S07 and S08 must sort at `_check_firstset` and `Branch._flush_set_members` exactly as the
+  recorder's `_render_key` does: class *name*, then the `_key` values, recursing into nested nodes
+  and tuples. PORTMAP's "Where we diverge" has the rule.
+- **Two things the corpus cannot check**, both worth a gap test in the slice that meets them:
+  the outer order of `named_list_indexes` (no corpus row has more than one named list), and the
+  .NET exception type for a `ValueError` rejection (the test pins the message only, deliberately,
+  because the type is the porting slice's call).
+- `docs/plan/2026-08-30-phase2-decisions.md` is unchanged and still the reasoning for the phase.

@@ -18,6 +18,12 @@ TestResults/
 coverage*.xml
 coverage*.json
 
+# Python. tools/record-compile-corpus.py is run as a script, but anything that imports it - a
+# probe, a REPL - drops bytecode next to it, which would then show up as a dirty tree and fail
+# the slice driver's cleanliness check.
+__pycache__/
+*.pyc
+
 # NuGet
 *.nupkg
 *.snupkg
