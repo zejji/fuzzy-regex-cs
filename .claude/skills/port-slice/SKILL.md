@@ -148,6 +148,17 @@ rejects, all of which have already burned turns on real slices:
 - **Heredocs and `-c` script blocks are refused outright** ("contains script block that may
   execute arbitrary code"). To run Python, `Write` a `.py` file and run `python thatfile.py`.
 - **Glob patterns inside a shell path always need approval.** Use the `Glob` tool instead.
+- **The `PowerShell` tool has a second gate the allowlist cannot open.** Before any rule is
+  consulted, it statically refuses: `{ }` script blocks (so no `Measure-Command { ... }`), `$()`
+  and `(...)` subexpressions, several statements joined by `;`, a nested shell (`pwsh -File ...`),
+  a `python ... && dotnet ...` chain, a literal path ending in `\` (read as a UNC share), and any
+  command over 1015 bytes. Nine such calls were refused during S09 - every one recovered, but
+  each cost a turn. Split multi-statement commands into separate calls, drop the wrapper, and run
+  `pwsh -File tools/check-ratchet.ps1` through the **`Bash`** tool, where `Bash(pwsh *)` allows it
+  and there is no nested-shell gate.
+- **A commit message over ~1015 bytes cannot go inline.** `Write` it to `.scratch/msg.txt` and
+  run `git commit -F .scratch/msg.txt`. Every closing note this skill asks for exceeds the cap,
+  so this is the normal path, not the exception.
 - **Throwaway scratch goes in `.scratch/`, never anywhere else in the working tree.** Oracle
   scripts, build logs, TRX probes, one-off Python: write them to `.scratch/` at the repo root.
   It is gitignored, so a file you forget cannot dirty the tree; it is inside the repo, so the
