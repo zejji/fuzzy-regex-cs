@@ -81,6 +81,11 @@ jobs:
         # unicodedata - an implementation independent of those files - before diffing the table.
         run: python tools/build-character-names.py --check
 
+      - name: The lowercase table must be current
+        # Downloads the Unicode 17.0.0 UCD and re-verifies the mapping against this runner's own
+        # str.lower() - an implementation independent of those files - before diffing the table.
+        run: python tools/build-lowercase.py --check
+
       - name: The Unicode fixtures must be current
         # The casing, property and str-predicate digests, taken from the oracle built above
         # rather than from a developer's locally installed regex.

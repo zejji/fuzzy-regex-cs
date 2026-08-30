@@ -31,5 +31,7 @@
     <EmbeddedResource Include="Gaps/Unicode/unicode-fixtures.json" />
     <!-- What the character-name table should be. Regenerate with tools/build-character-names.py. -->
     <EmbeddedResource Include="Gaps/Unicode/character-names.json" />
+    <!-- What the lowercase table should be. Regenerate with tools/build-lowercase.py. -->
+    <EmbeddedResource Include="Gaps/Unicode/lowercase.json" />
   </ItemGroup>
 </Project>

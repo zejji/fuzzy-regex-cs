@@ -24,9 +24,19 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// </remarks>
 internal static class ParseFunctions
 {
-    /// <summary>Upstream <c>CHARSET_ESCAPES</c> keys (lines 4606-4613).</summary>
-    private static readonly System.Collections.Frozen.FrozenSet<char> _charsetEscapes =
-        System.Collections.Frozen.FrozenSet.ToFrozenSet(['d', 'D', 'h', 's', 'S', 'w', 'W']);
+    /// <summary>Upstream <c>_POSIX_CLASSES</c> (line 1727).</summary>
+    private static readonly System.Collections.Frozen.FrozenSet<string> _posixClasses =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(["ALNUM", "DIGIT", "PUNCT", "XDIGIT"], StringComparer.Ordinal);
+
+    /// <summary>Upstream <c>_BINARY_VALUES</c> (line 1729).</summary>
+    private static readonly System.Collections.Frozen.FrozenSet<string> _binaryValues =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+            ["YES", "Y", "NO", "N", "TRUE", "T", "FALSE", "F"],
+            StringComparer.Ordinal
+        );
+
+    /// <summary>Upstream <c>SET_OPS</c> (line 183).</summary>
+    private static readonly string[] _setOps = ["||", "~~", "&&", "--"];
 
     /// <summary>
     /// Whether a character has more than one case. Upstream <c>is_cased_i</c>
@@ -72,6 +82,19 @@ internal static class ParseFunctions
     internal static Character MakeCharacter(Info info, int value, bool inSet = false) =>
         // A character set is built case-sensitively.
         inSet ? new Character(value) : new Character(value, caseFlags: MakeCaseFlags(info));
+
+    /// <summary>Upstream <c>make_property</c> (lines 445-450).</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="prop">The property node.</param>
+    /// <param name="inSet">Whether the property is inside a character set.</param>
+    /// <returns>The property, with the case flags a node built here should carry.</returns>
+    internal static RegexBase MakeProperty(Info info, Property prop, bool inSet)
+    {
+        ArgumentNullException.ThrowIfNull(prop);
+
+        // A character set is built case-sensitively.
+        return inSet ? prop : prop.WithFlags(caseFlags: MakeCaseFlags(info));
+    }
 
     /// <summary>Upstream <c>_parse_pattern</c> (lines 452-460).</summary>
     /// <param name="source">The scanner.</param>
@@ -156,9 +179,9 @@ internal static class ParseFunctions
                         break;
 
                     case '[':
-                        throw new NotImplementedException(
-                            "needs:character-classes - parse_set and the set node types are not ported yet (S10)"
-                        );
+                        // A character set.
+                        sequence.Add(ParseSet(source, info));
+                        break;
 
                     case '^':
                         // The start of a line or the string.
@@ -448,7 +471,9 @@ internal static class ParseFunctions
 
             if (ch == '#')
             {
-                throw new NotImplementedException("needs:comments - parse_comment is not ported yet (S10)");
+                // (?#...: a comment.
+                ParseComment(source);
+                return null;
             }
 
             if (ch == '(')
@@ -537,6 +562,37 @@ internal static class ParseFunctions
         info.CloseGroup();
 
         return new Group(info, group, subpattern);
+    }
+
+    /// <summary>Upstream <c>parse_comment</c> (lines 978-993).</summary>
+    /// <param name="source">The scanner, positioned just after the <c>(?#</c>.</param>
+    /// <remarks>
+    /// The loop leaves the position on the closing parenthesis and <c>expect</c> then consumes it,
+    /// so an unterminated comment is "missing )" rather than a silently swallowed rest of pattern.
+    /// A backslash escapes the next character, which is how <c>(?#c\)x)</c> comments out a
+    /// parenthesis.
+    /// </remarks>
+    internal static void ParseComment(Source source)
+    {
+        int savedPos;
+        while (true)
+        {
+            savedPos = source.Pos;
+            int c = source.Get(overrideIgnore: true);
+
+            if (c is Source.EndOfSource or ')')
+            {
+                break;
+            }
+
+            if (c == '\\')
+            {
+                _ = source.Get(overrideIgnore: true);
+            }
+        }
+
+        source.Pos = savedPos;
+        source.Expect(")");
     }
 
     /// <summary>Upstream <c>parse_extension</c> (lines 942-976).</summary>
@@ -851,12 +907,14 @@ internal static class ParseFunctions
 
         if (ch == 'R' && !inSet)
         {
-            throw new NotImplementedException("needs:escapes - \\R needs the Atomic (S11) and SetUnion (S10) nodes");
+            throw new NotImplementedException("needs:escapes - \\R needs the Atomic node (S11)");
         }
 
         if (ch == 'X' && !inSet)
         {
-            throw new NotImplementedException("needs:grapheme - the Grapheme node is not ported yet (S10)");
+            // Grapheme._compile builds an Atomic(Sequence([LazyRepeat(AnyAll(), 1, None),
+            // GraphemeBoundary()])) (lines 2919-2932), so the node waits for Atomic in S11.
+            throw new NotImplementedException("needs:grapheme - the Grapheme node needs Atomic (S11)");
         }
 
         if (RegexFlags.IsAlpha(ch))
@@ -872,11 +930,10 @@ internal static class ParseFunctions
                 }
             }
 
-            if (_charsetEscapes.Contains((char)ch))
+            Property? charset = CharsetEscape(info, ch);
+            if (charset is not null)
             {
-                throw new NotImplementedException(
-                    "needs:character-classes - the predefined character-set escapes are not ported yet (S10)"
-                );
+                return charset;
             }
 
             if (RegexFlags.CharacterEscapes.TryGetValue((char)ch, out char value))
@@ -1097,13 +1154,16 @@ internal static class ParseFunctions
         int savedPos = source.Pos;
         if (source.MatchText("{"))
         {
-            _ = source.GetWhile(RegexFlags.IsNamedCharPart, keepSpaces: true);
+            string name = source.GetWhile(RegexFlags.IsNamedCharPart, keepSpaces: true);
             if (source.MatchText("}"))
             {
-                // Upstream: value = unicodedata.lookup(name), or error("undefined character name").
-                throw new NotImplementedException(
-                    "needs:named-characters - \\N{...} needs the Unicode character-name table (S09)"
-                );
+                // Upstream's unicodedata.lookup, whose KeyError becomes this error.
+                if (!UnicodeCharacterNames.TryLookup(name, out int value))
+                {
+                    throw new FuzzyRegexParseException("undefined character name", source.String, source.Pos);
+                }
+
+                return MakeCharacter(info, value, inSet);
             }
         }
 
@@ -1117,32 +1177,40 @@ internal static class ParseFunctions
     /// <param name="positive">Whether this is <c>\p</c> or <c>\P</c>.</param>
     /// <param name="inSet">Whether the escape is inside a character set.</param>
     /// <returns>The property, or the literal <c>p</c> or <c>P</c> when there is no property here.</returns>
-    /// <remarks>
-    /// Only <c>lookup_property</c> needs the Unicode property tables; the scanning around it is
-    /// what makes a bare <c>\p</c> the literal <c>p</c>.
-    /// </remarks>
     internal static RegexBase ParseProperty(Source source, Info info, bool positive, bool inSet)
     {
         int savedPos = source.Pos;
         int ch = source.Get();
         if (ch == '{')
         {
-            _ = source.MatchText("^");
-            _ = ParsePropertyName(source);
+            bool negate = source.MatchText("^");
+            (string? propName, string name) = ParsePropertyName(source);
             if (source.MatchText("}"))
             {
                 // It's correctly delimited.
-                throw new NotImplementedException(
-                    "needs:unicode-properties - lookup_property needs the Unicode property tables (S09)"
+                Property prop = LookupProperty(
+                    propName,
+                    name,
+                    positive != negate,
+                    source,
+                    encoding: PropertyEncoding(info)
                 );
+
+                return MakeProperty(info, prop, inSet);
             }
         }
         else if (ch is 'C' or 'L' or 'M' or 'N' or 'P' or 'S' or 'Z')
         {
             // An abbreviated property, eg \pL.
-            throw new NotImplementedException(
-                "needs:unicode-properties - lookup_property needs the Unicode property tables (S09)"
+            Property prop = LookupProperty(
+                null,
+                char.ConvertFromUtf32(ch),
+                positive,
+                source,
+                encoding: PropertyEncoding(info)
             );
+
+            return MakeProperty(info, prop, inSet);
         }
 
         // Not a property, so treat as a literal "p" or "P".
@@ -1182,6 +1250,544 @@ internal static class ParseFunctions
 
         source.Pos = savedPos;
         return (propName, name);
+    }
+
+    /// <summary>Upstream <c>parse_set</c> (lines 1511-1535).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The set node.</returns>
+    internal static RegexBase ParseSet(Source source, Info info)
+    {
+        int version = Version(info);
+
+        bool savedIgnore = source.IgnoreSpace;
+        source.IgnoreSpace = false;
+
+        // Negative set?
+        bool negate = source.MatchText("^");
+        RegexBase item;
+        try
+        {
+            item = version == RegexFlags.Version0 ? ParseSetImpUnion(source, info) : ParseSetUnion(source, info);
+
+            if (!source.MatchText("]"))
+            {
+                throw new FuzzyRegexParseException("missing ]", source.String, source.Pos);
+            }
+        }
+        finally
+        {
+            source.IgnoreSpace = savedIgnore;
+        }
+
+        if (negate)
+        {
+            item = item.WithFlags(positive: !item.Positive);
+        }
+
+        return item.WithFlags(caseFlags: MakeCaseFlags(info));
+    }
+
+    /// <summary>Upstream <c>parse_set_union</c> (lines 1537-1545).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The union, or its single member.</returns>
+    internal static RegexBase ParseSetUnion(Source source, Info info)
+    {
+        List<RegexBase> items = [ParseSetSymmDiff(source, info)];
+        while (source.MatchText("||"))
+        {
+            items.Add(ParseSetSymmDiff(source, info));
+        }
+
+        return items.Count == 1 ? items[0] : new SetUnion(info, items);
+    }
+
+    /// <summary>Upstream <c>parse_set_symm_diff</c> (lines 1547-1555).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The symmetric difference, or its single member.</returns>
+    internal static RegexBase ParseSetSymmDiff(Source source, Info info)
+    {
+        List<RegexBase> items = [ParseSetInter(source, info)];
+        while (source.MatchText("~~"))
+        {
+            items.Add(ParseSetInter(source, info));
+        }
+
+        return items.Count == 1 ? items[0] : new SetSymDiff(info, items);
+    }
+
+    /// <summary>Upstream <c>parse_set_inter</c> (lines 1557-1565).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The intersection, or its single member.</returns>
+    internal static RegexBase ParseSetInter(Source source, Info info)
+    {
+        List<RegexBase> items = [ParseSetDiff(source, info)];
+        while (source.MatchText("&&"))
+        {
+            items.Add(ParseSetDiff(source, info));
+        }
+
+        return items.Count == 1 ? items[0] : new SetInter(info, items);
+    }
+
+    /// <summary>Upstream <c>parse_set_diff</c> (lines 1567-1575).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The difference, or its single member.</returns>
+    internal static RegexBase ParseSetDiff(Source source, Info info)
+    {
+        List<RegexBase> items = [ParseSetImpUnion(source, info)];
+        while (source.MatchText("--"))
+        {
+            items.Add(ParseSetImpUnion(source, info));
+        }
+
+        return items.Count == 1 ? items[0] : new SetDiff(info, items);
+    }
+
+    /// <summary>Upstream <c>parse_set_imp_union</c> (lines 1577-1598).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The implicit union, or its single member.</returns>
+    internal static RegexBase ParseSetImpUnion(Source source, Info info)
+    {
+        int version = Version(info);
+
+        List<RegexBase> items = [ParseSetMember(source, info)];
+        while (true)
+        {
+            int savedPos = source.Pos;
+            if (source.MatchText("]"))
+            {
+                // End of the set.
+                source.Pos = savedPos;
+                break;
+            }
+
+            // Upstream's `any(source.match(op) for op in SET_OPS)` consumes the operator it finds,
+            // which is why the position is restored either way.
+            if (version == RegexFlags.Version1 && Array.Exists(_setOps, source.MatchText))
+            {
+                // The new behaviour has set operators.
+                source.Pos = savedPos;
+                break;
+            }
+
+            items.Add(ParseSetMember(source, info));
+        }
+
+        return items.Count == 1 ? items[0] : new SetUnion(info, items);
+    }
+
+    /// <summary>Upstream <c>parse_set_member</c> (lines 1600-1639).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The member: a character, a range, a property or a nested set.</returns>
+    internal static RegexBase ParseSetMember(Source source, Info info)
+    {
+        // Parse a set item.
+        RegexBase start = ParseSetItem(source, info);
+        int savedPos1 = source.Pos;
+        if (start is not Character { Positive: true } startCharacter || !source.MatchText("-"))
+        {
+            // It's not the start of a range.
+            return start;
+        }
+
+        int version = Version(info);
+
+        // It looks like the start of a range of characters.
+        int savedPos2 = source.Pos;
+        if (version == RegexFlags.Version1 && source.MatchText("-"))
+        {
+            // It's actually the set difference operator '--', so return the character.
+            source.Pos = savedPos1;
+            return start;
+        }
+
+        if (source.MatchText("]"))
+        {
+            // We've reached the end of the set, so return both the character and hyphen.
+            source.Pos = savedPos2;
+            return new SetUnion(info, [start, new Character('-')]);
+        }
+
+        // Parse a set item.
+        RegexBase end = ParseSetItem(source, info);
+        if (end is not Character { Positive: true } endCharacter)
+        {
+            // It's not a range, so return the character, hyphen and property.
+            return new SetUnion(info, [start, new Character('-'), end]);
+        }
+
+        // It _is_ a range.
+        if (startCharacter.Value > endCharacter.Value)
+        {
+            throw new FuzzyRegexParseException("bad character range", source.String, source.Pos);
+        }
+
+        if (startCharacter.Value == endCharacter.Value)
+        {
+            return start;
+        }
+
+        return new Range(startCharacter.Value, endCharacter.Value);
+    }
+
+    /// <summary>Upstream <c>parse_set_item</c> (lines 1641-1677).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The item.</returns>
+    internal static RegexBase ParseSetItem(Source source, Info info)
+    {
+        int version = Version(info);
+
+        if (source.MatchText("\\"))
+        {
+            // An escape sequence in a set.
+            return ParseEscape(source, info, inSet: true);
+        }
+
+        int savedPos = source.Pos;
+        if (source.MatchText("[:"))
+        {
+            // Looks like a POSIX character class.
+            try
+            {
+                return ParsePosixClass(source, info);
+            }
+            catch (ParseErrorException)
+            {
+                // Not a POSIX character class.
+                source.Pos = savedPos;
+            }
+        }
+
+        if (version == RegexFlags.Version1 && source.MatchText("["))
+        {
+            // It's the start of a nested set.
+
+            // Negative set?
+            bool negate = source.MatchText("^");
+            RegexBase item = ParseSetUnion(source, info);
+
+            if (!source.MatchText("]"))
+            {
+                throw new FuzzyRegexParseException("missing ]", source.String, source.Pos);
+            }
+
+            return negate ? item.WithFlags(positive: !item.Positive) : item;
+        }
+
+        int ch = source.Get();
+        if (ch == Source.EndOfSource)
+        {
+            throw new FuzzyRegexParseException("unterminated character set", source.String, source.Pos);
+        }
+
+        return new Character(ch);
+    }
+
+    /// <summary>Upstream <c>parse_posix_class</c> (lines 1679-1686).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state; upstream takes it and does not use it.</param>
+    /// <returns>The property the class stands for.</returns>
+    /// <exception cref="ParseErrorException">
+    /// This is not a POSIX class after all, which <see cref="ParseSetItem"/> catches. An unknown
+    /// class name raises <see cref="FuzzyRegexParseException"/> instead, which it does not.
+    /// </exception>
+    internal static Property ParsePosixClass(Source source, Info info)
+    {
+        _ = info;
+
+        bool negate = source.MatchText("^");
+        (string? propName, string name) = ParsePropertyName(source);
+        if (!source.MatchText(":]"))
+        {
+            throw new ParseErrorException();
+        }
+
+        return LookupProperty(propName, name, !negate, source, posix: true);
+    }
+
+    /// <summary>Upstream <c>float_to_rational</c> (lines 1688-1697).</summary>
+    /// <param name="value">The value to convert.</param>
+    /// <returns>
+    /// The numerator and denominator, or <see langword="null"/> where upstream's <c>int()</c>
+    /// would raise <c>ValueError</c> - which <see cref="StandardiseName"/> catches.
+    /// </returns>
+    /// <exception cref="OverflowException">
+    /// The value is infinite. Upstream's <c>int(inf)</c> raises <c>OverflowError</c>, which
+    /// <c>standardise_name</c> does <b>not</b> catch, so <c>\p{Infinity}</c> propagates it out of
+    /// <c>compile</c> (measured against the local oracle, 2026-08-30).
+    /// </exception>
+    /// <remarks>
+    /// <see cref="BigInteger"/> rather than <c>long</c> because Python's <c>int</c> has no width:
+    /// <c>\p{1e300}</c> standardises to a 301-digit string upstream.
+    /// </remarks>
+    internal static (BigInteger Numerator, BigInteger Denominator)? FloatToRational(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            // Python's int(nan) raises ValueError.
+            return null;
+        }
+
+        if (double.IsInfinity(value))
+        {
+            throw new OverflowException("cannot convert float infinity to integer");
+        }
+
+        double truncated = Math.Truncate(value);
+        var intPart = new BigInteger(truncated);
+        double error = value - truncated;
+        if (Math.Abs(error) < 0.0001)
+        {
+            return (intPart, BigInteger.One);
+        }
+
+        // 1.0 / error is finite and not NaN, because error is finite and at least 0.0001 in
+        // magnitude, so the recursive call cannot return null.
+        (BigInteger den, BigInteger num) = FloatToRational(1.0 / error)!.Value;
+
+        return ((intPart * den) + num, den);
+    }
+
+    /// <summary>Upstream <c>numeric_to_rational</c> (lines 1699-1718).</summary>
+    /// <param name="numeric">The candidate numeric name.</param>
+    /// <param name="result">The rational form, when the name is numeric.</param>
+    /// <returns>
+    /// <see langword="false"/> where upstream raises <c>ValueError</c> or
+    /// <c>ZeroDivisionError</c>, which <c>standardise_name</c> catches.
+    /// </returns>
+    internal static bool TryNumericToRational(string numeric, out string result)
+    {
+        ArgumentNullException.ThrowIfNull(numeric);
+
+        result = string.Empty;
+
+        string sign = string.Empty;
+        if (numeric.StartsWith('-'))
+        {
+            sign = "-";
+            numeric = numeric[1..];
+        }
+
+        string[] parts = numeric.Split('/');
+        double value;
+        if (parts.Length == 2)
+        {
+            if (
+                !TryParsePythonFloat(parts[0], out double numerator)
+                || !TryParsePythonFloat(parts[1], out double denominator)
+            )
+            {
+                return false;
+            }
+
+            if (denominator == 0)
+            {
+                // Python's float division by zero raises ZeroDivisionError.
+                return false;
+            }
+
+            value = numerator / denominator;
+        }
+        else if (parts.Length == 1)
+        {
+            if (!TryParsePythonFloat(parts[0], out value))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            // Upstream's bare `raise ValueError()`.
+            return false;
+        }
+
+        if (FloatToRational(value) is not (BigInteger num, BigInteger den))
+        {
+            return false;
+        }
+
+        result = string.Create(CultureInfo.InvariantCulture, $"{sign}{num}/{den}");
+        if (result.EndsWith("/1", StringComparison.Ordinal))
+        {
+            result = result[..^2];
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>standardise_name</c> (lines 1720-1725).</summary>
+    /// <param name="name">The property or value name as written.</param>
+    /// <returns>The standardised name.</returns>
+    /// <remarks>
+    /// The fallback is Python's <c>str.upper()</c>. Every name that reaches here is ASCII -
+    /// <c>PROPERTY_NAME_PART</c> is alphanumerics plus <c>" &amp;_-."</c>, and a qualified value
+    /// adds <c>"/"</c> - so the invariant upper-casing is the same mapping, and unlike the current
+    /// culture it cannot turn <c>i</c> into <c>İ</c>.
+    /// </remarks>
+    internal static string StandardiseName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (TryNumericToRational(name, out string rational))
+        {
+            return rational;
+        }
+
+        return new string([.. name.Where(ch => ch is not ('_' or '-' or ' '))]).ToUpperInvariant();
+    }
+
+    /// <summary>Upstream <c>lookup_property</c> (lines 1731-1799).</summary>
+    /// <param name="property">The qualifier, or <see langword="null"/> for an unqualified name.</param>
+    /// <param name="value">The value name.</param>
+    /// <param name="positive">Whether the property is asserted or denied.</param>
+    /// <param name="source">The scanner, for the error position. Null only for a compile-time lookup.</param>
+    /// <param name="posix">Whether the name came from a POSIX bracket class.</param>
+    /// <param name="encoding">The encoding tag the node should carry.</param>
+    /// <returns>The property node.</returns>
+    internal static Property LookupProperty(
+        string? property,
+        string value,
+        bool positive,
+        Source? source = null,
+        bool posix = false,
+        int encoding = 0
+    )
+    {
+        // Normalise the names. Upstream's `property = standardise_name(property) if property else
+        // None` standardises first, and every later `if property` / `not property` then tests the
+        // *standardised* value - which can be the empty string, because standardise_name strips
+        // "_", "-" and spaces. So `\p{_:Lu}` has no qualifier by the time it is looked up, and
+        // falls through to the general-category, script, block and POSIX branches. Collapsing the
+        // empty string to null here is what makes the rest of this function read as upstream does.
+        string? propertyName = string.IsNullOrEmpty(property) ? null : StandardiseName(property);
+        if (propertyName?.Length == 0)
+        {
+            propertyName = null;
+        }
+
+        value = StandardiseName(value);
+
+        if (
+            string.Equals(propertyName, "GENERALCATEGORY", StringComparison.Ordinal)
+            && string.Equals(value, "ASSIGNED", StringComparison.Ordinal)
+        )
+        {
+            value = "UNASSIGNED";
+            positive = !positive;
+        }
+
+        if (posix && propertyName is null && _posixClasses.Contains(value.ToUpperInvariant()))
+        {
+            value = "POSIX" + value;
+        }
+
+        IReadOnlyDictionary<string, PropertyEntry> properties = RegexModule.GetProperties();
+
+        if (propertyName is not null)
+        {
+            // Both the property and the value are provided.
+            if (!properties.TryGetValue(propertyName, out PropertyEntry? qualified))
+            {
+                throw UnknownProperty(source, "unknown property");
+            }
+
+            if (!qualified.Values.TryGetValue(value, out int qualifiedValue))
+            {
+                throw UnknownProperty(source, "unknown property value");
+            }
+
+            return new Property(PackProperty(qualified.Id, qualifiedValue), positive, encoding: encoding);
+        }
+
+        // Only the value is provided. It might be the name of a GC, script or block value.
+        foreach (string candidate in (string[])["GC", "SCRIPT", "BLOCK"])
+        {
+            PropertyEntry entry = properties[candidate];
+            if (entry.Values.TryGetValue(value, out int valueId))
+            {
+                return new Property(PackProperty(entry.Id, valueId), positive, encoding: encoding);
+            }
+        }
+
+        // It might be the name of a binary property.
+        if (properties.TryGetValue(value, out PropertyEntry? binary))
+        {
+            if (_binaryValues.SetEquals(binary.Values.Keys))
+            {
+                return new Property(PackProperty(binary.Id, 1), positive, encoding: encoding);
+            }
+
+            return new Property(PackProperty(binary.Id, 0), !positive, encoding: encoding);
+        }
+
+        // It might be the name of a binary property starting with a prefix.
+        if (
+            value.StartsWith("IS", StringComparison.Ordinal)
+            && properties.TryGetValue(value[2..], out PropertyEntry? prefixed)
+            && prefixed.Values.ContainsKey("YES")
+        )
+        {
+            return new Property(PackProperty(prefixed.Id, 1), positive, encoding: encoding);
+        }
+
+        // It might be the name of a script or block starting with a prefix.
+        foreach ((string prefix, string prefixedProperty) in ((string, string)[])[("IS", "SCRIPT"), ("IN", "BLOCK")])
+        {
+            if (!value.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            PropertyEntry entry = properties[prefixedProperty];
+            if (entry.Values.TryGetValue(value[2..], out int valueId))
+            {
+                return new Property(PackProperty(entry.Id, valueId), positive, encoding: encoding);
+            }
+        }
+
+        // Unknown property.
+        throw UnknownProperty(source, "unknown property");
+    }
+
+    /// <summary>
+    /// The three <c>CHARSET_ESCAPES</c> tables and the choice between them: upstream
+    /// <c>CHARSET_ESCAPES</c>, <c>ASCII_CHARSET_ESCAPES</c> and <c>UNICODE_CHARSET_ESCAPES</c>
+    /// (lines 4605-4633), selected as <c>parse_escape</c> selects them (lines 1317-1322).
+    /// </summary>
+    /// <param name="info">The parse state, whose flags choose the table.</param>
+    /// <param name="ch">The escape letter.</param>
+    /// <returns>The property, or <see langword="null"/> if this letter is not a set escape.</returns>
+    /// <remarks>
+    /// A function rather than three dictionaries because the tables differ only in the encoding tag
+    /// on six of their seven entries - <c>\h</c> keeps the base entry in all three - and because
+    /// upstream's entries are shared singletons, which these need not be: every node this port
+    /// builds is immutable.
+    /// </remarks>
+    internal static Property? CharsetEscape(Info info, int ch)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        int encoding = PropertyEncoding(info);
+
+        return ch switch
+        {
+            'd' => LookupProperty(null, "Digit", true, encoding: encoding),
+            'D' => LookupProperty(null, "Digit", false, encoding: encoding),
+            'h' => LookupProperty(null, "Blank", true),
+            's' => LookupProperty(null, "Space", true, encoding: encoding),
+            'S' => LookupProperty(null, "Space", false, encoding: encoding),
+            'w' => LookupProperty(null, "Word", true, encoding: encoding),
+            'W' => LookupProperty(null, "Word", false, encoding: encoding),
+            _ => null,
+        };
     }
 
     /// <summary>Upstream <c>_compile_firstset</c> (lines 370-378).</summary>
@@ -1232,29 +1838,15 @@ internal static class ParseFunctions
             return null;
         }
 
-        // Build the firstset. Upstream:
-        //     fs = SetUnion(info, list(members), case_flags=case_flags & ~FULLCASE, zerowidth=True)
-        //     return fs.optimise(info, reverse, in_set=True)
-        int setCaseFlags = RegexFlags.CaseFlagsCombination(caseFlags & ~RegexFlags.FullCase);
+        // Build the firstset. One of the two points PORTMAP's "Where we diverge" requires the
+        // members to be sorted at, because a Python set of nodes has no stable order; the corpus
+        // recorder sorts by the same rendered key.
+        int setCaseFlags = caseFlags & ~RegexFlags.FullCase;
+        List<RegexBase> ordered = [.. members.OrderBy(m => m.RenderKey(), StringComparer.Ordinal)];
 
-        if (members.Count == 1)
-        {
-            // SetUnion.optimise's one-member case (lines 3939-3943) hands the member back with the
-            // set's flags rather than building a set at all, so the commonest firstset of all - a
-            // pattern that starts with one known character - needs no SetUnion node. The member's
-            // own optimise is then the identity for a Character (line 2608), which is the only node
-            // a firstset can hold until the set types land.
-            RegexBase only = members.First();
-            return only.WithFlags(positive: only.Positive, caseFlags: setCaseFlags, zerowidth: true);
-        }
+        var set = new SetUnion(info, ordered, caseFlags: setCaseFlags, zerowidth: true);
 
-        // More than one member needs the real SetUnion. That is also one of the two points
-        // PORTMAP's "Where we diverge" requires the members to be sorted at, because a Python set
-        // of nodes has no stable order; the sort lands with the set node.
-        _ = (info, reverse);
-        throw new NotImplementedException(
-            "needs:character-classes - a firstset of more than one member needs the SetUnion node (S10)"
-        );
+        return set.Optimise(info, reverse, inSet: true);
     }
 
     /// <summary>Upstream <c>_flatten_code</c> (lines 411-417).</summary>
@@ -1361,6 +1953,111 @@ internal static class ParseFunctions
         info.CloseGroup();
 
         return new Group(info, group, subpattern);
+    }
+
+    /// <summary>
+    /// Upstream's <c>(info.flags &amp; _ALL_VERSIONS) or DEFAULT_VERSION</c>, written out in six of
+    /// the set parsers.
+    /// </summary>
+    private static int Version(Info info) =>
+        (info.Flags & RegexFlags.AllVersions) != 0 ? info.Flags & RegexFlags.AllVersions : info.DefaultVersion;
+
+    /// <summary>
+    /// The encoding tag a property gets from the flags in force, written out identically in
+    /// <c>parse_property</c> (lines 1462-1467, 1474-1479) and in <c>parse_escape</c>'s choice of
+    /// charset-escape table (lines 1317-1322).
+    /// </summary>
+    private static int PropertyEncoding(Info info)
+    {
+        if ((info.Flags & RegexFlags.Ascii) != 0)
+        {
+            return RegexFlags.AsciiEncoding;
+        }
+
+        return (info.Flags & RegexFlags.Unicode) != 0 ? RegexFlags.UnicodeEncoding : 0;
+    }
+
+    /// <summary>Upstream's <c>(prop_id &lt;&lt; 16) | val_id</c>.</summary>
+    private static uint PackProperty(int propertyId, int valueId) => ((uint)propertyId << 16) | (uint)valueId;
+
+    /// <summary>
+    /// Upstream's two-armed <c>raise error(...)</c>, which drops the pattern and the position when
+    /// there is no <c>Source</c> - which happens only for the module-level
+    /// <c>CHARSET_ESCAPES</c> lookups, all of which succeed.
+    /// </summary>
+    private static FuzzyRegexParseException UnknownProperty(Source? source, string message) =>
+        source is null
+            ? new FuzzyRegexParseException(message)
+            : new FuzzyRegexParseException(message, source.String, source.Pos);
+
+    /// <summary>
+    /// Python's <c>float()</c>, which is not <see cref="double.TryParse(string, out double)"/>:
+    /// it accepts <c>inf</c>, <c>infinity</c> and <c>nan</c> in any case, and underscores between
+    /// digits.
+    /// </summary>
+    /// <param name="text">The candidate number.</param>
+    /// <param name="value">The parsed value.</param>
+    /// <returns><see langword="false"/> where Python raises <c>ValueError</c>.</returns>
+    /// <remarks>
+    /// Only names made of alphanumerics and <c>" &amp;_-./"</c> reach here, so Python's acceptance
+    /// of non-ASCII digits - <c>float("١٢")</c> is 12.0 - is unreachable and not ported.
+    /// </remarks>
+    private static bool TryParsePythonFloat(string text, out double value)
+    {
+        value = 0;
+
+        string trimmed = TrimPythonWhitespace(text);
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        // An underscore is legal only between two digits: float("1_0") is 10.0, float("1_") and
+        // float("1._5") are both ValueError.
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            if (trimmed[i] != '_')
+            {
+                continue;
+            }
+
+            if (
+                i == 0
+                || i == trimmed.Length - 1
+                || !char.IsAsciiDigit(trimmed[i - 1])
+                || !char.IsAsciiDigit(trimmed[i + 1])
+            )
+            {
+                return false;
+            }
+        }
+
+        string digits = trimmed.Replace("_", string.Empty, StringComparison.Ordinal);
+
+        string body = digits;
+        double sign = 1;
+        if (body.Length > 0 && body[0] is '+' or '-')
+        {
+            sign = body[0] == '-' ? -1 : 1;
+            body = body[1..];
+        }
+
+        if (
+            string.Equals(body, "inf", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(body, "infinity", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            value = sign * double.PositiveInfinity;
+            return true;
+        }
+
+        if (string.Equals(body, "nan", StringComparison.OrdinalIgnoreCase))
+        {
+            value = double.NaN;
+            return true;
+        }
+
+        return double.TryParse(digits, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
     /// <summary>

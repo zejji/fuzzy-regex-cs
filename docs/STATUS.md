@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 0.5%** (10 of 1966 ported upstream tests passing).
+**Overall parity: 0.7%** (14 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -38,7 +38,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 0 | 16 | 0 | 0.0% |
 | Quantifiers | 53 | 0 | 53 | 0 | 0.0% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 1 | 463 | 0 | 0.2% |
+| Regressions | 464 | 5 | 459 | 0 | 1.1% |
 | Reverse | 37 | 0 | 37 | 0 | 0.0% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
 | Substitution | 88 | 0 | 88 | 0 | 0.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 1771 | 829 | 942 | 0 |
+| Gaps | 1856 | 1412 | 444 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,28 +61,28 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `character-classes` | 573 |
 | `quantifiers` | 179 |
-| `unicode-properties` | 160 |
-| `fuzzy-syntax` | 149 |
+| `fuzzy-syntax` | 162 |
 | `substitution` | 148 |
 | `ignore-case` | 144 |
 | `escapes` | 135 |
-| `case-folding` | 101 |
-| `backrefs` | 93 |
-| `conditionals` | 89 |
+| `character-classes` | 114 |
+| `backrefs` | 112 |
+| `unicode-properties` | 95 |
+| `conditionals` | 93 |
 | `anchors` | 87 |
 | `partial` | 82 |
+| `lookaround` | 75 |
 | `parse-errors` | 71 |
-| `lookaround` | 70 |
+| `case-folding` | 69 |
+| `lookbehind` | 62 |
+| `named-lists` | 48 |
+| `recursion` | 48 |
 | `fuzzy-matching` | 48 |
 | `right-to-left` | 47 |
-| `named-lists` | 46 |
-| `lookbehind` | 46 |
-| `recursion` | 42 |
+| `backtracking-verbs` | 44 |
 | `basic-matching` | 40 |
 | `find-all` | 37 |
-| `backtracking-verbs` | 36 |
 | `groups` | 34 |
 | `inline-flags` | 29 |
 | `branch-reset` | 28 |
@@ -95,23 +95,22 @@ What the next slice should deliver, biggest win first.
 | `alternation` | 18 |
 | `word-flag` | 18 |
 | `fuzzy-bestmatch` | 18 |
-| `fuzzy-budget` | 17 |
 | `line-boundaries` | 17 |
+| `fuzzy-budget` | 17 |
 | `define-groups` | 15 |
 | `captures` | 12 |
-| `comments` | 12 |
 | `escape-function` | 12 |
 | `version-flags` | 11 |
-| `named-characters` | 11 |
 | `format` | 11 |
 | `grapheme` | 11 |
 | `possessive` | 8 |
-| `fuzzy-changes` | 8 |
 | `posix-matching` | 8 |
+| `fuzzy-changes` | 8 |
 | `full-match` | 7 |
-| `keep-marker` | 6 |
 | `fuzzy-enhancematch` | 6 |
+| `keep-marker` | 6 |
 | `overlapped` | 4 |
+| `comments` | 4 |
 | `fuzzy-deletion` | 3 |
 | `fuzzy-insertion` | 3 |
 | `fuzzy-substitution` | 3 |

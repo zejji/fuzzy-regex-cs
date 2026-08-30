@@ -66,6 +66,63 @@ internal abstract class RegexBase
     /// <returns>The optimised node.</returns>
     internal virtual RegexBase Optimise(Info info, bool reverse) => this;
 
+    /// <summary>
+    /// Rewrites a <b>character-set member</b> into a cheaper equivalent. Upstream's <c>optimise</c>
+    /// again, called with its third argument.
+    /// </summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="reverse">Whether the pattern is matched right to left.</param>
+    /// <param name="inSet">Whether the node is being optimised as a member of another set.</param>
+    /// <returns>The optimised node.</returns>
+    /// <exception cref="NotSupportedException">
+    /// This node is not one a character set can hold.
+    /// </exception>
+    /// <remarks>
+    /// Upstream declares <c>in_set</c> on six classes only - <c>Character</c>, <c>Property</c>,
+    /// <c>Range</c> and the four set types (lines 2608, 3333, 3394, 3828-3917) - so calling any
+    /// other node's <c>optimise</c> with a third argument is a <c>TypeError</c>, whatever its
+    /// value. That is reachable, not theoretical: <c>(?V1)[[\s\S]--a]</c> reduces its first
+    /// operand to an <c>AnyAll</c>, and <c>SetDiff.optimise</c> then calls
+    /// <c>items[0].with_flags(...).optimise(info, reverse, in_set)</c> on it, which upstream
+    /// answers with "RegexBase.optimise() got an unexpected keyword argument 'in_set'" (measured
+    /// 2026-08-30). Two separate methods reproduce that; one method with an ignored parameter
+    /// would compile the pattern upstream rejects.
+    /// </remarks>
+    internal virtual RegexBase Optimise(Info info, bool reverse, bool inSet) =>
+        throw new NotSupportedException(
+            $"{GetType().Name}.optimise() got an unexpected keyword argument 'in_set'; "
+                + "upstream would raise TypeError"
+        );
+
+    /// <summary>Whether the node matches a codepoint. Upstream <c>matches</c>.</summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it matches.</returns>
+    /// <remarks>
+    /// Upstream defines <c>matches</c> only on the nodes a character set can hold, so calling it on
+    /// anything else is an <c>AttributeError</c>. <c>SetBase._handle_case_folding</c> and
+    /// <c>SetBase.max_width</c> are its only callers.
+    /// </remarks>
+    internal virtual bool Matches(int ch) =>
+        throw new NotSupportedException($"{GetType().Name} has no matches; upstream would raise AttributeError");
+
+    /// <summary>
+    /// Upstream's <c>_key</c> rendered as a string, with the class <i>name</i> in place of the
+    /// class <i>object</i>, so that the two places a set of nodes becomes an ordered list can be
+    /// sorted identically here and in the corpus recorder.
+    /// </summary>
+    /// <returns>The rendered key.</returns>
+    /// <remarks>
+    /// See PORTMAP's "Where we diverge": <c>RegexBase.__hash__</c> hashes a tuple beginning with
+    /// the class object, whose hash is its address, so upstream's own order varies from one Python
+    /// process to the next. <c>tools/record-compile-corpus.py</c>'s <c>_render_key</c> is this
+    /// function; every rendered key is ASCII, so an ordinal sort is Python's <c>sorted</c>.
+    /// <para>
+    /// The default is upstream's default <c>_key</c>, the class alone (line 1943). Only a node that
+    /// overrides <c>_key</c> overrides this.
+    /// </para>
+    /// </remarks>
+    internal virtual string RenderKey() => GetType().Name;
+
     /// <summary>Packs runs of characters into strings. Upstream <c>pack_characters</c>.</summary>
     /// <param name="info">The parse state.</param>
     /// <returns>The packed node.</returns>
@@ -179,6 +236,10 @@ internal abstract class ZeroWidthBase(bool positive = true, int encoding = 0) : 
 
     /// <inheritdoc />
     internal override long MaxWidth() => 0;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({GetType().Name},{Positive})");
 
     /// <inheritdoc />
     public override bool Equals(object? obj) =>
@@ -378,6 +439,289 @@ internal sealed class PrecompiledCode : RegexBase
 }
 
 /// <summary>
+/// A Unicode property, as <c>\p{...}</c>, <c>\P{...}</c>, <c>[[:alpha:]]</c> and the shorthand
+/// classes <c>\d \D \h \s \S \w \W</c> all compile to. Upstream <c>Property</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3310-3364).
+/// </summary>
+/// <remarks>
+/// <c>encoding</c> is deliberately not part of <c>_key</c> upstream, so a property is equal to the
+/// same property with a different encoding tag even though the two compile to different flag
+/// words. Kept, because <c>Branch</c>'s prefix splitting hoists on that equality.
+/// </remarks>
+internal sealed class Property : RegexBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.Property,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.PropertyIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.Property,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.PropertyIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.PropertyRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.PropertyIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.PropertyRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.PropertyIgnRev,
+    };
+
+    /// <summary>Initializes a property node.</summary>
+    /// <param name="value">The packed property code: the property id in the high 16 bits, the value id in the low.</param>
+    /// <param name="positive">Whether the codepoint must have that value or must not.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    /// <param name="encoding">The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends.</param>
+    internal Property(
+        uint value,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false,
+        int encoding = 0
+    )
+    {
+        Value = value;
+        Positive = positive;
+        CaseFlags = RegexFlags.CaseFlagsCombination(caseFlags);
+        Zerowidth = zerowidth;
+        Encoding = encoding;
+    }
+
+    /// <summary>The packed property code. Upstream <c>value</c>.</summary>
+    internal uint Value { get; }
+
+    /// <inheritdoc />
+    internal override bool Positive { get; }
+
+    /// <inheritdoc />
+    internal override int CaseFlags { get; }
+
+    /// <inheritdoc />
+    internal override bool Zerowidth { get; }
+
+    /// <summary>The encoding whose answer to the property this node wants. Upstream <c>encoding</c>.</summary>
+    internal int Encoding { get; }
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [this];
+
+    /// <inheritdoc />
+    internal override bool HasSimpleStart() => true;
+
+    /// <inheritdoc />
+    /// <remarks>Upstream <c>Property.optimise</c> (line 3333) takes <c>in_set</c> and ignores it.</remarks>
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet) => this;
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => Unicode.RegexModule.HasPropertyValue(Value, (uint)ch) == Positive;
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => 1;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth})"
+        );
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is Property other
+        && Value == other.Value
+        && Positive == other.Positive
+        && CaseFlags == other.CaseFlags
+        && Zerowidth == other.Zerowidth;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(typeof(Property), Value, Positive, CaseFlags, Zerowidth);
+
+    /// <inheritdoc />
+    protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
+        new Property(Value, positive, caseFlags, zerowidth, Encoding);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (Zerowidth)
+        {
+            flags |= NodeFlags.Zerowidth;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        flags |= (uint)Encoding << NodeFlags.EncodingShift;
+
+        return
+        [
+            [(uint)_opcodes[(CaseFlags, reverse)], flags, Value],
+        ];
+    }
+}
+
+/// <summary>
+/// A range of codepoints inside a character set, as <c>[a-z]</c>. Upstream <c>Range</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3372-3447).
+/// </summary>
+internal sealed class Range : RegexBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.Range,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.RangeIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.Range,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.RangeIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.RangeRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.RangeIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.RangeRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.RangeIgnRev,
+    };
+
+    /// <summary>Initializes a codepoint range.</summary>
+    /// <param name="lower">The first codepoint, inclusive.</param>
+    /// <param name="upper">The last codepoint, inclusive.</param>
+    /// <param name="positive">Whether the range matches its members or everything else.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    internal Range(
+        int lower,
+        int upper,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false
+    )
+    {
+        Lower = lower;
+        Upper = upper;
+        Positive = positive;
+        CaseFlags = RegexFlags.CaseFlagsCombination(caseFlags);
+        Zerowidth = zerowidth;
+    }
+
+    /// <summary>The first codepoint. Upstream <c>lower</c>.</summary>
+    internal int Lower { get; }
+
+    /// <summary>The last codepoint. Upstream <c>upper</c>.</summary>
+    internal int Upper { get; }
+
+    /// <inheritdoc />
+    internal override bool Positive { get; }
+
+    /// <inheritdoc />
+    internal override int CaseFlags { get; }
+
+    /// <inheritdoc />
+    internal override bool Zerowidth { get; }
+
+    /// <inheritdoc />
+    /// <remarks>Python's default argument: <c>optimise(info, reverse)</c> is <c>in_set=False</c>.</remarks>
+    internal override RegexBase Optimise(Info info, bool reverse) => Optimise(info, reverse, inSet: false);
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        // Is the range case-sensitive?
+        if (!Positive || (CaseFlags & RegexFlags.IgnoreCase) == 0 || inSet)
+        {
+            return this;
+        }
+
+        // Is full case-folding possible?
+        if (
+            (info.Flags & RegexFlags.Unicode) == 0
+            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
+        )
+        {
+            return this;
+        }
+
+        // Get the characters which expand to multiple codepoints on folding, and fold the ones in
+        // the range. The order is upstream's table order, not set order, so it must reproduce
+        // exactly.
+        List<RegexBase> items = [];
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(ch => Lower <= ch && ch <= Upper))
+        {
+            items.Add(new String(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]), CaseFlags));
+        }
+
+        if (items.Count == 0)
+        {
+            // We can fall back to simple case-folding.
+            return this;
+        }
+
+        if (items.Count < Upper - Lower + 1)
+        {
+            // Not all the characters are covered by the full case-folding.
+            items.Insert(0, this);
+        }
+
+        return new Branch(items);
+    }
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => (Lower <= ch && ch <= Upper) == Positive;
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => 1;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({nameof(Range)},{Lower},{Upper},{Positive},{CaseFlags},{Zerowidth})"
+        );
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is Range other
+        && Lower == other.Lower
+        && Upper == other.Upper
+        && Positive == other.Positive
+        && CaseFlags == other.CaseFlags
+        && Zerowidth == other.Zerowidth;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(typeof(Range), Lower, Upper, Positive, CaseFlags, Zerowidth);
+
+    /// <inheritdoc />
+    protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
+        new Range(Lower, Upper, positive, caseFlags, zerowidth);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (Zerowidth)
+        {
+            flags |= NodeFlags.Zerowidth;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        return
+        [
+            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Lower, (uint)Upper],
+        ];
+    }
+}
+
+/// <summary>
 /// <c>.</c> outside <see cref="FuzzyRegexOptions.Singleline"/>: any character but a newline.
 /// Upstream <c>Any</c> (<c>upstream/regex/_regex_core.py</c> lines 2040-2057).
 /// </summary>
@@ -422,6 +766,13 @@ internal sealed class AnyAll : Any
 {
     /// <inheritdoc />
     protected override (Opcode Forward, Opcode Reverse) Opcodes => (Opcode.AnyAll, Opcode.AnyAllRev);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>AnyAll</c> is the one <c>Any</c> that overrides <c>_key</c>, to <c>(class, positive)</c>
+    /// (line 2068); <see cref="Any"/> and <see cref="AnyU"/> keep the class alone.
+    /// </remarks>
+    internal override string RenderKey() => $"({nameof(AnyAll)},{true})";
 }
 
 /// <summary>
@@ -828,8 +1179,7 @@ internal sealed class Branch : RegexBase
         int caseFlags = RegexFlags.NoCase;
         foreach (RegexBase b in branches)
         {
-            // Upstream's isinstance check also names Property and SetBase, which arrive in S10.
-            if (b is Character)
+            if (b is Character or Property or SetBase)
             {
                 // Branch starts with a single character.
                 if (b.CaseFlags != caseFlags)
@@ -870,18 +1220,12 @@ internal sealed class Branch : RegexBase
             return;
         }
 
-        if (items.Count > 1)
-        {
-            // Upstream: SetUnion(info, list(items)).optimise(info, reverse). This is also one of the
-            // two points PORTMAP's "Where we diverge" requires the members to be sorted at, because
-            // a Python set of nodes has no stable order; the sort lands with the set node.
-            _ = (info, reverse);
-            throw new NotImplementedException(
-                "needs:character-classes - reducing alternatives to a set needs the SetUnion node (S10)"
-            );
-        }
+        // One of the two points PORTMAP's "Where we diverge" requires the members to be sorted at,
+        // because a Python set of nodes has no stable order. The corpus recorder sorts by the same
+        // rendered key.
+        List<RegexBase> ordered = [.. items.OrderBy(i => i.RenderKey(), StringComparer.Ordinal)];
 
-        RegexBase item = items.First();
+        RegexBase item = ordered.Count == 1 ? ordered[0] : new SetUnion(info, ordered).Optimise(info, reverse);
 
         newBranches.Add(item.WithFlags(caseFlags: caseFlags));
 
@@ -916,11 +1260,15 @@ internal sealed class Branch : RegexBase
             }
         }
 
-        // Upstream folds the run with _regex.fold_case and compares it against every character in
-        // _regex.get_expand_on_folding(), both of which are the generated Unicode tables.
-        throw new NotImplementedException(
-            "needs:case-folding - deciding whether a run folds together needs the Unicode tables (S09)"
+        int[] folded = Unicode.RegexModule.FoldCase(
+            RegexFlags.FullCaseFolding,
+            [.. items.Select(i => ((Character)i).Value)]
         );
+
+        // Get the characters which expand to multiple codepoints on folding.
+        return Unicode
+            .RegexModule.GetExpandOnFolding()
+            .Any(c => folded.SequenceEqual(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])));
     }
 
     /// <summary>Upstream <c>Branch._add_precheck</c> (lines 2178-2191).</summary>
@@ -994,14 +1342,10 @@ internal sealed class Character : RegexBase
         CaseFlags = normalisedCaseFlags;
         Zerowidth = zerowidth;
 
-        if (positive && (normalisedCaseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase)
-        {
-            // Upstream: self.folded = _regex.fold_case(FULL_CASE_FOLDING, chr(self.value)), a
-            // lookup into the generated Unicode case-folding tables.
-            throw new NotImplementedException("needs:case-folding - full case folding needs the Unicode tables (S09)");
-        }
-
-        Folded = [value];
+        Folded =
+            positive && (normalisedCaseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase
+                ? Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [value])
+                : [value];
     }
 
     /// <summary>The codepoint. Upstream <c>value</c>.</summary>
@@ -1032,7 +1376,21 @@ internal sealed class Character : RegexBase
     internal override bool HasSimpleStart() => true;
 
     /// <inheritdoc />
+    /// <remarks>Upstream <c>Character.optimise</c> (line 2608) takes <c>in_set</c> and ignores it.</remarks>
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet) => this;
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => ch == Value == Positive;
+
+    /// <inheritdoc />
     internal override long MaxWidth() => Folded.Length;
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({nameof(Character)},{Value},{Positive},{CaseFlags},{Zerowidth})"
+        );
 
     /// <inheritdoc />
     internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) =>
@@ -1074,8 +1432,12 @@ internal sealed class Character : RegexBase
 
         RegexBase code = new PrecompiledCode([(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Value]);
 
-        // Upstream wraps the character in a Branch with its expanded form when full case-folding
-        // makes it longer than one character; the constructor above cannot build such a node yet.
+        if (Folded.Length > 1)
+        {
+            // The character expands on full case-folding.
+            code = new Branch([code, new String(Folded, CaseFlags)]);
+        }
+
         return code.Compile(reverse, fuzzy);
     }
 }
@@ -1107,14 +1469,12 @@ internal class String : RegexBase
         Characters = [.. characters];
         CaseFlags = normalisedCaseFlags;
 
-        if ((normalisedCaseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase)
-        {
-            // Upstream folds every character here with _regex.fold_case, which is a lookup into
-            // the generated Unicode case-folding tables.
-            throw new NotImplementedException("needs:case-folding - full case folding needs the Unicode tables (S09)");
-        }
-
-        FoldedCharacters = Characters;
+        // Upstream folds one character at a time and concatenates, which is what FoldCase over the
+        // whole run does: full folding is per-codepoint, with no context.
+        FoldedCharacters =
+            (normalisedCaseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase
+                ? Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, Characters)
+                : Characters;
     }
 
     /// <summary>The literal codepoints. Upstream <c>characters</c>.</summary>
@@ -1141,6 +1501,14 @@ internal class String : RegexBase
 
     /// <inheritdoc />
     internal override long MaxWidth() => FoldedCharacters.Length;
+
+    /// <inheritdoc />
+    /// <remarks><c>GetType().Name</c>, not <c>String</c>: <see cref="Literal"/> inherits this key.</remarks>
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({GetType().Name},({string.Join(',', Characters)}),{CaseFlags})"
+        );
 
     /// <inheritdoc />
     internal override (long Offset, RegexBase? Required) GetRequiredString(bool reverse) => (0, this);
@@ -1438,20 +1806,760 @@ internal sealed class Sequence : RegexBase
 
         if ((caseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase)
         {
-            // Upstream splits the run into full-folding and simple-folding chunks with
-            // _fix_full_casefold, which reads _regex.get_expand_on_folding().
-            throw new NotImplementedException(
-                "needs:case-folding - splitting a full-case-folded literal needs the Unicode tables (S09)"
+            foreach (Literal literal in FixFullCasefold(characters))
+            {
+                int[] chars = literal.Characters;
+
+                items.Add(
+                    chars.Length == 1
+                        ? new Character(chars[0], caseFlags: literal.CaseFlags)
+                        : new String(chars, literal.CaseFlags)
+                );
+            }
+        }
+        else
+        {
+            items.Add(
+                characters.Count == 1
+                    ? new Character(characters[0], caseFlags: caseFlags)
+                    : new String(characters, caseFlags)
             );
         }
 
-        items.Add(
-            characters.Count == 1
-                ? new Character(characters[0], caseFlags: caseFlags)
-                : new String(characters, caseFlags)
+        characters.Clear();
+    }
+
+    /// <summary>Upstream <c>Sequence._fix_full_casefold</c> (lines 3636-3668).</summary>
+    /// <remarks>
+    /// Splits a literal needing full case-folding into chunks that need it and chunks that can use
+    /// simple case-folding, which is faster.
+    /// <para>
+    /// The chunk offsets are found in the <b>folded</b> text and then used to slice the
+    /// <b>unfolded</b> characters, which are not the same length when a character expands. That is
+    /// upstream's own arithmetic, and it works out because an expansion begins where its character
+    /// does: <c>aß</c> folds to <c>ass</c>, <c>ss</c> is found at 1, and <c>characters[1:3]</c>
+    /// clamps to just the <c>ß</c>. Python's slicing clamps, so this one does too.
+    /// </para>
+    /// </remarks>
+    private static List<Literal> FixFullCasefold(List<int> characters)
+    {
+        // Get the characters which expand to multiple codepoints on folding, folded.
+        List<int[]> expanded =
+        [
+            .. Unicode
+                .RegexModule.GetExpandOnFolding()
+                .Select(c => Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])),
+        ];
+
+        int[] text = Unicode.PythonStr.Lower(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [.. characters]));
+
+        List<(int Start, int End)> chunks = [];
+        foreach (int[] e in expanded)
+        {
+            int found = Find(text, e, 0);
+
+            while (found >= 0)
+            {
+                chunks.Add((found, found + e.Length));
+                found = Find(text, e, found + 1);
+            }
+        }
+
+        int pos = 0;
+        List<Literal> literals = [];
+
+        foreach ((int start, int end) in MergeChunks(chunks))
+        {
+            if (pos < start)
+            {
+                literals.Add(new Literal(PySlice(characters, pos, start), RegexFlags.IgnoreCase));
+            }
+
+            literals.Add(new Literal(PySlice(characters, start, end), RegexFlags.FullIgnoreCase));
+            pos = end;
+        }
+
+        if (pos < characters.Count)
+        {
+            literals.Add(new Literal(PySlice(characters, pos, characters.Count), RegexFlags.IgnoreCase));
+        }
+
+        return literals;
+    }
+
+    /// <summary>Upstream <c>Sequence._merge_chunks</c> (lines 3670-3689).</summary>
+    private static List<(int Start, int End)> MergeChunks(List<(int Start, int End)> chunks)
+    {
+        if (chunks.Count < 2)
+        {
+            return chunks;
+        }
+
+        // Python sorts a list of tuples lexicographically.
+        chunks.Sort(static (a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.End.CompareTo(b.End));
+
+        (int start, int end) = chunks[0];
+        List<(int Start, int End)> newChunks = [];
+
+        foreach ((int s, int e) in chunks.Skip(1))
+        {
+            if (s <= end)
+            {
+                end = Math.Max(end, e);
+            }
+            else
+            {
+                newChunks.Add((start, end));
+                (start, end) = (s, e);
+            }
+        }
+
+        newChunks.Add((start, end));
+
+        return newChunks;
+    }
+
+    /// <summary>Python's <c>str.find(sub, start)</c> over codepoints.</summary>
+    private static int Find(int[] text, int[] sub, int start)
+    {
+        for (int i = Math.Max(start, 0); i + sub.Length <= text.Length; i++)
+        {
+            if (text.AsSpan(i, sub.Length).SequenceEqual(sub))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Python's <c>characters[start:end]</c>, which clamps rather than throwing.</summary>
+    private static List<int> PySlice(List<int> characters, int start, int end)
+    {
+        int from = Math.Clamp(start, 0, characters.Count);
+        int to = Math.Clamp(end, from, characters.Count);
+        return characters.GetRange(from, to - from);
+    }
+}
+
+/// <summary>
+/// Base class for the four character-set nodes. Upstream <c>SetBase</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3715-3818).
+/// </summary>
+/// <remarks>
+/// Upstream's <c>char_width</c> is not ported: it is set here and read only by the engine.
+/// <c>__del__</c>, which drops the <c>info</c> reference to break a cycle for Python's collector,
+/// has no counterpart either.
+/// </remarks>
+/// <param name="info">The parse state; the set reads the encoding flags off it when folding.</param>
+/// <param name="items">The members.</param>
+/// <param name="positive">Whether the set matches its members or everything else.</param>
+/// <param name="caseFlags">The case flags in force.</param>
+/// <param name="zerowidth">Whether the node consumes nothing.</param>
+internal abstract class SetBase(
+    Info info,
+    IReadOnlyList<RegexBase> items,
+    bool positive = true,
+    int caseFlags = RegexFlags.NoCase,
+    bool zerowidth = false
+) : RegexBase
+{
+    /// <summary>The parse state. Upstream <c>info</c>.</summary>
+    internal Info Info { get; } = info;
+
+    /// <summary>The members. Upstream <c>items</c>, which <c>optimise</c> reassigns.</summary>
+    internal List<RegexBase> Items { get; private protected set; } = [.. items];
+
+    /// <inheritdoc />
+    internal override bool Positive { get; } = positive;
+
+    /// <inheritdoc />
+    internal override int CaseFlags { get; } = RegexFlags.CaseFlagsCombination(caseFlags);
+
+    /// <inheritdoc />
+    internal override bool Zerowidth { get; } = zerowidth;
+
+    /// <summary>The opcode table for this set operator. Upstream <c>_opcode</c>.</summary>
+    protected abstract IReadOnlyDictionary<(int CaseFlags, bool Reverse), Opcode> Opcodes { get; }
+
+    /// <inheritdoc />
+    /// <remarks>Python's default argument: <c>optimise(info, reverse)</c> is <c>in_set=False</c>.</remarks>
+    internal override RegexBase Optimise(Info info, bool reverse) => Optimise(info, reverse, inSet: false);
+
+    /// <inheritdoc />
+    internal override HashSet<RegexBase?> GetFirstset(bool reverse) => [this];
+
+    /// <inheritdoc />
+    internal override bool HasSimpleStart() => true;
+
+    /// <inheritdoc />
+    internal override long MaxWidth()
+    {
+        // Is the set case-sensitive?
+        if (!Positive || (CaseFlags & RegexFlags.IgnoreCase) == 0)
+        {
+            return 1;
+        }
+
+        // Is full case-folding possible?
+        if (
+            (Info.Flags & RegexFlags.Unicode) == 0
+            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
+        )
+        {
+            return 1;
+        }
+
+        // Get the folded characters in the set.
+        HashSet<string> seen = [];
+        long widest = 0;
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        {
+            int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
+            if (seen.Add(string.Join(',', folded)))
+            {
+                widest = Math.Max(widest, folded.Length);
+            }
+        }
+
+        return seen.Count == 0 ? 1 : widest;
+    }
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({GetType().Name},({string.Join(',', Items.Select(i => i.RenderKey()))}),{Positive},{CaseFlags},{Zerowidth})"
         );
 
-        characters.Clear();
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is SetBase other
+        && GetType() == other.GetType()
+        && Positive == other.Positive
+        && CaseFlags == other.CaseFlags
+        && Zerowidth == other.Zerowidth
+        && Items.SequenceEqual(other.Items);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <see cref="Items"/> is reassigned by <c>optimise</c>, so hashing it would break the "a hash
+    /// does not change" contract for a node already sitting in a set - which is exactly where set
+    /// nodes go (<c>_check_firstset</c>, <c>Branch._reduce_to_set</c>). The immutable part is
+    /// hashed instead, as <see cref="Branch"/> does; <see cref="Equals(object)"/> still decides.
+    /// </remarks>
+    public override int GetHashCode() => HashCode.Combine(GetType(), Positive, CaseFlags, Zerowidth);
+
+    /// <summary>Upstream's <c>type(self)(...)</c>, which rebuilds the same set operator.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="items">The members.</param>
+    /// <param name="positive">The new sense.</param>
+    /// <param name="caseFlags">The new case flags.</param>
+    /// <param name="zerowidth">The new zero-width setting.</param>
+    /// <returns>The new set.</returns>
+    private protected abstract SetBase Recreate(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive,
+        int caseFlags,
+        bool zerowidth
+    );
+
+    /// <inheritdoc />
+    protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
+        Recreate(Info, Items, positive, caseFlags, zerowidth).Optimise(Info, reverse: false);
+
+    /// <summary>Upstream <c>SetBase._handle_case_folding</c> (lines 3762-3790).</summary>
+    /// <param name="info">The parse state; upstream takes it and reads <c>self.info</c> instead.</param>
+    /// <param name="inSet">Whether this set is itself a member of another set.</param>
+    /// <returns>This set, or a branch of it and its folded expansions.</returns>
+    protected RegexBase HandleCaseFolding(Info info, bool inSet)
+    {
+        _ = info;
+
+        // Is the set case-sensitive?
+        if (!Positive || (CaseFlags & RegexFlags.IgnoreCase) == 0 || inSet)
+        {
+            return this;
+        }
+
+        // Is full case-folding possible?
+        if (
+            (Info.Flags & RegexFlags.Unicode) == 0
+            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
+        )
+        {
+            return this;
+        }
+
+        // Get the folded characters in the set. Upstream's table order, not set order. Upstream
+        // calls this list `items`, which the primary constructor's parameter now owns.
+        List<RegexBase> expansions = [];
+        HashSet<string> seen = [];
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        {
+            int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
+            if (seen.Add(string.Join(',', folded)))
+            {
+                expansions.Add(new String(folded, CaseFlags));
+            }
+        }
+
+        if (expansions.Count == 0)
+        {
+            // We can fall back to simple case-folding.
+            return this;
+        }
+
+        return new Branch([this, .. expansions]);
+    }
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (Zerowidth)
+        {
+            flags |= NodeFlags.Zerowidth;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        List<uint[]> code =
+        [
+            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+        ];
+        foreach (RegexBase m in Items)
+        {
+            code.AddRange(m.Compile());
+        }
+
+        code.Add([(uint)Opcode.End]);
+
+        return code;
+    }
+}
+
+/// <summary>
+/// <c>[x--y]</c>, the version 1 set difference. Upstream <c>SetDiff</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3820-3844).
+/// </summary>
+internal sealed class SetDiff : SetBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.SetDiff,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.SetDiffIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.SetDiff,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.SetDiffIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.SetDiffRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.SetDiffIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.SetDiffRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.SetDiffIgnRev,
+    };
+
+    /// <summary>Initializes a set difference.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="items">The members.</param>
+    /// <param name="positive">Whether the set matches its members or everything else.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    internal SetDiff(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false
+    )
+        : base(info, items, positive, caseFlags, zerowidth) { }
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<(int CaseFlags, bool Reverse), Opcode> Opcodes => _opcodes;
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet)
+    {
+        List<RegexBase> items = Items;
+        if (items.Count > 2)
+        {
+            items = [items[0], new SetUnion(info, items.GetRange(1, items.Count - 1))];
+        }
+
+        if (items.Count == 1)
+        {
+            return items[0].WithFlags(caseFlags: CaseFlags, zerowidth: Zerowidth).Optimise(info, reverse, inSet);
+        }
+
+        Items = [.. items.Select(m => m.Optimise(info, reverse, inSet: true))];
+
+        return HandleCaseFolding(info, inSet);
+    }
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => (Items[0].Matches(ch) && !Items[1].Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    private protected override SetBase Recreate(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive,
+        int caseFlags,
+        bool zerowidth
+    ) => new SetDiff(info, items, positive, caseFlags, zerowidth);
+}
+
+/// <summary>
+/// <c>[x&amp;&amp;y]</c>, the version 1 set intersection. Upstream <c>SetInter</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3846-3874).
+/// </summary>
+internal sealed class SetInter : SetBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.SetInter,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.SetInterIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.SetInter,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.SetInterIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.SetInterRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.SetInterIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.SetInterRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.SetInterIgnRev,
+    };
+
+    /// <summary>Initializes a set intersection.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="items">The members.</param>
+    /// <param name="positive">Whether the set matches its members or everything else.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    internal SetInter(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false
+    )
+        : base(info, items, positive, caseFlags, zerowidth) { }
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<(int CaseFlags, bool Reverse), Opcode> Opcodes => _opcodes;
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet)
+    {
+        List<RegexBase> items = [];
+        foreach (RegexBase item in Items)
+        {
+            RegexBase m = item.Optimise(info, reverse, inSet: true);
+            if (m is SetInter nested && nested.Positive)
+            {
+                // Intersection in intersection.
+                items.AddRange(nested.Items);
+            }
+            else
+            {
+                items.Add(m);
+            }
+        }
+
+        if (items.Count == 1)
+        {
+            return items[0].WithFlags(caseFlags: CaseFlags, zerowidth: Zerowidth).Optimise(info, reverse, inSet);
+        }
+
+        Items = items;
+
+        return HandleCaseFolding(info, inSet);
+    }
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => Items.TrueForAll(i => i.Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    private protected override SetBase Recreate(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive,
+        int caseFlags,
+        bool zerowidth
+    ) => new SetInter(info, items, positive, caseFlags, zerowidth);
+}
+
+/// <summary>
+/// <c>[x~~y]</c>, the version 1 symmetric difference. Upstream <c>SetSymDiff</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 3876-3907).
+/// </summary>
+internal sealed class SetSymDiff : SetBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.SetSymDiff,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.SetSymDiffIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.SetSymDiff,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.SetSymDiffIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.SetSymDiffRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.SetSymDiffIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.SetSymDiffRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.SetSymDiffIgnRev,
+    };
+
+    /// <summary>Initializes a symmetric difference.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="items">The members.</param>
+    /// <param name="positive">Whether the set matches its members or everything else.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    internal SetSymDiff(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false
+    )
+        : base(info, items, positive, caseFlags, zerowidth) { }
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<(int CaseFlags, bool Reverse), Opcode> Opcodes => _opcodes;
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet)
+    {
+        List<RegexBase> items = [];
+        foreach (RegexBase item in Items)
+        {
+            RegexBase m = item.Optimise(info, reverse, inSet: true);
+            if (m is SetSymDiff nested && nested.Positive)
+            {
+                // Symmetric difference in symmetric difference.
+                items.AddRange(nested.Items);
+            }
+            else
+            {
+                items.Add(m);
+            }
+        }
+
+        if (items.Count == 1)
+        {
+            return items[0].WithFlags(caseFlags: CaseFlags, zerowidth: Zerowidth).Optimise(info, reverse, inSet);
+        }
+
+        Items = items;
+
+        return HandleCaseFolding(info, inSet);
+    }
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch)
+    {
+        bool m = false;
+        foreach (RegexBase i in Items)
+        {
+            m = m != i.Matches(ch);
+        }
+
+        return m == Positive;
+    }
+
+    /// <inheritdoc />
+    private protected override SetBase Recreate(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive,
+        int caseFlags,
+        bool zerowidth
+    ) => new SetSymDiff(info, items, positive, caseFlags, zerowidth);
+}
+
+/// <summary>
+/// An ordinary character set, <c>[abc]</c>, and the explicit union <c>[x||y]</c>. Upstream
+/// <c>SetUnion</c> (<c>upstream/regex/_regex_core.py</c> lines 3909-3985).
+/// </summary>
+internal sealed class SetUnion : SetBase
+{
+    private static readonly Dictionary<(int CaseFlags, bool Reverse), Opcode> _opcodes = new()
+    {
+        [(RegexFlags.NoCase, false)] = Opcode.SetUnion,
+        [(RegexFlags.IgnoreCase, false)] = Opcode.SetUnionIgn,
+        [(RegexFlags.FullCase, false)] = Opcode.SetUnion,
+        [(RegexFlags.FullIgnoreCase, false)] = Opcode.SetUnionIgn,
+        [(RegexFlags.NoCase, true)] = Opcode.SetUnionRev,
+        [(RegexFlags.IgnoreCase, true)] = Opcode.SetUnionIgnRev,
+        [(RegexFlags.FullCase, true)] = Opcode.SetUnionRev,
+        [(RegexFlags.FullIgnoreCase, true)] = Opcode.SetUnionIgnRev,
+    };
+
+    /// <summary>Initializes a set union.</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="items">The members.</param>
+    /// <param name="positive">Whether the set matches its members or everything else.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <param name="zerowidth">Whether the node consumes nothing.</param>
+    internal SetUnion(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive = true,
+        int caseFlags = RegexFlags.NoCase,
+        bool zerowidth = false
+    )
+        : base(info, items, positive, caseFlags, zerowidth) { }
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<(int CaseFlags, bool Reverse), Opcode> Opcodes => _opcodes;
+
+    /// <inheritdoc />
+    internal override RegexBase Optimise(Info info, bool reverse, bool inSet)
+    {
+        List<RegexBase> items = [];
+        foreach (RegexBase item in Items)
+        {
+            RegexBase m = item.Optimise(info, reverse, inSet: true);
+            if (m is SetUnion nested && nested.Positive)
+            {
+                // Union in union.
+                items.AddRange(nested.Items);
+            }
+            else if (m is AnyAll)
+            {
+                return new AnyAll();
+            }
+            else
+            {
+                items.Add(m);
+            }
+        }
+
+        // Are there complementary properties?
+        HashSet<(uint Value, int CaseFlags, bool Zerowidth)> negative = [];
+        HashSet<(uint Value, int CaseFlags, bool Zerowidth)> positive = [];
+
+        foreach (RegexBase m in items)
+        {
+            if (m is Property property)
+            {
+                (property.Positive ? positive : negative).Add((property.Value, property.CaseFlags, property.Zerowidth));
+            }
+        }
+
+        if (negative.Overlaps(positive))
+        {
+            return new AnyAll();
+        }
+
+        if (items.Count == 1)
+        {
+            RegexBase i = items[0];
+            return i.WithFlags(positive: i.Positive == Positive, caseFlags: CaseFlags, zerowidth: Zerowidth)
+                .Optimise(info, reverse, inSet);
+        }
+
+        Items = items;
+
+        return HandleCaseFolding(info, inSet);
+    }
+
+    /// <inheritdoc />
+    internal override bool Matches(int ch) => Items.Exists(i => i.Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    private protected override SetBase Recreate(
+        Info info,
+        IReadOnlyList<RegexBase> items,
+        bool positive,
+        int caseFlags,
+        bool zerowidth
+    ) => new SetUnion(info, items, positive, caseFlags, zerowidth);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream buckets the members' characters by sense into a <c>defaultdict(list)</c> and then
+    /// iterates it, so the two buckets come out in the order they were first created, not
+    /// positive-then-negative - and a set of one negated member followed by positive ones compiles
+    /// differently from the other way round. A list of buckets keeps that order by construction;
+    /// <see cref="Dictionary{TKey, TValue}"/>'s enumeration order is not part of its contract.
+    /// </remarks>
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        uint flags = 0;
+        if (Positive)
+        {
+            flags |= NodeFlags.Positive;
+        }
+
+        if (Zerowidth)
+        {
+            flags |= NodeFlags.Zerowidth;
+        }
+
+        if (fuzzy)
+        {
+            flags |= NodeFlags.Fuzzy;
+        }
+
+        List<(bool Positive, List<int> Values)> characters = [];
+        List<RegexBase> others = [];
+        foreach (RegexBase m in Items)
+        {
+            if (m is Character character)
+            {
+                int bucket = characters.FindIndex(b => b.Positive == character.Positive);
+                if (bucket < 0)
+                {
+                    characters.Add((character.Positive, []));
+                    bucket = characters.Count - 1;
+                }
+
+                characters[bucket].Values.Add(character.Value);
+            }
+            else
+            {
+                others.Add(m);
+            }
+        }
+
+        List<uint[]> code =
+        [
+            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+        ];
+
+        foreach ((bool positive, List<int> values) in characters)
+        {
+            uint memberFlags = positive ? NodeFlags.Positive : 0;
+            if (values.Count == 1)
+            {
+                code.Add([(uint)Opcode.Character, memberFlags, (uint)values[0]]);
+            }
+            else
+            {
+                uint[] word = new uint[3 + values.Count];
+                word[0] = (uint)Opcode.String;
+                word[1] = memberFlags;
+                word[2] = (uint)values.Count;
+                for (int i = 0; i < values.Count; i++)
+                {
+                    word[3 + i] = (uint)values[i];
+                }
+
+                code.Add(word);
+            }
+        }
+
+        foreach (RegexBase m in others)
+        {
+            code.AddRange(m.Compile());
+        }
+
+        code.Add([(uint)Opcode.End]);
+
+        return code;
     }
 }
 

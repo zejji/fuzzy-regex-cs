@@ -86,6 +86,50 @@ internal static class PythonStr
         return text.EnumerateRunes().Skip(1).All(rune => IsIdentifierContinue(rune.Value));
     }
 
+    /// <summary>
+    /// Python's <c>str.lower()</c>, as <c>Sequence._fix_full_casefold</c> calls it
+    /// (<c>upstream/regex/_regex_core.py</c> line 3643).
+    /// </summary>
+    /// <param name="codepoints">The codepoints to lowercase.</param>
+    /// <returns>The lowercased codepoints. One codepoint can become more than one.</returns>
+    /// <remarks>
+    /// <para>
+    /// One codepoint at a time, from <see cref="UnicodeLowercase"/>, which
+    /// <c>tools/build-lowercase.py</c> builds from the Unicode 17.0.0 UCD and checks against the
+    /// host CPython's <c>str.lower()</c> for all 1,109,309 codepoints that host knows.
+    /// </para>
+    /// <para>
+    /// CPython's <c>str.lower</c> has one context-sensitive rule, final sigma, which this does not
+    /// implement. It is unreachable here: the only caller lowercases text that has already been
+    /// through <c>fold_case</c>, and no codepoint folds to U+03A3 - measured over all 1,114,112
+    /// codepoints against the local oracle, 2026-08-30. The rule fires on nothing else.
+    /// </para>
+    /// </remarks>
+    internal static int[] Lower(ReadOnlySpan<int> codepoints)
+    {
+        List<int> lowered = new(codepoints.Length);
+        foreach (int codepoint in codepoints)
+        {
+            int index = Array.BinarySearch(UnicodeLowercase.From, codepoint);
+            if (index >= 0)
+            {
+                lowered.Add(UnicodeLowercase.To[index]);
+                continue;
+            }
+
+            int expanding = Array.FindIndex(UnicodeLowercase.Expanding, entry => entry.From == codepoint);
+            if (expanding >= 0)
+            {
+                lowered.AddRange(UnicodeLowercase.Expanding[expanding].To);
+                continue;
+            }
+
+            lowered.Add(codepoint);
+        }
+
+        return [.. lowered];
+    }
+
     private static Codes ResolveCodes()
     {
         IReadOnlyDictionary<string, PropertyEntry> properties = RegexModule.GetProperties();

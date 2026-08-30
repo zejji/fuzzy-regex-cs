@@ -24,7 +24,7 @@ public sealed class RegressionsCharacterClassTests
     // Hg issue 63: regex.search("[[:ascii:]]", "\N{KELVIN SIGN}", flags=regex.I|regex.V1) doesn't
     // return None.
     [Test]
-    [Skip("needs:character-classes - POSIX bracket classes like [[:ascii:]] are not parsed yet")]
+    [Skip("needs:character-classes - the engine has no set matching yet ([[:ascii:]] parses since S10)")]
     [Property("Upstream", "RegexTests.test_hg_bugs#46")]
     public void Case_insensitive_ascii_posix_class_does_not_match_the_kelvin_sign() =>
         FuzzyRegex.Match(_kelvinSign, "(?i)[[:ascii:]]").Success.Should().BeFalse();
@@ -32,7 +32,7 @@ public sealed class RegressionsCharacterClassTests
     // Hg issue 137: Posix character class :punct: does not seem to be supported. Posix
     // compatibility as recommended in https://www.unicode.org/reports/tr18/#Compatibility_Properties.
     [Test]
-    [Skip("needs:character-classes - POSIX bracket classes like [[:alpha:]] are not parsed yet")]
+    [Skip("needs:character-classes - the engine has no set matching yet ([[:alpha:]] parses since S10)")]
     [Property("Upstream", "RegexTests.test_hg_bugs#114-127")]
     [Arguments(@"[[:alnum:]]+", @"[\p{Alpha}\p{PosixDigit}]+")]
     [Arguments(@"[[:alpha:]]+", @"\p{Alpha}+")]
@@ -63,7 +63,6 @@ public sealed class RegressionsCharacterClassTests
 
     // Git issue 584: AttributeError: 'AnyAll' object has no attribute 'positive'.
     [Test]
-    [Skip("needs:character-classes - alternating character classes like (\\s|\\S) fail to compile")]
     [Property("Upstream", "RegexTests.test_hg_bugs#497")]
     public void Pattern_alternating_two_character_classes_compiles()
     {
@@ -74,7 +73,6 @@ public sealed class RegressionsCharacterClassTests
 
     // Git PR 585: Fix AttributeError: 'AnyAll' object has no attribute '_key'.
     [Test]
-    [Skip("needs:character-classes - alternating character classes like [\\S\\s] fail to compile")]
     [Property("Upstream", "RegexTests.test_hg_bugs#498")]
     public void Pattern_alternating_a_negated_and_a_positive_character_class_group_compiles()
     {
@@ -85,7 +83,7 @@ public sealed class RegressionsCharacterClassTests
 
     // Hg issue 131: nested sets behaviour.
     [Test]
-    [Skip("needs:set-operations - the (?V1) nested-set \"--\" difference operator is not implemented")]
+    [Skip("needs:set-operations - the engine has no set-difference opcode yet (\"--\" parses since S10)")]
     [Property("Upstream", "RegexTests.test_hg_bugs#107-110")]
     [Arguments(@"(?V1)[[b-e]--cd]")]
     [Arguments(@"(?V1)[b-e--cd]")]
@@ -97,7 +95,7 @@ public sealed class RegressionsCharacterClassTests
     // Git issue 551: a single "-" inside a nested set is a literal character, only "--" performs
     // set difference, and the operand order of "--" matters.
     [Test]
-    [Skip("needs:set-operations - the (?V1) nested-set \"--\" difference operator is not implemented")]
+    [Skip("needs:set-operations - the engine has no set-difference opcode yet (\"--\" parses since S10)")]
     [Property("Upstream", "RegexTests.test_hg_bugs#467-473")]
     [Arguments(@"(?V1)[[\s\S]]", true)]
     [Arguments(@"(?V1)[[\s\S]-a]", true)]
