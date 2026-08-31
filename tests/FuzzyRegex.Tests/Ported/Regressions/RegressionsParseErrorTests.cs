@@ -17,13 +17,17 @@ public sealed class RegressionsParseErrorTests
 {
     // Hg issue 58: bad named character escape sequences like "\N{1}" treats as "N".
     [Test]
-    [Skip("needs:parse-errors - \\N{name} character-name escapes are not implemented")]
+    // Split into message and offset by S13, as this class's remarks require. Measured against
+    // regex 2026.7.19 on 2026-08-31:
+    //     ERR  '\\N{1}' -> error msg='undefined character name' pos=5
     [Property("Upstream", "RegexTests.test_hg_bugs#42")]
     public void Undefined_character_name_reports_its_position()
     {
         Action act = () => _ = new FuzzyRegex(@"\N{1}");
 
-        act.Should().Throw<FuzzyRegexParseException>().WithMessage("undefined character name at position 5");
+        var error = act.Should().Throw<FuzzyRegexParseException>().Which;
+        error.Message.Should().Be("undefined character name");
+        error.Offset.Should().Be(5);
     }
 
     // Hg issue 80: Escape characters throws an exception.
@@ -68,12 +72,16 @@ public sealed class RegressionsParseErrorTests
 
     // Hg issue 132: index out of range on null property \p{}.
     [Test]
-    [Skip("needs:parse-errors - an empty \\p{} property name does not report a position")]
+    // Split into message and offset by S13, as this class's remarks require. Measured against
+    // regex 2026.7.19 on 2026-08-31:
+    //     ERR  '\\p{}' -> error msg='unknown property' pos=4
     [Property("Upstream", "RegexTests.test_hg_bugs#111")]
     public void Empty_property_name_reports_its_position()
     {
         Action act = () => _ = new FuzzyRegex(@"\p{}");
 
-        act.Should().Throw<FuzzyRegexParseException>().WithMessage("unknown property at position 4");
+        var error = act.Should().Throw<FuzzyRegexParseException>().Which;
+        error.Message.Should().Be("unknown property");
+        error.Offset.Should().Be(4);
     }
 }

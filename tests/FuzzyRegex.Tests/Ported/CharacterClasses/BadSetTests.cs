@@ -10,7 +10,6 @@ public sealed class BadSetTests
     // Upstream asserts the error message matches self.BAD_SET; we do not assert message text, per
     // the port's own error-message conventions (not yet decided).
     [Test]
-    [Skip("needs:parse-errors - the parser does not yet reject invalid patterns")]
     [Property("Upstream", "RegexTests.test_bug_545855#1")]
     public void Unterminated_set_fails_to_compile()
     {

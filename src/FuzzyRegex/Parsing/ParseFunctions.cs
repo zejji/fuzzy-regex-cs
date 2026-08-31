@@ -111,6 +111,12 @@ internal static class ParseFunctions
     internal static RefGroup MakeRefGroup(Info info, string name, int position) =>
         new(info, name, position, caseFlags: MakeCaseFlags(info));
 
+    /// <summary>Upstream <c>make_string_set</c> (lines 441-443).</summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="name">The named list's name.</param>
+    /// <returns>The named-list reference.</returns>
+    internal static StringSet MakeStringSet(Info info, string name) => new(info, name, caseFlags: MakeCaseFlags(info));
+
     /// <summary>
     /// Python's <c>int(text)</c> as the three group-resolving nodes call it: the value if the text
     /// is a number, otherwise a signal to look the text up as a name.
@@ -312,13 +318,24 @@ internal static class ParseFunctions
                         }
                         else
                         {
-                            // It's not a quantifier. Maybe it's a fuzzy constraint. Upstream parses
-                            // one here and, when there is none, falls through to "the element was
-                            // just a literal" - which is what makes `a{`, `{}` and `{x}` ordinary
-                            // literal braces. Telling those two apart needs the whole fuzzy
-                            // constraint grammar (parse_fuzzy_item and its eight helpers, S13), so
-                            // there is no narrower seam to throw at than this one.
-                            ParseFuzzy(source, info, ch, caseFlags);
+                            // It's not a quantifier. Maybe it's a fuzzy constraint.
+                            FuzzyConstraints? constraints = ParseFuzzy(source, info, ch, caseFlags);
+
+                            if (constraints is not null)
+                            {
+                                // It _is_ a fuzzy constraint.
+                                if (constraints.IsActuallyFuzzy())
+                                {
+                                    ApplyConstraint(source, info, constraints, caseFlags, savedPos, sequence);
+                                    sequence.Add(null);
+                                }
+                            }
+                            else
+                            {
+                                // The element was just a literal. This is what makes `a{`, `{}` and
+                                // `{x}` ordinary literal braces.
+                                sequence.Add(new Character(ch, caseFlags: caseFlags));
+                            }
                         }
 
                         break;
@@ -492,19 +509,364 @@ internal static class ParseFunctions
         return ((long)minCount, maxCount is null ? null : (long)maxCount.Value);
     }
 
+    /// <summary>Upstream <c>apply_constraint</c> (lines 590-602).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state; upstream takes it and does not use it.</param>
+    /// <param name="constraints">The constraints the fuzzy section carries.</param>
+    /// <param name="caseFlags">The case flags in force; upstream takes it and does not use it.</param>
+    /// <param name="savedPos">Where the constraint started, for the error message.</param>
+    /// <param name="sequence">The sequence so far, whose last element the constraint applies to.</param>
+    internal static void ApplyConstraint(
+        Source source,
+        Info info,
+        FuzzyConstraints constraints,
+        int caseFlags,
+        int savedPos,
+        List<RegexBase?> sequence
+    )
+    {
+        _ = (info, caseFlags);
+
+        RegexBase? element = sequence[^1];
+        sequence.RemoveAt(sequence.Count - 1);
+        if (element is null)
+        {
+            throw new FuzzyRegexParseException("nothing for fuzzy constraint", source.String, savedPos);
+        }
+
+        // If a group is marked as fuzzy then put all of the fuzzy part in the group.
+        if (element is Group group)
+        {
+            group.Subpattern = new Fuzzy(group.Subpattern, constraints);
+            sequence.Add(group);
+        }
+        else
+        {
+            sequence.Add(new Fuzzy(element, constraints));
+        }
+    }
+
     /// <summary>Upstream <c>parse_fuzzy</c> (lines 655-677).</summary>
     /// <param name="source">The scanner.</param>
     /// <param name="info">The parse state.</param>
     /// <param name="ch">The character that started the constraint.</param>
     /// <param name="caseFlags">The case flags in force.</param>
-    /// <returns>The constraints, never - this throws until S13.</returns>
-    internal static object? ParseFuzzy(Source source, Info info, int ch, int caseFlags)
+    /// <returns>The constraints, or <see langword="null"/> if this is not a fuzzy constraint.</returns>
+    internal static FuzzyConstraints? ParseFuzzy(Source source, Info info, int ch, int caseFlags)
     {
-        _ = (source, info, ch, caseFlags);
+        int savedPos = source.Pos;
 
-        throw new NotImplementedException(
-            "needs:fuzzy-syntax - parse_fuzzy_item and the cost grammar are not ported yet (S13)"
-        );
+        if (ch != '{')
+        {
+            return null;
+        }
+
+        var constraints = new FuzzyConstraints();
+        try
+        {
+            ParseFuzzyItem(source, constraints);
+            while (source.MatchText(","))
+            {
+                ParseFuzzyItem(source, constraints);
+            }
+        }
+        catch (ParseErrorException)
+        {
+            source.Pos = savedPos;
+            return null;
+        }
+
+        if (source.MatchText(":"))
+        {
+            constraints.Test = ParseFuzzyTest(source, info, caseFlags);
+        }
+
+        if (!source.MatchText("}"))
+        {
+            throw new FuzzyRegexParseException("expected }", source.String, source.Pos);
+        }
+
+        return constraints;
+    }
+
+    /// <summary>Upstream <c>parse_fuzzy_item</c> (lines 679-687).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="constraints">The constraints built so far, which this adds to.</param>
+    internal static void ParseFuzzyItem(Source source, FuzzyConstraints constraints)
+    {
+        int savedPos = source.Pos;
+        try
+        {
+            ParseCostConstraint(source, constraints);
+        }
+        catch (ParseErrorException)
+        {
+            source.Pos = savedPos;
+
+            ParseCostEquation(source, constraints);
+        }
+    }
+
+    /// <summary>Upstream <c>parse_cost_constraint</c> (lines 689-748).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="constraints">The constraints built so far, which this adds to.</param>
+    internal static void ParseCostConstraint(Source source, FuzzyConstraints constraints)
+    {
+        int savedPos = source.Pos;
+        int ch = source.Get();
+        if (RegexFlags.IsAlpha(ch))
+        {
+            // Syntax: constraint [("<=" | "<") cost]
+            char constraint = ParseConstraint(constraints, ch);
+
+            bool? maxInc = ParseFuzzyCompare(source);
+
+            if (maxInc is null)
+            {
+                // No maximum cost.
+                constraints.Limits[constraint] = (0, null);
+            }
+            else
+            {
+                // There's a maximum cost.
+                int costPos = source.Pos;
+                BigInteger maxCost = ParseCostLimit(source);
+
+                // Inclusive or exclusive limit?
+                if (!maxInc.Value)
+                {
+                    maxCost -= 1;
+                }
+
+                if (maxCost < 0)
+                {
+                    throw new FuzzyRegexParseException("bad fuzzy cost limit", source.String, costPos);
+                }
+
+                constraints.Limits[constraint] = (0, maxCost);
+            }
+        }
+        else if (RegexFlags.IsDigit(ch))
+        {
+            // Syntax: cost ("<=" | "<") constraint ("<=" | "<") cost
+            source.Pos = savedPos;
+
+            // Minimum cost. Upstream assigns cost_pos twice; only the second assignment is read.
+            BigInteger minCost = ParseCostLimit(source);
+
+            bool minInc = ParseFuzzyCompare(source) ?? throw new ParseErrorException();
+
+            char constraint = ParseConstraint(constraints, source.Get());
+
+            bool maxInc = ParseFuzzyCompare(source) ?? throw new ParseErrorException();
+
+            // Maximum cost.
+            int costPos = source.Pos;
+            BigInteger maxCost = ParseCostLimit(source);
+
+            // Inclusive or exclusive limits?
+            if (!minInc)
+            {
+                minCost += 1;
+            }
+
+            if (!maxInc)
+            {
+                maxCost -= 1;
+            }
+
+            if (!(minCost >= 0 && minCost <= maxCost))
+            {
+                throw new FuzzyRegexParseException("bad fuzzy cost limit", source.String, costPos);
+            }
+
+            constraints.Limits[constraint] = (minCost, maxCost);
+        }
+        else
+        {
+            throw new ParseErrorException();
+        }
+    }
+
+    /// <summary>Upstream <c>parse_cost_limit</c> (lines 750-760).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <returns>The cost.</returns>
+    /// <remarks>
+    /// <para>
+    /// A <see cref="BigInteger"/>, and not saturated anywhere, because upstream's <c>int(digits)</c>
+    /// is unbounded and its callers then do arithmetic on it: <c>max_cost -= 1</c>,
+    /// <c>min_cost += 1</c> and <c>not 0 &lt;= min_cost &lt;= max_cost</c>. A fuzzy cost is the one
+    /// number upstream range-checks nowhere - <c>is_above_limit</c> guards repeat counts and
+    /// nothing guards these - so any ceiling put on the value here is observable as a pattern this
+    /// port rejects and upstream compiles.
+    /// </para>
+    /// <para>
+    /// Two drafts of this got that wrong, both caught by an S13 blind review pass. Saturating at
+    /// <see cref="RegexFlags.Unlimited"/> made <c>{i&lt;4294967296}</c> subtract from the ceiling
+    /// and cap at 4294967294, and made <c>{4294967296&lt;=i&lt;=4294967295}</c> compile.
+    /// Saturating at <see cref="long.MaxValue"/> only moved the same fault upwards: with the
+    /// ceiling equal to the arithmetic type's maximum, <c>{9223372036854775807&lt;i&lt;=…}</c>
+    /// overflows to a negative minimum, and any two distinct values above the ceiling compare
+    /// equal, so <c>{9223372036854775807&lt;=i&lt;9223372036854775808}</c> is rejected too - all
+    /// three measured against regex 2026.7.19 on 2026-08-31 and all three accepted there. The
+    /// clamp to <see cref="RegexFlags.Unlimited"/> belongs at the emitted code word, in
+    /// <c>Fuzzy._compile</c>, and only there.
+    /// </para>
+    /// </remarks>
+    internal static BigInteger ParseCostLimit(Source source)
+    {
+        int costPos = source.Pos;
+        string digits = ParseCount(source);
+
+        if (digits.Length > 0)
+        {
+            return BigInteger.Parse(digits, CultureInfo.InvariantCulture);
+        }
+
+        throw new FuzzyRegexParseException("bad fuzzy cost limit", source.String, costPos);
+    }
+
+    /// <summary>Upstream <c>parse_constraint</c> (lines 762-770).</summary>
+    /// <param name="constraints">The constraints built so far, checked for a duplicate.</param>
+    /// <param name="ch">The constraint letter.</param>
+    /// <returns>The constraint letter.</returns>
+    /// <remarks>Upstream takes <c>source</c> as well and does not use it.</remarks>
+    internal static char ParseConstraint(FuzzyConstraints constraints, int ch)
+    {
+        if (ch is not ('d' or 'e' or 'i' or 's'))
+        {
+            throw new ParseErrorException();
+        }
+
+        if (constraints.Limits.ContainsKey((char)ch))
+        {
+            throw new ParseErrorException();
+        }
+
+        return (char)ch;
+    }
+
+    /// <summary>Upstream <c>parse_fuzzy_compare</c> (lines 772-779).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <returns>
+    /// <see langword="true"/> for <c>&lt;=</c>, <see langword="false"/> for <c>&lt;</c>, and
+    /// <see langword="null"/> for neither.
+    /// </returns>
+    internal static bool? ParseFuzzyCompare(Source source)
+    {
+        if (source.MatchText("<="))
+        {
+            return true;
+        }
+
+        return source.MatchText("<") ? false : null;
+    }
+
+    /// <summary>Upstream <c>parse_cost_equation</c> (lines 781-806).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="constraints">The constraints built so far, which this adds the equation to.</param>
+    internal static void ParseCostEquation(Source source, FuzzyConstraints constraints)
+    {
+        if (constraints.Cost is not null)
+        {
+            throw new FuzzyRegexParseException("more than one cost equation", source.String, source.Pos);
+        }
+
+        var cost = new FuzzyConstraints.CostEquation();
+
+        ParseCostTerm(source, cost);
+        while (source.MatchText("+"))
+        {
+            ParseCostTerm(source, cost);
+        }
+
+        bool maxInc = ParseFuzzyCompare(source) ?? throw new ParseErrorException();
+
+        // Upstream's int(parse_count(source)) raises ValueError on no digits at all, which is not
+        // its own error type; ParseCostLimit raises the "bad fuzzy cost limit" upstream would have
+        // raised one line later anyway, at the same position.
+        BigInteger maxCost = ParseCostLimit(source);
+
+        if (!maxInc)
+        {
+            maxCost -= 1;
+        }
+
+        if (maxCost < 0)
+        {
+            throw new FuzzyRegexParseException("bad fuzzy cost limit", source.String, source.Pos);
+        }
+
+        cost.Max = maxCost;
+
+        constraints.Cost = cost;
+    }
+
+    /// <summary>Upstream <c>parse_cost_term</c> (lines 808-818).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="cost">The cost equation built so far, which this adds a term to.</param>
+    internal static void ParseCostTerm(Source source, FuzzyConstraints.CostEquation cost)
+    {
+        string coeff = ParseCount(source);
+        int ch = source.Get();
+        if (ch is not ('d' or 'i' or 's'))
+        {
+            throw new ParseErrorException();
+        }
+
+        if (cost.Coefficients.ContainsKey((char)ch))
+        {
+            throw new FuzzyRegexParseException("repeated fuzzy cost", source.String, source.Pos);
+        }
+
+        // Upstream's `int(coeff or 1)`: no digits means a coefficient of 1. Saturated for the same
+        // reason ParseCostLimit is, and at the same place.
+        cost.Coefficients[(char)ch] =
+            coeff.Length == 0 ? BigInteger.One : BigInteger.Parse(coeff, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Upstream <c>parse_fuzzy_test</c> (lines 820-844).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    /// <returns>What a substituted character has to match.</returns>
+    internal static RegexBase ParseFuzzyTest(Source source, Info info, int caseFlags)
+    {
+        int savedPos = source.Pos;
+        int ch = source.Get();
+        if (RegexFlags.IsSpecial(ch))
+        {
+            switch (ch)
+            {
+                case '\\':
+                    // An escape sequence outside a set.
+                    return ParseEscape(source, info, false);
+
+                case '.':
+                    // Any character.
+                    if ((info.Flags & RegexFlags.DotAll) != 0)
+                    {
+                        return new AnyAll();
+                    }
+
+                    return (info.Flags & RegexFlags.Word) != 0 ? new AnyU() : new Any();
+
+                case '[':
+                    // A character set.
+                    return ParseSet(source, info);
+
+                default:
+                    throw new FuzzyRegexParseException("expected character set", source.String, savedPos);
+            }
+        }
+
+        if (ch != Source.EndOfSource)
+        {
+            // A literal.
+            return new Character(ch, caseFlags: caseFlags);
+        }
+
+        throw new FuzzyRegexParseException("expected character set", source.String, savedPos);
     }
 
     /// <summary>Upstream <c>parse_count</c> (lines 846-848).</summary>
@@ -1207,9 +1569,8 @@ internal static class ParseFunctions
 
         if (ch == 'L' && !inSet)
         {
-            throw new NotImplementedException(
-                "needs:named-lists - parse_string_set and the StringSet node are not ported yet (S13)"
-            );
+            // A named list.
+            return ParseStringSet(source, info);
         }
 
         if (ch == 'N')
@@ -1466,6 +1827,27 @@ internal static class ParseFunctions
         }
 
         return MakeRefGroup(info, name, savedPos);
+    }
+
+    /// <summary>Upstream <c>parse_string_set</c> (lines 1427-1435).</summary>
+    /// <param name="source">The scanner.</param>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The named-list reference.</returns>
+    /// <remarks>
+    /// Upstream's <c>name is None</c> guard is dead: <c>parse_name</c> raises "missing group name"
+    /// rather than returning <c>None</c>, so only the <c>info.kwargs</c> membership test can fire.
+    /// </remarks>
+    internal static RegexBase ParseStringSet(Source source, Info info)
+    {
+        source.Expect("<");
+        string name = ParseName(source, allowNumeric: true);
+        source.Expect(">");
+        if (!info.Kwargs.ContainsKey(name))
+        {
+            throw new FuzzyRegexParseException("undefined named list", source.String, source.Pos);
+        }
+
+        return MakeStringSet(info, name);
     }
 
     /// <summary>Upstream <c>parse_named_char</c> (lines 1437-1451).</summary>
@@ -2445,8 +2827,7 @@ internal static class ParseFunctions
                     // Calling the pattern as a whole.
                     bool rev = (info.Flags & RegexFlags.Reverse) != 0;
 
-                    // Upstream: fuz = isinstance(parsed, Fuzzy). The Fuzzy node arrives in S13.
-                    const bool fuz = false;
+                    bool fuz = parsed is Fuzzy;
                     if ((rev, fuz) != (reverse, fuzzy))
                     {
                         // The pattern as a whole doesn't have the features we want, so we'll need

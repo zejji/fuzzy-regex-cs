@@ -53,7 +53,13 @@ public sealed class SubTemplateNumericEscapeTests
     [Arguments(@"\11a")]
     [Arguments(@"\181")] // r'\18' + '1'
     [Arguments(@"\800")] // r'\80' + '0'
-    [Skip("needs:parse-errors - Pattern.Replace does not yet validate numeric group references in templates")]
+    // Not a parse error at all, which is why S13 did not turn these on with the rest of
+    // needs:parse-errors. _compile_replacement (upstream/regex/_regex_core.py lines 1844-1860)
+    // returns `True, [int(digits)]` for a bare `\1` without ever checking the number against the
+    // pattern's group count; only the `\g<...>` form is checked at compile time (line 1910). The
+    // rejection therefore happens when the template is expanded against a match, so these need
+    // the engine.
+    [Skip("needs:substitution - an out-of-range numeric group reference is rejected on expansion, not on compile")]
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#19-30")]
     public void Replace_with_an_invalid_numeric_group_reference_throws(string replacement)
     {

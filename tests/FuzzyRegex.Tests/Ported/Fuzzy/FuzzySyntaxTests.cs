@@ -20,7 +20,6 @@ public sealed class FuzzySyntaxTests
     [Arguments("(anaconda){1i+1d<1,s<=1,e<=10}")]
     [Arguments("(anaconda){s<=1,e<=1,1i+1d<1}")]
     [Arguments("(approximate){s<=3,1i+1d<3}")]
-    [Skip("needs:fuzzy-syntax - the parser does not read fuzzy constraints yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#1-6,18")]
     public void A_fuzzy_constraint_compiles(string pattern)
     {

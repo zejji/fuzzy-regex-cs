@@ -530,11 +530,11 @@ public sealed class RegressionsFuzzyTests
     public void Fuzzy_matching_with_mixed_greedy_and_lazy_dot_star_still_spans_the_whole_match(string pattern) =>
         FuzzyRegex.Match("A B CYZ", pattern).Value.Should().Be("A B CYZ");
 
-    // ---- needs:fuzzy-syntax ----
+    // ---- needs:fuzzy-matching (parsed since S13, not matchable yet) ----
 
     // Hg issue 338: specifying allowed characters when fuzzy-matching.
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#378-379")]
     [Arguments(@"(?:cat){e<=1:[u]}")]
     [Arguments(@"(?:cat){e<=1:u}")]
@@ -543,7 +543,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 371: Specifying character set when fuzzy-matching allows characters not in the set.
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#394")]
     public void Fuzzy_character_restriction_rejects_digits_outside_the_allowed_set() =>
         FuzzyRegex
@@ -553,7 +553,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 394: Unexpected behaviour in fuzzy matching with limited character set with IGNORECASE flag.
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#397-398")]
     [Arguments(@"(\d+){i<=2:[ab]}")]
     [Arguments(@"(?i)(\d+){i<=2:[ab]}")]
@@ -562,7 +562,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 415: Fuzzy character restrictions don't apply to insertions at "right edge".
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#402-403")]
     public void Fuzzy_character_restriction_on_a_substitution_rejects_a_char_outside_the_set()
     {
@@ -571,7 +571,7 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#404-406")]
     public void Fuzzy_character_restriction_on_an_insertion_rejects_a_char_outside_the_set_and_reports_its_position()
     {
@@ -594,7 +594,7 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("tes5t", @"t(es){i<=1,0<e<=1}t").Value.Should().Be("tes5t");
 
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#408")]
     public void Fuzzy_character_restriction_combined_with_a_nonzero_error_floor_reports_the_insertion_position()
     {
@@ -607,7 +607,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 442: Fuzzy regex matching doesn't seem to test insertions correctly.
     [Test]
-    [Skip("needs:fuzzy-syntax - fuzzy character-set restriction syntax ({e<=n:[set]}) not implemented yet")]
+    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#429-430")]
     [Arguments(FuzzyRegexOptions.None)]
     [Arguments(FuzzyRegexOptions.IgnoreCase)]

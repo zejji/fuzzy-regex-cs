@@ -20,7 +20,7 @@ public sealed class RegressionsNamedListTests
     // Hg issue 50: not all keywords are found by named list with overlapping keywords when full
     // Unicode casefolding is required.
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#33")]
     public void Full_case_folding_finds_every_casefold_variant_of_overlapping_keywords()
     {
@@ -43,7 +43,7 @@ public sealed class RegressionsNamedListTests
 
     // Hg issue 192: Named lists reverse matching doesn't work with IGNORECASE and V1.
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#220")]
     public void Reverse_case_insensitive_named_list_matches_under_V0()
     {
@@ -59,7 +59,7 @@ public sealed class RegressionsNamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#221")]
     public void Reverse_case_insensitive_named_list_matches_under_V1()
     {
@@ -76,7 +76,7 @@ public sealed class RegressionsNamedListTests
 
     // Hg issue 205: Named list and (?ri) flags.
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#246")]
     public void Case_insensitive_named_list_matches_the_longer_overlapping_entry()
     {
@@ -90,7 +90,7 @@ public sealed class RegressionsNamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#247")]
     public void Reverse_case_insensitive_named_list_matches_the_longer_overlapping_entry()
     {
@@ -104,7 +104,7 @@ public sealed class RegressionsNamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#248")]
     public void Full_case_folding_named_list_matches_the_longer_overlapping_entry()
     {
@@ -118,7 +118,7 @@ public sealed class RegressionsNamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#249")]
     public void Reverse_full_case_folding_named_list_matches_the_longer_overlapping_entry()
     {
@@ -133,7 +133,7 @@ public sealed class RegressionsNamedListTests
 
     // Hg issue 208: Named list, (?ri) flags, Backreference.
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#250")]
     public void Reverse_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
@@ -149,7 +149,7 @@ public sealed class RegressionsNamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#251")]
     public void Reverse_case_insensitive_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
@@ -166,7 +166,7 @@ public sealed class RegressionsNamedListTests
 
     // Git issue 525: segfault when fuzzy matching empty list.
     [Test]
-    [Skip("needs:named-lists - the parser does not read \\L<name> yet")]
+    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#446")]
     public void Fuzzy_matching_an_empty_named_list_matches_the_empty_string_without_crashing()
     {

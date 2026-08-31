@@ -24,6 +24,21 @@ Roughly 42-69 slice sessions in total, at plus or minus 50%. The generated statu
 real rate visible within the first two phases, which is when these numbers should be revised
 against evidence rather than trusted.
 
+**Phase 2's measured rate, recorded at its close (S13, 2026-08-31).** Phase 2 was re-estimated at
+8 slices when it opened and landed in exactly 8 (S06-S13), so the *slice* estimate held. The
+*driver session* count did not: `docs/plan/slice-log.jsonl` shows 8 slices took 11 driver sessions,
+because S07 failed twice before it was parked and S10 failed once - about 35% more sessions than
+slices. A completed slice cost 29M to 81M tokens, median around 48M, and a failed attempt costs
+roughly the same as a successful one. **So read every phase estimate below as slices, and budget
+1.35x that many driver sessions.** Phase 3's 11-16 slices is therefore 15-22 sessions. The estimate
+itself is left alone: Phase 2 was parser work and Phase 3 is engine work, so its rate is not
+evidence about Phase 3's, and revising a number on the strength of a different kind of work would
+be worse than leaving it.
+
+One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
+`maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
+binds after two and a half busy days. Changing it is an owner decision, not a slice's.
+
 Fuzzy matching - the reason this port exists - is usable at the end of phase 5, about two thirds
 of the way through.
 

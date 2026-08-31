@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
@@ -862,8 +864,29 @@ internal sealed class RefGroup : RegexBase
     public override int GetHashCode() => HashCode.Combine(typeof(RefGroup), CaseFlags);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The guard is upstream's behaviour, not an extra check. Upstream's <c>self.group</c> is the
+    /// text the pattern wrote until <c>fix_groups</c> replaces it with a number, so a reference
+    /// <c>fix_groups</c> never reached puts a <i>string</i> in the code list and
+    /// <c>_regex.compile</c> answers <c>RuntimeError: invalid RE code</c>. One construct reaches
+    /// that: a backreference inside a fuzzy test, <c>(a)(?:abc){e&lt;=1:\1}</c>, because
+    /// <c>Fuzzy.fix_groups</c> (line 2822) descends into <c>subpattern</c> and not into
+    /// <c>constraints["test"]</c>. <see cref="FixGroups"/> rejects any group below 1, so
+    /// <see cref="GroupNumber"/> still being 0 here means exactly "never fixed" - and without this,
+    /// the port would quietly compile a reference to group 0 where upstream rejects the pattern.
+    /// Found by the S13 blind review; measured against regex 2026.7.19 on 2026-08-31.
+    /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
+        if (GroupNumber == 0)
+        {
+            throw new NotSupportedException(
+                $"a backreference to '{_groupText}' was never resolved, so upstream would put the "
+                    + "text itself in the code list; _regex.compile would raise "
+                    + "RuntimeError: invalid RE code"
+            );
+        }
+
         uint flags = 0;
         if (fuzzy)
         {
@@ -1043,7 +1066,7 @@ internal sealed class Atomic : RegexBase
 /// two helpers have no other caller. See PORTMAP's "Where we diverge".
 /// </para>
 /// </remarks>
-internal sealed class Branch : RegexBase
+internal class Branch : RegexBase
 {
     /// <summary>Initializes an alternation.</summary>
     /// <param name="branches">The alternatives, in pattern order.</param>
@@ -1053,7 +1076,7 @@ internal sealed class Branch : RegexBase
     }
 
     /// <summary>The alternatives. Upstream <c>branches</c>.</summary>
-    internal List<RegexBase> Branches { get; private set; }
+    internal List<RegexBase> Branches { get; private protected set; }
 
     /// <inheritdoc />
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy)
@@ -1166,7 +1189,13 @@ internal sealed class Branch : RegexBase
     internal override long MaxWidth() => Branches.Max(b => b.MaxWidth());
 
     /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is Branch other && Branches.SequenceEqual(other.Branches);
+    /// <remarks>
+    /// The <c>GetType()</c> test is upstream's <c>type(self) is type(other)</c>, which keeps a
+    /// <see cref="StringSet"/> - a <c>Branch</c> subclass - from comparing equal to a plain
+    /// <c>Branch</c> with the same alternatives.
+    /// </remarks>
+    public override bool Equals(object? obj) =>
+        obj is Branch other && GetType() == other.GetType() && Branches.SequenceEqual(other.Branches);
 
     /// <inheritdoc />
     /// <remarks>
@@ -2145,6 +2174,102 @@ internal sealed class Literal : String
     /// <param name="caseFlags">The case flags in force.</param>
     internal Literal(IReadOnlyList<int> characters, int caseFlags = RegexFlags.NoCase)
         : base(characters, caseFlags) { }
+}
+
+/// <summary>
+/// <c>\L&lt;name&gt;</c>, a named list: an alternation over the caller's strings, longest first.
+/// Upstream <c>StringSet</c> (<c>upstream/regex/_regex_core.py</c> lines 4069-4108).
+/// </summary>
+/// <remarks>
+/// <para>
+/// A <see cref="Branch"/> subclass upstream and here, which is the whole of its compilation: it
+/// inherits <c>optimise</c>, so a named list is a plain <c>BRANCH</c> in the bytecode and the
+/// <c>STRING_SET</c> opcode the C engine still defines is never emitted. The parser-side effect
+/// that <i>does</i> outlive it is the entry this constructor makes in
+/// <see cref="Info.NamedListsUsed"/>, which drives the compiled pattern's named lists and the
+/// unused-argument check.
+/// </para>
+/// <para>
+/// NOT PORTED: upstream's <c>index</c>, <c>encoding</c> and <c>fold_flags</c> locals (lines 4081,
+/// 4086-4087), all three of which it computes and never reads, and <c>__del__</c>, which drops the
+/// reference cycle Python's collector would otherwise have to break.
+/// </para>
+/// </remarks>
+internal sealed class StringSet : Branch
+{
+    /// <summary>Initializes a named-list reference and registers it with the parse state.</summary>
+    /// <param name="info">The parse state, which holds the caller's lists and the index assignment.</param>
+    /// <param name="name">The list's name, already checked to be one the caller supplied.</param>
+    /// <param name="caseFlags">The case flags in force.</param>
+    internal StringSet(Info info, string name, int caseFlags = RegexFlags.NoCase)
+        : base([])
+    {
+        Name = name;
+        SetCaseFlags = RegexFlags.CaseFlagsCombination(caseFlags);
+
+        (string Name, int CaseFlags) setKey = (name, SetCaseFlags);
+        if (!info.NamedListsUsed.ContainsKey(setKey))
+        {
+            info.NamedListsUsed[setKey] = info.NamedListsUsed.Count;
+        }
+
+        List<List<RegexBase>> choices = [];
+        foreach (string item in info.Kwargs[name])
+        {
+            List<RegexBase> choice = [];
+
+            // Whole codepoints, as upstream's `[ord(c) for c in string]` iterates a Python str.
+            // Source.CharacterAt walks a surrogate pair the same way, lone surrogate included.
+            int i = 0;
+            while (i < item.Length)
+            {
+                bool pair = char.IsHighSurrogate(item[i]) && i + 1 < item.Length && char.IsLowSurrogate(item[i + 1]);
+                choice.Add(
+                    new Character(pair ? char.ConvertToUtf32(item[i], item[i + 1]) : item[i], caseFlags: SetCaseFlags)
+                );
+                i += pair ? 2 : 1;
+            }
+
+            choices.Add(choice);
+        }
+
+        // Sort from longest to shortest. LINQ's OrderByDescending is a stable sort, as Python's
+        // list.sort is, so two members of equal length keep the caller's order - and that order
+        // reaches the bytecode.
+        Branches =
+        [
+            .. choices.OrderByDescending(choice => choice.Count).Select(choice => (RegexBase)new Sequence(choice)),
+        ];
+    }
+
+    /// <summary>The list's name. Upstream <c>name</c>.</summary>
+    internal string Name { get; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream's <c>case_flags</c> attribute, named apart from <see cref="RegexBase.CaseFlags"/>
+    /// only because that one is a read-only virtual with no setter.
+    /// </remarks>
+    internal override int CaseFlags => SetCaseFlags;
+
+    /// <summary>The normalised case flags this list is matched under.</summary>
+    private int SetCaseFlags { get; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream sets <c>_key</c> to <c>(class, name, case_flags)</c> and then never reads it:
+    /// <c>StringSet</c> inherits <c>Branch.__eq__</c> (<c>upstream/regex/_regex_core.py</c> lines
+    /// 2520-2521), which compares the *branches*. Two differently-named lists holding the same
+    /// strings are therefore equal upstream, and are equal here too - so
+    /// <see cref="Branch.Equals"/> and <see cref="Branch.GetHashCode"/> are inherited rather than
+    /// overridden. <c>_key</c> is still what <see cref="RegexBase.RenderKey"/> renders, because
+    /// that stands for <c>_key</c> and not for equality.
+    /// </remarks>
+    internal override string RenderKey() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"({nameof(StringSet)},{Name},{SetCaseFlags})"
+        );
 }
 
 /// <summary>
@@ -3499,6 +3624,312 @@ internal sealed class LookAroundConditional : RegexBase
         code.Add([(uint)Opcode.End]);
 
         return code;
+    }
+}
+
+/// <summary>
+/// A fuzzy section's error budget: how many deletions, insertions, substitutions and errors of any
+/// kind are allowed, and what each costs. Upstream keeps this in the plain <c>dict</c> that
+/// <c>parse_fuzzy</c> builds and <c>Fuzzy.__init__</c> fills in.
+/// </summary>
+/// <remarks>
+/// A type rather than a dictionary because upstream's dict is heterogeneous - three of its keys
+/// hold a <c>(min, max)</c> pair, one holds another dict, one holds a node - and because the
+/// parser's duplicate checks (<c>if ch in constraints</c>, <c>if "cost" in constraints</c>) turn on
+/// which keys are <i>present</i>. <see langword="null"/> is that absence, and a <see langword="null"/>
+/// maximum in <see cref="Limits"/> is upstream's <c>None</c>, meaning unlimited.
+/// </remarks>
+internal sealed class FuzzyConstraints
+{
+    /// <summary>
+    /// The cost equation: a coefficient per error type and a maximum total. Upstream's inner dict,
+    /// whose <c>"max"</c> key shares the namespace with <c>"d"</c>, <c>"i"</c> and <c>"s"</c> -
+    /// harmlessly, because <c>parse_cost_term</c> only ever writes the three letters.
+    /// </summary>
+    internal sealed class CostEquation
+    {
+        /// <summary>The coefficient of each of <c>d</c>, <c>i</c> and <c>s</c> that was written.</summary>
+        internal Dictionary<char, BigInteger> Coefficients { get; } = [];
+
+        /// <summary>The maximum total cost, or <see langword="null"/> for unlimited.</summary>
+        internal BigInteger? Max { get; set; }
+    }
+
+    /// <summary>The error types in the order upstream's <c>_compile</c> reads them.</summary>
+    internal static ReadOnlySpan<char> ErrorTypes => "dise";
+
+    /// <summary>The three specific error types, in the order upstream writes <c>"dis"</c>.</summary>
+    internal static ReadOnlySpan<char> SpecificErrorTypes => "dis";
+
+    /// <summary>
+    /// The limit written for each error type - upstream's <c>"d"</c>, <c>"i"</c>, <c>"s"</c> and
+    /// <c>"e"</c> keys - as upstream's <c>(min, max)</c> pair, with a <see langword="null"/>
+    /// maximum standing for its <c>None</c>, meaning unlimited.
+    /// </summary>
+    internal Dictionary<char, (BigInteger Min, BigInteger? Max)> Limits { get; } = [];
+
+    /// <summary>The cost equation, or <see langword="null"/> if the pattern wrote none. Upstream's <c>"cost"</c> key.</summary>
+    internal CostEquation? Cost { get; set; }
+
+    /// <summary>What a substituted character must match, or <see langword="null"/>. Upstream's <c>"test"</c> key.</summary>
+    internal RegexBase? Test { get; set; }
+
+    /// <summary>Upstream <c>is_actually_fuzzy</c> (lines 548-556).</summary>
+    /// <returns><see langword="false"/> if the constraints permit no errors at all.</returns>
+    /// <remarks>
+    /// Called on the constraints as written, before <see cref="Fuzzy"/> fills in the defaults, so
+    /// "absent" and "present and zero" are different answers here. Upstream's <c>dict.get</c>
+    /// returns <c>None</c> for an absent key, and <c>None != (0, 0)</c>.
+    /// </remarks>
+    internal bool IsActuallyFuzzy()
+    {
+        (BigInteger, BigInteger?) none = (BigInteger.Zero, BigInteger.Zero);
+
+        if (Limits.TryGetValue('e', out (BigInteger Min, BigInteger? Max) e) && e == none)
+        {
+            return false;
+        }
+
+        return !(
+            Limits.TryGetValue('s', out (BigInteger Min, BigInteger? Max) s)
+            && Limits.TryGetValue('i', out (BigInteger Min, BigInteger? Max) i)
+            && Limits.TryGetValue('d', out (BigInteger Min, BigInteger? Max) d)
+            && s == none
+            && i == none
+            && d == none
+        );
+    }
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is FuzzyConstraints other
+        && Limits.Count == other.Limits.Count
+        && Limits.All(entry =>
+            other.Limits.TryGetValue(entry.Key, out (BigInteger Min, BigInteger? Max) value) && value == entry.Value
+        )
+        && CostEquals(Cost, other.Cost)
+        && Equals(Test, other.Test);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Every field this compares by is filled in or replaced after construction - the constructor
+    /// of <see cref="Fuzzy"/> adds the default limits and the default cost equation - so hashing
+    /// any of them would break the "a hash does not change" contract. Upstream never hashes these
+    /// at all: the dict they live in is unhashable in Python. A constant is the honest answer.
+    /// </remarks>
+    public override int GetHashCode() => typeof(FuzzyConstraints).GetHashCode();
+
+    private static bool CostEquals(CostEquation? left, CostEquation? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        return left.Max == right.Max
+            && left.Coefficients.Count == right.Coefficients.Count
+            && left.Coefficients.All(entry =>
+                right.Coefficients.TryGetValue(entry.Key, out BigInteger value) && value == entry.Value
+            );
+    }
+}
+
+/// <summary>
+/// A fuzzy section: <c>(?:...){e&lt;=2}</c> and friends. Upstream <c>Fuzzy</c>
+/// (<c>upstream/regex/_regex_core.py</c> lines 2786-2917).
+/// </summary>
+/// <remarks>
+/// The constructor fills in upstream's defaults by mutating the constraints it is handed, exactly
+/// as <c>Fuzzy.__init__</c> does. That mutation is visible to the caller in Python and is visible
+/// here too, because <see cref="FuzzyConstraints"/> is a class - which matters, since
+/// <c>apply_constraint</c> hands the same object to a second <see cref="Fuzzy"/> when the element
+/// is a <see cref="Group"/>.
+/// </remarks>
+internal sealed class Fuzzy : RegexBase
+{
+    /// <summary>Initializes a fuzzy section and applies upstream's default constraints.</summary>
+    /// <param name="subpattern">What the section matches.</param>
+    /// <param name="constraints">The constraints as written, which this fills in.</param>
+    internal Fuzzy(RegexBase subpattern, FuzzyConstraints? constraints = null)
+    {
+        constraints ??= new FuzzyConstraints();
+        Subpattern = subpattern;
+        Constraints = constraints;
+
+        // If an error type is mentioned in the cost equation, then its maximum defaults to
+        // unlimited.
+        if (constraints.Cost is not null)
+        {
+            foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+            {
+                if (constraints.Cost.Coefficients.ContainsKey(e))
+                {
+                    _ = constraints.Limits.TryAdd(e, (BigInteger.Zero, null));
+                }
+            }
+        }
+
+        // If any error type is mentioned, then all the error maxima default to 0, otherwise they
+        // default to unlimited.
+        (BigInteger Min, BigInteger? Max) fallback = ContainsAnySpecificErrorType(constraints)
+            ? (BigInteger.Zero, BigInteger.Zero)
+            : (BigInteger.Zero, null);
+        foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+        {
+            _ = constraints.Limits.TryAdd(e, fallback);
+        }
+
+        // The maximum of the generic error type defaults to unlimited.
+        _ = constraints.Limits.TryAdd('e', (BigInteger.Zero, null));
+
+        // The cost equation defaults to equal costs. Also, the cost of any error type not mentioned
+        // in the cost equation defaults to 0.
+        if (constraints.Cost is not null)
+        {
+            foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+            {
+                _ = constraints.Cost.Coefficients.TryAdd(e, 0);
+            }
+        }
+        else
+        {
+            var cost = new FuzzyConstraints.CostEquation { Max = constraints.Limits['e'].Max };
+            foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+            {
+                cost.Coefficients[e] = 1;
+            }
+
+            constraints.Cost = cost;
+        }
+    }
+
+    /// <summary>What the section matches. Upstream <c>subpattern</c>.</summary>
+    internal RegexBase Subpattern { get; private set; }
+
+    /// <summary>The error budget. Upstream <c>constraints</c>.</summary>
+    internal FuzzyConstraints Constraints { get; }
+
+    /// <inheritdoc />
+    /// <remarks>Everything inside a fuzzy section is fuzzy, whatever the caller said.</remarks>
+    internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
+        Subpattern.FixGroups(pattern, reverse, true);
+
+    /// <inheritdoc />
+    internal override RegexBase PackCharacters(Info info)
+    {
+        Subpattern = Subpattern.PackCharacters(info);
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override RegexBase RemoveCaptures()
+    {
+        Subpattern = Subpattern.RemoveCaptures();
+        return this;
+    }
+
+    /// <inheritdoc />
+    internal override bool IsAtomic() => Subpattern.IsAtomic();
+
+    /// <inheritdoc />
+    internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool IsEmpty() => Subpattern.IsEmpty();
+
+    /// <inheritdoc />
+    internal override long MaxWidth() => RegexFlags.Unlimited;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) =>
+        obj is Fuzzy other && Subpattern.Equals(other.Subpattern) && Constraints.Equals(other.Constraints);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream defines <c>__eq__</c> without <c>__hash__</c>, which makes <c>Fuzzy</c> unhashable
+    /// in Python, and nothing puts one in a set: <c>get_firstset</c> is not overridden, so a
+    /// <c>Fuzzy</c> raises <c>_FirstSetError</c> before it could reach one. As with
+    /// <see cref="Branch"/>, hashing the mutable <see cref="Subpattern"/> would break the "a hash
+    /// does not change" contract, so this hashes only what the constructor fixes.
+    /// </remarks>
+    public override int GetHashCode() => HashCode.Combine(typeof(Fuzzy), Constraints);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        _ = fuzzy;
+
+        // The individual limits.
+        List<uint> arguments = [];
+        foreach (char e in FuzzyConstraints.ErrorTypes)
+        {
+            (BigInteger min, BigInteger? max) = Constraints.Limits[e];
+            arguments.Add(CodeWord(min));
+            arguments.Add(CodeWord(max ?? RegexFlags.Unlimited));
+        }
+
+        // The coeffs of the cost equation.
+        foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+        {
+            arguments.Add(CodeWord(Constraints.Cost!.Coefficients[e]));
+        }
+
+        // The maximum of the cost equation.
+        arguments.Add(CodeWord(Constraints.Cost!.Max ?? RegexFlags.Unlimited));
+
+        uint flags = 0;
+        if (reverse)
+        {
+            flags |= NodeFlags.Reverse;
+        }
+
+        if (Constraints.Test is not null)
+        {
+            return
+            [
+                [(uint)Opcode.FuzzyExt, flags, .. arguments],
+                .. Constraints.Test.Compile(reverse, true),
+                [(uint)Opcode.Next],
+                .. Subpattern.Compile(reverse, true),
+                [(uint)Opcode.End],
+            ];
+        }
+
+        return
+        [
+            [(uint)Opcode.Fuzzy, flags, .. arguments],
+            .. Subpattern.Compile(reverse, true),
+            [(uint)Opcode.End],
+        ];
+    }
+
+    /// <summary>
+    /// Narrows a constraint value to a code word, clamping at <see cref="RegexFlags.Unlimited"/>.
+    /// </summary>
+    /// <param name="value">The constraint value, which upstream's unbounded <c>int</c> may exceed.</param>
+    /// <returns>The code word.</returns>
+    /// <remarks>
+    /// The only place this port's <see cref="uint"/> code words diverge from upstream's Python
+    /// <c>int</c>s, and the only place that clamps: everything earlier does upstream's arithmetic
+    /// on the true value, so which patterns compile and which are rejected is upstream's answer.
+    /// A code word is an <c>RE_CODE</c>, an <c>RE_UINT32</c> (<c>upstream/src/_regex.c:58</c>), so
+    /// clamping is what upstream's own engine does with the value in any case. See PORTMAP's
+    /// "Where we diverge" and <c>Gaps/Parsing/FuzzyCostLimitOverflowTests.cs</c>.
+    /// </remarks>
+    private static uint CodeWord(BigInteger value) => value > RegexFlags.Unlimited ? uint.MaxValue : (uint)value;
+
+    /// <summary>Upstream's <c>set(constraints) &amp; set("dis")</c> (line 2803).</summary>
+    private static bool ContainsAnySpecificErrorType(FuzzyConstraints constraints)
+    {
+        foreach (char e in FuzzyConstraints.SpecificErrorTypes)
+        {
+            if (constraints.Limits.ContainsKey(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

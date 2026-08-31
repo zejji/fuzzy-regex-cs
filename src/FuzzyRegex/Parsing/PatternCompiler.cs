@@ -5,10 +5,11 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// (<c>upstream/regex/_main.py</c> lines 460-686), minus the pattern cache.
 /// </summary>
 /// <remarks>
-/// Everything here throws until the parser slices land. The compile-parity corpus
-/// (<c>tests/FuzzyRegex.Tests/Gaps/CompileParity/corpus.json</c>) drives these two methods over
-/// every pattern upstream's own test suite compiles, so a slice that ports one construct turns on
-/// exactly the rows that construct reaches and leaves the rest skipped.
+/// The compile-parity corpus (<c>tests/FuzzyRegex.Tests/Gaps/CompileParity/corpus.json</c>) drives
+/// these two methods over every pattern upstream's own test suite compiles. Through Phase 2 a slice
+/// that ported one construct turned on exactly the rows that construct reached and left the rest
+/// skipped; **since S13 closed the parser, all 1659 rows pass and none skips**, so any row that
+/// starts skipping again is a regression, not a gap.
 /// </remarks>
 internal static class PatternCompiler
 {
@@ -123,8 +124,7 @@ internal static class PatternCompiler
 
         bool reverse = (info.Flags & RegexFlags.Reverse) != 0;
 
-        // Upstream: fuzzy = isinstance(parsed, _Fuzzy). The Fuzzy node arrives in S13.
-        const bool fuzzy = false;
+        bool fuzzy = parsed is Fuzzy;
 
         // Fix the group references. Upstream wraps and re-raises the error; see the loop above.
         parsed.FixGroups(pattern, reverse, false);
@@ -141,11 +141,18 @@ internal static class PatternCompiler
         // Build the named lists.
         Dictionary<string, IReadOnlySet<string>> namedListsBuilt = new(StringComparer.Ordinal);
         IReadOnlySet<string>[] namedListIndexes = new IReadOnlySet<string>[info.NamedListsUsed.Count];
-        if (info.NamedListsUsed.Count > 0)
+        foreach (((string name, int caseFlags), int index) in info.NamedListsUsed)
         {
-            // Upstream folds each value's case here with _fold_case when the entry carries case
-            // flags, which needs the Unicode tables.
-            throw new NotImplementedException("needs:named-lists - building the named lists is not ported yet (S13)");
+            HashSet<string> values = new(kwargs[name], StringComparer.Ordinal);
+            IReadOnlySet<string> items =
+                caseFlags != 0
+                    ? new HashSet<string>(values.Select(v => FoldCase(info, v)), StringComparer.Ordinal)
+                    : values;
+            namedListsBuilt[name] = values;
+            namedListIndexes[index] = items;
+
+            // NOT PORTED: upstream's args_needed, which exists only to feed the pattern cache and
+            // the unused-argument check; ComplainUnusedArgs reads info.NamedListsUsed instead.
         }
 
         ComplainUnusedArgs(kwargs, info);
@@ -208,6 +215,43 @@ internal static class PatternCompiler
             reqFlags,
             info.GroupCount
         );
+    }
+
+    /// <summary>
+    /// Upstream <c>_fold_case</c> (<c>upstream/regex/_regex_core.py</c> lines 354-360), over a
+    /// whole string rather than a codepoint array.
+    /// </summary>
+    /// <remarks>
+    /// The encoding fallback is upstream's and is unreachable here: <c>Compile</c> has already
+    /// forced <see cref="RegexFlags.Unicode"/> on by the time the named lists are built. It is kept
+    /// because a future caller earlier in the pipeline would need it.
+    /// </remarks>
+    private static string FoldCase(Info info, string value)
+    {
+        int flags = info.Flags;
+        if ((flags & RegexFlags.AllEncodings) == 0)
+        {
+            flags |= info.GuessEncoding;
+        }
+
+        // Whole codepoints in, whole codepoints out, as upstream's str does. A lone surrogate is a
+        // legal element of a Python str, so it is passed through rather than replaced.
+        List<int> codepoints = [];
+        int i = 0;
+        while (i < value.Length)
+        {
+            bool pair = char.IsHighSurrogate(value[i]) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]);
+            codepoints.Add(pair ? char.ConvertToUtf32(value[i], value[i + 1]) : value[i]);
+            i += pair ? 2 : 1;
+        }
+
+        var folded = new System.Text.StringBuilder(value.Length);
+        foreach (int c in Unicode.RegexModule.FoldCase(flags, [.. codepoints]))
+        {
+            _ = c <= char.MaxValue ? folded.Append((char)c) : folded.Append(char.ConvertFromUtf32(c));
+        }
+
+        return folded.ToString();
     }
 
     /// <summary>

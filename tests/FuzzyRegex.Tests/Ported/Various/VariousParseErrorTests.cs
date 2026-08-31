@@ -81,7 +81,6 @@ public sealed class VariousParseErrorTests
     [Arguments("w(?# comment")]
     [Arguments("((.)\\1+)")]
     [Arguments("(")]
-    [Skip("needs:parse-errors - the parser does not reject invalid patterns yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#1-5,7-10,16,19,50,89-93,136,200,203,205,258-260,272-273,275,280-281,286,294,328-329,383-385,397-398,400,405-406,411,422,477,496,498"

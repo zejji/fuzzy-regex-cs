@@ -103,7 +103,10 @@ public sealed class CharacterClassLiteralsTests
     // Upstream asserts the error message matches self.BAD_OCTAL_ESCAPE; we do not assert message
     // text, per the port's own error-message conventions (not yet decided).
     [Test]
-    [Skip("needs:parse-errors - the parser does not yet reject invalid octal escapes")]
+    // The parse error itself arrived with S13 - measured against regex 2026.7.19 on 2026-08-31,
+    // '[\\911]' -> error msg='bad escape \\9' pos=5, and PatternCompiler raises exactly that -
+    // but MatchAtStart is still a bare stub that never compiles its pattern.
+    [Skip("needs:basic-matching - FuzzyRegex.MatchAtStart does not compile the pattern yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#7")]
     public void Set_with_an_invalid_octal_escape_fails_to_compile()
     {

@@ -100,7 +100,10 @@ public sealed class CharacterLiteralsTests
     // Upstream asserts the error message matches self.INVALID_GROUP_REF; we do not assert message
     // text, per the port's own error-message conventions (not yet decided).
     [Test]
-    [Skip("needs:parse-errors - the parser does not yet reject invalid group references")]
+    // The parse error itself arrived with S13 - measured against regex 2026.7.19 on 2026-08-31,
+    // '\\911' -> error msg='invalid group reference' pos=3, and PatternCompiler raises exactly
+    // that - but MatchAtStart is still a bare stub that never compiles its pattern.
+    [Skip("needs:basic-matching - FuzzyRegex.MatchAtStart does not compile the pattern yet")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#7")]
     public void Escape_with_no_matching_group_fails_to_compile()
     {
