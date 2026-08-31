@@ -198,25 +198,32 @@ public sealed class OracleWaveTests
     }
 
     [Test]
-    public void A_pattern_upstream_rejected_and_this_port_compiled_is_a_divergence()
+    public void A_pattern_upstreams_compiler_rejects_is_rejected_here_too()
     {
-        // The one divergence the harness can already find with no matcher at all, and the reason
-        // "compiled, matching unported" is not the same verdict as "unsupported": upstream's
-        // re_compile rejects five patterns this port compiles (S13's closing notes), and reporting
-        // them as unsupported would hide every missing rejection behind the unported matcher for
-        // the whole of phase 3. `{e<=1:\b}` is one of the five - upstream answers
-        // `RuntimeError: invalid RE code`, measured 2026-08-31.
+        // `{e<=1:\b}` is one of the five patterns upstream's parser compiled and its C compiler
+        // then refused with `RuntimeError: invalid RE code` (measured 2026-08-31). Until S15 this
+        // port compiled all five, and this test held that gap open as a divergence; S15 ported
+        // re_compile, so the same row is now an agreement. **The oracle is what noticed the change
+        // of behaviour** - this test went red the moment the rejection landed.
         OracleRow rejectedByUpstream = OracleWave.ParseRows(
             """
             {"generator": "rows", "pattern": "(?:abc){e<=1:\\b}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "RuntimeError", "message": "invalid RE code"}}
             """
         )[0];
 
-        // Run, not a stand-in: the compile really succeeds here and the match really throws the
-        // seam's NotImplementedException, which is the whole pair being pinned.
+        // Run, not a stand-in: the constructor really throws here, out of the node compiler.
         IOracleOutcome? answer = OracleComparer.Run(rejectedByUpstream);
-        answer.Should().BeOfType<CompiledButUnmatched>("this port compiles the pattern upstream rejects");
-        OracleComparer.Compare(rejectedByUpstream, answer).Should().Be(OracleVerdict.Diverge);
+        answer
+            .Should()
+            .BeOfType<ErrorOutcome>("this port now refuses the pattern upstream's compiler refuses")
+            .Which.Exception.Should()
+            .Be(nameof(NotSupportedException));
+        OracleComparer.Compare(rejectedByUpstream, answer).Should().Be(OracleVerdict.Agree);
+
+        // The rule that made this row a divergence is still load-bearing - it is what stops any
+        // *other* missing rejection hiding behind the unported matcher for the rest of phase 3 -
+        // so it stays pinned, now with a stand-in because the engine no longer produces one here.
+        OracleComparer.Compare(rejectedByUpstream, new CompiledButUnmatched()).Should().Be(OracleVerdict.Diverge);
 
         // Where upstream did *not* reject the input, an unported matcher really does mean the
         // answer is unknown, and must not be reported as a divergence.

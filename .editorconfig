@@ -42,6 +42,14 @@ dotnet_style_readonly_field = true:warning
 csharp_style_prefer_readonly_struct = true:warning
 csharp_style_prefer_readonly_struct_member = true:warning
 
+; --- Formatting -----------------------------------------------------------
+; A `case X:` followed by a braced block: the .NET formatter indents the block one level past the
+; label, CSharpier keeps it level with the label, and IDE0055 is an error here - so the two
+; disagreeing made a braced case unwritable. CSharpier is this repository's formatter of record
+; (`dotnet csharpier format .`, enforced on pre-commit and in CI), so the .NET formatter is told to
+; agree with it. Added S15, where Engine/ ports C switch statements whose cases declare locals.
+csharp_indent_case_contents_when_block = false
+
 ; --- Naming ---------------------------------------------------------------
 dotnet_naming_rule.private_fields_underscore.severity = warning
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields

@@ -135,6 +135,13 @@ public sealed class FuzzyRegex
         MatchTimeout = matchTimeout;
         _compiled = Parsing.PatternCompiler.Compile(pattern, (int)options, ToCompilerNamedLists(namedLists));
 
+        // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
+        // the last thing that can reject a pattern - it refuses code the parser was happy to emit
+        // (upstream/src/_regex.c:25863). Building here rather than at first match keeps that
+        // rejection where the caller expects it, and where upstream puts it. The graph itself is
+        // discarded until S16, the first slice with something that can walk it.
+        _ = Engine.PatternObject.Compile(_compiled);
+
         // Group 0 is the whole match and has no name of its own, so it is listed by its number,
         // as every group without a name is.
         Dictionary<int, string> nameByNumber = _compiled.GroupIndex.ToDictionary(

@@ -2,7 +2,8 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 
 /// <summary>
 /// The bytecode opcodes, port of the <c>OPCODES</c> table in
-/// <c>upstream/regex/_regex_core.py</c> lines 212-296.
+/// <c>upstream/regex/_regex_core.py</c> lines 212-296, followed by the engine-only operators from
+/// <c>upstream/src/_regex.h</c> lines 100-117.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,6 +17,13 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 /// The names are upstream's, in upstream's order, re-spelled in PascalCase. All 81 are here even
 /// though the parser slices turn them on a few at a time, because the numbering only makes sense
 /// as a whole.
+/// </para>
+/// <para>
+/// <b>Values 81 to 97 never appear in a code list.</b> <c>_regex.h</c> continues the same numbering
+/// past the parser's table with seventeen operators the C compiler invents while it builds the node
+/// graph - <c>END_GROUP</c>, <c>END_FUZZY</c>, <c>GREEDY_REPEAT_ONE</c> and the rest. They are here,
+/// in the same enum, because upstream keeps one numbering across both files and the engine's
+/// <c>switch</c> is keyed on it; a second enum would only add a cast at every node it builds.
 /// </para>
 /// </remarks>
 internal enum Opcode : uint
@@ -262,4 +270,55 @@ internal enum Opcode : uint
 
     /// <summary>Upstream <c>OP.FUZZY_EXT</c>.</summary>
     FuzzyExt = 80,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_BODY_END</c>.</summary>
+    BodyEnd = 81,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_BODY_START</c>.</summary>
+    BodyStart = 82,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_ATOMIC</c>.</summary>
+    EndAtomic = 83,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_CONDITIONAL</c>.</summary>
+    EndConditional = 84,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_FUZZY</c>.</summary>
+    EndFuzzy = 85,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_GREEDY_REPEAT</c>.</summary>
+    EndGreedyRepeat = 86,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_GROUP</c>.</summary>
+    EndGroup = 87,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_LAZY_REPEAT</c>.</summary>
+    EndLazyRepeat = 88,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_END_LOOKAROUND</c>.</summary>
+    EndLookaround = 89,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_FUZZY_INSERT</c>.</summary>
+    FuzzyInsert = 90,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_GREEDY_REPEAT_ONE</c>.</summary>
+    GreedyRepeatOne = 91,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_GROUP_RETURN</c>.</summary>
+    GroupReturn = 92,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_LAZY_REPEAT_ONE</c>.</summary>
+    LazyRepeatOne = 93,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_MATCH_BODY</c>.</summary>
+    MatchBody = 94,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_MATCH_TAIL</c>.</summary>
+    MatchTail = 95,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_START_GROUP</c>.</summary>
+    StartGroup = 96,
+
+    /// <summary>Engine-only. Upstream <c>RE_OP_TAIL_START</c>.</summary>
+    TailStart = 97,
 }
