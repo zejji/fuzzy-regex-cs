@@ -34,7 +34,10 @@ public sealed class RegressionsDefineTests
         "\n,Cat 1,\n,Brand 1,\nsome\nthing\n,Brand 2,\nother\nthings\n,Cat 2,\n,Brand,\nSome\nthing\n";
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#169")]
     public void Define_group_supplies_named_subroutines_referenced_later_in_the_pattern() =>
         FuzzyRegex
@@ -43,13 +46,19 @@ public sealed class RegressionsDefineTests
             .Be("5 elephants");
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#170")]
     public void Group_called_only_from_inside_define_reports_no_group_value() =>
         FuzzyRegex.Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))").Groups["routine"].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#171")]
     public void Group_called_only_from_inside_define_still_records_its_capture() =>
         FuzzyRegex
@@ -61,7 +70,10 @@ public sealed class RegressionsDefineTests
 
     // Hg issue 158: Group issue with (?(DEFINE)...).
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#209")]
     public void Define_group_referenced_via_a_negative_lookahead_leaves_group_1_unmatched_on_every_finditer_match()
     {
@@ -88,7 +100,10 @@ public sealed class RegressionsDefineTests
         FuzzyRegex.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(m => m.Value).Should().Equal("efgh");
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#273")]
     public void Same_negative_lookahead_wrapped_in_a_define_subroutine_finds_the_same_match() =>
         FuzzyRegex
@@ -100,19 +115,28 @@ public sealed class RegressionsDefineTests
     // Hg issue 252: Empty capture strings when using DEFINE group reference within look-behind
     // expression.
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#300")]
     public void Define_group_called_directly_reports_no_group_value() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups[1].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#301")]
     public void Define_group_called_directly_reports_no_group_value_by_name() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups["func"].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#302")]
     public void Define_group_called_directly_still_records_its_single_capture() =>
         FuzzyRegex
@@ -123,19 +147,28 @@ public sealed class RegressionsDefineTests
             .Equal("a");
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#303")]
     public void Define_group_called_from_a_lookahead_reports_no_group_value() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups[1].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#304")]
     public void Define_group_called_from_a_lookahead_reports_no_group_value_by_name() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups["func"].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#305")]
     public void Define_group_called_from_a_lookahead_still_records_its_single_capture() =>
         FuzzyRegex
@@ -146,19 +179,28 @@ public sealed class RegressionsDefineTests
             .Equal("a");
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#306")]
     public void Define_group_called_from_a_lookbehind_reports_no_group_value() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups[1].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#307")]
     public void Define_group_called_from_a_lookbehind_reports_no_group_value_by_name() =>
         FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups["func"].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#308")]
     public void Define_group_called_from_a_lookbehind_still_records_its_single_capture() =>
         FuzzyRegex
@@ -171,7 +213,10 @@ public sealed class RegressionsDefineTests
     // Hg issue 329: Wrong group matches when question mark quantifier is used within a look
     // behind.
     [Test]
-    [Skip("needs:define-groups - (?(DEFINE)...) groups are not implemented yet")]
+    [Skip(
+        "needs:recursion - S21 made the DEFINE body a GROUP_EXISTS the matcher skips over, but every "
+            + "test in this file also calls into it with '(?&name)', which is CALL_GROUP and is Phase 4's"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#377")]
     public void Define_group_with_an_internal_alternative_records_captures_only_for_the_branch_that_matched()
     {

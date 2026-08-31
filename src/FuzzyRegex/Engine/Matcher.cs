@@ -96,6 +96,8 @@ internal static class Seam
             or Opcode.SetInterIgn
             or Opcode.SetSymDiffIgn
             or Opcode.SetUnionIgn
+            or Opcode.RefGroupFld
+            or Opcode.RefGroupIgn
             or Opcode.StringFld
             or Opcode.StringIgn => "ignore-case",
 
@@ -103,9 +105,11 @@ internal static class Seam
             // BODY_*, MATCH_* and TAIL_START backtrack markers, so 'quantifiers' has no arm here -
             // naming a delivered tag would put a capability the status board says we have on an
             // oracle 'unsupported' row and in a stack trace (the S17 blind review found that).
-            Opcode.RefGroup or Opcode.RefGroupFld or Opcode.RefGroupIgn => "backrefs",
-
-            Opcode.Conditional or Opcode.EndConditional or Opcode.GroupExists => "conditionals",
+            // S21 delivered REF_GROUP and GROUP_EXISTS, so 'backrefs' has no arm here at all and
+            // 'conditionals' covers only CONDITIONAL - the lookaround-condition form - which stays
+            // Phase 4's. REF_GROUP_IGN and REF_GROUP_FLD moved up to 'ignore-case' beside
+            // STRING_IGN and STRING_FLD, for the reason the S17 note above gives.
+            Opcode.Conditional or Opcode.EndConditional => "conditionals",
 
             Opcode.CallRef or Opcode.GroupCall or Opcode.GroupReturn => "recursion",
 
@@ -2868,6 +2872,40 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                // GROUP_EXISTS (:13442). Nothing is pushed to the backtracking stack: the opcode
+                // only picks an exit, and both exits are reachable from the enclosing structure's
+                // own backtracking, so there is nothing here to undo.
+                case Opcode.GroupExists: // Capture group exists.
+                {
+                    // Capture group indexes are 1-based (excluding group 0, which is the entire
+                    // matched string).
+                    //
+                    // Check whether the captured text, if any, exists at this position in the
+                    // string.
+                    //
+                    // A group index of 0, however, means that it's a DEFINE, which we should skip.
+                    int groupExistsIndex = (int)node.Values[0];
+
+                    if (groupExistsIndex == 0)
+                    {
+                        // Skip past the body.
+                        node = node.Next2.Node!;
+                    }
+                    else
+                    {
+                        // 'current' indexes the capture this attempt is holding, and is -1 until the
+                        // group captures and again after backtracking past it, so this is "matched
+                        // so far in this attempt" and not "exists in the pattern".
+                        GroupData groupExistsGroup = state.Groups[groupExistsIndex - 1];
+
+                        node =
+                            groupExistsGroup.Current >= 0
+                                ? node.Next1.Node! // The 'true' branch.
+                                : node.Next2.Node!; // The 'false' branch.
+                    }
+
+                    break;
+                }
                 case Opcode.Keep: // Keep.
                     state.Bstack.PushSize(state.MatchPos);
                     state.Bstack.PushUInt8((byte)Opcode.Keep);
@@ -3058,6 +3096,79 @@ internal static class Matcher
 
                     // Advance into the tail.
                     state.TextPos = pos;
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // REF_GROUP (:14004). Like STRING, it pushes nothing to the backtracking stack: the
+                // only state it carries between visits is 'stringPos', which the fuzzy retry block
+                // (:17269) reads and which Phase 5 will need a backtrack arm for.
+                case Opcode.RefGroup: // Reference to a capture group.
+                {
+                    // Capture group indexes are 1-based (excluding group 0, which is the entire
+                    // matched string).
+                    //
+                    // Check whether the captured text, if any, exists at this position in the
+                    // string.
+
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        // A reference to a group that has not captured fails; it does not match
+                        // empty. A group that captured an empty span has 'current' >= 0 and an
+                        // empty span, so it falls through and matches empty.
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.Start;
+                    }
+
+                    // Try comparing. Upstream's '++string_pos' and '++state->text_pos' are one
+                    // codepoint each, so both walk with 'NextPos' here - the S16 stepping - and an
+                    // astral character advances both by two code units, leaving 'stringPos' exactly
+                    // on 'span.End'.
+                    //
+                    // A plain '++' on both is in fact indistinguishable here, and deliberately not
+                    // used: measured 2026-08-31, it agreed on all 600 rows of the S21 negative
+                    // control and on the whole ported suite. Both operands index the *same* string,
+                    // so a code-unit walk stays in lockstep with a codepoint walk - it just tests
+                    // each surrogate half separately and reaches the same end. Kept as 'NextPos'
+                    // because upstream's '++' means one character, every other opcode in this port
+                    // spells that 'NextPos', and Phase 5's fuzzy retry moves 'stringPos' on its own,
+                    // where the lockstep argument no longer holds.
+                    while (stringPos < span.End)
+                    {
+                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        {
+                            return MatchStatus.Partial;
+                        }
+
+                        if (
+                            state.TextPos < state.SliceEnd
+                            && SameChar(state.CharAt(state.TextPos), state.CharAt(stringPos))
+                        )
+                        {
+                            stringPos = state.NextPos(stringPos);
+                            state.TextPos = state.NextPos(state.TextPos);
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
                     node = node.Next1.Node!;
                     break;
                 }

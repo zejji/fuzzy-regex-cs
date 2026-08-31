@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 39.0%** (767 of 1966 ported upstream tests passing).
+**Overall parity: 42.2%** (830 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -30,7 +30,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | FullMatch | 12 | 6 | 6 | 0 | 50.0% |
 | Fuzzy | 112 | 7 | 105 | 0 | 6.3% |
 | Grapheme | 5 | 2 | 3 | 0 | 40.0% |
-| Groups | 65 | 45 | 20 | 0 | 69.2% |
+| Groups | 65 | 64 | 1 | 0 | 98.5% |
 | Lookaround | 38 | 0 | 38 | 0 | 0.0% |
 | NamedLists | 10 | 0 | 10 | 0 | 0.0% |
 | Overlapped | 10 | 0 | 10 | 0 | 0.0% |
@@ -38,12 +38,12 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 8 | 8 | 0 | 50.0% |
 | Quantifiers | 53 | 52 | 1 | 0 | 98.1% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 82 | 382 | 0 | 17.7% |
+| Regressions | 464 | 96 | 368 | 0 | 20.7% |
 | Reverse | 37 | 0 | 37 | 0 | 0.0% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
 | Substitution | 88 | 7 | 81 | 0 | 8.0% |
 | UnicodeProperties | 70 | 49 | 21 | 0 | 70.0% |
-| Various | 524 | 345 | 179 | 0 | 65.8% |
+| Various | 524 | 375 | 149 | 0 | 71.6% |
 | ZeroWidth | 14 | 0 | 14 | 0 | 0.0% |
 
 ## Our own tests (gap tests and conventions)
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3555 | 3555 | 0 | 0 |
+| Gaps | 3565 | 3565 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,17 +61,15 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `find-all` | 163 |
+| `find-all` | 170 |
 | `ignore-case` | 154 |
 | `substitution` | 104 |
 | `fuzzy-matching` | 98 |
 | `partial` | 82 |
 | `case-folding` | 69 |
-| `conditionals` | 58 |
+| `lookaround` | 58 |
+| `recursion` | 50 |
 | `right-to-left` | 48 |
-| `backrefs` | 45 |
-| `lookaround` | 40 |
-| `recursion` | 35 |
 | `splitting` | 35 |
 | `backtracking-verbs` | 34 |
 | `inline-flags` | 29 |
@@ -79,18 +77,18 @@ What the next slice should deliver, biggest win first.
 | `branch-reset` | 21 |
 | `named-lists` | 20 |
 | `fuzzy-bestmatch` | 18 |
-| `lookbehind` | 17 |
 | `fuzzy-budget` | 17 |
-| `define-groups` | 15 |
-| `version-flags` | 11 |
+| `lookbehind` | 17 |
+| `conditionals` | 15 |
 | `format` | 11 |
+| `version-flags` | 11 |
+| `fuzzy-changes` | 8 |
 | `posix-matching` | 8 |
 | `possessive` | 8 |
-| `fuzzy-changes` | 8 |
 | `fuzzy-enhancematch` | 6 |
 | `overlapped` | 4 |
 | `comments` | 4 |
-| `fuzzy-deletion` | 3 |
-| `fuzzy-substitution` | 3 |
 | `fuzzy-insertion` | 3 |
+| `fuzzy-substitution` | 3 |
+| `fuzzy-deletion` | 3 |
 

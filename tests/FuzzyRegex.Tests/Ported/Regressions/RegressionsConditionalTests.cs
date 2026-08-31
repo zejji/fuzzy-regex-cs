@@ -12,7 +12,6 @@ public sealed class RegressionsConditionalTests
     // Hg issue 40: regex.search("(\()?[^()]+(?(1)\)|)", "(abcd").group(0) returns "bcd" instead of
     // "abcd".
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#18")]
     public void Conditional_with_an_empty_no_branch_still_matches_the_whole_run() =>
         FuzzyRegex.Match("(abcd", @"(\()?[^()]+(?(1)\)|)").Value.Should().Be("abcd");
@@ -24,7 +23,6 @@ public sealed class RegressionsConditionalTests
     [Arguments(2, 0, 3, 1, 3)]
     [Arguments(3, 0, 6, 3, 6)]
     [Arguments(4, 0, 10, 6, 10)]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#28-31")]
     public void Backreference_conditional_inside_a_repeated_group_grows_its_capture_each_time(
         int repeatCount,
@@ -51,7 +49,8 @@ public sealed class RegressionsConditionalTests
         FuzzyRegex.Match("female", @"(?:fe)?male").Value.Should().Be("female");
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#53")]
     public void Conditional_group_selects_the_matching_gender_specific_branch() =>
         FuzzyRegex
@@ -64,7 +63,6 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Arguments("(?:()|(?(1)()|z)){2}(?(2)a|z)")]
     [Arguments("(?:()|(?(1)()|z)){0,2}(?(2)a|z)")]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#112-113")]
     public void Nested_conditional_groups_reset_between_repeats_and_still_capture_empty_groups(string pattern)
     {
@@ -77,20 +75,25 @@ public sealed class RegressionsConditionalTests
 
     // Hg issue 146: Forced-fail (?!) works improperly in conditional.
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // The GROUP_EXISTS half landed in S21, but the forced fail is not an optimised-away FAILURE
+    // node: upstream compiles '(.)(?(1)(?!))' to '[30, 1, 1, 1, 2, 0, 20, 32, 1, 35, 0, 1, 20, 20,
+    // 1]', where 35 is LOOKAROUND over an empty body (probed against regex 2026.7.19, 2026-08-31).
+    [Skip("needs:lookaround - '(?!)' compiles to LOOKAROUND, not FAILURE, so this waits for Phase 4")]
     [Property("Upstream", "RegexTests.test_hg_bugs#154")]
     public void Forced_fail_in_the_conditionals_yes_branch_makes_the_whole_match_fail() =>
         FuzzyRegex.MatchAtStart("xy", @"(.)(?(1)(?!))").Success.Should().BeFalse();
 
     // Groups cleared after failure.
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_one_is_empty_on_every_match_because_it_never_participates() =>
         FuzzyRegex.Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)").Select(m => m.Groups[1].Value).Should().Equal("", "", "");
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_two_captures_each_digit_in_turn() =>
         FuzzyRegex
@@ -100,7 +103,8 @@ public sealed class RegressionsConditionalTests
             .Equal("1", "2", "3");
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_also_leaves_group_one_empty() =>
         FuzzyRegex
@@ -110,7 +114,8 @@ public sealed class RegressionsConditionalTests
             .Equal("", "", "");
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
+    // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_still_captures_each_digit() =>
         FuzzyRegex
@@ -135,7 +140,8 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#213")]
     public void Conditional_on_a_bare_lookahead_with_no_else_branch_does_not_match_without_a_boundary() =>
@@ -143,7 +149,8 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#214")]
     public void Conditional_choosing_between_two_lookbehind_predicates_matches_the_word_after_love()
@@ -156,7 +163,8 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#215")]
     public void Findall_with_a_lookbehind_conditional_finds_both_the_loved_and_hated_targets() =>
@@ -169,7 +177,8 @@ public sealed class RegressionsConditionalTests
     // Hg issue 217: Core dump in conditional ahead match and matching \! character.
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#263")]
     public void Conditional_lookahead_with_a_literal_bang_does_not_match_a_lone_bang() =>
@@ -183,7 +192,8 @@ public sealed class RegressionsConditionalTests
     [Arguments(@"(?(?=X)X|)", "", 0, 0)]
     [Arguments(@"(?(?=X))", "", 0, 0)]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#295-299")]
     public void Conditional_on_a_bare_lookahead_predicate_matches_the_expected_span(
@@ -202,7 +212,8 @@ public sealed class RegressionsConditionalTests
     // Git issue 479: Segmentation fault when using conditional pattern.
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#439")]
     public void Nested_conditional_with_lookbehind_and_a_negative_class_does_not_match_at_the_start() =>
@@ -210,7 +221,8 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#440")]
     public void Same_nested_conditional_matches_an_empty_span_after_the_A_via_search()
@@ -228,7 +240,8 @@ public sealed class RegressionsConditionalTests
     [Arguments(@"(?(?!a).|..)", 2)]
     [Arguments(@"(?(?!b).|..)", 1)]
     [Skip(
-        "needs:conditionals - the parser has no conditional-group support yet, including the lookaround-condition form"
+        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
+            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
     )]
     [Property("Upstream", "RegexTests.test_hg_bugs#442-445")]
     public void Conditional_with_no_else_branch_chooses_one_dot_or_two_depending_on_the_lookahead(

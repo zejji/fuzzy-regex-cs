@@ -263,7 +263,16 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
-GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups", "quantifiers", "boundaries")
+GENERATORS = (
+    "literals",
+    "literal-dot",
+    "anchors",
+    "classes",
+    "groups",
+    "quantifiers",
+    "boundaries",
+    "backrefs",
+)
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
 # literal. Every one is a plain anchor: the word and grapheme boundaries S20 added have their own
@@ -828,6 +837,249 @@ def _generate_boundaries(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S21's generator: backreferences and group-existence conditionals
+# --------------------------------------------------------------------------------------------
+
+# What a group captures, and what a conditional's branches hold. One character each, as in the
+# `groups` generator: the row is about the reference, not about the atom it reads back.
+BACKREF_ATOMS = ("a", "b", "c", "x", ".", "[ab]", r"\w")
+
+# The subjects. Small alphabets, because a backreference can only match when the subject repeats
+# something, and 'abcde' at length 6 almost never repeats a two-character run. The astral alphabet
+# is here for the reason it is in every other generator: a span reported in codepoints rather than
+# UTF-16 code units has to show up as a divergence, and a reference is the one construct that walks
+# the *subject* twice, so a stepping bug on the second walk shows up here and nowhere else.
+BACKREF_SUBJECT_ALPHABETS = ("ab", "abc", "aabbx", "ab\U0001f600\U0001d518")
+
+MAX_BACKREF_SUBJECT_LENGTH = 8
+
+# How a group gets defined. Every shape holds exactly one capture group, which is what makes the
+# numbering below a simple counter. 'optional' is how a reference reaches a group that did not
+# match at all (upstream: regex.search(r'(a)?\1', 'a') is None); 'empty-alt' is how it reaches one
+# that matched empty, which succeeds; 'repeated' changes the span the reference reads on every
+# iteration.
+BACKREF_DEFINE_SHAPES = ("plain", "named", "optional", "empty-alt", "alt", "repeated")
+BACKREF_DEFINE_WEIGHTS = (24, 16, 16, 14, 16, 14)
+
+# How a reference is spelled. All four compile to the same REF_GROUP node, so this is really a test
+# of the parser's four spellings reaching the same opcode - cheap to carry, and it is what the
+# ported suite spends five of its rows on.
+BACKREF_REF_FORMS = ("number", "g-number", "g-named", "p-named")
+BACKREF_REF_WEIGHTS = (72, 28, 0, 0)
+BACKREF_REF_NAMED_WEIGHTS = (20, 10, 35, 35)
+
+# What is wrapped round a reference. 'repeat' and 'count' are the shapes where the reference is
+# visited more than once, so 'stringPos' has to be back at -1 by the time it is; 'in-group' puts it
+# inside a capture of its own, which is the shape the ported suite's '^(\|)?([^()]+)\1$' rows use.
+BACKREF_REF_WRAPS = ("bare", "optional", "repeat", "count", "in-group")
+BACKREF_REF_WRAP_WEIGHTS = (44, 16, 12, 12, 16)
+
+# The conditional forms. 'yes-only' and 'empty-yes' are the two half-empty shapes: upstream builds
+# both from the same GROUP_EXISTS with one exit pointing straight at the join
+# (NodeCompiler.BuildGroupExists), so they are where an exit wired to the wrong branch shows up.
+BACKREF_COND_SHAPES = ("both", "yes-only", "empty-yes", "in-group")
+BACKREF_COND_WEIGHTS = (40, 24, 16, 20)
+
+BACKREF_PIECE_KINDS = ("define", "ref", "cond", "atom", "ref-in-repeat", "repeated-then-ref")
+BACKREF_PIECE_WEIGHTS = (28, 24, 18, 8, 12, 10)
+
+# Two or three pieces. The match rate falls off sharply as this rises - 28% at two pieces, 23% at
+# three, 20% at four, over 600 rows of `random.Random("1:backrefs")`, which is how `_record_wave`
+# seeds a generator - because every extra piece is another thing an eight-character subject has to
+# satisfy at once. Three keeps the structural variety (a definition, a reference and a conditional
+# in one pattern) at a match rate between the `groups` generator's 30% and the `classes`
+# generator's 23% on the same measurement.
+MAX_BACKREF_PIECES = 3
+
+# How often a row is prefixed with a conditional on a group defined *later* in the pattern. Legal
+# upstream (regex.search(r'(?(1)a)(b)', 'b') spans (0, 1)) and the sharpest test of GROUP_EXISTS
+# there is: the group does exist in the pattern and does match, but not yet, so the condition has to
+# be false. An implementation that consulted the pattern's group table rather than the attempt's
+# state takes the other branch on every one of these rows.
+BACKREF_FORWARD_COND_PROBABILITY = 0.18
+
+# How often the subject is built from doubled characters rather than drawn one at a time. See
+# _generate_backrefs for what it is worth.
+BACKREF_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+
+def _backref_pattern(rng: random.Random) -> str:
+    """One generated pattern: group definitions, references back to them, and conditionals.
+
+    Built strictly left to right so the group numbers are known as they are handed out. Self
+    references are deliberately absent: `(\\1xx|){3}` is "cannot refer to an open group" under V0
+    (probed 2026-08-31), and it needs the V1 flag, whose own semantics are not ported yet.
+    """
+    counter = [0]
+    # (number, name or None) for every capture group emitted so far.
+    defined: list[tuple[int, str | None]] = []
+
+    def atom() -> str:
+        return rng.choice(BACKREF_ATOMS)
+
+    def define() -> str:
+        shape = rng.choices(BACKREF_DEFINE_SHAPES, weights=BACKREF_DEFINE_WEIGHTS)[0]
+        counter[0] += 1
+        number = counter[0]
+        name = f"g{number}" if shape == "named" else None
+        defined.append((number, name))
+
+        if shape == "named":
+            return f"(?P<{name}>{atom()})"
+        if shape == "optional":
+            return f"({atom()})?"
+        if shape == "empty-alt":
+            return f"({atom()}|)"
+        if shape == "alt":
+            return f"({atom()}|{atom()})"
+        if shape == "repeated":
+            return f"({atom()})+"
+        return f"({atom()})"
+
+    def reference() -> str:
+        # A named group is only 16% of definitions, so a uniform draw referenced one rarely and the
+        # two named spellings landed on 4 and 3 rows of 300. Preferring a named target when there is
+        # one, and then weighting the spellings only a named target can use, takes them to 9 and 5.
+        #
+        # That is where the tuning stopped, deliberately. All four spellings compile to the same
+        # REF_GROUP node, and the compile-parity corpus already proves that bit-exactly over 1,547
+        # patterns, so matching cannot diverge by spelling - only parsing could, and parsing has its
+        # own oracle. Buying the remaining coverage would mean distorting the mix of definitions to
+        # serve a comparison that is already made elsewhere.
+        named = [g for g in defined if g[1] is not None]
+        number, name = rng.choice(named if named and rng.random() < 0.5 else defined)
+        weights = BACKREF_REF_NAMED_WEIGHTS if name is not None else BACKREF_REF_WEIGHTS
+        form = rng.choices(BACKREF_REF_FORMS, weights=weights)[0]
+
+        if form == "g-number":
+            ref = f"\\g<{number}>"
+        elif form == "g-named":
+            ref = f"\\g<{name}>"
+        elif form == "p-named":
+            ref = f"(?P={name})"
+        else:
+            ref = f"\\{number}"
+
+        wrap = rng.choices(BACKREF_REF_WRAPS, weights=BACKREF_REF_WRAP_WEIGHTS)[0]
+        if wrap == "optional":
+            return f"(?:{ref})?"
+        if wrap == "repeat":
+            return f"(?:{ref})+"
+        if wrap == "count":
+            return f"(?:{ref}){{{rng.randrange(2, 4)}}}"
+        if wrap == "in-group":
+            counter[0] += 1
+            defined.append((counter[0], None))
+            return f"({ref})"
+        return ref
+
+    def conditional(number: int, name: str | None, *, may_capture: bool = True) -> str:
+        shape = rng.choices(BACKREF_COND_SHAPES, weights=BACKREF_COND_WEIGHTS)[0]
+        # 'in-group' takes the next group number, which is only right for a piece that is
+        # *appended*. The forward conditional below is prepended, so its wrapper would really open
+        # as group 1 and shift every number already handed out: the S21 blind review found 8 rows of
+        # 300 where the condition and every numeric reference in the row pointed one group off, which
+        # silently defeated the two repeat shapes. The wave stayed sound - both sides get the same
+        # pattern - but the rows no longer tested what they were generated to test.
+        if shape == "in-group" and not may_capture:
+            shape = "both"
+        # A named group can be tested by either spelling; an unnamed one only by number.
+        condition = name if name is not None and rng.random() < 0.5 else str(number)
+
+        if shape == "yes-only":
+            return f"(?({condition}){atom()})"
+        if shape == "empty-yes":
+            return f"(?({condition})|{atom()})"
+        if shape == "in-group":
+            counter[0] += 1
+            defined.append((counter[0], None))
+            return f"((?({condition}){atom()}|{atom()}))"
+        return f"(?({condition}){atom()}|{atom()})"
+
+    pieces = []
+    for _ in range(rng.randrange(2, MAX_BACKREF_PIECES + 1)):
+        kind = rng.choices(BACKREF_PIECE_KINDS, weights=BACKREF_PIECE_WEIGHTS)[0]
+        # Nothing to point at yet, so the first piece is always a definition.
+        if not defined and kind in ("ref", "cond", "atom"):
+            kind = "define"
+
+        if kind == "define":
+            pieces.append(define())
+        elif kind == "ref":
+            pieces.append(reference())
+        elif kind == "cond":
+            pieces.append(conditional(*rng.choice(defined)))
+        elif kind == "ref-in-repeat":
+            # Defined and referenced inside the same repeat body, so each iteration's reference
+            # reads the span that iteration just captured, not the previous one's. This is the
+            # shape that catches a reference reading the pre-iteration span.
+            counter[0] += 1
+            defined.append((counter[0], None))
+            pieces.append(f"(?:({atom()})\\{counter[0]}){rng.choice(('+', '*', '{2}'))}")
+        elif kind == "repeated-then-ref":
+            # '(.)+\\1': the group captures once per iteration and the reference then reads the
+            # last of them. Emitted as a unit because it is the only shape that tells the current
+            # capture apart from the first one. Leaving it to chance was worth 6 divergences of 600
+            # on the negative control for exactly that fault - read 'Captures[0]' instead of
+            # 'Captures[Current]' in Matcher's REF_GROUP case - and adding it took that to 17. See
+            # the S21 closing notes for how to re-run it. The atom is drawn from the wide ones, since
+            # 'a' captures the same character every iteration and proves nothing here.
+            counter[0] += 1
+            defined.append((counter[0], None))
+            wide = rng.choice((".", "[ab]", r"\w"))
+            pieces.append(f"({wide}){rng.choice(('+', '{2,3}'))}\\{counter[0]}")
+        else:
+            pieces.append(atom())
+
+    pattern = "".join(pieces)
+
+    if rng.random() < BACKREF_FORWARD_COND_PROBABILITY:
+        number, name = rng.choice(defined)
+        pattern = conditional(number, name, may_capture=False) + pattern
+
+    return pattern
+
+
+def _generate_backrefs(rng: random.Random, count: int):
+    """S21's generator: backreferences and group-existence conditionals.
+
+    The subject is drawn independently of the pattern, as the `groups` generator does.
+
+    Measured by `python tools/record-oracle.py --generator backrefs --count 300 --seed 1`: 76 match,
+    224 do not, 63 with an astral subject, no parse errors. Grepping that wave, 119 rows hold a
+    conditional, 75 an optional definition and 45 an empty alternative; matching the two repeat
+    shapes needs a real regex rather than a substring, and gives 79 rows with a reference inside a
+    repeat and 64 with a reference after a repeated definition. 13 rows hold a named reference,
+    which the comment in `reference` explains and defends.
+    """
+    for i in range(count):
+        alphabet = BACKREF_SUBJECT_ALPHABETS[i % len(BACKREF_SUBJECT_ALPHABETS)]
+        length = rng.randrange(1, MAX_BACKREF_SUBJECT_LENGTH + 1)
+
+        if rng.random() < BACKREF_DOUBLED_SUBJECT_PROBABILITY:
+            # Built from doubled characters, so a reference has something to match. Worth a little
+            # overall - 138 matching rows of 600 against 127 with this set to 0.0, seed 1 - and it
+            # buys that where it is worth most: 'match' goes from 45 to 49 and 'fullmatch' from 7 to
+            # 15, the two operations a reference constrains hardest, because the whole pattern has to
+            # line up from position 0.
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        yield {
+            "generator": "backrefs",
+            "pattern": _backref_pattern(rng),
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -852,6 +1104,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "boundaries":
         yield from _generate_boundaries(rng, count)
+        return
+
+    if name == "backrefs":
+        yield from _generate_backrefs(rng, count)
         return
 
     dotted = name == "literal-dot"

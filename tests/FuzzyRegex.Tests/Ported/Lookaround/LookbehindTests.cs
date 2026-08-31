@@ -71,103 +71,103 @@ public sealed class LookbehindTests
         FuzzyRegex.MatchAtStart("abc", "(a)b(?=b)(c)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#9")]
     public void Lookbehind_with_a_conditional_on_group_2_choosing_the_wrong_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?<=(?(2)x|c))c").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#10")]
     public void Lookbehind_with_a_conditional_on_group_2_choosing_the_untaken_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?<=(?(2)b|x))c").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#11")]
     public void Lookbehind_with_a_conditional_on_group_2_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?<=(?(2)x|b))c").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#12")]
     public void Lookbehind_with_a_conditional_on_group_1_choosing_the_wrong_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?<=(?(1)c|x))c").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#13")]
     public void Lookbehind_with_a_conditional_on_group_1_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?<=(?(1)b|x))c").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#14")]
     public void Lookahead_with_a_conditional_on_group_2_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?=(?(2)x|c))c").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#15")]
     public void Lookahead_with_a_conditional_on_group_2_choosing_the_untaken_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?=(?(2)c|x))c").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#16")]
     public void Lookahead_with_a_conditional_on_group_2_choosing_the_right_branch_matches_again() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?=(?(2)x|c))c").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#17")]
     public void Lookahead_with_a_conditional_on_group_1_choosing_the_wrong_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?=(?(1)b|x))c").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#18")]
     public void Lookahead_with_a_conditional_on_group_1_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(?:(a)|(x))b(?=(?(1)c|x))c").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#19")]
     public void Lookbehind_after_a_captured_group_with_a_conditional_on_group_2_choosing_the_wrong_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?<=(?(2)x|c))(c)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#20")]
     public void Lookbehind_after_a_captured_group_with_a_conditional_on_group_2_choosing_the_untaken_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?<=(?(2)b|x))(c)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#21")]
     public void Lookbehind_after_a_captured_group_with_a_conditional_on_group_1_choosing_the_wrong_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?<=(?(1)c|x))(c)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#22")]
     public void Lookbehind_after_a_captured_group_with_a_conditional_on_group_1_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?<=(?(1)b|x))(c)").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#23")]
     public void Lookahead_after_a_captured_group_with_a_conditional_on_group_2_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?=(?(2)x|c))(c)").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#24")]
     public void Lookahead_after_a_captured_group_with_a_conditional_on_group_2_choosing_the_untaken_branch_fails() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?=(?(2)b|x))(c)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - a conditional inside a lookaround needs both")]
+    [Skip("needs:lookaround - S21 delivered the group-existence conditional; only the enclosing lookbehind is left")]
     [Property("Upstream", "RegexTests.test_lookbehind#25")]
     public void Lookahead_after_a_captured_group_with_a_conditional_on_group_1_choosing_the_right_branch_matches() =>
         FuzzyRegex.MatchAtStart("abc", "(a)b(?=(?(1)c|x))(c)").Success.Should().BeTrue();

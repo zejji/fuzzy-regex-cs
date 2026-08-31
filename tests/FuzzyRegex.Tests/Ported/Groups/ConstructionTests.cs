@@ -13,7 +13,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class ConstructionTests
 {
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_bug_3629#1")]
     public void Constructing_a_conditional_referencing_a_named_group_does_not_throw()
     {

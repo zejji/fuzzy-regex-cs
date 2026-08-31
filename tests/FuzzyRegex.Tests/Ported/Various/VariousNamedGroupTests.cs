@@ -46,7 +46,6 @@ public sealed class VariousNamedGroupTests
     [Arguments("(?<foo_123>a)\\g<1>", "aa", "1", new string?[] { "a" })]
     [Arguments("(?<foo_123>a)\\g<foo_123>", "aa", "1", new string?[] { "a" })]
     [Arguments("(?P<id>aa)(?P=id)", "aaaa", "0,id", new string?[] { "aaaa", "aa" })]
-    [Skip("needs:backrefs - the engine has no backreference opcode yet")]
     [Property("Upstream", "RegexTests.test_various#6,12,14,18,202")]
     public void Search_with_a_backreference_returns_the_expected_group_values(
         string pattern,

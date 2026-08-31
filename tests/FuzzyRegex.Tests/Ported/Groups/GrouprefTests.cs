@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class GrouprefTests
 {
     [Test]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#1")]
     public void A_backreference_to_a_leading_optional_delimiter_requires_the_matching_close()
     {
@@ -20,7 +19,6 @@ public sealed class GrouprefTests
     }
 
     [Test]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#2")]
     public void An_optional_backreference_may_be_absent_on_both_sides()
     {
@@ -34,13 +32,11 @@ public sealed class GrouprefTests
     [Test]
     [Arguments("a|")]
     [Arguments("|a")]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#3-4")]
     public void A_backreference_rejects_a_one_sided_delimiter(string subject) =>
         FuzzyRegex.MatchAtStart(subject, @"^(\|)?([^()]+)\1$").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#5")]
     public void A_backreference_to_the_taken_alternative_matches()
     {
@@ -52,7 +48,6 @@ public sealed class GrouprefTests
     }
 
     [Test]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#6")]
     public void An_optional_backreference_to_a_group_that_did_not_participate_may_be_absent()
     {
@@ -64,7 +59,8 @@ public sealed class GrouprefTests
     }
 
     [Test]
-    [Skip("needs:backrefs - backreference matching is not implemented yet")]
+    // S21 delivered the backreference; what is left is 'Matches', which is S25.
+    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#7")]
     public void Findall_resolves_a_backreference_to_an_earlier_group()
     {

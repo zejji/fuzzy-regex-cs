@@ -53,7 +53,6 @@ public sealed class VariousBackrefTests
     [Arguments("(abc)\\1", "abcabc", "1", new string?[] { "abc" })]
     [Arguments("([a-c]*)\\1", "abcabc", "1", new string?[] { "abc" })]
     [Arguments("[\\41]", "!", "0", new string?[] { "!" })]
-    [Skip("needs:backrefs - the engine has no backreference opcode yet")]
     [Property("Upstream", "RegexTests.test_various#20,22-23,39,173-174,176,178-188,206-207,327,337-338,499")]
     public void Search_returns_the_expected_group_values(
         string pattern,
@@ -70,7 +69,6 @@ public sealed class VariousBackrefTests
 
     [Test]
     [Arguments("^(a+).\\1$", "aaaa")]
-    [Skip("needs:backrefs - the engine has no backreference opcode yet")]
     [Property("Upstream", "RegexTests.test_various#177")]
     public void Search_does_not_match(string pattern, string subject) =>
         FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();

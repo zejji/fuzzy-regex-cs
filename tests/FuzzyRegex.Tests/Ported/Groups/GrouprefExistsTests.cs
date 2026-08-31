@@ -13,7 +13,6 @@ public sealed class GrouprefExistsTests
     // regex.match(r'^(\()?([^()]+)(?(1)\))$', '(a)')[:] is ('(a)', '(', 'a').
     [Arguments("(", "a", "(a)")]
     [Arguments(null, "a", "a")]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#1-2")]
     public void A_conditional_on_an_optional_leading_paren_matches(string? group1, string group2, string subject)
     {
@@ -31,13 +30,11 @@ public sealed class GrouprefExistsTests
     [Test]
     [Arguments("a)")]
     [Arguments("(a")]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#3-4")]
     public void A_conditional_on_a_mismatched_leading_paren_does_not_match(string subject) =>
         FuzzyRegex.MatchAtStart(subject, @"^(\()?([^()]+)(?(1)\))$").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#5")]
     public void A_conditional_choosing_between_two_branches_when_the_first_alternative_matched()
     {
@@ -49,7 +46,6 @@ public sealed class GrouprefExistsTests
     }
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#6")]
     public void A_conditional_choosing_between_two_branches_when_the_first_alternative_did_not_match()
     {
@@ -61,7 +57,6 @@ public sealed class GrouprefExistsTests
     }
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#7")]
     public void A_conditional_with_an_empty_yes_branch_when_the_condition_group_did_not_match()
     {
@@ -73,7 +68,6 @@ public sealed class GrouprefExistsTests
     }
 
     [Test]
-    [Skip("needs:conditionals - the parser has no conditional-group support yet")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#8")]
     public void A_conditional_with_an_empty_yes_branch_when_the_condition_group_matched()
     {
@@ -86,7 +80,6 @@ public sealed class GrouprefExistsTests
 
     // Bug #1177831: exercise a condition group other than group 1.
     [Test]
-    [Skip("needs:conditionals - no conditional-group support yet, and this pattern also needs named-group parsing")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#9")]
     public void A_conditional_on_a_named_group_other_than_the_first()
     {
@@ -99,7 +92,6 @@ public sealed class GrouprefExistsTests
     }
 
     [Test]
-    [Skip("needs:conditionals - no conditional-group support yet, and this pattern also needs named-group parsing")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#10")]
     public void A_conditional_on_a_named_group_that_did_not_participate()
     {
@@ -114,7 +106,6 @@ public sealed class GrouprefExistsTests
     [Test]
     [Arguments("abd")]
     [Arguments("ac")]
-    [Skip("needs:conditionals - no conditional-group support yet, and this pattern also needs named-group parsing")]
     [Property("Upstream", "RegexTests.test_re_groupref_exists#11-12")]
     public void A_conditional_on_a_named_group_rejects_the_wrong_branch(string subject) =>
         FuzzyRegex.MatchAtStart(subject, "(?P<g1>a)(?P<g2>b)?((?(g2)c|d))").Success.Should().BeFalse();
