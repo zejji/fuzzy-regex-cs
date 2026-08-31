@@ -132,7 +132,23 @@ Then:
 
    > Control A, `greedy-min`: in `Matcher.cs`, `GreedyRepeatOne` backtrack case, change
    > `if (count < node.Values[1])` to `if (count <= node.Values[1])`. Wave: `quantifiers`,
-   > 600 rows, seed 7. Result: 452 agree, 148 diverge.
+   > 600 rows, seed 7. Result: 452 agree, 148 diverge. Re-run at seed 4242: 141 diverge.
+
+   Two details, both learned by re-running other slices' controls:
+
+   **Quote the snippet as the file actually reads, not as a one-line paraphrase.** CSharpier
+   breaks a ternary across three lines, so S21's Control B was recorded as a single line that
+   appears nowhere in `Matcher.cs`. It was reproducible only because the intent was obvious.
+   Copy the lines out of the file.
+
+   **Re-run each control that fired at ONE seed the slice has not used, and record both
+   numbers.** It costs about three seconds and it is the only way to tell a control that
+   catches a fault from one that caught a coincidence. S20's Control C gave 2 divergences of
+   600 at its recorded seed, 2 at a second seed and **1** at a third: a rule that a generator
+   reaches on one row in six hundred is a thin margin, and the moment to widen the generator is
+   while you are still holding it. A control that fires at one seed and not another is a
+   finding about the generator, not a tick. Do not set a numeric threshold - there is no
+   evidence for where the line sits, and a rule such as WB5 genuinely applies to few subjects.
 2. Rewrite `docs/plan/STATE.md` (rewrite it, never append; 30 lines maximum).
 3. Append a dated one-liner to `docs/plan/DECISIONS.md` for any decision a future session would
    otherwise have to re-derive.

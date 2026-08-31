@@ -95,7 +95,7 @@ takes the false branch, because the first alternative's capture has to be backtr
 **Oracle.** New `backrefs` generator, added to `run-oracle.ps1`'s default list. Full run over all
 eight generators at 1500 rows each: **agree 12000, unsupported 0, diverge 0**.
 
-**Negative controls** - all four against `-Generator backrefs -Count 600 -Seed 1`, run with
+**Negative controls** - all five against `-Generator backrefs -Count 600 -Seed 1`, run with
 `-SkipRecord` against one recorded wave. Three fired; two did not, and *why* is the useful part.
 
 > Control A, `unmatched-ref-matches-empty`: in `Matcher.cs`, the `RefGroup` case, replace

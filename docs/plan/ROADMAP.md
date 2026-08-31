@@ -96,6 +96,40 @@ constraint before it plans, because the alternative is discovering the conflict 
 is built. Waiting until phase 8 is worse still - a packaging phase is the worst moment to find a
 design problem.
 
+**It constrains phase 7; it does not disqualify a fast path.** Researched 2026-08-31 on the owner's
+question, and recorded here so phase 7 does not plan as though the option does not exist. Nothing
+below changes phase 7's scope: the design spec's optimisation levers already park source-generated
+compiled patterns as **explicitly post-1.0** - "the bytecode design does not preclude them, and
+building them now is speculative" - and that still stands. Whether this port ever gets a compiled
+backend, and in which form, is an open decision for the owner.
+
+- **A single assembly can carry both paths.** `RuntimeFeature.IsDynamicCodeSupported` is false
+  under native AOT and true under the JIT, so one build takes the emit path where it exists and a
+  fallback where it does not; methods reaching `Reflection.Emit` carry `[RequiresDynamicCode]`,
+  which moves the warning to callers rather than hiding it. Microsoft's own library guidance
+  prefers this to multi-targeting or separate packages, so `IsAotCompatible` stays honest and
+  non-AOT users are not deprived of anything.
+- **The real split is not AOT versus JIT, it is when the pattern is known.** A source generator
+  (.NET's own `[GeneratedRegex]` route) is AOT-compatible and, per Microsoft's docs, gives "all
+  the throughput performance benefits of `RegexOptions.Compiled` (more, in fact)" plus the startup
+  win - but only for patterns that are compile-time literals. Patterns built at run time from
+  config, user input or composition can be served only by runtime emit, and for a fuzzy-matching
+  library that is plausibly a large share of real use.
+- **There is an AOT-safe middle tier**: compiling the node graph into a chain of delegates at
+  construction time removes dispatch overhead without `Reflection.Emit`, and serves
+  runtime-constructed patterns. Reach for it before a second backend if measurement says dispatch
+  is the bottleneck.
+- **Trap: `Expression.Compile()` is not a workaround.** Under native AOT it silently falls back to
+  the LINQ interpreter, the same silent degradation as `RegexOptions.Compiled` becoming a no-op
+  where dynamic code is forbidden. Neither throws; both just get slower.
+- **Most of the available speed is in the interpreter, and serves everyone.** Prefilters, better
+  inner loops and opcode specialisation need no dynamic code and help AOT, JIT and
+  runtime-constructed patterns alike. S19 measured the point: upstream's apparent instant answer on
+  `(a|a)*b` was `locate_required_string` rejecting the subject before the engine ran, not a faster
+  engine, and upstream is exponential on it too (23.3s at n=26). Any compiled backend stacks on top
+  of that work, not instead of it - and either backend is phase-sized, since .NET maintains
+  `RegexCompiler` and its source generator as near-1:1 twins for exactly that reason.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 
