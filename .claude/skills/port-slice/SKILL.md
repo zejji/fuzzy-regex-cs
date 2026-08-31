@@ -120,6 +120,19 @@ Then:
    A slice whose closing notes do not say this has not recorded its review, and the owner will
    treat it as not reviewed (S06 shipped without the record, and nobody can now tell). Tick the
    slice file's "Done when" boxes as you go; an unticked box is a visible gap.
+
+   **If the slice ran a negative control on the oracle, the closing notes must record how to
+   re-run it**, not just the number it produced. Four values, because a description is not enough
+   to reproduce one: the exact before/after source snippet, the generator, the row count, and the
+   seed. Verified 2026-08-31 - reconstructing S19's strongest control from its English description
+   gave 3 and then 8 divergences against the 148 it reported, and only reading the session's own
+   gitignored script settled it. The control figures are the evidence that a generator can detect
+   a fault at all, so a figure nobody can reproduce is not evidence. S18's controls are already
+   unreproducible: its scratch files are gone and only the numbers survive. Format:
+
+   > Control A, `greedy-min`: in `Matcher.cs`, `GreedyRepeatOne` backtrack case, change
+   > `if (count < node.Values[1])` to `if (count <= node.Values[1])`. Wave: `quantifiers`,
+   > 600 rows, seed 7. Result: 452 agree, 148 diverge.
 2. Rewrite `docs/plan/STATE.md` (rewrite it, never append; 30 lines maximum).
 3. Append a dated one-liner to `docs/plan/DECISIONS.md` for any decision a future session would
    otherwise have to re-derive.

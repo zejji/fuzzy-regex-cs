@@ -56,6 +56,11 @@ sweep are each checkable and their outputs quoted.
 
 - [ ] Hardening wave ran with seed and counts quoted; zero unexplained divergences; every real
       divergence pinned as a permanent test.
+- [ ] **Every negative control recorded in a Phase 3 slice's closing notes re-run from those
+      notes**, and its divergence count still holds. This is the moment the four recorded
+      values pay for themselves: a control that no longer reproduces means either the
+      generator has lost its teeth or the notes are wrong, and both are findings. S18's are
+      exempt - they predate the rule and are unreproducible, as its slice file records.
 - [ ] Five rejections confirmed against the CI-built 2026.8.12 oracle, output quoted.
 - [ ] PORTMAP complete for `_regex.c`: every symbol ported, not-ported-with-reason, or
       deferred-to-named-phase; prefilter contingency checked and recorded.

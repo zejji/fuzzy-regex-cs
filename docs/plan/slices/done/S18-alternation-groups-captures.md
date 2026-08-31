@@ -124,3 +124,11 @@ case can too. `reset_guards` is still the only thing the `FAILURE` backtrack cas
 leave unported, and both call sites name it. The three `needs:quantifiers` methods that a repeat
 alone will *not* unblock are tagged for their real slice instead: one `needs:lookaround`, one
 `needs:atomic`, one `needs:recursion`.
+**This slice's negative controls cannot be re-run.** Noted 2026-08-31, when the `port-slice` skill
+gained the rule that a control must be recorded with the four values needed to reproduce it - the
+before/after snippet, the generator, the row count and the seed. S18 recorded only its results
+(dropping `unsave_capture` gave 9 divergences, reversing branch priority 79, ordering `lastindex` by
+group number 195), and its scratch files are gone, so the mutations and seeds are lost. The
+orchestrator did independently reproduce the branch-priority control on its own wave and mutation on
+2026-08-31 - 18 divergences of 300 rows, the same rate - so the *claim* stands; the exact figures
+do not, and cannot be checked again. S19 onwards records the four values.

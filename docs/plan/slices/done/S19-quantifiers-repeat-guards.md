@@ -125,3 +125,19 @@ agreeing, and 40,000 generator rows across 200 seeds with no pattern upstream re
 5ms. It recorded one coverage limit, not a defect: a lone surrogate cannot be sent through the oracle
 at all, because the recorder reads rows as strict UTF-8, and no public entry point can currently
 start a match mid-pair.
+**How to re-run this slice's negative controls.** Back-filled 2026-08-31 from the session's scratch
+files, under the rule the `port-slice` skill now carries: a control figure nobody can reproduce is
+not evidence. All three ran against the same wave - generator `quantifiers`, 600 rows, **seed 7**,
+`regex` 2026.7.19 - recorded with `tools/run-oracle.ps1 -Generator quantifiers -Count 600 -Seed 7`
+and replayed against the mutated build with `-SkipRecord`. Each mutation is a single edit to
+`src/FuzzyRegex/Engine/Matcher.cs`; unmutated, that wave is 600 agree, 0 diverge.
+
+| Control | Edit | Result |
+|---|---|---|
+| `greedy-min` - a greedy `REPEAT_ONE` that will not retreat all the way to its minimum | in the `GreedyRepeatOne` retreat loop, `if (count < node.Values[1])` becomes `if (count <= node.Values[1])` | 452 agree, **148 diverge** |
+| `lazy-greedy` - a lazy `REPEAT_ONE` that counts up to its maximum instead of its minimum | in the `LazyRepeatOne` case, the `CountOne` call's `node.Values[1]` argument becomes `node.Values[2]` | 546 agree, **54 diverge** |
+| `astral-step` - a repeat that counts one UTF-16 code unit per character | in `CountOne`'s loop, `pos = state.NextPos(pos);` becomes `++pos;` | 599 agree, **1 diverge** |
+
+The `greedy-min` figure was independently reproduced by the orchestrator on 2026-08-31, at 452/148
+exactly. Two earlier reconstructions from the English description alone gave 3 and 8 divergences,
+which is why the four values above are now recorded rather than the number alone.
