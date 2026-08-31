@@ -156,9 +156,13 @@ Both reviewers were right about everything they reported, which is not the usual
 common thread in 9 of the 11 findings is the same mistake: quoting a measurement without re-taking
 it after the thing being measured changed.
 
-**Two hazards for the next slice.** A review subagent runs in this working tree. The first one left
-`upstream/regex/__pycache__` behind (dirtying the submodule) and a stale `parity-baseline.json`
-recorded at 4309 while its own temporary probe file was present. Both were caught by reading
+**Two things for the next slice.** A review subagent runs in this working tree, and the first one
+left `upstream/regex/__pycache__` behind, dirtying the submodule. Caught by reading
 `git status --porcelain` line by line before committing, which is why that step is in the skill.
-Brief a reviewer to clean up after itself, and re-run `-UpdateBaseline` after any review that ran
-the ratchet.
+Brief a reviewer to clean up after itself and to leave `parity-baseline.json` alone.
+
+Second: `baseline:` in the ratchet's verdict counts *unique* test ids, so it reads below `passing:`
+by design - 4309 against 4416 here, 4238 against 4343 at S20 - because parameterised rows sharing a
+display id collapse under `Sort-Object -Unique` (`PortTools.psm1:237`). The committed baseline was
+regenerated from a clean tree at 4416 passing and holds all ten new gap tests and no probe ids.
+This was briefly mistaken here for a stale figure the reviewer had left behind; it is not.

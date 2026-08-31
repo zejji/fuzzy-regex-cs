@@ -28,7 +28,10 @@ did not - both explained in the S21 closing notes, and all five reproducible fro
   generator with `random.Random(f"{seed}:{name}")`, so a figure measured with `random.Random(seed)`
   describes a wave it never produces.
 - **Read `git status --porcelain` line by line before committing.** A review subagent runs in this
-  tree: S21's first reviewer left `upstream/regex/__pycache__` and a baseline recorded at 4309.
-  Re-run `check-ratchet.ps1 -UpdateBaseline` after any review that ran the ratchet.
+  tree, and S21's first reviewer left `upstream/regex/__pycache__` behind, dirtying the submodule.
+  Brief a reviewer to clean up after itself and to leave `parity-baseline.json` alone.
+- **`baseline:` in the ratchet's verdict is a count of *unique* ids, so it reads below `passing:`
+  by design** - 4309 against 4416 here, 4238 against 4343 at S20. Parameterised rows that share a
+  display id collapse. Not a stale baseline; do not "fix" it.
 - **When a slice delivers an opcode family, take it out of `Matcher.Tag`.** S21's reviewer caught
   this again; the rule and its reason are in the comment at `Matcher.cs:88`.
