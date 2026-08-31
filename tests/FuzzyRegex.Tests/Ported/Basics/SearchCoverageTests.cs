@@ -11,7 +11,6 @@ public sealed class SearchCoverageTests
     [Test]
     // Retagged in S16: the engine matches literals now, but this pattern is a character class
     // followed by a capture group, so it is blocked on S17 and then S18, not on the spine.
-    [Skip("needs:groups - the matcher has no StartGroup yet")]
     [Property("Upstream", "RegexTests.test_search_coverage#1")]
     public void Search_captures_the_character_after_whitespace() =>
         FuzzyRegex.Match(" b", "\\s(b)").Groups[1].Value.Should().Be("b");

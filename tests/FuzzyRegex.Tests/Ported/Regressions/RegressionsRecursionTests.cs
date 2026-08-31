@@ -10,8 +10,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Regressions;
 public sealed class RegressionsRecursionTests
 {
     [Test]
+    [Skip(
+        "needs:recursion - the capture list it reads lands in S18, but '(?&rec)' is a group call and "
+            + "'[^()]++' is possessive"
+    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#54")]
-    [Skip("needs:captures - needs named recursion and Groups[n].Captures; the engine has neither yet")]
     public void Named_recursive_group_captures_every_nested_parenthesized_run()
     {
         // Hg issue 78: "Captures" doesn't work for recursive calls.

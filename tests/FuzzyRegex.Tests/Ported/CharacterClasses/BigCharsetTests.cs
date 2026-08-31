@@ -11,7 +11,6 @@ public sealed class BigCharsetTests
     // incidental here (str patterns are Unicode by default and the flag is not surfaced on
     // FuzzyRegexOptions); folded into one test.
     [Test]
-    [Skip("needs:groups - the matcher has no StartGroup yet")]
     [Property("Upstream", "RegexTests.test_bigcharset#1-2")]
     public void Set_of_two_high_codepoints_captures_the_matching_one() =>
         FuzzyRegex.MatchAtStart("∢", "([∢∣])").Groups[1].Value.Should().Be("∢");

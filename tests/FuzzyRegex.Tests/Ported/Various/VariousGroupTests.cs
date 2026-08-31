@@ -32,7 +32,6 @@ public sealed class VariousGroupTests
     [Arguments("((a)(b)c)(d)", "abcd", "1,2,3,4", new string?[] { "abc", "a", "b", "d" })]
     [Arguments("((((((((((a))))))))))", "a", "10", new string?[] { "a" })]
     [Arguments("(((((((((a)))))))))", "a", "0", new string?[] { "a" })]
-    [Skip("needs:groups - the engine does not capture groups yet")]
     [Property("Upstream", "RegexTests.test_various#124,126,130-131,158,166,271,276,282-283,318,326,330")]
     public void Search_returns_the_expected_group_values(
         string pattern,

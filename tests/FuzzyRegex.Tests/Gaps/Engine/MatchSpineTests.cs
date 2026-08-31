@@ -209,13 +209,20 @@ public sealed class MatchSpineTests
     }
 
     [Test]
-    public void A_pattern_with_groups_reaches_the_group_seam_rather_than_answering_wrongly()
+    public void A_pattern_with_a_group_reports_the_group_it_captured()
     {
-        // START_GROUP is S18's. Reaching it must throw with its tag, not silently match as if the
-        // group were not there.
-        Action grouped = () => _ = FuzzyRegex.Match("ab", "(a)b");
+        // START_GROUP and END_GROUP landed in S18, so this is no longer a seam. Group 0 is still the
+        // whole match and group 1 is the capture, each with its own one-element capture list.
+        Match m = FuzzyRegex.Match("xab", "(a)b");
 
-        grouped.Should().Throw<NotImplementedException>().WithMessage("needs:groups*");
+        m.Groups.Count.Should().Be(2);
+        (m.Index, m.Length).Should().Be((1, 2));
+        m.Groups[1].Success.Should().BeTrue();
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((1, 1));
+        m.Groups[1].Name.Should().Be("1");
+        m.Groups[1].Captures.Select(c => (c.Index, c.Length)).Should().Equal((1, 1));
+        m.LastGroupNumber.Should().Be(1);
+        m.LastGroupName.Should().BeNull("group 1 has no name");
     }
 
     [Test]

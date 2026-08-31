@@ -36,10 +36,8 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// </summary>
 /// <remarks>
 /// Group 0 is the whole match, which is what <see cref="Match"/> itself already is, so it needs no
-/// group span of its own. Groups 1 upwards do, and those arrive with <c>START_GROUP</c> in S18;
-/// until then this collection reports how many groups the pattern declares and throws
-/// <c>needs:groups</c> for every one of them. Reporting them as absent instead would be a wrong
-/// answer rather than a missing one.
+/// group span of its own and <c>Groups[0]</c> is the match. Groups 1 upwards are read out of the
+/// spans the engine recorded - see <c>Match.GroupAt</c>.
 /// </remarks>
 public sealed class GroupCollection : IReadOnlyList<Group>
 {
@@ -68,17 +66,25 @@ public sealed class GroupCollection : IReadOnlyList<Group>
                 throw new ArgumentOutOfRangeException(nameof(number), number, "the pattern has no such group");
             }
 
-            return number == 0
-                ? _match
-                : throw new NotImplementedException("needs:groups - capture groups are not implemented yet");
+            return number == 0 ? _match : _match.GroupAt(number);
         }
     }
 
     /// <summary>Gets a group by name.</summary>
     /// <param name="name">The group name.</param>
     /// <returns>The group, or an unsuccessful group if it did not take part in the match.</returns>
-    public Group this[string name] =>
-        throw new NotImplementedException("needs:named-groups - named groups are not implemented yet");
+    /// <exception cref="ArgumentOutOfRangeException">The pattern has no group of that name.</exception>
+    public Group this[string name]
+    {
+        get
+        {
+            int number = _match.GroupNumberFromName(name);
+
+            return number >= 0
+                ? this[number]
+                : throw new ArgumentOutOfRangeException(nameof(name), name, "the pattern has no such group");
+        }
+    }
 
     /// <summary>Enumerates the groups by ascending number.</summary>
     /// <returns>An enumerator over the groups.</returns>

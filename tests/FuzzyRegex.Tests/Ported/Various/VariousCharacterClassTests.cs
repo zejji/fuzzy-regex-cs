@@ -89,7 +89,9 @@ public sealed class VariousCharacterClassTests
     [Arguments("a([bc]+)(c*d)", "abcd", "0,1,2", new string?[] { "abcd", "bc", "d" })]
     [Arguments("a([bc]*)(c+d)", "abcd", "0,1,2", new string?[] { "abcd", "b", "cd" })]
     [Arguments("([\\s]*)([\\S]*)([\\s]*)", " testing!1972", "3,2,1", new string?[] { "", "testing!1972", " " })]
-    [Skip("needs:groups - the matcher has no StartGroup yet; most of these also need a quantifier")]
+    // Retagged at S18, which delivered the group: every one of these 15 rows also holds a repeat,
+    // so all 15 now stop at S19's seam and none of them needed splitting out.
+    [Skip("needs:quantifiers - each row repeats a class inside or beside the capture group")]
     [Property("Upstream", "RegexTests.test_various#151-154,191,193-196,198,311-314,493")]
     public void Search_with_a_group_returns_the_expected_group_values(
         string pattern,
@@ -170,7 +172,7 @@ public sealed class VariousCharacterClassTests
     // Split out at S17, one row each: both reach an opcode the matcher does not have, and a throw
     // is not the same answer as "no match".
     [Test]
-    [Skip("needs:groups - the matcher has no StartGroup yet")]
+    [Skip("needs:quantifiers - '([abc]*)x' repeats a class inside the group")]
     [Property("Upstream", "RegexTests.test_various#197")]
     public void Search_with_a_group_does_not_match() => FuzzyRegex.Match("abc", "([abc]*)x").Success.Should().BeFalse();
 

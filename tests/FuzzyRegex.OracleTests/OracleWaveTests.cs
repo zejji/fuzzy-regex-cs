@@ -31,8 +31,8 @@ public sealed class OracleWaveTests
     /// <see cref="The_recorder_translates_codepoint_indices_to_utf16"/> is what proves it.
     /// </summary>
     private const string _recordedRows = """
-        {"generator": "rows", "pattern": "(a)(b)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}]}}
-        {"generator": "rows", "pattern": "b", "flags": 0, "namedLists": {}, "subject": "😀ab", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}]}}
+        {"generator": "rows", "pattern": "(a)(b)", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 2, "lastGroup": null}}
+        {"generator": "rows", "pattern": "b", "flags": 0, "namedLists": {}, "subject": "😀ab", "operation": "search", "codepointSpan": [2, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null}}
         {"generator": "rows", "pattern": "zz", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
@@ -105,6 +105,25 @@ public sealed class OracleWaveTests
         corrupted.Divergences[0].Should().Contain("port     match 0:(0,2)[(0,2)] 1:(0,1)[(0,1)]");
         corrupted.Divergences[1].Should().Contain("port     match 0:(4,1)[(3,1)]");
         corrupted.Divergences[2].Should().Contain("upstream no match");
+    }
+
+    [Test]
+    public void A_wrong_lastindex_alone_is_reported_as_a_divergence()
+    {
+        // Added S18 with 'lastindex'/'lastgroup'. They are compared because nothing about the group
+        // spans distinguishes them - '((a))' against 'a' has lastindex 1 with groups 1 and 2 sharing
+        // one span - so an engine that got only these two wrong would agree on every span in every
+        // wave. The row's groups are left untouched here, which is what makes this a statement about
+        // the two new fields rather than about the spans.
+        OracleRow row = OracleWave.ParseRows(_recordedRows)[0];
+        var expected = (MatchOutcome)row.Expected;
+
+        expected.LastIndex.Should().Be(2, "group 2 of '(a)(b)' closes last");
+        expected.LastGroup.Should().BeNull("neither group is named");
+
+        OracleComparer.Compare(row, expected with { LastIndex = 1 }).Should().Be(OracleVerdict.Diverge);
+        OracleComparer.Compare(row, expected with { LastGroup = "b" }).Should().Be(OracleVerdict.Diverge);
+        OracleComparer.Compare(row, expected).Should().Be(OracleVerdict.Agree);
     }
 
     [Test]
@@ -226,10 +245,18 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(rejectedByUpstream, new CompiledButUnmatched()).Should().Be(OracleVerdict.Diverge);
 
         // Where upstream did *not* reject the input, an unported matcher really does mean the
-        // answer is unknown, and must not be reported as a divergence.
+        // answer is unknown, and must not be reported as a divergence. Pinned with a stand-in from
+        // S18 on, because the fixture row is '(a)(b)' and the engine now really matches it - the
+        // rule itself stays load-bearing, since it is what keeps the seam of a construct no slice
+        // has reached yet from being filed as a wrong answer.
         OracleRow matched = OracleWave.ParseRows(_recordedRows)[0];
-        OracleComparer.Run(matched).Should().BeOfType<CompiledButUnmatched>();
         OracleComparer.Compare(matched, new CompiledButUnmatched()).Should().Be(OracleVerdict.Unsupported);
+
+        // And the engine's real answer to that row agrees with upstream, which is what makes the
+        // line above a statement about Compare rather than about a still-missing capability.
+        IOracleOutcome? real = OracleComparer.Run(matched);
+        real.Should().BeOfType<MatchOutcome>();
+        OracleComparer.Compare(matched, real).Should().Be(OracleVerdict.Agree);
     }
 
     /// <summary>
@@ -256,12 +283,12 @@ public sealed class OracleWaveTests
     {
         var match = (MatchOutcome)outcome;
         OracleGroup first = match.Groups[0];
-        return new MatchOutcome([first with { Index = first.Index + 1 }, .. match.Groups.Skip(1)]);
+        return match with { Groups = [first with { Index = first.Index + 1 }, .. match.Groups.Skip(1)] };
     }
 
     private static MatchOutcome WithoutLastGroup(IOracleOutcome outcome)
     {
         var match = (MatchOutcome)outcome;
-        return new MatchOutcome([.. match.Groups.Take(match.Groups.Count - 1)]);
+        return match with { Groups = [.. match.Groups.Take(match.Groups.Count - 1)] };
     }
 }

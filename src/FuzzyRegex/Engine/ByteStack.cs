@@ -22,12 +22,21 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// and needs no lock of its own, so <c>state_fini</c>'s caching block has nothing to port.
 /// </para>
 /// <para>
-/// Only the typed helpers the spine actually pushes are here - <see cref="PushUInt8"/> and
-/// <see cref="PushSize"/> and their pops. The rest of upstream's set (<c>push_int8</c>,
-/// <c>push_bool</c>, <c>push_code</c>, <c>push_int</c>, <c>push_pointer</c>, <c>push_groups</c>,
-/// <c>push_captures</c>, <c>push_repeat_data</c>) arrives with its first caller in S18 and S19;
-/// <c>push_pointer</c> in particular needs a decision this slice cannot make, because a node
-/// reference cannot go in a byte array on a managed heap. <c>docs/PORTMAP.md</c> records them.
+/// Only the typed helpers the matcher actually pushes are here. The rest of upstream's set
+/// (<c>push_int8</c>, <c>push_code</c>, <c>push_int</c>, <c>push_groups</c>, <c>push_captures</c>,
+/// <c>push_repeat_data</c>) arrives with its first caller: <c>push_groups</c> and
+/// <c>push_captures</c> are only ever called by <c>ATOMIC</c>, <c>CONDITIONAL</c>,
+/// <c>LOOKAROUND</c>, <c>GROUP_CALL</c> and <c>GROUP_RETURN</c>, which are Phase 4's.
+/// <c>docs/PORTMAP.md</c> records them.
+/// </para>
+/// <para>
+/// <b>Upstream's <c>push_pointer</c> is <see cref="PushNode"/> here</b>, and it pushes an index
+/// into <see cref="PatternObject.NodeList"/> rather than a reference: a managed reference cannot go
+/// in a byte array, and the alternative - a second, parallel stack of nodes - would stop the byte
+/// layout matching upstream's, which is the one thing that makes a future diff of
+/// <c>basic_match</c> readable. <c>node_list</c> is upstream's own array of every node, so its
+/// index is the natural handle; it is 8 bytes on the stack, exactly as a pointer is on the
+/// platforms this port targets. DECISIONS 2026-08-31.
 /// </para>
 /// </remarks>
 internal sealed class ByteStack : IDisposable
@@ -173,20 +182,64 @@ internal sealed class ByteStack : IDisposable
     /// <returns><see langword="false"/> if the stack is empty.</returns>
     internal bool PopUInt8(out byte item) => Pop(out item);
 
+    /// <summary>Upstream <c>push_bool</c> (line 2446).</summary>
+    /// <param name="item">The value to push.</param>
+    internal void PushBool(bool item) => Push(item ? (byte)1 : (byte)0);
+
     /// <summary>
-    /// Upstream <c>push_size</c> (line 2456). <c>size_t</c> is 64-bit on the platforms this port
-    /// targets, so the width on the stack matches upstream's byte for byte.
+    /// Upstream <c>pop_bool</c> (line 2617), which pops one byte into a C <c>BOOL</c>.
+    /// </summary>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if the stack is empty.</returns>
+    internal bool PopBool(out bool item)
+    {
+        bool ok = Pop(out byte value);
+        item = value != 0;
+        return ok;
+    }
+
+    /// <summary>
+    /// Upstream <c>push_size</c> (line 2456) and <c>push_ssize</c> (line 2451), which are one method
+    /// here. Both <c>size_t</c> and <c>Py_ssize_t</c> are 64-bit on the platforms this port targets,
+    /// so the width on the stack matches upstream's byte for byte and C# has one type for both.
     /// </summary>
     /// <param name="item">The value to push.</param>
     internal void PushSize(long item) => PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<long>(in item)));
 
-    /// <summary>Upstream <c>pop_size</c>.</summary>
+    /// <summary>Upstream <c>pop_size</c> and <c>pop_ssize</c>.</summary>
     /// <param name="item">Receives the value.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopSize(out long item)
     {
         item = 0;
         return PopBlock(MemoryMarshal.AsBytes(new Span<long>(ref item)));
+    }
+
+    /// <summary>Upstream <c>drop_ssize</c> (line 2785).</summary>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool DropSize() => DropBlock(sizeof(long));
+
+    /// <summary>
+    /// Upstream <c>push_pointer</c> (line 2472) for the one kind of pointer this port pushes - see
+    /// the remarks on this class for why it is an index rather than a reference.
+    /// </summary>
+    /// <param name="node">The node to push.</param>
+    internal void PushNode(Node node) => PushSize(node.Index);
+
+    /// <summary>Upstream <c>pop_pointer</c> (line 2645), for a node.</summary>
+    /// <param name="pattern">The pattern whose <see cref="PatternObject.NodeList"/> the index is into.</param>
+    /// <param name="node">Receives the node.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopNode(PatternObject pattern, out Node? node)
+    {
+        if (!PopSize(out long index))
+        {
+            node = null;
+            return false;
+        }
+
+        node = pattern.NodeList[(int)index];
+        return true;
     }
 
     /// <summary>

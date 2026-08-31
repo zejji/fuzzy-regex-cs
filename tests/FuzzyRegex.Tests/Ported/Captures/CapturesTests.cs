@@ -16,8 +16,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Captures;
 public sealed class CapturesTests
 {
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#1")]
+    [Skip(@"needs:quantifiers - S18 records the capture list, but '(\w)+' repeats the group")]
     public void A_repeated_group_reports_one_capture_per_repetition()
     {
         Match m = FuzzyRegex.Match("abc", @"(\w)+");
@@ -26,8 +26,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#2")]
+    [Skip(@"needs:quantifiers - '(\w{3})+' repeats a capture group")]
     public void The_whole_match_and_a_repeated_group_each_report_their_own_captures()
     {
         Match m = FuzzyRegex.Match("abcdef", @"(\w{3})+");
@@ -37,8 +37,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#3")]
+    [Skip(@"needs:quantifiers - '(?:\.(\d{1,3})){3}' is a counted repeat round a capture group")]
     public void An_ipv4_address_reports_one_capture_for_the_first_octet_and_three_for_the_rest()
     {
         Match m = FuzzyRegex.Match("192.168.0.1", @"^(\d{1,3})(?:\.(\d{1,3})){3}$");
@@ -48,8 +48,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#4")]
+    [Skip(@"needs:quantifiers - '([0-9A-F]{2}){4}' and '([a-z]\d){5}' are counted repeats")]
     public void Two_interleaved_repeated_groups_each_report_their_own_captures_in_order()
     {
         Match m = FuzzyRegex.MatchAtStart("3FB52A0C a2c4g3k9d3", @"^([0-9A-F]{2}){4} ([a-z]\d){5}$");
@@ -59,8 +59,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#5")]
+    [Skip("needs:quantifiers - '([a-z]X)+' repeats a capture group")]
     public void A_group_before_a_repeated_group_and_one_after_it_each_report_their_own_captures()
     {
         Match m = FuzzyRegex.MatchAtStart("aWbXcXdXeXfY", "([a-z]W)([a-z]X)+([a-z]Y)");
@@ -71,8 +71,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - needs capture lists and lookaround; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_captures#6")]
+    [Skip("needs:lookaround - '.*?(?=(.)+)b' needs a lookahead as well as its two repeats")]
     public void A_group_repeated_only_inside_a_lookahead_still_reports_its_captures()
     {
         Match m = FuzzyRegex.Match("ab", @".*?(?=(.)+)b");
@@ -81,8 +81,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - needs capture lists and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_captures#7")]
+    [Skip("needs:atomic - '.*?(?>(.){0,2})d' needs an atomic group as well as its two repeats")]
     public void A_group_repeated_inside_an_atomic_group_reports_every_repetition_it_made()
     {
         Match m = FuzzyRegex.Match("abcd", @".*?(?>(.){0,2})d");
@@ -91,8 +91,8 @@ public sealed class CapturesTests
     }
 
     [Test]
-    [Skip("needs:captures - Groups[n].Captures is not implemented yet")]
     [Property("Upstream", "RegexTests.test_captures#8")]
+    [Skip("needs:quantifiers - '(.)+' repeats a capture group")]
     public void A_group_repeated_exactly_once_still_reports_one_capture()
     {
         Match m = FuzzyRegex.Match("a", @"(.)+");

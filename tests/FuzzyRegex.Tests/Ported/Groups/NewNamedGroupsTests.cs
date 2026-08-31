@@ -10,7 +10,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class NewNamedGroupsTests
 {
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_new_named_groups#1")]
     public void Both_named_group_spellings_match()
     {
@@ -22,7 +21,6 @@ public sealed class NewNamedGroupsTests
     }
 
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_new_named_groups#1")]
     public void Both_named_group_spellings_produce_the_same_tuple()
     {

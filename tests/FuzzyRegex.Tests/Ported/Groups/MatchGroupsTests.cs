@@ -8,13 +8,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class MatchGroupsTests
 {
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#1")]
     public void A_pattern_with_no_groups_reports_only_the_whole_match() =>
         FuzzyRegex.MatchAtStart("a", "a").Value.Should().Be("a");
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#2")]
     public void A_single_group_participates_in_the_whole_tuple()
     {
@@ -25,18 +23,15 @@ public sealed class MatchGroupsTests
     }
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#3")]
     public void Indexing_group_zero_is_the_whole_match() => FuzzyRegex.MatchAtStart("a", "(a)").Value.Should().Be("a");
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#4")]
     public void Indexing_group_one_is_its_capture() =>
         FuzzyRegex.MatchAtStart("a", "(a)").Groups[1].Value.Should().Be("a");
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#5")]
     public void Requesting_the_same_group_twice_returns_it_twice()
     {
@@ -54,8 +49,10 @@ public sealed class MatchGroupsTests
     [Arguments("ac", "ac", "a", true, "a", false, null, true, "c")]
     [Arguments("bc", "bc", "b", false, null, true, "b", true, "c")]
     [Arguments("bc", "bc", "b", false, null, true, "b", true, "c")]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#6-10")]
+    [Skip(
+        "needs:quantifiers - the alternation and the whole group surface land in S18, but '((a)|(b))(c)?' ends in an optional group"
+    )]
     public void Alternation_with_a_trailing_optional_group_reports_every_group(
         string subject,
         string whole,
@@ -93,7 +90,6 @@ public sealed class MatchGroupsTests
     }
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#11-14")]
     public void Group_accessor_forms_agree_for_a_single_capturing_group()
     {
@@ -107,10 +103,8 @@ public sealed class MatchGroupsTests
     }
 
     [Test]
-    [Skip(
-        "needs:named-groups - the pattern needs named-group parsing even though this test reads the groups by number"
-    )]
     [Property("Upstream", "RegexTests.test_re_match#15")]
+    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Multiple_numbered_groups_can_be_requested_together()
     {
         Match m = FuzzyRegex.MatchAtStart("a", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
@@ -121,8 +115,8 @@ public sealed class MatchGroupsTests
     }
 
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#16")]
+    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Multiple_named_groups_can_be_requested_together()
     {
         Match m = FuzzyRegex.MatchAtStart("b", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
@@ -133,8 +127,8 @@ public sealed class MatchGroupsTests
     }
 
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_match#17")]
+    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Numbered_and_named_group_requests_can_be_mixed()
     {
         Match m = FuzzyRegex.MatchAtStart("ac", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");

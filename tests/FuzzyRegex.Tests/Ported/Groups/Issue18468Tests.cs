@@ -23,13 +23,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class Issue18468Tests
 {
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#23")]
     public void A_pattern_with_no_capturing_group_reports_only_group_zero() =>
         FuzzyRegex.MatchAtStart("a", "a").Groups.Count.Should().Be(1);
 
     [Test]
-    [Skip("needs:groups - group capture is not implemented yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#24-27")]
     public void Group_accessor_forms_agree_for_a_single_capturing_group()
     {

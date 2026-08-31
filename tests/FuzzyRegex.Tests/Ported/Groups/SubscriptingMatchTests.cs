@@ -9,7 +9,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class SubscriptingMatchTests
 {
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_subscripting_match#1")]
     public void The_match_succeeds() => FuzzyRegex.MatchAtStart("xy", @"(?<a>\w)").Success.Should().BeTrue();
 
@@ -22,7 +21,6 @@ public sealed class SubscriptingMatchTests
     // Assertion 4 (a second "if not m" check) duplicates assertion 1 above.
 
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_subscripting_match#5")]
     public void The_whole_tuple_is_the_match_and_its_single_named_group()
     {

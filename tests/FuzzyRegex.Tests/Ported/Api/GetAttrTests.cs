@@ -66,7 +66,6 @@ public sealed class GetAttrTests
     // NOT PORTED: Match.endpos has no counterpart (regex.search("b(c)", "abcdef").endpos == 6).
 
     [Test]
-    [Skip("needs:groups - the engine has no capture support yet")]
     [Property("Upstream", "RegexTests.test_getattr#11-12")]
     public void Match_and_group_spans()
     {

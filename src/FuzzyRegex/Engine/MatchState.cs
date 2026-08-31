@@ -1,8 +1,83 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
+
+/// <summary>
+/// One stretch of the subject a group captured. Port of <c>RE_GroupSpan</c>
+/// (<c>upstream/src/_regex.c</c> lines 277-280).
+/// </summary>
+/// <remarks>
+/// A readonly struct because upstream copies it by value everywhere: onto the capture list, into a
+/// <c>RE_GroupStateData</c> and out again. Positions are UTF-16 code unit indices, like every other
+/// position in the engine, and the <c>(start, end)</c> pair keeps upstream's names - the
+/// <c>(Index, Length)</c> the public API reports is converted in <c>Capture</c>'s accessors and
+/// nowhere else (DECISIONS 2026-08-31).
+/// </remarks>
+/// <param name="Start">Where the capture starts.</param>
+/// <param name="End">One past where it ends.</param>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct GroupSpan(int Start, int End);
+
+/// <summary>
+/// Everything one capture group has captured during this match. Port of <c>RE_GroupData</c>
+/// (<c>upstream/src/_regex.c</c> lines 329-334).
+/// </summary>
+/// <remarks>
+/// Upstream keeps <b>every</b> capture a group made, not just the last, which is the headline
+/// mrab-regex feature the built-in <c>Regex</c> only offers inside a repeated construct. So
+/// <see cref="Captures"/> is the list and <see cref="Current"/> indexes the one that
+/// <c>Match.Groups[n]</c> reports, or is <c>-1</c> when the group did not take part in the match.
+/// Upstream's <c>capacity</c> is <see cref="Captures"/>'s <c>Length</c>.
+/// </remarks>
+internal sealed class GroupData
+{
+    /// <summary>Upstream <c>captures</c>: the spans, oldest first, of which <see cref="Count"/> are live.</summary>
+    internal GroupSpan[] Captures = [];
+
+    /// <summary>Upstream <c>count</c>: how many of <see cref="Captures"/> this match has written.</summary>
+    internal int Count;
+
+    /// <summary>
+    /// Upstream <c>current</c>: which capture <c>Match.Groups[n]</c> reports, or <c>-1</c> for a
+    /// group that did not take part in the match.
+    /// </summary>
+    internal int Current = -1;
+
+    /// <summary>
+    /// The half of <c>copy_groups</c> (<c>upstream/src/_regex.c</c> line 20621) that is not
+    /// arithmetic on one allocated block: <see cref="Match"/> outlives the state, so it takes a copy
+    /// of the spans rather than a pointer into the state's.
+    /// </summary>
+    /// <returns>A copy holding exactly the live spans.</returns>
+    internal GroupData Copy() =>
+        new()
+        {
+            Captures = Captures.AsSpan(0, Count).ToArray(),
+            Count = Count,
+            Current = Current,
+        };
+
+    /// <summary>
+    /// Upstream <c>copy_groups</c> (<c>upstream/src/_regex.c</c> line 20621), less its single-block
+    /// allocation arithmetic, which a garbage-collected heap does not need.
+    /// </summary>
+    /// <param name="groups">The state's groups.</param>
+    /// <param name="groupCount">How many to copy - upstream's <c>public_group_count</c>.</param>
+    /// <returns>The copies.</returns>
+    internal static GroupData[] CopyGroups(GroupData[] groups, int groupCount)
+    {
+        var copies = new GroupData[groupCount];
+        for (int g = 0; g < groupCount; g++)
+        {
+            copies[g] = groups[g].Copy();
+        }
+
+        return copies;
+    }
+}
 
 /// <summary>
 /// The state one matching operation runs in. Port of <c>RE_State</c>
@@ -84,6 +159,12 @@ internal sealed class MatchState : IDisposable
 
     /// <summary>Upstream <c>final_line_sep</c>.</summary>
     internal int FinalLineSep;
+
+    /// <summary>
+    /// Upstream <c>groups</c>: one entry per group, indexed by group number minus one, and
+    /// <c>true_group_count</c> long so a private group number reaches its own entry.
+    /// </summary>
+    internal GroupData[] Groups = [];
 
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
     internal readonly ByteStack Sstack = new();
@@ -200,16 +281,28 @@ internal sealed class MatchState : IDisposable
         long timeout
     )
     {
+        // The capture groups (state_init_2, upstream/src/_regex.c:18327). Upstream caches the block
+        // on the pattern as 'groups_storage' and reuses it; on a garbage-collected heap that cache
+        // has nothing to port. 'true_group_count' rather than 'public_group_count', because a
+        // branch-reset group's private number is larger than its public one and START_GROUP indexes
+        // by the private one.
+        //
+        // NOT PORTED: the repeat, fuzzy-guard and group-call-guard allocations. Their contents
+        // belong to S19 and Phases 4 and 5, and each of those slices allocates what it reads.
+        var groups = new GroupData[pattern.TrueGroupCount];
+        for (int g = 0; g < groups.Length; g++)
+        {
+            groups[g] = new GroupData();
+        }
+
         var state = new MatchState(pattern, text)
         {
             VisibleCaptures = visibleCaptures,
             MatchAll = matchAll,
             ReqPos = -1,
             IsFuzzy = pattern.IsFuzzy,
+            Groups = groups,
         };
-
-        // NOT PORTED: the group, repeat, fuzzy-guard and group-call-guard allocations. Their
-        // contents belong to S18, S19 and Phase 5, and each of those slices allocates what it reads.
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);
@@ -350,9 +443,12 @@ internal sealed class MatchState : IDisposable
         SearchAnchor = TextPos;
         MatchPos = TextPos;
 
-        // NOT PORTED: clear_groups (:3369) and reset_guards (:3383). There are no group spans until
-        // S18 and no repeat guards until S19, and a pattern needing either throws at its own opcode
-        // before anything could have written one.
+        // Clear the groups.
+        ClearGroups();
+
+        // NOT PORTED: reset_guards (:3383). There are no repeat guards until S19, no fuzzy guards
+        // until Phase 5 and no group-call guards until Phase 4, and a pattern needing any of them
+        // throws at its own opcode before anything could have written one.
 
         // Clear the counts and cost for matching.
         // NOT PORTED: the fuzzy counts, node and change list (Phase 5).
@@ -361,6 +457,71 @@ internal sealed class MatchState : IDisposable
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;
+    }
+
+    /// <summary>Upstream <c>clear_groups</c> (<c>upstream/src/_regex.c</c> line 3369).</summary>
+    /// <remarks>
+    /// The capture arrays are kept and only the counts go to zero, exactly as upstream does: a
+    /// retried match at the next start position reuses the storage it has already grown.
+    /// </remarks>
+    internal void ClearGroups()
+    {
+        foreach (GroupData group in Groups)
+        {
+            group.Count = 0;
+            group.Current = -1;
+        }
+    }
+
+    /// <summary>
+    /// Upstream <c>save_capture</c> (<c>upstream/src/_regex.c</c> line 9249).
+    /// </summary>
+    /// <remarks>
+    /// <b>Indexed by the public group number, not the private one</b>, which is upstream's own
+    /// asymmetry and is kept: <c>START_GROUP</c> and <c>END_GROUP</c> read and write
+    /// <c>group-&gt;current</c> through <c>private_index</c> and then call this, which appends
+    /// through <c>public_index</c>. The two are the same number for every group except a
+    /// branch-reset one, so changing it here would silently alter branch-reset behaviour that
+    /// Phase 4 has yet to test.
+    /// </remarks>
+    /// <param name="privateIndex">Upstream's <c>private_index</c>, which it also does not use.</param>
+    /// <param name="publicIndex">The public group number, one-based.</param>
+    /// <param name="span">The span to append.</param>
+    internal void SaveCapture(int privateIndex, int publicIndex, GroupSpan span)
+    {
+        _ = privateIndex;
+
+        // Capture group indexes are 1-based (excluding group 0, which is the entire matched string).
+        GroupData group = Groups[publicIndex - 1];
+
+        if (group.Count >= group.Captures.Length)
+        {
+            int newCapacity = group.Captures.Length * 2;
+
+            if (newCapacity == 0)
+            {
+                newCapacity = 16;
+            }
+
+            Array.Resize(ref group.Captures, newCapacity);
+        }
+
+        group.Captures[group.Count++] = span;
+    }
+
+    /// <summary>Upstream <c>unsave_capture</c> (<c>upstream/src/_regex.c</c> line 9282).</summary>
+    /// <param name="privateIndex">Upstream's <c>private_index</c>, which it also does not use.</param>
+    /// <param name="publicIndex">The public group number, one-based.</param>
+    internal void UnsaveCapture(int privateIndex, int publicIndex)
+    {
+        _ = privateIndex;
+
+        GroupData group = Groups[publicIndex - 1];
+
+        if (group.Count > 0)
+        {
+            --group.Count;
+        }
     }
 
     /// <summary>

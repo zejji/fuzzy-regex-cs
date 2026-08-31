@@ -161,7 +161,11 @@ internal static class OracleWave
                 outcome.GetProperty("exception").GetString()!,
                 outcome.GetProperty("message").GetString()!
             ),
-            "match" => new MatchOutcome([.. outcome.GetProperty("groups").EnumerateArray().Select(ReadGroup)]),
+            "match" => new MatchOutcome(
+                [.. outcome.GetProperty("groups").EnumerateArray().Select(ReadGroup)],
+                outcome.GetProperty("lastIndex").GetInt32(),
+                outcome.GetProperty("lastGroup").GetString()
+            ),
             _ => throw new InvalidOperationException($"unknown outcome kind '{kind}'."),
         };
     }
@@ -418,10 +422,24 @@ internal sealed record ErrorOutcome(string Exception, string Message, string? De
 
 /// <summary>The pattern matched, with one entry per group, group 0 being the whole match.</summary>
 /// <param name="Groups">Every group, by ascending number.</param>
-internal sealed record MatchOutcome(IReadOnlyList<OracleGroup> Groups) : IOracleOutcome
+/// <param name="LastIndex">
+/// Upstream's <c>lastindex</c> with <c>None</c> as <c>-1</c>, which is what
+/// <c>Match.LastGroupNumber</c> reports. Compared because it is not derivable from
+/// <paramref name="Groups"/>: it is the group that *closed* last, so <c>((a))</c> against
+/// <c>'a'</c> gives 1 although groups 1 and 2 both succeed with the same span.
+/// </param>
+/// <param name="LastGroup">
+/// Upstream's <c>lastgroup</c>, which is <c>Match.LastGroupName</c>. Also not derivable: it names
+/// the last *named* group even when an unnamed one succeeded later.
+/// </param>
+internal sealed record MatchOutcome(IReadOnlyList<OracleGroup> Groups, int LastIndex, string? LastGroup)
+    : IOracleOutcome
 {
     /// <inheritdoc />
-    public string Describe() => "match " + string.Join(" ", Groups.Select(group => group.Describe()));
+    public string Describe() =>
+        "match "
+        + string.Join(" ", Groups.Select(group => group.Describe()))
+        + string.Create(CultureInfo.InvariantCulture, $" last={LastIndex}/{LastGroup ?? "-"}");
 }
 
 /// <summary>One group's result.</summary>

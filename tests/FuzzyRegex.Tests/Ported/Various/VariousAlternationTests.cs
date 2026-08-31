@@ -32,7 +32,6 @@ public sealed class VariousAlternationTests
     [Arguments("(a|b|c|d|e)f", "ef", "0,1", new string?[] { "ef", "e" })]
     [Arguments("(ab|cd)e", "abcde", "0,1", new string?[] { "cde", "cd" })]
     [Arguments("(abc|)ef", "abcdef", "0,1", new string?[] { "ef", "" })]
-    [Skip("needs:alternation - the engine has no alternation opcode yet")]
     [Property("Upstream", "RegexTests.test_various#122-123,140-141,145,148,189,269-270,300-301,305,308")]
     public void Search_returns_the_expected_group_values(
         string pattern,

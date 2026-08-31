@@ -257,6 +257,14 @@ internal sealed class PatternObject
 
         // NOT PORTED: scan_locale_chars, which reads the C locale.
 
+        // Number the nodes, so the matcher can put a node reference on a byte stack where upstream
+        // puts a pointer (Node.Index). Last, because the optimiser has by now removed the
+        // unreachable nodes from the list and the required-string node has been added to it.
+        for (int i = 0; i < self.NodeList.Count; i++)
+        {
+            self.NodeList[i].Index = i;
+        }
+
         return self;
     }
 

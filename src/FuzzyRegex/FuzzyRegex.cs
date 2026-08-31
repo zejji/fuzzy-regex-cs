@@ -349,19 +349,49 @@ public sealed class FuzzyRegex
             throw new System.Text.RegularExpressions.RegexMatchTimeoutException(input, Pattern, MatchTimeout);
         }
 
+        return NewMatch(state, input, status);
+    }
+
+    /// <summary>
+    /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738).
+    /// </summary>
+    /// <param name="state">The state the match ran in.</param>
+    /// <param name="input">The subject.</param>
+    /// <param name="status">What <c>do_match</c> returned.</param>
+    /// <returns>The match, successful or not.</returns>
+    private Match NewMatch(Engine.MatchState state, string input, int status)
+    {
         if (status != Engine.MatchStatus.Success)
         {
             // Upstream returns None; this returns an unsuccessful Match, which is the built-in
-            // Regex's shape and the one this port's public surface committed to in S01.
-            return new Match(input, 0, 0, success: false, _compiled.GroupCount);
+            // Regex's shape and the one this port's public surface committed to in S01. Its groups
+            // are the pattern's, all of them absent, so `Groups.Count` still reports what the
+            // pattern declares rather than throwing.
+            var absent = new Engine.GroupData[_compiled.GroupCount];
+            for (int g = 0; g < absent.Length; g++)
+            {
+                absent[g] = new Engine.GroupData();
+            }
+
+            return new Match(this, input, 0, 0, success: false, absent);
         }
 
-        // Port of pattern_new_match (upstream/src/_regex.c:20738) reduced to group 0, including its
-        // rule that a reverse match reports its two ends the other way round (:20795).
+        // Upstream's rule that a reverse match reports its two ends the other way round (:20795).
         int matchStart = state.Reverse ? state.TextPos : state.MatchPos;
         int matchEnd = state.Reverse ? state.MatchPos : state.TextPos;
 
-        return new Match(input, matchStart, matchEnd, success: true, _compiled.GroupCount);
+        return new Match(
+            this,
+            input,
+            matchStart,
+            matchEnd,
+            success: true,
+            // Copied, because the state's arrays are about to be disposed and are reused by the next
+            // match: a Match sharing them would change under its owner (copy_groups, :20621).
+            Engine.GroupData.CopyGroups(state.Groups, _compiled.GroupCount),
+            state.LastIndex,
+            state.LastGroup
+        );
     }
 
     /// <summary>

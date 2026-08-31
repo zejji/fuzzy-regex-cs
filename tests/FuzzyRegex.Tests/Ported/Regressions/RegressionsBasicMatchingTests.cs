@@ -15,7 +15,6 @@ public sealed class RegressionsBasicMatchingTests
 
     // Hg issue 144: Latest version problem with matching 'R|R'.
     [Test]
-    [Skip("needs:alternation - alternation is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#153")]
     public void Alternation_of_two_identical_branches_still_matches()
     {
@@ -38,8 +37,10 @@ public sealed class RegressionsBasicMatchingTests
     [Test]
     // Retagged in S16: two capture groups, each holding a repeated negated set. The assertion
     // reads Groups[1] and Groups[2], so S18 is the last thing it waits on.
-    [Skip("needs:groups - '([^L]*)([^R]*R)' needs sets (S17), repeats (S19) and capture groups")]
     [Property("Upstream", "RegexTests.test_hg_bugs#143")]
+    [Skip(
+        "needs:quantifiers - the two capture groups it reads land in S18, but '([^L]*)([^R]*R)' repeats a negated set twice"
+    )]
     public void First_wildcard_group_is_allowed_to_match_empty_so_the_second_can_reach_the_anchor()
     {
         Match m = FuzzyRegex.Match("LtR", "([^L]*)([^R]*R)");
@@ -56,8 +57,8 @@ public sealed class RegressionsBasicMatchingTests
 
     [Test]
     // Retagged in S16: the pattern is an alternation, which the matcher has no BRANCH case for.
-    [Skip("needs:alternation - 'a|\\.*pb\\.py' is a branch, and its second arm is a repeat too")]
     [Property("Upstream", "RegexTests.test_hg_bugs#412")]
+    [Skip(@"needs:quantifiers - the branch lands in S18, but 'a|\.*pb\.py' has a repeat in its second arm")]
     public void Alternation_with_a_literal_dot_branch_does_not_falsely_match() =>
         new FuzzyRegex(@"a|\.*pb\.py").Match(".geojs").Success.Should().BeFalse();
 

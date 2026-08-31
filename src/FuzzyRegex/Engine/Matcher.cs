@@ -99,8 +99,6 @@ internal static class Seam
             or Opcode.StringFld
             or Opcode.StringIgn => "ignore-case",
 
-            Opcode.Branch => "alternation",
-
             Opcode.BodyEnd
             or Opcode.BodyStart
             or Opcode.EndGreedyRepeat
@@ -112,8 +110,6 @@ internal static class Seam
             or Opcode.MatchBody
             or Opcode.MatchTail
             or Opcode.TailStart => "quantifiers",
-
-            Opcode.EndGroup or Opcode.Group or Opcode.StartGroup => "groups",
 
             Opcode.RefGroup or Opcode.RefGroupFld or Opcode.RefGroupIgn => "backrefs",
 
@@ -141,7 +137,8 @@ internal static class Seam
             Opcode.Prune or Opcode.Skip => "backtracking-verbs",
 
             // Every remaining opcode either has a case above in the dispatch switch or never
-            // reaches the matcher at all (END, NEXT, and the values-only words).
+            // reaches the matcher at all (END, NEXT, GROUP - which build_GROUP consumes into a
+            // START_GROUP/END_GROUP pair - and the values-only words).
             _ => "basic-matching",
         };
 }
@@ -560,6 +557,114 @@ internal static class Matcher
     internal static int TryMatchStartOfString(MatchState state, int textPos) =>
         MatchStatus.From(textPos <= state.TextStart);
 
+    /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
+    /// <param name="span1">One span.</param>
+    /// <param name="span2">The other.</param>
+    /// <returns><see langword="true"/> if they are the same span.</returns>
+    internal static bool SameSpan(GroupSpan span1, GroupSpan span2) =>
+        span1.Start == span2.Start && span1.End == span2.End;
+
+    /// <summary>Upstream <c>same_span_as_group</c> (line 11639).</summary>
+    /// <remarks>
+    /// This is where upstream distinguishes a group that matched nothing from one that did not match
+    /// at all: a group whose <see cref="GroupData.Current"/> is negative took no part in the match,
+    /// so no span of it can be the same as anything, where a group that matched empty has a real
+    /// <c>(pos, pos)</c> span that can be.
+    /// </remarks>
+    /// <param name="group">The group.</param>
+    /// <param name="span">The span to compare against its current capture.</param>
+    /// <returns><see langword="true"/> if the group's current capture is that span.</returns>
+    internal static bool SameSpanAsGroup(GroupData group, GroupSpan span) =>
+        group.Current >= 0 && SameSpan(group.Captures[group.Current], span);
+
+    /// <summary>
+    /// Port of <c>RE_GroupStateData</c> (<c>upstream/src/_regex.c</c> lines 416-422): what
+    /// <c>START_GROUP</c> and <c>END_GROUP</c> put on the backtracking stack so their own backtrack
+    /// case can undo them.
+    /// </summary>
+    /// <param name="TextPos">
+    /// The end of the span for <c>START_GROUP</c> and its start for <c>END_GROUP</c> - whichever the
+    /// opcode took off the structure stack, so that backtracking can put it back.
+    /// </param>
+    /// <param name="Current">The group's <see cref="GroupData.Current"/> before the capture.</param>
+    /// <param name="CaptureChange">The state's capture change counter before the capture.</param>
+    /// <param name="PrivateIndex">The private group number.</param>
+    /// <param name="PublicIndex">The public group number.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct GroupStateData(
+        int TextPos,
+        int Current,
+        long CaptureChange,
+        int PrivateIndex,
+        int PublicIndex
+    );
+
+    /// <summary>
+    /// Upstream's <c>ByteStack_push_block(..., &amp;data_g, sizeof(data_g))</c>, field by field.
+    /// </summary>
+    /// <remarks>
+    /// Upstream pushes the struct's bytes, padding and all; this pushes the five fields as five
+    /// 8-byte words. The stack is internal to the engine and the only requirement on it is that the
+    /// pop is the mirror image of the push, so the difference is 8 bytes of stack per group entry
+    /// and nothing else.
+    /// </remarks>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushGroupStateData(ByteStack stack, GroupStateData data)
+    {
+        stack.PushSize(data.TextPos);
+        stack.PushSize(data.Current);
+        stack.PushSize(data.CaptureChange);
+        stack.PushSize(data.PrivateIndex);
+        stack.PushSize(data.PublicIndex);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopGroupStateData(ByteStack stack, out GroupStateData data)
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long publicIndex)
+            || !stack.PopSize(out long privateIndex)
+            || !stack.PopSize(out long captureChange)
+            || !stack.PopSize(out long current)
+            || !stack.PopSize(out long textPos)
+        )
+        {
+            return false;
+        }
+
+        data = new GroupStateData((int)textPos, (int)current, captureChange, (int)privateIndex, (int)publicIndex);
+        return true;
+    }
+
+    /// <summary>
+    /// Upstream <c>try_match</c> (<c>upstream/src/_regex.c</c> line 7671), <b>reduced to its default
+    /// arm</b> (<c>:7842</c>).
+    /// </summary>
+    /// <remarks>
+    /// Upstream looks at <c>next-&gt;test</c> and asks that node's <c>try_match_*</c> predicate
+    /// whether there is any point entering this branch at all, skipping the housekeeping when there
+    /// is not. That is the test-node fast path this port defers to Phase 7 (see the class remarks),
+    /// and deferring it is semantically transparent here: the default arm reports success and leaves
+    /// the position alone, so the branch is entered and its first node is tested by the dispatch loop
+    /// in the ordinary way. Where upstream would have refused the branch, this port enters it and
+    /// backtracks straight back out through the <c>BRANCH</c> backtrack case - slower, same answer.
+    /// </remarks>
+    /// <param name="next">The exit to test.</param>
+    /// <param name="textPos">The position to test at.</param>
+    /// <param name="nextPosition">Where to continue from.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int TryMatch(NextNode next, int textPos, out Position nextPosition)
+    {
+        nextPosition = new Position(next.Node!, textPos);
+        return MatchStatus.Success;
+    }
+
     /// <summary>
     /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266) less the
     /// <c>PyErr_CheckSignals</c> half, which is CPython's Ctrl-C handling and has no counterpart in
@@ -729,10 +834,7 @@ internal static class Matcher
             node = startNode;
         }
 
-        // Upstream's 'advance:' label is not here: the only jumps to it come from the backtrack
-        // cases that retry a fuzzy match, and every one of those throws in this slice. S18 and S19
-        // reintroduce it with their first real backtrack case; C# rejects an unreferenced label.
-
+        advance:
         // The main matching loop.
         while (true)
         {
@@ -812,6 +914,113 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.Branch: // 2-way branch.
+                {
+                    status = TryMatch(node.Next1, state.TextPos, out Position nextPosition);
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushNode(node.Next2.Node!);
+                        state.Bstack.PushUInt8((byte)Opcode.Branch);
+
+                        /* bstack: text_pos node BRANCH */
+
+                        node = nextPosition.Node;
+                        state.TextPos = nextPosition.TextPos;
+                    }
+                    else
+                    {
+                        node = node.Next2.Node!;
+                    }
+
+                    break;
+                }
+                // END_GROUP (:12686) and START_GROUP (:14569). Upstream writes the two out
+                // separately and they differ in exactly one expression: which end of the span the
+                // opcode takes off the structure stack. Only one of the pair captures - build_GROUP
+                // sets 'values[2]' on whichever node closes the group in the direction the pattern
+                // runs (NodeCompiler, :968-969) - and the other just parks the position for it, so
+                // in a forward match END_GROUP captures and in a reverse match START_GROUP does.
+                case Opcode.EndGroup: // End of a capture group.
+                case Opcode.StartGroup: // Start of a capture group.
+                {
+                    // Capture group indexes are 1-based (excluding group 0, which is the entire
+                    // matched string).
+                    int privateIndex = (int)node.Values[0];
+                    int publicIndex = (int)node.Values[1];
+                    GroupData group = state.Groups[privateIndex - 1];
+                    bool capture = node.Values[2] != 0;
+
+                    if (capture)
+                    {
+                        /* sstack: end (START_GROUP) or start (END_GROUP)
+                         *
+                         * bstack: -
+                         */
+
+                        if (!state.Sstack.PopSize(out long parked))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        GroupSpan span =
+                            node.Op == Opcode.StartGroup
+                                ? new GroupSpan(state.TextPos, (int)parked)
+                                : new GroupSpan((int)parked, state.TextPos);
+
+                        PushGroupStateData(
+                            state.Bstack,
+                            new GroupStateData(
+                                (int)parked,
+                                group.Current,
+                                state.CaptureChange,
+                                privateIndex,
+                                publicIndex
+                            )
+                        );
+
+                        if (pattern.GroupInfoAt(privateIndex).Referenced && !SameSpanAsGroup(group, span))
+                        {
+                            ++state.CaptureChange;
+                        }
+
+                        state.SaveCapture(privateIndex, publicIndex, span);
+
+                        // Upstream reads the count of the group it looked up by 'private_index'
+                        // while save_capture appended to the one it looked up by 'public_index'
+                        // (:9256). The two numbers differ only for a branch-reset group, so the
+                        // asymmetry is kept rather than tidied - see MatchState.SaveCapture.
+                        group.Current = group.Count - 1;
+                    }
+                    else
+                    {
+                        state.Sstack.PushSize(state.TextPos);
+                    }
+
+                    state.Bstack.PushBool(capture);
+                    state.Bstack.PushUInt8((byte)node.Op);
+
+                    /* If capturing:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: parked current capture_change private_index public_index TRUE op
+                     *
+                     * else:
+                     *
+                     * sstack: text_pos
+                     *
+                     * bstack: FALSE op
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
+                }
                 // Upstream gives each of these its own case with the same eleven-line tail copied
                 // out (:12968, :13804, :13914, :14446-14449), differing only in which 'matches_*'
                 // predicate it calls. One case group with the predicate chosen by a switch says the
@@ -1003,6 +1212,72 @@ internal static class Matcher
 
             switch ((Opcode)op)
             {
+                case Opcode.Branch: // 2-way branch.
+                {
+                    /* sstack: -
+                     *
+                     * bstack: text_pos node
+                     */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? other) || !state.Bstack.PopSize(out long textPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    node = other!;
+                    state.TextPos = (int)textPos;
+                    goto advance;
+                }
+                // END_GROUP (:15596) and START_GROUP (:17307). Upstream writes the two out
+                // separately and their bodies are identical: the position going back onto the
+                // structure stack is the group's start in one and its end in the other, and putting
+                // it back is the same act either way.
+                case Opcode.EndGroup: // End of a capture group.
+                case Opcode.StartGroup: // Start of a capture group.
+                {
+                    /* If capturing:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: parked current capture_change private_index public_index TRUE
+                     *
+                     * else:
+                     *
+                     * sstack: text_pos
+                     *
+                     * bstack: FALSE
+                     */
+
+                    if (!state.Bstack.PopBool(out bool capture))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (capture)
+                    {
+                        if (!PopGroupStateData(state.Bstack, out GroupStateData data))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = data.CaptureChange;
+                        state.Groups[data.PrivateIndex - 1].Current = data.Current;
+                        state.Sstack.PushSize(data.TextPos);
+
+                        state.UnsaveCapture(data.PrivateIndex, data.PublicIndex);
+
+                        /* sstack: parked
+                         *
+                         * bstack: -
+                         */
+                    }
+                    else if (!state.Sstack.DropSize())
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
+                }
                 case Opcode.Failure: // Failure.
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
@@ -1050,9 +1325,12 @@ internal static class Matcher
                             state.TextPos < state.SliceStart ? state.SliceStart : state.NextPos(state.TextPos);
                     }
 
-                    // NOT PORTED: clear_groups (:3369) and reset_guards (:3383). There are no
-                    // group spans until S18 and no repeat guards until S19, and a pattern needing
-                    // either throws at its own opcode before it can reach here.
+                    // Clear the groups.
+                    state.ClearGroups();
+
+                    // NOT PORTED: reset_guards (:3383). There are no repeat guards until S19, no
+                    // fuzzy guards until Phase 5 and no group-call guards until Phase 4, and a
+                    // pattern needing any of them throws at its own opcode before it can reach here.
 
                     // Reset the stacks.
                     state.Sstack.Reset();
@@ -1060,11 +1338,12 @@ internal static class Matcher
                     state.Pstack.Reset();
                     goto start_match;
                 default:
-                    // Nothing else is ever pushed by the opcodes ported so far: CHARACTER, STRING,
+                    // Nothing else is ever pushed by the opcodes ported so far. CHARACTER, STRING,
                     // the ANY family and S17's PROPERTY, RANGE and SET_* only put themselves on the
                     // backtracking stack to retry a fuzzy match (upstream's shared one-character
                     // block, :15210-15243, is nothing but 'retry_fuzzy_match_item'), which the
-                    // dispatch loop refuses above.
+                    // dispatch loop refuses above; BRANCH, START_GROUP and END_GROUP have their own
+                    // cases here.
                     throw Seam.For((Opcode)op);
             }
         }
@@ -1201,6 +1480,7 @@ internal static class Matcher
             // Store the results.
             state.LastIndex = -1;
             state.LastGroup = -1;
+            long maxEndIndex = -1;
 
             if (status == MatchStatus.Partial)
             {
@@ -1208,9 +1488,25 @@ internal static class Matcher
                 state.TextPos = state.Reverse ? state.SliceStart : state.SliceEnd;
             }
 
-            // NOT PORTED: the loop over the capture groups that sets 'lastindex' and 'lastgroup'.
-            // There are no group spans to read until S18, and any pattern with a group throws at
-            // START_GROUP before it gets here.
+            // Store the capture groups. 'lastindex' is not the highest-numbered group that took
+            // part but the one that closed last, which is why 'end_index' is consulted rather than
+            // the group number: `regex.match('((a))', 'a').lastindex` is 1, not 2.
+            PatternObject pattern = state.Pattern;
+
+            for (int g = 0; g < pattern.PublicGroupCount; g++)
+            {
+                GroupInfo info = pattern.GroupInfoAt(g + 1);
+
+                if (state.Groups[g].Current >= 0 && info.EndIndex > maxEndIndex)
+                {
+                    maxEndIndex = info.EndIndex;
+                    state.LastIndex = g + 1;
+                    if (info.HasName)
+                    {
+                        state.LastGroup = g + 1;
+                    }
+                }
+            }
         }
 
         // Upstream's tail here is `if (status < 0 && status != RE_ERROR_PARTIAL) set_error(status)`,

@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class Bug14462Tests
 {
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_14462#1")]
     public void A_non_ascii_group_name_is_usable() =>
         FuzzyRegex.Match("abc", "(?P<\u00FF>a)").Groups["\u00FF"].Value.Should().Be("a");

@@ -13,19 +13,16 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class Bug113254Tests
 {
     [Test]
-    [Skip("needs:alternation - alternation is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_113254#1")]
     public void Start_reports_a_group_that_did_not_participate() =>
         FuzzyRegex.MatchAtStart("b", "(a)|(b)").Groups[1].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:alternation - alternation is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_113254#2")]
     public void End_reports_a_group_that_did_not_participate() =>
         FuzzyRegex.MatchAtStart("b", "(a)|(b)").Groups[1].Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:alternation - alternation is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_113254#3")]
     public void Span_reports_a_group_that_did_not_participate() =>
         FuzzyRegex.MatchAtStart("b", "(a)|(b)").Groups[1].Success.Should().BeFalse();

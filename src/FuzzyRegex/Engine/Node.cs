@@ -3,6 +3,15 @@ using Fuzzy.Text.RegularExpressions.Parsing;
 namespace Fuzzy.Text.RegularExpressions.Engine;
 
 /// <summary>
+/// A place in the pattern and in the subject at once. Port of <c>RE_Position</c>
+/// (<c>upstream/src/_regex.c</c> lines 271-274), which is only ever an out-parameter of
+/// <c>try_match</c> and its string variants.
+/// </summary>
+/// <param name="Node">The node to continue from.</param>
+/// <param name="TextPos">The text position to continue at, a UTF-16 code unit index.</param>
+internal readonly record struct Position(Node Node, int TextPos);
+
+/// <summary>
 /// Where a node goes next, and the shortcuts the matcher uses to get there. Port of
 /// <c>RE_NextNode</c> (<c>upstream/src/_regex.c</c> lines 283-288).
 /// </summary>
@@ -63,6 +72,16 @@ internal sealed class Node
 
     /// <summary>Upstream <c>step</c>: how far matching this node moves the text position.</summary>
     internal long Step;
+
+    /// <summary>
+    /// This node's position in <see cref="PatternObject.NodeList"/>, which is upstream's
+    /// <c>node_list</c>. Not an upstream field: it is how a node reference gets onto the
+    /// backtracking stack, where upstream pushes the pointer itself - see
+    /// <see cref="ByteStack.PushNode"/>. Assigned once, at the end of
+    /// <see cref="PatternObject.Compile"/>, because the optimiser removes unreachable nodes from the
+    /// list and any index handed out before that would be stale.
+    /// </summary>
+    internal int Index;
 
     /// <summary>
     /// Upstream <c>values</c> and <c>value_count</c>. A list because <c>add_index</c>

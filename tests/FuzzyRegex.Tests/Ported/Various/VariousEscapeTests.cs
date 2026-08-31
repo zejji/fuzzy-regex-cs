@@ -64,8 +64,9 @@ public sealed class VariousEscapeTests
     }
 
     // Split out at S17: also needs quantifiers, but START_GROUP is the opcode it reaches first.
+    // Retagged at S18, which delivered START_GROUP; the three '\s*'/'\S*' repeats are S19's.
     [Test]
-    [Skip("needs:groups - the matcher has no StartGroup yet; also needs quantifiers")]
+    [Skip("needs:quantifiers - '(\\s*)(\\S*)(\\s*)' repeats a class in each of its three groups")]
     [Property("Upstream", "RegexTests.test_various#494")]
     public void Search_with_groups_returns_the_expected_group_values()
     {

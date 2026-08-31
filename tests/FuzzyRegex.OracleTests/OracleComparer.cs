@@ -221,6 +221,6 @@ internal static class OracleComparer
             );
         }
 
-        return new MatchOutcome(described);
+        return new MatchOutcome(described, match.LastGroupNumber, match.LastGroupName);
     }
 }

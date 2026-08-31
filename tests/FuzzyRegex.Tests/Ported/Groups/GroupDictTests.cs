@@ -12,7 +12,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Groups;
 public sealed class GroupDictTests
 {
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_groupdict#1")]
     public void The_first_named_group_is_reachable_by_name() =>
         FuzzyRegex
@@ -22,7 +21,6 @@ public sealed class GroupDictTests
             .Be("first");
 
     [Test]
-    [Skip("needs:named-groups - named group parsing is not implemented yet")]
     [Property("Upstream", "RegexTests.test_groupdict#1")]
     public void The_second_named_group_is_reachable_by_name() =>
         FuzzyRegex

@@ -232,7 +232,17 @@ def _record_row(regex, row: dict) -> dict:
         })
 
     recorded["codepointSpan"] = list(match.span(0))
-    recorded["outcome"] = {"kind": "match", "groups": groups}
+    recorded["outcome"] = {
+        "kind": "match",
+        "groups": groups,
+        # Neither is derivable from the groups: 'lastindex' is the group that *closed* last, so
+        # regex.match('((a))', 'a').lastindex is 1 even though groups 1 and 2 both succeed with the
+        # same span, and 'lastgroup' names the last *named* group even when an unnamed one succeeded
+        # later. None becomes -1 and null, which is what Match.LastGroupNumber and
+        # Match.LastGroupName report.
+        "lastIndex": -1 if match.lastindex is None else match.lastindex,
+        "lastGroup": match.lastgroup,
+    }
     return recorded
 
 
@@ -253,7 +263,7 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
-GENERATORS = ("literals", "literal-dot", "anchors", "classes")
+GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups")
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
 # literal. Every one is a plain anchor: word and grapheme boundaries are S20 and would only produce
@@ -410,6 +420,110 @@ def _generate_classes(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S18's generator: alternation, capture groups and the whole group surface
+# --------------------------------------------------------------------------------------------
+
+# The atoms a generated group pattern is built from. Every one consumes exactly one character or
+# nothing at all: no quantifier (S19), no backreference (S21), no lookaround (Phase 4), because a
+# generator that emits an opcode no slice has ported produces `unsupported` rows and tells nobody
+# anything. Kept deliberately narrow - one letter, one class, one dot - so that what the row is
+# really testing is the group and branch structure wrapped round them.
+GROUP_ATOMS = ("a", "b", "c", "x", ".", "[ab]", "[^a]", r"\w", r"\d")
+
+# The subjects. Short, because a pattern of n atoms can only match n characters without a
+# quantifier, and a subject much longer than the pattern makes every 'fullmatch' row fail for the
+# same uninteresting reason. The astral alphabet is here for the same reason as in the literal
+# generators: a group span reported in codepoints rather than UTF-16 code units has to show up as a
+# divergence from the first wave.
+GROUP_SUBJECT_ALPHABETS = ("abcx", "abx1_", "ab\U0001f600\U0001d518c")
+
+MAX_GROUP_SUBJECT_LENGTH = 5
+
+# How deep a generated pattern nests a group inside a group. Two is enough to reach every case that
+# matters - an inner group of an unmatched alternative, a group closing before its parent, the
+# 'lastindex' rule that reports the group which closed last rather than the highest-numbered one -
+# and three multiplies the chance the row simply does not match.
+MAX_GROUP_DEPTH = 2
+
+# How often each shape is drawn. Weighted towards the plain group and the two-way branch: those are
+# the two opcodes this generator exists to exercise, and the empty alternative is rare enough in
+# real patterns that giving it an equal share would crowd them out.
+GROUP_SHAPES = ("atom", "group", "named", "noncapture", "branch", "branch3", "empty-branch")
+GROUP_SHAPE_WEIGHTS = (30, 20, 8, 8, 20, 8, 6)
+
+
+def _group_pattern(rng: random.Random, depth: int, namer) -> str:
+    """One generated pattern fragment, recursively.
+
+    ``namer`` hands out distinct group names, because a repeated one is legal upstream but means
+    something quite different (two groups sharing a name), and mixing that in here would make a
+    divergence ambiguous between the branch machinery and the duplicate-name machinery.
+    """
+    shape = rng.choices(GROUP_SHAPES, weights=GROUP_SHAPE_WEIGHTS)[0]
+    if depth >= MAX_GROUP_DEPTH:
+        shape = "atom"
+
+    if shape == "atom":
+        return rng.choice(GROUP_ATOMS)
+
+    inner = "".join(_group_pattern(rng, depth + 1, namer) for _ in range(rng.randrange(1, 3)))
+
+    if shape == "group":
+        return f"({inner})"
+    if shape == "named":
+        return f"(?P<{namer()}>{inner})"
+    if shape == "noncapture":
+        return f"(?:{inner})"
+
+    other = "".join(_group_pattern(rng, depth + 1, namer) for _ in range(rng.randrange(1, 3)))
+    if shape == "branch":
+        return f"({inner}|{other})"
+    if shape == "branch3":
+        third = _group_pattern(rng, depth + 1, namer)
+        return f"({inner}|{other}|{third})"
+
+    # 'empty-branch': an alternative that matches nothing at all, which is the only way to reach a
+    # group whose span is (pos, pos) rather than absent - the distinction same_span_as_group draws
+    # (upstream/src/_regex.c:11639).
+    return f"({inner}|)"
+
+
+def _generate_groups(rng: random.Random, count: int):
+    """S18's generator: nested and named capture groups round alternations.
+
+    The subject is drawn independently of the pattern rather than sliced out of it, unlike the
+    literal generators: a branch over single-character atoms already matches a wide range of
+    subjects, so an independent draw still gives a mix of matching and non-matching rows without
+    the substring trick. Measured over 300 rows of seed 1: 92 match, 208 do not, 77 with an astral
+    subject. That is the best of the shapes tried - with up to three top-level fragments instead of
+    two it was 70/230, and shortening the subject to four characters gave 91/209 - and it is in line
+    with the `classes` generator, which sits at about the same fraction.
+    """
+    for i in range(count):
+        alphabet = GROUP_SUBJECT_ALPHABETS[i % len(GROUP_SUBJECT_ALPHABETS)]
+        subject = "".join(
+            rng.choice(alphabet) for _ in range(rng.randrange(1, MAX_GROUP_SUBJECT_LENGTH + 1))
+        )
+
+        counter = [0]
+
+        def namer(counter=counter) -> str:
+            counter[0] += 1
+            return f"g{counter[0]}"
+
+        pattern = "".join(_group_pattern(rng, 0, namer) for _ in range(rng.randrange(1, 3)))
+
+        yield {
+            "generator": "groups",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -422,6 +536,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "classes":
         yield from _generate_classes(rng, count)
+        return
+
+    if name == "groups":
+        yield from _generate_groups(rng, count)
         return
 
     dotted = name == "literal-dot"
