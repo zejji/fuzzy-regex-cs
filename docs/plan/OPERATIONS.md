@@ -119,6 +119,29 @@ After Phase 1, recalibrate: `docs/plan/slice-log.jsonl` will hold what each slic
 
   Approve (or adjust) the slices, then restart the driver.
 
+## If you are orchestrating (running slices and checking them)
+
+Short on purpose. Anything whose cost of forgetting is high belongs in a script that fails, not in
+this list.
+
+- **Launch the driver detached, never as a background tool call.** Measured 2026-08-31: a
+  backgrounded driver was killed by the harness 42 minutes in, mid-slice, before it could roll back
+  or rescue. Detaching removes the dependency entirely.
+- **Arm a heartbeat monitor in the same turn you launch.** It must print every few minutes whether
+  or not anything changed. A monitor that only emits on change is silent for the whole run and
+  tells you nothing.
+- **Verify every slice yourself**: run the ratchet and read the numbers, confirm a clean tree, the
+  commit, the slice file moved to `done/`, and reproduce the slice's own evidence rather than
+  reading it out of the closing notes. Where a slice claims to have CHANGED behaviour, prove it
+  with a before/after control against the previous commit.
+- **Maintenance is its own commit**, made between slices. Editing a tracked file while a slice runs
+  sweeps it into that slice's commit.
+- **Nothing is filed on upstream without the owner approving the drafted text.** `gh` is
+  deliberately absent from the driver's allowlist so an unattended session cannot post; keep it so.
+- **Prefer a graceful finish to a force kill.** The driver kills a session at
+  `sliceTimeoutMinutes`. The slice session is reachable as a peer via `ListAgents` and
+  `SendMessage`, so warn it in time to commit instead.
+
 ## Safeguards (why this doesn't descend into a mess)
 
 1. **Parity ratchet in CI and in the driver:** no commit lands if any previously-passing test

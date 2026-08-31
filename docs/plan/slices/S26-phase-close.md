@@ -61,6 +61,8 @@ sweep are each checkable and their outputs quoted.
       deferred-to-named-phase; prefilter contingency checked and recorded.
 - [ ] No test remains skipped on a tag Phase 3 delivered; `docs/STATUS.md` regenerated and the
       overall parity figure quoted in the closing notes.
+- [ ] `CHANGELOG.md` gains Phase 3's entry. Pre-1.0 it tracks phases, not slices, so a phase
+      close is the only place it is written.
 - [ ] Roadmap updated with Phase 3's measured rate; STATE.md says Phase 3 is complete and the
       driver stops at the boundary; Phase 4 handover notes written.
 - [ ] Ratchet GREEN, baseline updated, blind review over this slice's unreviewed changes (hunt:
