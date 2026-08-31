@@ -20,7 +20,6 @@ public sealed class CategoryAndNegatedSetTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_not_literal#2")]
-    [Skip("needs:quantifiers - '([^a]*)' repeats a negated set")]
     public void Negated_set_star_captures_the_run_after_whitespace() =>
         FuzzyRegex.Match(" bb", "\\s([^a]*)").Groups[1].Value.Should().Be("bb");
 }

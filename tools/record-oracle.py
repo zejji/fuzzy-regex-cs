@@ -263,7 +263,7 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
-GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups")
+GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups", "quantifiers")
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
 # literal. Every one is a plain anchor: word and grapheme boundaries are S20 and would only produce
@@ -524,6 +524,128 @@ def _generate_groups(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S19's generator: greedy and lazy quantifiers, the ONE fast paths, and the repeat guards
+# --------------------------------------------------------------------------------------------
+
+# What a quantifier is put on. Every one consumes exactly one character, so the count a repeat
+# reports is a character count and the span it reports is in UTF-16 code units - the whole reason
+# S19 needed 'StepBy' and 'CountBetween'. A quantified single-character atom compiles to
+# GREEDY_REPEAT_ONE / LAZY_REPEAT_ONE, which is the fast path with its own backtrack sub-switch, so
+# these reach different code from the group shapes below.
+QUANT_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d", r"\s", "[a-c]")
+
+# The quantifiers, as (suffix, weight). '{m,n}' forms are drawn separately so m and n vary. Weighted
+# towards '*' and '+' because those are what real patterns hold, and because a wave that is mostly
+# '{7,9}' spends its rows on counts no subject this short can reach.
+QUANTIFIERS = ("*", "+", "?", "{m}", "{m,}", "{m,n}")
+QUANTIFIER_WEIGHTS = (25, 25, 15, 10, 10, 15)
+
+# The bounds a '{m,n}' draws from. Kept at or below the subject length, so a bounded repeat has a
+# real chance of both reaching and exceeding its minimum - which is where an off-by-one at either
+# boundary shows up.
+QUANT_BOUNDS = (0, 1, 2, 3)
+
+# How a quantified fragment is wrapped. 'group' is the one that makes the captures observable: a
+# repeated capture group keeps one capture per iteration, and 'Group.Captures' has to agree with
+# 'match.spans(n)' row for row. 'nested' is a quantifier on a group that itself holds a quantifier,
+# which is the only way to reach RE_STATUS_INNER and the BODY_END / MATCH_BODY / MATCH_TAIL markers
+# with a repeat inside a repeat. 'empty-body' is the '(a?)*' shape whose body can match nothing at
+# all, where the position guards are the only thing that terminates the match.
+QUANT_SHAPES = ("atom", "group", "noncapture", "nested", "empty-body")
+QUANT_SHAPE_WEIGHTS = (34, 26, 12, 18, 10)
+
+# Short, because a quantifier already explores many lengths at each start position and a long subject
+# multiplies that by the number of start positions a search tries. The astral alphabet is here so a
+# repeat count reported in codepoints rather than UTF-16 code units diverges from the first wave.
+QUANT_SUBJECT_ALPHABETS = ("ab", "abx", "ab \t", "ab\U0001f600\U0001d518")
+
+MAX_QUANT_SUBJECT_LENGTH = 6
+MAX_QUANT_FRAGMENTS = 2
+
+# How deep a generated pattern nests one quantified group inside another. Two reaches everything that
+# matters - a repeat inside a repeat, so RE_STATUS_INNER and the BODY_END / MATCH_BODY / MATCH_TAIL
+# markers, and a capture group closing inside an outer iteration - and the cap is a hard one because
+# a quantifier nested four deep is how a generator accidentally emits a catastrophic pattern and
+# stalls the wave.
+MAX_QUANT_DEPTH = 2
+
+
+def _quantifier(rng: random.Random) -> str:
+    """One quantifier suffix, greedy or lazy.
+
+    Never possessive ('*+', Phase 4) and never doubled ('a*?*', which upstream rejects outright with
+    "multiple repeat"), because a generator that emits either produces rows that say nothing about
+    this slice: the first is `unsupported`, the second is a parse error both sides agree on.
+    """
+    form = rng.choices(QUANTIFIERS, weights=QUANTIFIER_WEIGHTS)[0]
+
+    if form == "{m}":
+        form = "{%d}" % rng.choice(QUANT_BOUNDS)
+    elif form == "{m,}":
+        form = "{%d,}" % rng.choice(QUANT_BOUNDS)
+    elif form == "{m,n}":
+        low = rng.choice(QUANT_BOUNDS)
+        form = "{%d,%d}" % (low, low + rng.randrange(3))
+
+    return form + ("?" if rng.random() < 0.35 else "")
+
+
+def _quant_fragment(rng: random.Random, depth: int) -> str:
+    shape = rng.choices(QUANT_SHAPES, weights=QUANT_SHAPE_WEIGHTS)[0]
+    if depth >= MAX_QUANT_DEPTH:
+        shape = "atom"
+    elif depth > 0 and shape in ("nested", "empty-body"):
+        shape = "atom"
+
+    if shape == "atom":
+        return rng.choice(QUANT_ATOMS) + _quantifier(rng)
+
+    if shape == "empty-body":
+        # '(a?)*': the body can match nothing, so the guards are what stops the repeat re-entering
+        # its own body at the same position for ever. Upstream reports the empty final iteration as a
+        # capture of its own, which is what makes this observable rather than merely terminating.
+        return "(%s?)%s" % (rng.choice(QUANT_ATOMS), rng.choice(("*", "*?", "+", "+?")))
+
+    inner = "".join(_quant_fragment(rng, depth + 1) for _ in range(rng.randrange(1, 3)))
+
+    if shape == "group":
+        return "(%s)%s" % (inner, _quantifier(rng))
+    if shape == "noncapture":
+        return "(?:%s)%s" % (inner, _quantifier(rng))
+
+    # 'nested': a quantifier on a group holding a quantifier.
+    return "(%s%s)%s" % (rng.choice(QUANT_ATOMS), _quantifier(rng), _quantifier(rng))
+
+
+def _generate_quantifiers(rng: random.Random, count: int):
+    """S19's generator: greedy and lazy repeats over atoms, groups and nested repeats.
+
+    The subject is drawn independently of the pattern rather than sliced out of it: a quantifier
+    already matches a range of lengths, so an independent draw gives a healthy mix without the
+    substring trick the literal generators use. Measured over 300 rows of seed 1: 174 match, 126 do
+    not, 58 with an astral subject, no parse errors at all, and the slowest row took 0.05ms upstream.
+    """
+    for i in range(count):
+        alphabet = QUANT_SUBJECT_ALPHABETS[i % len(QUANT_SUBJECT_ALPHABETS)]
+        subject = "".join(
+            rng.choice(alphabet) for _ in range(rng.randrange(MAX_QUANT_SUBJECT_LENGTH + 1))
+        )
+
+        pattern = "".join(
+            _quant_fragment(rng, 0) for _ in range(rng.randrange(1, MAX_QUANT_FRAGMENTS + 1))
+        )
+
+        yield {
+            "generator": "quantifiers",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -540,6 +662,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "groups":
         yield from _generate_groups(rng, count)
+        return
+
+    if name == "quantifiers":
+        yield from _generate_quantifiers(rng, count)
         return
 
     dotted = name == "literal-dot"

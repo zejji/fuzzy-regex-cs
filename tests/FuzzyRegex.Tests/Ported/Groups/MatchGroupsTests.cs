@@ -50,9 +50,6 @@ public sealed class MatchGroupsTests
     [Arguments("bc", "bc", "b", false, null, true, "b", true, "c")]
     [Arguments("bc", "bc", "b", false, null, true, "b", true, "c")]
     [Property("Upstream", "RegexTests.test_re_match#6-10")]
-    [Skip(
-        "needs:quantifiers - the alternation and the whole group surface land in S18, but '((a)|(b))(c)?' ends in an optional group"
-    )]
     public void Alternation_with_a_trailing_optional_group_reports_every_group(
         string subject,
         string whole,
@@ -104,7 +101,6 @@ public sealed class MatchGroupsTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#15")]
-    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Multiple_numbered_groups_can_be_requested_together()
     {
         Match m = FuzzyRegex.MatchAtStart("a", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
@@ -116,7 +112,6 @@ public sealed class MatchGroupsTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#16")]
-    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Multiple_named_groups_can_be_requested_together()
     {
         Match m = FuzzyRegex.MatchAtStart("b", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
@@ -128,7 +123,6 @@ public sealed class MatchGroupsTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#17")]
-    [Skip("needs:quantifiers - '(?P<c3>c)?' is an optional group")]
     public void Numbered_and_named_group_requests_can_be_mixed()
     {
         Match m = FuzzyRegex.MatchAtStart("ac", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");

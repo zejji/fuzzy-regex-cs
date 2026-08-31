@@ -48,7 +48,6 @@ public sealed class VariousEscapeTests
     [Arguments("\\w+", "--ab_cd0123--", "0", new string?[] { "ab_cd0123" })]
     [Arguments("\\D+", "1234abc5678", "0", new string?[] { "abc" })]
     [Arguments(".*?\\S *:", "xx:", "0", new string?[] { "xx:" })]
-    [Skip("needs:quantifiers - the matcher has no repeat opcode yet")]
     [Property("Upstream", "RegexTests.test_various#488,490,506")]
     public void Search_with_a_quantifier_returns_the_expected_group_values(
         string pattern,
@@ -66,7 +65,6 @@ public sealed class VariousEscapeTests
     // Split out at S17: also needs quantifiers, but START_GROUP is the opcode it reaches first.
     // Retagged at S18, which delivered START_GROUP; the three '\s*'/'\S*' repeats are S19's.
     [Test]
-    [Skip("needs:quantifiers - '(\\s*)(\\S*)(\\s*)' repeats a class in each of its three groups")]
     [Property("Upstream", "RegexTests.test_various#494")]
     public void Search_with_groups_returns_the_expected_group_values()
     {

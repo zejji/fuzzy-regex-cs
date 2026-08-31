@@ -16,7 +16,6 @@ public sealed class SearchStarPlusTests
     [Arguments("a*", "xxx", 0, 0)]
     [Arguments("x*", "axx", 0, 0)]
     [Arguments("x+", "axx", 1, 3)]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_search_star_plus#1-4")]
     public void Search_spans(string pattern, string subject, int start, int end)
     {
@@ -27,7 +26,6 @@ public sealed class SearchStarPlusTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_search_star_plus#5")]
     public void Search_for_an_absent_literal_does_not_match() =>
         FuzzyRegex.Match("aaa", "x").Success.Should().BeFalse();
@@ -35,7 +33,6 @@ public sealed class SearchStarPlusTests
     [Test]
     [Arguments("a*", "xxx", 0, 0)]
     [Arguments("x*", "xxxa", 0, 3)]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_search_star_plus#6-9")]
     public void MatchAtStart_spans(string pattern, string subject, int start, int end)
     {
@@ -46,7 +43,6 @@ public sealed class SearchStarPlusTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_search_star_plus#10")]
     public void MatchAtStart_requires_the_pattern_to_start_at_the_beginning() =>
         FuzzyRegex.MatchAtStart("xxx", "a+").Success.Should().BeFalse();

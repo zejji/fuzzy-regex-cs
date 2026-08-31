@@ -46,7 +46,6 @@ public sealed class RegressionsConditionalTests
     [Test]
     // Upstream's control for #53: no conditional in this pattern, so it is tagged for the
     // optional group it does need.
-    [Skip("needs:quantifiers - the engine has no optional-group opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#52")]
     public void Optional_non_capturing_group_still_matches_the_longer_alternative() =>
         FuzzyRegex.Match("female", @"(?:fe)?male").Value.Should().Be("female");

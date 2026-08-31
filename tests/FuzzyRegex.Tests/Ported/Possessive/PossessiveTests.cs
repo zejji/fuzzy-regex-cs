@@ -14,7 +14,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Possessive;
 public sealed class PossessiveTests
 {
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#1")]
     public void Optional_a_then_a_backtracks_to_match_a_single_a()
     {
@@ -25,7 +24,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#2")]
     public void Star_a_then_a_backtracks_to_match_the_whole_run()
     {
@@ -36,7 +34,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#3")]
     public void Plus_a_then_a_backtracks_to_match_the_whole_run()
     {
@@ -47,7 +44,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#4")]
     public void Bounded_repeat_a_then_a_backtracks_to_match_the_whole_run()
     {
@@ -58,7 +54,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#5")]
     public void Optional_group_then_group_backtracks_to_match_a_single_group()
     {
@@ -69,7 +64,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#6")]
     public void Star_group_then_group_backtracks_to_match_the_whole_run()
     {
@@ -80,7 +74,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#7")]
     public void Plus_group_then_group_backtracks_to_match_the_whole_run()
     {
@@ -91,7 +84,6 @@ public sealed class PossessiveTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_possessive#8")]
     public void Bounded_repeat_group_then_group_backtracks_to_match_the_whole_run()
     {

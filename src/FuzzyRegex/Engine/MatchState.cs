@@ -166,6 +166,12 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal GroupData[] Groups = [];
 
+    /// <summary>
+    /// Upstream <c>repeats</c>: one entry per repeat in the pattern, indexed by the repeat index
+    /// that a <c>GREEDY_REPEAT</c>-family node carries in <c>values[0]</c>.
+    /// </summary>
+    internal RepeatData[] Repeats = [];
+
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
     internal readonly ByteStack Sstack = new();
 
@@ -287,12 +293,22 @@ internal sealed class MatchState : IDisposable
         // branch-reset group's private number is larger than its public one and START_GROUP indexes
         // by the private one.
         //
-        // NOT PORTED: the repeat, fuzzy-guard and group-call-guard allocations. Their contents
-        // belong to S19 and Phases 4 and 5, and each of those slices allocates what it reads.
+        // NOT PORTED: the fuzzy-guard and group-call-guard allocations. Their contents belong to
+        // Phases 4 and 5, and each of those slices allocates what it reads.
         var groups = new GroupData[pattern.TrueGroupCount];
         for (int g = 0; g < groups.Length; g++)
         {
             groups[g] = new GroupData();
+        }
+
+        // The repeats (state_init_2, upstream/src/_regex.c:18493-18505). Like the groups, upstream
+        // caches the block on the pattern as 'repeats_storage' and reuses it; there is nothing to
+        // port in that cache on a garbage-collected heap, and nothing in 'dealloc_repeats'
+        // (:18630) either, which is three calls to free.
+        var repeats = new RepeatData[pattern.RepeatCount];
+        for (int r = 0; r < repeats.Length; r++)
+        {
+            repeats[r] = new RepeatData();
         }
 
         var state = new MatchState(pattern, text)
@@ -302,6 +318,7 @@ internal sealed class MatchState : IDisposable
             ReqPos = -1,
             IsFuzzy = pattern.IsFuzzy,
             Groups = groups,
+            Repeats = repeats,
         };
 
         // Adjust boundaries.
@@ -446,9 +463,8 @@ internal sealed class MatchState : IDisposable
         // Clear the groups.
         ClearGroups();
 
-        // NOT PORTED: reset_guards (:3383). There are no repeat guards until S19, no fuzzy guards
-        // until Phase 5 and no group-call guards until Phase 4, and a pattern needing any of them
-        // throws at its own opcode before anything could have written one.
+        // Reset the guards.
+        ResetGuards();
 
         // Clear the counts and cost for matching.
         // NOT PORTED: the fuzzy counts, node and change list (Phase 5).
@@ -471,6 +487,99 @@ internal sealed class MatchState : IDisposable
             group.Count = 0;
             group.Current = -1;
         }
+    }
+
+    /// <summary>Upstream <c>reset_guards</c> (<c>upstream/src/_regex.c</c> line 3383).</summary>
+    /// <remarks>
+    /// The fuzzy-section and group-call halves (<c>:3392-3400</c>) are not ported: there are no
+    /// fuzzy guards until Phase 5 and no group-call guards until Phase 4, and a pattern needing
+    /// either throws at its own opcode before anything could have written one.
+    /// </remarks>
+    internal void ResetGuards()
+    {
+        // Reset the guards for the repeats.
+        foreach (RepeatData repeat in Repeats)
+        {
+            repeat.BodyGuardList.Reset();
+            repeat.TailGuardList.Reset();
+        }
+    }
+
+    /// <summary>
+    /// Which of a repeat's two guard lists a guard type names, or <see langword="null"/> when no
+    /// guard of that type is active for that repeat. Upstream spells the same three lines out in
+    /// each of <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446),
+    /// <c>guard_repeat_range</c> (<c>:9534</c>) and <c>is_repeat_guarded</c> (<c>:9559</c>).
+    /// </summary>
+    /// <remarks>
+    /// The three differ in one respect that is <b>not</b> folded in here: <c>is_repeat_guarded</c>
+    /// tests <c>guard_type == RE_STATUS_BODY</c> where the other two test
+    /// <c>guard_type &amp; RE_STATUS_BODY</c>. Every call site passes exactly one of the two bits, so
+    /// the two spellings agree, and <c>&amp;</c> is the one kept.
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <returns>The list, or <see langword="null"/> if this repeat needs no guard of that type.</returns>
+    private GuardList? ActiveGuardList(int index, uint guardType)
+    {
+        // Is a guard active here?
+        if ((Pattern.RepeatInfoAt(index).Status & guardType) == 0)
+        {
+            return null;
+        }
+
+        // Which guard list?
+        RepeatData repeat = Repeats[index];
+        return (guardType & NodeStatus.Body) != 0 ? repeat.BodyGuardList : repeat.TailGuardList;
+    }
+
+    /// <summary>Upstream <c>guard_repeat</c> (<c>upstream/src/_regex.c</c> line 9446).</summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position to guard.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="protect">Whether the span blocks matching or merely records.</param>
+    internal void GuardRepeat(int index, int textPos, uint guardType, bool protect) =>
+        ActiveGuardList(index, guardType)?.Guard(textPos, protect);
+
+    /// <summary>Upstream <c>guard_repeat_range</c> (line 9534).</summary>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="loPos">The lowest position to guard.</param>
+    /// <param name="hiPos">The highest, inclusive.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <param name="protect">Whether the span blocks matching or merely records.</param>
+    internal void GuardRepeatRange(int index, int loPos, int hiPos, uint guardType, bool protect)
+    {
+        GuardList? guardList = ActiveGuardList(index, guardType);
+
+        if (guardList is null)
+        {
+            return;
+        }
+
+        while (loPos <= hiPos)
+        {
+            loPos = guardList.GuardRange(loPos, hiPos, protect);
+        }
+    }
+
+    /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
+    /// <remarks>
+    /// The guards are switched off outright while fuzzy matching, which is upstream's own
+    /// <c>|| state-&gt;is_fuzzy</c>: a fuzzy match may reach the same position again with a
+    /// different error budget, so "already failed here" is not a sound conclusion.
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <param name="guardType"><see cref="NodeStatus.Body"/> or <see cref="NodeStatus.Tail"/>.</param>
+    /// <returns><see langword="true"/> if that position is guarded for that repeat.</returns>
+    internal bool IsRepeatGuarded(int index, int textPos, uint guardType)
+    {
+        if (IsFuzzy)
+        {
+            return false;
+        }
+
+        return ActiveGuardList(index, guardType)?.IsGuarded(textPos) ?? false;
     }
 
     /// <summary>

@@ -14,7 +14,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Quantifiers;
 public sealed class LazyAndRepeatedGroupRecursionTests
 {
     [Test]
-    [Skip("needs:quantifiers - lazy .*? must not recurse per character")]
     [Property("Upstream", "RegexTests.test_bug_418626#1")]
     public void MatchAtStart_lazy_dot_star_c_does_not_overflow_the_stack()
     {
@@ -26,7 +25,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - lazy .*? must not recurse per character")]
     [Property("Upstream", "RegexTests.test_bug_418626#2")]
     public void MatchAtStart_lazy_dot_star_cd_does_not_overflow_the_stack()
     {
@@ -39,7 +37,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - lazy .*? must not recurse per character")]
     [Property("Upstream", "RegexTests.test_bug_418626#3")]
     public void MatchAtStart_lazy_dot_star_cd_handles_a_long_repeated_prefix()
     {
@@ -51,7 +48,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - a lazy alternation repeat must not recurse per character")]
     [Property("Upstream", "RegexTests.test_bug_418626#4")]
     public void Match_lazy_alternation_repeat_does_not_overflow_the_stack()
     {
@@ -63,7 +59,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - a repeated capturing group must not recurse per iteration")]
     [Property("Upstream", "RegexTests.test_stack_overflow#1")]
     public void MatchAtStart_repeated_group_captures_the_last_iteration_without_overflow()
     {
@@ -73,7 +68,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - a repeated capturing group must not recurse per iteration")]
     [Property("Upstream", "RegexTests.test_stack_overflow#2")]
     public void MatchAtStart_repeated_group_before_a_literal_captures_without_overflow()
     {
@@ -83,7 +77,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - a lazy repeated capturing group must not recurse per iteration")]
     [Property("Upstream", "RegexTests.test_stack_overflow#3")]
     public void MatchAtStart_lazy_repeated_group_before_a_literal_captures_without_overflow()
     {

@@ -9,7 +9,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Quantifiers;
 public sealed class RepeatedRepeatsTests
 {
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_repeated_repeats#1")]
     public void Nested_plus_matches_the_whole_run()
     {
@@ -20,7 +19,6 @@ public sealed class RepeatedRepeatsTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_repeated_repeats#2")]
     public void Nested_repeat_of_a_repeated_group_matches_the_whole_run()
     {
@@ -31,7 +29,6 @@ public sealed class RepeatedRepeatsTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - nested repeats need a repeat opcode")]
     [Property("Upstream", "RegexTests.test_repeated_repeats#3")]
     public void Nested_plus_with_a_bounded_outer_repeat_matches_the_whole_run()
     {

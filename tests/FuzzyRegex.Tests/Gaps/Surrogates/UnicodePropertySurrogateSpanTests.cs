@@ -24,7 +24,6 @@ public sealed class UnicodePropertySurrogateSpanTests
     private static readonly string _smilingCatFaceWithOpenMouth = char.ConvertFromUtf32(0x1F63A);
 
     [Test]
-    [Skip("needs:quantifiers - the matcher has no repeat opcode yet")]
     [Property("Upstream", "none - gap test")]
     public void Other_symbol_property_matches_a_non_BMP_emoji_as_two_UTF16_code_units()
     {

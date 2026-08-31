@@ -27,7 +27,6 @@ public sealed class RegressionsBasicMatchingTests
     // Hg issue 88: regex.match() hangs.
     [Test]
     // Retagged in S16: the spine matches literals and '.', but '.*' is a repeat.
-    [Skip("needs:quantifiers - '.*a.*ba.*aa' is three greedy repeats")]
     [Property("Upstream", "RegexTests.test_hg_bugs#59")]
     public void Pattern_that_used_to_hang_fails_to_match_without_hanging() =>
         FuzzyRegex.MatchAtStart("ababba", @".*a.*ba.*aa").Success.Should().BeFalse();
@@ -38,9 +37,6 @@ public sealed class RegressionsBasicMatchingTests
     // Retagged in S16: two capture groups, each holding a repeated negated set. The assertion
     // reads Groups[1] and Groups[2], so S18 is the last thing it waits on.
     [Property("Upstream", "RegexTests.test_hg_bugs#143")]
-    [Skip(
-        "needs:quantifiers - the two capture groups it reads land in S18, but '([^L]*)([^R]*R)' repeats a negated set twice"
-    )]
     public void First_wildcard_group_is_allowed_to_match_empty_so_the_second_can_reach_the_anchor()
     {
         Match m = FuzzyRegex.Match("LtR", "([^L]*)([^R]*R)");
@@ -50,7 +46,6 @@ public sealed class RegressionsBasicMatchingTests
 
     [Test]
     // Retagged in S16: '[ ]*' is a repeated set.
-    [Skip("needs:quantifiers - '[ ]* Name[ ]*\\* ' repeats a set twice")]
     [Property("Upstream", "RegexTests.test_hg_bugs#411")]
     public void Trailing_space_in_the_pattern_that_is_absent_from_the_subject_fails_to_match() =>
         new FuzzyRegex(@"[ ]* Name[ ]*\* ").Match("  Name *").Success.Should().BeFalse();
@@ -58,7 +53,6 @@ public sealed class RegressionsBasicMatchingTests
     [Test]
     // Retagged in S16: the pattern is an alternation, which the matcher has no BRANCH case for.
     [Property("Upstream", "RegexTests.test_hg_bugs#412")]
-    [Skip(@"needs:quantifiers - the branch lands in S18, but 'a|\.*pb\.py' has a repeat in its second arm")]
     public void Alternation_with_a_literal_dot_branch_does_not_falsely_match() =>
         new FuzzyRegex(@"a|\.*pb\.py").Match(".geojs").Success.Should().BeFalse();
 
@@ -79,7 +73,6 @@ public sealed class RegressionsBasicMatchingTests
     // Hg issue 327: .fullmatch() causes MemoryError.
     [Test]
     // Retagged in S16: FullMatch itself works now; '((\d)*?)*?' is nested lazy repeats.
-    [Skip("needs:quantifiers - '((\\d)*?)*?' is two nested lazy repeats over a set")]
     [Property("Upstream", "RegexTests.test_hg_bugs#376")]
     public void Nested_lazy_star_groups_fully_match_without_exhausting_memory()
     {

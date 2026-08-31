@@ -15,7 +15,6 @@ public sealed class Bug448951Tests
     [Arguments("")]
     [Arguments("?")]
     [Arguments("*")]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_bug_448951#1")]
     public void A_leading_optional_group_may_be_absent(string op)
     {
@@ -30,7 +29,6 @@ public sealed class Bug448951Tests
     [Arguments("")]
     [Arguments("?")]
     [Arguments("*")]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_bug_448951#2")]
     public void A_leading_optional_group_captures_greedily_when_present(string op)
     {

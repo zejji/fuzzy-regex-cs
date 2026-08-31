@@ -17,7 +17,6 @@ public sealed class Bug725106Tests
     [Arguments("^(([ab])|c)*?d", "abcd", "abcd", "c", "b")]
     [Arguments("^((d)|[ab])*?c", "abc", "abc", "b", null)]
     [Arguments("^((a)c|[ab])*?c", "abc", "abc", "b", null)]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_bug_725106#1-8")]
     public void The_last_repeat_iteration_leaves_its_group_captures(
         string pattern,

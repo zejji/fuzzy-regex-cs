@@ -88,7 +88,6 @@ public sealed class VariousQuantifierTests
     [Arguments("a(?:b|(c|e){1,2}?|d)+?(.)", "ace", "1,2", new string?[] { "c", "e" })]
     [Arguments(".*d", "abc\nabd", "0", new string?[] { "abd" })]
     [Arguments("(x?)?", "x", "0", new string?[] { "x" })]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#58-62,65-67,69,79,127-128,132-135,139,142-144,149-150,157,169-170,190,199,220-225,229-232,234-236,238-239,249,277-278,284-285,287-293,297,302-304,309-310,317,333-334,470-473,497,500"
@@ -119,7 +118,6 @@ public sealed class VariousQuantifierTests
     [Arguments("ab{4,5}bc", "abbbbc")]
     [Arguments("ab?bc", "abbbbc")]
     [Arguments("a.*c", "axyzd")]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_various#42-43,63-64,68,80,226-228,233,237,250")]
     public void Search_does_not_match(string pattern, string subject) =>
         FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();

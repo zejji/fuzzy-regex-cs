@@ -14,7 +14,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Quantifiers;
 public sealed class GuardsTests
 {
     [Test]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_guards#1")]
     public void A_bounded_repeat_of_a_group_stops_backtracking_at_the_last_successful_repetition()
     {
@@ -26,7 +25,6 @@ public sealed class GuardsTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_guards#2")]
     public void An_unbounded_minimum_repeat_of_a_group_still_starts_at_the_earliest_possible_match()
     {
@@ -38,7 +36,7 @@ public sealed class GuardsTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - needs repeat opcodes and lookaround (a negative lookahead); the engine has neither yet")]
+    [Skip("needs:lookaround - the repeats work from S19, but '(?!\\d)' is a negative lookahead")]
     [Property("Upstream", "RegexTests.test_guards#3")]
     public void An_optional_group_that_does_not_participate_reports_no_success()
     {
@@ -50,7 +48,6 @@ public sealed class GuardsTests
     }
 
     [Test]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_guards#4")]
     public void A_lazy_bounded_repeat_still_reaches_a_literal_that_only_appears_later()
     {
@@ -63,7 +60,6 @@ public sealed class GuardsTests
     [Test]
     [Arguments("aaaaaa:\nDerde:", 8, 14)]
     [Arguments("aaaaa:\nDerde:", 7, 13)]
-    [Skip("needs:quantifiers - the engine has no repeat opcodes yet")]
     [Property("Upstream", "RegexTests.test_guards#5-6")]
     public void A_lazy_whitespace_repeat_before_a_colon_finds_the_second_occurrence(string subject, int start, int end)
     {

@@ -99,18 +99,10 @@ internal static class Seam
             or Opcode.StringFld
             or Opcode.StringIgn => "ignore-case",
 
-            Opcode.BodyEnd
-            or Opcode.BodyStart
-            or Opcode.EndGreedyRepeat
-            or Opcode.EndLazyRepeat
-            or Opcode.GreedyRepeat
-            or Opcode.GreedyRepeatOne
-            or Opcode.LazyRepeat
-            or Opcode.LazyRepeatOne
-            or Opcode.MatchBody
-            or Opcode.MatchTail
-            or Opcode.TailStart => "quantifiers",
-
+            // S19 delivered the whole GREEDY_REPEAT / LAZY_REPEAT / *_REPEAT_ONE family and the
+            // BODY_*, MATCH_* and TAIL_START backtrack markers, so 'quantifiers' has no arm here -
+            // naming a delivered tag would put a capability the status board says we have on an
+            // oracle 'unsupported' row and in a stack trace (the S17 blind review found that).
             Opcode.RefGroup or Opcode.RefGroupFld or Opcode.RefGroupIgn => "backrefs",
 
             Opcode.Conditional or Opcode.EndConditional or Opcode.GroupExists => "conditionals",
@@ -160,8 +152,15 @@ internal static class Seam
 /// <b>Deferred to Phase 7</b>, all of them semantically transparent prefilters: the required-string
 /// locator (<c>locate_required_string</c>, <c>:11082</c>), <c>search_start</c> and the
 /// <c>string_search</c> family (<c>:5231-6918</c>), and the test-node fast path (<c>try_match</c>,
-/// <c>:6919-7686</c>). Without them the search tries the pattern at every position, which is slower
-/// and answers the same.
+/// <c>:7671</c>). Without them the search tries the pattern at every position, which is slower and
+/// answers the same. <b>They are not only a speed matter</b>: the required-string locator is the
+/// whole reason upstream answers <c>'(a|a)*b'</c> against a subject holding no <c>'b'</c>
+/// instantly, where this port runs the exponential search. Measured 2026-08-31; DECISIONS has the
+/// numbers.
+/// </para>
+/// <para>
+/// The test-node fast path (<c>try_match</c>, <c>:7671</c>) is deferred too, and S19 measured what
+/// that costs before putting it back: nothing it could find. See <see cref="TryMatch"/>.
 /// </para>
 /// </remarks>
 internal static class Matcher
@@ -399,6 +398,195 @@ internal static class Matcher
         };
 
     /// <summary>
+    /// What the <c>match_many_*</c> family asks of one character, for the opcodes a
+    /// <c>*_REPEAT_ONE</c> node can repeat. Not an upstream function: upstream writes a
+    /// <c>match_many_X</c> per opcode - ANY (<c>upstream/src/_regex.c</c> line 3537), ANY_U
+    /// (<c>:3647</c>), CHARACTER (<c>:3803</c>), PROPERTY (<c>:4045</c>), RANGE (<c>:4485</c>) and
+    /// SET (<c>:4737</c>) - and each is the same loop over three character widths with a different
+    /// predicate. This is the predicate; <see cref="CountOne"/> is the loop.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's ANY and ANY_U compare against the <c>match</c> argument their caller passed, where
+    /// the CHARACTER, PROPERTY, RANGE and SET family folds <c>node-&gt;match</c> in first
+    /// (<c>match = node-&gt;match == match</c>, <c>:3809</c>, <c>:4053</c> and so on). Every
+    /// <c>count_one</c> call passes <c>TRUE</c>, so the difference is only that ANY ignores
+    /// <c>node-&gt;match</c>; <c>.</c> is never negated, so the two agree, and the distinction is
+    /// kept because keeping it is free. ANY_ALL has no <c>match_many</c> at all - <c>count_one</c>
+    /// takes the whole slice for it (<c>:5009</c>) - which is what a predicate of
+    /// <see langword="true"/> says.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The repeated node.</param>
+    /// <param name="pos">The position.</param>
+    /// <returns><see langword="true"/> if the character there is one more repeat.</returns>
+    private static bool MatchesMany(MatchState state, Node node, int pos)
+    {
+        uint ch = state.CharAt(pos);
+
+        return node.Op switch
+        {
+            Opcode.Any => MatchesAny(ch),
+            Opcode.AnyAll => true,
+            Opcode.AnyU => MatchesAnyU(state.Encoding, ch),
+            _ => MatchesOne(state.Encoding, node, ch) == node.Match,
+        };
+    }
+
+    /// <summary>
+    /// Upstream <c>count_one</c> (<c>upstream/src/_regex.c</c> line 4989), reduced to the forward,
+    /// case-sensitive opcodes this port matches: how many times
+    /// <paramref name="node"/> repeats from <paramref name="textPos"/>, up to
+    /// <paramref name="maxCount"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's arms are each three statements - clamp the count to what is left of the slice, run
+    /// the opcode's <c>match_many_X</c> as far as that, then subtract the positions to get the count
+    /// back - and both bounds only ever stop the same walk, so one loop carrying both says the same
+    /// thing. Doing it in one pass also avoids walking the subject twice, which the codepoint /
+    /// UTF-16 split would otherwise force.
+    /// </para>
+    /// <para>
+    /// <b><paramref name="endPos"/> is not an upstream out-parameter.</b> Upstream's callers do
+    /// <c>text_pos += (Py_ssize_t)count * node-&gt;step</c>, which works because it indexes the
+    /// subject by codepoint, so a character count and a subject offset are the same number. Ours are
+    /// UTF-16 code unit indices, so the walk's end position is returned rather than recomputed by
+    /// multiplication - see <see cref="StepBy"/> for the sites where a position genuinely has to be
+    /// derived from a count.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The repeated node, which matches exactly one character.</param>
+    /// <param name="textPos">Where to start counting.</param>
+    /// <param name="maxCount">The most repeats to count.</param>
+    /// <param name="isPartial">
+    /// Receives upstream's <c>*is_partial</c>: the count ran out of subject rather than out of
+    /// matches, and a partial match on the right was asked for.
+    /// </param>
+    /// <param name="endPos">Receives the position the count reached.</param>
+    /// <returns>The number of repeats.</returns>
+    internal static long CountOne(
+        MatchState state,
+        Node node,
+        int textPos,
+        long maxCount,
+        out bool isPartial,
+        out int endPos
+    )
+    {
+        isPartial = false;
+        endPos = textPos;
+
+        if (maxCount < 1)
+        {
+            return 0;
+        }
+
+        switch (node.Op)
+        {
+            case Opcode.Any:
+            case Opcode.AnyAll:
+            case Opcode.AnyU:
+            case Opcode.Character:
+            case Opcode.Property:
+            case Opcode.Range:
+            case Opcode.SetDiff:
+            case Opcode.SetInter:
+            case Opcode.SetSymDiff:
+            case Opcode.SetUnion:
+                break;
+            default:
+                // Upstream's switch has no default at all, so an opcode it does not list falls off
+                // the end of the function with 'count' uninitialised. Every opcode that reaches
+                // here is one 'SequenceMatchesOne' accepted, so the ones missing from the list
+                // above are the case-insensitive (S22) and reverse (S23) halves.
+                throw Seam.For(node.Op);
+        }
+
+        long count = 0;
+        int pos = textPos;
+
+        while (count < maxCount && pos < state.SliceEnd && MatchesMany(state, node, pos))
+        {
+            pos = state.NextPos(pos);
+            ++count;
+        }
+
+        endPos = pos;
+
+        // Upstream's 'count == (size_t)(state->text_end - text_pos)': the walk consumed everything
+        // there was, which in code-unit indices is the walk having stopped at 'text_end'.
+        isPartial = pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
+
+        return count;
+    }
+
+    /// <summary>
+    /// Upstream <c>text_pos + (Py_ssize_t)count * step</c>: <paramref name="count"/> characters
+    /// along from <paramref name="pos"/>, in the direction <paramref name="step"/> runs.
+    /// </summary>
+    /// <remarks>
+    /// Not an upstream function, and it exists for exactly one reason: upstream indexes the subject
+    /// by codepoint, so it can multiply a character count by a step to get an offset, and this port
+    /// indexes by UTF-16 code unit, where an astral character is one character and two units. The
+    /// walk stops at the slice bound, which upstream gets for free - its own product cannot pass the
+    /// bound, because every count it multiplies came from <see cref="CountOne"/> or from a count of
+    /// what is left of the slice.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">The position to start from.</param>
+    /// <param name="count">How many characters to step.</param>
+    /// <param name="step">Upstream's step: 1 forwards, -1 backwards.</param>
+    /// <returns>The stepped position.</returns>
+    private static int StepBy(MatchState state, int pos, long count, long step)
+    {
+        if (step > 0)
+        {
+            for (long i = 0; i < count && pos < state.SliceEnd; i++)
+            {
+                pos = state.NextPos(pos);
+            }
+        }
+        else if (step < 0)
+        {
+            for (long i = 0; i < count && pos > state.SliceStart; i++)
+            {
+                pos = state.PrevPos(pos);
+            }
+        }
+
+        return pos;
+    }
+
+    /// <summary>
+    /// Upstream <c>abs_ssize_t(pos - state-&gt;text_pos)</c> where that difference is a count of
+    /// characters (<c>upstream/src/_regex.c</c> lines 16297 and 17058), and
+    /// <c>slice_end - text_pos</c> where that is (<c>:16486</c>).
+    /// </summary>
+    /// <remarks>
+    /// The inverse of <see cref="StepBy"/> and there for the same reason. A subtraction of UTF-16
+    /// indices counts code units, and every one of these sites means characters.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="from">One position.</param>
+    /// <param name="to">The other.</param>
+    /// <returns>How many characters lie between them.</returns>
+    private static long CountBetween(MatchState state, int from, int to)
+    {
+        int pos = Math.Min(from, to);
+        int end = Math.Max(from, to);
+        long count = 0;
+
+        while (pos < end)
+        {
+            pos = state.NextPos(pos);
+            ++count;
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Upstream <c>ascii_at_line_start</c> / <c>unicode_at_line_start</c>
     /// (<c>upstream/src/_regex.c</c> lines 899 and 1942). Upstream reaches these through the
     /// encoding table; they take the state, so they live here rather than in
@@ -557,6 +745,65 @@ internal static class Matcher
     internal static int TryMatchStartOfString(MatchState state, int textPos) =>
         MatchStatus.From(textPos <= state.TextStart);
 
+    /// <summary>
+    /// Upstream <c>try_match_CHARACTER</c> (<c>upstream/src/_regex.c</c> line 7026),
+    /// <c>try_match_PROPERTY</c> (<c>:7154</c>), <c>try_match_RANGE</c> (<c>:7220</c>) and
+    /// <c>try_match_SET</c> (<c>:7292</c>), which are the same six lines with a different
+    /// <c>matches_*</c> predicate - the switch <see cref="MatchesOne"/> already makes.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchOne(MatchState state, Node node, int textPos)
+    {
+        if (textPos >= state.TextEnd)
+        {
+            return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
+        }
+
+        return MatchStatus.From(
+            textPos < state.SliceEnd && MatchesOne(state.Encoding, node, state.CharAt(textPos)) == node.Match
+        );
+    }
+
+    /// <summary>
+    /// Upstream <c>match_one</c> (<c>upstream/src/_regex.c</c> line 11373), reduced to the forward,
+    /// case-sensitive opcodes this port matches.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's default arm answers <c>FALSE</c> for an opcode it has no <c>try_match_*</c> for.
+    /// Here that would turn a construct a later slice delivers into a silent "no repeat here", so
+    /// the leaf throws instead - the S07 rule. The only caller is the <c>LAZY_REPEAT_ONE</c>
+    /// backtrack case, whose node is whatever <c>SequenceMatchesOne</c> accepted, so what is missing
+    /// from the list is the case-insensitive (S22) and reverse (S23) halves.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int MatchOne(MatchState state, Node node, int textPos) =>
+        node.Op switch
+        {
+            Opcode.Any => TryMatchAny(state, textPos),
+            Opcode.AnyAll => TryMatchAnyAll(state, textPos),
+            Opcode.AnyU => TryMatchAnyU(state, textPos),
+            Opcode.Character
+            or Opcode.Property
+            or Opcode.Range
+            or Opcode.SetDiff
+            or Opcode.SetInter
+            or Opcode.SetSymDiff
+            or Opcode.SetUnion => TryMatchOne(state, node, textPos),
+            _ => throw Seam.For(node.Op),
+        };
+
+    /// <summary>Upstream <c>at_end</c> (<c>upstream/src/_regex.c</c> line 11628).</summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if matching has reached the far end of the slice.</returns>
+    private static bool AtEnd(MatchState state) =>
+        state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd;
+
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
     /// <param name="span1">One span.</param>
     /// <param name="span2">The other.</param>
@@ -643,17 +890,236 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Port of <c>RE_BodyEndStateData</c> (<c>upstream/src/_regex.c</c> lines 433-438): what
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> park so that backtracking into the body
+    /// can restore the repeat to what it was before this iteration.
+    /// </summary>
+    /// <param name="Count">The repeat's count before this iteration.</param>
+    /// <param name="Start">Where this iteration of the body started.</param>
+    /// <param name="CaptureChange">The repeat's capture-change counter before this iteration.</param>
+    /// <param name="Index">The repeat index.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct BodyEndStateData(long Count, int Start, long CaptureChange, int Index);
+
+    /// <summary>
+    /// Port of <c>RE_RepeatStateData</c> (lines 440-446): what <c>GREEDY_REPEAT</c> and
+    /// <c>LAZY_REPEAT</c> park so that backtracking out of the repeat altogether restores the
+    /// enclosing one - the same repeat index is reused by every nesting level.
+    /// </summary>
+    /// <param name="Count">The enclosing repeat's count.</param>
+    /// <param name="Start">The enclosing repeat's start.</param>
+    /// <param name="CaptureChange">The enclosing repeat's capture-change counter.</param>
+    /// <param name="Index">The repeat index.</param>
+    /// <param name="TextPos">Where the repeat was entered.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct RepeatStateData(long Count, int Start, long CaptureChange, int Index, int TextPos);
+
+    /// <summary>
+    /// Port of <c>RE_MatchBodyTailStateData</c> (lines 424-431): what a repeat parks when
+    /// <b>both</b> its body and its tail could match, so that the loser of the two can still be
+    /// tried before backtracking any further.
+    /// </summary>
+    /// <param name="Position">Where to resume - the node and the text position.</param>
+    /// <param name="Count">The repeat's count to restore first.</param>
+    /// <param name="Start">The repeat's start to restore first.</param>
+    /// <param name="CaptureChange">The repeat's capture-change counter to restore first.</param>
+    /// <param name="Index">The repeat index.</param>
+    /// <param name="TextPos">The position the loser is being tried at, for its own guard.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct MatchBodyTailStateData(
+        Position Position,
+        long Count,
+        int Start,
+        long CaptureChange,
+        int Index,
+        int TextPos
+    );
+
+    /// <summary>
+    /// Port of <c>RE_RepeatOneStateData</c> (lines 448-453): what <c>GREEDY_REPEAT_ONE</c> and
+    /// <c>LAZY_REPEAT_ONE</c> park so their backtrack case can walk the repeat one character at a
+    /// time.
+    /// </summary>
+    /// <param name="Count">The enclosing repeat's count.</param>
+    /// <param name="Start">The enclosing repeat's start.</param>
+    /// <param name="Node">The repeat node itself, which the backtrack case resumes from.</param>
+    /// <param name="Index">The repeat index.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct RepeatOneStateData(long Count, int Start, Node Node, int Index);
+
+    /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_be, sizeof(data_be))</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data)
+    {
+        stack.PushSize(data.Count);
+        stack.PushSize(data.Start);
+        stack.PushSize(data.CaptureChange);
+        stack.PushSize(data.Index);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data)
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long index)
+            || !stack.PopSize(out long captureChange)
+            || !stack.PopSize(out long start)
+            || !stack.PopSize(out long count)
+        )
+        {
+            return false;
+        }
+
+        data = new BodyEndStateData(count, (int)start, captureChange, (int)index);
+        return true;
+    }
+
+    /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_r, sizeof(data_r))</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data)
+    {
+        stack.PushSize(data.Count);
+        stack.PushSize(data.Start);
+        stack.PushSize(data.CaptureChange);
+        stack.PushSize(data.Index);
+        stack.PushSize(data.TextPos);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data)
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long textPos)
+            || !stack.PopSize(out long index)
+            || !stack.PopSize(out long captureChange)
+            || !stack.PopSize(out long start)
+            || !stack.PopSize(out long count)
+        )
+        {
+            return false;
+        }
+
+        data = new RepeatStateData(count, (int)start, captureChange, (int)index, (int)textPos);
+        return true;
+    }
+
+    /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_mbt, sizeof(data_mbt))</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data)
+    {
+        stack.PushNode(data.Position.Node);
+        stack.PushSize(data.Position.TextPos);
+        stack.PushSize(data.Count);
+        stack.PushSize(data.Start);
+        stack.PushSize(data.CaptureChange);
+        stack.PushSize(data.Index);
+        stack.PushSize(data.TextPos);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="pattern">The pattern the parked node index is into.</param>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopMatchBodyTailStateData(
+        PatternObject pattern,
+        ByteStack stack,
+        out MatchBodyTailStateData data
+    )
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long textPos)
+            || !stack.PopSize(out long index)
+            || !stack.PopSize(out long captureChange)
+            || !stack.PopSize(out long start)
+            || !stack.PopSize(out long count)
+            || !stack.PopSize(out long positionTextPos)
+            || !stack.PopNode(pattern, out Node? positionNode)
+        )
+        {
+            return false;
+        }
+
+        data = new MatchBodyTailStateData(
+            new Position(positionNode!, (int)positionTextPos),
+            count,
+            (int)start,
+            captureChange,
+            (int)index,
+            (int)textPos
+        );
+        return true;
+    }
+
+    /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_ro, sizeof(data_ro))</c>.</summary>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushRepeatOneStateData(ByteStack stack, RepeatOneStateData data)
+    {
+        stack.PushSize(data.Count);
+        stack.PushSize(data.Start);
+        stack.PushNode(data.Node);
+        stack.PushSize(data.Index);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="pattern">The pattern the parked node index is into.</param>
+    /// <param name="stack">The backtracking stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopRepeatOneStateData(PatternObject pattern, ByteStack stack, out RepeatOneStateData data)
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long index)
+            || !stack.PopNode(pattern, out Node? node)
+            || !stack.PopSize(out long start)
+            || !stack.PopSize(out long count)
+        )
+        {
+            return false;
+        }
+
+        data = new RepeatOneStateData(count, (int)start, node!, (int)index);
+        return true;
+    }
+
+    /// <summary>
     /// Upstream <c>try_match</c> (<c>upstream/src/_regex.c</c> line 7671), <b>reduced to its default
-    /// arm</b> (<c>:7842</c>).
+    /// arm</b> (<c>:7843</c>).
     /// </summary>
     /// <remarks>
-    /// Upstream looks at <c>next-&gt;test</c> and asks that node's <c>try_match_*</c> predicate
-    /// whether there is any point entering this branch at all, skipping the housekeeping when there
-    /// is not. That is the test-node fast path this port defers to Phase 7 (see the class remarks),
-    /// and deferring it is semantically transparent here: the default arm reports success and leaves
-    /// the position alone, so the branch is entered and its first node is tested by the dispatch loop
-    /// in the ordinary way. Where upstream would have refused the branch, this port enters it and
-    /// backtracks straight back out through the <c>BRANCH</c> backtrack case - slower, same answer.
+    /// <para>
+    /// Upstream looks at <c>next-&gt;test</c>, asks that node's <c>try_match_*</c> predicate whether
+    /// there is any point entering this branch or repeat body at all, and on success resumes at
+    /// <c>next-&gt;match_next</c> with the tested character already consumed. That is the test-node
+    /// fast path this port defers to Phase 7 (see the class remarks). Deferring it is semantically
+    /// transparent: the default arm reports success and leaves the position alone, so the branch is
+    /// entered and its first node is tested by the dispatch loop in the ordinary way. Where upstream
+    /// would have refused the branch, this port enters it and backtracks straight back out - slower,
+    /// same answer.
+    /// </para>
+    /// <para>
+    /// <b>S19 ported the full version and reverted it</b>, because the exponential blowup it was
+    /// meant to fix was not caused by this at all - see DECISIONS 2026-08-31. It measurably fixed
+    /// nothing, and Phase 7 is where an optimisation gets made behind a benchmark.
+    /// </para>
     /// </remarks>
     /// <param name="next">The exit to test.</param>
     /// <param name="textPos">The position to test at.</param>
@@ -1021,6 +1487,316 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                case Opcode.EndGreedyRepeat: // End of a greedy repeat.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    // The body has matched successfully at this position.
+                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+
+                    ++rpData.Count;
+
+                    // Have we advanced through the text or has a capture group change?
+                    bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
+
+                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
+                    // slice: a fuzzy pattern throws in do_match_2 before it gets here.
+                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    {
+                        changed = !(
+                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
+                        );
+                    }
+
+                    // Could the body or tail match?
+                    bool tryBody =
+                        changed
+                        && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
+                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+                    int bodyStatus;
+                    Position nextBodyPosition = default;
+
+                    if (tryBody)
+                    {
+                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        if (bodyStatus < 0)
+                        {
+                            // Unreachable until Phase 7 gives 'try_match' its test-node arm back,
+                            // which is the only thing that can answer PARTIAL here.
+                            if (bodyStatus == MatchStatus.Partial && rpData.Count >= node.Values[1] && AtEnd(state))
+                            {
+                                bodyStatus = MatchStatus.Failure;
+                            }
+                            else
+                            {
+                                return bodyStatus;
+                            }
+                        }
+
+                        if (bodyStatus == MatchStatus.Failure)
+                        {
+                            tryBody = false;
+                        }
+                    }
+                    else
+                    {
+                        bodyStatus = MatchStatus.Failure;
+                    }
+
+                    bool tryTail =
+                        (!changed || rpData.Count >= node.Values[1])
+                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
+                    int tailStatus;
+                    Position nextTailPosition = default;
+
+                    if (tryTail)
+                    {
+                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        if (tailStatus < 0)
+                        {
+                            return tailStatus;
+                        }
+
+                        if (tailStatus == MatchStatus.Failure)
+                        {
+                            tryTail = false;
+                        }
+                    }
+                    else
+                    {
+                        tailStatus = MatchStatus.Failure;
+                    }
+
+                    if (!tryBody && !tryTail)
+                    {
+                        // Neither the body nor the tail could match.
+                        --rpData.Count;
+                        goto backtrack;
+                    }
+
+                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    {
+                        return MatchStatus.Partial;
+                    }
+
+                    // Record info in case we backtrack into the body.
+                    PushBodyEndStateData(
+                        state.Bstack,
+                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                    );
+                    state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
+
+                    /* bstack: count start capture_change index BODY_END */
+
+                    if (tryBody)
+                    {
+                        if (tryTail)
+                        {
+                            // Both the body and the tail could match, but the body takes precedence.
+                            // If the body fails to match then we want to try the tail before
+                            // backtracking further.
+                            PushMatchBodyTailStateData(
+                                state.Bstack,
+                                new MatchBodyTailStateData(
+                                    nextTailPosition,
+                                    rpData.Count,
+                                    state.TextPos,
+                                    state.CaptureChange,
+                                    index,
+                                    state.TextPos
+                                )
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.MatchTail);
+
+                            /* bstack: position count start capture_change index text_pos MATCH_TAIL */
+                        }
+
+                        // Record backtracking info in case the body fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+                        /* bstack: index text_pos BODY_START */
+
+                        rpData.CaptureChange = state.CaptureChange;
+                        rpData.Start = state.TextPos;
+
+                        // Advance into the body.
+                        node = nextBodyPosition.Node;
+                        state.TextPos = nextBodyPosition.TextPos;
+                    }
+                    else
+                    {
+                        // Only the tail could match.
+
+                        // Record backtracking info in case the tail fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+                        /* bstack: index text_pos TAIL_START */
+
+                        // Advance into the tail.
+                        node = nextTailPosition.Node;
+                        state.TextPos = nextTailPosition.TextPos;
+                    }
+
+                    break;
+                }
+                case Opcode.EndLazyRepeat: // End of a lazy repeat.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    // The body has matched successfully at this position.
+                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+
+                    ++rpData.Count;
+
+                    // Have we advanced through the text or has a capture group change?
+                    bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
+
+                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
+                    // slice, as in END_GREEDY_REPEAT above.
+                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    {
+                        changed = !(
+                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
+                        );
+                    }
+
+                    // Could the body or tail match?
+                    bool tryBody =
+                        changed
+                        && (rpData.Count < node.Values[2] || ~node.Values[2] == 0)
+                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+                    int bodyStatus;
+                    Position nextBodyPosition = default;
+
+                    if (tryBody)
+                    {
+                        // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
+                        // minimum has been reached and the text has run out (:12575); this case does
+                        // not, and the asymmetry is upstream's own.
+                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        if (bodyStatus < 0)
+                        {
+                            return bodyStatus;
+                        }
+
+                        if (bodyStatus == MatchStatus.Failure)
+                        {
+                            tryBody = false;
+                        }
+                    }
+                    else
+                    {
+                        bodyStatus = MatchStatus.Failure;
+                    }
+
+                    bool tryTail =
+                        (!changed || rpData.Count >= node.Values[1])
+                        && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Tail);
+                    int tailStatus;
+                    Position nextTailPosition = default;
+
+                    if (tryTail)
+                    {
+                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        if (tailStatus < 0)
+                        {
+                            return tailStatus;
+                        }
+
+                        if (tailStatus == MatchStatus.Failure)
+                        {
+                            tryTail = false;
+                        }
+                    }
+                    else
+                    {
+                        tailStatus = MatchStatus.Failure;
+                    }
+
+                    if (!tryBody && !tryTail)
+                    {
+                        // Neither the body nor the tail could match.
+                        --rpData.Count;
+                        goto backtrack;
+                    }
+
+                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    {
+                        return MatchStatus.Partial;
+                    }
+
+                    // Record info in case we backtrack into the body.
+                    PushBodyEndStateData(
+                        state.Bstack,
+                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                    );
+                    state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
+
+                    /* bstack: count start capture_change index BODY_END */
+
+                    if (tryTail)
+                    {
+                        if (tryBody)
+                        {
+                            // Both the body and the tail could match, but the tail takes precedence.
+                            // If the tail fails to match then we want to try the body before
+                            // backtracking further.
+                            PushMatchBodyTailStateData(
+                                state.Bstack,
+                                new MatchBodyTailStateData(
+                                    nextBodyPosition,
+                                    rpData.Count,
+                                    state.TextPos,
+                                    state.CaptureChange,
+                                    index,
+                                    state.TextPos
+                                )
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.MatchBody);
+
+                            /* bstack: position count start capture_change index text_pos MATCH_BODY */
+                        }
+
+                        // Record backtracking info in case the tail fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+                        /* bstack: index text_pos TAIL_START */
+
+                        // Advance into the tail.
+                        node = nextTailPosition.Node;
+                        state.TextPos = nextTailPosition.TextPos;
+                    }
+                    else
+                    {
+                        // Only the body could match.
+
+                        // Record backtracking info in case the body fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+                        /* bstack: index text_pos BODY_START */
+
+                        rpData.CaptureChange = state.CaptureChange;
+                        rpData.Start = state.TextPos;
+
+                        // Advance into the body.
+                        node = nextBodyPosition.Node;
+                        state.TextPos = nextBodyPosition.TextPos;
+                    }
+
+                    break;
+                }
                 // Upstream gives each of these its own case with the same eleven-line tail copied
                 // out (:12968, :13804, :13914, :14446-14449), differing only in which 'matches_*'
                 // predicate it calls. One case group with the predicate chosen by a switch says the
@@ -1102,6 +1878,404 @@ internal static class Matcher
                     break;
                 case Opcode.Failure: // Failure.
                     goto backtrack;
+                case Opcode.GreedyRepeat: // Greedy repeat.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    // We might need to backtrack into the head, so save the current repeat.
+                    PushRepeatStateData(
+                        state.Bstack,
+                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                    );
+                    state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
+
+                    /* bstack: count start capture_change index text_pos GREEDY_REPEAT */
+
+                    // Initialise the new repeat.
+                    rpData.Count = 0;
+                    rpData.Start = state.TextPos;
+                    rpData.CaptureChange = state.CaptureChange;
+
+                    // Could the body or tail match?
+                    bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+                    int bodyStatus;
+                    Position nextBodyPosition = default;
+
+                    if (tryBody)
+                    {
+                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        if (bodyStatus < 0)
+                        {
+                            return bodyStatus;
+                        }
+
+                        if (bodyStatus == MatchStatus.Failure)
+                        {
+                            tryBody = false;
+                        }
+                    }
+                    else
+                    {
+                        bodyStatus = MatchStatus.Failure;
+                    }
+
+                    bool tryTail = node.Values[1] == 0;
+                    int tailStatus;
+                    Position nextTailPosition = default;
+
+                    if (tryTail)
+                    {
+                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        if (tailStatus < 0)
+                        {
+                            return tailStatus;
+                        }
+
+                        if (tailStatus == MatchStatus.Failure)
+                        {
+                            tryTail = false;
+                        }
+                    }
+                    else
+                    {
+                        tailStatus = MatchStatus.Failure;
+                    }
+
+                    if (!tryBody && !tryTail)
+                    {
+                        // Neither the body nor the tail could match.
+                        goto backtrack;
+                    }
+
+                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    {
+                        return MatchStatus.Partial;
+                    }
+
+                    if (tryBody)
+                    {
+                        if (tryTail)
+                        {
+                            // Both the body and the tail could match, but the body takes precedence.
+                            // If the body fails to match then we want to try the tail before
+                            // backtracking further.
+                            //
+                            // Upstream parks the *repeat's* start and capture change here
+                            // (:13265-13266), where END_GREEDY_REPEAT parks the state's text_pos and
+                            // capture change (:12635-12636). The repeat was reinitialised three
+                            // statements ago, so the two agree on 'start'; the asymmetry is
+                            // upstream's own and is kept.
+                            PushMatchBodyTailStateData(
+                                state.Bstack,
+                                new MatchBodyTailStateData(
+                                    nextTailPosition,
+                                    rpData.Count,
+                                    rpData.Start,
+                                    rpData.CaptureChange,
+                                    index,
+                                    state.TextPos
+                                )
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.MatchTail);
+
+                            /* bstack: position count start capture_change index text_pos MATCH_TAIL */
+                        }
+
+                        // Record backtracking info in case the body fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+                        /* bstack: index text_pos BODY_START */
+
+                        // Advance into the body.
+                        node = nextBodyPosition.Node;
+                        state.TextPos = nextBodyPosition.TextPos;
+                    }
+                    else
+                    {
+                        // Only the tail could match.
+
+                        // Record backtracking info in case the tail fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+                        /* bstack: index text_pos TAIL_START */
+
+                        // Advance into the tail.
+                        node = nextTailPosition.Node;
+                        state.TextPos = nextTailPosition.TextPos;
+                    }
+
+                    break;
+                }
+                case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    if (state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body))
+                    {
+                        goto backtrack;
+                    }
+
+                    // Count how many times the character repeats, up to the maximum.
+                    long count = CountOne(
+                        state,
+                        node.Next2.Node!,
+                        state.TextPos,
+                        node.Values[2],
+                        out bool isPartial,
+                        out int pos
+                    );
+                    if (isPartial)
+                    {
+                        state.TextPos = pos;
+                        return MatchStatus.Partial;
+                    }
+
+                    // Unmatch until it's not guarded. 'pos' is upstream's
+                    // 'state->text_pos + (Py_ssize_t)count * node->step', stepped back a character
+                    // at a time as the count comes down rather than recomputed by multiplication.
+                    bool match = false;
+                    while (true)
+                    {
+                        if (count < node.Values[1])
+                        {
+                            // The number of repeats is below the minimum.
+                            break;
+                        }
+
+                        if (!state.IsRepeatGuarded(index, pos, NodeStatus.Tail))
+                        {
+                            // It's not guarded at this position.
+                            match = true;
+                            break;
+                        }
+
+                        if (count == 0)
+                        {
+                            break;
+                        }
+
+                        --count;
+                        pos = Step(state, pos, -node.Step);
+                    }
+
+                    if (!match)
+                    {
+                        // The repeat has failed to match at this position.
+                        state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        goto backtrack;
+                    }
+
+                    if (count > node.Values[1])
+                    {
+                        // Record the backtracking info.
+                        PushRepeatOneStateData(
+                            state.Bstack,
+                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
+                        );
+                        state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
+
+                        /* bstack: count start node index GREEDY_REPEAT_ONE */
+
+                        rpData.Start = state.TextPos;
+                        rpData.Count = count;
+                    }
+
+                    // Advance into the tail.
+                    state.TextPos = pos;
+                    node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.LazyRepeat: // Lazy repeat.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    // We might need to backtrack into the head, so save the current repeat.
+                    PushRepeatStateData(
+                        state.Bstack,
+                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                    );
+                    state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
+
+                    /* bstack: count start capture_change index text_pos LAZY_REPEAT */
+
+                    // Initialise the new repeat.
+                    rpData.Count = 0;
+                    rpData.Start = state.TextPos;
+                    rpData.CaptureChange = state.CaptureChange;
+
+                    // Could the body or tail match?
+                    bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
+                    int bodyStatus;
+                    Position nextBodyPosition = default;
+
+                    if (tryBody)
+                    {
+                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        if (bodyStatus < 0)
+                        {
+                            return bodyStatus;
+                        }
+
+                        if (bodyStatus == MatchStatus.Failure)
+                        {
+                            tryBody = false;
+                        }
+                    }
+                    else
+                    {
+                        bodyStatus = MatchStatus.Failure;
+                    }
+
+                    bool tryTail = node.Values[1] == 0;
+                    int tailStatus;
+                    Position nextTailPosition = default;
+
+                    if (tryTail)
+                    {
+                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        if (tailStatus < 0)
+                        {
+                            return tailStatus;
+                        }
+
+                        if (tailStatus == MatchStatus.Failure)
+                        {
+                            tryTail = false;
+                        }
+                    }
+                    else
+                    {
+                        tailStatus = MatchStatus.Failure;
+                    }
+
+                    if (!tryBody && !tryTail)
+                    {
+                        // Neither the body nor the tail could match.
+                        goto backtrack;
+                    }
+
+                    if (bodyStatus < 0 || (bodyStatus == MatchStatus.Failure && tailStatus < 0))
+                    {
+                        return MatchStatus.Partial;
+                    }
+
+                    if (tryTail)
+                    {
+                        if (tryBody)
+                        {
+                            // Both the body and the tail could match, but the tail takes precedence.
+                            // If the tail fails to match then we want to try the body before
+                            // backtracking further.
+                            PushMatchBodyTailStateData(
+                                state.Bstack,
+                                new MatchBodyTailStateData(
+                                    nextBodyPosition,
+                                    rpData.Count,
+                                    rpData.Start,
+                                    rpData.CaptureChange,
+                                    index,
+                                    state.TextPos
+                                )
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.MatchBody);
+
+                            /* bstack: position count start capture_change index text_pos MATCH_BODY */
+                        }
+
+                        // Record backtracking info in case the tail fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+                        /* bstack: index text_pos TAIL_START */
+
+                        // Advance into the tail.
+                        node = nextTailPosition.Node;
+                        state.TextPos = nextTailPosition.TextPos;
+                    }
+                    else
+                    {
+                        // Only the body could match.
+
+                        // Record backtracking info in case the body fails to match.
+                        state.Bstack.PushSize(index);
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+                        /* bstack: index text_pos BODY_START */
+
+                        // Advance into the body.
+                        node = nextBodyPosition.Node;
+                        state.TextPos = nextBodyPosition.TextPos;
+                    }
+
+                    break;
+                }
+                case Opcode.LazyRepeatOne: // Lazy repeat for one character.
+                {
+                    // Repeat indexes are 0-based.
+                    int index = (int)node.Values[0];
+                    RepeatData rpData = state.Repeats[index];
+
+                    if (state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body))
+                    {
+                        goto backtrack;
+                    }
+
+                    // Count how many times the character repeats, up to the minimum.
+                    long count = CountOne(
+                        state,
+                        node.Next2.Node!,
+                        state.TextPos,
+                        node.Values[1],
+                        out bool isPartial,
+                        out int pos
+                    );
+                    if (isPartial)
+                    {
+                        state.TextPos = pos;
+                        return MatchStatus.Partial;
+                    }
+
+                    // Have we matched at least the minimum?
+                    if (count < node.Values[1])
+                    {
+                        // The repeat has failed to match at this position.
+                        state.GuardRepeat(index, state.TextPos, NodeStatus.Body, true);
+                        goto backtrack;
+                    }
+
+                    if (count < node.Values[2])
+                    {
+                        // The match is shorter than the maximum, so we might need to backtrack the
+                        // repeat to consume more.
+                        PushRepeatOneStateData(
+                            state.Bstack,
+                            new RepeatOneStateData(rpData.Count, rpData.Start, node, index)
+                        );
+                        state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
+
+                        /* bstack: count start node index LAZY_REPEAT_ONE */
+
+                        rpData.Start = state.TextPos;
+                        rpData.Count = count;
+                    }
+
+                    // Advance into the tail.
+                    state.TextPos = pos;
+                    node = node.Next1.Node!;
+                    break;
+                }
                 case Opcode.String: // A string.
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
@@ -1212,6 +2386,37 @@ internal static class Matcher
 
             switch ((Opcode)op)
             {
+                case Opcode.BodyEnd:
+                {
+                    /* bstack: count start capture_change index */
+
+                    if (!PopBodyEndStateData(state.Bstack, out BodyEndStateData dataBe))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // We're backtracking into the body.
+                    RepeatData rpData = state.Repeats[dataBe.Index];
+
+                    // Restore the repeat info.
+                    rpData.Count = dataBe.Count;
+                    rpData.Start = dataBe.Start;
+                    rpData.CaptureChange = dataBe.CaptureChange;
+                    break;
+                }
+                case Opcode.BodyStart:
+                {
+                    /* bstack: index text_pos */
+
+                    if (!state.Bstack.PopSize(out long bodyTextPos) || !state.Bstack.PopSize(out long bodyIndex))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The body may have failed to match at this position.
+                    state.GuardRepeat((int)bodyIndex, (int)bodyTextPos, NodeStatus.Body, true);
+                    break;
+                }
                 case Opcode.Branch: // 2-way branch.
                 {
                     /* sstack: -
@@ -1307,11 +2512,28 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Skip over any repeated leading characters. Unreachable in this slice: a
-                    // pattern whose start node is a repeat throws at that opcode above.
+                    // Skip over any repeated leading characters.
                     if (startNode.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne)
                     {
-                        throw Seam.For(startNode.Op);
+                        // How many characters did the repeat actually match?
+                        long skipCount = CountOne(
+                            state,
+                            startNode.Next2.Node!,
+                            state.TextPos,
+                            startNode.Values[2],
+                            out bool _,
+                            out int skipEnd
+                        );
+
+                        // If it's fewer than the maximum then skip over those characters. Upstream's
+                        // 'state->text_pos += (Py_ssize_t)count * pattern_step' is the position
+                        // CountOne walked to: the pattern step and the repeated node's direction
+                        // agree here, because the repeat is the pattern's own start node, and
+                        // CountOne throws for a reverse node in any case (S23).
+                        if (skipCount < startNode.Values[2])
+                        {
+                            state.TextPos = skipEnd;
+                        }
                     }
 
                     // Advance and try to match again. We also need to check whether we need to skip.
@@ -1328,22 +2550,396 @@ internal static class Matcher
                     // Clear the groups.
                     state.ClearGroups();
 
-                    // NOT PORTED: reset_guards (:3383). There are no repeat guards until S19, no
-                    // fuzzy guards until Phase 5 and no group-call guards until Phase 4, and a
-                    // pattern needing any of them throws at its own opcode before it can reach here.
+                    // Reset the guards.
+                    state.ResetGuards();
 
                     // Reset the stacks.
                     state.Sstack.Reset();
                     state.Bstack.Reset();
                     state.Pstack.Reset();
                     goto start_match;
+                // GREEDY_REPEAT (:15778) and LAZY_REPEAT (:15779), which upstream gives one body:
+                // the repeat failed, so the enclosing repeat's state goes back and the position it
+                // was entered at is guarded against the body being tried there again.
+                case Opcode.GreedyRepeat: // Greedy repeat.
+                case Opcode.LazyRepeat: // Lazy repeat.
+                {
+                    /* bstack: count start capture_change index text_pos */
+
+                    if (!PopRepeatStateData(state.Bstack, out RepeatStateData dataR))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The repeat failed to match.
+                    RepeatData rpData = state.Repeats[dataR.Index];
+
+                    // The body may have failed to match at this position.
+                    state.GuardRepeat(dataR.Index, dataR.TextPos, NodeStatus.Body, true);
+
+                    // Restore the previous repeat.
+                    rpData.Count = dataR.Count;
+                    rpData.Start = dataR.Start;
+                    rpData.CaptureChange = dataR.CaptureChange;
+                    break;
+                }
+                case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
+                {
+                    /* bstack: count start node index */
+
+                    if (!PopRepeatOneStateData(pattern, state.Bstack, out RepeatOneStateData dataRo))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    int index = dataRo.Index;
+                    node = dataRo.Node;
+                    int start = dataRo.Start;
+                    long savedCount = dataRo.Count;
+
+                    RepeatData rpData = state.Repeats[index];
+
+                    // Unmatch one character at a time until the tail could match or we have reached
+                    // the minimum.
+                    state.TextPos = rpData.Start;
+
+                    long count = rpData.Count;
+                    long step = node.Next2.Test!.Step;
+                    int pos = StepBy(state, state.TextPos, count, step);
+                    int limit = StepBy(state, state.TextPos, node.Values[1], step);
+
+                    // The tail failed to match at this position.
+                    state.GuardRepeat(index, pos, NodeStatus.Tail, true);
+
+                    // A (*SKIP) might have changed the size of the slice.
+                    if (step > 0)
+                    {
+                        if (limit < state.SliceStart)
+                        {
+                            limit = state.SliceStart;
+                        }
+                    }
+                    else if (limit > state.SliceEnd)
+                    {
+                        limit = state.SliceEnd;
+                    }
+
+                    if (pos == limit)
+                    {
+                        // We've backtracked the repeat as far as we can.
+                        rpData.Start = start;
+                        rpData.Count = savedCount;
+                        break;
+                    }
+
+                    Node test = node.Next1.Test!;
+
+                    if ((test.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        // Upstream's fuzzy retreat loop (:15881).
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+
+                    // Upstream follows this with a switch on 'test->op' whose CHARACTER,
+                    // CHARACTER_IGN, CHARACTER_IGN_REV, CHARACTER_REV, STRING, STRING_FLD,
+                    // STRING_FLD_REV, STRING_IGN, STRING_IGN_REV and STRING_REV arms
+                    // (:15907-16270) are optimisations of the default arm below: "a repeated
+                    // single-character match is often followed by a literal, so checking specially
+                    // for it can be a good optimisation when working with long strings". Only the
+                    // default arm (:16271) is ported, for two reasons. The string arms are built on
+                    // 'string_search_rev', which is the Phase 7 deferral (DECISIONS 2026-08-31); and
+                    // the character arms consult 'test' themselves, which is exactly the test-node
+                    // fast path this port already defers, so porting them here would half-deliver
+                    // it. The default arm retreats one character and re-enters the dispatch loop,
+                    // which tests the tail node in the ordinary way and comes straight back here if
+                    // it fails - slower, same answer.
+                    //
+                    // One thing the string arms do that is not an optimisation: they answer PARTIAL
+                    // for a partial string match at the retreated position. Partial matching is not
+                    // delivered yet, and a partial-match test that reaches here should be tagged
+                    // 'needs:partial' rather than treated as this deferral's fault.
+                    bool match = false;
+
+                    while (true)
+                    {
+                        pos = Step(state, pos, -step);
+
+                        status = TryMatch(node.Next1, pos, out _);
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Success && !state.IsRepeatGuarded(index, pos, NodeStatus.Tail))
+                        {
+                            match = true;
+                            break;
+                        }
+
+                        if (pos == limit)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        count = CountBetween(state, pos, state.TextPos);
+
+                        // The tail could match.
+                        if (count > node.Values[1])
+                        {
+                            // The match is longer than the minimum, so we might need to backtrack the
+                            // repeat again to consume less.
+                            rpData.Count = count;
+
+                            PushRepeatOneStateData(
+                                state.Bstack,
+                                new RepeatOneStateData(savedCount, start, node, index)
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.GreedyRepeatOne);
+
+                            /* bstack: count start node index GREEDY_REPEAT_ONE */
+                        }
+                        else
+                        {
+                            // We've reached or passed the minimum, so we won't need to backtrack the
+                            // repeat again.
+                            rpData.Start = start;
+                            rpData.Count = savedCount;
+
+                            // Have we passed the minimum?
+                            if (count < node.Values[1])
+                            {
+                                goto backtrack;
+                            }
+                        }
+
+                        node = node.Next1.Node!;
+                        state.TextPos = pos;
+                        goto advance;
+                    }
+
+                    // Don't try this repeated match again.
+                    if (step > 0)
+                    {
+                        state.GuardRepeatRange(index, limit, pos, NodeStatus.Body, true);
+                    }
+                    else if (step < 0)
+                    {
+                        state.GuardRepeatRange(index, pos, limit, NodeStatus.Body, true);
+                    }
+
+                    // We've backtracked the repeat as far as we can.
+                    rpData.Start = start;
+                    rpData.Count = savedCount;
+                    break;
+                }
+                case Opcode.LazyRepeatOne: // Lazy repeat for one character.
+                {
+                    /* bstack: count start node index */
+
+                    if (!PopRepeatOneStateData(pattern, state.Bstack, out RepeatOneStateData data))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    int index = data.Index;
+                    node = data.Node;
+                    int start = data.Start;
+                    long savedCount = data.Count;
+
+                    RepeatData rpData = state.Repeats[index];
+
+                    // Match one character at a time until the tail could match or we have reached
+                    // the maximum.
+                    state.TextPos = rpData.Start;
+                    long count = rpData.Count;
+
+                    long step = node.Next2.Test!.Step;
+                    int pos = StepBy(state, state.TextPos, count, step);
+                    long available =
+                        step > 0
+                            ? CountBetween(state, state.TextPos, state.SliceEnd)
+                            : CountBetween(state, state.SliceStart, state.TextPos);
+                    long maxCount = Math.Min(available, node.Values[2]);
+                    int limit = StepBy(state, state.TextPos, maxCount, step);
+
+                    Node repeated = node.Next2.Node!;
+                    Node test = node.Next1.Test!;
+
+                    if ((test.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        // Upstream's fuzzy advance loop (:16500).
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+
+                    // Only upstream's default arm (:17024) is ported, for the reasons given in the
+                    // GREEDY_REPEAT_ONE case above. Upstream's 'skip_pos' goes with the string arms
+                    // that are not ported - they are the only thing that sets it, so its
+                    // '-1' branch is all that is left and it does nothing.
+                    bool match = false;
+
+                    while (true)
+                    {
+                        status = MatchOne(state, repeated, pos);
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            break;
+                        }
+
+                        pos = Step(state, pos, step);
+
+                        status = TryMatch(node.Next1, pos, out _);
+                        if (status < 0)
+                        {
+                            // Upstream returns RE_ERROR_PARTIAL here rather than 'status', where the
+                            // GREEDY_REPEAT_ONE arm above returns 'status' (:17040 against :16280).
+                            // Ported as written; unreachable either way until Phase 7 restores
+                            // try_match's test-node arm.
+                            return MatchStatus.Partial;
+                        }
+
+                        if (status == MatchStatus.Success && !state.IsRepeatGuarded(index, pos, NodeStatus.Tail))
+                        {
+                            match = true;
+                            break;
+                        }
+
+                        if (pos == limit)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        // The tail could match.
+                        count = CountBetween(state, pos, state.TextPos);
+                        state.TextPos = pos;
+
+                        if (count < maxCount)
+                        {
+                            // The match is shorter than the maximum, so we might need to backtrack
+                            // the repeat again to consume more.
+                            rpData.Count = count;
+
+                            PushRepeatOneStateData(
+                                state.Bstack,
+                                new RepeatOneStateData(savedCount, start, node, index)
+                            );
+                            state.Bstack.PushUInt8((byte)Opcode.LazyRepeatOne);
+
+                            /* bstack: count start node index LAZY_REPEAT_ONE */
+                        }
+                        else
+                        {
+                            // We've reached or passed the maximum, so we won't need to backtrack the
+                            // repeat again.
+                            rpData.Start = start;
+                            rpData.Count = savedCount;
+
+                            // Have we passed the maximum?
+                            if (count > maxCount)
+                            {
+                                goto backtrack;
+                            }
+                        }
+
+                        node = node.Next1.Node!;
+                        goto advance;
+                    }
+
+                    // The tail couldn't match.
+                    rpData.Start = start;
+                    rpData.Count = savedCount;
+                    break;
+                }
+                case Opcode.MatchBody:
+                {
+                    /* bstack: position count start capture_change index text_pos */
+
+                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // We want to match the body.
+                    RepeatData rpData = state.Repeats[dataMbt.Index];
+
+                    // Restore the repeat info.
+                    rpData.Count = dataMbt.Count;
+                    rpData.Start = dataMbt.Start;
+                    rpData.CaptureChange = dataMbt.CaptureChange;
+
+                    // Record backtracking info in case the body fails to match.
+                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushSize(dataMbt.TextPos);
+                    state.Bstack.PushUInt8((byte)Opcode.BodyStart);
+
+                    /* bstack: index text_pos BODY_START */
+
+                    // Advance into the body.
+                    node = dataMbt.Position.Node;
+                    state.TextPos = dataMbt.Position.TextPos;
+                    goto advance;
+                }
+                case Opcode.MatchTail:
+                {
+                    /* bstack: position count start capture_change index text_pos */
+
+                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // We want to match the tail.
+                    RepeatData rpData = state.Repeats[dataMbt.Index];
+
+                    // Restore the repeat info.
+                    rpData.Count = dataMbt.Count;
+                    rpData.Start = dataMbt.Start;
+                    rpData.CaptureChange = dataMbt.CaptureChange;
+
+                    // Record backtracking info in case the tail fails to match.
+                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushSize(dataMbt.TextPos);
+                    state.Bstack.PushUInt8((byte)Opcode.TailStart);
+
+                    /* bstack: index text_pos TAIL_START */
+
+                    // Advance into the tail.
+                    node = dataMbt.Position.Node;
+                    state.TextPos = dataMbt.Position.TextPos;
+                    goto advance;
+                }
+                case Opcode.TailStart:
+                {
+                    /* bstack: index text_pos */
+
+                    if (!state.Bstack.PopSize(out long tailTextPos) || !state.Bstack.PopSize(out long tailIndex))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The tail may have failed to match at this position.
+                    state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    break;
+                }
                 default:
                     // Nothing else is ever pushed by the opcodes ported so far. CHARACTER, STRING,
                     // the ANY family and S17's PROPERTY, RANGE and SET_* only put themselves on the
                     // backtracking stack to retry a fuzzy match (upstream's shared one-character
                     // block, :15210-15243, is nothing but 'retry_fuzzy_match_item'), which the
-                    // dispatch loop refuses above; BRANCH, START_GROUP and END_GROUP have their own
-                    // cases here.
+                    // dispatch loop refuses above; BRANCH, START_GROUP, END_GROUP and S19's
+                    // BODY_END, BODY_START, GREEDY_REPEAT, LAZY_REPEAT, GREEDY_REPEAT_ONE,
+                    // LAZY_REPEAT_ONE, MATCH_BODY, MATCH_TAIL and TAIL_START have their own cases
+                    // here.
                     throw Seam.For((Opcode)op);
             }
         }

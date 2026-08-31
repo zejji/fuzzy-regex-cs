@@ -36,7 +36,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers',
     [int]$Seed = -1,
     [int]$Count = 300,
     [string]$Rows,
