@@ -45,3 +45,10 @@ docs/plan/slice-log.jsonl
 # and ignored so a file left behind can never fail a slice. `git clean -fd` (no -x) leaves it
 # alone, and `git stash push -u` does not pick it up.
 .scratch/
+
+# Session scaffolding for the human driving the port: the prompt handed to a fresh orchestrator
+# session at the start of a phase. Untracked by choice - it describes how to run the work, not the
+# work itself, and it goes stale the moment a phase ends. Gitignored rather than merely untracked
+# because an unignored file at the repo root shows in `git status --porcelain`, which is exactly
+# what the driver fails a slice for.
+ORCHESTRATOR-PROMPT.md
