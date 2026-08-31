@@ -40,6 +40,10 @@ still seams. The three biggest waiting tags are `quantifiers` 211, `ignore-case`
   "CRLF, do not use Python's `write_text`" warning was wrong; what *is* true is that the `Read` tool
   renders a unicode escape in the source it shows you as the character itself, so echoing
   that back through `Write` puts a raw control byte in the file. Count the bytes afterwards.
+- **`<IsAotCompatible>true</IsAotCompatible>` is now set on `src/FuzzyRegex`** (2026-08-31,
+  spec amendment 12). Native AOT is a shipped requirement, so with `TreatWarningsAsErrors` a
+  trim or AOT hazard - reflection, `Reflection.Emit`, `DynamicMethod` - fails your build. It is
+  clean at 0 warnings today. Decide any such finding on the merits; do not suppress it.
 - **Run the ratchet AFTER committing as well as before** - the pre-commit CSharpier hook rewrites
   files (DECISIONS 2026-08-31).
 - **Scratch lives in `.scratch/`** (gitignored). The driver fails any slice whose tree is dirty.
