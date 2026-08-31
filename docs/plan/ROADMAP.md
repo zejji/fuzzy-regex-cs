@@ -16,12 +16,12 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep | 6-10 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, the engine in a Web Worker, deployed to GitHub Pages | 2-3 | Opus |
 
-Roughly 48-73 slice sessions in total, at plus or minus 50%. The generated status board makes the
+Roughly 51-78 slice sessions in total, at plus or minus 50%. The generated status board makes the
 real rate visible within the first two phases, which is when these numbers should be revised
 against evidence rather than trusted.
 
@@ -119,6 +119,61 @@ baselines, measured and committed per `.claude/skills/benchmark/SKILL.md` (the s
 nothing is committed under `bench/baselines/` yet, so this is work, not a tick), and the edge cases
 an optimiser is tempted to special-case - zero-width and empty matches, anchors, `MatchTimeout`,
 large inputs, and pathological backtracking.
+
+**Phase 6 also sweeps upstream's open issues, because the oracle cannot see them (2026-08-31).**
+Triage every open issue on `mrabarnett/mrab-regex`; drop the questions, the feature requests and
+the Python-specific ones; for what is left, reproduce it as a test, fix it here, and report it
+there. Sized at 3-5 sessions on top of the phase's existing 3-5, which is why the row now reads
+6-10.
+
+The reason this is a separate instrument, and not more oracle waves, is that **the oracle is blind
+to an inherited bug by construction.** It compares this port against upstream, so a bug we
+reproduce faithfully produces agreement - the thing the oracle reports as success. A divergence
+appears only where we accidentally failed to reproduce one. Widening the generators cannot help,
+because the blindness is in what the comparison means rather than in how much of it we run. It also
+has to come before phase 7: optimising on top of behaviour already known to be wrong means
+measuring the wrong answer and then locking it in.
+
+The size is measured, not guessed. All 79 open issues were triaged with `gh` on 2026-08-31: 40 are
+not bugs, 24 are Python-specific and cannot exist in a C# port, 12 are real engine bugs this port
+would inherit, and 3 cannot be judged without trying to reproduce them. The 12 fall in four groups
+- four 2026 memory-safety bugs from a fuzzing campaign (611-614), four fuzzy and BESTMATCH bugs
+(470, 563, 564, 596), two resource blowups (551, 554), and two singletons (367 on partial matching,
+425 on branch reset). What a reproduce-fix-report cycle costs per issue is *not* measured, so 3-5
+is an estimate whose only basis is that count.
+
+Two things to know before starting. First, the memory-safety four are heap-buffer-overflow reads
+and writes in C, which cannot happen in a memory-safe language - the same defect arrives here as an
+`IndexOutOfRangeException` or as a quietly wrong answer instead. The underlying logic errors are
+inherited regardless: boolean precedence desyncing the group count, a stale required-string cache,
+a stale backtrack limit, and `build_GROUP()` dropping match direction for a group called from a
+lookbehind. Several are compiler-side, in code S15 and S16 have already ported, so one may surface
+before phase 6 arrives; that is a thing to recognise if it happens, not a plan.
+
+Second, fixing a bug upstream still has creates a permanent oracle divergence, so the sweep brings
+an intentional-divergence allowlist with it: a version-controlled, machine-readable manifest the
+oracle consults, which reclassifies a listed divergence as expected rather than skipping it
+silently. Row identity, our result, upstream's result, a reason carrying the upstream issue number
+and our DECISIONS entry, and the upstream commit it was recorded against. **It has to be strict:**
+if a listed divergence stops diverging, because upstream fixed it or because our fix regressed, the
+run fails - the way pytest's `xfail_strict` turns an unexpected pass into a failure, and unlike
+Chromium's TestExpectations, which lacks that and is documented as accumulating stale entries. This
+is the same shape as `tests/parity-baseline.json` and `tools/check-ratchet.ps1`, which is already a
+pinned manifest that fails both on a regression and on a baselined test quietly vanishing, so the
+allowlist follows that convention instead of inventing a second one.
+
+Reporting upstream has a template and a rule. The maintainer merges external pull requests (7 of
+the last 20 closed, February to May 2026), there is no CLA and no CONTRIBUTING.md, and crisp
+technical reports are acted on within hours - #607 and #608 were both fixed the same evening -
+while design-trade-off arguments stall. The four traits those reports shared: a minimal, directly
+runnable reproduction with the version or commit pinned; the faulting function or mechanism named,
+not just the symptom; the bug explicitly distinguished from a similar one already fixed; and a
+concrete fix proposed. The rule: nothing is filed upstream until the owner has approved the drafted
+text, and `gh` stays out of the driver's allowlist in `tools/run-slices.ps1`, so an unattended
+slice session cannot post - it stalls instead, which is the right failure. Licence was checked the
+same day and needs nothing: `NOTICE` already declares the derivative work, attributes mrab-regex at
+the pinned commit, carries upstream's CNRI/Secret Labs statement and credits the UCD, which is
+Apache 2.0 section 4(b) and 4(c) satisfied.
 
 **Phase 9 is a browser demo, and it comes after 1.0 (2026-08-31).** It depends on a public API that
 has stopped moving and on the phase 6 trim and AOT gate, and demo polish must not hold up the

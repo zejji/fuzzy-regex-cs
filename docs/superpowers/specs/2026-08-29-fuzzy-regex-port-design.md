@@ -303,7 +303,7 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors + the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which no later phase claims and without which no group test can run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
 | 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) + native-AOT compatibility gate, against a named exit gate (Amendment 12) | 3-5 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) + native-AOT compatibility gate, against a named exit gate (Amendment 12) + the upstream open-issue sweep (Amendment 13) | 6-10 | Opus/Sonnet |
 | 7 | Benchmarks + optimization, AOT-compatible throughout (Amendment 12) | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, engine in a Web Worker, GitHub Pages; after 1.0 (Amendment 12) | 2-3 | Opus |
@@ -313,7 +313,7 @@ every member throwing. Without it the ported tests cannot compile, so "port the 
 Phase 1" and "API skeleton in Phase 2" were mutually exclusive as written. Phase 2 keeps the same
 scope, implementing the parser and compiler behind that surface.)
 
-Total roughly 48-73 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
+Total roughly 51-78 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
 +/-50% uncertainty; the generated status board makes the true rate visible within the first two
 phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through.
 
@@ -546,3 +546,76 @@ amended text is inline above; this list is the record of what changed and why.
    measured here, the warm spare being the documented mitigation and the compiled module being
    browser-cached so a respawn hits cache rather than re-downloading; and `[JSExport]` requires
    `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`, which fails at build time, not at run time.
+
+13. **Phase 6 sweeps upstream's open issues: triage, reproduce, fix here, report there** (sections
+   5 and 12). Made 2026-08-31, decided by the project owner. Sized at 3-5 sessions on top of Phase
+   6's existing 3-5, taking the phase to 6-10.
+
+   *Why it is a separate instrument.* **The differential oracle is blind to inherited bugs by
+   construction.** It compares this port against upstream, so a bug faithfully reproduced from
+   upstream produces *agreement*, and agreement is what the oracle is built to report as success. A
+   divergence appears only in the cases where we accidentally failed to reproduce one. No number of
+   extra oracle waves changes this - the blindness is in the definition of the comparison, not in
+   its coverage. The issue sweep is the only instrument that can see these, which is also why it
+   sits before Phase 7: optimizing on top of behaviour already known to be wrong means measuring,
+   tuning and locking in the wrong answer.
+
+   *Sizing, measured rather than guessed.* All 79 open issues on `mrabarnett/mrab-regex` were
+   triaged with `gh` on 2026-08-31: 40 are not bugs (feature requests, questions, doc and refactor
+   suggestions), 24 are Python-specific and cannot exist in a C# port (packaging, wheels, type
+   stubs, build toolchains), 12 are real engine bugs this port would inherit, and 3 cannot be
+   decided without attempting a reproduction. The 12 fall in four groups: four 2026 memory-safety
+   bugs from a fuzzing campaign (611-614), four fuzzy and BESTMATCH bugs (470, 563, 564, 596), two
+   resource blowups (551, an infinite loop on a `V1` search; 554, a `MemoryError` from `fullmatch`
+   where CPython's own `re` succeeds), and two singletons (367, a `partial=True` true positive
+   where the lookaheads are jointly unsatisfiable; 425, branch reset with mixed named and numbered
+   groups returning the wrong capture). The classification is the record; what a reproduce-fix-
+   report cycle actually costs per issue is not measured, so 3-5 is an estimate whose *basis* is
+   the triage count and nothing more. Questions, feature requests and Python-specific issues are
+   out of scope by definition.
+
+   *What a memory-safety bug becomes here.* Issues 611-614 are heap-buffer-overflow reads and
+   writes in C, and those cannot manifest as memory corruption in a memory-safe language: the same
+   defect surfaces as an `IndexOutOfRangeException` or, worse, as a quietly wrong answer. The
+   *underlying logic errors* are inherited all the same - boolean precedence desyncing the group
+   count from the emitted groups, a stale required-string cache position, a stale backtrack limit
+   left by `(*SKIP)` inside an atomic group, and `build_GROUP()` dropping match direction for a
+   group called from a lookbehind. Several are compiler-side, in code S15 and S16 have already
+   ported, so they may surface before Phase 6 reaches them. That is a possibility to recognise when
+   it happens, not a plan to rely on.
+
+   *Fixing a bug upstream still has creates a permanent oracle divergence*, so the sweep needs a
+   place to put one. That place is an intentional-divergence allowlist: a version-controlled,
+   machine-readable manifest the oracle consults, which **reclassifies** a listed divergence as
+   expected rather than skipping it silently. Each entry carries the row identity, our expected
+   result, upstream's result, a reason with a durable link (the upstream issue number and our
+   DECISIONS entry), and the upstream version or commit it was recorded against. This is the common
+   pattern rather than an invention: web-platform-tests uses `meta/*.ini` with `expected: FAIL`,
+   test262 uses per-test frontmatter, pytest uses `xfail`. PyPy's `cpython_differences` page is the
+   weak variant of the same idea, prose-only and enforced by nothing but the rule that an
+   undocumented difference is a bug.
+
+   **The anti-rot ingredient is strictness.** If a listed divergence stops diverging - upstream
+   fixed it, or our fix regressed - the run must fail, exactly as pytest's `xfail_strict` turns an
+   unexpected pass into a failure. Chromium's TestExpectations lacks this and is documented as
+   accumulating stale entries. This repository already has the shape: `tests/parity-baseline.json`
+   plus `tools/check-ratchet.ps1` is a generated manifest, pinned to an upstream commit, that fails
+   both on a regression and on a baselined test silently disappearing. The allowlist follows that
+   convention rather than inventing a second one.
+
+   *Reporting upstream.* Verified 2026-08-31: the maintainer merges external pull requests (7 of
+   the last 20 closed PRs, February to May 2026), there is no CLA and no CONTRIBUTING.md, and crisp
+   technical reports get acted on within hours - #607 and #608, both SIGSEGVs, were fixed the same
+   evening - while arguments about design trade-offs stall. The reports he acted on fastest shared
+   four traits, which are the template: a minimal, directly runnable reproduction with the exact
+   version or commit pinned; naming the faulting function or mechanism rather than only the
+   symptom; explicitly distinguishing the bug from a similar one already fixed; and proposing a
+   concrete fix. **Nothing is filed upstream without the owner approving the drafted text first**,
+   and `gh` stays out of the driver's allowlist in `tools/run-slices.ps1` so an unattended slice
+   session cannot post on its own - a tool outside that list stalls the slice, which is the correct
+   outcome for this one.
+
+   *Licence: checked 2026-08-31, no action needed.* `NOTICE` already declares the derivative work,
+   attributes mrab-regex at the pinned commit, carries upstream's own CNRI/Secret Labs statement
+   and credits the Unicode Character Database, which satisfies Apache 2.0 section 4(b) and 4(c).
+   Contributing a fix back changes nothing about that.
