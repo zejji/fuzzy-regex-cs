@@ -36,7 +36,7 @@ A divergence is not a finding until it is one row long, and it is not fixed unti
 
 Usage::
 
-    python tools/record-oracle.py [--generator literals,literal-dot] [--seed N] [--count N]
+    python tools/record-oracle.py [--generator literals,literal-dot,anchors] [--seed N] [--count N]
     python tools/record-oracle.py --rows candidate.jsonl
     python tools/record-oracle.py --verify-determinism
 
@@ -253,20 +253,59 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
+GENERATORS = ("literals", "literal-dot", "anchors")
+
+# The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
+# literal. Every one is a plain anchor: word and grapheme boundaries are S20 and would only produce
+# unsupported rows. `\G` is upstream's SEARCH_ANCHOR, which is only interesting when the operation
+# is a search, so it is paired with an empty suffix rather than combined.
+ANCHOR_AFFIXES = (
+    ("^", ""),
+    ("", "$"),
+    ("^", "$"),
+    (r"\A", ""),
+    ("", r"\Z"),
+    (r"\A", r"\Z"),
+    (r"\G", ""),
+    ("", ""),
+)
+
+# Recorded both with and without MULTILINE, because that is exactly what changes '^' and '$' from
+# START_OF_STRING/END_OF_STRING_LINE into START_OF_LINE/END_OF_LINE - four separate opcodes and four
+# separate try_match predicates in the port. regex.MULTILINE is 8.
+MULTILINE = 8
+
+# Line separators, mixed into the anchor generator's subjects so '^' and '$' have somewhere to match
+# other than the two ends. CR/LF is in the list as one item because upstream refuses to break inside
+# it (ascii_at_line_start, upstream/src/_regex.c:899) and a generator that never emits the pair would
+# never test that.
+LINE_BREAKS = ("\n", "\r", "\r\n", " ", "")
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
-    Deliberately simple: S16 - literals and the engine spine - is their first customer, and a
-    generator that emits constructs no slice has ported yet produces a wave that is all
-    ``unsupported`` and tells nobody anything. Later slices add their own.
+    Deliberately simple: S16 - literals, plain anchors and the engine spine - is their first
+    customer, and a generator that emits constructs no slice has ported yet produces a wave that is
+    all ``unsupported`` and tells nobody anything. Later slices add their own.
     """
+    if name not in GENERATORS:
+        raise SystemExit(f"unknown generator {name!r}; expected one of {', '.join(GENERATORS)}")
+
     dotted = name == "literal-dot"
-    if name not in ("literals", "literal-dot"):
-        raise SystemExit(f"unknown generator {name!r}; expected 'literals' or 'literal-dot'")
+    anchored = name == "anchors"
 
     for i in range(count):
         alphabet = ALPHABETS[i % len(ALPHABETS)]
         subject = "".join(rng.choice(alphabet) for _ in range(rng.randrange(MAX_SUBJECT_LENGTH + 1)))
+
+        if anchored:
+            # Put line breaks in, so '^' and '$' under MULTILINE have interior positions to match at
+            # and the CR/LF rule is reachable. Inserted rather than drawn from the alphabet so a row
+            # can hold several.
+            for _ in range(rng.randrange(3)):
+                at = rng.randrange(len(subject) + 1)
+                subject = subject[:at] + rng.choice(LINE_BREAKS) + subject[at:]
 
         if subject and rng.random() < SUBSTRING_PROBABILITY:
             # A substring of the subject, so most rows match. Sliced by codepoint, so an astral
@@ -282,10 +321,26 @@ def _generate(name: str, rng: random.Random, count: int):
         if dotted:
             pattern = "".join("." if rng.random() < DOT_PROBABILITY else c for c in pattern)
 
+        flags = 0
+        if anchored:
+            # A line break inside the literal would make the pattern's own text the thing under
+            # test rather than the anchor, so escape whatever the substring slice picked up.
+            pattern = re.sub(r"[\n\r ]", lambda m: "\\" + m.group(), pattern)
+            # Drawn from the seeded stream, not from `i`. Indexing the affix table, the alphabet
+            # table and the flag all by `i` aliased them: ANCHOR_AFFIXES has an even length, so
+            # '^' only ever landed on an even index and was therefore never recorded with
+            # MULTILINE, which left START_OF_LINE and START_OF_LINE_U - two of the four opcodes
+            # this generator exists to cover - untested, and put every astral subject on the
+            # MULTILINE side. Found by the S16 blind review; measured before the fix over 500 rows
+            # at 0 of 126 '^' rows with MULTILINE and 0 of 166 astral rows without it.
+            prefix, suffix = rng.choice(ANCHOR_AFFIXES)
+            pattern = prefix + pattern + suffix
+            flags = MULTILINE if rng.random() < 0.5 else 0
+
         yield {
             "generator": name,
             "pattern": pattern,
-            "flags": 0,
+            "flags": flags,
             "namedLists": {},
             "subject": subject,
             "operation": OPERATIONS[i % len(OPERATIONS)],
@@ -488,8 +543,8 @@ def _self_check() -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--generator", default="literals,literal-dot",
-                        help="comma-separated generator names (default: literals,literal-dot)")
+    parser.add_argument("--generator", default=",".join(GENERATORS),
+                        help=f"comma-separated generator names (default: {','.join(GENERATORS)})")
     parser.add_argument("--seed", type=int, default=None,
                         help="the generator seed; a random one is chosen and recorded if omitted")
     parser.add_argument("--count", type=int, default=300, help="rows per generator (default: 300)")

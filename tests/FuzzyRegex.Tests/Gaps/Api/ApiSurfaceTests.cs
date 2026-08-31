@@ -80,15 +80,44 @@ public sealed class ApiSurfaceTests
     }
 
     [Test]
-    public void The_matching_members_are_still_stubs()
+    public void The_six_matching_entry_points_answer_for_a_pattern_the_spine_can_run()
     {
-        // The engine is phase 3. When this starts failing, the slice that made it fail should
-        // replace it with real assertions, exactly as S07 did to its predecessor.
-        Action isMatch = () => _ = FuzzyRegex.IsMatch("abc", "a");
-        Action match = () => _ = new FuzzyRegex("a").Match("abc");
+        // Replaced its predecessor in S16, which is what that test asked the first slice to reach
+        // it to do. The pattern is a bare literal, which is all the engine spine matches; the point
+        // here is that each of the six entry points is wired to the right upstream operation -
+        // search, match and fullmatch - not that the engine is finished.
+        var pattern = new FuzzyRegex("a");
 
-        isMatch.Should().Throw<NotImplementedException>();
-        match.Should().Throw<NotImplementedException>();
+        FuzzyRegex.IsMatch("xax", "a").Should().BeTrue();
+        pattern.IsMatch("xax").Should().BeTrue();
+        pattern.IsMatchAtStart("xax").Should().BeFalse("upstream's match() anchors at the start");
+        pattern.IsMatchAtStart("ax").Should().BeTrue();
+        pattern.IsFullMatch("ax").Should().BeFalse("upstream's fullmatch() must cover the whole slice");
+        pattern.IsFullMatch("a").Should().BeTrue();
+
+        Match found = pattern.Match("xax");
+        found.Success.Should().BeTrue();
+        (found.Index, found.Length, found.Value).Should().Be((1, 1, "a"));
+
+        pattern.MatchAtStart("xax").Success.Should().BeFalse();
+        pattern.FullMatch("a").Value.Should().Be("a");
+    }
+
+    [Test]
+    public void The_members_no_slice_has_reached_are_still_stubs()
+    {
+        // The other half of what the S16 replacement inherited: iteration, substitution and
+        // splitting are S24 and S25, and partial matching is phase 4. When one of these starts
+        // failing, the slice that made it fail should assert on it for real instead.
+        Action matches = () => _ = new FuzzyRegex("a").Matches("abc");
+        Action replace = () => _ = new FuzzyRegex("a").Replace("abc", "z");
+        Action split = () => _ = new FuzzyRegex("a").Split("abc");
+        Action partial = () => _ = new FuzzyRegex("a").Match("abc", partial: true);
+
+        matches.Should().Throw<NotImplementedException>();
+        replace.Should().Throw<NotImplementedException>();
+        split.Should().Throw<NotImplementedException>();
+        partial.Should().Throw<NotImplementedException>().WithMessage("needs:partial*");
     }
 
     [Test]

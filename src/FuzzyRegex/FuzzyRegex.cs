@@ -62,6 +62,8 @@ public sealed class FuzzyRegex
     private const string _metachars = "()[]{}?*+|^$\\.-#&~";
 
     private readonly Parsing.CompiledPattern _compiled;
+    private readonly Engine.PatternObject _pattern;
+    private readonly long _timeoutTicks;
     private readonly string[] _groupNames;
     private readonly int[] _groupNumbers;
 
@@ -138,9 +140,16 @@ public sealed class FuzzyRegex
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
         // the last thing that can reject a pattern - it refuses code the parser was happy to emit
         // (upstream/src/_regex.c:25863). Building here rather than at first match keeps that
-        // rejection where the caller expects it, and where upstream puts it. The graph itself is
-        // discarded until S16, the first slice with something that can walk it.
-        _ = Engine.PatternObject.Compile(_compiled);
+        // rejection where the caller expects it, and where upstream puts it.
+        _pattern = Engine.PatternObject.Compile(_compiled);
+
+        // Upstream's timeout is in clock ticks; ours is in Stopwatch ticks, which is the clock the
+        // engine reads. decode_timeout (upstream/src/_regex.c:21056) maps a negative number to "no
+        // timeout", which is exactly what InfiniteMatchTimeout is.
+        _timeoutTicks =
+            matchTimeout == InfiniteMatchTimeout
+                ? Engine.MatchState.NoTimeout
+                : (long)(matchTimeout.TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
 
         // Group 0 is the whole match and has no name of its own, so it is listed by its number,
         // as every group without a name is.
@@ -249,12 +258,16 @@ public sealed class FuzzyRegex
     /// How much of the subject to consider, in UTF-16 code units, or <c>-1</c> for the rest of it.
     /// </param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
-    public bool IsMatch(string input, int beginning = 0, int length = -1) => throw new NotImplementedException();
+    public bool IsMatch(string input, int beginning = 0, int length = -1) =>
+        Run(input, beginning, length, partial: false, search: true, matchAll: false).Success;
 
     /// <summary>Whether the pattern matches anywhere in the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
-    public bool IsMatch(ReadOnlySpan<char> input) => throw new NotImplementedException();
+    // ponytail: copies the span, because the engine indexes a string. Making it allocation-free
+    // means threading a ReadOnlySpan through MatchState and every try_match_*, which is a Phase 7
+    // question (the whole engine is string-based today), not a correctness one.
+    public bool IsMatch(ReadOnlySpan<char> input) => IsMatch(input.ToString());
 
     /// <summary>
     /// Whether the pattern matches starting exactly at <paramref name="beginning"/>. Upstream
@@ -266,7 +279,8 @@ public sealed class FuzzyRegex
     /// How much of the subject to consider, or <c>-1</c> for the rest of it.
     /// </param>
     /// <returns><see langword="true"/> if the pattern matches there.</returns>
-    public bool IsMatchAtStart(string input, int beginning = 0, int length = -1) => throw new NotImplementedException();
+    public bool IsMatchAtStart(string input, int beginning = 0, int length = -1) =>
+        Run(input, beginning, length, partial: false, search: false, matchAll: false).Success;
 
     /// <summary>
     /// Whether the pattern matches the whole of the given part of the subject. Upstream
@@ -278,7 +292,77 @@ public sealed class FuzzyRegex
     /// How much of the subject the match must cover, or <c>-1</c> for the rest of it.
     /// </param>
     /// <returns><see langword="true"/> if the pattern matches all of it.</returns>
-    public bool IsFullMatch(string input, int beginning = 0, int length = -1) => throw new NotImplementedException();
+    public bool IsFullMatch(string input, int beginning = 0, int length = -1) =>
+        Run(input, beginning, length, partial: false, search: false, matchAll: true).Success;
+
+    /// <summary>
+    /// Runs one matching operation. Port of <c>pattern_search_or_match</c>
+    /// (<c>upstream/src/_regex.c</c> line 21522) less its argument parsing, which our own overloads
+    /// have already done.
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="beginning">Upstream's <c>pos</c>.</param>
+    /// <param name="length">How much of the subject to consider, or <c>-1</c> for the rest.</param>
+    /// <param name="partial">Upstream's <c>partial</c>.</param>
+    /// <param name="search">Whether to advance the start position (upstream's <c>search</c>).</param>
+    /// <param name="matchAll">Whether the match must cover the slice (upstream's <c>match_all</c>).</param>
+    /// <returns>The match, successful or not.</returns>
+    private Match Run(string input, int beginning, int length, bool partial, bool search, bool matchAll)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        if (partial)
+        {
+            throw new NotImplementedException("needs:partial - partial matching is not implemented yet");
+        }
+
+        // Upstream takes 'pos' and 'endpos' and clamps each on its own (get_limits,
+        // upstream/src/_regex.c:21627); this port takes a beginning and a length, so 'endpos' is
+        // 'beginning + length'. The beginning is resolved FIRST, because a negative one counts back
+        // from the end of the subject and adding the length to the unresolved number gives an end
+        // unrelated to the start: `Match("abcde", beginning: -2, length: 3)` computed an end of 1,
+        // which clamped up to the start and searched an empty slice, where `beginning: 3` with the
+        // same length searched (3, 5) and matched. Found by the S16 blind review.
+        beginning = Engine.MatchState.ClampIndex(beginning, input.Length);
+
+        // `length: -1` is "the rest of the subject", which is what upstream's endpos default of
+        // PY_SSIZE_T_MAX means once it is clamped.
+        int end = length < 0 || beginning > int.MaxValue - length ? int.MaxValue : beginning + length;
+
+        using var state = Engine.MatchState.Create(
+            _pattern,
+            input,
+            beginning,
+            end,
+            overlapped: false,
+            partial: partial,
+            // The Match object, and therefore repeated captures, will be visible.
+            visibleCaptures: true,
+            matchAll: matchAll,
+            timeout: _timeoutTicks
+        );
+
+        int status = Engine.Matcher.DoMatch(state, search);
+
+        if (status == Engine.MatchStatus.Cancelled)
+        {
+            throw new System.Text.RegularExpressions.RegexMatchTimeoutException(input, Pattern, MatchTimeout);
+        }
+
+        if (status != Engine.MatchStatus.Success)
+        {
+            // Upstream returns None; this returns an unsuccessful Match, which is the built-in
+            // Regex's shape and the one this port's public surface committed to in S01.
+            return new Match(input, 0, 0, success: false, _compiled.GroupCount);
+        }
+
+        // Port of pattern_new_match (upstream/src/_regex.c:20738) reduced to group 0, including its
+        // rule that a reverse match reports its two ends the other way round (:20795).
+        int matchStart = state.Reverse ? state.TextPos : state.MatchPos;
+        int matchEnd = state.Reverse ? state.MatchPos : state.TextPos;
+
+        return new Match(input, matchStart, matchEnd, success: true, _compiled.GroupCount);
+    }
 
     /// <summary>
     /// Finds the first match anywhere in the given part of the subject. Upstream
@@ -295,7 +379,7 @@ public sealed class FuzzyRegex
     /// </param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match.</returns>
     public Match Match(string input, int beginning = 0, int length = -1, bool partial = false) =>
-        throw new NotImplementedException();
+        Run(input, beginning, length, partial, search: true, matchAll: false);
 
     /// <summary>
     /// Finds the match starting exactly at <paramref name="beginning"/>. Upstream
@@ -309,7 +393,7 @@ public sealed class FuzzyRegex
     /// <param name="partial">Whether to report a partial match. Upstream's <c>partial=True</c>.</param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match there.</returns>
     public Match MatchAtStart(string input, int beginning = 0, int length = -1, bool partial = false) =>
-        throw new NotImplementedException();
+        Run(input, beginning, length, partial, search: false, matchAll: false);
 
     /// <summary>
     /// Finds the match covering the whole of the given part of the subject. Upstream
@@ -323,7 +407,7 @@ public sealed class FuzzyRegex
     /// <param name="partial">Whether to report a partial match. Upstream's <c>partial=True</c>.</param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match all of it.</returns>
     public Match FullMatch(string input, int beginning = 0, int length = -1, bool partial = false) =>
-        throw new NotImplementedException();
+        Run(input, beginning, length, partial, search: false, matchAll: true);
 
     /// <summary>
     /// Finds every match in the given part of the subject. Upstream <c>Pattern.finditer</c>.
@@ -457,7 +541,7 @@ public sealed class FuzzyRegex
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
     public static bool IsMatch(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
-        throw new NotImplementedException();
+        new FuzzyRegex(pattern, options).IsMatch(input);
 
     /// <summary>Finds the first match anywhere in the subject. Upstream <c>regex.search</c>.</summary>
     /// <param name="input">The subject to search.</param>
@@ -473,7 +557,7 @@ public sealed class FuzzyRegex
         string pattern,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).Match(input);
 
     /// <summary>
     /// Finds the match starting at the start of the subject. Upstream <c>regex.match</c>.
@@ -491,7 +575,7 @@ public sealed class FuzzyRegex
         string pattern,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).MatchAtStart(input);
 
     /// <summary>Finds the match covering the whole subject. Upstream <c>regex.fullmatch</c>.</summary>
     /// <param name="input">The subject to match.</param>
@@ -507,7 +591,7 @@ public sealed class FuzzyRegex
         string pattern,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).FullMatch(input);
 
     /// <summary>Finds every match in the subject. Upstream <c>regex.finditer</c>.</summary>
     /// <param name="input">The subject to search.</param>

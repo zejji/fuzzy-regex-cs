@@ -89,17 +89,87 @@ All line references are `upstream/src/_regex.c`.
 
 ## Done when
 
-- [ ] `basic-matching` delivered: the tag is gone from `docs/STATUS.md`'s waiting table (tests
+- [x] `basic-matching` delivered: the tag is gone from `docs/STATUS.md`'s waiting table (tests
       genuinely blocked on something else are retagged with prose saying why, the S07/S13
       precedent); `full-match` delivered or its stragglers retagged.
-- [ ] Oracle run green with counts quoted; divergences, if any were found and fixed en route,
+- [x] Oracle run green with counts quoted; divergences, if any were found and fixed en route,
       minimised into permanent tests.
-- [ ] Span-convention gap test in; conversion exists only in the `Match`/`Group` accessors.
-- [ ] Analyzer duty discharged here if S15 handed it over.
-- [ ] `docs/PORTMAP.md` updated for every `_regex.c` symbol ported or stubbed; the structural
+- [x] Span-convention gap test in; conversion exists only in the `Match`/`Group` accessors.
+- [x] Analyzer duty discharged here if S15 handed it over.
+- [x] `docs/PORTMAP.md` updated for every `_regex.c` symbol ported or stubbed; the structural
       decision and the prefilter deferral recorded in DECISIONS (deferral is already there dated
       2026-08-31 - extend it if the shape changed in practice).
-- [ ] Ratchet GREEN, baseline updated, blind review (hunt: a surrogate pair stepped as two
+- [x] Ratchet GREEN, baseline updated, blind review (hunt: a surrogate pair stepped as two
       positions, a search-position advance that skips the empty match at the end of the subject,
       a backtrack case that pops in a different order than its push, `state.text_pos` written
       where upstream writes a local), commit.
+
+## Closing notes (2026-08-31)
+
+**A pattern matches.** `src/FuzzyRegex/Engine/` gained `ByteStack.cs`, `MatchState.cs` and
+`Matcher.cs`: the byte stacks, `RE_State`, `basic_match`'s two switches, the `try_match_*`
+predicates and the `do_match` drivers. `FuzzyRegex`'s six matching entry points, `Match`, `Group`,
+`Capture` and the two collections stopped being stubs for group 0. Parity **4.5% -> 6.5%**
+(88 -> 128 of 1966 upstream tests), suite **3612 -> 3665 passing, 0 failing**, ratchet GREEN,
+baseline updated. `docs/PORTMAP.md` has a new "The matcher (`src/_regex.c`), S16" section, one row
+per symbol ported, stubbed or deliberately dropped.
+
+**The oracle is what made this slice worth trusting.** Its first real wave went from
+`agree 0 unsupported 600` to `agree 600 diverge 0`, and then the anchors generator turned it **RED
+at 41 of 2400 rows**. Every one was a pattern with a leading anchor, and the cause was real:
+`optimise_pattern` hoists the first character test of such a pattern in *front* of the anchor as a
+`CHARACTER` node with `RE_ZEROWIDTH_OP` and `step == 0`, so `'^a'` is
+`CHARACTER(step 0) - START_OF_STRING - CHARACTER(step 1)`. The port stepped that first node by one
+anyway, and **nothing with a leading anchor could match**. The ported suite did not catch it - there
+was no un-skipped test for a leading anchor to catch it with. Final run: `agree 3600  unsupported 0
+diverge 0` over `literals`, `literal-dot` and `anchors` at 1200 rows each. **S17 inherits the same
+trap:** `BuildRange` and `BuildSet` set `step = 0` on the same flag, so the class opcodes must read
+`node.Step` too; `ANY` and `STRING` do not, and upstream increments them unconditionally.
+
+**Un-skipped:** all of `needs:basic-matching` and `needs:full-match`. **Retagged with prose** (the
+S07/S13 precedent, nine tests): three to `needs:quantifiers`, two to `needs:character-classes`, one
+each to `needs:groups`, `needs:alternation` and `needs:lookbehind`. `ApiSurfaceTests.The_matching_
+members_are_still_stubs` was replaced, as it asked its successor slice to do, by two tests - one
+asserting the six entry points for real, one keeping the stub check on `Matches`/`Replace`/`Split`/
+`partial`.
+
+**Analyzer duty (handed over by S15): no public-field struct was landed, so CA1051, S1104 and
+MA0008 still do not fire** - measured on this build. `RE_State` is a class with internal fields
+because every helper mutates it and a struct would need `ref` on every signature; the `.editorconfig`
+note stays in place, still untested, for the slice that genuinely needs one. What *was* decided:
+**S907 (`goto`) is disapplied for `src/FuzzyRegex/Engine/**` only**, with the reason at the entry -
+`basic_match` is a backtracking machine whose loops jump into each other, and structuring that away
+means re-deriving it at every upstream sync. `Parsing/` and `Unicode/` are deliberately left out of
+that scope. Two rules were **fixed rather than disapplied**: S1066/S3358/IDE0032/IDE0057/IDE0078 by
+rewriting, and `RE_ERROR_MEMORY` by throwing `InvalidOperationException` - the runtime reserves both
+memory exception types, and the 1GB limit itself is kept because an unbounded backtracking stack is
+a denial-of-service vector.
+
+**Review.** Two blind passes, both reproduction-gated. **Pass one** raised **2 findings, both
+reproduced, both fixed**: (1) the `anchors` generator indexed its affix table, its alphabet table
+and the MULTILINE flag all by the loop counter, and `ANCHOR_AFFIXES` has an even length - so `^` was
+**never** recorded with MULTILINE (0 of 126 rows) and every astral subject landed on the MULTILINE
+side (0 of 166 without), leaving `START_OF_LINE` and `START_OF_LINE_U` untested by the wave; the
+affix and flag now come from the seeded stream. (2) `FuzzyRegex.Run` computed
+`end = beginning + length` before resolving a negative `beginning`, so `Match("abcde", -2, 3)` found
+nothing where the identical slice written `Match("abcde", 3, 3)` matched; the beginning is now
+resolved first, and the case is pinned by `Length_means_the_same_thing_whichever_way_the_beginning_
+was_written`. The reviewer's own 28,877-row differential fuzz found nothing else. **Pass two** ran
+over the three fix hunks, which pass one never saw: **no defects found** (7,800-combination sweep of
+`beginning`/`length` including `int.MinValue`/`int.MaxValue`, plus the recorder's determinism and
+per-generator-seed self-checks). No critique loop: the reviewer opined once per body of code.
+
+**One thing this slice learned the hard way: verify after committing, not only before.** The
+pre-commit CSharpier hook reformatted `Matcher.cs`'s three `goto` labels *during* the commit, and
+the committed tree - green a minute earlier - failed to build, because IDE0055's default outdents a
+label where CSharpier does not. Fixed with `csharp_indent_labels = no_change`, the exact twin of the
+`csharp_indent_case_contents_when_block` line S15 added, and the commit amended. A hook that
+rewrites files is a gap in the "run the ratchet, then commit" order that this slice's steps did not
+close.
+
+**Worth knowing next.** `advance:` is absent from `BasicMatch` because nothing jumps to it yet and
+C# rejects an unreferenced label - S18 or S19 puts it back with its first real backtrack case. The
+`CHARACTER`/`STRING`/`ANY` backtrack cases exist upstream *only* to retry a fuzzy match, so for a
+non-fuzzy pattern the bstack never holds anything but the `FAILURE` marker; that is why the whole
+backtrack switch is one real case today. `push_pointer` is not ported and needs a decision S18 must
+make: a node reference cannot go in a byte array on a managed heap.

@@ -50,6 +50,14 @@ csharp_style_prefer_readonly_struct_member = true:warning
 ; agree with it. Added S15, where Engine/ ports C switch statements whose cases declare locals.
 csharp_indent_case_contents_when_block = false
 
+; A `goto` label: the .NET formatter's default (`one_less_than_current`) outdents it, CSharpier
+; leaves it at the surrounding indent, and IDE0055 is an error here - so a label CSharpier had
+; formatted failed the build immediately afterwards. Same conflict and same resolution as the line
+; above: CSharpier is the formatter of record, so the .NET formatter is told to agree with it.
+; Added S16, where Engine/Matcher.cs ports basic_match's `start_match`, `next_match_2` and
+; `backtrack` labels.
+csharp_indent_labels = no_change
+
 ; --- Naming ---------------------------------------------------------------
 dotnet_naming_rule.private_fields_underscore.severity = warning
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
@@ -130,6 +138,20 @@ dotnet_diagnostic.MA0025.severity = none
 ; skips an optimisation. Making them public would put three types nobody can usefully catch on
 ; the shipped surface, which is a restructuring, not a fix. Added S07.
 dotnet_diagnostic.S3871.severity = none
+
+[src/FuzzyRegex/Engine/**.cs]
+; S907: remove this use of 'goto'. Added S16, and narrower than the block above on purpose - the
+; parser and the Unicode tables contain no 'goto' and must not start containing one.
+;
+; What the rule wants is structured control flow, and it is right about ordinary code. It is wrong
+; about this file. 'basic_match' (upstream/src/_regex.c:11714-17403) is a backtracking machine whose
+; two loops - the dispatch switch and the backtrack switch - jump into each other and back to the
+; search restart, and every one of the 'goto's here is one of upstream's, at the same place, with
+; the same label name. Structuring them away means inventing a control-flow scheme upstream does not
+; have, in the one function most upstream fixes land in, which is the cost this port exists to avoid
+; (AGENTS.md, design spec section 4). The decision to keep upstream's shape is recorded in
+; DECISIONS 2026-08-31.
+dotnet_diagnostic.S907.severity = none
 
 ; --- Tests ----------------------------------------------------------------
 [tests/**/*.cs]

@@ -200,6 +200,38 @@ are `upstream/src/_regex.c` unless the row says otherwise.
 | `RE_CheckStack`, `RE_NodeStack` and their `_init`/`_fini`/`_push`/`_pop` | `:23188-23236`, `:23573-23616` | **Not ported as types.** Hand-rolled growable stacks of `PyMem_Realloc`'d arrays; `Stack<T>` is the same structure with the same push/pop order |
 | `RE_ERROR_MEMORY` and every `if (!node) return RE_ERROR_MEMORY` | throughout the builders | **Not ported.** In .NET `new` throws, so there is nothing to guard |
 
+### The matcher (`src/_regex.c`), S16
+
+The engine spine: match state, the backtracking stacks, the dispatch and backtrack switches, and the
+public entry points. Only this slice's opcodes are real; every other case throws a seam exception
+naming its capability tag (`Engine.Seam`), so an unported construct is a skipped test or an
+`unsupported` oracle row rather than a wrong answer. All line references are `upstream/src/_regex.c`.
+
+| Upstream symbol | Upstream line | Ours |
+|---|---|---|
+| `RE_ERROR_*`, `bool_as_status` | `:103-122`, `:2225` | `Engine.MatchStatus`. Only the codes this port can produce; the rest describe CPython argument errors our own signatures make unrepresentable |
+| `ByteStack`, `ByteStack_init`/`_fini`/`_reset`/`_push`/`_push_block`/`_pop`/`_pop_block`/`_drop`/`_drop_block`/`_top_block` | `:2285-2433` | `Engine.ByteStack`. Backed by an `ArrayPool<byte>` rental, which is where `PatternObject.stack_storage`'s per-pattern cache and its 64KB cap go (`state_fini`, `:18676-18693`) - the pool does the same job across all patterns and needs no lock |
+| `push_uint8`, `pop_uint8`, `push_size`, `pop_size`, `push_bstack`, `push_sstack` | `:2440`-`:2601` | `ByteStack.PushUInt8`/`PopUInt8`/`PushSize`/`PopSize`, called directly at the two sites upstream wraps. `RE_MEMORY_LIMIT` is kept; it is the guard against an unbounded backtracking stack |
+| `push_int8`, `push_bool`, `push_code`, `push_int`, `push_pointer`, `push_groups`, `push_captures`, `push_guard_data`, `push_repeat_data`, `push_repeats` and their pops | `:2434-2815` | **Not ported yet - they arrive with their first caller** in S18 and S19. `push_pointer` needs a decision this slice cannot make: a node reference cannot go in a byte array on a managed heap |
+| `RE_State` | `:463-529` | `Engine.MatchState`, a class with internal fields (see DECISIONS 2026-08-31). Dropped: the `view`/`charsize`/`is_unicode`/`should_release` buffer fields and the `char_at`/`set_char_at`/`point_to` pointers they select, because this port matches `string` only; `thread_state`, `lock` and `is_multithreaded`, because the state is per call and the pattern is immutable; `search_positions`, which only `search_start` reads |
+| `state_init`, `state_init_2`, `state_fini` | `:18598`, `:18275`, `:18662` | `MatchState.Create` and `MatchState.Dispose`. `get_string` (`:18217`) and `check_compatible` (`:18573`) drop with the bytes support they exist for |
+| `init_match` | `:3404` | `MatchState.InitMatch` |
+| `clear_groups`, `reset_guards` | `:3369`, `:3383` | **Not ported yet.** There are no group spans until S18 and no repeat guards until S19, and a pattern needing either throws at its own opcode first. The two call sites carry a comment naming them |
+| `check_timed_out`, `safe_check_cancel` | `:2253`, `:2266` | `MatchState.CheckTimedOut` and `Matcher.SafeCheckCancel`. `Stopwatch` ticks rather than `clock()` ticks; `PyErr_CheckSignals` has no counterpart in a library call. `RE_ERROR_TIMED_OUT` surfaces as `RegexMatchTimeoutException`, thrown by `FuzzyRegex.Run` because that is where the pattern text the exception carries lives |
+| `decode_timeout` | `:21056` | The `_timeoutTicks` conversion in `FuzzyRegex`'s constructor. A negative value means "no timeout" upstream, which is exactly what `InfiniteMatchTimeout` is |
+| `char_at` (the `bytesN_char_at` family) | `:763-800`, selected at `:18408` | `MatchState.CharAt`, which decodes a surrogate pair inline so a non-BMP character is one character to every opcode. `NextPos`, `PrevPos` and `CharBefore` are the stepping half; upstream needs none of them because a Python `str` is indexed by codepoint |
+| `same_char`, `matches_ANY`, `matches_ANY_U`, `matches_CHARACTER` | `:2838`, `:2900`, `:2906`, `:2912` | `Matcher.SameChar`, `MatchesAny`, `MatchesAnyU`, `MatchesCharacter` |
+| `ascii_is_line_sep`, `unicode_is_line_sep` | `:894`, `:1936` | `Unicode.Encodings.IsLineSep`, beside the rest of the encoding table's codepoint-only half |
+| `ascii_at_line_start`/`_end`, `unicode_at_line_start`/`_end` | `:899`, `:919`, `:1942`, `:1963` | `Matcher.AtLineStart`, `AtLineEnd`. In `Engine/`, not `Unicode/`, because they take the match state |
+| `try_match_ANY`, `_ANY_ALL`, `_ANY_U`, `_START_OF_LINE`, `_START_OF_LINE_U`, `_START_OF_STRING`, `_END_OF_LINE`, `_END_OF_LINE_U`, `_END_OF_STRING`, `_END_OF_STRING_LINE`, `_END_OF_STRING_LINE_U` | `:6919`-`:7371` | `Matcher.TryMatchAny` … `TryMatchStartOfString`, same names |
+| `basic_match` | `:11714-17403` | `Matcher.BasicMatch`, with upstream's `goto` labels at upstream's places. Real cases: `SUCCESS`, `FAILURE`, `CHARACTER`, `STRING`, `ANY`/`ANY_ALL`/`ANY_U`, `START_OF_STRING`, `END_OF_STRING`, `START_OF_LINE`/`_U`, `END_OF_LINE`/`_U`, `END_OF_STRING_LINE`/`_U`, `SEARCH_ANCHOR`, and `FAILURE` in the backtrack switch. Upstream's nine separate zero-width cases become one case group with the predicate chosen by a switch - one arm per upstream case. `advance:` is absent because nothing jumps to it yet; C# rejects an unreferenced label |
+| `locate_required_string`, `search_start`, the `string_search`/`fast_string_search` family, `try_match` (the test-node fast path) | `:11082`, `:5231-6918`, `:6919-7686` | **Deferred to Phase 7** (DECISIONS 2026-08-31). All are semantically transparent prefilters; without them the search tries the pattern at every position, which is slower and answers the same |
+| `do_exact_match`, `do_match_2`, `do_match` | `:18064`, `:18099`, `:18121` | `Matcher.DoExactMatch`, `DoMatch2`, `DoMatch`. The GIL release and re-acquire drop; `do_simple_fuzzy_match`, `do_enhanced_fuzzy_match` and `do_best_fuzzy_match` (`:18027`, `:17862`, `:17584`) are seams throwing their fuzzy tags |
+| `pattern_search_or_match`, `pattern_match`, `pattern_fullmatch`, `pattern_search` | `:21522`-`:21646` | `FuzzyRegex.Run` and the six public entry points over it. The `PyArg_ParseTupleAndKeywords` half drops - our own overloads have parsed the arguments |
+| `get_limits`, `limited_range` | `:21627`, `:18794` | `MatchState.ClampIndex`, one method: `state_init_2` (`:18376`) and `get_limits` spell the same clamping out twice |
+| `pattern_new_match` | `:20738` | The tail of `FuzzyRegex.Run`, reduced to group 0 - including the rule that a reverse match reports its two ends the other way round (`:20795`). Upstream returns `None` for no match where this returns an unsuccessful `Match`, which is `Regex`'s shape and what S01 committed to |
+| `check_posix_match`, `restore_best_match` | `:11602`, `:11565` | **Not ported.** Both branches are present in `basic_match` and throw `needs:posix-matching` |
+
 ## Deliberately not ported
 
 Recorded so the omissions are visible and countable rather than silently missing.

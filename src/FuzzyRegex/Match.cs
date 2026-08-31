@@ -5,28 +5,50 @@ namespace Fuzzy.Text.RegularExpressions;
 /// <see cref="System.Text.RegularExpressions.Capture"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <see cref="Index"/> and <see cref="Length"/> are UTF-16 code units, matching the built-in
 /// <c>Regex</c>. Upstream reports codepoints; see design spec section 4.
+/// </para>
+/// <para>
+/// The engine works in <c>(start, end)</c> throughout, keeping upstream's names. This class and the
+/// recorder in <c>tools/record-oracle.py</c> are the only two places that convert to
+/// <c>(Index, Length)</c> (DECISIONS 2026-08-31), which is why a slip at either end shows up as an
+/// oracle divergence rather than as a silent agreement.
+/// </para>
 /// </remarks>
 public class Capture
 {
-    internal Capture() { }
+    /// <summary>The subject the span points into.</summary>
+    private protected readonly string _subject;
+
+    /// <summary>The engine's <c>start</c>, a UTF-16 code unit index.</summary>
+    private protected readonly int _start;
+
+    /// <summary>The engine's <c>end</c>, one past the last code unit.</summary>
+    private protected readonly int _end;
+
+    internal Capture(string subject, int start, int end)
+    {
+        _subject = subject;
+        _start = start;
+        _end = end;
+    }
 
     /// <summary>The position in the subject at which the captured text starts.</summary>
-    public int Index => throw new NotImplementedException();
+    public int Index => _start;
 
     /// <summary>The length of the captured text.</summary>
-    public int Length => throw new NotImplementedException();
+    public int Length => _end - _start;
 
     /// <summary>The captured text.</summary>
-    public string Value => throw new NotImplementedException();
+    public string Value => _subject[_start.._end];
 
     /// <summary>The captured text, without copying it out of the subject.</summary>
-    public ReadOnlySpan<char> ValueSpan => throw new NotImplementedException();
+    public ReadOnlySpan<char> ValueSpan => _subject.AsSpan(_start, _end - _start);
 
     /// <summary>Returns <see cref="Value"/>.</summary>
     /// <returns>The captured text.</returns>
-    public override string ToString() => throw new NotImplementedException();
+    public override string ToString() => Value;
 }
 
 /// <summary>
@@ -36,20 +58,30 @@ public class Capture
 /// </summary>
 public class Group : Capture
 {
-    internal Group() { }
+    internal Group(string subject, int start, int end, bool success, string name)
+        : base(subject, start, end)
+    {
+        Success = success;
+        Name = name;
+    }
 
     /// <summary>Whether the group took part in the match.</summary>
-    public bool Success => throw new NotImplementedException();
+    public bool Success { get; }
 
     /// <summary>The group's name, or its number as text if it has none.</summary>
-    public string Name => throw new NotImplementedException();
+    public string Name { get; }
 
     /// <summary>
     /// Every capture the group made, oldest first, not just the last one. Upstream
     /// <c>Match.captures(group)</c>; the built-in <c>Regex</c> only keeps this for groups inside
     /// a repeated construct, whereas mrab-regex keeps it always.
     /// </summary>
-    public CaptureCollection Captures => throw new NotImplementedException();
+    /// <remarks>
+    /// Group 0 is the whole match, which is captured exactly once, so its list is a single span and
+    /// needs none of the machinery real capture lists do. Every other group throws its seam before
+    /// it can reach this - see <see cref="GroupCollection"/>.
+    /// </remarks>
+    public CaptureCollection Captures => new([this]);
 }
 
 /// <summary>
@@ -59,27 +91,41 @@ public class Group : Capture
 /// </summary>
 public sealed class Match : Group
 {
-    internal Match() { }
+    private readonly int _publicGroupCount;
+
+    internal Match(string subject, int start, int end, bool success, int publicGroupCount, bool partial = false)
+        : base(subject, start, end, success, "0")
+    {
+        _publicGroupCount = publicGroupCount;
+        PartialMatch = partial;
+    }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
-    public GroupCollection Groups => throw new NotImplementedException();
+    public GroupCollection Groups => new(this, _publicGroupCount);
 
     /// <summary>
     /// Whether this is a partial match: the subject ran out before the pattern could either
     /// succeed or fail. Upstream <c>Match.partial</c>, set by matching with <c>partial=True</c>.
     /// </summary>
-    public bool PartialMatch => throw new NotImplementedException();
+    /// <remarks>
+    /// Always <see langword="false"/> until Phase 4: the only way to get a partial match is to ask
+    /// for one, and every entry point refuses <c>partial: true</c> with a <c>needs:partial</c> seam.
+    /// The field is here rather than a constant so that Phase 4 has somewhere to put the answer.
+    /// </remarks>
+    public bool PartialMatch { get; }
 
     /// <summary>
     /// How many errors of each kind the fuzzy match used. Zero throughout for an exact match.
     /// Upstream <c>Match.fuzzy_counts</c>.
     /// </summary>
-    public FuzzyCounts FuzzyCounts => throw new NotImplementedException();
+    public FuzzyCounts FuzzyCounts =>
+        throw new NotImplementedException("needs:fuzzy-counts - fuzzy matching is not implemented yet");
 
     /// <summary>
     /// Where the fuzzy match used each kind of error. Upstream <c>Match.fuzzy_changes</c>.
     /// </summary>
-    public FuzzyChanges FuzzyChanges => throw new NotImplementedException();
+    public FuzzyChanges FuzzyChanges =>
+        throw new NotImplementedException("needs:fuzzy-changes - fuzzy matching is not implemented yet");
 
     /// <summary>
     /// The number of the last group that took part in the match, or <c>-1</c> if no group did.
@@ -90,7 +136,8 @@ public sealed class Match : Group
     /// <c>regex.match('((a))', 'a').lastindex</c> is <c>1</c> even though groups 1 and 2 both
     /// succeed and both span <c>(0, 1)</c>, so nothing about the groups distinguishes them.
     /// </remarks>
-    public int LastGroupNumber => throw new NotImplementedException();
+    public int LastGroupNumber =>
+        throw new NotImplementedException("needs:groups - capture groups are not implemented yet");
 
     /// <summary>
     /// The name of the last <em>named</em> group that took part in the match, or
@@ -100,11 +147,13 @@ public sealed class Match : Group
     /// Also not derivable: <c>regex.match('(?P&lt;a&gt;a(b))', 'ab').lastgroup</c> is <c>'a'</c>
     /// although the unnamed group 2 succeeded later, at span <c>(1, 2)</c>.
     /// </remarks>
-    public string? LastGroupName => throw new NotImplementedException();
+    public string? LastGroupName =>
+        throw new NotImplementedException("needs:groups - capture groups are not implemented yet");
 
     /// <summary>Finds the next match, starting where this one ended.</summary>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
-    public Match NextMatch() => throw new NotImplementedException();
+    public Match NextMatch() =>
+        throw new NotImplementedException("needs:find-all - iterating over the matches is not implemented yet");
 
     /// <summary>
     /// Expands a replacement template against this match, so <c>\1</c> and <c>\g&lt;name&gt;</c>
@@ -122,7 +171,8 @@ public sealed class Match : Group
     /// </remarks>
     /// <param name="replacement">The replacement template, in upstream's syntax.</param>
     /// <returns>The expanded text.</returns>
-    public string Result(string replacement) => throw new NotImplementedException();
+    public string Result(string replacement) =>
+        throw new NotImplementedException("needs:substitution - expanding a template is not implemented yet");
 
     /// <summary>
     /// Expands a <c>str.format</c>-style template against this match, where <c>{0}</c> is the
@@ -137,5 +187,6 @@ public sealed class Match : Group
     /// </remarks>
     /// <param name="format">The format template.</param>
     /// <returns>The expanded text.</returns>
-    public string ResultFormat(string format) => throw new NotImplementedException();
+    public string ResultFormat(string format) =>
+        throw new NotImplementedException("needs:format - expanding a format template is not implemented yet");
 }

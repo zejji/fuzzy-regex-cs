@@ -15,7 +15,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Basics;
 public sealed class CommonPrefixTests
 {
     [Test]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
     [Property("Upstream", "RegexTests.test_common_prefix#1")]
     public void Compiling_an_alternation_with_a_very_long_common_prefix_succeeds()
     {

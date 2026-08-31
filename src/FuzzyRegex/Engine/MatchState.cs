@@ -1,0 +1,406 @@
+using System.Diagnostics;
+using Fuzzy.Text.RegularExpressions.Parsing;
+using Fuzzy.Text.RegularExpressions.Unicode;
+
+namespace Fuzzy.Text.RegularExpressions.Engine;
+
+/// <summary>
+/// The state one matching operation runs in. Port of <c>RE_State</c>
+/// (<c>upstream/src/_regex.c</c> lines 459-529), built by <see cref="Create"/>, which is the port of
+/// <c>state_init</c> (<c>:18598</c>) and <c>state_init_2</c> (<c>:18275</c>).
+/// </summary>
+/// <remarks>
+/// <para>
+/// A class with internal fields rather than a struct, exactly as S15 ported <c>RE_Node</c>: every
+/// helper below mutates it, and a struct would put <c>ref</c> on every signature to say what a
+/// reference type says for free. Nothing here is public, so CA1051, S1104 and MA0008 - the rules the
+/// <c>.editorconfig</c> note was written for - do not fire (measured, S16). See DECISIONS.
+/// </para>
+/// <para>
+/// Not ported: the <c>view</c>/<c>charsize</c>/<c>is_unicode</c>/<c>should_release</c> buffer fields
+/// and the <c>char_at</c>/<c>set_char_at</c>/<c>point_to</c> function pointers they select
+/// (<c>get_string</c>, <c>:18217</c>), because this port matches <see cref="string"/> only; the GIL
+/// and lock machinery (<c>acquire_state_lock</c>, <c>:20847</c>), because the state is per call and
+/// the pattern is immutable; and <c>check_compatible</c> (<c>:18573</c>), which exists to reject a
+/// <c>str</c> pattern against a <c>bytes</c> subject.
+/// </para>
+/// <para>
+/// <b>Positions are UTF-16 code units</b> where upstream's are codepoints, so a codepoint step is
+/// one or two of them - see <see cref="CharAt"/> and <see cref="NextPos"/>. Internal spans are
+/// <c>(start, end)</c>, keeping upstream's names; the <c>(Index, Length)</c> the public API reports
+/// is converted in <c>Match</c>/<c>Group</c>'s accessors and nowhere else (DECISIONS 2026-08-31).
+/// </para>
+/// </remarks>
+internal sealed class MatchState : IDisposable
+{
+    /// <summary>Upstream <c>RE_PARTIAL_NONE</c> (<c>upstream/src/_regex.c</c> line 93).</summary>
+    internal const int PartialNone = -1;
+
+    /// <summary>Upstream <c>RE_PARTIAL_LEFT</c> (line 94).</summary>
+    internal const int PartialLeft = 0;
+
+    /// <summary>Upstream <c>RE_PARTIAL_RIGHT</c> (line 95).</summary>
+    internal const int PartialRight = 1;
+
+    /// <summary>Upstream <c>RE_NO_TIMEOUT</c> (line 85).</summary>
+    internal const long NoTimeout = -1;
+
+    /// <summary>Upstream <c>pattern</c>.</summary>
+    internal readonly PatternObject Pattern;
+
+    /// <summary>Upstream <c>text</c> and <c>string</c>, which are one object here.</summary>
+    internal readonly string Text;
+
+    /// <summary>Upstream <c>text_length</c>.</summary>
+    internal readonly int TextLength;
+
+    /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
+    internal int SliceStart;
+
+    /// <summary>Upstream <c>slice_end</c>.</summary>
+    internal int SliceEnd;
+
+    /// <summary>
+    /// Upstream <c>text_start</c>. Always 0: upstream documents the bounds as an open start and a
+    /// closed end, so <c>pos</c> moves <see cref="SliceStart"/> but not this, which is why
+    /// <c>^</c> does not match at <c>pos</c>.
+    /// </summary>
+    internal int TextStart;
+
+    /// <summary>Upstream <c>text_end</c>, which <c>endpos</c> does move.</summary>
+    internal int TextEnd;
+
+    /// <summary>Upstream <c>search_anchor</c>: where this matching operation was asked to start.</summary>
+    internal int SearchAnchor;
+
+    /// <summary>Upstream <c>match_pos</c>: where the match being attempted starts.</summary>
+    internal int MatchPos;
+
+    /// <summary>Upstream <c>text_pos</c>: where matching has got to.</summary>
+    internal int TextPos;
+
+    /// <summary>Upstream <c>final_newline</c>: the index of a newline ending the string, or -1.</summary>
+    internal int FinalNewline;
+
+    /// <summary>Upstream <c>final_line_sep</c>.</summary>
+    internal int FinalLineSep;
+
+    /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
+    internal readonly ByteStack Sstack = new();
+
+    /// <summary>Upstream <c>bstack</c>: the backtracking stack.</summary>
+    internal readonly ByteStack Bstack = new();
+
+    /// <summary>Upstream <c>pstack</c>: the pruning stack.</summary>
+    internal readonly ByteStack Pstack = new();
+
+    /// <summary>Upstream <c>min_width</c>, a codepoint count.</summary>
+    internal long MinWidth;
+
+    /// <summary>Upstream <c>encoding</c>, reduced to which table it is (see <see cref="Encodings"/>).</summary>
+    internal CaseEncoding Encoding;
+
+    /// <summary>Upstream <c>partial_side</c>.</summary>
+    internal int PartialSide;
+
+    /// <summary>Upstream <c>max_errors</c>.</summary>
+    internal long MaxErrors;
+
+    /// <summary>Upstream <c>total_errors</c>.</summary>
+    internal long TotalErrors;
+
+    /// <summary>Upstream <c>fewest_errors</c>.</summary>
+    internal long FewestErrors;
+
+    /// <summary>Upstream <c>capture_change</c>.</summary>
+    internal long CaptureChange;
+
+    /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
+    internal int ReqPos;
+
+    /// <summary>Upstream <c>req_end</c>.</summary>
+    internal int ReqEnd;
+
+    /// <summary>Upstream <c>lastindex</c>.</summary>
+    internal int LastIndex;
+
+    /// <summary>Upstream <c>lastgroup</c>.</summary>
+    internal int LastGroup;
+
+    /// <summary>
+    /// Upstream <c>timeout</c>, in <see cref="Stopwatch"/> ticks rather than clock ticks, or
+    /// <see cref="NoTimeout"/>. Upstream's <c>decode_timeout</c> (<c>:21056</c>) maps a negative
+    /// number to "no timeout", which is what <c>FuzzyRegex.InfiniteMatchTimeout</c> does here.
+    /// </summary>
+    internal long Timeout;
+
+    /// <summary>Upstream <c>start_time</c>.</summary>
+    internal long StartTime;
+
+    /// <summary>Upstream <c>iterations</c>: how long since the last cancellation check.</summary>
+    internal ushort Iterations;
+
+    /// <summary>Upstream <c>overlapped</c>.</summary>
+    internal bool Overlapped;
+
+    /// <summary>Upstream <c>reverse</c>.</summary>
+    internal bool Reverse;
+
+    /// <summary>Upstream <c>visible_captures</c>.</summary>
+    internal bool VisibleCaptures;
+
+    /// <summary>Upstream <c>version_0</c>.</summary>
+    internal bool Version0;
+
+    /// <summary>Upstream <c>must_advance</c>.</summary>
+    internal bool MustAdvance;
+
+    /// <summary>Upstream <c>too_few_errors</c>.</summary>
+    internal bool TooFewErrors;
+
+    /// <summary>Upstream <c>match_all</c>: this is a <c>fullmatch</c>.</summary>
+    internal bool MatchAll;
+
+    /// <summary>Upstream <c>found_match</c>: a POSIX match has been found.</summary>
+    internal bool FoundMatch;
+
+    /// <summary>Upstream <c>is_fuzzy</c>.</summary>
+    internal bool IsFuzzy;
+
+    private MatchState(PatternObject pattern, string text)
+    {
+        Pattern = pattern;
+        Text = text;
+        TextLength = text.Length;
+    }
+
+    /// <summary>
+    /// Port of <c>state_init</c> (<c>upstream/src/_regex.c</c> line 18598) and the half of
+    /// <c>state_init_2</c> (line 18275) that is not allocation.
+    /// </summary>
+    /// <param name="pattern">The compiled pattern.</param>
+    /// <param name="text">The subject.</param>
+    /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
+    /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
+    /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Whether a partial match is wanted.</param>
+    /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
+    /// <param name="matchAll">Whether the match must cover the whole slice.</param>
+    /// <param name="timeout">The timeout in <see cref="Stopwatch"/> ticks, or <see cref="NoTimeout"/>.</param>
+    /// <returns>The state, ready to match.</returns>
+    internal static MatchState Create(
+        PatternObject pattern,
+        string text,
+        int start,
+        int end,
+        bool overlapped,
+        bool partial,
+        bool visibleCaptures,
+        bool matchAll,
+        long timeout
+    )
+    {
+        var state = new MatchState(pattern, text)
+        {
+            VisibleCaptures = visibleCaptures,
+            MatchAll = matchAll,
+            ReqPos = -1,
+            IsFuzzy = pattern.IsFuzzy,
+        };
+
+        // NOT PORTED: the group, repeat, fuzzy-guard and group-call-guard allocations. Their
+        // contents belong to S18, S19 and Phase 5, and each of those slices allocates what it reads.
+
+        // Adjust boundaries.
+        start = ClampIndex(start, text.Length);
+        end = ClampIndex(end, text.Length);
+
+        if (end < start)
+        {
+            end = start;
+        }
+
+        state.Overlapped = overlapped;
+        state.MinWidth = pattern.MinWidth;
+        state.Encoding = pattern.Encoding;
+
+        // Open start and closed end bounds, like in re module.
+        state.TextStart = 0;
+        state.TextEnd = end;
+
+        state.SliceStart = start;
+        state.SliceEnd = end;
+
+        state.Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
+
+        if (partial)
+        {
+            state.PartialSide = state.Reverse ? PartialLeft : PartialRight;
+        }
+        else
+        {
+            state.PartialSide = PartialNone;
+        }
+
+        state.TextPos = state.Reverse ? state.SliceEnd : state.SliceStart;
+
+        // Point to the final newline and line separator if it's at the end of the string, otherwise
+        // just -1.
+        state.FinalNewline = -1;
+        state.FinalLineSep = -1;
+        int finalPos = state.PrevPos(state.TextEnd);
+        if (finalPos >= 0)
+        {
+            uint ch = state.CharAt(finalPos);
+            if (ch == 0x0A)
+            {
+                // The string ends with LF.
+                state.FinalNewline = finalPos;
+                state.FinalLineSep = finalPos;
+
+                // Does the string end with CR/LF?
+                finalPos = state.PrevPos(finalPos);
+                if (finalPos >= 0 && state.CharAt(finalPos) == 0x0D)
+                {
+                    state.FinalLineSep = finalPos;
+                }
+            }
+            else if (Encodings.IsLineSep(state.Encoding, ch))
+            {
+                // The string doesn't end with LF, but it could be another kind of line separator.
+                state.FinalLineSep = finalPos;
+            }
+        }
+
+        // If the 'new' behaviour is enabled then split correctly on zero-width matches.
+        state.Version0 = (pattern.Flags & RegexFlags.Version1) == 0;
+        state.MustAdvance = false;
+
+        state.Timeout = timeout;
+        state.StartTime = timeout == NoTimeout ? 0 : Stopwatch.GetTimestamp();
+
+        // NOT PORTED: search_positions, which only search_start reads (Phase 7).
+
+        return state;
+    }
+
+    /// <summary>
+    /// Upstream <c>state_fini</c> (<c>upstream/src/_regex.c</c> line 18662), reduced to returning
+    /// the stacks' rented buffers.
+    /// </summary>
+    public void Dispose()
+    {
+        Sstack.Dispose();
+        Bstack.Dispose();
+        Pstack.Dispose();
+    }
+
+    /// <summary>
+    /// Upstream's <c>char_at</c> function pointer (<c>upstream/src/_regex.c</c> line 18408), which
+    /// reads one whole codepoint. A surrogate pair is decoded here, so a non-BMP character is one
+    /// character to every opcode just as it is one to upstream's Python <c>str</c>. An unpaired
+    /// surrogate reads as itself, which is what a Python <c>str</c> holding one does.
+    /// </summary>
+    /// <param name="pos">The position, a UTF-16 code unit index.</param>
+    /// <returns>The codepoint there.</returns>
+    internal uint CharAt(int pos)
+    {
+        char first = Text[pos];
+        if (char.IsHighSurrogate(first) && pos + 1 < TextEnd && char.IsLowSurrogate(Text[pos + 1]))
+        {
+            return (uint)char.ConvertToUtf32(first, Text[pos + 1]);
+        }
+
+        return first;
+    }
+
+    /// <summary>
+    /// One codepoint forward from <paramref name="pos"/>: upstream's <c>++text_pos</c> and
+    /// <c>text_pos += node-&gt;step</c> when the step is positive.
+    /// </summary>
+    /// <param name="pos">The position.</param>
+    /// <returns>The next position.</returns>
+    internal int NextPos(int pos) =>
+        pos + 1 < TextEnd && char.IsHighSurrogate(Text[pos]) && char.IsLowSurrogate(Text[pos + 1]) ? pos + 2 : pos + 1;
+
+    /// <summary>
+    /// One codepoint back from <paramref name="pos"/>: upstream's <c>--text_pos</c> and
+    /// <c>char_at(text_pos - 1)</c>.
+    /// </summary>
+    /// <param name="pos">The position.</param>
+    /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
+    internal int PrevPos(int pos) =>
+        pos >= 2 && char.IsLowSurrogate(Text[pos - 1]) && char.IsHighSurrogate(Text[pos - 2]) ? pos - 2 : pos - 1;
+
+    /// <summary>Upstream's <c>char_at(state-&gt;text, text_pos - 1)</c>, over whole codepoints.</summary>
+    /// <param name="pos">The position to look back from, which must be greater than 0.</param>
+    /// <returns>The codepoint before it.</returns>
+    internal uint CharBefore(int pos) => CharAt(PrevPos(pos));
+
+    /// <summary>
+    /// Upstream <c>init_match</c> (<c>upstream/src/_regex.c</c> line 3404).
+    /// </summary>
+    internal void InitMatch()
+    {
+        // Reset the stacks.
+        Sstack.Reset();
+        Bstack.Reset();
+        Pstack.Reset();
+
+        SearchAnchor = TextPos;
+        MatchPos = TextPos;
+
+        // NOT PORTED: clear_groups (:3369) and reset_guards (:3383). There are no group spans until
+        // S18 and no repeat guards until S19, and a pattern needing either throws at its own opcode
+        // before anything could have written one.
+
+        // Clear the counts and cost for matching.
+        // NOT PORTED: the fuzzy counts, node and change list (Phase 5).
+
+        TotalErrors = 0;
+        FoundMatch = false;
+        CaptureChange = 0;
+        Iterations = 0;
+    }
+
+    /// <summary>
+    /// Upstream <c>check_timed_out</c> (<c>upstream/src/_regex.c</c> line 2253), which upstream
+    /// calls from <c>safe_check_cancel</c> alongside <c>PyErr_CheckSignals</c> - the second has no
+    /// counterpart here, so this is the whole of the cancellation check.
+    /// </summary>
+    /// <returns><see langword="true"/> if the operation has run out of time.</returns>
+    internal bool CheckTimedOut()
+    {
+        if (Timeout == NoTimeout)
+        {
+            // No timeout.
+            return false;
+        }
+
+        // Hasn't timed out yet.
+        return Stopwatch.GetTimestamp() - StartTime >= Timeout;
+    }
+
+    /// <summary>
+    /// Upstream's boundary adjustment, which <c>state_init_2</c> (<c>:18376</c>) and
+    /// <c>get_limits</c> (<c>:21627</c>) spell out identically: a negative index counts back from
+    /// the end, and the result is clamped to the string.
+    /// </summary>
+    /// <param name="value">The index.</param>
+    /// <param name="length">The subject's length.</param>
+    /// <returns>The clamped index.</returns>
+    internal static int ClampIndex(int value, int length)
+    {
+        if (value < 0)
+        {
+            value += length;
+        }
+
+        if (value < 0)
+        {
+            return 0;
+        }
+
+        return value > length ? length : value;
+    }
+}

@@ -133,6 +133,23 @@ internal static class Encodings
         return UnicodeTables.GetFullCaseFolding(ch, folded);
     }
 
+    /// <summary>
+    /// Upstream <c>unicode_is_line_sep</c> / <c>ascii_is_line_sep</c>
+    /// (<c>upstream/src/_regex.c</c> lines 1936 and 894).
+    /// </summary>
+    /// <remarks>
+    /// The position predicates built on this - <c>at_line_start</c> and <c>at_line_end</c> - take
+    /// the match state, so they live in <c>Engine.Matcher</c> rather than here; this file is the
+    /// half of upstream's encoding tables that needs nothing but a codepoint.
+    /// </remarks>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it separates lines.</returns>
+    internal static bool IsLineSep(CaseEncoding encoding, uint ch) =>
+        encoding == CaseEncoding.Ascii
+            ? ch is >= 0x0A and <= 0x0D
+            : ch is (>= 0x0A and <= 0x0D) or 0x85 or 0x2028 or 0x2029;
+
     /// <summary>Upstream <c>unicode_possible_turkic</c> (line 1984).</summary>
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> for the four variants of I/i.</returns>

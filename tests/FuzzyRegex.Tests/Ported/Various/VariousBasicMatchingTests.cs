@@ -36,7 +36,6 @@ public sealed class VariousBasicMatchingTests
     [Arguments("a.c", "axc", "0", new string?[] { "axc" })]
     [Arguments("a]", "a]", "0", new string?[] { "a]" })]
     [Arguments("multiple words", "multiple words, yeah", "0", new string?[] { "multiple words" })]
-    [Skip("needs:basic-matching - the engine cannot match a literal yet")]
     [Property("Upstream", "RegexTests.test_various#40,44,51-52,56-57,77-78,94,168,214,218-219,247-248,261,332")]
     public void Search_returns_the_expected_group_values(
         string pattern,
@@ -64,7 +63,6 @@ public sealed class VariousBasicMatchingTests
     [Arguments("abc", "")]
     [Arguments("multiple words of text", "uh-uh")]
     [Arguments("a.b", "a\nb")]
-    [Skip("needs:basic-matching - the engine cannot match a literal yet")]
     [Property("Upstream", "RegexTests.test_various#41,53-55,138,167,215-217,296,331,486")]
     public void Search_does_not_match(string pattern, string subject) =>
         FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();

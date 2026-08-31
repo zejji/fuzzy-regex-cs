@@ -27,7 +27,8 @@ public sealed class RegressionsBasicMatchingTests
 
     // Hg issue 88: regex.match() hangs.
     [Test]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
+    // Retagged in S16: the spine matches literals and '.', but '.*' is a repeat.
+    [Skip("needs:quantifiers - '.*a.*ba.*aa' is three greedy repeats")]
     [Property("Upstream", "RegexTests.test_hg_bugs#59")]
     public void Pattern_that_used_to_hang_fails_to_match_without_hanging() =>
         FuzzyRegex.MatchAtStart("ababba", @".*a.*ba.*aa").Success.Should().BeFalse();
@@ -35,7 +36,9 @@ public sealed class RegressionsBasicMatchingTests
     // Hg issue 139: Regular expression with multiple wildcards where first should match empty
     // string does not always work.
     [Test]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
+    // Retagged in S16: two capture groups, each holding a repeated negated set. The assertion
+    // reads Groups[1] and Groups[2], so S18 is the last thing it waits on.
+    [Skip("needs:groups - '([^L]*)([^R]*R)' needs sets (S17), repeats (S19) and capture groups")]
     [Property("Upstream", "RegexTests.test_hg_bugs#143")]
     public void First_wildcard_group_is_allowed_to_match_empty_so_the_second_can_reach_the_anchor()
     {
@@ -45,13 +48,15 @@ public sealed class RegressionsBasicMatchingTests
     }
 
     [Test]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
+    // Retagged in S16: '[ ]*' is a repeated set.
+    [Skip("needs:quantifiers - '[ ]* Name[ ]*\\* ' repeats a set twice")]
     [Property("Upstream", "RegexTests.test_hg_bugs#411")]
     public void Trailing_space_in_the_pattern_that_is_absent_from_the_subject_fails_to_match() =>
         new FuzzyRegex(@"[ ]* Name[ ]*\* ").Match("  Name *").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
+    // Retagged in S16: the pattern is an alternation, which the matcher has no BRANCH case for.
+    [Skip("needs:alternation - 'a|\\.*pb\\.py' is a branch, and its second arm is a repeat too")]
     [Property("Upstream", "RegexTests.test_hg_bugs#412")]
     public void Alternation_with_a_literal_dot_branch_does_not_falsely_match() =>
         new FuzzyRegex(@"a|\.*pb\.py").Match(".geojs").Success.Should().BeFalse();
@@ -61,7 +66,8 @@ public sealed class RegressionsBasicMatchingTests
     [Arguments("9 hours 1 minute ago", "1 minute ago")]
     [Arguments("10 months 1 hour ago", "1 hour ago")]
     [Arguments("1 month 10 hours ago", "10 hours ago")]
-    [Skip("needs:basic-matching - the engine has no matching yet")]
+    // Retagged in S16: the pattern opens with a lookbehind and closes with a lookahead.
+    [Skip("needs:lookbehind - the pattern is '(?<=...)(alternation)(?=...)'")]
     [Property("Upstream", "RegexTests.test_hg_bugs#413-416")]
     public void Relative_time_pattern_finds_the_rightmost_recognised_phrase(string subject, string expected) =>
         new FuzzyRegex(_relativeTimePattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0)
@@ -71,7 +77,8 @@ public sealed class RegressionsBasicMatchingTests
 
     // Hg issue 327: .fullmatch() causes MemoryError.
     [Test]
-    [Skip("needs:full-match - Pattern.FullMatch is not implemented yet")]
+    // Retagged in S16: FullMatch itself works now; '((\d)*?)*?' is nested lazy repeats.
+    [Skip("needs:quantifiers - '((\\d)*?)*?' is two nested lazy repeats over a set")]
     [Property("Upstream", "RegexTests.test_hg_bugs#376")]
     public void Nested_lazy_star_groups_fully_match_without_exhausting_memory()
     {
