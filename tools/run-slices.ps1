@@ -107,7 +107,7 @@ function Invoke-SliceSession {
         self-orients from STATE.md, the roadmap, the slice file and the generated status, so a
         long briefing here would only add stale context.
     #>
-    param([int]$TimeoutMinutes)
+    param([int]$TimeoutMinutes, [string]$HeadBefore)
 
     $process = $null
 
@@ -143,7 +143,23 @@ function Invoke-SliceSession {
         $process.StandardInput.Close()
 
         if (-not $process.WaitForExit($TimeoutMinutes * 60 * 1000)) {
-            $process.Kill($true)
+            # A force kill here is the last resort, not the first move, and it is loud about it.
+            # Killing a session that has already committed would discard a slice that actually
+            # landed: the commit is the slice (the port-slice skill), so a session racing the
+            # deadline may well have committed in the seconds before this fired, and the rollback
+            # in the caller resets to $HeadBefore. Grace is short because the session is not
+            # cooperating with a shutdown - nothing here can ask it to stop, so this only avoids
+            # losing work that is already safe.
+            Write-Host "  the session has run past $TimeoutMinutes minutes; checking whether it committed before killing it" -ForegroundColor Yellow
+            $headNow = (git -C $repoRoot rev-parse HEAD).Trim()
+            if ($headNow -ne $HeadBefore) {
+                Write-Host "  it committed $headNow at the deadline - giving it 60s to finish and exit on its own" -ForegroundColor Yellow
+                $null = $process.WaitForExit(60 * 1000)
+            }
+            if (-not $process.HasExited) {
+                Write-Host "  FORCE KILLING the session tree now" -ForegroundColor Red
+                $process.Kill($true)
+            }
             return [pscustomobject]@{
                 Ok = $false; Reason = "the session exceeded $TimeoutMinutes minutes and was killed"
                 TotalTokens = 0; CostUsd = 0
@@ -316,7 +332,7 @@ while ($completed -lt $MaxSlices) {
 
     $headBefore = (Get-GitState).Head
     Write-Host "  running $Model session..." -ForegroundColor DarkGray
-    $session = Invoke-SliceSession -TimeoutMinutes $budget.sliceTimeoutMinutes
+    $session = Invoke-SliceSession -TimeoutMinutes $budget.sliceTimeoutMinutes -HeadBefore $headBefore
 
     $failureReason = if (-not $session.Ok) { $session.Reason } else { Test-SliceLanded -HeadBefore $headBefore -SliceName $slice.Name }
 
