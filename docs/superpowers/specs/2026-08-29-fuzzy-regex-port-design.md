@@ -303,7 +303,7 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors + the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which no later phase claims and without which no group test can run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
 | 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) + native-AOT compatibility gate, against a named exit gate (Amendment 12) + the upstream open-issue sweep (Amendment 13) | 6-10 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) + native-AOT compatibility gate, against a named exit gate (Amendment 12) + the upstream open-issue sweep (Amendment 13); its mutation-testing gate item widens from the API layer to the engine and runs overnight (Amendment 14) | 7-12 | Opus/Sonnet |
 | 7 | Benchmarks + optimization, AOT-compatible throughout (Amendment 12) | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, engine in a Web Worker, GitHub Pages; after 1.0 (Amendment 12) | 2-3 | Opus |
@@ -619,3 +619,53 @@ amended text is inline above; this list is the record of what changed and why.
    attributes mrab-regex at the pinned commit, carries upstream's own CNRI/Secret Labs statement
    and credits the Unicode Character Database, which satisfies Apache 2.0 section 4(b) and 4(c).
    Contributing a fix back changes nothing about that.
+
+14. **The Phase 6 mutation-testing pass widens from the API layer to the engine, because overnight
+   capacity was granted** (section 12). Made 2026-08-31, decided by the project owner. Sized at 1-2
+   sessions on top of Phase 6's 6-10, taking the phase to 7-12.
+
+   *This is a change of scope, not a new instrument.* Amendment 12 already put mutation testing in
+   the Phase 6 exit gate as item 3, and the roadmap already parked Stryker.NET for Phase 6. Both
+   deliberately confined it to **the public API layer and the parse-error paths** - "the two places
+   the oracle cannot reach" - and both gave the same reason for confining it: "Stryker reruns the
+   suite per mutant, so a 30k-line engine would take hours to days per run - never a merge gate."
+   That reason was about machine time in a working day.
+
+   *What changed is the constraint, not the technique.* The owner has allowed the mutation pass and
+   the Phase 7 optimization slices to run overnight, with no contention for the machine. A cost that
+   is unacceptable interactively is ordinary unattended, so the runtime argument no longer scopes
+   the engine out. The engine is where Phase 7 will do its rewriting, so it is the part whose test
+   coverage most needs measuring before that starts.
+
+   *Why before Phase 7, restated.* Phase 7 is optimization: behaviour-preserving rewrites whose only
+   safety net is the suite. Measuring holes in that net after the rewriting has begun measures the
+   wrong thing. This is Amendment 13's argument for the upstream-issue sweep, applied to the tests
+   rather than to the behaviour.
+
+   *What a mutation score is worth, with its published limits.* Across 357 real faults, 230,000
+   mutants and 321 KLOC in five Java programs, mutant detection correlated significantly with
+   real-fault detection, and more strongly than statement coverage did. The same study bounds the
+   claim: the coupling effect held for **73%** of those faults, **10%** would have needed a new or
+   stronger mutation operator, and **17%** were not coupled to any mutant (Just et al., FSE 2014).
+   So it is a sharper proxy than coverage, not a proof, and it does not replace either of the other
+   two instruments: the oracle compares against upstream, and the per-slice negative controls test
+   whether the oracle's *generators* have teeth, which is a question mutation testing never asks.
+
+   *Tooling, checked 2026-08-31.* Stryker.NET 4.16.0 (released 2026-07-03). It can reach this suite
+   only through its Microsoft Testing Platform runner, added in 4.13 and still marked preview,
+   because MTP is the only runner supporting TUnit. That preview status is the delivery risk, and is
+   why this stays a one-off measurement with a written verdict rather than a CI gate: `break-at`
+   exists, but a preview runner is not something to block a build on.
+
+   *Scoping still applies, overnight or not.* The engine is ~7,900 lines with ~3,100 in
+   `Matcher.cs`, and the suite takes 43 seconds as of S19. Use `mutate` to bound the files,
+   `mutation-level` to bound operator aggressiveness, `ignore-methods` for the seam throwers,
+   `concurrency` for a machine with nothing else on it, and `since` with `with-baseline` if it is
+   ever repeated. Expect equivalent mutants in quantity - a backtracking matcher is full of
+   defensive guards unobservable from outside, and S19 already met one by hand when relaxing a
+   `count > maxCount` check produced zero divergences because that branch is dead in practice.
+   Triaging those is most of the work, which is why the deliverable is a verdict and the tests it
+   justifies, not a score to chase. Google's published practice is the calibration: they abandoned
+   exhaustive mutation for one mutant per covered line, scoped to the diff under review, with
+   unproductive lines suppressed (Petrovic and Ivankovic, ICSE-SEIP 2018; Petrovic et al., TSE
+   2021).

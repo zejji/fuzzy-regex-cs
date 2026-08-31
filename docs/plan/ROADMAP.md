@@ -16,12 +16,12 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep | 6-10 | Opus/Sonnet |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 7-12 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, the engine in a Web Worker, deployed to GitHub Pages | 2-3 | Opus |
 
-Roughly 51-78 slice sessions in total, at plus or minus 50%. The generated status board makes the
+Roughly 52-80 slice sessions in total, at plus or minus 50%. The generated status board makes the
 real rate visible within the first two phases, which is when these numbers should be revised
 against evidence rather than trusted.
 
@@ -107,9 +107,13 @@ number nobody acts on, so the phase closes against these, biggest signal first.
 2. **Oracle waves across every generator, with zero divergences.** Real ground truth, and unlike
    coverage it finds behaviour that was never tested at all - S16's leading-anchor bug was found
    by a wave and by no ported test.
-3. **Mutation testing**, already parked for phase 6 below, scoped to the public API layer and the
-   parse-error paths. It is the only instrument that answers "would a regression actually fail a
-   test?", and those are the two places the oracle cannot reach.
+3. **Mutation testing**, already parked for phase 6 below. It is the only instrument that answers
+   "would a regression actually fail a test?". Originally scoped to the public API layer and the
+   parse-error paths - the two places the oracle cannot reach - and **widened on 2026-08-31 to
+   include the engine** (design spec amendment 14, DECISIONS 2026-08-31). What confined it was
+   machine time, not doubt about its value, and the owner has since allowed it to run overnight
+   with no contention. The engine is what phase 7 rewrites, so it is the part whose coverage most
+   needs measuring first.
 4. **Line coverage last, and only as a backstop** - to find a file or a branch with no test at all.
    Never as a percentage target.
 
@@ -254,6 +258,13 @@ worker-hosted runtime.
   argument validation, `MatchTimeout`, Span overloads) and the parse-error paths. Revisit in
   phase 6 with real code and real timings; any estimate made now would be a guess. It cannot
   test the PowerShell tooling at all.
+
+  **Updated 2026-08-31 (design spec amendment 14):** the "hours to days per run" objection was a
+  working-day objection, and the owner has allowed this pass and the phase 7 optimisation slices
+  to run overnight with the machine to themselves. The scope therefore widens to the engine, which
+  is precisely what phase 7 rewrites. It stays a one-off measurement with a written verdict, never
+  a merge gate - partly for runtime, partly because Stryker.NET reaches TUnit only through its
+  Microsoft Testing Platform runner, which is still preview as of 4.16.0.
 
 ## Phase boundaries are human checkpoints
 
