@@ -13,7 +13,7 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 0 | Scaffolding: solution, build props, CI, skills, driver script, budget gate, slice files for phase 1 | 1-2 | Opus |
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
-| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
+| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
 | 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests | 3-5 | Opus/Sonnet |
@@ -34,6 +34,13 @@ roughly the same as a successful one. **So read every phase estimate below as sl
 itself is left alone: Phase 2 was parser work and Phase 3 is engine work, so its rate is not
 evidence about Phase 3's, and revising a number on the strength of a different kind of work would
 be worse than leaving it.
+
+**Phase 3 as authored (2026-08-31) is 13 slices, S14-S26** - inside the 11-16 band - so at the
+measured 1.35 sessions per slice, budget about 18 driver sessions. The Phase 3 content line above
+was corrected the same day: the original omitted the Match object, substitution and the iteration
+API, which are necessarily Phase 3 work (Phase 4/5 do not claim them, `Match.Result` was
+constrained to Phase 3 at the S13 close, and group/backref tests cannot run without `m.Groups`);
+four of the 13 slices are that unlisted work, and the band still held.
 
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
