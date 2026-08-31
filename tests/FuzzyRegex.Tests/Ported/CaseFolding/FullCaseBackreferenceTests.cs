@@ -27,7 +27,6 @@ public sealed class FullCaseBackreferenceTests
     private static readonly string _strasseLower = "stra" + (char)0x00DF + "e"; // straße
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case-folding yet")]
     [Property("Upstream", "RegexTests.test_named_lists#15-16")]
     public void A_backreference_under_full_case_folding_matches_a_different_length_form()
     {

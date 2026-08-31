@@ -30,7 +30,6 @@ public sealed class GeneralCategoryTests
     [Test]
     [Arguments("a")]
     [Arguments("A")]
-    [Skip("needs:ignore-case - the engine has no case-insensitive comparison yet")]
     [Property("Upstream", "RegexTests.test_properties#59-60")]
     public void Inline_ignore_case_matches_either_case_of_a_literal(string subject) =>
         new FuzzyRegex("(?i)a").IsMatchAtStart(subject).Should().BeTrue();

@@ -9,13 +9,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.CaseFolding;
 public sealed class IgnoreCaseTests
 {
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#1")]
     public void Literal_matches_case_insensitively() =>
         FuzzyRegex.MatchAtStart("ABC", "abc", FuzzyRegexOptions.IgnoreCase).Value.Should().Be("ABC");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#3")]
     public void Negated_set_star_captures_case_insensitively() =>
         FuzzyRegex
@@ -25,13 +23,11 @@ public sealed class IgnoreCaseTests
             .Be("a bb");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#4")]
     public void Set_captures_case_insensitively() =>
         FuzzyRegex.MatchAtStart("a b", "(a\\s[abc])", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a b");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#5")]
     public void Set_star_captures_case_insensitively() =>
         FuzzyRegex
@@ -41,13 +37,11 @@ public sealed class IgnoreCaseTests
             .Be("a bb");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive backreference matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#6")]
     public void Backreference_matches_case_insensitively() =>
         FuzzyRegex.MatchAtStart("a a", "((a)\\s\\2)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a a");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive backreference matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#7")]
     public void Backreference_star_matches_case_insensitively() =>
         FuzzyRegex
@@ -57,7 +51,6 @@ public sealed class IgnoreCaseTests
             .Be("a aa");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#8")]
     public void Alternation_with_backreference_captures_case_insensitively() =>
         FuzzyRegex
@@ -67,7 +60,6 @@ public sealed class IgnoreCaseTests
             .Be("a a");
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#9")]
     public void Alternation_star_captures_case_insensitively() =>
         FuzzyRegex
@@ -88,7 +80,6 @@ public sealed class IgnoreCaseTests
     }
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#11")]
     public void Range_between_cases_is_unaffected_by_inline_ignore_case()
     {
@@ -98,25 +89,21 @@ public sealed class IgnoreCaseTests
     }
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no inline (?i) flag yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#12")]
     public void Inline_ignore_case_flag_matches_a_differently_cased_literal() =>
         FuzzyRegex.MatchAtStart("nAo", "(?i)nao").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no inline (?i) flag yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#13")]
     public void Inline_ignore_case_flag_matches_a_differently_cased_accented_literal() =>
         FuzzyRegex.MatchAtStart("nÃo", "(?i)não").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no inline (?i) flag yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#14")]
     public void Inline_ignore_case_flag_matches_a_fully_upper_cased_accented_literal() =>
         FuzzyRegex.MatchAtStart("NÃO", "(?i)não").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:ignore-case - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#15")]
     public void Inline_ignore_case_flag_matches_long_s_against_s() =>
         FuzzyRegex.MatchAtStart("ſ", "(?i)s").Success.Should().BeTrue();

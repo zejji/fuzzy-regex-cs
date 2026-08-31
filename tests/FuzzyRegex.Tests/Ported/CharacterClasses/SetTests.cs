@@ -32,7 +32,6 @@ public sealed class SetTests
     [Test]
     [Arguments("(?i)[a]", "A", 0, 1)]
     [Arguments("(?i)[a-b]", "A", 0, 1)]
-    [Skip("needs:ignore-case - the matcher has no CharacterIgn or RangeIgn yet")]
     [Property("Upstream", "RegexTests.test_set#2,4")]
     public void Case_insensitive_character_class_matches_a_single_char_or_a_range(
         string pattern,

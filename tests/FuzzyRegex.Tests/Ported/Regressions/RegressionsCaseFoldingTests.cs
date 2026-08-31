@@ -52,8 +52,8 @@ public sealed class RegressionsCaseFoldingTests
     );
 
     [Test]
+    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#34")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void First_alternative_wins_when_it_can_be_matched_without_expanding_a_ligature() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)pos|post")
@@ -62,8 +62,8 @@ public sealed class RegressionsCaseFoldingTests
             .Equal("POS", "Pos", "pos", "po" + _longS, "po" + _ligatureSt, "po" + _ligatureLongSt);
 
     [Test]
+    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#35")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Longer_alternative_still_wins_when_tried_first() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)post|pos")
@@ -72,8 +72,8 @@ public sealed class RegressionsCaseFoldingTests
             .Equal("POST", "Post", "post", "po" + _longS + "t", "po" + _ligatureSt, "po" + _ligatureLongSt);
 
     [Test]
+    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#36")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Post_alternative_matches_even_when_the_other_branch_cannot() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)post|another")
@@ -92,7 +92,7 @@ public sealed class RegressionsCaseFoldingTests
     // count. The upstream index is carried as a row value because eight identical [Arguments]
     // rows would not be distinguishable from one another.
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
+    [Skip("needs:find-all - the FULLCASE compile is S22's; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#74-81")]
     [Arguments(74, false)]
     [Arguments(75, false)]
@@ -114,7 +114,6 @@ public sealed class RegressionsCaseFoldingTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#224")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Full_case_backreference_matches_the_same_word_repeated_in_lowercase()
     {
         // Hg issue 194: .FULLCASE and Backreference.
@@ -125,7 +124,6 @@ public sealed class RegressionsCaseFoldingTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#225")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Full_case_backreference_matches_the_word_repeated_in_a_different_case()
     {
         Match m = FuzzyRegex.Match("<cli><clI>", @"(?if)<(CLI)><\1>");
@@ -134,8 +132,8 @@ public sealed class RegressionsCaseFoldingTests
     }
 
     [Test]
+    [Skip("needs:right-to-left - the (?r) flag needs CHARACTER_REV and REF_GROUP_FLD_REV, which are S23")]
     [Property("Upstream", "RegexTests.test_hg_bugs#226")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Full_case_backreference_matches_right_to_left_with_the_word_repeated_in_a_different_case()
     {
         Match m = FuzzyRegex.Match("<cli><clI>", @"(?ifr)<\1><(CLI)>");
@@ -145,7 +143,6 @@ public sealed class RegressionsCaseFoldingTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#271")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Optional_leading_character_under_full_case_and_ignore_case_still_finds_the_later_match()
     {
         // Hg issue 227: Incorrect behavior for ? operator with UNICODE + IGNORECASE.
@@ -156,7 +153,6 @@ public sealed class RegressionsCaseFoldingTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#474")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     public void Full_case_group_followed_by_a_literal_that_never_occurs_in_the_subject_does_not_match()
     {
         string subject =

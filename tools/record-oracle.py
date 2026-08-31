@@ -272,6 +272,7 @@ GENERATORS = (
     "quantifiers",
     "boundaries",
     "backrefs",
+    "case-folding",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -1080,6 +1081,293 @@ def _generate_backrefs(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S22's generator: case-insensitive and full-casefold matching
+# --------------------------------------------------------------------------------------------
+
+# regex.IGNORECASE and regex.FULLCASE (verified 2026-08-31: `int(regex.I)` is 2 and `int(regex.F)`
+# is 16384). regex.ASCII is 128, and selects upstream's other casing table - ascii_all_cases only
+# knows A-Z and a-z, so an ASCII row is where a fold that should not happen would show up.
+IGNORECASE = 2
+FULLCASE = 16384
+ASCII_FLAG = 128
+
+
+def _expanding_characters() -> str:
+    """Every character whose full case folding is longer than itself.
+
+    Computed rather than listed, so it cannot rot against a Unicode bump: a hand-copied inventory
+    would silently stop covering the characters a new Unicode version adds. ``str.casefold`` is
+    CPython's full case folding, which is the same CaseFolding.txt data upstream's
+    ``re_get_full_case_folding`` table is generated from; the two are not asserted to agree here -
+    that is what the wave is for - it is only being used to *choose* interesting characters.
+
+    Measured 2026-08-31 on CPython 3.14: 104 characters, which is the figure the S22 slice file
+    quotes. The sharp-s family and the ff/fi/fl/ffi/ffl/long-s-t/st ligatures are all in it.
+    """
+    return "".join(chr(cp) for cp in range(0x110000) if len(chr(cp).casefold()) > 1)
+
+
+# Folds that do not expand but still catch a simple-folding bug. Turkic dotted/dotless I, whose
+# four variants upstream refuses to fold into each other at all (unicode_simple_case_fold, :1997);
+# Cherokee, whose lowercase letters fold *upward* into the U+13A0 block rather than downward; and
+# the singletons every case-folding implementation gets wrong at least once - long s, Kelvin sign,
+# Angstrom sign, final sigma.
+FOLD_TURKIC = "Iiİı"
+FOLD_CHEROKEE = "ᎠᏰᏵꭰꮎᏸ"
+FOLD_SINGLETONS = "ſKÅσςΣßẞ"
+
+# Cased *astral* characters - Deseret, Osage, Vithkuqi, Warang Citi, Medefaidrin and Adlam - each
+# an upper/lower pair that folds into the other. Every one is one codepoint and two UTF-16 code
+# units, which is the split the whole port has to keep straight: an IGN comparison that advanced a
+# code unit where upstream advances a codepoint agrees everywhere in the BMP and diverges here.
+# Verified 2026-08-31 with str.casefold: each pair folds to its lowercase member.
+FOLD_ASTRAL = (
+    "\U00010400\U00010428"
+    "\U000104B0\U000104D8"
+    "\U00010570\U00010597"
+    "\U000118A0\U000118C0"
+    "\U00016E40\U00016E60"
+    "\U0001E900\U0001E922"
+)
+
+# Plain ASCII, so the wave is not all exotica: an ordinary '(?i)abc' against 'ABC' is the common
+# case and has to keep working. Kept short so the alphabet stays small enough that a random
+# subject and a random pattern collide often.
+FOLD_ASCII = "aAbBkKsS"
+
+# The alphabets a row's subject is drawn from, rotated by row index so every wave covers all of
+# them rather than whichever one the seed favoured. Each exotic set is spliced with ASCII because a
+# subject of nothing but ligatures matches almost nothing, and a wave of non-matches says little.
+#
+# The expanding set appears twice in the rotation, so a third of rows draw from it rather than a
+# fifth. It is the only one that reaches STRING_FLD and REF_GROUP_FLD's differing advance rates at
+# all, and those need several things to line up at once - FULLCASE set, the right shape, the
+# character repeated - so a fifth of the wave was not enough to reach them reliably.
+FOLD_ALPHABETS = (
+    FOLD_ASCII,
+    FOLD_ASCII + FOLD_TURKIC,
+    FOLD_ASCII + _expanding_characters(),
+    FOLD_ASCII + FOLD_CHEROKEE + FOLD_SINGLETONS,
+    FOLD_ASCII + FOLD_ASTRAL,
+    FOLD_ASCII + _expanding_characters(),
+)
+
+MAX_FOLD_SUBJECT_LENGTH = 6
+MAX_FOLD_PATTERN_LENGTH = 3
+
+# How often the pattern's literal is cut out of the subject rather than drawn independently. Lower
+# than the literals generator's 0.7 because a case-insensitive pattern matches far more than the
+# substring it was cut from, so the wave would otherwise be almost all matches.
+FOLD_SUBSTRING_PROBABILITY = 0.55
+
+# How often the subject is built from doubled characters rather than drawn one at a time - the
+# trick the backrefs generator uses, and for the same reason: a reference needs the subject to
+# repeat itself before it can match at all. It matters more here, because REF_GROUP_FLD only
+# behaves differently from REF_GROUP_IGN when the *captured* text expands on folding, and a
+# reference that never matches never reaches that. With REF_GROUP_FLD comparing the captured
+# character raw instead of folded (S22 control D), 600 rows gave 0 divergences at seed 7 and 0 at
+# seed 4242 without this, and 8 and 6 with it (measured 2026-08-31).
+FOLD_DOUBLED_SUBJECT_PROBABILITY = 0.4
+
+# The pattern shapes, and how often each is chosen. Every one puts the folded literal somewhere a
+# different opcode family handles it: bare is CHARACTER_IGN / STRING_IGN / STRING_FLD, 'set' is
+# SET_UNION_IGN, 'range' is RANGE_IGN, 'property' is PROPERTY_IGN, 'repeat' is the *_REPEAT_ONE
+# counting path, and 'backref' is REF_GROUP_IGN / REF_GROUP_FLD.
+FOLD_SHAPES = (
+    "bare",
+    "folded-literal",
+    "set",
+    "negated-set",
+    "range",
+    "property",
+    "repeat",
+    "backref",
+    "folded-backref",
+)
+FOLD_SHAPE_WEIGHTS = (16, 12, 11, 7, 10, 7, 10, 11, 16)
+
+# The properties the 'property' shape draws from. \p{Lu}, \p{Ll} and \p{Lt} are the three whose
+# meaning matches_PROPERTY_IGN deliberately changes under IGNORECASE - they collapse into "is it a
+# cased letter" - and \p{Upper} and \p{Lower} are the two that collapse into \p{Cased}. \p{L} is
+# the control: case-insensitive already, so it must answer the same either way.
+FOLD_PROPERTIES = (r"\p{Lu}", r"\p{Ll}", r"\p{Lt}", r"\p{Upper}", r"\p{Lower}", r"\p{L}", r"\p{Alpha}")
+
+FOLD_QUANTIFIERS = ("+", "*", "?", "{1,3}", "{2}", "+?", "*?")
+
+# Ranges that hold one case of a letter and not the other, so a character inside one has no second
+# case inside it and 'in_range_ign' has to test the character itself as well as its other cases.
+# The Cherokee pair is the same trick above the BMP's Latin block, where the small letters fold
+# upward out of their own range; the Deseret pair is astral.
+FOLD_ONE_CASE_RANGES = (
+    "[a-z]",
+    "[A-Z]",
+    "[a-m]",
+    "[N-Z]",
+    "[Ꭰ-Ᏽ]",
+    "[ꭰ-ꮿ]",
+    "[\U00010400-\U00010427]",
+    "[\U00010428-\U0001044f]",
+)
+
+
+def _fold_pattern(rng: random.Random, literal: str, subject: str) -> tuple[str, str]:
+    """Wraps a literal drawn from the folding inventory in one of the shapes above.
+
+    Returns the pattern and the shape that produced it; the caller needs the shape to decide
+    whether the ASCII flag is safe on this row. The subject is needed only by the two backreference
+    shapes, which pick a character the subject already repeats.
+    """
+    shape = rng.choices(FOLD_SHAPES, weights=FOLD_SHAPE_WEIGHTS, k=1)[0]
+
+    if shape == "property":
+        quantified = rng.choice(FOLD_QUANTIFIERS) if rng.random() < 0.4 else ""
+        return rng.choice(FOLD_PROPERTIES) + quantified, shape
+
+    if not literal:
+        # Nothing to wrap; an empty pattern is a legal row and matches everywhere.
+        return "", shape
+
+    if shape == "folded-literal":
+        # The spelled-out folding of the literal, so under (?f) the pattern is longer than the
+        # subject text it has to match and STRING_FLD's two sides advance at different rates. That
+        # is the one thing a bare literal cannot test: with pattern and subject the same length,
+        # advancing the subject once per pattern character and advancing it only when the subject's
+        # folding runs out are the same walk. With STRING_FLD advancing unconditionally (S22
+        # control C), 600 rows at seed 7 gave 0 divergences without this shape and 5 with it, and
+        # at seed 4242 1 and 5 (measured 2026-08-31).
+        return literal.casefold(), shape
+
+    if shape == "set":
+        return "[" + literal + "]", shape
+
+    if shape == "negated-set":
+        return "[^" + literal + "]", shape
+
+    if shape == "range":
+        # Half the time a range whose bounds hold one case and not the other, so a subject
+        # character inside it has no *other* case inside it. A range built from the subject's own
+        # characters almost always contains both cases of everything it contains, which makes it
+        # nearly blind to a folding bug: with 'in_range_ign' skipping the character itself
+        # (S22 control B), 600 rows at seed 7 gave 3 divergences without these and 7 with them,
+        # and at seed 4242 3 and 8 (measured 2026-08-31).
+        if rng.random() < 0.5:
+            return rng.choice(FOLD_ONE_CASE_RANGES), shape
+
+        # Sorted, because '[z-a]' is a parse error rather than a matching question. A range of one
+        # character is legal and still exercises in_range_ign, so a duplicate pair is kept.
+        lower, upper = sorted((rng.choice(literal), rng.choice(literal)))
+        return "[" + lower + "-" + upper + "]", shape
+
+    if shape == "repeat":
+        # One character repeated, so the parser builds a *_REPEAT_ONE and the count runs through
+        # count_one's bulk-stepper path rather than through the dispatch switch.
+        return rng.choice(literal) + rng.choice(FOLD_QUANTIFIERS), shape
+
+    if shape in ("backref", "folded-backref"):
+        # The reference is what REF_GROUP_IGN and REF_GROUP_FLD execute; under (?f) the two sides
+        # can fold to different lengths, which is the whole difficulty of REF_GROUP_FLD - and a
+        # reference that does not match never reaches the folding at all. So the group is a single
+        # character the subject already repeats where there is one: drawn from the literal instead,
+        # only 23 of 152 backreference rows matched (600 rows, seed 7, 2026-08-31), and only 2 of
+        # those had a subject character that expands on folding.
+        doubled = [subject[i] for i in range(len(subject) - 1) if subject[i] == subject[i + 1]]
+        group = rng.choice(doubled) if doubled else rng.choice(literal)
+
+        # 'folded-backref' writes the group as the spelled-out folding of that character, so
+        # against a subject holding the unfolded form the group *captures* a character that
+        # expands, and REF_GROUP_FLD has to fold the captured text as well as the subject. Nothing
+        # else here produces that: a group written as the character itself captures the character
+        # itself, and both sides then fold the same way.
+        if shape == "folded-backref":
+            group = group.casefold()
+
+        return "(" + group + r")\1", shape
+
+    return literal, shape
+
+
+def _generate_casefolding(rng: random.Random, count: int):
+    """S22's generator: every literal, set, range, repeat and backreference under (?i) and (?fi).
+
+    Measured by `python tools/record-oracle.py --generator case-folding --count 600 --seed 1`,
+    after the last change to this generator: 223 match, 377 do not, no parse errors and no empty
+    patterns; 85 rows have an astral subject and 248 a subject holding a character that expands on
+    folding; 304 rows carry FULLCASE and 127 carry ASCII. Classifying that wave's patterns by shape
+    - which cannot separate 'bare' from 'folded-literal', nor the two backreference shapes - gives
+    181 bare-or-folded, 77 set, 45 negated-set, 66 range, 32 property, 55 repeat and 144
+    backreference rows.
+    """
+    for i in range(count):
+        alphabet = FOLD_ALPHABETS[i % len(FOLD_ALPHABETS)]
+        length = rng.randrange(1, MAX_FOLD_SUBJECT_LENGTH + 1)
+
+        if rng.random() < FOLD_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        # At least one character, on both paths. Drawn the way the literals generator draws it -
+        # 'randrange(start, ...)' and 'randrange(MAX + 1)' - an empty literal came up on 173 rows
+        # of 600 at seed 1, and every shape below collapses to the empty pattern when handed one,
+        # so nearly a third of the wave was asking upstream what '' matches. The '?' and '*'
+        # quantifiers still give the wave patterns that *can* match empty.
+        if rng.random() < FOLD_SUBSTRING_PROBABILITY:
+            start = rng.randrange(len(subject))
+            end = rng.randrange(start + 1, min(len(subject), start + MAX_FOLD_PATTERN_LENGTH) + 1)
+            literal = subject[start:end]
+        else:
+            literal = "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, MAX_FOLD_PATTERN_LENGTH + 1)))
+
+        pattern, shape = _fold_pattern(rng, literal, subject)
+        operation = OPERATIONS[i % len(OPERATIONS)]
+
+        # IGNORECASE on every row - a case-folding generator with a case-sensitive row in it is
+        # just the literals generator. FULLCASE on half, because (?i) and (?fi) reach different
+        # opcodes for the same pattern: STRING_IGN against STRING_FLD, REF_GROUP_IGN against
+        # REF_GROUP_FLD. ASCII on a quarter, to reach the other casing table.
+        flags = IGNORECASE
+        if rng.random() < 0.5:
+            flags |= FULLCASE
+        if rng.random() < 0.25:
+            flags |= ASCII_FLAG
+
+        # ... but never ASCII on a property. Upstream does not agree with *itself* about a cased
+        # property under the ASCII encoding, and no single predicate reproduces all of its answers.
+        # Measured against regex 2026.7.19 on 2026-08-31, subject 'KsKK', operation match:
+        #
+        #     pattern        (?ai)      (?ui)
+        #     \p{Ll}         (0, 1)     (0, 1)
+        #     \p{Ll}{2}      (0, 2)     (0, 2)
+        #     \p{Ll}{4}      (0, 4)     (0, 4)
+        #     \p{Ll}+        (0, 2)     (0, 4)
+        #     \p{Ll}*        (0, 0)     (0, 4)
+        #     (\p{Ll})+      (0, 4)     (0, 4)
+        #
+        # A greedy '*' that consumes nothing where '+' consumes two is not a rule any predicate
+        # states; it is three code paths - the dispatch switch, count_one's bulk stepper and
+        # search_start's screen - reaching for three different functions, only one of which does
+        # the cased-category collapse. `regex.search(r'(?ai)\p{Ll}', 'A')` being None while
+        # `regex.match` of the same pair spans (0, 1) is the same fault seen from the search side.
+        # This port answers all three consistently, so every such row records as a divergence.
+        # The rows we can pin are pinned in Gaps/Engine/CaseInsensitiveMatchingTests.cs, and
+        # DECISIONS 2026-08-31 carries the finding. Revisit if upstream settles it.
+        if shape == "property":
+            flags &= ~ASCII_FLAG
+
+        yield {
+            "generator": "case-folding",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -1108,6 +1396,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "backrefs":
         yield from _generate_backrefs(rng, count)
+        return
+
+    if name == "case-folding":
+        yield from _generate_casefolding(rng, count)
         return
 
     dotted = name == "literal-dot"

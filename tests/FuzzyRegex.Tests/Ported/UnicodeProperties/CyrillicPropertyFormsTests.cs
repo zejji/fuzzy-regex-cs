@@ -37,7 +37,6 @@ public sealed class CyrillicPropertyFormsTests
 
     // Split from the row above at S17, which delivered PROPERTY: this one compiles to PROPERTY_IGN.
     [Test]
-    [Skip("needs:ignore-case - the matcher has no PropertyIgn yet")]
     [Property("Upstream", "RegexTests.test_properties#18")]
     public void Case_insensitive_Cyrillic_property_matches_a_Cyrillic_letter() =>
         new FuzzyRegex(@"(?i)\p{Cyrillic}").IsMatchAtStart(_cyrillicA).Should().BeTrue();

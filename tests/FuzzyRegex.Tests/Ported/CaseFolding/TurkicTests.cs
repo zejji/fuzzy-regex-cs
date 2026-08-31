@@ -35,7 +35,6 @@ public sealed class TurkicTests
     [Arguments("İ", "i", true)]
     [Arguments("İ", "ı", false)]
     [Arguments("İ", "İ", true)]
-    [Skip("needs:case-folding - the engine has no case-insensitive matching yet")]
     [Property("Upstream", "RegexTests.test_turkic#1-2")]
     public void Dotted_and_dotless_I_forms_fold_under_ignore_case_exactly_as_upstream_observed(
         string ch1,

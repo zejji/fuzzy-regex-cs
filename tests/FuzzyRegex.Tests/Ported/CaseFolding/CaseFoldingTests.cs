@@ -21,7 +21,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.CaseFolding;
 public sealed class CaseFoldingTests
 {
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#1")]
     public void Lower_ss_full_folds_to_upper_SS()
     {
@@ -31,7 +30,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#2")]
     public void Upper_SS_full_folds_to_lower_ss()
     {
@@ -41,7 +39,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#3")]
     public void Upper_SS_full_folds_to_sharp_s()
     {
@@ -51,7 +48,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#4")]
     public void Sharp_s_pattern_full_folds_to_upper_SS()
     {
@@ -61,7 +57,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#5")]
     public void Ligature_st_pattern_full_folds_to_ST()
     {
@@ -71,7 +66,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#6")]
     public void Upper_ST_full_folds_to_ligature_st()
     {
@@ -81,7 +75,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#7")]
     public void Upper_ST_full_folds_to_ligature_long_s_t()
     {
@@ -91,7 +84,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#8")]
     public void Upper_SST_full_folds_to_sharp_s_plus_t()
     {
@@ -101,7 +93,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#9")]
     public void Upper_SST_full_folds_to_s_plus_ligature_long_s_t()
     {
@@ -112,7 +103,6 @@ public sealed class CaseFoldingTests
 
     // Upstream's assertion 12 repeats assertion 10 exactly (same pattern and subject); folded here.
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#10,12")]
     public void Upper_SST_full_folds_to_s_plus_ligature_st()
     {
@@ -122,7 +112,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#11")]
     public void Ligature_st_pattern_full_folds_within_upper_SST()
     {
@@ -132,7 +121,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#13")]
     public void Upper_FFI_full_folds_to_ligature_ffi()
     {
@@ -142,7 +130,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#14")]
     public void Upper_FFI_full_folds_to_ligature_ff_plus_i()
     {
@@ -152,7 +139,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#15")]
     public void Upper_FFI_full_folds_to_f_plus_ligature_fi()
     {
@@ -162,7 +148,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#16")]
     public void Ligature_ffi_pattern_full_folds_to_upper_FFI()
     {
@@ -172,7 +157,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#17")]
     public void Ligature_ff_pattern_plus_i_full_folds_to_upper_FFI()
     {
@@ -182,7 +166,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#18")]
     public void F_plus_ligature_fi_pattern_full_folds_to_upper_FFI()
     {
@@ -203,7 +186,6 @@ public sealed class CaseFoldingTests
     [Arguments("ς", "Σ")]
     [Arguments("ς", "σ")]
     [Arguments("ς", "ς")]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#19")]
     public void Every_sigma_form_full_folds_to_every_other_sigma_form(string ch1, string ch2) =>
         FuzzyRegex.MatchAtStart(ch2, "(?fi)" + ch1).Success.Should().BeTrue();
@@ -211,49 +193,41 @@ public sealed class CaseFoldingTests
     // Upstream repeats several of these six (?iV1) checks verbatim later in the method (its own
     // assertions 26-29 and 31); folded into their first occurrence.
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#20,26")]
     public void V1_ignore_case_ff_matches_ligature_ff_then_fi() =>
         FuzzyRegex.Match("ﬀﬁ", "(?iV1)ff").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#21")]
     public void V1_ignore_case_ff_matches_ligature_fi_then_ff() =>
         FuzzyRegex.Match("ﬁﬀ", "(?iV1)ff").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#22,27")]
     public void V1_ignore_case_fi_matches_ligature_ff_then_fi() =>
         FuzzyRegex.Match("ﬀﬁ", "(?iV1)fi").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#23")]
     public void V1_ignore_case_fi_matches_ligature_fi_then_ff() =>
         FuzzyRegex.Match("ﬁﬀ", "(?iV1)fi").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#24,28")]
     public void V1_ignore_case_fffi_matches_ligature_ff_then_fi() =>
         FuzzyRegex.Match("ﬀﬁ", "(?iV1)fffi").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#25,29")]
     public void V1_ignore_case_f_plus_ligature_ffi_matches_ligature_ff_then_fi() =>
         FuzzyRegex.Match("ﬀﬁ", "(?iV1)fﬃ").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - Unicode V1 ligature folding is not implemented yet")]
     [Property("Upstream", "RegexTests.test_case_folding#30,31")]
     public void V1_ignore_case_f_plus_ligature_fi_matches_ligature_ff_then_i() =>
         FuzzyRegex.Match("ﬀi", "(?iV1)fﬁ").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#34")]
     public void Ligature_ffi_full_folds_inside_a_longer_word()
     {
@@ -263,7 +237,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#35")]
     public void Ligature_ffi_full_folds_inside_an_alternation()
     {
@@ -273,7 +246,6 @@ public sealed class CaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:case-folding - the engine has no full case folding yet")]
     [Property("Upstream", "RegexTests.test_case_folding#36")]
     public void Ligature_ffi_full_folds_inside_a_multi_char_alternation()
     {

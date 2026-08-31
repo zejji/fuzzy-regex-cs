@@ -85,30 +85,15 @@ internal static class Seam
             or Opcode.StringIgnRev
             or Opcode.StringRev => "right-to-left",
 
-            // S17 delivered the forward, case-sensitive PROPERTY, RANGE and SET_* opcodes, so what
-            // is left of those families is the case-insensitive half, and that is S22's. Naming the
-            // delivered tag here would put a capability the status board says we have on an
-            // oracle 'unsupported' row and in a stack trace (found by the S17 blind review).
-            Opcode.CharacterIgn
-            or Opcode.PropertyIgn
-            or Opcode.RangeIgn
-            or Opcode.SetDiffIgn
-            or Opcode.SetInterIgn
-            or Opcode.SetSymDiffIgn
-            or Opcode.SetUnionIgn
-            or Opcode.RefGroupFld
-            or Opcode.RefGroupIgn
-            or Opcode.StringFld
-            or Opcode.StringIgn => "ignore-case",
-
             // S19 delivered the whole GREEDY_REPEAT / LAZY_REPEAT / *_REPEAT_ONE family and the
             // BODY_*, MATCH_* and TAIL_START backtrack markers, so 'quantifiers' has no arm here -
             // naming a delivered tag would put a capability the status board says we have on an
             // oracle 'unsupported' row and in a stack trace (the S17 blind review found that).
             // S21 delivered REF_GROUP and GROUP_EXISTS, so 'backrefs' has no arm here at all and
             // 'conditionals' covers only CONDITIONAL - the lookaround-condition form - which stays
-            // Phase 4's. REF_GROUP_IGN and REF_GROUP_FLD moved up to 'ignore-case' beside
-            // STRING_IGN and STRING_FLD, for the reason the S17 note above gives.
+            // Phase 4's. S22 delivered every forward _IGN and _FLD opcode - CHARACTER_IGN,
+            // PROPERTY_IGN, RANGE_IGN, the four SET_*_IGN, STRING_IGN, STRING_FLD, REF_GROUP_IGN
+            // and REF_GROUP_FLD - so 'ignore-case' and 'case-folding' have no arm here either.
             Opcode.Conditional or Opcode.EndConditional => "conditionals",
 
             Opcode.CallRef or Opcode.GroupCall or Opcode.GroupReturn => "recursion",
@@ -144,14 +129,25 @@ internal static class Seam
 /// would have to be re-derived at every sync instead of diffed.
 /// </para>
 /// <para>
-/// <b>Deferred to Phase 7</b>, all of them semantically transparent prefilters: the required-string
-/// locator (<c>locate_required_string</c>, <c>:11082</c>), <c>search_start</c> and the
-/// <c>string_search</c> family (<c>:5231-6918</c>), and the test-node fast path (<c>try_match</c>,
-/// <c>:7671</c>). Without them the search tries the pattern at every position, which is slower and
-/// answers the same. <b>They are not only a speed matter</b>: the required-string locator is the
-/// whole reason upstream answers <c>'(a|a)*b'</c> against a subject holding no <c>'b'</c>
-/// instantly, where this port runs the exponential search. Measured 2026-08-31; DECISIONS has the
-/// numbers.
+/// <b>Deferred to Phase 7</b>: the required-string locator (<c>locate_required_string</c>,
+/// <c>:11082</c>), <c>search_start</c> and the <c>string_search</c> family (<c>:5231-6918</c>), and
+/// the test-node fast path (<c>try_match</c>, <c>:7671</c>). Without them the search tries the
+/// pattern at every position, which is slower. <b>They are not only a speed matter</b>: the
+/// required-string locator is the whole reason upstream answers <c>'(a|a)*b'</c> against a subject
+/// holding no <c>'b'</c> instantly, where this port runs the exponential search. Measured
+/// 2026-08-31; DECISIONS has the numbers.
+/// </para>
+/// <para>
+/// <b>Nor are they uniformly transparent.</b> They answer the same for the case-sensitive opcodes,
+/// and S22 found three places where they do not for the case-insensitive ones: <c>search_start</c>
+/// screens a cased property under an ASCII encoding with a predicate that does not fold;
+/// <c>string_search_fld</c> compares with <c>same_char_ign_turkic</c>, which nothing else reaches;
+/// and the <c>GREEDY_REPEAT_ONE</c> retreat fast path clamps by a folded length it recomputes from
+/// already-folded values. In each, this port finds a match upstream's own search misses (or, for
+/// the first, the other way round). All three are pinned as known differences in
+/// <c>tests/FuzzyRegex.Tests/Gaps/Engine/CaseInsensitiveMatchingTests.cs</c>, with the
+/// <c>regex.match</c> output beside them; DECISIONS 2026-08-31 has the reasoning. <b>A Phase 7
+/// slice restoring any of the three is expected to change those tests, and should.</b>
 /// </para>
 /// <para>
 /// The test-node fast path (<c>try_match</c>, <c>:7671</c>) is deferred too, and S19 measured what
@@ -199,6 +195,80 @@ internal static class Matcher
     internal static bool MatchesRange(Node node, uint ch) => InRange(node.Values[0], node.Values[1], ch);
 
     /// <summary>
+    /// Upstream <c>same_char_ign</c> (<c>upstream/src/_regex.c</c> line 2849).
+    /// </summary>
+    /// <remarks>
+    /// The comparison is not symmetric in form - only <paramref name="ch1"/>'s other cases are
+    /// enumerated - but it is in result, because <c>all_cases</c> returns a whole case set: if
+    /// <c>ch2</c> is one of <c>ch1</c>'s cases then <c>ch1</c> is one of <c>ch2</c>'s. Upstream's
+    /// callers still pass a particular one first, and this port keeps their argument order so a
+    /// future change in either can be diffed.
+    /// </remarks>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="ch1">One codepoint.</param>
+    /// <param name="ch2">The other.</param>
+    /// <returns><see langword="true"/> if they are the same, ignoring case.</returns>
+    internal static bool SameCharIgn(CaseEncoding encoding, uint ch1, uint ch2)
+    {
+        if (ch1 == ch2)
+        {
+            return true;
+        }
+
+        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        int count = Encodings.AllCases(encoding, ch1, cases);
+
+        // From 1: 'cases[0]' is 'ch1' itself, which the equality above already rejected.
+        for (int i = 1; i < count; i++)
+        {
+            if (cases[i] == ch2)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Upstream <c>in_range_ign</c> (<c>upstream/src/_regex.c</c> line 2821).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="lower">The lowest codepoint in the range.</param>
+    /// <param name="upper">The highest.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if any case of the codepoint is in the range.</returns>
+    internal static bool InRangeIgn(CaseEncoding encoding, uint lower, uint upper, uint ch)
+    {
+        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        int count = Encodings.AllCases(encoding, ch, cases);
+
+        for (int i = 0; i < count; i++)
+        {
+            if (InRange(lower, upper, cases[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Upstream <c>matches_CHARACTER_IGN</c> (<c>upstream/src/_regex.c</c> line 2918).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The <c>CHARACTER_IGN</c> node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if they are the same, ignoring case.</returns>
+    internal static bool MatchesCharacterIgn(CaseEncoding encoding, Node node, uint ch) =>
+        SameCharIgn(encoding, node.Values[0], ch);
+
+    /// <summary>Upstream <c>matches_RANGE_IGN</c> (<c>upstream/src/_regex.c</c> line 3009).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The <c>RANGE_IGN</c> node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in the range, ignoring case.</returns>
+    internal static bool MatchesRangeIgn(CaseEncoding encoding, Node node, uint ch) =>
+        InRangeIgn(encoding, node.Values[0], node.Values[1], ch);
+
+    /// <summary>
     /// Upstream's <c>ENCODING_KIND(node)</c> switch, which <c>matches_PROPERTY</c> (line 2926) and
     /// <c>matches_member</c> (line 3041) both open with: a node compiled under a scoped
     /// <c>(?a:...)</c> or <c>(?u:...)</c> carries its own encoding and ignores the pattern's.
@@ -226,6 +296,62 @@ internal static class Matcher
     /// <returns><see langword="true"/> if the codepoint has the property.</returns>
     internal static bool MatchesProperty(CaseEncoding encoding, Node node, uint ch) =>
         Encodings.HasProperty(NodeEncoding(encoding, node), node.Values[0], ch);
+
+    /// <summary>Upstream <c>matches_PROPERTY_IGN</c> (<c>upstream/src/_regex.c</c> line 2937).</summary>
+    /// <remarks>
+    /// <para>
+    /// Under <c>IGNORECASE</c> the three cased general categories collapse into "is it a cased
+    /// letter" and Uppercase / Lowercase into <c>Cased</c>, because a case-insensitive
+    /// <c>\p{Lu}</c> that still refused lowercase would be answering a different question from the
+    /// one the flag asked. Upstream writes that collapse out once per encoding arm, so <b>it
+    /// applies under ASCII too</b> - which is not what the encoding table's own
+    /// <c>has_property_ign</c> slot does (<c>ascii_has_property_ign</c>, <c>:832</c>, is
+    /// <c>ascii_has_property</c> with a comment). Only this one is reached from the matcher.
+    /// </para>
+    /// <para>
+    /// <b>Confirm against <c>regex.match</c>, never <c>regex.search</c>.</b> Upstream's
+    /// search-start prefilter tests a candidate position with a predicate that does *not* collapse,
+    /// so <c>search</c> refuses positions its own matcher would accept and the two operations
+    /// disagree. Measured against regex 2026.7.19 on 2026-08-31:
+    /// </para>
+    /// <code>
+    /// regex.match(r'(?ai)\p{Ll}', 'A')    -> (0, 1)     regex.fullmatch(...) -> (0, 1)
+    /// regex.search(r'(?ai)\p{Ll}', 'A')   -> None
+    /// regex.search(r'(?ai)x?\p{Ll}', 'A') -> (0, 1)     # the prefilter no longer applies
+    /// </code>
+    /// <para>
+    /// The prefilter is <c>search_start</c>, which this port defers to Phase 7, so our
+    /// <c>search</c> agrees with upstream's <c>match</c> here and not with upstream's
+    /// <c>search</c>. That is the deferral showing through rather than a difference in this
+    /// predicate; DECISIONS 2026-08-31 records it and the gap tests pin both halves.
+    /// </para>
+    /// </remarks>
+    /// <param name="encoding">The pattern's encoding.</param>
+    /// <param name="node">The <c>PROPERTY_IGN</c> node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
+    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch)
+    {
+        uint property = node.Values[0];
+        uint prop = property >> 16;
+
+        // Upstream's Unicode and ASCII arms are the same three tests; only the fall-through
+        // differs, and Encodings.HasProperty is where that difference already lives.
+        if (property is Encodings.PropGcLu or Encodings.PropGcLl or Encodings.PropGcLt)
+        {
+            uint value = UnicodeTables.GetGeneralCategory(ch);
+
+            return value is UnicodeTables.PropLu or UnicodeTables.PropLl or UnicodeTables.PropLt;
+        }
+
+        if (prop is UnicodeTables.PropUppercase or UnicodeTables.PropLowercase)
+        {
+            return UnicodeTables.GetCased(ch) != 0;
+        }
+
+        // The property is case-insensitive.
+        return Encodings.HasProperty(NodeEncoding(encoding, node), property, ch);
+    }
 
     /// <summary>Upstream <c>matches_member</c> (line 3025).</summary>
     /// <param name="encoding">The encoding in force.</param>
@@ -359,6 +485,215 @@ internal static class Matcher
         return false;
     }
 
+    /// <summary>Upstream <c>matches_member_ign</c> (<c>upstream/src/_regex.c</c> line 3085).</summary>
+    /// <remarks>
+    /// <para>
+    /// The case set is computed once by <see cref="MatchesSetIgn"/> and threaded down, so a nested
+    /// set is tested against each case of the subject character rather than re-folding at every
+    /// level. That is upstream's shape, <c>case_count</c> and <c>cases</c> and all.
+    /// </para>
+    /// <para>
+    /// Three deliberate differences from <see cref="MatchesMember"/>, all upstream's:
+    /// <c>ANY_ALL</c> has no arm and falls to the default; the default answers
+    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>; and
+    /// the <c>PROPERTY</c> arm calls the encoding's plain <c>has_property</c> without the
+    /// <c>ENCODING_KIND(member)</c> switch, so a scoped <c>(?a:...)</c> inside a
+    /// case-insensitive set is not honoured here. The nested <c>SET_*</c> arms likewise recurse
+    /// into the case-*sensitive* <c>in_set_*</c> with one case at a time.
+    /// </para>
+    /// </remarks>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="member">The member node.</param>
+    /// <param name="cases">The cases of the subject character.</param>
+    /// <returns><see langword="true"/> if any case of the character matches the member.</returns>
+    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, ReadOnlySpan<uint> cases)
+    {
+        for (int i = 0; i < cases.Length; i++)
+        {
+            switch (member.Op)
+            {
+                case Opcode.Character:
+                    if (cases[i] == member.Values[0])
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.Property:
+                    if (Encodings.HasProperty(encoding, member.Values[0], cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.Range:
+                    if (InRange(member.Values[0], member.Values[1], cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.SetDiff:
+                    if (InSetDiff(encoding, member, cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.SetInter:
+                    if (InSetInter(encoding, member, cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.SetSymDiff:
+                    if (InSetSymDiff(encoding, member, cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.SetUnion:
+                    if (InSetUnion(encoding, member, cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case Opcode.String:
+                    // A STRING inside a set is a set of single characters; see MatchesMember.
+                    if (member.Values.Contains(cases[i]))
+                    {
+                        return true;
+                    }
+
+                    break;
+                default:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Upstream <c>in_set_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3177).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="cases">The cases of the subject character.</param>
+    /// <returns><see langword="true"/> if the character is in the difference, ignoring case.</returns>
+    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    {
+        Node? member = node.Next2.Node;
+
+        if (MatchesMemberIgn(encoding, member!, cases) != member!.Match)
+        {
+            return false;
+        }
+
+        member = member.Next1.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            {
+                return false;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>in_set_inter_ign</c> (<c>upstream/src/_regex.c</c> line 3218).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="cases">The cases of the subject character.</param>
+    /// <returns><see langword="true"/> if the character is in every member, ignoring case.</returns>
+    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    {
+        Node? member = node.Next2.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMemberIgn(encoding, member, cases) != member.Match)
+            {
+                return false;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>in_set_sym_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3257).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="cases">The cases of the subject character.</param>
+    /// <returns><see langword="true"/> if the character is in an odd number of members.</returns>
+    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    {
+        Node? member = node.Next2.Node;
+        bool result = false;
+
+        while (member is not null)
+        {
+            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            {
+                result = !result;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return result;
+    }
+
+    /// <summary>Upstream <c>in_set_union_ign</c> (<c>upstream/src/_regex.c</c> line 3295).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="cases">The cases of the subject character.</param>
+    /// <returns><see langword="true"/> if the character is in any member, ignoring case.</returns>
+    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    {
+        Node? member = node.Next2.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            {
+                return true;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return false;
+    }
+
+    /// <summary>Upstream <c>matches_SET_IGN</c> (<c>upstream/src/_regex.c</c> line 3334).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in the set, ignoring case.</returns>
+    internal static bool MatchesSetIgn(CaseEncoding encoding, Node node, uint ch)
+    {
+        Span<uint> allCases = stackalloc uint[UnicodeTables.MaxCases];
+        int caseCount = Encodings.AllCases(encoding, ch, allCases);
+        ReadOnlySpan<uint> cases = allCases[..caseCount];
+
+        return node.Op switch
+        {
+            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, cases),
+            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, cases),
+            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, cases),
+            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, cases),
+            _ => false,
+        };
+    }
+
     /// <summary>
     /// Which <c>matches_*</c> predicate a single-character opcode uses. Not an upstream function:
     /// upstream picks it by having a separate <c>case</c> per opcode in the dispatch switch, and
@@ -372,8 +707,16 @@ internal static class Matcher
         node.Op switch
         {
             Opcode.Character => MatchesCharacter(node, ch),
+            Opcode.CharacterIgn => MatchesCharacterIgn(encoding, node, ch),
             Opcode.Property => MatchesProperty(encoding, node, ch),
+            Opcode.PropertyIgn => MatchesPropertyIgn(encoding, node, ch),
             Opcode.Range => MatchesRange(node, ch),
+            Opcode.RangeIgn => MatchesRangeIgn(encoding, node, ch),
+            Opcode.SetDiffIgn or Opcode.SetInterIgn or Opcode.SetSymDiffIgn or Opcode.SetUnionIgn => MatchesSetIgn(
+                encoding,
+                node,
+                ch
+            ),
             _ => MatchesSet(encoding, node, ch),
         };
 
@@ -428,8 +771,8 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>count_one</c> (<c>upstream/src/_regex.c</c> line 4989), reduced to the forward,
-    /// case-sensitive opcodes this port matches: how many times
+    /// Upstream <c>count_one</c> (<c>upstream/src/_regex.c</c> line 4989), reduced to the forward
+    /// opcodes this port matches: how many times
     /// <paramref name="node"/> repeats from <paramref name="textPos"/>, up to
     /// <paramref name="maxCount"/>.
     /// </summary>
@@ -483,18 +826,25 @@ internal static class Matcher
             case Opcode.AnyAll:
             case Opcode.AnyU:
             case Opcode.Character:
+            case Opcode.CharacterIgn:
             case Opcode.Property:
+            case Opcode.PropertyIgn:
             case Opcode.Range:
+            case Opcode.RangeIgn:
             case Opcode.SetDiff:
+            case Opcode.SetDiffIgn:
             case Opcode.SetInter:
+            case Opcode.SetInterIgn:
             case Opcode.SetSymDiff:
+            case Opcode.SetSymDiffIgn:
             case Opcode.SetUnion:
+            case Opcode.SetUnionIgn:
                 break;
             default:
                 // Upstream's switch has no default at all, so an opcode it does not list falls off
                 // the end of the function with 'count' uninitialised. Every opcode that reaches
-                // here is one 'SequenceMatchesOne' accepted, so the ones missing from the list
-                // above are the case-insensitive (S22) and reverse (S23) halves.
+                // here is one 'SequenceMatchesOne' accepted, so what is missing from the list
+                // above is the reverse (S23) half.
                 throw Seam.For(node.Op);
         }
 
@@ -1421,9 +1771,10 @@ internal static class Matcher
 
     /// <summary>
     /// Upstream <c>try_match_CHARACTER</c> (<c>upstream/src/_regex.c</c> line 7026),
-    /// <c>try_match_PROPERTY</c> (<c>:7154</c>), <c>try_match_RANGE</c> (<c>:7220</c>) and
-    /// <c>try_match_SET</c> (<c>:7292</c>), which are the same six lines with a different
-    /// <c>matches_*</c> predicate - the switch <see cref="MatchesOne"/> already makes.
+    /// <c>try_match_PROPERTY</c> (<c>:7154</c>), <c>try_match_RANGE</c> (<c>:7220</c>),
+    /// <c>try_match_SET</c> (<c>:7292</c>) and their four <c>_IGN</c> counterparts, which are the
+    /// same six lines with a different <c>matches_*</c> predicate - the switch
+    /// <see cref="MatchesOne"/> already makes.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node.</param>
@@ -1442,15 +1793,15 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>match_one</c> (<c>upstream/src/_regex.c</c> line 11373), reduced to the forward,
-    /// case-sensitive opcodes this port matches.
+    /// Upstream <c>match_one</c> (<c>upstream/src/_regex.c</c> line 11373), reduced to the forward
+    /// opcodes this port matches.
     /// </summary>
     /// <remarks>
     /// Upstream's default arm answers <c>FALSE</c> for an opcode it has no <c>try_match_*</c> for.
     /// Here that would turn a construct a later slice delivers into a silent "no repeat here", so
     /// the leaf throws instead - the S07 rule. The only caller is the <c>LAZY_REPEAT_ONE</c>
     /// backtrack case, whose node is whatever <c>SequenceMatchesOne</c> accepted, so what is missing
-    /// from the list is the case-insensitive (S22) and reverse (S23) halves.
+    /// from the list is the reverse (S23) half.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node.</param>
@@ -1463,12 +1814,19 @@ internal static class Matcher
             Opcode.AnyAll => TryMatchAnyAll(state, textPos),
             Opcode.AnyU => TryMatchAnyU(state, textPos),
             Opcode.Character
+            or Opcode.CharacterIgn
             or Opcode.Property
+            or Opcode.PropertyIgn
             or Opcode.Range
+            or Opcode.RangeIgn
             or Opcode.SetDiff
+            or Opcode.SetDiffIgn
             or Opcode.SetInter
+            or Opcode.SetInterIgn
             or Opcode.SetSymDiff
-            or Opcode.SetUnion => TryMatchOne(state, node, textPos),
+            or Opcode.SetSymDiffIgn
+            or Opcode.SetUnion
+            or Opcode.SetUnionIgn => TryMatchOne(state, node, textPos),
             _ => throw Seam.For(node.Op),
         };
 
@@ -1929,6 +2287,14 @@ internal static class Matcher
 
         long patternStep = state.Reverse ? -1 : 1;
         int stringPos = -1;
+
+        // Upstream's 'folded_pos' and 'gfolded_pos' (:11727-11728) are left uninitialised: every
+        // opcode that reads them sets them first, in the arm it takes when 'string_pos' is
+        // negative. C# needs them definitely assigned, and 0 is the value those arms write.
+        int foldedPos = 0;
+        int gfoldedPos = 0;
+        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        Span<uint> gfolded = stackalloc uint[UnicodeTables.MaxFolded];
         state.FewestErrors = state.MaxErrors;
 
         // 'do_search_start' and the required-string locator are Phase 7 prefilters, so the search
@@ -2562,16 +2928,24 @@ internal static class Matcher
                     break;
                 }
                 // Upstream gives each of these its own case with the same eleven-line tail copied
-                // out (:12968, :13804, :13914, :14446-14449), differing only in which 'matches_*'
-                // predicate it calls. One case group with the predicate chosen by a switch says the
-                // same thing, and each arm still maps one-for-one onto upstream's case.
+                // out (:12968, :13804, :13914, :14446-14449 case-sensitive; :12146, :13827, :13937,
+                // :14471-14474 ignoring case), differing only in which 'matches_*' predicate it
+                // calls. One case group with the predicate chosen by a switch says the same thing,
+                // and each arm still maps one-for-one onto upstream's case.
                 case Opcode.Character: // A character.
+                case Opcode.CharacterIgn: // A character, ignoring case.
                 case Opcode.Property: // A property.
+                case Opcode.PropertyIgn: // A property, ignoring case.
                 case Opcode.Range: // A range.
+                case Opcode.RangeIgn: // A range, ignoring case.
                 case Opcode.SetDiff: // Set difference.
+                case Opcode.SetDiffIgn: // Set difference, ignoring case.
                 case Opcode.SetInter: // Set intersection.
+                case Opcode.SetInterIgn: // Set intersection, ignoring case.
                 case Opcode.SetSymDiff: // Set symmetric difference.
+                case Opcode.SetSymDiffIgn: // Set symmetric difference, ignoring case.
                 case Opcode.SetUnion: // Set union.
+                case Opcode.SetUnionIgn: // Set union, ignoring case.
                     if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
                     {
                         return MatchStatus.Partial;
@@ -3172,6 +3546,160 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                // REF_GROUP_FLD (:14060). The hard one: the captured text and the subject are both
+                // full-case-folded, and the two foldings need not be the same length, so each side
+                // has its own buffer and its own position and only advances when its buffer runs
+                // out. 'gfolded' is the group's side, 'folded' the subject's.
+                case Opcode.RefGroupFld: // Reference to a capture group, ignoring case.
+                {
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+                    int foldedLen;
+                    int gfoldedLen;
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.Start;
+                        foldedPos = 0;
+                        foldedLen = 0;
+                        gfoldedPos = 0;
+                        gfoldedLen = 0;
+                    }
+                    else
+                    {
+                        // Only Phase 5's fuzzy retry leaves 'stringPos' non-negative on the way in,
+                        // so nothing reaches this arm yet.
+                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+                        gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
+                    }
+
+                    // Try comparing.
+                    while (stringPos < span.End)
+                    {
+                        // Case-fold at current position in text.
+                        if (foldedPos >= foldedLen)
+                        {
+                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            {
+                                return MatchStatus.Partial;
+                            }
+
+                            foldedLen =
+                                state.TextPos < state.SliceEnd
+                                    ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                    : 0;
+
+                            foldedPos = 0;
+                        }
+
+                        // Case-fold at current position in group.
+                        if (gfoldedPos >= gfoldedLen)
+                        {
+                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
+                            gfoldedPos = 0;
+                        }
+
+                        if (
+                            foldedPos < foldedLen
+                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos], folded[foldedPos])
+                        )
+                        {
+                            ++foldedPos;
+                            ++gfoldedPos;
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+
+                        // Upstream's '++state->text_pos' and '++string_pos' are one codepoint each;
+                        // both index this subject, so both walk with 'NextPos' - the S21 reasoning
+                        // on REF_GROUP applies unchanged.
+                        if (foldedPos >= foldedLen && foldedLen > 0)
+                        {
+                            state.TextPos = state.NextPos(state.TextPos);
+                        }
+
+                        if (gfoldedPos >= gfoldedLen)
+                        {
+                            stringPos = state.NextPos(stringPos);
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // A folding that ran out on one side but not the other did not line up.
+                    if (foldedPos < foldedLen || gfoldedPos < gfoldedLen)
+                    {
+                        goto backtrack;
+                    }
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // REF_GROUP_IGN (:14262): REF_GROUP with 'same_char_ign' in place of 'same_char'.
+                // Simple folding, so both sides still advance one character at a time.
+                case Opcode.RefGroupIgn: // Reference to a capture group, ignoring case.
+                {
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.Start;
+                    }
+
+                    // Try comparing.
+                    while (stringPos < span.End)
+                    {
+                        if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                        {
+                            return MatchStatus.Partial;
+                        }
+
+                        if (
+                            state.TextPos < state.SliceEnd
+                            && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
+                        )
+                        {
+                            stringPos = state.NextPos(stringPos);
+                            state.TextPos = state.NextPos(state.TextPos);
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
                 case Opcode.String: // A string.
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
@@ -3200,6 +3728,165 @@ internal static class Matcher
                             if (
                                 state.TextPos < state.SliceEnd
                                 && SameChar(state.CharAt(state.TextPos), node.Values[stringPos])
+                            )
+                            {
+                                ++stringPos;
+                                state.TextPos = state.NextPos(state.TextPos);
+                            }
+                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                throw Seam.For(Opcode.Fuzzy);
+                            }
+                            else
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+                        }
+                    }
+
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // STRING_FLD (:14776). The pattern's values are already folded - the parser's
+                // 'Sequence._fix_full_casefold' (S10) put them there - so only the subject is
+                // folded here, and one subject character can answer for up to three pattern
+                // characters. 'text_pos' advances only when the subject's folding is used up,
+                // which is why 'foldedPos' has to survive a backtrack into this node.
+                case Opcode.StringFld: // A string, ignoring case.
+                {
+                    int foldedLen;
+
+                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    {
+                        // Unreachable until Phase 7 ports the required-string locator.
+                        state.TextPos = state.ReqEnd;
+                    }
+                    else
+                    {
+                        int length = node.Values.Count;
+
+                        if (stringPos < 0)
+                        {
+                            stringPos = 0;
+                            foldedPos = 0;
+                            foldedLen = 0;
+                        }
+                        else
+                        {
+                            // Only Phase 5's fuzzy retry reaches this arm.
+                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+
+                            if (foldedPos >= foldedLen)
+                            {
+                                if (state.TextPos >= state.SliceEnd)
+                                {
+                                    goto backtrack;
+                                }
+
+                                state.TextPos = state.NextPos(state.TextPos);
+                                foldedPos = 0;
+                                foldedLen = 0;
+                            }
+                        }
+
+                        // Try comparing.
+                        while (stringPos < length)
+                        {
+                            if (foldedPos >= foldedLen)
+                            {
+                                if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                                {
+                                    return MatchStatus.Partial;
+                                }
+
+                                foldedLen =
+                                    state.TextPos < state.SliceEnd
+                                        ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                        : 0;
+
+                                foldedPos = 0;
+                            }
+
+                            if (
+                                foldedPos < foldedLen
+                                && SameCharIgn(state.Encoding, node.Values[stringPos], folded[foldedPos])
+                            )
+                            {
+                                ++stringPos;
+                                ++foldedPos;
+
+                                if (foldedPos >= foldedLen)
+                                {
+                                    state.TextPos = state.NextPos(state.TextPos);
+                                }
+                            }
+                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                throw Seam.For(Opcode.Fuzzy);
+                            }
+                            else
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+                        }
+
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+
+                        stringPos = -1;
+
+                        // The subject character's folding was longer than what the pattern
+                        // consumed, so this string is only part of it.
+                        if (foldedPos < foldedLen)
+                        {
+                            goto backtrack;
+                        }
+                    }
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // STRING_IGN (:14989): STRING with 'same_char_ign' in place of 'same_char'.
+                case Opcode.StringIgn: // A string, ignoring case.
+                {
+                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    {
+                        // Unreachable until Phase 7 ports the required-string locator.
+                        state.TextPos = state.ReqEnd;
+                    }
+                    else
+                    {
+                        int length = node.Values.Count;
+
+                        if (stringPos < 0)
+                        {
+                            stringPos = 0;
+                        }
+
+                        // Try comparing.
+                        while (stringPos < length)
+                        {
+                            if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
+                            {
+                                return MatchStatus.Partial;
+                            }
+
+                            if (
+                                state.TextPos < state.SliceEnd
+                                && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
                                 ++stringPos;
@@ -3891,10 +4578,12 @@ internal static class Matcher
                 }
                 default:
                     // Nothing else is ever pushed by the opcodes ported so far. CHARACTER, STRING,
-                    // the ANY family and S17's PROPERTY, RANGE and SET_* only put themselves on the
-                    // backtracking stack to retry a fuzzy match (upstream's shared one-character
-                    // block, :15210-15243, is nothing but 'retry_fuzzy_match_item'), which the
-                    // dispatch loop refuses above; BRANCH, START_GROUP, END_GROUP and S19's
+                    // the ANY family, S17's PROPERTY, RANGE and SET_* and S22's _IGN and _FLD
+                    // variants of all of them only put themselves on the backtracking stack to
+                    // retry a fuzzy match (upstream's shared one-character block, :15210-15243, is
+                    // nothing but 'retry_fuzzy_match_item', and the REF_GROUP and STRING rows at
+                    // :17269-17291 are the same), which the dispatch loop refuses above; BRANCH,
+                    // START_GROUP, END_GROUP and S19's
                     // BODY_END, BODY_START, GREEDY_REPEAT, LAZY_REPEAT, GREEDY_REPEAT_ONE,
                     // LAZY_REPEAT_ONE, MATCH_BODY, MATCH_TAIL and TAIL_START have their own cases
                     // here.

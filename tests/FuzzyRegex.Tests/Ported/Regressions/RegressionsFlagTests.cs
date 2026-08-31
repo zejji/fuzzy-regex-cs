@@ -22,7 +22,6 @@ public sealed class RegressionsFlagTests
 
     // Hg issue 204: confusion of (?aif) flags.
     [Test]
-    [Skip("needs:ignore-case - the matcher has no CharacterIgn yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#240-245")]
     [Arguments("(?ui)", _cyrillicShortIUpper, _cyrillicShortILower, true)]
     [Arguments("(?ui)", _cyrillicShortILower, _cyrillicShortIUpper, true)]

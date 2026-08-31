@@ -155,6 +155,24 @@ internal static class Encodings
     /// <returns><see langword="true"/> for the four variants of I/i.</returns>
     internal static bool IsPossibleTurkic(uint ch) => ch is 'I' or 'i' or 0x0130 or 0x0131;
 
+    /// <summary>Upstream <c>RE_PROP_GC_LU</c> (<c>upstream/src/_regex.c</c> line 66).</summary>
+    /// <remarks>
+    /// These three are here rather than in the generated constants because upstream defines them in
+    /// <c>_regex.c</c>, not in <c>_regex_unicode.h</c> that
+    /// <c>tools/transliterate-unicode.py</c> reads. Their one reader is
+    /// <c>Matcher.MatchesPropertyIgn</c>. The <c>*_has_property_ign</c> encoding-table slot they
+    /// also belong to is NOT ported: the matcher never reaches it - only
+    /// <c>matches_PROPERTY_IGN</c> does - and its one other caller, <c>search_start</c>, is the
+    /// Phase 7 deferral.
+    /// </remarks>
+    internal const uint PropGcLu = (UnicodeTables.PropGc << 16) | UnicodeTables.PropLu;
+
+    /// <summary>Upstream <c>RE_PROP_GC_LL</c> (line 67).</summary>
+    internal const uint PropGcLl = (UnicodeTables.PropGc << 16) | UnicodeTables.PropLl;
+
+    /// <summary>Upstream <c>RE_PROP_GC_LT</c> (line 68).</summary>
+    internal const uint PropGcLt = (UnicodeTables.PropGc << 16) | UnicodeTables.PropLt;
+
     /// <summary>Upstream <c>RE_ASCII_MAX</c> (<c>upstream/src/_regex_unicode.h</c> line 16).</summary>
     private const uint _asciiMax = 0x7F;
 

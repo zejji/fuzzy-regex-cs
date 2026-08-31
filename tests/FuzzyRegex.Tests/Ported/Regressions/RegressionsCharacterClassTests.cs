@@ -24,7 +24,6 @@ public sealed class RegressionsCharacterClassTests
     // Hg issue 63: regex.search("[[:ascii:]]", "\N{KELVIN SIGN}", flags=regex.I|regex.V1) doesn't
     // return None.
     [Test]
-    [Skip("needs:ignore-case - the matcher has no PropertyIgn yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#46")]
     public void Case_insensitive_ascii_posix_class_does_not_match_the_kelvin_sign() =>
         FuzzyRegex.Match(_kelvinSign, "(?i)[[:ascii:]]").Success.Should().BeFalse();

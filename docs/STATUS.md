@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 42.2%** (830 of 1966 ported upstream tests passing).
+**Overall parity: 53.0%** (1041 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -21,8 +21,8 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Boundaries | 41 | 24 | 17 | 0 | 58.5% |
 | BranchReset | 21 | 0 | 21 | 0 | 0.0% |
 | Captures | 8 | 7 | 1 | 0 | 87.5% |
-| CaseFolding | 69 | 1 | 68 | 0 | 1.4% |
-| CharacterClasses | 52 | 10 | 42 | 0 | 19.2% |
+| CaseFolding | 69 | 67 | 2 | 0 | 97.1% |
+| CharacterClasses | 52 | 12 | 40 | 0 | 23.1% |
 | Escapes | 103 | 103 | 0 | 0 | 100.0% |
 | FindAll | 27 | 0 | 27 | 0 | 0.0% |
 | Flags | 20 | 4 | 16 | 0 | 20.0% |
@@ -38,12 +38,12 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 8 | 8 | 0 | 50.0% |
 | Quantifiers | 53 | 52 | 1 | 0 | 98.1% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 96 | 368 | 0 | 20.7% |
+| Regressions | 464 | 111 | 353 | 0 | 23.9% |
 | Reverse | 37 | 0 | 37 | 0 | 0.0% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
 | Substitution | 88 | 7 | 81 | 0 | 8.0% |
-| UnicodeProperties | 70 | 49 | 21 | 0 | 70.0% |
-| Various | 524 | 375 | 149 | 0 | 71.6% |
+| UnicodeProperties | 70 | 52 | 18 | 0 | 74.3% |
+| Various | 524 | 500 | 24 | 0 | 95.4% |
 | ZeroWidth | 14 | 0 | 14 | 0 | 0.0% |
 
 ## Our own tests (gap tests and conventions)
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3565 | 3565 | 0 | 0 |
+| Gaps | 3640 | 3640 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,15 +61,13 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `find-all` | 170 |
-| `ignore-case` | 154 |
+| `find-all` | 181 |
 | `substitution` | 104 |
 | `fuzzy-matching` | 98 |
 | `partial` | 82 |
-| `case-folding` | 69 |
 | `lookaround` | 58 |
 | `recursion` | 50 |
-| `right-to-left` | 48 |
+| `right-to-left` | 49 |
 | `splitting` | 35 |
 | `backtracking-verbs` | 34 |
 | `inline-flags` | 29 |
@@ -88,7 +86,7 @@ What the next slice should deliver, biggest win first.
 | `fuzzy-enhancematch` | 6 |
 | `overlapped` | 4 |
 | `comments` | 4 |
-| `fuzzy-insertion` | 3 |
 | `fuzzy-substitution` | 3 |
 | `fuzzy-deletion` | 3 |
+| `fuzzy-insertion` | 3 |
 

@@ -119,7 +119,6 @@ public sealed class VariousIgnoreCaseTests
     [Arguments("(?i)m+", "MMM", "0", new string?[] { "MMM" })]
     [Arguments("(?i)[M]+", "MMM", "0", new string?[] { "MMM" })]
     [Arguments("(?i)[m]+", "MMM", "0", new string?[] { "MMM" })]
-    [Skip("needs:ignore-case - the engine does no case-insensitive matching yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#339,343-350,354-357,359-361,363-365,367,369-374,377,379-382,386-388,390,393-396,401-404,407-410,412-421,423,425-434,436-443,445-450,453-458,460-462,464-466,480-481,510-513"
@@ -163,7 +162,6 @@ public sealed class VariousIgnoreCaseTests
     [Arguments("(?i)multiple words of text", "UH-UH")]
     [Arguments("(?i)[k]", "AB")]
     [Arguments("w(?i)", "W")]
-    [Skip("needs:ignore-case - the engine does no case-insensitive matching yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#340-342,351-353,358,362,366,368,375-376,378,389,391-392,399,424,435,444,451-452,459,463,479"
