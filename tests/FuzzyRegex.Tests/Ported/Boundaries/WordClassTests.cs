@@ -32,13 +32,13 @@ public sealed class WordClassTests
         FuzzyRegex.Matches(_subject, @"\W+").Select(m => m.Value).Should().Equal(" ", ",");
 
     [Test]
-    [Skip("needs:anchors - the engine has no word-boundary opcode yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_class#3")]
     public void Splitting_on_a_word_boundary_isolates_the_devanagari_run() =>
         FuzzyRegex.Split(_subject, @"(?V1)\b").Should().Equal(" ", _hindi, ",");
 
     [Test]
-    [Skip("needs:anchors - the engine has no non-word-boundary opcode yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_class#4")]
     public void Splitting_on_a_non_word_boundary_splits_between_every_devanagari_character() =>
         FuzzyRegex

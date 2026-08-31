@@ -10,7 +10,6 @@ public sealed class RegressionsAnchorTests
 {
     // Hg issue 59: regex.search("\\Z", "a\na\n") returns None incorrectly.
     [Test]
-    [Skip("needs:anchors - \\Z does not anchor past a trailing newline")]
     [Property("Upstream", "RegexTests.test_hg_bugs#43")]
     public void End_of_string_anchor_matches_after_a_trailing_newline()
     {

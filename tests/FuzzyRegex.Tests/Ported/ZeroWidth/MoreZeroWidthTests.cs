@@ -38,7 +38,7 @@ public sealed class MoreZeroWidthTests
     }
 
     [Test]
-    [Skip("needs:line-boundaries - the engine has no multiline zero-width $ opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_more_zerowidth#5")]
     public void Multiline_lazy_zero_width_whitespace_to_end_of_line_matches_at_each_blank_line_position() =>
         FuzzyRegex

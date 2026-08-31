@@ -28,14 +28,13 @@ public sealed class RegressionsGraphemeTests
 
     // Hg issue 138: grapheme anchored search not working properly.
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#142")]
     public void Grapheme_cluster_anchored_at_end_matches_the_final_degree_celsius_sign() =>
         FuzzyRegex.Match("ab" + _degreeCelsius, @"\X$").Value.Should().Be(_degreeCelsius);
 
     // Hg issue 312: \X not matching graphemes with zero-width-joins.
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#373")]
     public void Grapheme_cluster_treats_a_ZWJ_joined_family_emoji_sequence_as_one_unit()
     {

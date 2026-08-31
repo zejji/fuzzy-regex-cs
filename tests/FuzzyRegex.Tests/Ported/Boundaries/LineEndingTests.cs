@@ -10,7 +10,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Boundaries;
 public sealed class LineEndingTests
 {
     [Test]
-    [Skip("needs:line-boundaries - \\R has no line-ending escape opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_line_ending#1")]
     public void Backslash_R_matches_every_unicode_line_ending_as_one_token()
     {

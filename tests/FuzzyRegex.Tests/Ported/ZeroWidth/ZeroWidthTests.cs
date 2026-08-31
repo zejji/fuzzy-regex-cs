@@ -25,7 +25,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.ZeroWidth;
 public sealed class ZeroWidthTests
 {
     [Test]
-    [Skip("needs:anchors - the engine has no word-boundary opcode yet; also needs splitting")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#1")]
     public void Split_on_a_word_boundary_yields_the_word_the_gap_and_empty_ends() =>
         new FuzzyRegex(@"\b").Split("a b").Should().Equal("", "a", " ", "b", "");
@@ -37,7 +37,7 @@ public sealed class ZeroWidthTests
         new FuzzyRegex(@"(?V1)\b").Split("a b").Should().Equal("", "a", " ", "b", "");
 
     [Test]
-    [Skip("needs:anchors - the engine has no ^ (start-of-string) opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#4,5")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
         FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");

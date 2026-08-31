@@ -52,7 +52,6 @@ public sealed class VariousAnchorTests
     [Arguments("^((a)c)?(ab)$", "ab", "1,2,3", new string?[] { null, null, "ab" })]
     [Arguments("\\b.\\b", "a", "0", new string?[] { "a" })]
     [Arguments("\\b.\\b", "\u00C4", "0", new string?[] { "\u00C4" })]
-    [Skip("needs:anchors - the engine has no anchor opcodes yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#70,72,74-76,103-105,110-111,119-121,129,160-162,165,175,240,242,244-246,279,320-322,325,495,518,522-523"
@@ -97,7 +96,6 @@ public sealed class VariousAnchorTests
     [Arguments("^abc", "jkl\nabc\nxyz")]
     [Arguments("^.*?$", "one\ntwo\nthree\n")]
     [Arguments("^a*?$", "foo")]
-    [Skip("needs:anchors - the engine has no anchor opcodes yet")]
     [Property(
         "Upstream",
         "RegexTests.test_various#71,73,106-109,112-118,125,147,163-164,241,243,274,307,323-324,483,515,517"

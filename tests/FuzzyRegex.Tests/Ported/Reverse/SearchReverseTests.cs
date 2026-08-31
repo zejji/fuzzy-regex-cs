@@ -80,7 +80,7 @@ public sealed class SearchReverseTests
             .Equal("c", "b");
 
     [Test]
-    [Skip("needs:anchors - the engine has no ^ (start-of-string) opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#10,14")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
         FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
@@ -104,13 +104,13 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
-    [Skip("needs:anchors - the engine has no \\G opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#18")]
     public void Matches_value_for_two_char_runs_anchored_to_the_previous_match_end() =>
         FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
-    [Skip("needs:anchors - the engine has no \\G opcode yet")]
+    [Skip("needs:lookaround - the (?<=...) lookbehind has no opcode yet; also needs FuzzyRegex.Matches")]
     [Property("Upstream", "RegexTests.test_search_reverse#19")]
     public void Matches_value_for_two_char_runs_using_a_lookbehind_G_check() =>
         FuzzyRegex.Matches("abcd", @".{2}(?<=\G.*)").Select(m => m.Value).Should().Equal("ab", "cd");

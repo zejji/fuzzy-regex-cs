@@ -31,7 +31,7 @@ public sealed class Bug10328Tests
     }
 
     [Test]
-    [Skip("needs:anchors - (?<=[^\\n])\\Z and $ in multiline are not implemented yet")]
+    [Skip("needs:lookaround - the (?<=...) lookbehind has no opcode yet; also needs FuzzyRegex.Matches")]
     [Property("Upstream", "RegexTests.test_bug_10328#3")]
     public void V0_matches_the_trailing_whitespace_and_the_empty_missing_final_newline()
     {
@@ -54,7 +54,7 @@ public sealed class Bug10328Tests
     }
 
     [Test]
-    [Skip("needs:anchors - (?<=[^\\n])\\Z and $ in multiline are not implemented yet")]
+    [Skip("needs:lookaround - the (?<=...) lookbehind has no opcode yet; also needs FuzzyRegex.Matches")]
     [Property("Upstream", "RegexTests.test_bug_10328#5")]
     public void V1_matches_the_trailing_whitespace_and_the_empty_missing_final_newline()
     {

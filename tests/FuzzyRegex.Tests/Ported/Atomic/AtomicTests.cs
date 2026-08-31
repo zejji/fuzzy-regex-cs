@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Atomic;
 public sealed class AtomicTests
 {
     [Test]
-    [Skip("needs:atomic - the engine has no atomic-group opcode yet")]
     [Property("Upstream", "RegexTests.test_atomic#1")]
     public void Atomic_group_does_not_backtrack_into_the_star_it_wraps() =>
         FuzzyRegex.Match("aa", "(?>a*)a").Success.Should().BeFalse();

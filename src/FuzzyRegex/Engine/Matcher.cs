@@ -111,21 +111,12 @@ internal static class Seam
 
             Opcode.EndLookaround or Opcode.Lookaround => "lookaround",
 
-            Opcode.Atomic or Opcode.EndAtomic => "atomic",
-
             Opcode.EndFuzzy or Opcode.Fuzzy or Opcode.FuzzyExt or Opcode.FuzzyInsert => "fuzzy-matching",
 
-            Opcode.Boundary
-            or Opcode.DefaultBoundary
-            or Opcode.DefaultEndOfWord
-            or Opcode.DefaultStartOfWord
-            or Opcode.EndOfWord
-            or Opcode.StartOfWord => "word-flag",
-
-            Opcode.GraphemeBoundary => "grapheme",
-
-            Opcode.Keep => "keep-marker",
-
+            // S20 delivered BOUNDARY, DEFAULT_BOUNDARY, DEFAULT_START_OF_WORD, DEFAULT_END_OF_WORD,
+            // START_OF_WORD, END_OF_WORD, GRAPHEME_BOUNDARY, KEEP, ATOMIC and END_ATOMIC, so
+            // 'word-flag', 'grapheme', 'keep-marker' and 'atomic' have no arm here either - same
+            // reason as 'quantifiers' above.
             Opcode.Prune or Opcode.Skip => "backtracking-verbs",
 
             // Every remaining opcode either has a case above in the dispatch switch or never
@@ -647,6 +638,608 @@ internal static class Matcher
         return Encodings.IsLineSep(state.Encoding, ch);
     }
 
+    /// <summary>
+    /// Upstream <c>ascii_word_left</c> / <c>unicode_word_left</c> (<c>upstream/src/_regex.c</c>
+    /// lines 849 and 1447).
+    /// </summary>
+    /// <remarks>
+    /// Upstream writes the pair out per encoding and they differ only in which
+    /// <c>has_property</c> they call, which <see cref="Encodings.HasProperty(CaseEncoding, uint, uint)"/>
+    /// already decides from the encoding.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a word character lies to the left.</returns>
+    private static bool WordLeft(MatchState state, CaseEncoding encoding, int textPos) =>
+        textPos > state.TextStart && Encodings.HasProperty(encoding, UnicodeTables.PropWord, state.CharBefore(textPos));
+
+    /// <summary>Upstream <c>ascii_word_right</c> / <c>unicode_word_right</c> (lines 855 and 1453).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a word character lies to the right.</returns>
+    private static bool WordRight(MatchState state, CaseEncoding encoding, int textPos) =>
+        textPos < state.TextEnd && Encodings.HasProperty(encoding, UnicodeTables.PropWord, state.CharAt(textPos));
+
+    /// <summary>
+    /// Upstream <c>ascii_at_boundary</c> / <c>unicode_at_boundary</c> (lines 861 and 1460).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a word boundary is there.</returns>
+    internal static bool AtBoundary(MatchState state, CaseEncoding encoding, int textPos) =>
+        WordLeft(state, encoding, textPos) != WordRight(state, encoding, textPos);
+
+    /// <summary>
+    /// Upstream <c>ascii_at_word_start</c> / <c>unicode_at_word_start</c> (lines 872 and 1471).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a word starts there.</returns>
+    internal static bool AtWordStart(MatchState state, CaseEncoding encoding, int textPos) =>
+        !WordLeft(state, encoding, textPos) && WordRight(state, encoding, textPos);
+
+    /// <summary>
+    /// Upstream <c>ascii_at_word_end</c> / <c>unicode_at_word_end</c> (lines 883 and 1482).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a word ends there.</returns>
+    internal static bool AtWordEnd(MatchState state, CaseEncoding encoding, int textPos) =>
+        WordLeft(state, encoding, textPos) && !WordRight(state, encoding, textPos);
+
+    /// <summary>Upstream <c>is_unicode_vowel</c> (line 1496).</summary>
+    /// <remarks>
+    /// Upstream's <c>Py_UNICODE_TOLOWER</c> is CPython's simple lowercase mapping, and
+    /// <see cref="PythonStr.Lower"/> is the same UCD mapping with SpecialCasing's unconditional rows
+    /// over it. Only its first codepoint can be one of the twenty this compares against, so taking it
+    /// is upstream's answer. Allocating per call is fine here: the only caller reaches this when the
+    /// character to its left is an apostrophe.
+    /// </remarks>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> for the vowels upstream lists.</returns>
+    private static bool IsUnicodeVowel(uint ch) =>
+        (uint)PythonStr.Lower([(int)ch])[0]
+            is 'a'
+                or 0xE0
+                or 0xE1
+                or 0xE2
+                or 'e'
+                or 0xE8
+                or 0xE9
+                or 0xEA
+                or 'i'
+                or 0xEC
+                or 0xED
+                or 0xEE
+                or 'o'
+                or 0xF2
+                or 0xF3
+                or 0xF4
+                or 'u'
+                or 0xF9
+                or 0xFA
+                or 0xFB;
+
+    /// <summary>Upstream <c>is_unicode_apostrophe</c> (line 1514).</summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> for U+0027 and U+2019.</returns>
+    private static bool IsUnicodeApostrophe(uint ch) => ch is 0x27 or 0x2019;
+
+    /// <summary>Upstream <c>IS_AHLETTER</c> (line 1518).</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for ALetter and Hebrew_Letter.</returns>
+    private static bool IsAhLetter(uint v) => v is UnicodeTables.WbreakAletter or UnicodeTables.WbreakHebrewletter;
+
+    /// <summary>Upstream <c>IS_MIDNUMLETQ</c> (line 1522).</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for MidNumLet and Single_Quote.</returns>
+    private static bool IsMidNumLetQ(uint v) => v is UnicodeTables.WbreakMidnumlet or UnicodeTables.WbreakSinglequote;
+
+    /// <summary>
+    /// Upstream <c>unicode_at_default_boundary</c> (<c>upstream/src/_regex.c</c> lines 1531-1749):
+    /// the UAX #29 default word-boundary rules, WB1 to WB999.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>left_pos</c> is inclusive - the index of the character to the left - and its
+    /// <c>left_pos - 1</c> and <c>right_pos + 1</c> are the characters beyond those, which in UTF-16
+    /// are <see cref="MatchState.PrevPos"/> and <see cref="MatchState.NextPos"/> rather than
+    /// arithmetic.
+    /// </para>
+    /// <para>
+    /// WB15/WB16 count regional indicators, not code units. Upstream reads the count off
+    /// <c>left_pos - pos</c> because its indices are codepoints; every regional indicator is astral,
+    /// so the same subtraction here would always be even and the rule would never fire, which is why
+    /// the walk carries its own counter.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a default word boundary is there.</returns>
+    internal static bool AtDefaultBoundary(MatchState state, int textPos)
+    {
+        // Break at the start and end of text, unless the text is empty.
+        // WB1 and WB2
+        if (textPos <= state.TextStart || textPos >= state.TextEnd)
+        {
+            return state.TextEnd > state.TextStart;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        int rightPos = textPos;
+        uint leftChar = state.CharAt(leftPos);
+        uint rightChar = state.CharAt(rightPos);
+
+        // Do not break within CRLF.
+        // WB3
+        uint leftProp = UnicodeTables.GetWordBreak(leftChar);
+        uint rightProp = UnicodeTables.GetWordBreak(rightChar);
+
+        if (leftProp == UnicodeTables.WbreakCr && rightProp == UnicodeTables.WbreakLf)
+        {
+            return false;
+        }
+
+        // Otherwise break before and after Newlines (including CR and LF).
+        // WB3a
+        if (leftProp is UnicodeTables.WbreakNewline or UnicodeTables.WbreakCr or UnicodeTables.WbreakLf)
+        {
+            return true;
+        }
+
+        // WB3b
+        if (rightProp is UnicodeTables.WbreakNewline or UnicodeTables.WbreakCr or UnicodeTables.WbreakLf)
+        {
+            return true;
+        }
+
+        // Do not break within emoji zwj sequences.
+        // WB3c
+        if (leftProp == UnicodeTables.WbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
+        {
+            return false;
+        }
+
+        // Keep horizontal whitespace together.
+        // WB3d
+        if (leftProp == UnicodeTables.WbreakWsegspace && rightProp == UnicodeTables.WbreakWsegspace)
+        {
+            return false;
+        }
+
+        // Ignore Format and Extend characters, except after sot, CR, LF, and Newline. This also has
+        // the effect of: Any x (Format || Extend || ZWJ)
+        // WB4
+        if (rightProp is UnicodeTables.WbreakExtend or UnicodeTables.WbreakFormat or UnicodeTables.WbreakZwj)
+        {
+            return false;
+        }
+
+        while (leftProp is UnicodeTables.WbreakExtend or UnicodeTables.WbreakFormat or UnicodeTables.WbreakZwj)
+        {
+            if (leftPos <= state.TextStart)
+            {
+                return false;
+            }
+
+            leftPos = state.PrevPos(leftPos);
+            leftChar = state.CharAt(leftPos);
+            leftProp = UnicodeTables.GetWordBreak(leftChar);
+        }
+
+        // Do not break between most letters.
+        // WB5
+        if (IsAhLetter(leftProp) && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Break between apostrophe and vowels (French, Italian).
+        // WB5a
+        if (IsUnicodeApostrophe(leftChar) && IsUnicodeVowel(rightChar))
+        {
+            return false;
+        }
+
+        // Do not break letters across certain punctuation.
+        // WB6
+        int rightRightPos = state.NextPos(rightPos);
+        uint rightRightProp = 0;
+        bool hasRightRight = rightRightPos < state.TextEnd;
+
+        if (hasRightRight)
+        {
+            rightRightProp = UnicodeTables.GetWordBreak(state.CharAt(rightRightPos));
+
+            if (
+                IsAhLetter(leftProp)
+                && (rightProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(rightProp))
+                && IsAhLetter(rightRightProp)
+            )
+            {
+                return false;
+            }
+        }
+
+        // WB7
+        int leftLeftPos = state.PrevPos(leftPos);
+        uint leftLeftProp = 0;
+        bool hasLeftLeft = leftPos > state.TextStart;
+
+        if (hasLeftLeft)
+        {
+            leftLeftProp = UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos));
+
+            if (
+                IsAhLetter(leftLeftProp)
+                && (leftProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(leftProp))
+                && IsAhLetter(rightProp)
+            )
+            {
+                return false;
+            }
+        }
+
+        // WB7a
+        if (leftProp == UnicodeTables.WbreakHebrewletter && rightProp == UnicodeTables.WbreakSinglequote)
+        {
+            return false;
+        }
+
+        // WB7b
+        if (
+            hasRightRight
+            && leftProp == UnicodeTables.WbreakHebrewletter
+            && rightProp == UnicodeTables.WbreakDoublequote
+            && rightRightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // WB7c
+        if (
+            hasLeftLeft
+            && leftLeftProp == UnicodeTables.WbreakHebrewletter
+            && leftProp == UnicodeTables.WbreakDoublequote
+            && rightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // Do not break within sequences of digits, or digits adjacent to letters ("3a", or "A3").
+        // WB8
+        if (leftProp == UnicodeTables.WbreakNumeric && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB9
+        if (IsAhLetter(leftProp) && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB10
+        if (leftProp == UnicodeTables.WbreakNumeric && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Do not break within sequences, such as "3.2" or "3,456.789".
+        // WB11
+        if (
+            hasLeftLeft
+            && leftLeftProp == UnicodeTables.WbreakNumeric
+            && (leftProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(leftProp))
+            && rightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // WB12
+        if (
+            hasRightRight
+            && leftProp == UnicodeTables.WbreakNumeric
+            && (rightProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(rightProp))
+            && rightRightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // Do not break between Katakana.
+        // WB13
+        if (leftProp == UnicodeTables.WbreakKatakana && rightProp == UnicodeTables.WbreakKatakana)
+        {
+            return false;
+        }
+
+        // Do not break from extenders.
+        // WB13a
+        if (
+            (
+                IsAhLetter(leftProp)
+                || leftProp
+                    is UnicodeTables.WbreakNumeric
+                        or UnicodeTables.WbreakKatakana
+                        or UnicodeTables.WbreakExtendnumlet
+            )
+            && rightProp == UnicodeTables.WbreakExtendnumlet
+        )
+        {
+            return false;
+        }
+
+        // WB13b
+        if (
+            leftProp == UnicodeTables.WbreakExtendnumlet
+            && (IsAhLetter(rightProp) || rightProp is UnicodeTables.WbreakNumeric or UnicodeTables.WbreakKatakana)
+        )
+        {
+            return false;
+        }
+
+        // Do not break within emoji flag sequences. That is, do not break between regional indicator
+        // (RI) symbols if there is an odd number of RI characters before the break point.
+        // WB15 and WB16
+        if (
+            CountRegionalIndicatorsLeft(
+                state,
+                leftPos,
+                UnicodeTables.GetWordBreak,
+                UnicodeTables.WbreakRegionalindicator
+            ) % 2
+            == 1
+        )
+        {
+            return false;
+        }
+
+        // Otherwise, break everywhere (including around ideographs).
+        // WB999
+        return true;
+    }
+
+    /// <summary>
+    /// Upstream's regional-indicator walk, which WB15/WB16 (line 1737) and GB12/GB13 (line 1919)
+    /// write out identically bar the property they read.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="leftPos">The index of the character to the left of the position being tested.</param>
+    /// <param name="getBreak">The break property to read.</param>
+    /// <param name="regionalIndicator">That property's regional-indicator value.</param>
+    /// <returns>How many regional indicators run leftwards from <paramref name="leftPos"/>.</returns>
+    private static long CountRegionalIndicatorsLeft(
+        MatchState state,
+        int leftPos,
+        Func<uint, uint> getBreak,
+        uint regionalIndicator
+    )
+    {
+        long count = 0;
+        int pos = leftPos;
+
+        while (pos >= state.TextStart && getBreak(state.CharAt(pos)) == regionalIndicator)
+        {
+            ++count;
+            pos = state.PrevPos(pos);
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Upstream <c>unicode_at_default_word_start_or_end</c> (<c>upstream/src/_regex.c</c> line 1752).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <param name="atStart">Whether the caller wants the start of a word rather than the end.</param>
+    /// <returns><see langword="true"/> if the position is that edge of a word.</returns>
+    internal static bool AtDefaultWordStartOrEnd(MatchState state, int textPos, bool atStart)
+    {
+        // Is it at a boundary?
+        if (!AtDefaultBoundary(state, textPos))
+        {
+            return false;
+        }
+
+        // Look at the 2 characters either side of the boundary. Are they part of a word?
+        bool before = WordLeft(state, CaseEncoding.Unicode, textPos);
+        bool after = WordRight(state, CaseEncoding.Unicode, textPos);
+
+        return before != atStart && after == atStart;
+    }
+
+    /// <summary>
+    /// Upstream <c>unicode_at_grapheme_boundary</c> (<c>upstream/src/_regex.c</c> lines 1786-1933):
+    /// the UAX #29 extended grapheme cluster rules, GB1 to GB999.
+    /// </summary>
+    /// <remarks>
+    /// The same two UTF-16 translations as <see cref="AtDefaultBoundary"/>: neighbours are stepped
+    /// rather than offset, and GB12/GB13 counts regional indicators rather than subtracting indices.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if a grapheme cluster boundary is there.</returns>
+    internal static bool AtGraphemeBoundary(MatchState state, int textPos)
+    {
+        // Break at the start and end of text, unless the text is empty.
+        // GB1 and GB2
+        if (textPos <= state.TextStart || textPos >= state.TextEnd)
+        {
+            return state.TextEnd > state.TextStart;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        int rightPos = textPos;
+        uint leftChar = state.CharAt(leftPos);
+        uint rightChar = state.CharAt(rightPos);
+
+        // Do not break between a CR and LF. Otherwise, break before and after controls.
+        // GB3
+        uint leftProp = UnicodeTables.GetGraphemeClusterBreak(leftChar);
+        uint rightProp = UnicodeTables.GetGraphemeClusterBreak(rightChar);
+
+        if (leftProp == UnicodeTables.GbreakCr && rightProp == UnicodeTables.GbreakLf)
+        {
+            return false;
+        }
+
+        // GB4
+        if (leftProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return true;
+        }
+
+        // GB5
+        if (rightProp is UnicodeTables.GbreakControl or UnicodeTables.GbreakCr or UnicodeTables.GbreakLf)
+        {
+            return true;
+        }
+
+        // Do not break Hangul syllable sequences.
+        // GB6
+        if (
+            leftProp == UnicodeTables.GbreakL
+            && rightProp
+                is UnicodeTables.GbreakL
+                    or UnicodeTables.GbreakV
+                    or UnicodeTables.GbreakLv
+                    or UnicodeTables.GbreakLvt
+        )
+        {
+            return false;
+        }
+
+        // GB7
+        if (
+            leftProp is UnicodeTables.GbreakLv or UnicodeTables.GbreakV
+            && rightProp is UnicodeTables.GbreakV or UnicodeTables.GbreakT
+        )
+        {
+            return false;
+        }
+
+        // GB8
+        if (leftProp is UnicodeTables.GbreakLvt or UnicodeTables.GbreakT && rightProp == UnicodeTables.GbreakT)
+        {
+            return false;
+        }
+
+        // Do not break before extending characters or ZWJ.
+        // GB9
+        if (rightProp is UnicodeTables.GbreakExtend or UnicodeTables.GbreakZwj)
+        {
+            return false;
+        }
+
+        // The GB9a and GB9b rules only apply to extended grapheme clusters: Do not break before
+        // SpacingMarks, or after Prepend characters.
+        // GB9a
+        if (rightProp == UnicodeTables.GbreakSpacingmark)
+        {
+            return false;
+        }
+
+        // GB9b
+        if (leftProp == UnicodeTables.GbreakPrepend)
+        {
+            return false;
+        }
+
+        // The GB9c rule only applies to extended grapheme clusters: Do not break within certain
+        // combinations with Indic_Conjunct_Break (InCB)=Linker.
+        // GB9c
+        if (UnicodeTables.GetIndicConjunctBreak(rightChar) == UnicodeTables.IncbConsonant)
+        {
+            bool hasLinker = false;
+            int pos = leftPos;
+
+            // Upstream's do-while reads the character at 'pos' and only then tests the bound, so a
+            // walk that steps off the start of the text stops without reading.
+            while (true)
+            {
+                uint prop = UnicodeTables.GetIndicConjunctBreak(state.CharAt(pos));
+
+                if (prop == UnicodeTables.IncbLinker)
+                {
+                    hasLinker = true;
+                }
+                else if (prop == UnicodeTables.IncbConsonant)
+                {
+                    if (hasLinker)
+                    {
+                        return false;
+                    }
+
+                    goto end_GB9c;
+                }
+                else if (prop != UnicodeTables.IncbExtend)
+                {
+                    goto end_GB9c;
+                }
+
+                pos = state.PrevPos(pos);
+
+                if (pos < state.TextStart)
+                {
+                    break;
+                }
+            }
+        }
+
+        end_GB9c:
+        // Do not break within emoji modifier sequences or emoji zwj sequences.
+        // GB11
+        if (leftProp == UnicodeTables.GbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
+        {
+            int pos = state.PrevPos(leftPos);
+
+            while (
+                pos >= state.TextStart
+                && UnicodeTables.GetGraphemeClusterBreak(state.CharAt(pos)) == UnicodeTables.GbreakExtend
+            )
+            {
+                pos = state.PrevPos(pos);
+            }
+
+            if (pos >= state.TextStart && UnicodeTables.GetExtendedPictographic(state.CharAt(pos)) != 0)
+            {
+                return false;
+            }
+        }
+
+        // The \p{Extended_Pictographic} values are provided as a part of the Emoji data in [UTS51].
+        // Do not break within emoji flag sequences. That is, do not break between regional indicator
+        // (RI) symbols if there is an odd number of RI characters before the break point.
+        // GB12 and GB13
+        if (
+            rightProp == UnicodeTables.GbreakRegionalindicator
+            && CountRegionalIndicatorsLeft(
+                state,
+                leftPos,
+                UnicodeTables.GetGraphemeClusterBreak,
+                UnicodeTables.GbreakRegionalindicator
+            ) % 2
+                == 1
+        )
+        {
+            return false;
+        }
+
+        // Otherwise, break everywhere.
+        // GB999
+        return true;
+    }
+
     /// <summary>Upstream <c>try_match_ANY</c> (<c>upstream/src/_regex.c</c> line 6919).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
@@ -688,6 +1281,83 @@ internal static class Matcher
 
         return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(state.Encoding, state.CharAt(textPos)));
     }
+
+    /// <summary>Upstream <c>try_match_BOUNDARY</c> (line 7010).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchBoundary(MatchState state, Node node, int textPos) =>
+        MatchStatus.From(AtBoundary(state, NodeEncoding(state.Encoding, node), textPos) == node.Match);
+
+    /// <summary>
+    /// Upstream <c>try_match_DEFAULT_BOUNDARY</c> (line 7087).
+    /// </summary>
+    /// <remarks>
+    /// The ASCII and locale rows of upstream's encoding tables (lines 1008-1010 and 1345-1347) point
+    /// all three <c>DEFAULT_</c> slots back at the plain word predicates - "no special default word
+    /// boundary for ASCII" - so the dispatch that upstream does through a table of function pointers
+    /// is a test of the encoding here.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchDefaultBoundary(MatchState state, Node node, int textPos) =>
+        MatchStatus.From(
+            (
+                state.Encoding == CaseEncoding.Ascii
+                    ? AtBoundary(state, CaseEncoding.Ascii, textPos)
+                    : AtDefaultBoundary(state, textPos)
+            ) == node.Match
+        );
+
+    /// <summary>Upstream <c>try_match_DEFAULT_END_OF_WORD</c> (line 7094).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchDefaultEndOfWord(MatchState state, int textPos) =>
+        MatchStatus.From(
+            state.Encoding == CaseEncoding.Ascii
+                ? AtWordEnd(state, CaseEncoding.Ascii, textPos)
+                : AtDefaultWordStartOrEnd(state, textPos, false)
+        );
+
+    /// <summary>Upstream <c>try_match_DEFAULT_START_OF_WORD</c> (line 7101).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchDefaultStartOfWord(MatchState state, int textPos) =>
+        MatchStatus.From(
+            state.Encoding == CaseEncoding.Ascii
+                ? AtWordStart(state, CaseEncoding.Ascii, textPos)
+                : AtDefaultWordStartOrEnd(state, textPos, true)
+        );
+
+    /// <summary>Upstream <c>try_match_END_OF_WORD</c> (line 7141).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchEndOfWord(MatchState state, int textPos) =>
+        MatchStatus.From(AtWordEnd(state, state.Encoding, textPos));
+
+    /// <summary>Upstream <c>try_match_START_OF_WORD</c> (line 7376).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchStartOfWord(MatchState state, int textPos) =>
+        MatchStatus.From(AtWordStart(state, state.Encoding, textPos));
+
+    /// <summary>
+    /// Upstream <c>try_match_GRAPHEME_BOUNDARY</c> (line 7147). The ASCII and locale encodings have
+    /// no grapheme rules at all and point this slot at <c>at_boundary_always</c> (lines 1011 and
+    /// 1348), which answers <see langword="true"/> everywhere.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchGraphemeBoundary(MatchState state, int textPos) =>
+        MatchStatus.From(state.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
     /// <param name="state">The match state.</param>
@@ -845,6 +1515,45 @@ internal static class Matcher
         int PrivateIndex,
         int PublicIndex
     );
+
+    /// <summary>
+    /// Upstream <c>push_captures</c> (<c>upstream/src/_regex.c</c> line 2513).
+    /// </summary>
+    /// <remarks>
+    /// Only each group's <c>count</c> and <c>current</c> are saved, never the spans: a group's
+    /// capture list is append-only within a match, so restoring the count discards everything written
+    /// since.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to push onto.</param>
+    private static void PushCaptures(MatchState state, ByteStack stack)
+    {
+        foreach (GroupData group in state.Groups)
+        {
+            stack.PushSize(group.Count);
+            stack.PushSize(group.Current);
+        }
+    }
+
+    /// <summary>Upstream <c>pop_captures</c> (line 2685).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopCaptures(MatchState state, ByteStack stack)
+    {
+        for (int g = state.Groups.Length - 1; g >= 0; g--)
+        {
+            if (!stack.PopSize(out long current) || !stack.PopSize(out long count))
+            {
+                return false;
+            }
+
+            state.Groups[g].Current = (int)current;
+            state.Groups[g].Count = (int)count;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_g, sizeof(data_g))</c>, field by field.
@@ -1380,6 +2089,57 @@ internal static class Matcher
                     }
 
                     break;
+                case Opcode.Atomic: // Start of an atomic group.
+                    PushCaptures(state, state.Bstack);
+
+                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
+                    // block on the stack is the same shape at both ends.
+                    state.Bstack.PushSize(state.CaptureChange);
+                    state.Bstack.PushSize(state.Sstack.Count);
+                    state.Bstack.PushUInt8((byte)Opcode.Atomic);
+                    state.Pstack.PushSize(state.Bstack.Count);
+
+                    /* bstack: captures capture_change sstack ATOMIC
+                     *
+                     * pstack: bstack
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
+                case Opcode.EndAtomic: // End of an atomic group.
+                {
+                    /* sstack: ...
+                     *
+                     * bstack: captures capture_change sstack ATOMIC ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    // Discarding everything the group pushed while it matched is what makes the group
+                    // atomic: after this there is nothing left to backtrack into.
+                    if (!state.Pstack.PopSize(out long atomicBstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Bstack.Count = (int)atomicBstackCount;
+
+                    if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long atomicSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)atomicSstackCount;
+                    state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
+
+                    /* bstack: captures capture_change END_ATOMIC
+                     *
+                     * pstack: -
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
+                }
                 case Opcode.Branch: // 2-way branch.
                 {
                     status = TryMatch(node.Next1, state.TextPos, out Position nextPosition);
@@ -1832,28 +2592,43 @@ internal static class Matcher
 
                     break;
                 // Upstream gives each of these its own case with the same four-line tail copied out
-                // (:13014, :13033, :13052, :13071, :13091, :14431, :14643, :14662, :14681). One
-                // case group with the predicate chosen by a switch says the same thing, and each
-                // arm still maps one-for-one onto upstream's case.
+                // (:12060, :12255, :12274, :12294, :13014, :13033, :13052, :13071, :13091, :13111,
+                // :13157, :14431, :14643, :14662, :14681, :14700). One case group with the predicate
+                // chosen by a switch says the same thing, and each arm still maps one-for-one onto
+                // upstream's case.
+                case Opcode.Boundary: // At a word boundary.
+                case Opcode.DefaultBoundary: // At a default word boundary.
+                case Opcode.DefaultEndOfWord: // At the default end of a word.
+                case Opcode.DefaultStartOfWord: // At the default start of a word.
                 case Opcode.EndOfLine: // At the end of a line.
                 case Opcode.EndOfLineU: // At the end of a line.
                 case Opcode.EndOfString: // At the end of the string.
                 case Opcode.EndOfStringLine: // At the end of the string or the final newline.
                 case Opcode.EndOfStringLineU: // At the end of the string or the final line separator.
+                case Opcode.EndOfWord: // At the end of a word.
+                case Opcode.GraphemeBoundary: // On a grapheme boundary.
                 case Opcode.SearchAnchor: // At the start of the search.
                 case Opcode.StartOfLine: // At the start of a line.
                 case Opcode.StartOfLineU: // At the start of a line.
                 case Opcode.StartOfString: // At the start of the string.
+                case Opcode.StartOfWord: // At the start of a word.
                     status = node.Op switch
                     {
+                        Opcode.Boundary => TryMatchBoundary(state, node, state.TextPos),
+                        Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, state.TextPos),
+                        Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, state.TextPos),
+                        Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, state.TextPos),
                         Opcode.EndOfLine => TryMatchEndOfLine(state, state.TextPos),
                         Opcode.EndOfLineU => TryMatchEndOfLineU(state, state.TextPos),
                         Opcode.EndOfString => TryMatchEndOfString(state, state.TextPos),
                         Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, state.TextPos),
                         Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, state.TextPos),
+                        Opcode.EndOfWord => TryMatchEndOfWord(state, state.TextPos),
+                        Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, state.TextPos),
                         Opcode.SearchAnchor => MatchStatus.From(state.TextPos == state.SearchAnchor),
                         Opcode.StartOfLine => TryMatchStartOfLine(state, state.TextPos),
                         Opcode.StartOfLineU => TryMatchStartOfLineU(state, state.TextPos),
+                        Opcode.StartOfWord => TryMatchStartOfWord(state, state.TextPos),
                         _ => TryMatchStartOfString(state, state.TextPos),
                     };
 
@@ -2093,6 +2868,16 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                case Opcode.Keep: // Keep.
+                    state.Bstack.PushSize(state.MatchPos);
+                    state.Bstack.PushUInt8((byte)Opcode.Keep);
+
+                    /* bstack: match_pos KEEP */
+
+                    state.MatchPos = state.TextPos;
+
+                    node = node.Next1.Node!;
+                    break;
                 case Opcode.LazyRepeat: // Lazy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -2386,6 +3171,68 @@ internal static class Matcher
 
             switch ((Opcode)op)
             {
+                case Opcode.Atomic: // Start of an atomic group.
+                {
+                    /* sstack: ...
+                     *
+                     * bstack: captures capture_change sstack
+                     *
+                     * pstack: bstack
+                     */
+
+                    if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long atomicSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)atomicSstackCount;
+
+                    if (!state.Bstack.PopSize(out long atomicCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = atomicCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
+                }
+                case Opcode.EndAtomic: // End of an atomic group.
+                {
+                    /* bstack: captures capture_change */
+
+                    if (!state.Bstack.PopSize(out long endAtomicCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = endAtomicCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
+                }
+                case Opcode.Keep: // Keep.
+                {
+                    /* bstack: match_pos */
+
+                    if (!state.Bstack.PopSize(out long keepMatchPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.MatchPos = (int)keepMatchPos;
+                    break;
+                }
                 case Opcode.BodyEnd:
                 {
                     /* bstack: count start capture_change index */

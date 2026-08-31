@@ -9,7 +9,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Boundaries;
 public sealed class WordBoundaryTests
 {
     [Test]
-    [Skip("needs:anchors - the engine has no word-boundary opcode yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#1")]
     public void Word_boundary_split_separates_punctuation_apostrophes_and_the_decimal_point() =>
         FuzzyRegex
@@ -42,7 +42,7 @@ public sealed class WordBoundaryTests
             );
 
     [Test]
-    [Skip("needs:word-flag - the WORD flag is not implemented and is not on FuzzyRegexOptions")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#2")]
     public void Word_boundary_split_with_word_flag_treats_apostrophes_and_the_decimal_point_as_word_chars() =>
         FuzzyRegex
@@ -77,19 +77,19 @@ public sealed class WordBoundaryTests
             );
 
     [Test]
-    [Skip("needs:anchors - the engine has no word-boundary opcode yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#3")]
     public void Word_boundary_split_keeps_a_double_space_between_two_words_whole() =>
         FuzzyRegex.Split("The  fox", @"(?V1)\b").Should().Equal("", "The", "  ", "fox", "");
 
     [Test]
-    [Skip("needs:word-flag - the WORD flag is not implemented and is not on FuzzyRegexOptions")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#4")]
     public void Word_boundary_split_with_word_flag_also_keeps_a_double_space_whole() =>
         FuzzyRegex.Split("The  fox", @"(?V1w)\b").Should().Equal("", "The", "  ", "fox", "");
 
     [Test]
-    [Skip("needs:anchors - the engine has no word-boundary opcode yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#5")]
     public void Word_boundary_split_treats_each_apostrophe_as_a_boundary() =>
         FuzzyRegex
@@ -98,7 +98,7 @@ public sealed class WordBoundaryTests
             .Equal("", "can", "'", "t", " ", "aujourd", "'", "hui", " ", "l", "'", "objectif", "");
 
     [Test]
-    [Skip("needs:word-flag - the WORD flag is not implemented and is not on FuzzyRegexOptions")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_word_boundary#6")]
     public void Word_boundary_split_with_word_flag_keeps_each_contraction_whole() =>
         FuzzyRegex

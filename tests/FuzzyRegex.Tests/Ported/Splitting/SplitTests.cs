@@ -108,19 +108,19 @@ public sealed class SplitTests
     // which is not ported - see docs/PORTMAP.md.
 
     [Test]
-    [Skip("needs:anchors - the \\b word-boundary escape is not implemented yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_re_split#17")]
     public void Split_on_a_word_boundary_keeps_both_words_and_the_separators() =>
         FuzzyRegex.Split("a b c", @"(?V1)\b").Should().Equal("", "a", " ", "b", " ", "c", "");
 
     [Test]
-    [Skip("needs:anchors - the \\m start-of-word escape is not implemented yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_re_split#18")]
     public void Split_on_a_start_of_word_boundary_keeps_the_leading_edge_with_the_next_word() =>
         FuzzyRegex.Split("a b c", @"(?V1)\m").Should().Equal("", "a ", "b ", "c");
 
     [Test]
-    [Skip("needs:anchors - the \\M end-of-word escape is not implemented yet")]
+    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_re_split#19")]
     public void Split_on_an_end_of_word_boundary_keeps_the_trailing_edge_with_the_previous_word() =>
         FuzzyRegex.Split("a b c", @"(?V1)\M").Should().Equal("a", " b", " c", "");

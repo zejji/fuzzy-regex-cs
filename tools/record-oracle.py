@@ -263,11 +263,12 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
-GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups", "quantifiers")
+GENERATORS = ("literals", "literal-dot", "anchors", "classes", "groups", "quantifiers", "boundaries")
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
-# literal. Every one is a plain anchor: word and grapheme boundaries are S20 and would only produce
-# unsupported rows. `\G` is upstream's SEARCH_ANCHOR, which is only interesting when the operation
+# literal. Every one is a plain anchor: the word and grapheme boundaries S20 added have their own
+# generator below, because they need subjects chosen for their word-break classes rather than for
+# their line breaks. `\G` is upstream's SEARCH_ANCHOR, which is only interesting when the operation
 # is a search, so it is paired with an empty suffix rather than combined.
 ANCHOR_AFFIXES = (
     ("^", ""),
@@ -646,6 +647,187 @@ def _generate_quantifiers(rng: random.Random, count: int):
         }
 
 
+# S20's generator.
+#
+# The zero-width predicates that ask about the characters either side of a position rather than
+# about the character at it: `\b` / `\B` (BOUNDARY), `\m` / `\M` (START_OF_WORD / END_OF_WORD),
+# their `(?w)` forms (DEFAULT_BOUNDARY, DEFAULT_START_OF_WORD, DEFAULT_END_OF_WORD), `\X`
+# (GRAPHEME_BOUNDARY inside an atomic group) and `\K` (KEEP).
+BOUNDARY_AFFIXES = (
+    (r"\b", ""),
+    ("", r"\b"),
+    (r"\b", r"\b"),
+    (r"\B", ""),
+    ("", r"\B"),
+    (r"\B", r"\B"),
+    (r"\m", ""),
+    ("", r"\M"),
+    (r"\m", r"\M"),
+    ("", ""),
+)
+
+# The three encodings the word predicates dispatch on. `(?w)` is the only one that reaches
+# `unicode_at_default_boundary` and its WB rules at all; `(?a)` is the only one that reaches
+# `ascii_word_left` / `ascii_word_right`, whose whole difference is that everything above U+007F is
+# answered as unassigned. Written inline rather than as a flags integer so both sides of the oracle
+# read the identical row - FuzzyRegexOptions has no WORD or ASCII member (S24 territory).
+BOUNDARY_FLAG_PREFIXES = ("", "(?a)", "(?w)", "(?V1)", "(?V1w)", "(?aw)")
+
+# The literal an affix pair is wrapped round. Kept to single characters and short runs so the row is
+# about the predicate rather than about whether the literal happened to be present.
+BOUNDARY_LITERALS = ("a", "z", "0", "'", "b", "ab", "a0", "א", "カ", "क", "é")
+
+# Subject material, cycled band by band so no wave is all-ASCII. Each band is chosen for the
+# word-break or grapheme-cluster classes it contains, because those classes are what the rules
+# switch on:
+#   0. ASCII letters, digits and the MidLetter / MidNumLet / MidNum punctuation of WB6-WB12.
+#   1. Latin-1, a combining mark (GB9, and Extend for WB4), the dotted and dotless I of WB5a.
+#   2. Hebrew_Letter (WB7a-WB7c), Katakana (WB13), Devanagari with a virama (GB9c), an Arabic-Indic
+#      digit, ExtendNumLet (WB13a/WB13b) and WSegSpace (WB3d).
+#   3. Astral: regional indicators (WB15/WB16 and GB12/GB13), a ZWJ, extended pictographics
+#      (WB3c, GB11) and an emoji modifier - every one of which is two UTF-16 code units, so a rule
+#      that counted code units rather than characters answers differently here.
+BOUNDARY_SUBJECT_ALPHABETS = (
+    "abz09 '.,-_",
+    "éÀàİı '",
+    "אב\"'カタक्ष٠_　",
+    "\U0001f1ec\U0001f1e7\U0001f600‍\U0001f469\U0001f3fb\U0001d518",
+)
+
+# Line breaks, inserted rather than drawn, so a row can hold several and so CR/LF lands as a pair -
+# which is WB3 and GB3, the one place both rule sets refuse to break between two characters they
+# would each break around on their own.
+BOUNDARY_LINE_BREAKS = ("\n", "\r", "\r\n", "", " ")
+
+# Whole clusters, inserted the same way, because the rules that join two characters need those two
+# characters side by side and a per-character draw rarely produces one. A negative control measured
+# this: seeding a fault into the regional-indicator count of WB15/GB13 - the one rule whose port had
+# to count characters rather than subtract UTF-16 indices - diverged on 0 rows of 600 without these
+# and on 2 with them (seed 7). Each entry is something upstream refuses to break inside, or a rule's
+# own worked example.
+BOUNDARY_CLUSTERS = (
+    "\U0001f1ec\U0001f1e7",  # A regional-indicator pair: GB12/GB13 and WB15/WB16.
+    "\U0001f1ec\U0001f1e7\U0001f1eb\U0001f1f7",  # Two flags, so the run length is what decides.
+    "\U0001f469‍\U0001f466",  # An emoji ZWJ sequence: GB11 and WB3c.
+    "à",  # A base letter and a combining mark: GB9, and Extend for WB4.
+    "क्ष",  # Devanagari consonant, virama, consonant: GB9c.
+    "can't",  # WB6/WB7 across an apostrophe, which is what `(?w)` is for.
+    "3.2",  # WB11/WB12 across a decimal point.
+)
+
+BOUNDARY_CLUSTER_PROBABILITY = 0.4
+
+MAX_BOUNDARY_SUBJECT_LENGTH = 7
+
+# How a row's pattern is shaped, and how often.
+#   'affix':    a literal wrapped in one of BOUNDARY_AFFIXES - the word predicates.
+#   'infix':    an assertion *between* two literals, so the position under test is interior.
+#   'keep':     '\K' between two literals, which moves the reported match start.
+#   'grapheme': '\X', repeated or quantified - GRAPHEME_BOUNDARY inside an atomic group.
+#
+# 'infix' exists because of a negative control that did not fire. WB1/WB2 answers "there is a
+# boundary here" for the two ends of the subject before any other rule is consulted, and an
+# affix-shaped pattern searched forwards mostly matches at position 0, so a fault seeded into WB5
+# was invisible over 600 rows: 48 of them held `(?w)` and `\b`, and not one of them turned on a rule
+# past WB2. With 'infix' at this weight the same fault diverges on 7 rows of 600 (seed 7).
+BOUNDARY_SHAPES = ("affix", "infix", "keep", "grapheme")
+BOUNDARY_SHAPE_WEIGHTS = (4, 4, 2, 3)
+
+# The zero-width assertions worth putting between two literals. `\K` is not here - it has its own
+# shape, and it is not an assertion but a marker.
+BOUNDARY_INFIXES = (r"\b", r"\B", r"\m", r"\M")
+
+# The last three put the `\K` inside an alternative or an optional group, so a branch that fails
+# after the marker has to backtrack past it and put the reported match start back. That branch was
+# also found by a control that did not fire: removing the restore left the first five shapes
+# agreeing on all 600 rows, because none of them can fail after the `\K`.
+BOUNDARY_KEEP_SHAPES = (
+    r"%s\K%s",
+    r"(%s\K%s)",
+    r"%s\K(%s)",
+    r"(?:%s)\K%s",
+    r"%s+\K%s",
+    r"%s\K%s%s|%s%s",
+    r"(?:%s\K%s|%s)%s",
+    r"(%s\K%s)?%s%s",
+)
+BOUNDARY_GRAPHEME_SHAPES = (r"\X", r"\X\X", r"\X+", r"\X*", r"\X+?", r"\X{2}", r"\X%s", r"%s\X")
+
+
+def _generate_boundaries(rng: random.Random, count: int):
+    """S20's generator: word, default-word and grapheme boundaries, and the keep marker.
+
+    The subject is drawn independently of the pattern, as the class and quantifier generators do: a
+    boundary assertion is zero-width, so slicing the whole pattern out of the subject would say
+    nothing extra. Measured over 200 rows of seed 1: 59 match, 141 do not, 49 with an astral
+    subject, no parse errors, and every one of `\\b`, `\\B`, `\\m`, `\\M`, `\\K`, `\\X`, `(?a)` and
+    `(?w)` recorded at least 17 times.
+    """
+    for i in range(count):
+        alphabet = BOUNDARY_SUBJECT_ALPHABETS[i % len(BOUNDARY_SUBJECT_ALPHABETS)]
+        subject = "".join(
+            rng.choice(alphabet) for _ in range(rng.randrange(1, MAX_BOUNDARY_SUBJECT_LENGTH + 1))
+        )
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(BOUNDARY_LINE_BREAKS) + subject[at:]
+
+        if rng.random() < BOUNDARY_CLUSTER_PROBABILITY:
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(BOUNDARY_CLUSTERS) + subject[at:]
+
+        # A literal the subject actually contains most of the time, so the row turns on where the
+        # boundary is rather than on whether the literal was there at all. Measured over 200 rows of
+        # seed 1: drawing every literal from the table gave 46 matching rows, this gives 59.
+        def literal():
+            candidates = [c for c in subject if c not in "\r\n"]
+            if candidates and rng.random() < SUBSTRING_PROBABILITY:
+                return re.escape(rng.choice(candidates))
+            return rng.choice(BOUNDARY_LITERALS)
+
+        shape = rng.choices(BOUNDARY_SHAPES, weights=BOUNDARY_SHAPE_WEIGHTS)[0]
+
+        if shape == "affix":
+            prefix, suffix = rng.choice(BOUNDARY_AFFIXES)
+            pattern = prefix + literal() + suffix
+        elif shape == "infix":
+            # Two characters the subject holds side by side, so the assertion is asked about a
+            # position the pattern can actually reach. Drawn independently the pattern usually
+            # cannot match at all, and a row that never reaches the assertion tests nothing.
+            pairs = [
+                subject[at : at + 2]
+                for at in range(len(subject) - 1)
+                if "\r" not in subject[at : at + 2] and "\n" not in subject[at : at + 2]
+            ]
+            if pairs and rng.random() < SUBSTRING_PROBABILITY:
+                pair = rng.choice(pairs)
+                left, right = re.escape(pair[0]), re.escape(pair[1])
+            else:
+                left, right = literal(), literal()
+
+            pattern = left + rng.choice(BOUNDARY_INFIXES) + right
+        elif shape == "keep":
+            form = rng.choice(BOUNDARY_KEEP_SHAPES)
+            pattern = form % tuple(literal() for _ in range(form.count("%s")))
+        else:
+            form = rng.choice(BOUNDARY_GRAPHEME_SHAPES)
+            pattern = form % literal() if "%s" in form else form
+
+        # `\m` and `\M` are mrab-regex extensions with no V0/V1 difference, and `(?w)` only changes
+        # which opcode `\b` compiles to, so every prefix is legal in front of every shape.
+        pattern = rng.choice(BOUNDARY_FLAG_PREFIXES) + pattern
+
+        yield {
+            "generator": "boundaries",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -666,6 +848,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "quantifiers":
         yield from _generate_quantifiers(rng, count)
+        return
+
+    if name == "boundaries":
+        yield from _generate_boundaries(rng, count)
         return
 
     dotted = name == "literal-dot"

@@ -33,7 +33,6 @@ public sealed class GraphemeSurrogateSpanTests
     private const string _zwj = "\u200D";
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
     [Property("Upstream", "none - gap test")]
     public void ZWJ_joined_family_emoji_is_one_grapheme_cluster_spanning_11_UTF16_code_units()
     {

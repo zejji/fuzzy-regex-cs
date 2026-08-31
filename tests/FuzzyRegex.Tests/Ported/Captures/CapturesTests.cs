@@ -77,7 +77,6 @@ public sealed class CapturesTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_captures#7")]
-    [Skip("needs:atomic - '.*?(?>(.){0,2})d' needs an atomic group as well as its two repeats")]
     public void A_group_repeated_inside_an_atomic_group_reports_every_repetition_it_made()
     {
         Match m = FuzzyRegex.Match("abcd", @".*?(?>(.){0,2})d");

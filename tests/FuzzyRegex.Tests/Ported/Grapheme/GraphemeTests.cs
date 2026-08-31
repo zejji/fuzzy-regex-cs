@@ -38,7 +38,6 @@ public sealed class GraphemeTests
     private const string _decomposedCapitalAWithAcute = "Á";
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
     [Property("Upstream", "RegexTests.test_grapheme#1")]
     public void Grapheme_cluster_matches_a_single_precomposed_a_with_grave()
     {
@@ -49,7 +48,6 @@ public sealed class GraphemeTests
     }
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
     [Property("Upstream", "RegexTests.test_grapheme#2")]
     public void Grapheme_cluster_matches_a_base_letter_plus_combining_grave_as_one_unit()
     {
@@ -60,7 +58,7 @@ public sealed class GraphemeTests
     }
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_grapheme#3")]
     public void Grapheme_cluster_splits_a_mix_of_precomposed_and_combining_letters_into_clusters()
     {
@@ -82,7 +80,7 @@ public sealed class GraphemeTests
     }
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_grapheme#4")]
     public void Three_grapheme_clusters_group_the_same_mix_into_two_runs()
     {
@@ -100,7 +98,7 @@ public sealed class GraphemeTests
     }
 
     [Test]
-    [Skip("needs:grapheme - \\X has no grapheme-cluster opcode yet")]
+    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_grapheme#5")]
     public void Grapheme_cluster_treats_CR_CRLF_and_a_combining_mark_after_a_letter_as_units()
     {
