@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Fuzzy.Text.RegularExpressions</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
     <!-- The shipped public API must carry XML docs (design spec section 7). -->
     <WarningsNotAsErrors></WarningsNotAsErrors>
     <NoWarn></NoWarn>

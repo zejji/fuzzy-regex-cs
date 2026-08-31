@@ -300,19 +300,20 @@ Correctness gates first; optimization is Phase 7 and benchmark-driven throughout
 | 0 | Scaffolding: solution, props, CI, skills, driver script, budget-gate validation, AGENTS.md, slice files for Phase 1 | 1-2 | Opus |
 | 1 | Public API surface stub, then port the full upstream test suite (all skipped initially) | 3-6 | Sonnet under Opus |
 | 2 | Compile-parity corpus, then parser/compiler (`_regex_core.py`), Unicode tables, pattern-level API | 8 | Opus |
-| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors | 11-16 | Opus |
+| 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors + the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which no later phase claims and without which no group test can run | 11-16 | Opus |
 | 4 | Advanced: lookaround, atomic/possessive, recursion, branch reset, named lists, POSIX, partial | 8-12 | Opus |
 | 5 | Fuzzy matching + BESTMATCH/ENHANCEMATCH | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) | 3-5 | Opus/Sonnet |
-| 7 | Benchmarks + optimization | 5-10 | Opus |
+| 6 | Oracle *hardening* (broader generators, all Unicode planes) + gap tests (Unicode tables moved to Phase 2, Amendment 11) + native-AOT compatibility gate, against a named exit gate (Amendment 12) | 3-5 | Opus/Sonnet |
+| 7 | Benchmarks + optimization, AOT-compatible throughout (Amendment 12) | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
+| 9 | Browser demo: Vue 3 page, engine in a Web Worker, GitHub Pages; after 1.0 (Amendment 12) | 2-3 | Opus |
 
 (Amendment 2, 2026-08-29: Phase 1's first slice writes the public API surface as signatures only,
 every member throwing. Without it the ported tests cannot compile, so "port the whole suite in
 Phase 1" and "API skeleton in Phase 2" were mutually exclusive as written. Phase 2 keeps the same
 scope, implementing the parser and compiler behind that surface.)
 
-Total roughly 42-69 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
+Total roughly 48-73 slice sessions; 2-4 calendar months at Premium-plan cadence. Estimates carry
 +/-50% uncertainty; the generated status board makes the true rate visible within the first two
 phases. Fuzzy matching is usable at the end of Phase 5, about two-thirds through.
 
@@ -479,3 +480,69 @@ amended text is inline above; this list is the record of what changed and why.
    and the divergence from CPython 3.14's 16.0.0 `unicodedata` are in
    `docs/plan/2026-08-30-phase2-decisions.md`. Phase 2 also opens with a compile-parity corpus
    (slice S06) for the same reason Phase 3 opens with the oracle. Decided by the project owner.
+
+12. **Native AOT is a requirement, Phase 6 gains an exit gate, and a Phase 9 browser demo is added
+   after 1.0** (sections 11 and 12). Made 2026-08-31, decided by the project owner. Three changes,
+   recorded as one because they were decided together and because the first is the reason the third
+   is worth building.
+
+   *Native AOT.* The library must stay AOT-compatible, enforced in two places because static
+   analysis and a published binary answer different questions. Statically,
+   `<IsAotCompatible>true</IsAotCompatible>` goes on `src/FuzzyRegex` now rather than at packaging
+   time: on net8 and later it enables the trim, AOT and single-file analyzers, and
+   `Directory.Build.props` already sets `TreatWarningsAsErrors`, so the slice that introduces a
+   hazard fails its own build. It costs nothing today - measured 2026-08-31, `src/` contains no
+   reflection at all (every `System.Reflection` hit was generated `obj/` assembly-info or a compiled
+   binary; the only `System.Type` use is `typeof(...)` and `GetType()` inside `Equals` and
+   `GetHashCode`, which is statically known and trim-safe). Dynamically, Phase 6 publishes a small
+   consumer app with `PublishAot=true` in CI and asserts real matches, because static analysis
+   cannot see a runtime-only failure. **This is why it could not wait for Phase 8.** The classic
+   .NET regex optimization is `RegexOptions.Compiled`, which emits IL at run time through
+   `Reflection.Emit` and `DynamicMethod` and has no JIT to emit into under native AOT. Phase 7 has
+   to plan around that constraint rather than discover it after building the fast path, and a
+   packaging phase is the worst moment to find a design problem.
+
+   *Phase 6 exit gate.* "Sweep for coverage gaps" with no criteria produces a number nobody acts on,
+   so the phase now closes against four, in descending order of value: skips remaining in the ported
+   suite, which is the real coverage metric for a port and already exists (1,880 of 5,492 as of
+   2026-08-31, each carrying a machine-readable `needs:` reason that `tools/PortTools.psm1`
+   aggregates into `docs/STATUS.md`, giving an enumerated per-capability list of unported upstream
+   behaviour); oracle waves across every generator with zero divergences, the only real ground truth
+   and the only instrument that finds behaviour never tested at all; mutation testing scoped to the
+   public API layer and the parse-error paths, the two places the oracle cannot reach, and the only
+   instrument that answers "would a regression actually fail a test?"; and line coverage last, as a
+   backstop to find a file or branch with no test at all, never as a percentage target. Phase 6 also
+   pins what Phase 7 regresses against, since optimization is where silent behaviour change is
+   likeliest: the benchmark baselines, and the edge cases an optimizer is tempted to special-case -
+   zero-width and empty matches, anchors, `MatchTimeout`, large inputs, pathological backtracking.
+
+   *Phase 9 browser demo.* A Vue 3 page, vendored as an ESM build so there is no build step and no
+   CDN dependency, driving a .NET WebAssembly runtime hosted in a Web Worker that exposes one
+   `[JSExport]` string-in, JSON-out match method; deployed to GitHub Pages. The worker is the whole
+   safety design, and that reasoning is why this belongs in the spec rather than in a README task. A
+   public demo invites strangers to type pathological patterns; regex matching is unbounded in the
+   worst case, and this is a fuzzy engine, so approximate matching is combinatorially worse than the
+   exact case. `MatchTimeout` only bounds a freeze if the engine polls the deadline in its inner
+   loop, so a single missed check point turns a bounded stutter into a frozen tab - which makes the
+   guarantee a property of engine correctness, exactly what a demo of an unfinished port cannot
+   assume. Running in a worker makes "the page never freezes" a property of the browser's scheduler
+   instead: a runaway is killed with `worker.terminate()`, with a warm spare pre-spawned so respawn
+   latency is hidden, and `MatchTimeout` stays as the fast common-case exit and defence in depth,
+   never as the sole net. No cross-origin isolation is needed - the worker boots an independent
+   runtime and talks over `postMessage`, and COOP/COEP are required only by `WasmEnableThreads`,
+   which this does not use - and that distinction is recorded because GitHub Pages cannot set custom
+   response headers at all, so without it someone will later read the design as impossible on Pages.
+   Blazor was the original recommendation and was dropped once the UI no longer had to be .NET. It
+   is placed after 1.0 because it depends on a frozen public API and on the Phase 6 trim and AOT
+   gate, and because demo polish must not delay the release; if the README has to carry a working
+   "try it in your browser" link *at* 1.0, it moves into Phase 8 and Phase 8's estimate rises. The
+   2-3 sessions in the table are an estimate with no measured basis. It also earns its keep as a
+   test: publishing into a live WebAssembly host is a real trimming and AOT proof under a different
+   runtime from the CI gate. Known risks, at the precision the evidence supports: the `wasmbrowser`
+   and `wasmconsole` project templates are documented as experimental ("the developer workflow for
+   the templates is evolving"), while the `[JSImport]`/`[JSExport]` interop the worker actually
+   depends on has been supported since .NET 8, so expect template ergonomics to shift and the API
+   surface to hold; respawn latency after `terminate()` has no published figure and none has been
+   measured here, the warm spare being the documented mitigation and the compiled module being
+   browser-cached so a respawn hits cache rather than re-downloading; and `[JSExport]` requires
+   `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`, which fails at build time, not at run time.
