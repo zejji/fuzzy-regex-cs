@@ -21,6 +21,41 @@ is ported; absence means it is not (yet).
 | `regex/_main.py` | `src/FuzzyRegex/` (namespace `Fuzzy.Text.RegularExpressions`) |
 | `regex/tests/test_regex.py` | `tests/FuzzyRegex.Tests/Ported/` |
 
+## The differential oracle harness (S14)
+
+Not a port of anything - it is how the port is checked. The compile-parity corpus is the oracle for
+what our *compiler* emits; this is the oracle for what our *matcher* answers, and from Phase 3 on
+no slice that touches the engine commits without a local run (VERIFICATION.md rule 7).
+
+| Piece | Where | What it does |
+|---|---|---|
+| Recorder | `tools/record-oracle.py` | Generates rows from a seed (or reads explicit ones), runs each through upstream, writes JSONL: pattern, flags, named lists, subject, operation, and the outcome - no match, the match with every group's span and captures, or the exception. |
+| Consumer | `tests/FuzzyRegex.OracleTests/` | Reads the wave, runs `FuzzyRegex`, reports per row `agree`, `diverge` or `unsupported`. Any `diverge` fails the run; `unsupported` (a `NotImplementedException` seam) is informational. Writes `TestResults/oracle/report.txt`, which is what oracle.yml uploads. |
+| One command | `tools/run-oracle.ps1` | Record, consume, verdict. Nonzero on any divergence. |
+| Schedule | `.github/workflows/oracle.yml` | Weekly and on demand, never a merge gate (design spec amendment 7). |
+
+Three properties of it are load-bearing, and each is pinned by a test in `OracleWaveTests`:
+
+- **The seam is `NotImplementedException`, and *which call* threw it decides the verdict.** A seam
+  hit while compiling means the port knows nothing: `unsupported`. A seam hit after the pattern
+  compiled means the port has already answered whether the input is acceptable, so on a row
+  upstream *rejected* that is a `diverge` - which is how the harness catches the five patterns S13
+  left compiling here and rejected by upstream's `re_compile`, with no matcher in existence.
+- **Any other exception is an *answer*, and agrees only if it is a rejection rather than a crash.**
+  Two things separate them, because the types overlap: the exception must be one of a short
+  allow-list, and it must have come from the constructor rather than from the matching call. The
+  message is compared only for `regex.error`, whose text ports verbatim; a Python `KeyError`'s does
+  not (`regex.compile('a', V0|V1)` says `regex.V0|V1`, where .NET decorates its own message with
+  the parameter name and value), so comparing it there would fail a correct port.
+- **Index translation happens in the recorder, once.** Python reports codepoint `(start, end)`; the
+  file holds UTF-16 `(Index, Length)`. This is one of exactly two places the span convention is
+  enforced - the other is `Match`/`Group`'s accessors - so a slip at the accessor shows up as a
+  divergence rather than as a silent agreement (DECISIONS 2026-08-31).
+- **A wave is generated, not committed.** A divergence is minimised by hand and pinned as an
+  ordinary test in `tests/FuzzyRegex.Tests/Gaps/`; the recorder's file header has the workflow.
+  Named lists are sorted before either engine sees them, for the reason the last row of "Where we
+  diverge" gives.
+
 ## Symbol map
 
 | Upstream symbol | Upstream file:line | Ours | Slice |

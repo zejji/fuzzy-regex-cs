@@ -91,12 +91,28 @@ jobs:
         # rather than from a developer's locally installed regex.
         run: python tools/record-unicode-fixtures.py --check
 
+      - name: The wave recorder's guards must fire
+        # Four properties the recorder must hold rather than be trusted on: it refuses a named list
+        # whose name collides with a regex.compile parameter, it refuses a pattern that dies on
+        # CPython's recursion limit, the seed it prints beside a generator reproduces that
+        # generator's rows on its own, and it translates codepoint indices to UTF-16. Each would
+        # otherwise be a silent wrong answer, not a crash. All four were raised by the S14 blind
+        # review.
+        run: python tools/record-oracle.py --self-check
+
+      - name: The wave recorder must be deterministic
+        # Two runs of one seed, in fresh interpreters under different PYTHONHASHSEED values, must
+        # produce byte-identical waves. A wave nobody can re-record is a divergence nobody can
+        # reproduce.
+        run: python tools/record-oracle.py --verify-determinism
+
       - name: Run the oracle
-        # --ignore-exit-code 8 tolerates "zero tests ran". The harness itself arrives in phase 6;
-        # until then this project is empty, and a scheduled job that always fails just teaches
-        # everyone to ignore red. Exit code 8 means only that no test ran - an actual oracle
-        # failure reports a different code and still fails the job. Remove this flag in phase 6.
-        run: dotnet test tests/FuzzyRegex.OracleTests --configuration Release -- --ignore-exit-code 8
+        # Records a wave from the oracle built above and diffs this port's matching against it.
+        # The seed is random per run and recorded in the wave header, so each week explores rows
+        # last week did not and any divergence stays reproducible from the uploaded artifact.
+        # Every divergence fails the job; a row this port cannot answer yet is reported as
+        # unsupported and does not.
+        run: pwsh -File tools/run-oracle.ps1 -Configuration Release -Count 2000
 
       - name: Upload divergences
         if: always()

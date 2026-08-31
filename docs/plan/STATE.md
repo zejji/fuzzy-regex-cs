@@ -2,43 +2,42 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase:** 2 is **COMPLETE**. All eight slices (S06-S13) are in `docs/plan/slices/done/`, the
-pending queue is empty, and the driver stops here at the phase boundary. The owner reviews, then
-authors and approves the Phase 3 slices (`docs/plan/OPERATIONS.md`).
+**Phase:** 3, the engine. **S14 is DONE** and committed; the tree is clean. Pending queue: S15-S26.
 
-**Current slice:** none. The tree is clean.
+**Current slice:** none in flight. **Next is S15** (`re_compile`, `_regex.c:25863-26121`): the code
+list becomes the node graph, and it **must reject the five patterns this port still compiles** -
+listed in S13's closing notes, and now visible to the oracle as divergences (see below).
 
-**Where Phase 2 leaves the port:** ratchet GREEN, 2046 passing (baseline 2046, recorded as 2040
-ids), 3926 total, nothing failing; overall parity 4.5%. **The parser is finished** - every
-construct upstream's parser accepts is parsed and compiled here - and **all 1659 compile-parity
-corpus rows pass with none skipped**, which is the first slice at which that is true.
-`parse-errors` and `fuzzy-syntax` have left the status board.
+**Where the port stands:** ratchet GREEN, 2046 passing (baseline 2040 recorded ids - the two
+legitimately differ, DECISIONS 2026-08-31), 3926 total, nothing failing; overall parity 4.5%. The
+parser is finished and all 1659 compile-parity corpus rows pass. The engine does not exist: every
+match method throws `NotImplementedException`, and `Match` is a fieldless stub.
 
-**Next action:** owner checkpoint, then Phase 3. Its handover notes are the closing notes of
-`docs/plan/slices/done/S13-fuzzy-syntax-named-lists-phase-close.md`; read them before authoring
-the Phase 3 slices. The roadmap now records Phase 2's measured rate: budget **1.35 driver sessions
-per slice**, so Phase 3's 11-16 slices is 15-22 sessions.
+**The oracle is live, and rule 7 now applies.** `pwsh -File tools/run-oracle.ps1` records a wave
+from Python `regex` and diffs this port's matching against it. **Run it before committing any slice
+that touches the engine**, and minimise every divergence into a permanent test in
+`tests/FuzzyRegex.Tests/Gaps/`. Latest run: `agree 0  unsupported 1000  diverge 0`.
 
 **Blockers:** none.
 
 **Worth knowing before the next slice:**
 
-- **Phase 3 opens with the differential oracle, not the VM** (ROADMAP, design spec amendment 10).
-  Then `re_compile` (`_regex.c:25863-26121`), which turns the code list into the node graph - and
-  which **must reject five patterns this port currently compiles**, listed in S13's closing notes.
-- **Two blind review passes are the sweet spot and both earn their keep.** S13's first pass found 4
-  real defects and its second, over the fixes only, found 2 more. Neither would have been caught by
-  the corpus.
-- **A differential wave beats the corpus wherever upstream's own suite is thin.** Recipe:
-  `.scratch/s13_record.py` + `.scratch/wave/` + `.scratch/s13_compare.py` + `.scratch/s13_classify.py`.
-  **Sort each named list before handing it to upstream** - `record-compile-corpus.py`'s
-  `_canonical_kwargs` does, and not doing so cost 58 false divergences. Always run a negative control.
-- **`Match.Result` is still unwired** and `Match` is a fieldless stub, so nothing can compile a
-  replacement template against a match until Phase 3.
-- **The span convention:** upstream is `(start, end)`, this port is `(Index, Length)`
-  (DECISIONS 2026-08-30). Getting that wrong in the engine would be silent and pervasive.
+- **The oracle can already fail on a fuzzy pattern.** A pattern upstream rejects and this port
+  compiles is reported as a divergence, not as unsupported - so a generator emitting fuzzy patterns
+  before S15 lands `re_compile` will legitimately turn the wave red. Today's generators emit
+  literals only. S15 closing this is what makes such a generator safe to add.
+- **S16 owes one test the oracle cannot have yet:** `OracleComparer.Run`'s `whileMatching: true`
+  attribution is unreachable while every match entry point throws, and is marked at the line. The
+  first slice with a matcher must pin it, or a crash in the engine can be scored as agreement.
+- **Add a generator per slice**, matched to what that slice ported. A generator ahead of the engine
+  produces an all-`unsupported` wave and proves nothing.
+- **Three blind passes earned their keep on S14** (7 findings, all real): pass 2 found a defect in
+  pass 1's fix, pass 3 was a first pass over code no reviewer had seen. Prove each fix by deleting
+  the guard and watching the assertion fail, not by re-running the reviewer.
+- **The span convention:** engine internals are `(start, end)`; the public API is `(Index, Length)`.
+  Converted in exactly two places - `Match`/`Group`'s accessors and the oracle recorder. A third is
+  a defect by definition (DECISIONS 2026-08-31).
 - **`\uXXXX` written through any agent tool is decoded before it reaches disk.** Build such text
-  with `chr(0x5c) + 'u2028'` in a Python one-liner instead.
-- **Do not edit a C# file with Python's `write_text`** - it converts CRLF to LF and IDE0055 then
-  fails the build. Use `Edit`, or run `dotnet format` afterwards.
+  with `chr(0x5c) + 'u2028'` in a Python file instead.
+- **Do not edit a C# file with Python's `write_text`** - CRLF becomes LF and IDE0055 fails the build.
 - **Scratch lives in `.scratch/`** (gitignored). The driver fails any slice whose tree is dirty.
