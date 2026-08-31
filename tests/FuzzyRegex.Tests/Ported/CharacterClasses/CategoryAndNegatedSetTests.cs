@@ -9,19 +9,19 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.CharacterClasses;
 public sealed class CategoryAndNegatedSetTests
 {
     [Test]
-    [Skip("needs:character-classes - the engine has no \\s matching yet")]
+    [Skip("needs:groups - the matcher has no StartGroup yet")]
     [Property("Upstream", "RegexTests.test_category#1")]
     public void Whitespace_class_captures_a_space() =>
         FuzzyRegex.MatchAtStart(" ", "(\\s)").Groups[1].Value.Should().Be(" ");
 
     [Test]
-    [Skip("needs:character-classes - the engine has no negated set matching yet")]
+    [Skip("needs:groups - the matcher has no StartGroup yet")]
     [Property("Upstream", "RegexTests.test_not_literal#1")]
     public void Negated_set_captures_the_character_after_whitespace() =>
         FuzzyRegex.Match(" b", "\\s([^a])").Groups[1].Value.Should().Be("b");
 
     [Test]
-    [Skip("needs:character-classes - the engine has no negated set matching yet")]
+    [Skip("needs:groups - the matcher has no StartGroup yet; also needs quantifiers")]
     [Property("Upstream", "RegexTests.test_not_literal#2")]
     public void Negated_set_star_captures_the_run_after_whitespace() =>
         FuzzyRegex.Match(" bb", "\\s([^a]*)").Groups[1].Value.Should().Be("bb");

@@ -2,44 +2,44 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase:** 3, the engine. **S16 is DONE** and committed; the tree is clean. Pending queue: S17-S26.
+**Phase:** 3, the engine. **S17 is DONE** and committed; the tree is clean. Pending queue: S18-S26.
 
-**Current slice:** none in flight. **Next is S17** (`classes at match time`): `RANGE`, the four
-`SET_*` families, `PROPERTY`, and the `ascii-flag` behaviour.
+**Current slice:** none in flight. **Next is S18** (`alternation, groups and captures`): `BRANCH`,
+`START_GROUP`/`END_GROUP`, the group span stacks, and `Match.Groups`/`Captures` for groups 1+.
 
-**Where the port stands:** ratchet GREEN, 3665 passing, 5505 total, nothing failing; overall parity
-6.5%. **Patterns match.** `src/FuzzyRegex/Engine/` holds `ByteStack`, `MatchState` and `Matcher` -
-`basic_match`'s two switches with literals, `.`, `STRING` and the plain anchors real and every other
-opcode throwing a tagged seam. `Match`/`Group`/`Capture` report real spans for group 0; groups 1+,
-`Matches`, `Replace`, `Split` and `partial: true` are still seams.
+**Where the port stands:** ratchet GREEN, 3917 passing, 5516 total, nothing failing; overall parity
+**18.8%** (was 6.5%). `Escapes` is at 100%, `UnicodeProperties` 70%. The matcher has literals, `.`,
+`STRING`, the plain anchors, and now `PROPERTY`, `RANGE` and the four `SET_*` operators with the
+scoped `(?a:)`/`(?u:)` encoding. Groups 1+, `Matches`, `Replace`, `Split` and `partial: true` are
+still seams. The three biggest waiting tags are `quantifiers` 211, `ignore-case` 154, `find-all` 132.
 
-**The oracle earned its keep in S16 and rule 7 still applies.** `pwsh -File tools/run-oracle.ps1`
-before committing any engine slice. Latest: `agree 3600  unsupported 0  diverge 0` over `literals`,
-`literal-dot` and the new `anchors` generator, 1200 rows each.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Latest:
+`agree 6000  unsupported 0  diverge 0` over `literals`, `literal-dot`, `anchors` and the new
+`classes` generator, 1500 rows each. Two negative controls fired (6 and 133 divergences).
 
 **Blockers:** none.
 
-**S17 inherits these three duties:**
+**S18 inherits these duties:**
 
-- **Read `node.Step`, do not assume 1.** `BuildRange` and `BuildSet` clear the step to 0 on
-  `RE_ZEROWIDTH_OP`, exactly as `BuildCharacter` does. Assuming 1 for `CHARACTER` cost S16 41
-  oracle rows - every pattern with a leading anchor failed. `ANY` and `STRING` genuinely do step
-  unconditionally upstream.
-- **Pin `OracleComparer.Run`'s `whileMatching: true` attribution.** Still marked at the line and
-  still unreached: S16's engine throws `NotImplementedException` for an unported opcode, which the
-  catch above takes. The first slice whose matcher can throw something else must pin it.
-- **Add a generator per capability it delivers.** S16 added `anchors` and it found the slice's only
-  real defect. A slice that lands opcodes without one is trusting the ported suite alone.
+- **Add a generator per capability it delivers**, and run a negative control on it. `classes` found
+  nothing this time, but the two controls proved it can - a generator nobody has broken on purpose
+  is a generator nobody knows works.
+- **Retag, do not just un-skip.** S17 un-skipped 84 attributes, 156 tests still failed at another
+  slice's seam, and every one had to be retagged with prose. Six fan-out methods needed splitting
+  because only some rows were blocked; `git show HEAD:<path>` and compare the `[Arguments]` rows
+  afterwards, because a split is where test data gets silently altered.
+- **Put `advance:` back** in `BasicMatch` with the first real backtrack case; S16 removed it because
+  C# rejects an unreferenced label. **`push_pointer` is still not ported** and S18 must decide it: a
+  node reference cannot go in a byte array on a managed heap.
 
 **Worth knowing before the next slice:**
 
-- **`advance:` is absent from `BasicMatch`** - nothing jumps to it yet and C# rejects an
-  unreferenced label. The slice with the first real backtrack case puts it back.
-- **The span convention:** engine internals are `(start, end)`; the public API is `(Index, Length)`.
-  Converted in exactly two places - `Capture`'s accessors and the oracle recorder.
-- **Run the ratchet AFTER committing as well as before.** The pre-commit CSharpier hook rewrites
-  files, and in S16 its reindenting of the `goto` labels broke a commit that had been green a
-  minute earlier (fixed by `csharp_indent_labels = no_change`; DECISIONS 2026-08-31).
-- **Do not edit a C# file with Python's `write_text`** - CRLF becomes LF and IDE0055 fails the
-  build. Use the `Edit` tool. (Hit again in S16, caught before the build.)
+- **Do not reason about upstream, run it.** `ENCODING_KIND` looks dead by grep and is not; the bits
+  come from the Python compiler. One `_regex.compile` intercept settled it. DECISIONS 2026-08-31.
+- **Working-tree line endings are LF** (`.gitattributes` sets `* text=auto eol=lf`), so the older
+  "CRLF, do not use Python's `write_text`" warning was wrong; what *is* true is that the `Read` tool
+  renders a unicode escape in the source it shows you as the character itself, so echoing
+  that back through `Write` puts a raw control byte in the file. Count the bytes afterwards.
+- **Run the ratchet AFTER committing as well as before** - the pre-commit CSharpier hook rewrites
+  files (DECISIONS 2026-08-31).
 - **Scratch lives in `.scratch/`** (gitignored). The driver fails any slice whose tree is dirty.

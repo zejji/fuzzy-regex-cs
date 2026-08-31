@@ -30,7 +30,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.CharacterClasses;
 public sealed class WordClassIsUnicodeByDefaultTests
 {
     [Test]
-    [Skip("needs:character-classes - the engine has no \\w shorthand class yet")]
     [Property("Upstream", "RegexTests.test_ascii_and_unicode_flag#2,4")]
     public void Word_class_matches_a_non_ascii_letter_without_any_flag() =>
         // U+00E0 LATIN SMALL LETTER A WITH GRAVE - upstream's '\xe0'.

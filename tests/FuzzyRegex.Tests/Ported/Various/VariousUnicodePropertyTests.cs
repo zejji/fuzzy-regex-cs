@@ -24,7 +24,6 @@ public sealed class VariousUnicodePropertyTests
     [Arguments("\\p{Ll}", "a", "0", new string?[] { "a" })]
     [Arguments("\\P", "P", "0", new string?[] { "P" })]
     [Arguments("\\P{Lu}", "p", "0", new string?[] { "p" })]
-    [Skip("needs:unicode-properties - the engine has no property opcode yet (\\p{...} parses since S10)")]
     [Property("Upstream", "RegexTests.test_various#209-213")]
     public void Search_returns_the_expected_group_values(
         string pattern,

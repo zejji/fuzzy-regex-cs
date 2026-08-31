@@ -13,7 +13,6 @@ public sealed class SpecialEscapesCharacterClassesTests
     // incidental here (str patterns are Unicode by default and the flag is not surfaced on
     // FuzzyRegexOptions); folded into one test.
     [Test]
-    [Skip("needs:character-classes - the engine has no \\d \\D \\w \\W \\s \\S matching yet")]
     [Property("Upstream", "RegexTests.test_special_escapes#15,17")]
     public void Digit_word_space_classes_and_their_negations_match_in_sequence() =>
         FuzzyRegex.Match("1aa! a", "\\d\\D\\w\\W\\s\\S").Value.Should().Be("1aa! a");

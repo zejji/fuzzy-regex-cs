@@ -11,13 +11,13 @@ public sealed class BigCharsetTests
     // incidental here (str patterns are Unicode by default and the flag is not surfaced on
     // FuzzyRegexOptions); folded into one test.
     [Test]
-    [Skip("needs:character-classes - the engine has no set matching yet")]
+    [Skip("needs:groups - the matcher has no StartGroup yet")]
     [Property("Upstream", "RegexTests.test_bigcharset#1-2")]
     public void Set_of_two_high_codepoints_captures_the_matching_one() =>
         FuzzyRegex.MatchAtStart("∢", "([∢∣])").Groups[1].Value.Should().Be("∢");
 
     [Test]
-    [Skip("needs:character-classes - the engine has no dot matching yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#3")]
     public void Findall_dot_reproduces_a_string_of_high_codepoints()
     {
@@ -29,7 +29,7 @@ public sealed class BigCharsetTests
     }
 
     [Test]
-    [Skip("needs:character-classes - the engine has no set matching yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#4")]
     public void Findall_big_set_reproduces_a_string_of_high_codepoints()
     {
@@ -41,7 +41,7 @@ public sealed class BigCharsetTests
     }
 
     [Test]
-    [Skip("needs:character-classes - the engine has no alternation matching yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#5")]
     public void Findall_alternation_of_high_codepoints_reproduces_the_string()
     {

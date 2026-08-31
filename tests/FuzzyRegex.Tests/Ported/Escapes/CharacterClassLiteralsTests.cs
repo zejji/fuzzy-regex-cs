@@ -23,7 +23,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\177]")]
     [Arguments(128, @"[\200]")]
     [Arguments(255, @"[\377]")]
-    [Skip("needs:escapes - the parser has no octal literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#1")]
     public void Set_with_bare_octal_escape_matches_the_character(int codepoint, string pattern) =>
         FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
@@ -37,7 +36,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\1770]")]
     [Arguments(128, @"[\2000]")]
     [Arguments(255, @"[\3770]")]
-    [Skip("needs:escapes - the parser has no octal literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#2")]
     public void Set_with_octal_escape_plus_a_literal_zero_member_matches_the_character(int codepoint, string pattern) =>
         FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
@@ -51,7 +49,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\1778]")]
     [Arguments(128, @"[\2008]")]
     [Arguments(255, @"[\3778]")]
-    [Skip("needs:escapes - the parser has no octal literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#3")]
     public void Set_with_octal_escape_plus_a_literal_eight_member_matches_the_character(
         int codepoint,
@@ -67,7 +64,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\x7f]")]
     [Arguments(128, @"[\x80]")]
     [Arguments(255, @"[\xff]")]
-    [Skip("needs:escapes - the parser has no hex literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#4")]
     public void Set_with_bare_hex_escape_matches_the_character(int codepoint, string pattern) =>
         FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
@@ -81,7 +77,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\x7f0]")]
     [Arguments(128, @"[\x800]")]
     [Arguments(255, @"[\xff0]")]
-    [Skip("needs:escapes - the parser has no hex literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#5")]
     public void Set_with_hex_escape_plus_a_literal_zero_member_matches_the_character(int codepoint, string pattern) =>
         FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
@@ -95,7 +90,6 @@ public sealed class CharacterClassLiteralsTests
     [Arguments(127, @"[\x7fz]")]
     [Arguments(128, @"[\x80z]")]
     [Arguments(255, @"[\xffz]")]
-    [Skip("needs:escapes - the parser has no hex literal escapes yet")]
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#6")]
     public void Set_with_hex_escape_plus_a_literal_z_member_matches_the_character(int codepoint, string pattern) =>
         FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();

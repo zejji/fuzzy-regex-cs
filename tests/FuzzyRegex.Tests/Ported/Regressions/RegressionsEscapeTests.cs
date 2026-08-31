@@ -10,7 +10,6 @@ public sealed class RegressionsEscapeTests
 {
     // Hg issue 35: regex.compile("\ ", regex.X) causes "_regex_core.error: bad escape".
     [Test]
-    [Skip("needs:escapes - an escaped space under IgnorePatternWhitespace raises bad escape")]
     [Property("Upstream", "RegexTests.test_hg_bugs#13")]
     public void Escaped_space_under_verbose_mode_matches_a_literal_space()
     {
@@ -21,7 +20,6 @@ public sealed class RegressionsEscapeTests
 
     // Git issue 527: `VERBOSE`/`X` flag breaks `\N` escapes.
     [Test]
-    [Skip("needs:escapes - \\N{name} character-name escapes are not implemented")]
     [Property("Upstream", "RegexTests.test_hg_bugs#447")]
     public void Named_character_escape_matches_the_letter_it_names()
     {
@@ -32,7 +30,6 @@ public sealed class RegressionsEscapeTests
     }
 
     [Test]
-    [Skip("needs:escapes - \\N{name} character-name escapes are not implemented")]
     [Property("Upstream", "RegexTests.test_hg_bugs#448")]
     public void Named_character_escape_matches_the_letter_it_names_under_verbose_mode()
     {

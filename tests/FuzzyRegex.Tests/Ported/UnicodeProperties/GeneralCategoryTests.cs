@@ -14,7 +14,6 @@ public sealed class GeneralCategoryTests
     [Arguments(@"\p{L}", "a")]
     [Arguments(@"\p{Lu}", "A")]
     [Arguments(@"\p{Ll}", "a")]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
     [Property("Upstream", "RegexTests.test_properties#55-58")]
     public void General_category_matches_a_letter_of_that_category(string pattern, string subject) =>
         new FuzzyRegex(pattern).IsMatchAtStart(subject).Should().BeTrue();
@@ -24,7 +23,6 @@ public sealed class GeneralCategoryTests
     /// own test so the assertion index in the provenance stays truthful.
     /// </remarks>
     [Test]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
     [Property("Upstream", "RegexTests.test_properties#69")]
     public void Lowercase_letter_category_still_matches_after_the_grapheme_block() =>
         new FuzzyRegex(@"\p{Ll}").IsMatchAtStart("a").Should().BeTrue();

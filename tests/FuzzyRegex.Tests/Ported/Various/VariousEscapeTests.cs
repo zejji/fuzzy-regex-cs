@@ -27,13 +27,8 @@ public sealed class VariousEscapeTests
     [Arguments("\\t\\n\\v\\r\\f\\a", "\t\n\v\r\f\a", "0", new string?[] { "\t\n\v\r\f\a" })]
     [Arguments("\\g", "g", "0", new string?[] { "g" })]
     [Arguments("\\N", "N", "0", new string?[] { "N" })]
-    [Arguments("\\w+", "--ab_cd0123--", "0", new string?[] { "ab_cd0123" })]
-    [Arguments("\\D+", "1234abc5678", "0", new string?[] { "abc" })]
-    [Arguments("(\\s*)(\\S*)(\\s*)", " testing!1972", "3,2,1", new string?[] { "", "testing!1972", " " })]
-    [Arguments(".*?\\S *:", "xx:", "0", new string?[] { "xx:" })]
     [Arguments("\\w", "\u00C4", "0", new string?[] { "\u00C4" })]
-    [Skip("needs:escapes - the parser does not decode escapes yet")]
-    [Property("Upstream", "RegexTests.test_various#21,24,30,35-37,204,208,488,490,494,506,524")]
+    [Property("Upstream", "RegexTests.test_various#21,24,30,35-37,204,208,524")]
     public void Search_returns_the_expected_group_values(
         string pattern,
         string subject,
@@ -47,12 +42,44 @@ public sealed class VariousEscapeTests
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
     }
 
+    // Split out at S17: the shorthand class in each of these matches now, the repeat around it
+    // does not exist yet.
+    [Test]
+    [Arguments("\\w+", "--ab_cd0123--", "0", new string?[] { "ab_cd0123" })]
+    [Arguments("\\D+", "1234abc5678", "0", new string?[] { "abc" })]
+    [Arguments(".*?\\S *:", "xx:", "0", new string?[] { "xx:" })]
+    [Skip("needs:quantifiers - the matcher has no repeat opcode yet")]
+    [Property("Upstream", "RegexTests.test_various#488,490,506")]
+    public void Search_with_a_quantifier_returns_the_expected_group_values(
+        string pattern,
+        string subject,
+        string groups,
+        string?[] expected
+    )
+    {
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        m.Success.Should().BeTrue();
+        VariousTable.GroupValues(m, groups).Should().Equal(expected);
+    }
+
+    // Split out at S17: also needs quantifiers, but START_GROUP is the opcode it reaches first.
+    [Test]
+    [Skip("needs:groups - the matcher has no StartGroup yet; also needs quantifiers")]
+    [Property("Upstream", "RegexTests.test_various#494")]
+    public void Search_with_groups_returns_the_expected_group_values()
+    {
+        Match m = FuzzyRegex.Match(" testing!1972", "(\\s*)(\\S*)(\\s*)");
+
+        m.Success.Should().BeTrue();
+        VariousTable.GroupValues(m, "3,2,1").Should().Equal("", "testing!1972", " ");
+    }
+
     [Test]
     [Arguments("\\x00ffffffffffffff", "\u00FF")]
     [Arguments("\\x00f", "\u000F")]
     [Arguments("\\x00fe", "\u00FE")]
     [Arguments("\\x00ff", "\u00FF")]
-    [Skip("needs:escapes - the parser does not decode escapes yet")]
     [Property("Upstream", "RegexTests.test_various#31-34")]
     public void Search_does_not_match(string pattern, string subject) =>
         FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();

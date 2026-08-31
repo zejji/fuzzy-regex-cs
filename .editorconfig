@@ -180,6 +180,19 @@ dotnet_diagnostic.S1313.severity = none
 dotnet_diagnostic.S3011.severity = none
 
 ; ==========================================================================
+; Ported table tests only.
+; ==========================================================================
+[tests/FuzzyRegex.Tests/Ported/**/*.cs]
+; S4144 wants two methods with identical bodies merged. In a ported table test the body IS shared -
+; upstream drives its whole 524-row table through one loop and one assertion - and what makes two
+; methods different is their [Arguments] data and their [Skip] tag. Splitting a table by the
+; capability each row waits on is how this port records its gaps (docs/STATUS.md is generated from
+; those tags), so merging the methods back would delete the information the split exists to carry.
+; Extracting the body into a helper does not satisfy the rule either: the callers are then
+; identical one-liners. First needed at S17, splitting test_various by groups and quantifiers.
+dotnet_diagnostic.S4144.severity = none
+
+; ==========================================================================
 ; API surface stub (S01), src/FuzzyRegex root only.
 ;
 ; The public API exists as signatures before the parser and engine do, because the ported test

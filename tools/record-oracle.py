@@ -253,7 +253,7 @@ def _canonical_named_lists(named_lists: dict) -> dict:
 # --------------------------------------------------------------------------------------------
 
 
-GENERATORS = ("literals", "literal-dot", "anchors")
+GENERATORS = ("literals", "literal-dot", "anchors", "classes")
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
 # literal. Every one is a plain anchor: word and grapheme boundaries are S20 and would only produce
@@ -282,6 +282,134 @@ MULTILINE = 8
 LINE_BREAKS = ("\n", "\r", "\r\n", " ", "")
 
 
+# regex.ASCII and regex.VERSION1 (upstream/regex/_regex_core.py lines 74 and 88).
+ASCII = 0x80
+VERSION1 = 0x100
+
+# The class atoms the S17 engine can match: RANGE, PROPERTY and the four SET_* operators, positive
+# and negated, plus a bare literal so a generated pattern is not all classes. Every one is a single
+# node that consumes exactly one character - no quantifier, no group, no alternation - because a
+# generator that emits an opcode no slice has ported produces `unsupported` rows and tells nobody
+# anything. The '&&', '--', '||' and '~~' forms need V1, so they are drawn separately below.
+CLASS_ATOMS = (
+    "[a]",
+    "[^a]",
+    "[abz]",
+    "[^abz]",
+    "[a-f]",
+    "[^a-f]",
+    "[a-fA-F0-9]",
+    "[0-9a-f_]",
+    r"\d",
+    r"\D",
+    r"\w",
+    r"\W",
+    r"\s",
+    r"\S",
+    r"[\d]",
+    r"[^\d]",
+    r"[\w\s]",
+    r"[^\w\s]",
+    r"[a\d]",
+    r"[^a\d]",
+    "[[:alpha:]]",
+    "[[:^alpha:]]",
+    "[[:digit:]]",
+    "[[:punct:]]",
+    "[[:xdigit:]]",
+    r"\p{L}",
+    r"\P{L}",
+    r"\p{Lu}",
+    r"\p{Nd}",
+    r"\p{^Nd}",
+    r"\p{Greek}",
+    r"\p{Cyrillic}",
+    r"\p{ASCII}",
+    r"\p{Alnum}",
+    r"[\p{L}\p{N}]",
+    r"[^\p{L}]",
+    "a",
+    "Z",
+    "0",
+)
+
+# The four V1 set operators, nested one level, so 'in_set_diff', 'in_set_inter', 'in_set_sym_diff'
+# and 'in_set_union' are each reached with a member list longer than one and with a nested set as a
+# member - which is the only way 'matches_member' recurses.
+V1_CLASS_ATOMS = (
+    r"[\p{ASCII}&&\p{L}]",
+    r"[\p{L}&&\p{ASCII}&&[a-z]]",
+    r"[\p{ASCII}--\p{L}]",
+    r"[[a-z]--[aei]]",
+    r"[\w--[0-9]]",
+    r"[\p{L}||\p{N}]",
+    r"[[a-c]||[x-z]]",
+    r"[\p{Alnum}~~\p{L}]",
+    r"[[a-f]~~[d-k]]",
+    r"[^[\p{L}--[a-z]]]",
+)
+
+# Four bands, cycled row by row so no wave is all-ASCII: ASCII, Latin-1 (the first place the ASCII
+# flag changes an answer), the BMP above it, and astral - where a codepoint is two UTF-16 code units,
+# so a property looked up by 'char' rather than by codepoint would answer differently.
+CLASS_SUBJECT_ALPHABETS = (
+    "aZ0_ -.\t",
+    "éÅµß· ",
+    "ΓγЖж中٠ ",
+    "\U0001f600\U0001d518\U0001d7ee\U00010400\U0001f4a9",
+)
+
+# How many atoms a generated class pattern holds, and how often. Weighted towards one, because
+# every extra atom multiplies the chance that the row simply does not match, and a wave that is
+# nearly all 'nomatch' exercises the failure path and almost nothing else. Measured over 400 rows of
+# seed 1: a flat 1-3 draw gave 45 matching rows, this weighting gives 91.
+CLASS_PATTERN_ATOMS = (1, 2, 3)
+CLASS_PATTERN_ATOM_WEIGHTS = (6, 3, 1)
+
+# Shorter subjects than the literal generators use. A third of the rows are 'fullmatch', which
+# against an eight-character subject needs an eight-atom pattern to have any chance at all: over the
+# same 400 rows a maximum of 8 gave 1 matching fullmatch row, and a maximum of 4 gives 10.
+MAX_CLASS_SUBJECT_LENGTH = 4
+
+
+def _generate_classes(rng: random.Random, count: int):
+    """S17's generator: one to three class atoms in a row, over four bands of codepoint.
+
+    No substring trick here, unlike the literal generators: a class already matches a whole band of
+    characters, so drawing atoms independently of the subject still gives a healthy mix of matching
+    and non-matching rows. The subject is never empty, because an empty one makes every
+    one-character class fail for the same uninteresting reason.
+    """
+    for i in range(count):
+        alphabet = CLASS_SUBJECT_ALPHABETS[i % len(CLASS_SUBJECT_ALPHABETS)]
+        subject = "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, MAX_CLASS_SUBJECT_LENGTH + 1)))
+
+        # The set operators are a V1-only syntax, so half the rows opt in and only those may draw
+        # from the operator pool. Drawn from the seeded stream rather than from 'i', for the reason
+        # recorded against the anchor generator below: indexing several tables by 'i' aliases them.
+        version1 = rng.random() < 0.5
+        pool = CLASS_ATOMS + V1_CLASS_ATOMS if version1 else CLASS_ATOMS
+
+        flags = 0
+        if version1:
+            flags |= VERSION1
+        if rng.random() < 0.5:
+            # The whole of the ASCII flag's matching story is that the property table swaps, so it is
+            # only observable on a subject above U+007F - which is three of the four bands.
+            flags |= ASCII
+
+        atoms = rng.choices(CLASS_PATTERN_ATOMS, weights=CLASS_PATTERN_ATOM_WEIGHTS)[0]
+
+        yield {
+            "generator": "classes",
+            "pattern": "".join(rng.choice(pool) for _ in range(atoms)),
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -291,6 +419,10 @@ def _generate(name: str, rng: random.Random, count: int):
     """
     if name not in GENERATORS:
         raise SystemExit(f"unknown generator {name!r}; expected one of {', '.join(GENERATORS)}")
+
+    if name == "classes":
+        yield from _generate_classes(rng, count)
+        return
 
     dotted = name == "literal-dot"
     anchored = name == "anchors"

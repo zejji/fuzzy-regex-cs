@@ -85,20 +85,19 @@ internal static class Seam
             or Opcode.StringIgnRev
             or Opcode.StringRev => "right-to-left",
 
-            Opcode.CharacterIgn or Opcode.StringFld or Opcode.StringIgn => "ignore-case",
-
-            Opcode.Property or Opcode.PropertyIgn => "unicode-properties",
-
-            Opcode.Range
+            // S17 delivered the forward, case-sensitive PROPERTY, RANGE and SET_* opcodes, so what
+            // is left of those families is the case-insensitive half, and that is S22's. Naming the
+            // delivered tag here would put a capability the status board says we have on an
+            // oracle 'unsupported' row and in a stack trace (found by the S17 blind review).
+            Opcode.CharacterIgn
+            or Opcode.PropertyIgn
             or Opcode.RangeIgn
-            or Opcode.SetDiff
             or Opcode.SetDiffIgn
-            or Opcode.SetInter
             or Opcode.SetInterIgn
-            or Opcode.SetSymDiff
             or Opcode.SetSymDiffIgn
-            or Opcode.SetUnion
-            or Opcode.SetUnionIgn => "character-classes",
+            or Opcode.SetUnionIgn
+            or Opcode.StringFld
+            or Opcode.StringIgn => "ignore-case",
 
             Opcode.Branch => "alternation",
 
@@ -194,6 +193,213 @@ internal static class Matcher
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> if they are the same.</returns>
     internal static bool MatchesCharacter(Node node, uint ch) => SameChar(node.Values[0], ch);
+
+    /// <summary>Upstream <c>in_range</c> (line 2816).</summary>
+    /// <param name="lower">The lowest codepoint in the range.</param>
+    /// <param name="upper">The highest.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it is in the range.</returns>
+    internal static bool InRange(uint lower, uint upper, uint ch) => lower <= ch && ch <= upper;
+
+    /// <summary>Upstream <c>matches_RANGE</c> (line 3003).</summary>
+    /// <param name="node">The <c>RANGE</c> node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it is in the node's range.</returns>
+    internal static bool MatchesRange(Node node, uint ch) => InRange(node.Values[0], node.Values[1], ch);
+
+    /// <summary>
+    /// Upstream's <c>ENCODING_KIND(node)</c> switch, which <c>matches_PROPERTY</c> (line 2926) and
+    /// <c>matches_member</c> (line 3041) both open with: a node compiled under a scoped
+    /// <c>(?a:...)</c> or <c>(?u:...)</c> carries its own encoding and ignores the pattern's.
+    /// </summary>
+    /// <remarks>
+    /// This is the whole of the scoped ASCII flag's matching story. Without it <c>(?a:\d)</c>
+    /// matched U+FF19 FULLWIDTH DIGIT NINE, because the pattern-level encoding is Unicode
+    /// (upstream answers <see langword="false"/>; probed against regex 2026.7.19, 2026-08-31).
+    /// </remarks>
+    /// <param name="encoding">The pattern's encoding.</param>
+    /// <param name="node">The node.</param>
+    /// <returns>The encoding to answer this node's property lookups in.</returns>
+    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, Node node) =>
+        NodeStatus.EncodingKind(node) switch
+        {
+            NodeStatus.AsciiEncoding => CaseEncoding.Ascii,
+            NodeStatus.UnicodeEncoding => CaseEncoding.Unicode,
+            _ => encoding,
+        };
+
+    /// <summary>Upstream <c>matches_PROPERTY</c> (line 2924).</summary>
+    /// <param name="encoding">The pattern's encoding.</param>
+    /// <param name="node">The <c>PROPERTY</c> node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has the property.</returns>
+    internal static bool MatchesProperty(CaseEncoding encoding, Node node, uint ch) =>
+        Encodings.HasProperty(NodeEncoding(encoding, node), node.Values[0], ch);
+
+    /// <summary>Upstream <c>matches_member</c> (line 3025).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="member">The member node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint matches the member.</returns>
+    internal static bool MatchesMember(CaseEncoding encoding, Node member, uint ch)
+    {
+        switch (member.Op)
+        {
+            case Opcode.AnyAll:
+                return true;
+            case Opcode.Character:
+                return ch == member.Values[0];
+            case Opcode.Property:
+                return MatchesProperty(encoding, member, ch);
+            case Opcode.Range:
+                return InRange(member.Values[0], member.Values[1], ch);
+            case Opcode.SetDiff:
+                return InSetDiff(encoding, member, ch);
+            case Opcode.SetInter:
+                return InSetInter(encoding, member, ch);
+            case Opcode.SetSymDiff:
+                return InSetSymDiff(encoding, member, ch);
+            case Opcode.SetUnion:
+                return InSetUnion(encoding, member, ch);
+            case Opcode.String:
+                // A STRING inside a set is a set of single characters, not a sequence: build_SET
+                // routes it through build_STRING with 'is_charset' (NodeCompiler, :1637). Upstream's
+                // hand-written scan over 'values' is a 'Contains' here, which S3267 asks for and
+                // which is the same linear scan.
+                return member.Values.Contains(ch);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Upstream <c>in_set_diff</c> (line 3155): in the first member and in no other.</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in the difference.</returns>
+    internal static bool InSetDiff(CaseEncoding encoding, Node node, uint ch)
+    {
+        Node? member = node.Next2.Node;
+
+        if (MatchesMember(encoding, member!, ch) != member!.Match)
+        {
+            return false;
+        }
+
+        member = member.Next1.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMember(encoding, member, ch) == member.Match)
+            {
+                return false;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>in_set_inter</c> (line 3201).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in every member.</returns>
+    internal static bool InSetInter(CaseEncoding encoding, Node node, uint ch)
+    {
+        Node? member = node.Next2.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMember(encoding, member, ch) != member.Match)
+            {
+                return false;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return true;
+    }
+
+    /// <summary>Upstream <c>in_set_sym_diff</c> (line 3236).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in an odd number of members.</returns>
+    internal static bool InSetSymDiff(CaseEncoding encoding, Node node, uint ch)
+    {
+        Node? member = node.Next2.Node;
+        bool result = false;
+
+        while (member is not null)
+        {
+            if (MatchesMember(encoding, member, ch) == member.Match)
+            {
+                result = !result;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return result;
+    }
+
+    /// <summary>Upstream <c>in_set_union</c> (line 3278).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in any member.</returns>
+    internal static bool InSetUnion(CaseEncoding encoding, Node node, uint ch)
+    {
+        Node? member = node.Next2.Node;
+
+        while (member is not null)
+        {
+            if (MatchesMember(encoding, member, ch) == member.Match)
+            {
+                return true;
+            }
+
+            member = member.Next1.Node;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Which <c>matches_*</c> predicate a single-character opcode uses. Not an upstream function:
+    /// upstream picks it by having a separate <c>case</c> per opcode in the dispatch switch, and
+    /// this is that choice pulled out so the eleven lines around it are written once.
+    /// </summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="ch">The codepoint at the text position.</param>
+    /// <returns>What the node's predicate says, before <c>node-&gt;match</c> is applied.</returns>
+    private static bool MatchesOne(CaseEncoding encoding, Node node, uint ch) =>
+        node.Op switch
+        {
+            Opcode.Character => MatchesCharacter(node, ch),
+            Opcode.Property => MatchesProperty(encoding, node, ch),
+            Opcode.Range => MatchesRange(node, ch),
+            _ => MatchesSet(encoding, node, ch),
+        };
+
+    /// <summary>Upstream <c>matches_SET</c> (line 3313).</summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="node">The set node.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint is in the set.</returns>
+    internal static bool MatchesSet(CaseEncoding encoding, Node node, uint ch) =>
+        node.Op switch
+        {
+            Opcode.SetDiff or Opcode.SetDiffRev => InSetDiff(encoding, node, ch),
+            Opcode.SetInter or Opcode.SetInterRev => InSetInter(encoding, node, ch),
+            Opcode.SetSymDiff or Opcode.SetSymDiffRev => InSetSymDiff(encoding, node, ch),
+            Opcode.SetUnion or Opcode.SetUnionRev => InSetUnion(encoding, node, ch),
+            _ => false,
+        };
 
     /// <summary>
     /// Upstream <c>ascii_at_line_start</c> / <c>unicode_at_line_start</c>
@@ -606,7 +812,17 @@ internal static class Matcher
                     }
 
                     break;
+                // Upstream gives each of these its own case with the same eleven-line tail copied
+                // out (:12968, :13804, :13914, :14446-14449), differing only in which 'matches_*'
+                // predicate it calls. One case group with the predicate chosen by a switch says the
+                // same thing, and each arm still maps one-for-one onto upstream's case.
                 case Opcode.Character: // A character.
+                case Opcode.Property: // A property.
+                case Opcode.Range: // A range.
+                case Opcode.SetDiff: // Set difference.
+                case Opcode.SetInter: // Set intersection.
+                case Opcode.SetSymDiff: // Set symmetric difference.
+                case Opcode.SetUnion: // Set union.
                     if (state.TextPos >= state.TextEnd && state.PartialSide == MatchState.PartialRight)
                     {
                         return MatchStatus.Partial;
@@ -614,7 +830,7 @@ internal static class Matcher
 
                     if (
                         state.TextPos < state.SliceEnd
-                        && MatchesCharacter(node, state.CharAt(state.TextPos)) == node.Match
+                        && MatchesOne(state.Encoding, node, state.CharAt(state.TextPos)) == node.Match
                     )
                     {
                         state.TextPos = Step(state, state.TextPos, node.Step);
@@ -844,9 +1060,11 @@ internal static class Matcher
                     state.Pstack.Reset();
                     goto start_match;
                 default:
-                    // Nothing else is ever pushed by this slice's opcodes: CHARACTER, STRING and the
-                    // ANY family only put themselves on the backtracking stack to retry a fuzzy
-                    // match, which S16 refuses above.
+                    // Nothing else is ever pushed by the opcodes ported so far: CHARACTER, STRING,
+                    // the ANY family and S17's PROPERTY, RANGE and SET_* only put themselves on the
+                    // backtracking stack to retry a fuzzy match (upstream's shared one-character
+                    // block, :15210-15243, is nothing but 'retry_fuzzy_match_item'), which the
+                    // dispatch loop refuses above.
                     throw Seam.For((Opcode)op);
             }
         }

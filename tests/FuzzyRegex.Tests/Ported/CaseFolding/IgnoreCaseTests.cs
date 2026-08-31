@@ -79,7 +79,6 @@ public sealed class IgnoreCaseTests
     // Issue 3511: a range spanning between uppercase and lowercase (Z=0x5A to a=0x61) must not
     // become an unbounded case-insensitive range once (?i) is applied.
     [Test]
-    [Skip("needs:character-classes - the engine has no range set matching yet")]
     [Property("Upstream", "RegexTests.test_ignore_case#10")]
     public void Range_between_cases_matches_a_character_between_them()
     {

@@ -184,6 +184,28 @@ internal static class NodeStatus
     /// <summary>Upstream <c>RE_STATUS_HAS_REPEATS</c>.</summary>
     internal const uint HasRepeats = 0x20000;
 
+    /// <summary>Upstream <c>RE_ENCODING_SHIFT</c> (<c>upstream/src/_regex.c</c> line 164).</summary>
+    /// <remarks>
+    /// These are the same two bits as <see cref="HasGroups"/> and <see cref="HasRepeats"/>: the
+    /// parser's encoding value (0, 1 or 2) is shifted by <c>ENCODING_OP_SHIFT</c> (5) into the code
+    /// word's flags, and <c>create_node</c> shifts the whole flags word by <see cref="Shift"/> (11),
+    /// which lands it on bits 16 and 17. Nothing sets both meanings on one node - the encoding is
+    /// only ever carried by <c>PROPERTY</c> and <c>RANGE</c>-family nodes, and the two
+    /// <c>HAS_</c> bits only by group, repeat and lookaround nodes.
+    /// </remarks>
+    internal const int EncodingShift = 16;
+
+    /// <summary>Upstream <c>ASCII_ENCODING</c> (line 165).</summary>
+    internal const uint AsciiEncoding = 1;
+
+    /// <summary>Upstream <c>UNICODE_ENCODING</c> (line 166).</summary>
+    internal const uint UnicodeEncoding = 2;
+
+    /// <summary>Upstream <c>ENCODING_KIND</c> (line 167).</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>0 for "whatever the pattern uses", otherwise <see cref="AsciiEncoding"/> or <see cref="UnicodeEncoding"/>.</returns>
+    internal static uint EncodingKind(Node node) => (node.Status >> EncodingShift) & 0x3;
+
     /// <summary>Upstream <c>RE_STATUS_ALL_ATOMIC</c>.</summary>
     internal const uint AllAtomic = 0x40000;
 

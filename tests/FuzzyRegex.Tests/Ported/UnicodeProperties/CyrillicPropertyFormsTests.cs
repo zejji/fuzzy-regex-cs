@@ -22,7 +22,6 @@ public sealed class CyrillicPropertyFormsTests
 
     [Test]
     [Arguments(@"\p{Cyrillic}")]
-    [Arguments(@"(?i)\p{Cyrillic}")]
     [Arguments(@"\p{IsCyrillic}")]
     [Arguments(@"\p{Script=Cyrillic}")]
     [Arguments(@"\p{InCyrillic}")]
@@ -32,10 +31,16 @@ public sealed class CyrillicPropertyFormsTests
     [Arguments(@"[[:Script=Cyrillic:]]")]
     [Arguments(@"[[:InCyrillic:]]")]
     [Arguments(@"[[:Block=Cyrillic:]]")]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
-    [Property("Upstream", "RegexTests.test_properties#17-27")]
+    [Property("Upstream", "RegexTests.test_properties#17,19-27")]
     public void Every_positive_spelling_of_the_Cyrillic_property_matches_a_Cyrillic_letter(string pattern) =>
         new FuzzyRegex(pattern).IsMatchAtStart(_cyrillicA).Should().BeTrue();
+
+    // Split from the row above at S17, which delivered PROPERTY: this one compiles to PROPERTY_IGN.
+    [Test]
+    [Skip("needs:ignore-case - the matcher has no PropertyIgn yet")]
+    [Property("Upstream", "RegexTests.test_properties#18")]
+    public void Case_insensitive_Cyrillic_property_matches_a_Cyrillic_letter() =>
+        new FuzzyRegex(@"(?i)\p{Cyrillic}").IsMatchAtStart(_cyrillicA).Should().BeTrue();
 
     [Test]
     [Arguments(@"\P{Cyrillic}")]
@@ -53,7 +58,6 @@ public sealed class CyrillicPropertyFormsTests
     [Arguments(@"[[:^Script=Cyrillic:]]")]
     [Arguments(@"[[:^InCyrillic:]]")]
     [Arguments(@"[[:^Block=Cyrillic:]]")]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
     [Property("Upstream", "RegexTests.test_properties#28-42")]
     public void Every_negated_spelling_of_the_Cyrillic_property_matches_a_Latin_letter(string pattern) =>
         new FuzzyRegex(pattern).IsMatchAtStart(_latinA).Should().BeTrue();

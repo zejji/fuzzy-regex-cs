@@ -51,13 +51,12 @@ public sealed class PosixAndPropertyClassTableTests
     [Arguments(@"\P{InBasicLatin}", _latinPair, "á")]
     [Arguments(@"(?i)\p{InBasicLatin}", _latinPair, "a")]
     [Arguments(@"(?i)\P{InBasicLatin}", _latinPair, "á")]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_properties#73")]
     public void Class_finds_exactly_its_members_in_the_subject(string pattern, string subject, string expected) =>
         string.Concat(FuzzyRegex.Matches(subject, pattern).Select(m => m.Value)).Should().Be(expected);
 
     [Test]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
     [Property("Upstream", "RegexTests.test_properties#70")]
     public void Numeric_value_zero_matches_the_digit_zero() =>
         new FuzzyRegex(@"\p{NumericValue=0}").IsMatchAtStart("0").Should().BeTrue();
@@ -69,7 +68,6 @@ public sealed class PosixAndPropertyClassTableTests
     [Test]
     [Arguments(@"\p{NumericValue=1/2}")]
     [Arguments(@"\p{NumericValue=0.5}")]
-    [Skip("needs:unicode-properties - the engine has no Unicode property tables yet")]
     [Property("Upstream", "RegexTests.test_properties#71-72")]
     public void Numeric_value_one_half_matches_the_vulgar_fraction(string pattern) =>
         new FuzzyRegex(pattern).IsMatchAtStart(((char)0x00BD).ToString()).Should().BeTrue();

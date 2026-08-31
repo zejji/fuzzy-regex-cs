@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 6.5%** (128 of 1966 ported upstream tests passing).
+**Overall parity: 18.8%** (369 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -17,13 +17,13 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Anchors | 12 | 0 | 12 | 0 | 0.0% |
 | Api | 6 | 5 | 1 | 0 | 83.3% |
 | Atomic | 1 | 0 | 1 | 0 | 0.0% |
-| Basics | 3 | 1 | 2 | 0 | 33.3% |
+| Basics | 3 | 2 | 1 | 0 | 66.7% |
 | Boundaries | 41 | 0 | 41 | 0 | 0.0% |
 | BranchReset | 21 | 0 | 21 | 0 | 0.0% |
 | Captures | 8 | 0 | 8 | 0 | 0.0% |
-| CaseFolding | 69 | 0 | 69 | 0 | 0.0% |
-| CharacterClasses | 52 | 1 | 51 | 0 | 1.9% |
-| Escapes | 103 | 6 | 97 | 0 | 5.8% |
+| CaseFolding | 69 | 1 | 68 | 0 | 1.4% |
+| CharacterClasses | 52 | 5 | 47 | 0 | 9.6% |
+| Escapes | 103 | 103 | 0 | 0 | 100.0% |
 | FindAll | 27 | 0 | 27 | 0 | 0.0% |
 | Flags | 20 | 4 | 16 | 0 | 20.0% |
 | Format | 11 | 0 | 11 | 0 | 0.0% |
@@ -38,12 +38,12 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 0 | 16 | 0 | 0.0% |
 | Quantifiers | 53 | 0 | 53 | 0 | 0.0% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 16 | 448 | 0 | 3.4% |
+| Regressions | 464 | 45 | 419 | 0 | 9.7% |
 | Reverse | 37 | 0 | 37 | 0 | 0.0% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
 | Substitution | 88 | 7 | 81 | 0 | 8.0% |
-| UnicodeProperties | 70 | 0 | 70 | 0 | 0.0% |
-| Various | 524 | 75 | 449 | 0 | 14.3% |
+| UnicodeProperties | 70 | 49 | 21 | 0 | 70.0% |
+| Various | 524 | 135 | 389 | 0 | 25.8% |
 | ZeroWidth | 14 | 0 | 14 | 0 | 0.0% |
 
 ## Our own tests (gap tests and conventions)
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3518 | 3516 | 2 | 0 |
+| Gaps | 3529 | 3527 | 2 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,28 +61,23 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `quantifiers` | 182 |
-| `ignore-case` | 144 |
-| `escapes` | 134 |
-| `character-classes` | 116 |
-| `fuzzy-matching` | 98 |
+| `quantifiers` | 211 |
+| `ignore-case` | 154 |
+| `find-all` | 132 |
 | `substitution` | 98 |
-| `unicode-properties` | 95 |
+| `fuzzy-matching` | 98 |
 | `anchors` | 87 |
 | `partial` | 82 |
 | `case-folding` | 69 |
 | `conditionals` | 58 |
+| `groups` | 57 |
 | `right-to-left` | 47 |
 | `backrefs` | 40 |
-| `find-all` | 37 |
-| `groups` | 35 |
 | `backtracking-verbs` | 34 |
 | `recursion` | 33 |
 | `lookaround` | 32 |
 | `inline-flags` | 29 |
-| `ascii-flag` | 28 |
 | `fuzzy-counts` | 28 |
-| `set-operations` | 24 |
 | `named-groups` | 23 |
 | `splitting` | 23 |
 | `branch-reset` | 21 |
@@ -97,10 +92,10 @@ What the next slice should deliver, biggest win first.
 | `captures` | 12 |
 | `version-flags` | 11 |
 | `format` | 11 |
-| `possessive` | 8 |
-| `posix-matching` | 8 |
 | `fuzzy-changes` | 8 |
 | `grapheme` | 8 |
+| `posix-matching` | 8 |
+| `possessive` | 8 |
 | `atomic` | 7 |
 | `fuzzy-enhancematch` | 6 |
 | `keep-marker` | 6 |

@@ -20,13 +20,13 @@ public sealed class WordClassTests
     private static readonly string _subject = $" {_hindi},";
 
     [Test]
-    [Skip("needs:escapes - the engine has no \\w matching yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_word_class#1")]
     public void Word_class_findall_matches_the_whole_devanagari_run() =>
         FuzzyRegex.Matches(_subject, @"\w+").Select(m => m.Value).Should().Equal(_hindi);
 
     [Test]
-    [Skip("needs:escapes - the engine has no \\W matching yet")]
+    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_word_class#2")]
     public void Non_word_class_findall_matches_the_surrounding_space_and_comma() =>
         FuzzyRegex.Matches(_subject, @"\W+").Select(m => m.Value).Should().Equal(" ", ",");

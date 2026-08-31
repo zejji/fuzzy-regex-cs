@@ -155,6 +155,24 @@ internal static class Encodings
     /// <returns><see langword="true"/> for the four variants of I/i.</returns>
     internal static bool IsPossibleTurkic(uint ch) => ch is 'I' or 'i' or 0x0130 or 0x0131;
 
+    /// <summary>Upstream <c>RE_ASCII_MAX</c> (<c>upstream/src/_regex_unicode.h</c> line 16).</summary>
+    private const uint _asciiMax = 0x7F;
+
+    /// <summary>Upstream <c>UNASSIGNED_CODEPOINT</c> (<c>upstream/src/_regex.c</c> line 62).</summary>
+    private const uint _unassignedCodepoint = 0x10FFFF;
+
+    /// <summary>
+    /// Upstream <c>ascii_has_property</c> (<c>upstream/src/_regex.c</c> line 822): the ASCII
+    /// encoding's whole property story is that everything above <c>RE_ASCII_MAX</c> is answered as
+    /// though it were unassigned, and the Unicode table answers the rest.
+    /// </summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="property">The packed property code.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has that value.</returns>
+    internal static bool HasProperty(CaseEncoding encoding, uint property, uint ch) =>
+        HasProperty(property, encoding == CaseEncoding.Ascii && ch > _asciiMax ? _unassignedCodepoint : ch);
+
     /// <summary>
     /// Upstream <c>unicode_has_property</c> (<c>upstream/src/_regex.c</c> line 1362): whether a
     /// codepoint has a given value for a Unicode property.
