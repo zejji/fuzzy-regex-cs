@@ -233,4 +233,23 @@ public sealed class RepeatTests
 
         (m.Index + m.Length).Should().Be(240001);
     }
+
+    [Test]
+    public void A_lazy_repeat_over_a_long_astral_subject_costs_time_proportional_to_its_length()
+    {
+        // The same guard for a subject whose characters do not each occupy one UTF-16 code unit, so
+        // the arithmetic fast path cannot apply and 'CharacterIndex' is what has to keep it linear.
+        // Measured on 'x' U+1F600 'y' repeated, before the index existed: 48,002 characters cost
+        // 6,912,240,003 single-character steps, exactly 3n^2, and 6.25 seconds. With the index the
+        // same match costs 2,328,005 steps and 0.034 seconds, and the step count doubles rather than
+        // quadruples with the subject.
+        string subject = string.Concat(Enumerable.Repeat("x\U0001F600y", 60000)) + "cd";
+        subject.Should().HaveLength(240002, "180,002 characters, of which 60,000 take two code units");
+
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
+
+        Match m = pattern.MatchAtStart(subject);
+
+        (m.Index + m.Length).Should().Be(240002);
+    }
 }

@@ -269,6 +269,21 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal readonly bool OneUnitPerCharacter;
 
+    private CharacterIndex? _characterIndex;
+
+    /// <summary>
+    /// The sampled position table that converts between a character count and a position when
+    /// <see cref="OneUnitPerCharacter"/> is <see langword="false"/>, building it on first use.
+    /// </summary>
+    /// <remarks>
+    /// A method rather than a property because the first call walks the whole subject. Built lazily
+    /// rather than in <see cref="Create"/> because most patterns never ask for the conversion at
+    /// all: only the single-character repeat opcodes do. A subject that holds a surrogate pair but
+    /// is matched against a pattern with no such repeat pays nothing.
+    /// </remarks>
+    /// <returns>The index.</returns>
+    internal CharacterIndex GetCharacterIndex() => _characterIndex ??= new CharacterIndex(this);
+
     private MatchState(PatternObject pattern, string text)
     {
         Pattern = pattern;

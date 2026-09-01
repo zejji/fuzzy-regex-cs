@@ -910,29 +910,24 @@ internal static class Matcher
 
         if (step > 0)
         {
-            if (state.OneUnitPerCharacter)
+            if (!state.OneUnitPerCharacter)
             {
-                // Upstream's arithmetic, restored: one character is one code unit, so the walk below
-                // can only end at 'pos + count' or at the bound it stops on.
-                return pos >= state.SliceEnd ? pos : (int)Math.Min(pos + count, state.SliceEnd);
+                return state.GetCharacterIndex().StepForward(pos, count, state.SliceEnd);
             }
 
-            for (long i = 0; i < count && pos < state.SliceEnd; i++)
-            {
-                pos = state.NextPos(pos);
-            }
+            // Upstream's arithmetic, restored: one character is one code unit, so the walk this
+            // replaces can only end at 'pos + count' or at the bound it stops on.
+            return pos >= state.SliceEnd ? pos : (int)Math.Min(pos + count, state.SliceEnd);
         }
-        else if (step < 0)
+
+        if (step < 0)
         {
-            if (state.OneUnitPerCharacter)
+            if (!state.OneUnitPerCharacter)
             {
-                return pos <= state.SliceStart ? pos : (int)Math.Max(pos - count, state.SliceStart);
+                return state.GetCharacterIndex().StepBackward(pos, count, state.SliceStart);
             }
 
-            for (long i = 0; i < count && pos > state.SliceStart; i++)
-            {
-                pos = state.PrevPos(pos);
-            }
+            return pos <= state.SliceStart ? pos : (int)Math.Max(pos - count, state.SliceStart);
         }
 
         return pos;
@@ -953,24 +948,13 @@ internal static class Matcher
     /// <returns>How many characters lie between them.</returns>
     private static long CountBetween(MatchState state, int from, int to)
     {
-        int pos = Math.Min(from, to);
-        int end = Math.Max(from, to);
-
         if (state.OneUnitPerCharacter)
         {
             // Upstream's subtraction, restored: see StepBy.
-            return end - pos;
+            return Math.Abs(to - from);
         }
 
-        long count = 0;
-
-        while (pos < end)
-        {
-            pos = state.NextPos(pos);
-            ++count;
-        }
-
-        return count;
+        return state.GetCharacterIndex().CountBetween(from, to);
     }
 
     /// <summary>
