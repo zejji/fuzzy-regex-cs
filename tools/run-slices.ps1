@@ -198,6 +198,35 @@ function Invoke-SliceSession {
             # Worth surfacing: a slice that stalled on the allowlist is a driver configuration
             # problem, not a porting problem, and the fix is a human decision.
             Write-Host "  permission denials: $($denials.Count) - check the allowlist in this script" -ForegroundColor Yellow
+
+            # And say WHICH, because the count alone cannot be acted on. Measured 2026-09-01: S26
+            # reported 25 denials, and by the time anyone looked the JSON response was gone - it is
+            # never written to the log, and the session transcript does not record denials either.
+            # So the count was unactionable and the allowlist could only have been widened by
+            # guessing, which is how a safety boundary quietly stops being one.
+            $denials |
+                ForEach-Object {
+                    # No '?.' on a bare variable here: PowerShell parses `$x?.` as a variable named
+                    # 'x?', which under Set-StrictMode throws rather than returning null. Measured
+                    # against a synthetic response, 2026-09-01.
+                    $name = $_.PSObject.Properties['tool_name']?.Value
+                    $toolInput = $_.PSObject.Properties['tool_input']?.Value
+                    $detail = $null
+                    if ($null -ne $toolInput) {
+                        $detail = $toolInput.PSObject.Properties['command']?.Value
+                        if (-not $detail) { $detail = $toolInput.PSObject.Properties['file_path']?.Value }
+                    }
+                    if ($detail) { "$name($detail)" } else { "$name" }
+                } |
+                Group-Object |
+                Sort-Object Count -Descending |
+                Select-Object -First 15 |
+                ForEach-Object {
+                    # Truncated: a denied command can be a whole script, and this goes in a log a
+                    # human skims.
+                    $shown = $_.Name.Substring(0, [Math]::Min(120, $_.Name.Length))
+                    Write-Host "      x$($_.Count)  $shown" -ForegroundColor DarkYellow
+                }
         }
 
         return [pscustomobject]@{
