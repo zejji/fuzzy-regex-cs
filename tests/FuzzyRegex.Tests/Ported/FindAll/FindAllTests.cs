@@ -17,31 +17,26 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 public sealed class FindAllTests
 {
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#1")]
     public void Matches_is_empty_when_the_pattern_never_matches() =>
         FuzzyRegex.Matches("abc", ":+").Select(m => m.Value).Should().BeEmpty();
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#2")]
     public void Matches_value_is_the_whole_match_when_the_pattern_has_no_groups() =>
         FuzzyRegex.Matches("a:b::c:::d", ":+").Select(m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#3")]
     public void Matches_group_one_value_is_used_when_the_pattern_has_exactly_one_group() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:+)").Select(m => m.Groups[1].Value).Should().Equal(":", "::", ":::");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#4")]
     public void Matches_group_one_value_for_a_two_group_pattern() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(m => m.Groups[1].Value).Should().Equal(":", ":", ":");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#4")]
     public void Matches_group_two_value_for_a_two_group_pattern() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(m => m.Groups[2].Value).Should().Equal("", ":", "::");
@@ -49,13 +44,11 @@ public sealed class FindAllTests
     [Test]
     [Arguments(@"\((?P<test>.{0,5}?TEST)\)")]
     [Arguments(@"\((?P<test>.{0,3}?TEST)\)")]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#5-6")]
     public void Matches_group_one_value_for_a_lazy_named_group_before_TEST(string pattern) =>
         FuzzyRegex.Matches("(MY TEST)", pattern).Select(m => m.Groups[1].Value).Should().Equal("MY TEST");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#7")]
     public void Matches_group_one_value_for_a_lazy_named_group_before_T() =>
         FuzzyRegex.Matches("(MY T)", @"\((?P<test>.{0,3}?T)\)").Select(m => m.Groups[1].Value).Should().Equal("MY T");
@@ -64,13 +57,11 @@ public sealed class FindAllTests
     [Arguments(@"[^a]{2}[A-Z]", "\n  S", "  S")]
     [Arguments(@"[^a]{2,3}[A-Z]", "\n  S", "\n  S")]
     [Arguments(@"[^a]{2,3}[A-Z]", "\n   S", "   S")]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#8-10")]
     public void Matches_value_for_negated_character_class_repeats(string pattern, string subject, string expected) =>
         FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(expected);
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#11")]
     public void Matches_group_one_value_for_a_group_repeated_one_or_two_times() =>
         FuzzyRegex
@@ -80,7 +71,6 @@ public sealed class FindAllTests
             .Equal("YPPQ\n");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#11")]
     public void Matches_group_two_value_for_a_group_repeated_one_or_two_times() =>
         FuzzyRegex
@@ -90,7 +80,6 @@ public sealed class FindAllTests
             .Equal(" ");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#12")]
     public void Matches_group_one_value_for_an_optional_nested_repeated_group() =>
         FuzzyRegex
@@ -100,7 +89,6 @@ public sealed class FindAllTests
             .Equal("\nTest\nxyz\nxyz");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_re_findall#12")]
     public void Matches_group_two_value_for_an_optional_nested_repeated_group() =>
         FuzzyRegex
@@ -110,13 +98,11 @@ public sealed class FindAllTests
             .Equal("\nxyz");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_117612#1")]
     public void Matches_group_one_value_for_a_nested_alternation_group() =>
         FuzzyRegex.Matches("aba", "(a|(b))").Select(m => m.Groups[1].Value).Should().Equal("a", "b", "a");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_117612#1")]
     public void Matches_group_two_value_for_a_nested_alternation_group()
     {

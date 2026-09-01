@@ -70,7 +70,6 @@ public sealed class RegressionsFlagTests
 
     // Git issue 575: Issues with ASCII/Unicode modifiers.
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#477")]
     public void Unflagged_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
         FuzzyRegex
@@ -80,7 +79,6 @@ public sealed class RegressionsFlagTests
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#478")]
     public void Unicode_scoped_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
         FuzzyRegex
@@ -90,7 +88,6 @@ public sealed class RegressionsFlagTests
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#479")]
     public void Ascii_scoped_digit_class_matches_only_the_ascii_digit() =>
         FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a:\d)").Select(m => m.Value).Should().Equal("9");
@@ -101,7 +98,6 @@ public sealed class RegressionsFlagTests
     // on 2026-08-30: `regex.findall(r'\d', '9\uFF19', flags=regex.U)` and
     // `regex.findall(r'(?u)\d', '9\uFF19')` both give `['9', '\uff19']`.
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#480")]
     public void Global_unicode_flag_prefix_leaves_the_digit_class_matching_both_digits() =>
         FuzzyRegex
@@ -111,7 +107,6 @@ public sealed class RegressionsFlagTests
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#481")]
     public void Global_unicode_flag_prefix_does_not_change_an_already_unicode_scoped_digit_class() =>
         FuzzyRegex
@@ -121,19 +116,16 @@ public sealed class RegressionsFlagTests
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#482")]
     public void Global_unicode_flag_prefix_does_not_widen_an_ascii_scoped_digit_class() =>
         FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?u)(?a:\d)").Select(m => m.Value).Should().Equal("9");
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#483")]
     public void Global_ascii_flag_prefix_narrows_the_digit_class_to_the_ascii_digit() =>
         FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)\d").Select(m => m.Value).Should().Equal("9");
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#484")]
     public void Global_ascii_flag_prefix_does_not_narrow_a_unicode_scoped_digit_class() =>
         FuzzyRegex
@@ -143,7 +135,6 @@ public sealed class RegressionsFlagTests
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#485")]
     public void Global_ascii_flag_prefix_does_not_change_an_already_ascii_scoped_digit_class() =>
         FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)(?a:\d)").Select(m => m.Value).Should().Equal("9");
@@ -153,7 +144,6 @@ public sealed class RegressionsFlagTests
     private static readonly string _latin1CodePoints = new([.. Enumerable.Range(0, 0x100).Select(c => (char)c)]);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#486-494")]
     [Arguments(@"\p{L}", 117)]
     [Arguments(@"(?a)\p{L}", 52)]

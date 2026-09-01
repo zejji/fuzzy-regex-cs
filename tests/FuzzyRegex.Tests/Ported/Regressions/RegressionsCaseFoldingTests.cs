@@ -52,7 +52,6 @@ public sealed class RegressionsCaseFoldingTests
     );
 
     [Test]
-    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#34")]
     public void First_alternative_wins_when_it_can_be_matched_without_expanding_a_ligature() =>
         FuzzyRegex
@@ -62,7 +61,6 @@ public sealed class RegressionsCaseFoldingTests
             .Equal("POS", "Pos", "pos", "po" + _longS, "po" + _ligatureSt, "po" + _ligatureLongSt);
 
     [Test]
-    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#35")]
     public void Longer_alternative_still_wins_when_tried_first() =>
         FuzzyRegex
@@ -72,7 +70,6 @@ public sealed class RegressionsCaseFoldingTests
             .Equal("POST", "Post", "post", "po" + _longS + "t", "po" + _ligatureSt, "po" + _ligatureLongSt);
 
     [Test]
-    [Skip("needs:find-all - S22 matches the ligatures; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#36")]
     public void Post_alternative_matches_even_when_the_other_branch_cannot() =>
         FuzzyRegex
@@ -92,7 +89,6 @@ public sealed class RegressionsCaseFoldingTests
     // count. The upstream index is carried as a row value because eight identical [Arguments]
     // rows would not be distinguishable from one another.
     [Test]
-    [Skip("needs:find-all - the FULLCASE compile is S22's; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#74-81")]
     [Arguments(74, false)]
     [Arguments(75, false)]

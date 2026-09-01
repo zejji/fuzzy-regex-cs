@@ -9,7 +9,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Anchors;
 public sealed class SearchAnchorTests
 {
     [Test]
-    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_anchor#1")]
     public void Matches_value_for_two_char_runs_anchored_to_the_previous_match_end() =>
         FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(m => m.Value).Should().Equal("ab", "cd");

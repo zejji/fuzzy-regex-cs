@@ -74,7 +74,14 @@ OPERATIONS = ("search", "match", "fullmatch")
 # fourth entry in OPERATIONS: everything that reads a row has to know which shape it is holding.
 # `count` is upstream's own convention, where 0 means "no limit"; the consumer translates it.
 SUB_OPERATIONS = ("sub", "subf")
-ALL_OPERATIONS = OPERATIONS + SUB_OPERATIONS
+
+# S25's operations, and a third row shape: the answer is a *sequence*, so comparing one match is not
+# enough - a scan that finds the right matches in the wrong order, or stops one match early, agrees
+# on every individual match. `split` carries a limit in the same field and the same convention as a
+# substitution's `count`, where 0 means "no limit"; the consumer translates it.
+ITER_OPERATIONS = ("finditer", "finditer-overlapped", "split")
+LIMIT_OPERATIONS = SUB_OPERATIONS + ("split",)
+ALL_OPERATIONS = OPERATIONS + SUB_OPERATIONS + ITER_OPERATIONS
 
 # regex.compile takes named lists as **kwargs (signature verified 2026-08-31:
 # `(pattern, flags=0, ignore_unused=False, cache_pattern=None, **kwargs)`), so a list whose name is
@@ -204,6 +211,8 @@ def _record_row(regex, row: dict) -> dict:
                 "one without a template would file the untouched subject as upstream's answer."
             )
         recorded["template"] = row["template"]
+
+    if operation in LIMIT_OPERATIONS:
         recorded["count"] = int(row.get("count", 0))
 
     def failed(e: Exception, while_matching: bool) -> dict:
@@ -250,6 +259,36 @@ def _record_row(regex, row: dict) -> dict:
         recorded["outcome"] = {"kind": "sub", "text": text, "count": made}
         return recorded
 
+    if operation in ITER_OPERATIONS:
+        try:
+            if operation == "split":
+                parts = compiled.split(subject, maxsplit=recorded["count"])
+            else:
+                overlapped = operation == "finditer-overlapped"
+                found = list(compiled.finditer(subject, overlapped=overlapped))
+        except Exception as e:  # noqa: BLE001
+            return failed(e, while_matching=True)
+
+        recorded["codepointSpan"] = None
+        if operation == "split":
+            # None stays None: upstream puts it where a capturing group took no part in a match,
+            # which our `string?[]` spells as null. Losing the distinction between that and an
+            # empty string is exactly the mistake Regex.Split makes.
+            recorded["outcome"] = {"kind": "split", "parts": parts}
+        else:
+            offsets = _utf16_offsets(subject)
+            recorded["outcome"] = {
+                "kind": "matches",
+                "matches": [
+                    # The untranslated codepoint span per match, for the same reason the top-level
+                    # one exists: it makes the recorder's index translation visible in the file
+                    # rather than merely trusted. The consumer never reads it.
+                    dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0)))
+                    for m in found
+                ],
+            }
+        return recorded
+
     try:
         match = getattr(compiled, operation)(subject)
     except Exception as e:  # noqa: BLE001
@@ -260,7 +299,17 @@ def _record_row(regex, row: dict) -> dict:
         recorded["outcome"] = {"kind": "nomatch"}
         return recorded
 
-    offsets = _utf16_offsets(subject)
+    recorded["codepointSpan"] = list(match.span(0))
+    recorded["outcome"] = {"kind": "match", **_describe_match(compiled, match, _utf16_offsets(subject))}
+    return recorded
+
+
+def _describe_match(compiled, match, offsets: list[int]) -> dict:
+    """One match's groups and its two last-group fields, in UTF-16 ``[Index, Length]``.
+
+    Shared by the single-match operations and by ``finditer``, whose answer is a list of these, so
+    the two shapes cannot drift apart.
+    """
     groups = []
     for number in range(compiled.groups + 1):
         span = match.span(number)
@@ -276,9 +325,7 @@ def _record_row(regex, row: dict) -> dict:
             "captures": [_to_index_length(offsets, s) for s in match.spans(number)],
         })
 
-    recorded["codepointSpan"] = list(match.span(0))
-    recorded["outcome"] = {
-        "kind": "match",
+    return {
         "groups": groups,
         # Neither is derivable from the groups: 'lastindex' is the group that *closed* last, so
         # regex.match('((a))', 'a').lastindex is 1 even though groups 1 and 2 both succeed with the
@@ -288,7 +335,6 @@ def _record_row(regex, row: dict) -> dict:
         "lastIndex": -1 if match.lastindex is None else match.lastindex,
         "lastGroup": match.lastgroup,
     }
-    return recorded
 
 
 def _canonical_named_lists(named_lists: dict) -> dict:
@@ -320,6 +366,7 @@ GENERATORS = (
     "case-folding",
     "reverse",
     "substitution",
+    "iteration",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -1781,6 +1828,99 @@ def _generate_substitution(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S25: the iteration generator
+# --------------------------------------------------------------------------------------------
+
+
+# The atoms a scan can go wrong on, which is a different set from what a single match cares about.
+# Everything here can match at more than one position, and most of it can match nothing at all -
+# which is what makes the empty-match advance, the overlapped step and a split's zero-width policy
+# reachable at all. `\b` and `\B` are the only zero-width assertions available before Phase 4 brings
+# lookaround, and `\G` is left out: it pins a match to the search anchor, which moves with every
+# turn of a scan, so it belongs to whichever slice ports the scanner's anchor semantics.
+ITER_ATOMS = (
+    "a", "b", ":", ".",
+    "a*", "a+", "a?", "a*?", "a+?",
+    ":*", ":+", ":*?",
+    "[ab]", "[ab]*", "[^a]", "[^a]*",
+    "a|", "|a", "a|b", ":|a",
+    r"\b", r"\B",
+    "a{0,2}", "a{1,2}?", "a{2,}",
+)
+
+# The group wrappers, because a split interleaves every group's capture and findall/finditer report
+# per-group spans: a group that takes no part in one match of a scan is where a null slot comes
+# from, and a repeated group is where a capture list grows across a scan. `(?:...)` is in so that a
+# non-capturing group is not silently treated as a capturing one.
+ITER_WRAPPERS = (
+    "{0}",
+    "({0})",
+    "(?:{0})",
+    "({0})*",
+    "({0})?",
+    "(?P<g>{0})",
+    "({0})|(x)",
+    "(x)|({0})",
+)
+
+# Upstream's own limit convention, where 0 is "no limit" and a negative number is "none at all".
+# Both ends are here because the two are inverted against this surface at both ends, and S24 shipped
+# a correct port that the oracle called RED for translating only one of them.
+ITER_LIMITS = (0, 0, 0, 1, 2, 3, -1)
+
+# The subjects. Short, because what matters is the number of positions a scan visits rather than the
+# length of any one match, and adjacency is the interesting case: ':::' gives a run of three, 'a:a'
+# gives matches separated by one character, and '' gives the single zero-width position.
+ITER_SUBJECT_ALPHABETS = ("ab:", "a:\U0001f600")
+ITER_MAX_SUBJECT = 6
+
+
+def _generate_iteration(rng: random.Random, count: int):
+    """S25's generator: whole-sequence rows for finditer, overlapped finditer and split.
+
+    Each row's answer is a sequence, so a scan that finds the right matches in the wrong order or
+    stops one short diverges where a per-match comparison would agree. Every fourth row carries
+    ``(?r)`` and every third ``(?V1)``, drawn from the seeded stream rather than from ``i`` so the
+    two do not alias each other or the operation - the mistake the S16 blind review found in the
+    anchors generator, where indexing three tables by ``i`` left two of four opcodes untested.
+
+    Measured by `python tools/record-oracle.py --generator iteration --count 600 --seed 1`, after
+    the last change to this generator: 200 finditer rows, 200 overlapped and 200 split; 435 rows
+    produce an answer with more than one element, of which 226 are finditer rows with more than one
+    match; 1,006 matches in all; 145 rows are reversed; 215 are V1; 182 have an astral subject; and
+    111 split rows carry a limit other than "no limit". No row is rejected by upstream - every
+    pattern this grammar can build compiles, and rejection coverage belongs to the other generators.
+
+    Re-taken from scratch after every widening, and that is not ceremony: adding one entry to any of
+    the tables above shifts the whole RNG stream, so a figure measured before it describes a wave
+    this generator no longer produces. S24 quoted five such figures and four were wrong.
+    """
+    for i in range(count):
+        alphabet = ITER_SUBJECT_ALPHABETS[i % len(ITER_SUBJECT_ALPHABETS)]
+        subject = "".join(rng.choice(alphabet) for _ in range(rng.randrange(ITER_MAX_SUBJECT + 1)))
+
+        body = "".join(rng.choice(ITER_ATOMS) for _ in range(rng.randrange(1, 3)))
+        pattern = rng.choice(ITER_WRAPPERS).format(body)
+
+        # Order matters: (?r) and (?V1) are both global flags and upstream accepts them in either
+        # order, but only at the start of the pattern.
+        if rng.random() < 0.25:
+            pattern = "(?r)" + pattern
+        if rng.random() < 0.35:
+            pattern = "(?V1)" + pattern
+
+        yield {
+            "generator": "iteration",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": ITER_OPERATIONS[i % len(ITER_OPERATIONS)],
+            "count": rng.choice(ITER_LIMITS),
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -1821,6 +1961,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "substitution":
         yield from _generate_substitution(rng, count)
+        return
+
+    if name == "iteration":
+        yield from _generate_iteration(rng, count)
         return
 
     dotted = name == "literal-dot"

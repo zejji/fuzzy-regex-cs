@@ -15,7 +15,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Splitting;
 public sealed class Bug931848Tests
 {
     [Test]
-    [Skip("needs:splitting - Pattern.Split is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_931848#1")]
     public void Split_on_a_character_class_of_four_full_stop_variants()
     {

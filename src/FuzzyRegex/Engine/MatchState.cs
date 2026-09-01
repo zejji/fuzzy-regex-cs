@@ -506,6 +506,43 @@ internal sealed class MatchState : IDisposable
         Iterations = 0;
     }
 
+    /// <summary>
+    /// Moves the scan on from the match now in the state, so that the next <c>do_match</c> looks in
+    /// the right place. Upstream spells this identically in three loops -
+    /// <c>scanner_search_or_match</c> (<c>upstream/src/_regex.c</c> line 20903),
+    /// <c>pattern_findall</c> (<c>:22470</c>) and, without the overlapped half it can never take,
+    /// <c>pattern_subx</c> (<c>:22047</c>) and <c>pattern_split</c> (<c>:22326</c>) - so it is one
+    /// method here and every caller uses it.
+    /// </summary>
+    /// <remarks>
+    /// The overlapped branch steps one <b>codepoint</b> from where the match started, not one code
+    /// unit and not from where it ended, because upstream indexes the subject by codepoint. A step
+    /// off either end of the slice is left to show as a <see cref="TextPos"/> outside
+    /// <see cref="SliceStart"/>..<see cref="SliceEnd"/>, which is what upstream's own loop condition
+    /// tests, so the caller checks it rather than this.
+    /// </remarks>
+    internal void AdvancePastMatch()
+    {
+        if (Overlapped)
+        {
+            // Advance one character.
+            TextPos = Reverse ? PrevPos(MatchPos) : NextPos(MatchPos);
+            MustAdvance = false;
+        }
+        else
+        {
+            // Don't allow 2 contiguous zero-width matches.
+            MustAdvance = TextPos == MatchPos;
+        }
+    }
+
+    /// <summary>
+    /// Whether the scan has somewhere left to look: upstream's <c>pattern_findall</c> loop
+    /// condition (<c>upstream/src/_regex.c</c> line 22415).
+    /// </summary>
+    /// <returns><see langword="true"/> if <see cref="TextPos"/> is still inside the slice.</returns>
+    internal bool IsInSlice() => SliceStart <= TextPos && TextPos <= SliceEnd;
+
     /// <summary>Upstream <c>clear_groups</c> (<c>upstream/src/_regex.c</c> line 3369).</summary>
     /// <remarks>
     /// The capture arrays are kept and only the counts go to zero, exactly as upstream does: a

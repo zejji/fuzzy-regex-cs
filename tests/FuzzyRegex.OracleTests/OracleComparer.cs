@@ -112,23 +112,25 @@ internal static class OracleComparer
         {
             if (row.Operation is "sub" or "subf")
             {
-                // The two conventions are each other's mirror at both ends, and translating only
-                // one end asks the two engines opposite questions: upstream's 0 is "no limit" and
-                // its negative is "no replacements", where this surface spells those -1 and 0.
-                // A row with a negative count reached a false RED before S24's blind review found
-                // it; only a hand-written `-Rows` row can carry one, since the generator emits
-                // upstream's own convention.
-                int count = row.Count switch
-                {
-                    0 => -1,
-                    < 0 => 0,
-                    _ => row.Count,
-                };
                 string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
-                    ? compiled.Replace(row.Subject, row.Template!, count, out int replacements)
-                    : compiled.ReplaceFormat(row.Subject, row.Template!, count, out replacements);
+                    ? compiled.Replace(row.Subject, row.Template!, OurLimit(row.Count), out int replacements)
+                    : compiled.ReplaceFormat(row.Subject, row.Template!, OurLimit(row.Count), out replacements);
 
                 return new SubOutcome(replaced, replacements);
+            }
+
+            if (row.Operation is "finditer" or "finditer-overlapped")
+            {
+                bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
+
+                return new MatchesOutcome([
+                    .. compiled.Matches(row.Subject, overlapped: overlapped).Select(DescribeGroups),
+                ]);
+            }
+
+            if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
+            {
+                return new SplitOutcome(compiled.Split(row.Subject, OurLimit(row.Count)));
             }
 
             Match match = row.Operation switch
@@ -221,13 +223,30 @@ internal static class OracleComparer
             : OracleVerdict.Diverge;
     }
 
-    private static IOracleOutcome Describe(Match match)
-    {
-        if (!match.Success)
+    /// <summary>
+    /// A recorded limit, which is in upstream's convention, as this surface spells it.
+    /// </summary>
+    /// <param name="recorded">Upstream's number: 0 is no limit, negative is none at all.</param>
+    /// <returns>This surface's number: -1 is no limit, 0 is none at all.</returns>
+    /// <remarks>
+    /// The two conventions are each other's mirror at <b>both</b> ends, and translating only one end
+    /// asks the two engines opposite questions. A row with a negative count reached a false RED
+    /// before S24's blind review found it; only a hand-written <c>-Rows</c> row can carry one for a
+    /// substitution, since that generator emits upstream's own convention, but the iteration
+    /// generator draws a negative <c>maxsplit</c> deliberately.
+    /// </remarks>
+    private static int OurLimit(int recorded) =>
+        recorded switch
         {
-            return new NoMatchOutcome();
-        }
+            0 => -1,
+            < 0 => 0,
+            _ => recorded,
+        };
 
+    private static IOracleOutcome Describe(Match match) => match.Success ? DescribeGroups(match) : new NoMatchOutcome();
+
+    private static MatchOutcome DescribeGroups(Match match)
+    {
         GroupCollection groups = match.Groups;
         var described = new List<OracleGroup>(groups.Count);
         for (int number = 0; number < groups.Count; number++)

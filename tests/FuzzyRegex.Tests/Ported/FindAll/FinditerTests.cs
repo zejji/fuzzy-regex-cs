@@ -15,13 +15,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 public sealed class FinditerTests
 {
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_finditer#1")]
     public void Matches_yields_whole_match_values_in_order() =>
         FuzzyRegex.Matches("a:b::c:::d", ":+").Select(m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_581080#1")]
     public void Matches_first_match_span()
     {
@@ -31,7 +29,6 @@ public sealed class FinditerTests
     }
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_581080#2")]
     public void Matches_has_exactly_one_match() => FuzzyRegex.Matches("a b", @"\s").Count.Should().Be(1);
 
@@ -39,7 +36,6 @@ public sealed class FinditerTests
     // API is deliberately not ported (see docs/PORTMAP.md).
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_817234#1")]
     public void Matches_first_match_of_dot_star_spans_the_whole_subject()
     {
@@ -49,7 +45,6 @@ public sealed class FinditerTests
     }
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_817234#2")]
     public void Matches_second_match_of_dot_star_is_the_trailing_empty_match()
     {
@@ -59,7 +54,6 @@ public sealed class FinditerTests
     }
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_bug_817234#3")]
     public void Matches_has_exactly_two_matches_for_dot_star() => FuzzyRegex.Matches("asdf", ".*").Count.Should().Be(2);
 }

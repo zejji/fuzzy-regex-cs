@@ -15,13 +15,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Overlapped;
 public sealed class OverlappedTests
 {
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_overlapped#1,6")]
     public void Matches_value_for_two_char_runs_without_overlap() =>
         FuzzyRegex.Matches("abcde", "..").Select(m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#2,7")]
     public void Matches_value_for_two_char_runs_with_overlap() =>
         new FuzzyRegex("..")
@@ -31,13 +29,11 @@ public sealed class OverlappedTests
             .Equal("ab", "bc", "cd", "de");
 
     [Test]
-    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_overlapped#3,8")]
     public void Matches_value_for_reversed_two_char_runs_without_overlap() =>
         FuzzyRegex.Matches("abcde", "(?r)..").Select(m => m.Value).Should().Equal("de", "bc");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#4,9")]
     public void Matches_value_for_reversed_two_char_runs_with_overlap() =>
         new FuzzyRegex("(?r)..")
@@ -47,7 +43,6 @@ public sealed class OverlappedTests
             .Equal("de", "cd", "bc", "ab");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_one_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
@@ -57,7 +52,6 @@ public sealed class OverlappedTests
             .Equal("a", "b");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_two_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
@@ -67,7 +61,6 @@ public sealed class OverlappedTests
             .Equal("-", "-");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_three_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
@@ -77,7 +70,6 @@ public sealed class OverlappedTests
             .Equal("b", "c");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -87,7 +79,6 @@ public sealed class OverlappedTests
             .Equal("b", "a");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -97,7 +88,6 @@ public sealed class OverlappedTests
             .Equal("-", "-");
 
     [Test]
-    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")

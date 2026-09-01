@@ -133,8 +133,12 @@ internal static class Substitution
             subCount++;
             lastPos = state.TextPos;
 
-            // Don't allow 2 contiguous zero-width matches.
-            state.MustAdvance = state.MatchPos == state.TextPos;
+            // Upstream's own line here is `state->must_advance = state->text_pos ==
+            // state->match_pos` (:22047), which is what AdvancePastMatch does for a state whose
+            // `overlapped` is false - and subx never sets it. Shared rather than repeated because
+            // the scanner and the splitter run the same rule, and a slip in one of three copies
+            // would be invisible.
+            state.AdvancePastMatch();
         }
 
         // The segment following the last match.

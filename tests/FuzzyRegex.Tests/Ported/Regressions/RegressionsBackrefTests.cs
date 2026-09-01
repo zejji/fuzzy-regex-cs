@@ -36,7 +36,6 @@ public sealed class RegressionsBackrefTests
     // Hg issue 115: Infinite loop when processing backreferences.
     [Test]
     // S21 delivered the backreference; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#104")]
     public void Backreference_that_cannot_match_finds_nothing_without_looping_forever() =>
         FuzzyRegex

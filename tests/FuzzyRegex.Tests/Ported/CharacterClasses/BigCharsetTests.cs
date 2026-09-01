@@ -16,7 +16,6 @@ public sealed class BigCharsetTests
         FuzzyRegex.MatchAtStart("∢", "([∢∣])").Groups[1].Value.Should().Be("∢");
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#3")]
     public void Findall_dot_reproduces_a_string_of_high_codepoints()
     {
@@ -28,7 +27,6 @@ public sealed class BigCharsetTests
     }
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#4")]
     public void Findall_big_set_reproduces_a_string_of_high_codepoints()
     {
@@ -40,7 +38,6 @@ public sealed class BigCharsetTests
     }
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_bigcharset#5")]
     public void Findall_alternation_of_high_codepoints_reproduces_the_string()
     {

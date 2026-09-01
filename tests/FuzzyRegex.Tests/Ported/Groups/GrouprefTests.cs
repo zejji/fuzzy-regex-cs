@@ -60,7 +60,6 @@ public sealed class GrouprefTests
 
     [Test]
     // S21 delivered the backreference; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_groupref#7")]
     public void Findall_resolves_a_backreference_to_an_earlier_group()
     {

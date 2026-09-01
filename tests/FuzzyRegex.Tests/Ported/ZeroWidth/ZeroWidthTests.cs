@@ -25,7 +25,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.ZeroWidth;
 public sealed class ZeroWidthTests
 {
     [Test]
-    [Skip("needs:splitting - the boundary opcodes land in S20; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#1")]
     public void Split_on_a_word_boundary_yields_the_word_the_gap_and_empty_ends() =>
         new FuzzyRegex(@"\b").Split("a b").Should().Equal("", "a", " ", "b", "");
@@ -37,13 +36,11 @@ public sealed class ZeroWidthTests
         new FuzzyRegex(@"(?V1)\b").Split("a b").Should().Equal("", "a", " ", "b", "");
 
     [Test]
-    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#4,5")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
         FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
-    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#6,7")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
         FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
@@ -61,13 +58,11 @@ public sealed class ZeroWidthTests
         FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
-    [Skip("needs:splitting - Pattern.Split is not implemented yet")]
     [Property("Upstream", "RegexTests.test_zerowidth#12")]
     public void Split_on_an_empty_pattern_yields_every_char_with_empty_ends() =>
         new FuzzyRegex("").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
 
     [Test]
-    [Skip("needs:splitting - right-to-left matching works from S23; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#16")]
     public void Split_on_a_reversed_empty_pattern_yields_every_char_in_reverse_with_empty_ends() =>
         new FuzzyRegex("(?r)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");

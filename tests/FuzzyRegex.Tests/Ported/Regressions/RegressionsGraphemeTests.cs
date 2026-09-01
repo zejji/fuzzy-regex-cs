@@ -34,7 +34,6 @@ public sealed class RegressionsGraphemeTests
 
     // Hg issue 312: \X not matching graphemes with zero-width-joins.
     [Test]
-    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#373")]
     public void Grapheme_cluster_treats_a_ZWJ_joined_family_emoji_sequence_as_one_unit()
     {

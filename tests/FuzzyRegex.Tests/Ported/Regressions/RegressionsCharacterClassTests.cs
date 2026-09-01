@@ -31,7 +31,6 @@ public sealed class RegressionsCharacterClassTests
     // Hg issue 137: Posix character class :punct: does not seem to be supported. Posix
     // compatibility as recommended in https://www.unicode.org/reports/tr18/#Compatibility_Properties.
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#114-127")]
     [Arguments(@"[[:alnum:]]+", @"[\p{Alpha}\p{PosixDigit}]+")]
     [Arguments(@"[[:alpha:]]+", @"\p{Alpha}+")]
@@ -82,7 +81,6 @@ public sealed class RegressionsCharacterClassTests
 
     // Hg issue 131: nested sets behaviour.
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_hg_bugs#107-110")]
     [Arguments(@"(?V1)[[b-e]--cd]")]
     [Arguments(@"(?V1)[b-e--cd]")]

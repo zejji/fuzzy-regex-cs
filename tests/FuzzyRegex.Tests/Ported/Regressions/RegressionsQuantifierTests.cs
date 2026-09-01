@@ -101,14 +101,12 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#57")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void A_plus_quantifier_before_a_literal_slash_only_matches_the_line_containing_it() =>
         // Hg issue 83: slash handling in presence of a quantifier.
         FuzzyRegex.Matches("cA/c\ncAb/c", "c..+/c").Select(m => m.Value).Should().Equal("cAb/c");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_one_to_three_times_captures_the_whole_run_for_each_repetition() =>
         // Hg issue 238: Not fully re backward compatible.
         FuzzyRegex
@@ -119,7 +117,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_one_to_three_times_captures_the_word_for_each_repetition() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
@@ -129,7 +126,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_one_to_three_times_captures_the_dots_for_each_repetition() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
@@ -139,13 +135,11 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#275")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_three_times_never_matches_the_subject() =>
         FuzzyRegex.Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){3}").Select(m => m.Value).Should().BeEmpty();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_two_times_captures_the_whole_run() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
@@ -155,7 +149,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_two_times_captures_the_word() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
@@ -165,7 +158,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_two_times_captures_the_dots() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
@@ -175,7 +167,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_once_captures_the_whole_run_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
@@ -185,7 +176,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_once_captures_the_word_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
@@ -195,7 +185,6 @@ public sealed class RegressionsQuantifierTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
-    [Skip("needs:find-all - the repeat itself works from S19; FuzzyRegex.Matches does not exist yet")]
     public void Group_repeated_exactly_once_captures_the_dots_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")

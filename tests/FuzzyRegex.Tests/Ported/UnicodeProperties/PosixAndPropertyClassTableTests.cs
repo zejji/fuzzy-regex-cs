@@ -51,7 +51,6 @@ public sealed class PosixAndPropertyClassTableTests
     [Arguments(@"\P{InBasicLatin}", _latinPair, "á")]
     [Arguments(@"(?i)\p{InBasicLatin}", _latinPair, "a")]
     [Arguments(@"(?i)\P{InBasicLatin}", _latinPair, "á")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_properties#73")]
     public void Class_finds_exactly_its_members_in_the_subject(string pattern, string subject, string expected) =>
         string.Concat(FuzzyRegex.Matches(subject, pattern).Select(m => m.Value)).Should().Be(expected);

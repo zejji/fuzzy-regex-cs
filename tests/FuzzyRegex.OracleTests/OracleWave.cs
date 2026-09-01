@@ -131,18 +131,29 @@ internal static class OracleWave
         JsonElement row = document.RootElement;
 
         string operation = row.GetProperty("operation").GetString()!;
-        if (operation is not ("search" or "match" or "fullmatch" or "sub" or "subf"))
+        if (
+            operation
+            is not (
+                "search"
+                or "match"
+                or "fullmatch"
+                or "sub"
+                or "subf"
+                or "finditer"
+                or "finditer-overlapped"
+                or "split"
+            )
+        )
         {
             // Rejected at read time rather than at run time, so an unknown operation cannot be
             // reported as a divergence in the port.
             throw new InvalidOperationException($"row {number}: unknown operation '{operation}'.");
         }
 
-        // A substitution row carries the template and the replacement limit; nothing else does. A
-        // sub row without a template would silently become "does this pattern match", which every
-        // port agrees with, so it is refused here as well as in the recorder.
+        // A substitution row carries the template; nothing else does. A sub row without a template
+        // would silently become "does this pattern match", which every port agrees with, so it is
+        // refused here as well as in the recorder.
         string? template = null;
-        int count = 0;
         if (operation is "sub" or "subf")
         {
             if (!row.TryGetProperty("template", out JsonElement templateElement))
@@ -151,6 +162,12 @@ internal static class OracleWave
             }
 
             template = templateElement.GetString()!;
+        }
+
+        // The limit, in upstream's convention, which a substitution and a split both carry.
+        int count = 0;
+        if (operation is "sub" or "subf" or "split")
+        {
             count = row.TryGetProperty("count", out JsonElement limit) ? limit.GetInt32() : 0;
         }
 
@@ -184,14 +201,24 @@ internal static class OracleWave
                 WhileMatching: outcome.TryGetProperty("whileMatching", out JsonElement phase) && phase.GetBoolean()
             ),
             "sub" => new SubOutcome(outcome.GetProperty("text").GetString()!, outcome.GetProperty("count").GetInt32()),
-            "match" => new MatchOutcome(
-                [.. outcome.GetProperty("groups").EnumerateArray().Select(ReadGroup)],
-                outcome.GetProperty("lastIndex").GetInt32(),
-                outcome.GetProperty("lastGroup").GetString()
-            ),
+            "match" => ReadMatch(outcome),
+            "matches" => new MatchesOutcome([.. outcome.GetProperty("matches").EnumerateArray().Select(ReadMatch)]),
+            // A part is null where a capturing group took no part in that match, and that is the
+            // whole difference between upstream's split and Regex.Split's, so null is read as null
+            // rather than coalesced to "".
+            "split" => new SplitOutcome([
+                .. outcome.GetProperty("parts").EnumerateArray().Select(part => part.GetString()),
+            ]),
             _ => throw new InvalidOperationException($"unknown outcome kind '{kind}'."),
         };
     }
+
+    private static MatchOutcome ReadMatch(JsonElement match) =>
+        new(
+            [.. match.GetProperty("groups").EnumerateArray().Select(ReadGroup)],
+            match.GetProperty("lastIndex").GetInt32(),
+            match.GetProperty("lastGroup").GetString()
+        );
 
     private static OracleGroup ReadGroup(JsonElement group) =>
         new(
@@ -473,6 +500,35 @@ internal sealed record SubOutcome(string Text, int Count) : IOracleOutcome
     /// <inheritdoc />
     public string Describe() =>
         string.Create(CultureInfo.InvariantCulture, $"sub {Count} {OracleWave.Printable(Text)}");
+}
+
+/// <summary>A whole scan: every match it produced, in the order it produced them.</summary>
+/// <param name="Matches">The matches. Empty when the scan found none.</param>
+/// <remarks>
+/// The sequence is compared as one string, which is the point of the shape: a scan that finds the
+/// right matches in the wrong order, or stops one match early, or repeats a zero-width match at one
+/// position, agrees on every individual match and diverges here.
+/// </remarks>
+internal sealed record MatchesOutcome(IReadOnlyList<MatchOutcome> Matches) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() =>
+        string.Create(CultureInfo.InvariantCulture, $"matches {Matches.Count}")
+        + (Matches.Count == 0 ? "" : " | " + string.Join(" || ", Matches.Select(match => match.Describe())));
+}
+
+/// <summary>A split: the pieces of the subject, with the groups interleaved.</summary>
+/// <param name="Parts">
+/// The pieces, in order. A <see langword="null"/> entry is a capturing group that took no part in
+/// that match, which upstream spells <c>None</c> and this port spells <see langword="null"/> - the
+/// difference the built-in <c>Regex.Split</c> loses by omitting the entry entirely.
+/// </param>
+internal sealed record SplitOutcome(IReadOnlyList<string?> Parts) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() =>
+        string.Create(CultureInfo.InvariantCulture, $"split {Parts.Count} ")
+        + string.Join(" ", Parts.Select(part => part is null ? "<null>" : OracleWave.Printable(part)));
 }
 
 /// <summary>The pattern matched, with one entry per group, group 0 being the whole match.</summary>

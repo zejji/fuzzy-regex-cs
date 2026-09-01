@@ -54,7 +54,6 @@ public sealed class SetTests
     [Test]
     [Arguments(@"[\p{Alpha}]", "a0", "a")]
     [Arguments(@"(?i)[\p{Alpha}]", "A0", "A")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#6-7")]
     public void Alpha_property_findall_matches_only_the_letter(string pattern, string subject, string expected) =>
         FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(expected);
@@ -64,7 +63,6 @@ public sealed class SetTests
     [Arguments(@"[a\P{Alpha}]", "ab0", "a", "0")]
     [Arguments(@"(?i)[a\p{Alpha}]", "ab0", "a", "b")]
     [Arguments(@"(?i)[a\P{Alpha}]", "ab0", "a", "0")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#8-11")]
     public void Literal_char_plus_a_property_or_its_negation_findall(
         string pattern,
@@ -76,7 +74,6 @@ public sealed class SetTests
     [Test]
     [Arguments(@"[a-b\p{Alpha}]", "abC0", "a", "b", "C")]
     [Arguments(@"(?i)[a-b\p{Alpha}]", "AbC0", "A", "b", "C")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#12-13")]
     public void Range_plus_a_property_findall(
         string pattern,
@@ -91,7 +88,6 @@ public sealed class SetTests
     [Arguments(@"[\P{Alpha}]", "a0", "0")]
     [Arguments(@"[^\p{Alpha}]", "a0", "0")]
     [Arguments(@"[^\P{Alpha}]", "a0", "a")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#14-17")]
     public void Alpha_property_and_its_negations_findall(string pattern, string subject, string expected) =>
         FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(expected);
@@ -103,7 +99,6 @@ public sealed class SetTests
     [Arguments(@"[^b\w]", "a b", " ")]
     [Arguments(@"[^b\S]", "a b", " ")]
     [Arguments(@"[^8\d]", "a 1b2", "a b")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#18-23")]
     public void Negated_character_class_findall_joined(string pattern, string subject, string expectedJoined) =>
         string.Concat(FuzzyRegex.Matches(subject, pattern).Select(m => m.Value)).Should().Be(expectedJoined);
@@ -113,13 +108,11 @@ public sealed class SetTests
     [Arguments(@"\p{Letter}", 117)]
     [Arguments(@"\p{Digit}", 10)]
     [Arguments(@"\p{HexDigit}", 22)]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#24-26,35")]
     public void Property_findall_count_over_every_byte_value(string pattern, int expectedCount) =>
         FuzzyRegex.Count(_allChars, pattern).Should().Be(expectedCount);
 
     [Test]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#33")]
     public void Two_properties_side_by_side_inside_one_class_is_an_implicit_union() =>
         FuzzyRegex.Count(_allChars, @"[\p{Letter}\p{Digit}]").Should().Be(127);
@@ -134,7 +127,6 @@ public sealed class SetTests
     [Arguments(@"(?V1)[\p{Letter}||\p{Digit}]", 127)]
     [Arguments(@"(?V1)[\p{HexDigit}~~\p{Digit}]", 12)]
     [Arguments(@"(?V1)[\p{Digit}~~\p{HexDigit}]", 12)]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#27-32,34,36-37")]
     public void Set_operators_over_properties_count_over_every_byte_value(string pattern, int expectedCount) =>
         FuzzyRegex.Count(_allChars, pattern).Should().Be(expectedCount);
@@ -144,7 +136,6 @@ public sealed class SetTests
     [Arguments("(?iV1)[[a-z]--[aei]]", "abc", "b", "c")]
     [Arguments(@"(?V1)[\w--a]", "abc", "b", "c")]
     [Arguments(@"(?iV1)[\w--a]", "abc", "b", "c")]
-    [Skip("needs:find-all - the class matches; Matches/Count are S25")]
     [Property("Upstream", "RegexTests.test_set#39-42")]
     public void Set_difference_findall(string pattern, string subject, string first, string second) =>
         FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(first, second);

@@ -50,7 +50,6 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#53")]
     public void Conditional_group_selects_the_matching_gender_specific_branch() =>
         FuzzyRegex
@@ -86,14 +85,12 @@ public sealed class RegressionsConditionalTests
     // Groups cleared after failure.
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_one_is_empty_on_every_match_because_it_never_participates() =>
         FuzzyRegex.Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)").Select(m => m.Groups[1].Value).Should().Equal("", "", "");
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_two_captures_each_digit_in_turn() =>
         FuzzyRegex
@@ -104,7 +101,6 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_also_leaves_group_one_empty() =>
         FuzzyRegex
@@ -115,7 +111,6 @@ public sealed class RegressionsConditionalTests
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
-    [Skip("needs:find-all - FuzzyRegex.Matches is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_still_captures_each_digit() =>
         FuzzyRegex

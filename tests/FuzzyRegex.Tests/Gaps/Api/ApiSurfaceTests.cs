@@ -106,17 +106,46 @@ public sealed class ApiSurfaceTests
     [Test]
     public void The_members_no_slice_has_reached_are_still_stubs()
     {
-        // The other half of what the S16 replacement inherited: iteration and splitting are S25,
-        // and partial matching is phase 4. Substitution left this list in S24 for the test below.
-        // When one of these starts failing, the slice that made it fail should assert on it for
-        // real instead.
-        Action matches = () => _ = new FuzzyRegex("a").Matches("abc");
-        Action split = () => _ = new FuzzyRegex("a").Split("abc");
+        // Partial matching is phase 4, and it is now the only stub left on this surface:
+        // substitution answered in S24 and iteration in S25, each leaving a real assertion below.
+        // When this starts failing, the slice that made it fail should assert on it for real too.
         Action partial = () => _ = new FuzzyRegex("a").Match("abc", partial: true);
 
-        matches.Should().Throw<NotImplementedException>();
-        split.Should().Throw<NotImplementedException>();
         partial.Should().Throw<NotImplementedException>().WithMessage("needs:partial*");
+    }
+
+    [Test]
+    public void The_six_iteration_entry_points_answer_for_a_pattern_the_engine_can_run()
+    {
+        // S25's half of the test above: every entry point that walks a subject producing more than
+        // one result, wired to the right upstream operation. The ported suite covers what each
+        // *does*; what is checked here is that no overload was left throwing, and that the two
+        // slicing arguments and `overlapped` reach the scan.
+        var pattern = new FuzzyRegex("(a)");
+
+        pattern.Matches("aba").Select(m => m.Index).Should().Equal(0, 2);
+        FuzzyRegex.Matches("aba", "(a)").Select(m => m.Index).Should().Equal(0, 2);
+        pattern.Matches("aba", beginning: 1).Select(m => m.Index).Should().Equal(2);
+        pattern.Matches("aba", beginning: 0, length: 2).Select(m => m.Index).Should().Equal(0);
+        new FuzzyRegex("aa").Matches("aaa", overlapped: true).Select(m => m.Index).Should().Equal(0, 1);
+
+        pattern.Count("aba").Should().Be(2);
+        pattern.Count("aba".AsSpan()).Should().Be(2);
+        FuzzyRegex.Count("aba", "(a)").Should().Be(2);
+        pattern.Count("aba", beginning: 1).Should().Be(1);
+
+        pattern.Split("xaybaz").Should().Equal("x", "a", "yb", "a", "z");
+        FuzzyRegex.Split("xaybaz", "(a)").Should().Equal("x", "a", "yb", "a", "z");
+        pattern.Split("xaybaz", maxSplits: 1).Should().Equal("x", "a", "ybaz");
+
+        // NextMatch walks the same sequence Matches gives, and stops on an unsuccessful match
+        // rather than restarting.
+        Match first = pattern.Match("aba");
+        Match second = first.NextMatch();
+        Match third = second.NextMatch();
+        (first.Index, second.Index).Should().Be((0, 2));
+        third.Success.Should().BeFalse();
+        third.NextMatch().Success.Should().BeFalse();
     }
 
     [Test]

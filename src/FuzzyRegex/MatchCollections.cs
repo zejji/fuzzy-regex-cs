@@ -103,24 +103,41 @@ public sealed class GroupCollection : IReadOnlyList<Group>
 /// The matches found by <see cref="FuzzyRegex.Matches(string, int, int, bool)"/>. Shaped after
 /// <see cref="System.Text.RegularExpressions.MatchCollection"/>.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The whole scan runs before this is handed back, where the built-in <c>MatchCollection</c> is
+/// lazy and finds the next match as it is asked for. That is upstream's <c>findall</c> rather than
+/// its <c>finditer</c>, and it is what this shape can honestly offer: <c>IReadOnlyList</c> promises
+/// a <see cref="Count"/>, which no lazy scan can answer without running to the end anyway, and the
+/// engine's state owns rented buffers that a half-enumerated iterator would never return.
+/// </para>
+/// <para>
+/// <c>ponytail:</c> eager, so a caller that wants the first two matches of a huge subject pays for
+/// all of them. Lift it by exposing upstream's scanner as a separate <c>IEnumerable&lt;Match&gt;</c>
+/// entry point that owns one state for the walk - not by making this lazy, which would either break
+/// <see cref="Count"/> or leak the state.
+/// </para>
+/// </remarks>
 public sealed class MatchCollection : IReadOnlyList<Match>
 {
-    internal MatchCollection() { }
+    private readonly IReadOnlyList<Match> _matches;
+
+    internal MatchCollection(IReadOnlyList<Match> matches)
+    {
+        _matches = matches;
+    }
 
     /// <summary>The number of matches.</summary>
-    public int Count =>
-        throw new NotImplementedException("needs:find-all - iterating over the matches is not implemented yet");
+    public int Count => _matches.Count;
 
     /// <summary>Gets a match by position.</summary>
     /// <param name="index">The zero-based position of the match.</param>
     /// <returns>The match at that position.</returns>
-    public Match this[int index] =>
-        throw new NotImplementedException("needs:find-all - iterating over the matches is not implemented yet");
+    public Match this[int index] => _matches[index];
 
     /// <summary>Enumerates the matches, leftmost first.</summary>
     /// <returns>An enumerator over the matches.</returns>
-    public IEnumerator<Match> GetEnumerator() =>
-        throw new NotImplementedException("needs:find-all - iterating over the matches is not implemented yet");
+    public IEnumerator<Match> GetEnumerator() => _matches.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

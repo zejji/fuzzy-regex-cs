@@ -320,23 +320,12 @@ public sealed class FuzzyRegex
             throw new NotImplementedException("needs:partial - partial matching is not implemented yet");
         }
 
-        // Upstream takes 'pos' and 'endpos' and clamps each on its own (get_limits,
-        // upstream/src/_regex.c:21627); this port takes a beginning and a length, so 'endpos' is
-        // 'beginning + length'. The beginning is resolved FIRST, because a negative one counts back
-        // from the end of the subject and adding the length to the unresolved number gives an end
-        // unrelated to the start: `Match("abcde", beginning: -2, length: 3)` computed an end of 1,
-        // which clamped up to the start and searched an empty slice, where `beginning: 3` with the
-        // same length searched (3, 5) and matched. Found by the S16 blind review.
-        beginning = Engine.MatchState.ClampIndex(beginning, input.Length);
-
-        // `length: -1` is "the rest of the subject", which is what upstream's endpos default of
-        // PY_SSIZE_T_MAX means once it is clamped.
-        int end = length < 0 || beginning > int.MaxValue - length ? int.MaxValue : beginning + length;
+        (int start, int end) = Limits(input, beginning, length);
 
         using var state = Engine.MatchState.Create(
             PatternObject,
             input,
-            beginning,
+            start,
             end,
             overlapped: false,
             partial: partial,
@@ -354,6 +343,34 @@ public sealed class FuzzyRegex
         }
 
         return NewMatch(state, input, status);
+    }
+
+    /// <summary>
+    /// Resolves this surface's <c>(beginning, length)</c> pair into upstream's <c>pos</c> and
+    /// <c>endpos</c>, which <c>state_init</c> then clamps (<c>get_limits</c>,
+    /// <c>upstream/src/_regex.c</c> line 21627).
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="beginning">Where in the subject to start, possibly negative.</param>
+    /// <param name="length">How much of it to consider, or <c>-1</c> for the rest.</param>
+    /// <returns>The resolved start and end.</returns>
+    /// <remarks>
+    /// The beginning is resolved FIRST, because a negative one counts back from the end of the
+    /// subject and adding the length to the unresolved number gives an end unrelated to the start:
+    /// <c>Match("abcde", beginning: -2, length: 3)</c> computed an end of 1, which clamped up to
+    /// the start and searched an empty slice, where <c>beginning: 3</c> with the same length
+    /// searched (3, 5) and matched. Found by the S16 blind review; shared by every entry point
+    /// taking the pair, so there is one copy of the rule to get wrong.
+    /// <para>
+    /// <c>length: -1</c> is "the rest of the subject", which is what upstream's <c>endpos</c>
+    /// default of <c>PY_SSIZE_T_MAX</c> means once it is clamped.
+    /// </para>
+    /// </remarks>
+    private static (int Start, int End) Limits(string input, int beginning, int length)
+    {
+        beginning = Engine.MatchState.ClampIndex(beginning, input.Length);
+
+        return (beginning, length < 0 || beginning > int.MaxValue - length ? int.MaxValue : beginning + length);
     }
 
     /// <summary>
@@ -408,17 +425,7 @@ public sealed class FuzzyRegex
     {
         if (status != Engine.MatchStatus.Success)
         {
-            // Upstream returns None; this returns an unsuccessful Match, which is the built-in
-            // Regex's shape and the one this port's public surface committed to in S01. Its groups
-            // are the pattern's, all of them absent, so `Groups.Count` still reports what the
-            // pattern declares rather than throwing.
-            var absent = new Engine.GroupData[_compiled.GroupCount];
-            for (int g = 0; g < absent.Length; g++)
-            {
-                absent[g] = new Engine.GroupData();
-            }
-
-            return new Match(this, input, 0, 0, success: false, absent);
+            return NoMatch(input);
         }
 
         // Upstream's rule that a reverse match reports its two ends the other way round (:20795).
@@ -434,8 +441,45 @@ public sealed class FuzzyRegex
             // Copied, because the state's arrays are about to be disposed and are reused by the next
             // match: a Match sharing them would change under its owner (copy_groups, :20621).
             Engine.GroupData.CopyGroups(state.Groups, _compiled.GroupCount),
+            // The slice, not the match, because Match.NextMatch resumes inside it.
+            state.SliceStart,
+            state.SliceEnd,
+            state.Overlapped,
             state.LastIndex,
             state.LastGroup
+        );
+    }
+
+    /// <summary>
+    /// The unsuccessful <see cref="RegularExpressions.Match"/> upstream reports as <c>None</c>.
+    /// </summary>
+    /// <param name="input">The subject that was searched.</param>
+    /// <returns>An unsuccessful match over that subject.</returns>
+    /// <remarks>
+    /// This surface returns an unsuccessful <see cref="RegularExpressions.Match"/> instead of null, which is the
+    /// built-in <c>Regex</c>'s shape and the one S01 committed to. Its groups are the pattern's,
+    /// all of them absent, so <c>Groups.Count</c> still reports what the pattern declares rather
+    /// than throwing. Its slice is the whole subject, which nothing reads: an unsuccessful match
+    /// ends the scan, so <see cref="Match.NextMatch"/> on one never searches again.
+    /// </remarks>
+    internal Match NoMatch(string input)
+    {
+        var absent = new Engine.GroupData[_compiled.GroupCount];
+        for (int g = 0; g < absent.Length; g++)
+        {
+            absent[g] = new Engine.GroupData();
+        }
+
+        return new Match(
+            this,
+            input,
+            0,
+            0,
+            success: false,
+            absent,
+            sliceStart: 0,
+            sliceEnd: input.Length,
+            overlapped: false
         );
     }
 
@@ -497,8 +541,17 @@ public sealed class FuzzyRegex
     /// always resumes after the previous match.
     /// </param>
     /// <returns>The matches, leftmost first.</returns>
-    public MatchCollection Matches(string input, int beginning = 0, int length = -1, bool overlapped = false) =>
-        throw new NotImplementedException();
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// The scan ran out of time. The whole scan shares one budget, as upstream's does.
+    /// </exception>
+    public MatchCollection Matches(string input, int beginning = 0, int length = -1, bool overlapped = false)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        (int start, int end) = Limits(input, beginning, length);
+
+        return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped));
+    }
 
     /// <summary>Counts the matches in the given part of the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -508,13 +561,30 @@ public sealed class FuzzyRegex
     /// </param>
     /// <param name="overlapped">Whether matches may overlap. Upstream's <c>overlapped=True</c>.</param>
     /// <returns>The number of matches.</returns>
-    public int Count(string input, int beginning = 0, int length = -1, bool overlapped = false) =>
-        throw new NotImplementedException();
+    /// <remarks>
+    /// Upstream spells this <c>len(findall(...))</c>; counting without building a match per match
+    /// is the only reason it is its own entry point.
+    /// </remarks>
+    public int Count(string input, int beginning = 0, int length = -1, bool overlapped = false)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        (int start, int end) = Limits(input, beginning, length);
+
+        return Engine.Iteration.Count(this, input, start, end, overlapped);
+    }
 
     /// <summary>Counts the matches in the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <returns>The number of matches.</returns>
-    public int Count(ReadOnlySpan<char> input) => throw new NotImplementedException();
+    /// <remarks>
+    /// <c>ponytail:</c> the span is copied to a string, because the engine indexes a
+    /// <see cref="string"/> throughout - <c>MatchState.Text</c> is one, as upstream's subject is a
+    /// Python <c>str</c>. So this overload spares the caller a conversion and not the allocation.
+    /// Lift it by moving the engine onto <c>ReadOnlySpan&lt;char&gt;</c>, which is a Phase 7
+    /// question and touches every opcode, not this method.
+    /// </remarks>
+    public int Count(ReadOnlySpan<char> input) => Count(input.ToString());
 
     /// <summary>Replaces matches with an expanded replacement template.</summary>
     /// <param name="input">The subject to search.</param>
@@ -586,7 +656,15 @@ public sealed class FuzzyRegex
     /// <c>regex.split('(x)|(1)', 'a1b')</c> is <c>['a', None, '1', 'b']</c> where
     /// <c>Regex.Split("a1b", "(x)|(1)")</c> is <c>["a", "1", "b"]</c>.
     /// </returns>
-    public string?[] Split(string input, int maxSplits = -1) => throw new NotImplementedException();
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// The split ran out of time.
+    /// </exception>
+    public string?[] Split(string input, int maxSplits = -1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        return Engine.Iteration.Split(this, input, maxSplits);
+    }
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template. Upstream
@@ -683,7 +761,7 @@ public sealed class FuzzyRegex
         string pattern,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).Matches(input);
 
     /// <summary>Counts the matches in the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -691,7 +769,7 @@ public sealed class FuzzyRegex
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
     /// <returns>The number of matches.</returns>
     public static int Count(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
-        throw new NotImplementedException();
+        new FuzzyRegex(pattern, options).Count(input);
 
     /// <summary>
     /// Replaces matches with an expanded replacement template. Upstream <c>regex.sub</c>.
@@ -753,7 +831,7 @@ public sealed class FuzzyRegex
     /// take part in a match. See <see cref="Split(string, int)"/>.
     /// </returns>
     public static string?[] Split(string input, string pattern, FuzzyRegexOptions options = FuzzyRegexOptions.None) =>
-        throw new NotImplementedException();
+        new FuzzyRegex(pattern, options).Split(input);
 
     /// <summary>
     /// Escapes the characters that have a special meaning in a pattern, so the result matches the

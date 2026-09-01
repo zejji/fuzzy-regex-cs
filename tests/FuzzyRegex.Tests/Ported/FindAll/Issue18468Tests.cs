@@ -22,25 +22,21 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 public sealed class Issue18468Tests
 {
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#17")]
     public void Matches_value_is_the_whole_match_when_the_pattern_has_no_groups() =>
         FuzzyRegex.Matches("a:b::c:::d", ":+").Select(m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#18")]
     public void Matches_group_one_value_is_used_when_the_pattern_has_exactly_one_group() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:+)").Select(m => m.Groups[1].Value).Should().Equal(":", "::", ":::");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#19")]
     public void Matches_group_one_value_for_a_two_group_pattern() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(m => m.Groups[1].Value).Should().Equal(":", ":", ":");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#19")]
     public void Matches_group_two_value_for_a_two_group_pattern() =>
         FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(m => m.Groups[2].Value).Should().Equal("", ":", "::");

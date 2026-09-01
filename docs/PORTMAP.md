@@ -29,7 +29,7 @@ no slice that touches the engine commits without a local run (VERIFICATION.md ru
 
 | Piece | Where | What it does |
 |---|---|---|
-| Recorder | `tools/record-oracle.py` | Generates rows from a seed (or reads explicit ones), runs each through upstream, writes JSONL: pattern, flags, named lists, subject, operation, and the outcome - no match, the match with every group's span and captures, or the exception. |
+| Recorder | `tools/record-oracle.py` | Generates rows from a seed (or reads explicit ones), runs each through upstream, writes JSONL: pattern, flags, named lists, subject, operation, and the outcome - no match, the match with every group's span and captures, a substitution's `(text, count)` pair, a **whole scan's sequence of matches**, a **split's pieces including its `null` slots**, or the exception. |
 | Consumer | `tests/FuzzyRegex.OracleTests/` | Reads the wave, runs `FuzzyRegex`, reports per row `agree`, `diverge` or `unsupported`. Any `diverge` fails the run; `unsupported` (a `NotImplementedException` seam) is informational. Writes `TestResults/oracle/report.txt`, which is what oracle.yml uploads. |
 | One command | `tools/run-oracle.ps1` | Record, consume, verdict. Nonzero on any divergence. |
 | Schedule | `.github/workflows/oracle.yml` | Weekly and on demand, never a merge gate (design spec amendment 7). |
@@ -51,6 +51,10 @@ Three properties of it are load-bearing, and each is pinned by a test in `Oracle
   file holds UTF-16 `(Index, Length)`. This is one of exactly two places the span convention is
   enforced - the other is `Match`/`Group`'s accessors - so a slip at the accessor shows up as a
   divergence rather than as a silent agreement (DECISIONS 2026-08-31).
+- **An answer that is a sequence is compared as a sequence, not match by match.** S25 added
+  `finditer`, `finditer-overlapped` and `split` rows, whose recorded outcome is the whole list. A
+  scan that finds the right matches in the wrong order, stops one match early, or repeats a
+  zero-width match at one position agrees on every individual match and diverges only here.
 - **A wave is generated, not committed.** A divergence is minimised by hand and pinned as an
   ordinary test in `tests/FuzzyRegex.Tests/Gaps/`; the recorder's file header has the workflow.
   Named lists are sorted before either engine sees them, for the reason the last row of "Where we
@@ -264,7 +268,7 @@ naming its capability tag (`Engine.Seam`), so an unported construct is a skipped
 | `copy_groups` | `:20621` | `GroupData.CopyGroups` and `GroupData.Copy`, less the single-block allocation arithmetic a garbage-collected heap does not need. Load-bearing, not cosmetic: the state's arrays are reused across start positions and across calls, so a `Match` sharing them would change under its owner |
 | `match_get_group_by_index`, `match_get_start_by_index`, `match_get_end_by_index`, `match_get_span_by_index`, `match_get_spans_by_index`, `match_get_captures_by_index` | `:18847`-`:19180` | `Match.GroupAt`, which answers all six with one `Group`: `Success`, `Index`, `Length`, `Value` and `Captures`. Index 0 is special-cased to the match itself, as upstream special-cases it. An absent group reports `Success == false` and a `(0, 0)` span - the built-in `Regex`'s shape, and what the oracle recorder writes where Python's span is `(-1, -1)` |
 | `match_lastindex`, `match_lastgroup` | `:20430`, `:20442` | `Match.LastGroupNumber` and `Match.LastGroupName`; the `do_match` loop that computes them (`:18186-18200`) is in `Matcher.DoMatch`. `lastindex` is the group that closed **last** (`group_info[g].end_index`), not the highest-numbered one, and only a named group is ever recorded as `lastgroup`, so upstream's `indexgroup` lookup is `FuzzyRegex.GroupNameFromNumber` and never falls back to the number |
-| `state_get_group` | `:20818` | **Not ported.** It reads a group's text straight off a live `RE_State`, and its only callers are the substitution and split paths (S24, S25), which have a `Match` in hand here |
+| `state_get_group` | `:20818` | Ported in S25 as `Engine.Iteration.GetGroup` - see the iteration table below. S16 recorded it as not ported on the grounds that its callers would have a `Match` in hand; that held for the substitution path and not for `pattern_split`, which reads the groups off the live state |
 | `make_match_copy` | `:20669` | **Not ported.** It exists for `Match.__copy__`/`__deepcopy__` and for the detached-string case, neither of which this surface has |
 | `check_posix_match`, `restore_best_match` | `:11602`, `:11565` | **Not ported.** Both branches are present in `basic_match` and throw `needs:posix-matching` |
 
@@ -358,6 +362,27 @@ references are `upstream/src/_regex.c`.
 | `make_capture_object`, the `built_capture` args/kwargs cache | `:19968`, `:21895`-`:21950` | **Not ported.** The cache exists so one args tuple can be reused across matches through a pointer to the match; a fresh `Match` per match says the same thing, and is what `match_expandf` itself does |
 | The `RE_SUBF` format spec and the `!r`/`!a` conversions | - | **Deliberately rejected**, because upstream rejects them too: a spec raises `TypeError: unsupported format string passed to _regex.Capture.__format__`, and `!r` yields `'<_regex.Capture object at 0x...>'`, an interpreter address. `NotSupportedException` here; measured 2026-09-01 |
 | A chained subscript (`{1[0][0]}`) and attribute access (`{0.x}`) | - | **Not ported.** The first works upstream by indexing the `str` the first subscript produced - codepoints there, UTF-16 code units here - so it is a marked corner cut with the ceiling named at `Substitution.ExpandField`; the second raises `AttributeError` upstream |
+
+### Iteration: the scanner and the splitter (`src/_regex.c`), S25
+
+`finditer`, `findall`, `split` and the `overlapped` argument - everything that walks a subject
+producing more than one result. All line references are `upstream/src/_regex.c`.
+
+| Upstream symbol | Upstream line | Ours |
+|---|---|---|
+| `pattern_findall`, `scanner_search_or_match` | `:22360`, `:20874` | **One** method, `Engine.Iteration.Scan`, with the per-match work as a callback. Upstream says the same thing twice: `findall` writes the loop out and carries a `slice_start <= text_pos <= slice_end` guard, while the scanner drives one turn per call and has none. Folding them is measured, not argued - `findall` and `[m[0] for m in finditer(...)]` are element for element identical on nine subject/pattern pairs, overlapped and not, including the reverse and zero-width cases where the guard is what ends the scan (2026-09-01, pinned in `Gaps/Engine/IterationTests.cs`) |
+| `pattern_finditer` | `:22490` | `FuzzyRegex.Matches` through `Iteration.FindAll`. Eager where the built-in `MatchCollection` is lazy, which is `findall`'s shape rather than `finditer`'s: `IReadOnlyList` promises a `Count` that no lazy scan can answer without running to the end, and the state owns rented buffers a half-enumerated iterator would never return. Marked `ponytail:` at `MatchCollection` with the upgrade path |
+| `pattern_findall`'s `visible_capture_count` switch | `:22427` | **Not ported.** It picks between the whole match, the one group's text and a tuple of group texts, which is `findall`'s Python return shape; `Matches` always returns `Match` objects and the caller indexes `Groups`. The ported `findall` tests read `Groups[1]` where upstream reads the element |
+| `pattern_split` | `:22235` | `Engine.Iteration.Split`, called by `FuzzyRegex.Split`. Takes no `pos`/`endpos` upstream either, so the slice is always the whole subject. The reverse case is **not** reversed at the end, unlike `pattern_subx`'s join list: measured, `regex.split('(?r)x', 'xaxbxc')` is `['c', 'b', 'a', '']` |
+| `pattern_split`'s `maxsplit` | `:22258` | Inverted at **both** ends: upstream's 0 is "no limit" and its negative is "no splits at all", where this surface spells those `-1` and `0`, exactly as `pattern_subx`'s `count` needed in S24. Pinned in `Gaps/Engine/IterationTests.cs` and drawn deliberately by the `iteration` oracle generator |
+| `state_get_group` | `:20818` | `Engine.Iteration.GetGroup`, with `empty` false - the case whose `Py_RETURN_NONE` becomes the `null` slot in `string?[]`. Previously recorded as not ported; the split path is what needed it, because a split has no `Match` in hand |
+| The post-match advance | `:20903`, `:22470` | `Engine.MatchState.AdvancePastMatch`, one method that all four loops call - the scanner, `findall`, `split` and `pattern_subx`. Upstream repeats the line, and the last two carry only the non-overlapped half because they never set `overlapped`. Shared here on purpose: the slice's own review hunt was for these drifting apart |
+| The overlapped step (`match_pos + step`) | `:22472` | `NextPos`/`PrevPos` from the match's **start**, so it is one codepoint and not one code unit. Measured: `regex.finditer('..', three astral characters, overlapped=True)` gives codepoint spans (0, 2) and (1, 3), so the next match begins on the next character rather than inside a surrogate pair |
+| `pattern_findall`'s loop condition | `:22415` | `MatchState.IsInSlice`. It is what ends an overlapped scan: a step off either end of the slice leaves `TextPos` outside it, so no separate bounds check exists |
+| `state->version_0` | `:18482` | **Nothing to port.** The slice expected a V0/V1 difference in how a split treats a zero-width match. The field is written by `state_init` and read nowhere in the whole of `_regex.c`, exactly as S24 found for `pattern_subx`. Measured over four V0/V1 pairs, every one identical, and pinned in `Gaps/Engine/IterationTests.cs` so the next slice does not go hunting |
+| `state->visible_captures` | `:18307` | Set and never read, on both sides. Kept because `state_init`'s argument list is ported faithfully and a later release may read it |
+| `Scanner_Type`, `Splitter_Type`, `next_split_part`, `splitter_split`, `pattern_splitter`, `pattern_splititer` and their `copy`/`deepcopy` | `:20961`-`:21014`, `:21135`-`:21466` | **Not ported** as objects. The *iteration logic* is `Scan` and `Split`; the stateful public objects are the `regex.Scanner`/`splititer` rows in the table below, both deferred in S01. `next_split_part` is `pattern_split` re-expressed as a resumable state machine, and its own `index` walk emits the same sequence the eager loop does |
+| `Match.next` | - | No upstream counterpart: `Match.NextMatch` is a `Regex`-shaped addition, ported as one turn of the scanner over a state rebuilt from the match (`Iteration.Next`). It carries the **slice**, not just the match end, because `pos` moves `slice_start` and a `\B` or a lookbehind at the resumption point would otherwise read a subject that starts there. One state per call, so a `NextMatch` walk is superlinear where `Matches` is flat - a marked `ponytail:` with the upgrade path, and measured: 209 seconds against 0.1 for 640,000 matches |
 
 ## Deliberately not ported
 

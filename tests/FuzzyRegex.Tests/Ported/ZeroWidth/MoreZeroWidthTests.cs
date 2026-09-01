@@ -15,7 +15,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.ZeroWidth;
 public sealed class MoreZeroWidthTests
 {
     [Test]
-    [Skip("needs:splitting - Pattern.Split is not implemented yet")]
     [Property("Upstream", "RegexTests.test_more_zerowidth#1")]
     public void Splitting_on_a_word_boundary_or_colon_run_keeps_the_empty_pieces() =>
         FuzzyRegex.Split("a::bc", @"\b|:+").Should().Equal("", "a", "", "", "bc", "");
@@ -26,7 +25,6 @@ public sealed class MoreZeroWidthTests
         FuzzyRegex.Replace("a::bc", @"\b|:+", "-").Should().Be("-a---bc-");
 
     [Test]
-    [Skip("needs:find-all - the engine has no repeat opcodes or a Matches enumerator yet")]
     [Property("Upstream", "RegexTests.test_more_zerowidth#3-4")]
     public void Matches_of_a_word_boundary_or_colon_run_have_the_expected_values_and_spans()
     {
@@ -37,7 +35,6 @@ public sealed class MoreZeroWidthTests
     }
 
     [Test]
-    [Skip("needs:find-all - the boundary opcodes land in S20; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_more_zerowidth#5")]
     public void Multiline_lazy_zero_width_whitespace_to_end_of_line_matches_at_each_blank_line_position() =>
         FuzzyRegex

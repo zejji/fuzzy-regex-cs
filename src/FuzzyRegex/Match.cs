@@ -108,6 +108,9 @@ public sealed class Match : Group
     private readonly FuzzyRegex _regex;
     private readonly Engine.GroupData[] _groups;
     private readonly int _lastGroup;
+    private readonly int _sliceStart;
+    private readonly int _sliceEnd;
+    private readonly bool _overlapped;
 
     /// <summary>
     /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738), whose
@@ -123,6 +126,12 @@ public sealed class Match : Group
     /// The engine's group data, already copied out of the state - the state's arrays are reused by
     /// the next match, so a match that shared them would change under its owner.
     /// </param>
+    /// <param name="sliceStart">
+    /// Where the slice this match was found in starts, which <see cref="NextMatch"/> resumes inside
+    /// - not where the match starts.
+    /// </param>
+    /// <param name="sliceEnd">One past where that slice ends.</param>
+    /// <param name="overlapped">Whether the scan this match came from allowed matches to overlap.</param>
     /// <param name="lastIndex">The engine's <c>lastindex</c>.</param>
     /// <param name="lastGroup">The engine's <c>lastgroup</c>.</param>
     /// <param name="partial">Whether this is a partial match.</param>
@@ -133,6 +142,9 @@ public sealed class Match : Group
         int end,
         bool success,
         Engine.GroupData[] groups,
+        int sliceStart,
+        int sliceEnd,
+        bool overlapped,
         int lastIndex = -1,
         int lastGroup = -1,
         bool partial = false
@@ -142,6 +154,9 @@ public sealed class Match : Group
         _regex = regex;
         _groups = groups;
         _lastGroup = lastGroup;
+        _sliceStart = sliceStart;
+        _sliceEnd = sliceEnd;
+        _overlapped = overlapped;
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
     }
@@ -233,9 +248,24 @@ public sealed class Match : Group
     public string? LastGroupName => _lastGroup >= 0 ? _regex.GroupNameFromNumber(_lastGroup) : null;
 
     /// <summary>Finds the next match, starting where this one ended.</summary>
+    /// <remarks>
+    /// The search resumes inside the same slice this match was found in, and under the same
+    /// <c>overlapped</c> setting, so walking a subject with <see cref="NextMatch"/> gives the same
+    /// sequence as <see cref="FuzzyRegex.Matches(string, int, int, bool)"/> over it. A zero-width
+    /// match is not allowed to repeat at the same position, which is upstream's
+    /// <c>must_advance</c> - see <c>MatchState.AdvancePastMatch</c>, the one place that rule lives.
+    /// <para>
+    /// An unsuccessful match has no next one, so this returns another unsuccessful match rather
+    /// than restarting the scan - which is what <c>Match.Empty.NextMatch()</c> does on the built-in
+    /// <c>Regex</c>, and what upstream's scanner does once its status is a failure
+    /// (<c>scanner_search_or_match</c>, <c>:20886</c>).
+    /// </para>
+    /// </remarks>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     public Match NextMatch() =>
-        throw new NotImplementedException("needs:find-all - iterating over the matches is not implemented yet");
+        Success
+            ? Engine.Iteration.Next(_regex, _subject, _start, _end, _sliceStart, _sliceEnd, _overlapped)
+            : _regex.NoMatch(_subject);
 
     /// <summary>
     /// Expands a replacement template against this match, so <c>\1</c> and <c>\g&lt;name&gt;</c>
