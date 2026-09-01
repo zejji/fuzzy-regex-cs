@@ -20,6 +20,17 @@ All line references are `upstream/src/_regex.c`.
   S01's stubs and the ported tests already assert), `Match.NextMatch`, `Count`. The `overlapped`
   argument (next scan starts one past the previous *start*, not past its end) is a scanner
   parameter, not a separate engine - `overlapped` (4 tests) delivers here.
+- **One `MatchState` per operation, not one per match.** `scanner_search_or_match` (`:20874`)
+  keeps one state across the whole scan and upstream's `Scanner_Type` holds it, so this is what
+  upstream does anyway - but there is now a second reason, and it is a performance cliff rather
+  than a style point. Since the 2026-09-01 quadratic fix, building a `MatchState` costs one
+  vectorised pass over the subject (`OneUnitPerCharacter`), and on a subject holding a surrogate
+  pair the first character-count conversion costs a second pass to build `CharacterIndex`. Both
+  amortise to nothing across a scan that shares one state, and both become per-match costs if
+  `Matches`, `Count` or `Split` creates a state per match - which makes a find-all over a long
+  subject quadratic again by a new route, with every correctness test still green.
+  `Substitution.Subx` already does it correctly, one state then a loop: copy that shape.
+  DECISIONS 2026-09-01.
 - **The splitter**: `next_split_part` (`:21135`), `pattern_split` (`:22235`), `splititer`
   (`:22354`). Public: `Split(input, maxSplits)`, returning captured groups interleaved as
   upstream does, with `null` for an unmatched group's slot (the `string?[]` surface S01 stubbed).
@@ -36,6 +47,11 @@ All line references are `upstream/src/_regex.c`.
 - **Un-skip** `needs:find-all` (37), `needs:splitting` (23) and `needs:overlapped` (4), reading
   each skip's prose first; the `FindAll`, `Splitting`, `Overlapped` and `ZeroWidth` STATUS areas
   are the scoreboard. Stragglers retag with prose.
+- **Confirm the scan is linear in the subject.** A find-all that builds a `MatchState` per match
+  passes every correctness test and only shows up as time, so time it: `Matches` over a long
+  subject at two sizes, and check that doubling the subject doubles the work rather than
+  quadrupling it. Cheapest decisive version is the one the repeat guards use - a subject big enough
+  that a quadratic cannot finish inside a 20-second match timeout.
 - **Oracle wave**: patterns with zero-width alternatives over subjects that produce adjacent and
   empty matches, compared as the full match *sequence* (spans and groups per match) for
   finditer/findall semantics; split outputs compared element for element including `null` slots

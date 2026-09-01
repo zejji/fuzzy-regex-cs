@@ -35,16 +35,31 @@ swept the whole surface at once, and Phase 4's author has a handover.
 - **The prefilter contingency, checked**: confirm no ported test is skipped-for-timeout because
   of the deferral (S19's contingency). If any is, port the needed prefilter now rather than hand
   Phase 4 a slow engine with a hidden hole.
-  **Widened 2026-09-01: the symptom is not only a skip, it is a test that passes slowly.**
-  `MatchAtStart_lazy_dot_star_cd_handles_a_long_repeated_prefix` takes **372 seconds** where
-  upstream takes **0.0003**, and with its two siblings accounts for 433 of the suite's 515
-  measured seconds - the ratchet went from 1m28s to over 6 minutes on S24's watch, and every
-  future slice pays that. The suite's own numbers put the growth at **n^2.29** (20,004 chars in
-  30.08s, 60,002 in 372.43s), so this is quadratic behaviour, most likely the UTF-16 position
-  walking in the repeat loop rather than a missing prefilter - `MatchAtStart` is anchored, so
-  `locate_required_string` is not what saves upstream. Measure it, name the cause, and decide
-  explicitly whether Phase 7 fixes it or Phase 3 closes with a documented quadratic. Do not let it
-  pass unremarked because the tests are green. DECISIONS 2026-09-01.
+  **The quadratic half of this box is closed.** It was widened on 2026-09-01 to cover a test that
+  passes *slowly* rather than one that is skipped, because `.*?cd` over 60,002 characters took 69
+  seconds against upstream's 0.0003. The cause was not a missing prefilter - the call is anchored,
+  so `locate_required_string` is not what saves upstream - it was `StepBy`/`CountBetween` walking
+  the subject to convert a character count into a UTF-16 position, exactly `3n^2` steps. Fixed the
+  same day in `1d9f71c` and `d39a3f1`. So this box now only has to:
+  - confirm the two permanent complexity guards still pass:
+    `RepeatTests.A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length` and
+    `A_lazy_repeat_over_a_long_astral_subject_costs_time_proportional_to_its_length`;
+  - re-run the recorded negative control - force `MatchState.OneUnitPerCharacter` to `false` and
+    confirm the first guard fails at its 20-second ceiling - because a guard nobody has watched
+    fail is not evidence that it is load bearing;
+  - state plainly whether any *other* ported test is now slow enough to want a prefilter, and if
+    none is, say so and leave the prefilters to Phase 7.
+  DECISIONS 2026-09-01.
+- **The `NextPos`/`PrevPos` asymmetry, decided.** Forward stepping refuses to pair a high and low
+  surrogate when `pos + 1 >= TextEnd`; backward stepping pairs regardless of any bound, so above
+  `TextEnd` the two disagree about where a character starts. Surfaced by `CharacterIndexTests`
+  sweeping positions the engine cannot reach, and proven unreachable from the engine. Left alone on
+  2026-09-01 because it is a semantic decision about what `beginning` and `length` mean when they
+  split a surrogate pair, upstream has no opinion to port (it indexes by codepoint, so an `endpos`
+  inside a character cannot exist), and bundling a semantic change into a performance fix makes
+  both harder to review. Decide it here, in writing, one of three ways: make the two symmetric;
+  keep the asymmetry and document it on the public `beginning`/`length` parameters; or record it as
+  a Phase 6 hardening item. Do not leave it undecided a second time. DECISIONS 2026-09-01.
 - **Un-skip sweep**: walk the remaining skipped tests whose tags Phase 3 delivered - any test
   still skipped on a delivered tag is either a defect (fix it) or mis-tagged (retag with prose),
   the S13 rule that a phase does not close with its own tags still on the board.
