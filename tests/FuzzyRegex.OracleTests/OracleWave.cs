@@ -131,11 +131,27 @@ internal static class OracleWave
         JsonElement row = document.RootElement;
 
         string operation = row.GetProperty("operation").GetString()!;
-        if (operation is not ("search" or "match" or "fullmatch"))
+        if (operation is not ("search" or "match" or "fullmatch" or "sub" or "subf"))
         {
             // Rejected at read time rather than at run time, so an unknown operation cannot be
             // reported as a divergence in the port.
             throw new InvalidOperationException($"row {number}: unknown operation '{operation}'.");
+        }
+
+        // A substitution row carries the template and the replacement limit; nothing else does. A
+        // sub row without a template would silently become "does this pattern match", which every
+        // port agrees with, so it is refused here as well as in the recorder.
+        string? template = null;
+        int count = 0;
+        if (operation is "sub" or "subf")
+        {
+            if (!row.TryGetProperty("template", out JsonElement templateElement))
+            {
+                throw new InvalidOperationException($"row {number}: a '{operation}' row has no template.");
+            }
+
+            template = templateElement.GetString()!;
+            count = row.TryGetProperty("count", out JsonElement limit) ? limit.GetInt32() : 0;
         }
 
         return new OracleRow(
@@ -147,7 +163,9 @@ internal static class OracleWave
             row.GetProperty("subject").GetString()!,
             operation,
             ReadOutcome(row.GetProperty("outcome")),
-            ReadCodepointSpan(row.GetProperty("codepointSpan"))
+            ReadCodepointSpan(row.GetProperty("codepointSpan")),
+            template,
+            count
         );
     }
 
@@ -157,10 +175,15 @@ internal static class OracleWave
         return kind switch
         {
             "nomatch" => new NoMatchOutcome(),
+            // 'whileMatching' is optional and defaults to false, which is what every wave recorded
+            // before S24 means: until substitution landed, upstream's only recorded rejections came
+            // out of regex.compile. A hand-written minimisation row need not carry it either.
             "error" => new ErrorOutcome(
                 outcome.GetProperty("exception").GetString()!,
-                outcome.GetProperty("message").GetString()!
+                outcome.GetProperty("message").GetString()!,
+                WhileMatching: outcome.TryGetProperty("whileMatching", out JsonElement phase) && phase.GetBoolean()
             ),
+            "sub" => new SubOutcome(outcome.GetProperty("text").GetString()!, outcome.GetProperty("count").GetInt32()),
             "match" => new MatchOutcome(
                 [.. outcome.GetProperty("groups").EnumerateArray().Select(ReadGroup)],
                 outcome.GetProperty("lastIndex").GetInt32(),
@@ -250,6 +273,13 @@ internal static class OracleWave
         );
         block.AppendLine("  pattern  " + Printable(row.Pattern));
         block.AppendLine("  subject  " + Printable(row.Subject));
+        if (row.Template is { } template)
+        {
+            block.AppendLine(
+                string.Create(CultureInfo.InvariantCulture, $"  template {Printable(template)}   [count {row.Count}]")
+            );
+        }
+
         if (row.NamedLists.Count > 0)
         {
             block.AppendLine(
@@ -341,6 +371,15 @@ internal sealed record OracleHeader(
 /// there was no match. Never compared - it is what makes the recorder's index translation visible
 /// in the file and in a divergence block rather than merely trusted.
 /// </param>
+/// <param name="Template">
+/// The replacement or format template, for a <c>sub</c> or <c>subf</c> row, and
+/// <see langword="null"/> for every other operation.
+/// </param>
+/// <param name="Count">
+/// The replacement limit in <b>upstream's</b> convention, where 0 means no limit. This surface
+/// spells no limit as -1, so <see cref="OracleComparer.Run"/> translates it; recording upstream's
+/// own number keeps the wave a transcript of what upstream was asked.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -350,7 +389,9 @@ internal sealed record OracleRow(
     string Subject,
     string Operation,
     IOracleOutcome Expected,
-    (int Start, int End)? CodepointSpan
+    (int Start, int End)? CodepointSpan,
+    string? Template = null,
+    int Count = 0
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -418,6 +459,20 @@ internal sealed record ErrorOutcome(string Exception, string Message, string? De
     /// for the two answers that <see cref="OracleComparer.Compare"/> treats differently.
     /// </remarks>
     public string Describe() => (WhileMatching ? "error while matching " : "error ") + Exception + ": " + Message;
+}
+
+/// <summary>A substitution ran, giving this text and this many replacements.</summary>
+/// <param name="Text">The subject with the matches replaced.</param>
+/// <param name="Count">
+/// How many replacements were made - upstream's <c>subn</c> pair. Compared as well as the text
+/// because they can disagree: a <c>count</c> that counted scans rather than replacements, or an
+/// empty replacement of an empty match, both produce the right string and the wrong number.
+/// </param>
+internal sealed record SubOutcome(string Text, int Count) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() =>
+        string.Create(CultureInfo.InvariantCulture, $"sub {Count} {OracleWave.Printable(Text)}");
 }
 
 /// <summary>The pattern matched, with one entry per group, group 0 being the whole match.</summary>

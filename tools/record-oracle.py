@@ -69,6 +69,13 @@ PYPI_FALLBACK_VERSION = "2026.7.19"
 
 OPERATIONS = ("search", "match", "fullmatch")
 
+# S24's operations. A substitution row carries two more fields - `template` and `count` - and its
+# answer is a (string, count) pair rather than a span, so it is a second row shape rather than a
+# fourth entry in OPERATIONS: everything that reads a row has to know which shape it is holding.
+# `count` is upstream's own convention, where 0 means "no limit"; the consumer translates it.
+SUB_OPERATIONS = ("sub", "subf")
+ALL_OPERATIONS = OPERATIONS + SUB_OPERATIONS
+
 # regex.compile takes named lists as **kwargs (signature verified 2026-08-31:
 # `(pattern, flags=0, ignore_unused=False, cache_pattern=None, **kwargs)`), so a list whose name is
 # one of its own parameters cannot be passed at all - the call fails with "compile() got multiple
@@ -169,8 +176,8 @@ def _record_row(regex, row: dict) -> dict:
     named_lists = _canonical_named_lists(row.get("namedLists") or {})
     subject = row["subject"]
     operation = row["operation"]
-    if operation not in OPERATIONS:
-        raise SystemExit(f"unknown operation {operation!r}; expected one of {OPERATIONS}")
+    if operation not in ALL_OPERATIONS:
+        raise SystemExit(f"unknown operation {operation!r}; expected one of {ALL_OPERATIONS}")
 
     reserved = sorted(set(named_lists) & set(RESERVED_NAMES))
     if reserved:
@@ -189,11 +196,27 @@ def _record_row(regex, row: dict) -> dict:
         "subject": subject,
         "operation": operation,
     }
+    if operation in SUB_OPERATIONS:
+        if "template" not in row:
+            raise SystemExit(
+                f"operation {operation!r} needs a 'template' and this row has none (pattern "
+                f"{pattern!r}). A substitution row's answer is the replaced string, so recording "
+                "one without a template would file the untouched subject as upstream's answer."
+            )
+        recorded["template"] = row["template"]
+        recorded["count"] = int(row.get("count", 0))
 
-    try:
-        compiled = regex.compile(pattern, flags, **named_lists)
-        match = getattr(compiled, operation)(subject)
-    except Exception as e:  # noqa: BLE001 - the exception *is* the recorded answer
+    def failed(e: Exception, while_matching: bool) -> dict:
+        """The recorded answer when upstream raised.
+
+        ``whileMatching`` is recorded, not inferred, because upstream answers the *same* bad
+        template two different ways depending on when it notices: `regex.sub('x', r'\\g<bad', 'z')`
+        raises while compiling the template and `regex.sub('x', r'\\1', 'x')` raises while
+        substituting, and both are the port's answer too. Without the flag the consumer's rule
+        that an exception raised while matching cannot agree with a compile-time rejection - which
+        exists to stop an index slip in our own engine being filed as parity - made every
+        invalid-group-reference row a false divergence. Measured 2026-09-01.
+        """
         if type(e).__name__ in ENVIRONMENT_FAILURES:
             raise SystemExit(
                 f"upstream raised {type(e).__name__} on pattern {pattern!r} against subject "
@@ -207,8 +230,30 @@ def _record_row(regex, row: dict) -> dict:
             # regex.error's str() appends the position; .msg is the text our
             # FuzzyRegexParseException.Message carries, which is what the corpus compares too.
             "message": e.msg if isinstance(e, regex.error) else str(e),
+            "whileMatching": while_matching,
         }
         return recorded
+
+    try:
+        compiled = regex.compile(pattern, flags, **named_lists)
+    except Exception as e:  # noqa: BLE001 - the exception *is* the recorded answer
+        return failed(e, while_matching=False)
+
+    if operation in SUB_OPERATIONS:
+        method = compiled.subn if operation == "sub" else compiled.subfn
+        try:
+            text, made = method(recorded["template"], subject, count=recorded["count"])
+        except Exception as e:  # noqa: BLE001
+            return failed(e, while_matching=True)
+
+        recorded["codepointSpan"] = None
+        recorded["outcome"] = {"kind": "sub", "text": text, "count": made}
+        return recorded
+
+    try:
+        match = getattr(compiled, operation)(subject)
+    except Exception as e:  # noqa: BLE001
+        return failed(e, while_matching=True)
 
     if match is None:
         recorded["codepointSpan"] = None
@@ -274,6 +319,7 @@ GENERATORS = (
     "backrefs",
     "case-folding",
     "reverse",
+    "substitution",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -1490,6 +1536,251 @@ def _generate_reverse(rng: random.Random, count: int):
             yield row
 
 
+# --------------------------------------------------------------------------------------------
+# S24's generator: sub, subn, subf and subfn
+# --------------------------------------------------------------------------------------------
+
+# What a capture group is wrapped round. Every one is a single character or a class matching one,
+# so a group's span is predictable and a `*` on it can match empty - which is where the empty-match
+# advance policy, and therefore most substitution bugs, live.
+SUB_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d")
+
+# The shapes a pattern fragment takes, and how many capture groups each opens. Weighted towards the
+# plain and starred group: the first is the ordinary case a template references, and the second is
+# the zero-width one. 'optional' exists to produce a group that takes no part in a match, which is
+# the case where upstream expands a reference to the empty string rather than dropping it.
+# 'plus' is the only shape that makes a group capture more than once, which is what a format
+# template's `{n[i]}` subscript exists to reach: without it every capture list was one entry long,
+# the `[-1]` subscript agreed with `[0]` by accident, so the rule that reads it could not be got
+# wrong observably. With this shape the control that breaks that rule fires on 16 rows of 600 at
+# seed 7 and 14 at seed 55 (measured 2026-09-01 against this generator, S24 closing notes).
+SUB_SHAPES = ("literal", "group", "named", "star", "lazy", "optional", "branch", "plus")
+SUB_SHAPE_WEIGHTS = (12, 20, 10, 15, 7, 12, 9, 15)
+SUB_SHAPE_GROUPS = {
+    "literal": 0,
+    "group": 1,
+    "named": 1,
+    "star": 1,
+    "lazy": 1,
+    "optional": 1,
+    "branch": 1,
+    "plus": 1,
+}
+
+# How often the whole pattern becomes `A|B`, where B's atoms are drawn from characters the subject
+# alphabets do not hold. B's groups are then reachable by number from the template and never take
+# part in a match, which is upstream's `sub('(test1)|(test2)', r'matched: \1\2', ...)` case.
+SUB_ALTERNATION_PROBABILITY = 0.3
+SUB_DEAD_ATOMS = ("q", "z", "Q", "7")
+
+# How often a template reaches for a group the pattern has not got. Both directions are wanted and
+# they fail at different times: `\g<n>` out of range is rejected while the template compiles, and a
+# bare `\n` out of range only when it is expanded against a match (measured 2026-09-01).
+SUB_BAD_REFERENCE_PROBABILITY = 0.08
+
+# The replacement counts, in upstream's convention where 0 is "no limit" and a negative is "no
+# replacements at all" - which is this surface's -1 and 0 respectively, so the wave exercises both
+# ends of the translation. Weighted towards no limit so most rows exercise the whole scan, with the
+# rest stopping the loop early enough to catch a `count` that counts scans instead of replacements.
+SUB_COUNTS = (0, 0, 0, 1, 2, 3, -1)
+
+# Literal runs a template is built from. `<`, `>`, `[`, `]` and `{`/`}` are in there because they
+# are the delimiters of the two template languages and a literal one must survive unchanged.
+SUB_LITERALS = ("-", "|", "<", ">", "[", "]", "ab", "", " ", "\U0001f600")
+
+MAX_SUB_TEMPLATE_PARTS = 4
+
+# One row in this many forces the too-short-subject shortcut's cell. `pattern_subx` compares
+# `min_width` - a CODEPOINT count - against the subject, and returns before the template is even
+# compiled, so the only way the comparison is observable at all is a subject whose codepoint and
+# UTF-16 code-unit counts differ, a pattern whose width falls between the two, and a template the
+# template compiler rejects. All three at once: without this arm the ordinary rows reached the cell
+# on no seed tried and the control that breaks the comparison fired on 0 rows of 600; with it, on
+# 21 at seed 7 and 21 at seed 55 (measured 2026-09-01, S24 closing notes).
+SUB_NARROW_EVERY = 12
+SUB_NARROW_ASTRAL = "\U0001f600"
+
+
+
+def _sub_pattern(rng: random.Random) -> tuple[str, int, list[str]]:
+    """A pattern, its capture group count and its group names.
+
+    The inventory is returned rather than recovered from the pattern because the template has to
+    reference groups by number, and a number the pattern has not got is a *different* test - one
+    this generator makes deliberately and rarely (SUB_BAD_REFERENCE_PROBABILITY) rather than by
+    accident on most rows.
+    """
+
+    def branch(atoms: tuple[str, ...], names: list[str], start: int) -> tuple[str, int]:
+        parts = []
+        opened = 0
+        for _ in range(rng.randrange(1, 4)):
+            shape = rng.choices(SUB_SHAPES, weights=SUB_SHAPE_WEIGHTS)[0]
+            atom = rng.choice(atoms)
+            if shape == "literal":
+                parts.append(atom)
+            elif shape == "group":
+                parts.append(f"({atom})")
+            elif shape == "named":
+                name = f"g{start + opened + 1}"
+                names.append(name)
+                parts.append(f"(?P<{name}>{atom})")
+            elif shape == "star":
+                parts.append(f"({atom}*)")
+            elif shape == "lazy":
+                parts.append(f"({atom}*?)")
+            elif shape == "optional":
+                parts.append(f"({atom})?")
+            elif shape == "plus":
+                # Repeated *inside* the group's own repeat, so the group captures once per
+                # iteration and its capture list has more than one entry to subscript.
+                parts.append(f"({atom})+")
+            else:
+                parts.append(f"({atom}|{rng.choice(atoms)})")
+            opened += SUB_SHAPE_GROUPS[shape]
+        return "".join(parts), opened
+
+    names: list[str] = []
+    left, opened = branch(SUB_ATOMS, names, 0)
+    if rng.random() >= SUB_ALTERNATION_PROBABILITY:
+        return left, opened, names
+
+    right, dead = branch(SUB_DEAD_ATOMS, names, opened)
+    return f"{left}|{right}", opened + dead, names
+
+
+def _sub_template(rng: random.Random, groups: int, names: list[str]) -> str:
+    """A `sub` replacement template over a pattern with that group inventory."""
+    parts = []
+    for _ in range(rng.randrange(1, MAX_SUB_TEMPLATE_PARTS + 1)):
+        choice = rng.randrange(7)
+        if choice == 0:
+            parts.append(rng.choice(SUB_LITERALS))
+        elif choice == 1:
+            parts.append(rng.choice((r"\n", r"\t", "\\\\", r"\x41", r"\101")))
+        elif choice == 2 and rng.random() < SUB_BAD_REFERENCE_PROBABILITY:
+            # Rejected while the template compiles, whether or not the pattern matches.
+            parts.append(f"\\g<{groups + 1}>")
+        elif choice == 3 and rng.random() < SUB_BAD_REFERENCE_PROBABILITY:
+            # Rejected only when it is expanded, so a row that never matches is not rejected at all.
+            parts.append(f"\\{min(groups + 1, 9)}")
+        elif choice in (2, 3, 4) and groups:
+            number = rng.randrange(1, groups + 1)
+            parts.append(f"\\{number}" if number <= 9 else f"\\g<{number}>")
+        elif choice == 5 and names:
+            parts.append(f"\\g<{rng.choice(names)}>")
+        else:
+            # \g<0> is the whole match; a bare \0 is an octal escape for NUL, not group 0.
+            parts.append(r"\g<0>" if rng.random() < 0.5 else rng.choice(SUB_LITERALS))
+    return "".join(parts)
+
+
+def _subf_template(rng: random.Random, groups: int, names: list[str]) -> str:
+    """A `subf` format template over a pattern with that group inventory.
+
+    Automatic field numbering is decided once for the whole template, because CPython rejects a
+    template that mixes `{}` with `{0}` and a wave of rejections would say nothing about the port.
+    """
+    automatic = rng.random() < 0.2
+    parts = []
+    for _ in range(rng.randrange(1, MAX_SUB_TEMPLATE_PARTS + 1)):
+        choice = rng.randrange(6)
+        if choice == 0:
+            parts.append(rng.choice(SUB_LITERALS).replace("{", "{{").replace("}", "}}"))
+        elif choice == 1:
+            parts.append(rng.choice(("{{", "}}", "{{}}")))
+        elif automatic:
+            parts.append("{}")
+        elif choice == 2 and rng.random() < SUB_BAD_REFERENCE_PROBABILITY:
+            parts.append(f"{{{groups + 1}}}")
+        elif choice in (2, 3) or not names:
+            # A subscript reaches the individual captures of a repeated group; a negative one counts
+            # back from the last. Index 2 is out of range on most rows, which is wanted: upstream
+            # raises IndexError there and so must this port.
+            number = rng.randrange(groups + 1)
+            # Weighted towards the negative subscripts: they are the only ones whose rule can be
+            # got wrong silently, since a positive index is the same number either way. As one
+            # choice in five they left the control that breaks that rule below ten rows in 600.
+            subscript = rng.choice(("", "[0]", "[-1]", "[-1]", "[-2]", "[2]"))
+            parts.append(f"{{{number}{subscript}}}")
+        else:
+            parts.append(f"{{{rng.choice(names)}}}")
+    return "".join(parts)
+
+
+def _narrow_row(rng: random.Random) -> dict:
+    """One row aimed at the too-short-subject shortcut, over an all-astral subject.
+
+    The pattern is a run of ``.``, so its ``min_width`` is exactly its length in codepoints, and
+    the template is a group reference the pattern has not got, which the *template compiler*
+    rejects - the one thing the shortcut can be seen to skip. The width is drawn across the whole
+    interesting range, so the arm carries the two agreeing sides as well as the divergent middle:
+    at or below the codepoint count both engines compile the template and raise, above the
+    code-unit count both take the shortcut, and only in between do they differ if the comparison
+    is made in the wrong unit. Verified against regex 2026.7.19 on 2026-09-01 for one, two and
+    three codepoints.
+    """
+    codepoints = rng.randrange(1, 4)
+    width = rng.randrange(1, 2 * codepoints + 2)
+    return {
+        "generator": "substitution",
+        "pattern": "." * width,
+        "flags": 0,
+        "namedLists": {},
+        "subject": SUB_NARROW_ASTRAL * codepoints,
+        "operation": "sub",
+        "template": r"\g<1>",
+        "count": rng.choice(SUB_COUNTS),
+    }
+
+
+def _generate_substitution(rng: random.Random, count: int):
+    """S24's generator: (pattern, subject, template, count) quadruples for sub and subf.
+
+    The pattern is generated with its group inventory in hand so the template can reference the
+    groups it actually has; the subject is drawn independently, so a fair share of rows match
+    nothing and exercise the "return the subject untouched" path and the too-short-subject
+    shortcut. Every other row is reversed, because `(?r)` reverses the join list rather than the
+    matching alone and that is a substitution-specific code path.
+
+    Measured by `python tools/record-oracle.py --generator substitution --count 600 --seed 1`,
+    after the last change to this generator: 194 rows replace at least once, 327 replace nothing,
+    79 are rejected by upstream, 250 are subf, and 219 have an astral subject. The `sub` share is
+    the larger one because the narrow arm is always a `sub` row.
+
+    Re-taken from scratch after every widening, and that is not ceremony: `SUB_COUNTS` gaining a
+    `-1` entry shifts the whole RNG stream, so a figure measured before it describes a wave this
+    generator no longer produces. The first set recorded here was wrong for exactly that reason,
+    and S24's second blind pass caught it.
+    """
+    for i in range(count):
+        if i % SUB_NARROW_EVERY == SUB_NARROW_EVERY - 1:
+            yield _narrow_row(rng)
+            continue
+
+        alphabet = ALPHABETS[i % len(ALPHABETS)]
+        subject = "".join(rng.choice(alphabet) for _ in range(rng.randrange(MAX_SUBJECT_LENGTH + 1)))
+
+        pattern, groups, names = _sub_pattern(rng)
+        operation = SUB_OPERATIONS[i % len(SUB_OPERATIONS)]
+        template = (
+            _sub_template(rng, groups, names)
+            if operation == "sub"
+            else _subf_template(rng, groups, names)
+        )
+
+        yield {
+            "generator": "substitution",
+            "pattern": ("(?r)" + pattern) if i % 2 else pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+            "template": template,
+            "count": rng.choice(SUB_COUNTS),
+        }
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -1526,6 +1817,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "reverse":
         yield from _generate_reverse(rng, count)
+        return
+
+    if name == "substitution":
+        yield from _generate_substitution(rng, count)
         return
 
     dotted = name == "literal-dot"
@@ -1721,6 +2016,10 @@ def _self_check() -> int:
         # emits today; the guard is for the generators later slices add.
         ("an interpreter limit rather than a judgement about the pattern",
          row(pattern="(" * 2000 + "a" + ")" * 2000), "limit of the interpreter"),
+        # Added in S24. Without it a hand-written minimisation row that forgot its template would
+        # record the untouched subject as upstream's answer, which every port trivially agrees with.
+        ("a substitution row with no template",
+         row(operation="sub"), "needs a 'template'"),
     ):
         try:
             _record_row(regex, unrecordable)

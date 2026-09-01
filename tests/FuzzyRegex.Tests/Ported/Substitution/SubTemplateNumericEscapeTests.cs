@@ -30,7 +30,6 @@ public sealed class SubTemplateNumericEscapeTests
     [Arguments(@"\0a", "\0a")]
     [Arguments(@"\400", "\x100")]
     [Arguments(@"\777", "\x1FF")]
-    [Skip("needs:substitution - octal numeric escapes in Pattern.Replace templates are not implemented yet")]
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#1-16")]
     public void Replace_expands_an_octal_numeric_escape(string replacement, string expected) =>
         FuzzyRegex.Replace("x", "x", replacement).Should().Be(expected);
@@ -59,7 +58,6 @@ public sealed class SubTemplateNumericEscapeTests
     // pattern's group count; only the `\g<...>` form is checked at compile time (line 1910). The
     // rejection therefore happens when the template is expanded against a match, so these need
     // the engine.
-    [Skip("needs:substitution - an out-of-range numeric group reference is rejected on expansion, not on compile")]
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#19-30")]
     public void Replace_with_an_invalid_numeric_group_reference_throws(string replacement)
     {
@@ -72,9 +70,6 @@ public sealed class SubTemplateNumericEscapeTests
     [Arguments("(((((((((((x)))))))))))", @"\11", "x", "x")]
     [Arguments("((((((((((y))))))))))(.)", @"\118", "xyz", "xz8")]
     [Arguments("((((((((((y))))))))))(.)", @"\11a", "xyz", "xza")]
-    [Skip(
-        "needs:substitution - two-digit group references resolved against deeply nested groups are not implemented yet"
-    )]
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#31-33")]
     public void Replace_resolves_a_two_digit_group_reference_against_deeply_nested_groups(
         string pattern,

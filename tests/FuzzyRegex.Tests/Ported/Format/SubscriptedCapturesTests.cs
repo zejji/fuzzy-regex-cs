@@ -11,13 +11,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Format;
 public sealed class SubscriptedCapturesTests
 {
     [Test]
-    [Skip("needs:format - ResultFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#1")]
     public void ResultFormat_group_zero_subscript_selects_the_whole_match_by_index() =>
         FuzzyRegex.MatchAtStart("abc", @"(?P<x>.)+").ResultFormat("{0} {0[0]} {0[-1]}").Should().Be("abc abc abc");
 
     [Test]
-    [Skip("needs:format - ResultFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#2")]
     public void ResultFormat_group_one_subscript_indexes_into_its_repeated_captures() =>
         FuzzyRegex
@@ -27,7 +25,6 @@ public sealed class SubscriptedCapturesTests
             .Be("c a b c c b a");
 
     [Test]
-    [Skip("needs:format - ResultFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#3")]
     public void ResultFormat_named_group_subscript_indexes_into_its_repeated_captures() =>
         FuzzyRegex
@@ -37,13 +34,11 @@ public sealed class SubscriptedCapturesTests
             .Be("c a b c c b a");
 
     [Test]
-    [Skip("needs:format - ReplaceFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#4")]
     public void ReplaceFormat_group_zero_subscript_selects_the_whole_match_by_index() =>
         FuzzyRegex.ReplaceFormat("abc", @"(?P<x>.)+", "{0} {0[0]} {0[-1]}").Should().Be("abc abc abc");
 
     [Test]
-    [Skip("needs:format - ReplaceFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#5")]
     public void ReplaceFormat_group_one_subscript_indexes_into_its_repeated_captures() =>
         FuzzyRegex
@@ -52,7 +47,6 @@ public sealed class SubscriptedCapturesTests
             .Be("c a b c c b a");
 
     [Test]
-    [Skip("needs:format - ReplaceFormat has no {n[i]} subscript syntax for a repeated group's captures yet")]
     [Property("Upstream", "RegexTests.test_subscripted_captures#6")]
     public void ReplaceFormat_named_group_subscript_indexes_into_its_repeated_captures() =>
         FuzzyRegex

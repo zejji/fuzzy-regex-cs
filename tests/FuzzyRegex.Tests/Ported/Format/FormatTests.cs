@@ -14,19 +14,16 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Format;
 public sealed class FormatTests
 {
     [Test]
-    [Skip("needs:format - ReplaceFormat is not implemented yet")]
     [Property("Upstream", "RegexTests.test_format#1")]
     public void ReplaceFormat_reorders_groups_by_number() =>
         FuzzyRegex.ReplaceFormat("foo bar", @"(\w+) (\w+)", "{0} => {2} {1}").Should().Be("foo bar => bar foo");
 
     [Test]
-    [Skip("needs:format - ReplaceFormat is not implemented yet")]
     [Property("Upstream", "RegexTests.test_format#2")]
     public void ReplaceFormat_reorders_groups_by_name() =>
         FuzzyRegex.ReplaceFormat("foo bar", @"(?<word1>\w+) (?<word2>\w+)", "{word2} {word1}").Should().Be("bar foo");
 
     [Test]
-    [Skip("needs:format - the ReplaceFormat(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_format#3")]
     public void ReplaceFormat_reports_the_string_and_the_replacement_count_by_number()
     {
@@ -42,7 +39,6 @@ public sealed class FormatTests
     }
 
     [Test]
-    [Skip("needs:format - the ReplaceFormat(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_format#4")]
     public void ReplaceFormat_reports_the_string_and_the_replacement_count_by_name()
     {
@@ -58,7 +54,6 @@ public sealed class FormatTests
     }
 
     [Test]
-    [Skip("needs:format - Match.ResultFormat is not implemented yet")]
     [Property("Upstream", "RegexTests.test_format#5")]
     public void ResultFormat_reorders_groups_by_number_from_an_existing_match() =>
         FuzzyRegex

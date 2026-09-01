@@ -18,7 +18,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class Bug10328Tests
 {
     [Test]
-    [Skip("needs:substitution - lastgroup and the MatchEvaluator Replace overload are not implemented yet")]
+    [Skip("needs:lookaround - Replace lands in S24; the (?<=...) lookbehind has no opcode yet")]
     [Property("Upstream", "RegexTests.test_bug_10328#1")]
     public void V0_replace_with_evaluator_tags_the_trailing_whitespace_and_missing_final_newline_groups()
     {
@@ -41,7 +41,7 @@ public sealed class Bug10328Tests
     }
 
     [Test]
-    [Skip("needs:substitution - lastgroup and the MatchEvaluator Replace overload are not implemented yet")]
+    [Skip("needs:lookaround - Replace lands in S24; the (?<=...) lookbehind has no opcode yet")]
     [Property("Upstream", "RegexTests.test_bug_10328#4")]
     public void V1_replace_with_evaluator_tags_the_trailing_whitespace_and_missing_final_newline_groups()
     {

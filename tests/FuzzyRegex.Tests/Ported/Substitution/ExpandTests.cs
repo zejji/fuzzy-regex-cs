@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class ExpandTests
 {
     [Test]
-    [Skip("needs:substitution - Match.Result is not implemented yet")]
     [Property("Upstream", "RegexTests.test_expand#1")]
     public void Result_expands_named_groups_by_number_and_by_name()
     {

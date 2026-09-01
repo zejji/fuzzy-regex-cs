@@ -59,13 +59,11 @@ public sealed class SymbolicRefsTests
     }
 
     [Test]
-    [Skip("needs:substitution - an unmatched group reference in a template is not implemented yet")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#7")]
     public void Replace_with_a_named_reference_to_a_group_that_did_not_participate_expands_to_empty() =>
         FuzzyRegex.Replace("xx", "(?P<a>x)|(?P<b>y)", @"\g<b>").Should().Be("");
 
     [Test]
-    [Skip("needs:substitution - an unmatched group reference in a template is not implemented yet")]
     [Property("Upstream", "RegexTests.test_symbolic_refs#8")]
     public void Replace_with_a_numbered_reference_to_a_group_that_did_not_participate_expands_to_empty() =>
         FuzzyRegex.Replace("xx", "(?P<a>x)|(?P<b>y)", @"\2").Should().Be("");

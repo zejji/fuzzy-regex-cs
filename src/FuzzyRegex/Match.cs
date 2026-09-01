@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace Fuzzy.Text.RegularExpressions;
 
 /// <summary>
@@ -250,8 +253,27 @@ public sealed class Match : Group
     /// </remarks>
     /// <param name="replacement">The replacement template, in upstream's syntax.</param>
     /// <returns>The expanded text.</returns>
-    public string Result(string replacement) =>
-        throw new NotImplementedException("needs:substitution - expanding a template is not implemented yet");
+    /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
+    /// <exception cref="ArgumentException">It references a group the pattern has not got.</exception>
+    public string Result(string replacement)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        // match_expand (upstream/src/_regex.c line 19902). A template with no backslash in it is
+        // returned as it is, without ever reaching the template compiler.
+        if (Engine.Substitution.IsLiteralTemplate(replacement, '\\'))
+        {
+            return replacement;
+        }
+
+        var expanded = new StringBuilder(replacement.Length);
+        foreach (object item in _regex.CompileReplacement(replacement))
+        {
+            expanded.Append(Engine.Substitution.GetMatchReplacement(item, this, _groups.Length));
+        }
+
+        return expanded.ToString();
+    }
 
     /// <summary>
     /// Expands a <c>str.format</c>-style template against this match, where <c>{0}</c> is the
@@ -266,6 +288,42 @@ public sealed class Match : Group
     /// </remarks>
     /// <param name="format">The format template.</param>
     /// <returns>The expanded text.</returns>
-    public string ResultFormat(string format) =>
-        throw new NotImplementedException("needs:format - expanding a format template is not implemented yet");
+    /// <exception cref="FormatException">The template is malformed.</exception>
+    /// <exception cref="ArgumentException">It references a group the pattern has not got.</exception>
+    public string ResultFormat(string format)
+    {
+        ArgumentNullException.ThrowIfNull(format);
+
+        // match_expandf (upstream/src/_regex.c line 20045) hands the template straight to
+        // str.format, with none of the literal shortcut Result has: verified 2026-09-01,
+        // `regex.match(r'(\w+)', 'ab').expandf('}')` raises where `regex.subf(r'(\w+)', '}', 'ab')`
+        // returns '}', because only subf checks for a '{' first.
+        return Engine.Substitution.ExpandFormat(format, ResolveFormatArgument);
+    }
+
+    /// <summary>
+    /// One argument of the <c>str.format</c> call <c>match_expandf</c> makes: the positional
+    /// arguments are one capture object per group with group 0 first (<c>:20065</c>), and the
+    /// keyword arguments are the named groups (<c>make_capture_dict</c>, <c>:19983</c>).
+    /// </summary>
+    /// <param name="argument">The field name: a run of digits, or a group name.</param>
+    /// <returns>The group, or <see langword="null"/> if this match has no such argument.</returns>
+    private Group? ResolveFormatArgument(string argument)
+    {
+        // NumberStyles.None accepts digits and nothing else, which is CPython's own rule for
+        // telling a positional field from a named one. A number too long for an int falls through
+        // to the name lookup and fails there, which is upstream's answer for it too.
+        if (int.TryParse(argument, NumberStyles.None, CultureInfo.InvariantCulture, out int number))
+        {
+            if (number == 0)
+            {
+                return this;
+            }
+
+            return number <= _groups.Length ? GroupAt(number) : null;
+        }
+
+        int named = _regex.GroupNumberFromName(argument);
+        return named < 0 ? null : GroupAt(named);
+    }
 }

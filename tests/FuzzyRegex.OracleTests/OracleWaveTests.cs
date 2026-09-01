@@ -259,6 +259,84 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(matched, real).Should().Be(OracleVerdict.Agree);
     }
 
+    [Test]
+    public void A_substitution_row_compares_its_text_its_count_and_the_phase_a_rejection_came_from()
+    {
+        // S24's row shape, and the rule change it forced. Upstream rejects an out-of-range group
+        // reference in a template *while it substitutes* - regex.sub('x', r'\1', 'x') raises
+        // `error: invalid group reference` after regex.compile has already succeeded (measured
+        // 2026-09-01) - so the recorder writes whileMatching, and Compare requires the two sides to
+        // have thrown at the same point rather than assuming upstream threw at compile time.
+        // Before this, every such row was a false divergence.
+        OracleRow rejectedWhileSubstituting = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "x", "flags": 0, "namedLists": {}, "subject": "x", "operation": "sub", "template": "\\1", "count": 0, "codepointSpan": null, "outcome": {"kind": "error", "exception": "error", "message": "invalid group reference", "whileMatching": true}}
+            """
+        )[0];
+
+        rejectedWhileSubstituting.Template.Should().Be(@"\1");
+
+        // Run, not a stand-in: Replace really throws here, out of the template expansion, and this
+        // is the first row that reaches OracleComparer.Run's while-matching catch at all.
+        IOracleOutcome? answer = OracleComparer.Run(rejectedWhileSubstituting);
+        answer
+            .Should()
+            .BeOfType<ErrorOutcome>()
+            .Which.WhileMatching.Should()
+            .BeTrue("the pattern compiled and the template was rejected during the substitution");
+        OracleComparer.Compare(rejectedWhileSubstituting, answer).Should().Be(OracleVerdict.Agree);
+
+        // The phase rule still bites in both directions: a rejection at the wrong point is not the
+        // same answer, whatever its type and message.
+        OracleComparer
+            .Compare(
+                rejectedWhileSubstituting,
+                new ErrorOutcome(nameof(FuzzyRegexParseException), "invalid group reference")
+            )
+            .Should()
+            .Be(
+                OracleVerdict.Diverge,
+                "upstream got as far as substituting; refusing to compile is a different answer"
+            );
+
+        // And a successful substitution compares on both halves of upstream's subn pair.
+        OracleRow replaced = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "aba", "operation": "sub", "template": "z", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "zbz", "count": 2}}
+            """
+        )[0];
+
+        OracleComparer.Compare(replaced, OracleComparer.Run(replaced)).Should().Be(OracleVerdict.Agree);
+        OracleComparer.Compare(replaced, new SubOutcome("zbz", 1)).Should().Be(OracleVerdict.Diverge);
+        OracleComparer.Compare(replaced, new SubOutcome("zba", 2)).Should().Be(OracleVerdict.Diverge);
+    }
+
+    [Test]
+    public void Both_ends_of_the_count_convention_are_translated_not_just_the_no_limit_end()
+    {
+        // upstream 0 is "no limit" and upstream negative is "no replacements at all"; this surface
+        // spells those -1 and 0. Translating only the first asked the two engines opposite
+        // questions and reported a correct port as RED. Found by S24's blind review with exactly
+        // this row: regex.subn('a', 'z', 'aaa', count=-1) is ('aaa', 0).
+        OracleRow noReplacements = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "sub", "template": "z", "count": -1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "aaa", "count": 0}}
+            """
+        )[0];
+
+        OracleComparer.Compare(noReplacements, OracleComparer.Run(noReplacements)).Should().Be(OracleVerdict.Agree);
+
+        // And the other end, so this is a statement about the mapping rather than about one value:
+        // regex.subn('a', 'z', 'aaa', count=0) is ('zzz', 3).
+        OracleRow noLimit = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "aaa", "operation": "sub", "template": "z", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "zzz", "count": 3}}
+            """
+        )[0];
+
+        OracleComparer.Compare(noLimit, OracleComparer.Run(noLimit)).Should().Be(OracleVerdict.Agree);
+    }
+
     /// <summary>
     /// This port's real answer to <c>regex.compile('a', V0|V1)</c>, thrown rather than hand-written
     /// so the assertion above is made against the message .NET actually decorates, not against an

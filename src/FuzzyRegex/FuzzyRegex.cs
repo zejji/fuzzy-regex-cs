@@ -62,8 +62,6 @@ public sealed class FuzzyRegex
     private const string _metachars = "()[]{}?*+|^$\\.-#&~";
 
     private readonly Parsing.CompiledPattern _compiled;
-    private readonly Engine.PatternObject _pattern;
-    private readonly long _timeoutTicks;
     private readonly string[] _groupNames;
     private readonly int[] _groupNumbers;
 
@@ -141,12 +139,12 @@ public sealed class FuzzyRegex
         // the last thing that can reject a pattern - it refuses code the parser was happy to emit
         // (upstream/src/_regex.c:25863). Building here rather than at first match keeps that
         // rejection where the caller expects it, and where upstream puts it.
-        _pattern = Engine.PatternObject.Compile(_compiled);
+        PatternObject = Engine.PatternObject.Compile(_compiled);
 
         // Upstream's timeout is in clock ticks; ours is in Stopwatch ticks, which is the clock the
         // engine reads. decode_timeout (upstream/src/_regex.c:21056) maps a negative number to "no
         // timeout", which is exactly what InfiniteMatchTimeout is.
-        _timeoutTicks =
+        TimeoutTicks =
             matchTimeout == InfiniteMatchTimeout
                 ? Engine.MatchState.NoTimeout
                 : (long)(matchTimeout.TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
@@ -223,18 +221,24 @@ public sealed class FuzzyRegex
     public int GroupNumberFromName(string name) => _compiled.GroupIndex.GetValueOrDefault(name, -1);
 
     /// <summary>
-    /// Compiles a replacement template against this pattern's groups and discards the result,
-    /// which is all this port can do with it until the engine lands. Upstream compiles the
+    /// Compiles a replacement template against this pattern's groups. Upstream compiles the
     /// template before it starts matching, so a malformed one is rejected whether or not the
     /// pattern matches: measured against <c>regex</c> 2026.7.19 on 2026-08-31,
     /// <c>regex.sub('x', r'\g&lt;bad', 'z')</c> raises <c>missing &gt;</c> on a subject with no
     /// match at all, while <c>regex.sub('x', r'\2', 'z')</c> returns <c>'z'</c> - the
     /// group-number check happens during expansion, which needs a match.
     /// </summary>
+    /// <remarks>
+    /// "Before it starts matching" is not "before anything at all": <c>pattern_subx</c> takes its
+    /// too-short-subject shortcut first, so the template is not compiled - and a malformed one not
+    /// rejected - when the pattern cannot possibly fit. Measured 2026-09-01:
+    /// <c>regex.sub('xx', r'\g&lt;bad', 'z')</c> returns <c>'z'</c>. See <see cref="Subx"/>.
+    /// </remarks>
     /// <param name="replacement">The replacement template.</param>
+    /// <returns>The compiled template: a literal run or a group number per item.</returns>
     /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
-    private void ValidateReplacement(string replacement) =>
-        _ = Parsing.PatternCompiler.CompileReplacement(replacement, _compiled.GroupCount, _compiled.GroupIndex);
+    internal IReadOnlyList<object> CompileReplacement(string replacement) =>
+        Parsing.PatternCompiler.CompileReplacement(replacement, _compiled.GroupCount, _compiled.GroupIndex);
 
     /// <summary>
     /// Adapts the public named-list shape to the compiler's. The compiler takes a list because
@@ -330,7 +334,7 @@ public sealed class FuzzyRegex
         int end = length < 0 || beginning > int.MaxValue - length ? int.MaxValue : beginning + length;
 
         using var state = Engine.MatchState.Create(
-            _pattern,
+            PatternObject,
             input,
             beginning,
             end,
@@ -339,7 +343,7 @@ public sealed class FuzzyRegex
             // The Match object, and therefore repeated captures, will be visible.
             visibleCaptures: true,
             matchAll: matchAll,
-            timeout: _timeoutTicks
+            timeout: TimeoutTicks
         );
 
         int status = Engine.Matcher.DoMatch(state, search);
@@ -353,13 +357,54 @@ public sealed class FuzzyRegex
     }
 
     /// <summary>
+    /// Replaces every match, up to <paramref name="count"/> of them. The loop itself is
+    /// <see cref="Engine.Substitution.Subx"/>, beside the rest of the <c>_regex.c</c> port; this is
+    /// the argument shuffling upstream's <c>pattern_sub</c>/<c>subn</c>/<c>subf</c>/<c>subfn</c> do
+    /// before calling it.
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="template">The replacement or format template, or <see langword="null"/> when
+    /// <paramref name="evaluator"/> is given.</param>
+    /// <param name="evaluator">Computes each replacement, or <see langword="null"/> for a template.</param>
+    /// <param name="isFormat">Whether the template is a <c>str.format</c> one (upstream's <c>RE_SUBF</c>).</param>
+    /// <param name="count">The most replacements to make, or a negative number for no limit.</param>
+    /// <param name="replacements">Receives how many replacements were made.</param>
+    /// <returns>The subject with the matches replaced.</returns>
+    private string Subx(
+        string input,
+        string? template,
+        MatchEvaluator? evaluator,
+        bool isFormat,
+        int count,
+        out int replacements
+    )
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (evaluator is null)
+        {
+            ArgumentNullException.ThrowIfNull(template);
+        }
+
+        return Engine.Substitution.Subx(this, input, template, evaluator, isFormat, count, out replacements);
+    }
+
+    /// <summary>The compiled pattern the engine runs, which <c>pattern_subx</c> reads as <c>self</c>.</summary>
+    internal Engine.PatternObject PatternObject { get; }
+
+    /// <summary>The pattern's capture group count, upstream's <c>public_group_count</c>.</summary>
+    internal int GroupCount => _compiled.GroupCount;
+
+    /// <summary>The match timeout in <see cref="System.Diagnostics.Stopwatch"/> ticks.</summary>
+    internal long TimeoutTicks { get; }
+
+    /// <summary>
     /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738).
     /// </summary>
     /// <param name="state">The state the match ran in.</param>
     /// <param name="input">The subject.</param>
     /// <param name="status">What <c>do_match</c> returned.</param>
     /// <returns>The match, successful or not.</returns>
-    private Match NewMatch(Engine.MatchState state, string input, int status)
+    internal Match NewMatch(Engine.MatchState state, string input, int status)
     {
         if (status != Engine.MatchStatus.Success)
         {
@@ -481,11 +526,8 @@ public sealed class FuzzyRegex
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <returns>The subject with the matches replaced.</returns>
     /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
-    public string Replace(string input, string replacement, int count = -1)
-    {
-        ValidateReplacement(replacement);
-        throw new NotImplementedException();
-    }
+    public string Replace(string input, string replacement, int count = -1) =>
+        Subx(input, replacement, evaluator: null, isFormat: false, count, out _);
 
     /// <summary>
     /// Replaces matches with an expanded replacement template, reporting how many were replaced.
@@ -497,19 +539,19 @@ public sealed class FuzzyRegex
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <returns>The subject with the matches replaced.</returns>
     /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
-    public string Replace(string input, string replacement, int count, out int replacements)
-    {
-        ValidateReplacement(replacement);
-        throw new NotImplementedException();
-    }
+    public string Replace(string input, string replacement, int count, out int replacements) =>
+        Subx(input, replacement, evaluator: null, isFormat: false, count, out replacements);
 
     /// <summary>Replaces matches with text computed per match.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="evaluator">Computes the replacement for each match.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <returns>The subject with the matches replaced.</returns>
-    public string Replace(string input, MatchEvaluator evaluator, int count = -1) =>
-        throw new NotImplementedException();
+    public string Replace(string input, MatchEvaluator evaluator, int count = -1)
+    {
+        ArgumentNullException.ThrowIfNull(evaluator);
+        return Subx(input, template: null, evaluator, isFormat: false, count, out _);
+    }
 
     /// <summary>
     /// Replaces matches with text computed per match, reporting how many were replaced. Upstream
@@ -520,8 +562,11 @@ public sealed class FuzzyRegex
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <returns>The subject with the matches replaced.</returns>
-    public string Replace(string input, MatchEvaluator evaluator, int count, out int replacements) =>
-        throw new NotImplementedException();
+    public string Replace(string input, MatchEvaluator evaluator, int count, out int replacements)
+    {
+        ArgumentNullException.ThrowIfNull(evaluator);
+        return Subx(input, template: null, evaluator, isFormat: false, count, out replacements);
+    }
 
     /// <summary>
     /// Splits the subject around the matches, including the text captured by any groups, as both
@@ -551,7 +596,8 @@ public sealed class FuzzyRegex
     /// <param name="format">The format template.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <returns>The subject with the matches replaced.</returns>
-    public string ReplaceFormat(string input, string format, int count = -1) => throw new NotImplementedException();
+    public string ReplaceFormat(string input, string format, int count = -1) =>
+        Subx(input, format, evaluator: null, isFormat: true, count, out _);
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, reporting how many were
@@ -563,7 +609,7 @@ public sealed class FuzzyRegex
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <returns>The subject with the matches replaced.</returns>
     public string ReplaceFormat(string input, string format, int count, out int replacements) =>
-        throw new NotImplementedException();
+        Subx(input, format, evaluator: null, isFormat: true, count, out replacements);
 
     /// <summary>Whether the pattern matches anywhere in the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -678,7 +724,7 @@ public sealed class FuzzyRegex
         string pattern,
         MatchEvaluator evaluator,
         FuzzyRegexOptions options = FuzzyRegexOptions.None
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options).Replace(input, evaluator);
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, where <c>{0}</c> is the
@@ -696,7 +742,7 @@ public sealed class FuzzyRegex
         string pattern,
         string format,
         FuzzyRegexOptions options = FuzzyRegexOptions.None
-    ) => throw new NotImplementedException();
+    ) => new FuzzyRegex(pattern, options).ReplaceFormat(input, format);
 
     /// <summary>Splits the subject around the matches. Upstream <c>regex.split</c>.</summary>
     /// <param name="input">The subject to split.</param>

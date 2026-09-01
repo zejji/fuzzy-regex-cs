@@ -68,18 +68,18 @@ Three properties of it are load-bearing, and each is pinned by a test in `Oracle
 | `Match.fuzzy_changes` | `_regex.c` | `Match.FuzzyChanges` (`FuzzyChanges` record struct) | S01 |
 | `Match.partial` | `_regex.c` | `Match.PartialMatch` | S01 |
 | `Match.captures(g)` | `_regex.c` | `Group.Captures` (`CaptureCollection`) | S01 |
-| `Match.expand` | `_main.py:687` (`_compile_replacement_helper`) | `Match.Result(string)` - the template language is upstream's (`\1`, `\g<name>`, `\n`), not `Regex`'s `$1` | S01, language settled S02 |
-| `Match.expandf` | `_main.py:687` | `Match.ResultFormat(string)` | S01 |
+| `Match.expand` | `_main.py:687` (`_compile_replacement_helper`), `_regex.c:19902` | `Match.Result(string)` - the template language is upstream's (`\1`, `\g<name>`, `\n`), not `Regex`'s `$1`. **Implemented in S24** | S01, language settled S02, S24 |
+| `Match.expandf` | `_main.py:687`, `_regex.c:20045` | `Match.ResultFormat(string)` - **implemented in S24** | S01, S24 |
 | `Match.lastindex` | `_regex.c` | `Match.LastGroupNumber` | S01 |
 | `Match.lastgroup` | `_regex.c` | `Match.LastGroupName` | S01 |
 | `Pattern.search` / `regex.search` | `_main.py:273` | `FuzzyRegex.Match` (.NET meaning of Match) | S01 |
 | `Pattern.match` / `regex.match` | `_main.py:252` | `FuzzyRegex.MatchAtStart` | S01 |
 | `Pattern.fullmatch` / `regex.fullmatch` | `_main.py:266` | `FuzzyRegex.FullMatch` | S01 |
 | `Pattern.finditer` / `regex.finditer` | `_main.py:350` | `FuzzyRegex.Matches` (`MatchCollection`) | S01 |
-| `Pattern.sub` / `regex.sub` | `_main.py:280` | `FuzzyRegex.Replace` | S01 |
-| `Pattern.subn` / `regex.subn` | `_main.py:300` | `FuzzyRegex.Replace(..., out int)` | S01 |
-| `Pattern.subf` / `regex.subf` | `_main.py:290` | `FuzzyRegex.ReplaceFormat` | S01 |
-| `Pattern.subfn` / `regex.subfn` | `_main.py:312` | `FuzzyRegex.ReplaceFormat(..., out int)` | S01 |
+| `Pattern.sub` / `regex.sub` | `_main.py:280`, `_regex.c:21726` | `FuzzyRegex.Replace` - **implemented in S24** | S01, S24 |
+| `Pattern.subn` / `regex.subn` | `_main.py:300` | `FuzzyRegex.Replace(..., out int)` - **implemented in S24**. `count` is inverted: upstream's 0 is no limit and ours is -1 | S01, S24 |
+| `Pattern.subf` / `regex.subf` | `_main.py:290` | `FuzzyRegex.ReplaceFormat` - **implemented in S24** | S01, S24 |
+| `Pattern.subfn` / `regex.subfn` | `_main.py:312` | `FuzzyRegex.ReplaceFormat(..., out int)` - **implemented in S24** | S01, S24 |
 | `Pattern.split` / `regex.split` | `_main.py:324` | `FuzzyRegex.Split`, returning `string?[]` - `null` where a group did not take part, as upstream puts `None` | S01, signature revised S02 |
 | `Pattern.groupindex` | `_main.py` | `FuzzyRegex.GroupNumberFromName` / `GroupNames` | S01 |
 | `regex.escape`, `_METACHARS` | `_main.py:388-423`, `:445` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` and its `_metachars` constant - **implemented in S12**. Both upstream flags are carried; all four combinations differ. One loop over whole codepoints rather than upstream's two loops over a `str`, so an astral character takes one backslash and a lone surrogate survives | S01, S12 |
@@ -336,6 +336,28 @@ follows is the dispatch cases and the two counting helpers. All line references 
 | The `_REV` rows of the shared one-character backtrack block (`:15210-15243`), the `_REV` rows of the `REF_GROUP`/`STRING` fuzzy retry (`:17269-17292`) | as listed | **Nothing to port.** Every one is `retry_fuzzy_match_item`, `retry_fuzzy_match_string` or `retry_fuzzy_match_group_fld`; the `default` arm's seam still covers them, and a non-fuzzy `_REV` node pushes nothing |
 | The `_REV` string arms of the two `*_REPEAT_ONE` sub-switches (`:15950-16342`, `:16608-17107`) | as listed | **Not ported**, for the reason the forward ones are not: they are built on `string_search_rev`, the Phase 7 deferral. The `*_REPEAT_ONE` backtrack cases themselves needed no change at all - S19 wrote them against `node.Next2.Test!.Step`, which is `-1` for a reversed repeat |
 | The zero-width predicates under `(?r)` | - | **Nothing to port.** They have no `_REV` twin in upstream at all: each inspects both sides of a position, so direction cannot change its answer. The claim is pinned rather than assumed, in `Gaps/Engine/ReverseMatchingTests.cs` |
+
+### Substitution (`src/_regex.c`), S24
+
+`sub`, `subn`, `subf`, `subfn`, `Match.expand` and `Match.expandf`. S12 ported the replacement
+*template compiler*; this is everything that applies a template to a real match. All line
+references are `upstream/src/_regex.c`.
+
+| Upstream symbol | Upstream line | Ours |
+|---|---|---|
+| `pattern_subx` | `:21726` | `Engine.Substitution.Subx`, with the per-match four-way branch in `AddReplacement` beside it. `FuzzyRegex.Subx` is the argument shuffling `pattern_sub`/`subn`/`subf`/`subfn` (`:22109`-) do before calling it. Lives in `Engine/` rather than on `FuzzyRegex` because that is where the `_regex.c` port lives; the three `internal` members it reads back (`PatternObject`, `GroupCount`, `TimeoutTicks`) are upstream's `self->pattern`, `self->public_group_count` and `self->timeout` |
+| `check_replacement_string` | `:19865` | `Engine.Substitution.IsLiteralTemplate`. Upstream returns a length so its callers can separate an empty template from a literal one and skip it; both add nothing to the join list, so the two collapse to a `bool`. **Not an optimisation**: a literal is never handed to the template compiler, so a malformed template is not rejected unless it holds the special character |
+| `get_sub_replacement` | `:21667` | `Engine.Substitution.GetSubReplacement`, reading the match out of the live state. Upstream's two `Py_RETURN_NONE` paths - a zero-width whole match, and a group that took no part - join as `""`, which is what the slice of a zero-width span already gives, so both return text |
+| `get_match_replacement` | `:19635` | `Engine.Substitution.GetMatchReplacement`, reading a finished `Match`. Differs from the one above in **which exception an out-of-range reference raises**, and that is upstream's difference, not ours: `RE_ERROR_INVALID_GROUP_REF` (`regex.error`) from `sub`, `RE_ERROR_NO_SUCH_GROUP` (`IndexError`) from `expand`. Measured 2026-09-01 and pinned in `Gaps/Substitution/SubstitutionRulesTests.cs` |
+| `match_expand` | `:19902` | `Match.Result`, literal shortcut and all |
+| `match_expandf`, `make_capture_dict` | `:20045`, `:19983` | `Match.ResultFormat` over `Match.ResolveFormatArgument`. Upstream builds one `Capture` object per group and hands them to CPython's `str.format` as `*args` plus the named groups as `**kwargs`; here the arguments are `Group`s and `Substitution.ExpandFormat` is the port of the *format grammar* rather than of anything in `_regex.c` |
+| `capture_str`, `capture_getitem`, `capture_length` | `:21437`, `:21370`, `:21356` | `Group.Value` and `Group.Captures` answer both, including the negative-index rule and group 0's single-entry capture list, so `{n[i]}` needed no new accessor |
+| `index_to_integer` | `:21311` | `Substitution.TryParseSubscript`, **partially**. It is `int(text, 0)`, a full Python integer literal; this reads an optionally-signed ASCII decimal and refuses the rest, including the base-0 rule that makes a *signed* `{1[-01]}` an error while an unsigned `{1[01]}` is index 1. `{1[ 0 ]}`, `{1[0x1]}` and a non-ASCII decimal digit are accepted upstream and refused here - a marked ceiling with the upgrade path at the method, failing by refusal rather than by a different capture. Raised by S24's blind review |
+| `pattern_subx`'s too-short-subject shortcut | `:21762` | In `Substitution.Subx`, compared against a **codepoint** count (`CodepointCount`), because `min_width` is one and this port's positions are UTF-16 code units. The two differ only on an astral subject, and only observably at all because the shortcut returns before the template is compiled. Also raised by S24's blind review |
+| `init_join_list`, `add_to_join_list`, `join_list_info`, `clear_join_list` | `:19687`-`:19864` | A `List<string>` concatenated with `string.Concat`. A list rather than a `StringBuilder` because `join_info.reversed` reverses the whole list once the last match is in, which is how `(?r)` produces a forward-reading result |
+| `make_capture_object`, the `built_capture` args/kwargs cache | `:19968`, `:21895`-`:21950` | **Not ported.** The cache exists so one args tuple can be reused across matches through a pointer to the match; a fresh `Match` per match says the same thing, and is what `match_expandf` itself does |
+| The `RE_SUBF` format spec and the `!r`/`!a` conversions | - | **Deliberately rejected**, because upstream rejects them too: a spec raises `TypeError: unsupported format string passed to _regex.Capture.__format__`, and `!r` yields `'<_regex.Capture object at 0x...>'`, an interpreter address. `NotSupportedException` here; measured 2026-09-01 |
+| A chained subscript (`{1[0][0]}`) and attribute access (`{0.x}`) | - | **Not ported.** The first works upstream by indexing the `str` the first subscript produced - codepoints there, UTF-16 code units here - so it is a marked corner cut with the ceiling named at `Substitution.ExpandField`; the second raises `AttributeError` upstream |
 
 ## Deliberately not ported
 

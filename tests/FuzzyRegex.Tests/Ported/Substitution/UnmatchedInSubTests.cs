@@ -17,49 +17,31 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class UnmatchedInSubTests
 {
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#1")]
     public void V0_replacement_expands_an_unmatched_trailing_group_to_empty() =>
         FuzzyRegex.Replace("xy", "(?V0)(x)?(y)?", @"\2-\1").Should().Be("y-x-");
 
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#3")]
     public void V1_replacement_expands_an_unmatched_trailing_group_to_empty() =>
         FuzzyRegex.Replace("xy", "(?V1)(x)?(y)?", @"\2-\1").Should().Be("y-x-");
 
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#4")]
     public void V0_replacement_expands_an_unmatched_leading_and_trailing_group_to_empty() =>
         FuzzyRegex.Replace("x", "(?V0)(x)?(y)?", @"\2-\1").Should().Be("-x-");
 
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#6")]
     public void V1_replacement_expands_an_unmatched_leading_and_trailing_group_to_empty() =>
         FuzzyRegex.Replace("x", "(?V1)(x)?(y)?", @"\2-\1").Should().Be("-x-");
 
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#7")]
     public void V0_replacement_expands_an_unmatched_leading_group_to_empty() =>
         FuzzyRegex.Replace("y", "(?V0)(x)?(y)?", @"\2-\1").Should().Be("y--");
 
     [Test]
-    [Skip(
-        "needs:substitution - backreferences to an unmatched group are not implemented yet; the pattern also needs the (?V0)/(?V1) version flags to parse"
-    )]
     [Property("Upstream", "RegexTests.test_unmatched_in_sub#9")]
     public void V1_replacement_expands_an_unmatched_leading_group_to_empty() =>
         FuzzyRegex.Replace("y", "(?V1)(x)?(y)?", @"\2-\1").Should().Be("y--");

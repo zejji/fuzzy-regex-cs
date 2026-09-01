@@ -27,6 +27,9 @@ internal static class OracleComparer
         nameof(ArgumentNullException),
         nameof(ArgumentOutOfRangeException),
         nameof(NotSupportedException),
+        // Added in S24 for the format-template language: a malformed `{...}` field is upstream's
+        // ValueError out of str.format, and FormatException is what .NET calls that.
+        nameof(FormatException),
     ];
 
     /// <summary>Puts every row's question to an engine and tallies the verdicts.</summary>
@@ -107,6 +110,27 @@ internal static class OracleComparer
 
         try
         {
+            if (row.Operation is "sub" or "subf")
+            {
+                // The two conventions are each other's mirror at both ends, and translating only
+                // one end asks the two engines opposite questions: upstream's 0 is "no limit" and
+                // its negative is "no replacements", where this surface spells those -1 and 0.
+                // A row with a negative count reached a false RED before S24's blind review found
+                // it; only a hand-written `-Rows` row can carry one, since the generator emits
+                // upstream's own convention.
+                int count = row.Count switch
+                {
+                    0 => -1,
+                    < 0 => 0,
+                    _ => row.Count,
+                };
+                string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
+                    ? compiled.Replace(row.Subject, row.Template!, count, out int replacements)
+                    : compiled.ReplaceFormat(row.Subject, row.Template!, count, out replacements);
+
+                return new SubOutcome(replaced, replacements);
+            }
+
             Match match = row.Operation switch
             {
                 "search" => compiled.Match(row.Subject),
@@ -125,10 +149,6 @@ internal static class OracleComparer
         }
         catch (Exception e)
         {
-            // ponytail: unreachable until S16 lands a matcher - every match entry point throws
-            // NotImplementedException today, so the catch above takes everything. The first slice
-            // that can throw from here must pin the attribution with a test; until then only
-            // Compare's side of the flag is covered (OracleWaveTests).
             return ErrorOutcome.From(e, whileMatching: true);
         }
     }
@@ -162,12 +182,17 @@ internal static class OracleComparer
                 return OracleVerdict.Diverge;
             }
 
-            // Upstream rejected the input before it matched anything, so an exception this port
-            // raised *while matching* is not the same answer however plausible its type looks: it
-            // is a crash on a row this port should have refused to compile. Without this the
-            // allow-list alone let an ArgumentOutOfRangeException out of the engine be filed as
-            // parity with upstream's ValueError about conflicting flags.
-            if (got.WhileMatching)
+            // The two sides must have thrown at the same point. An exception this port raised
+            // *while matching*, where upstream rejected the pattern before it matched anything, is
+            // not the same answer however plausible its type looks: it is a crash on a row this
+            // port should have refused to compile. Without this the allow-list alone let an
+            // ArgumentOutOfRangeException out of the engine be filed as parity with upstream's
+            // ValueError about conflicting flags.
+            //
+            // Upstream's own flag was recorded, not assumed, from S24 on: a substitution rejects an
+            // out-of-range group reference while it is substituting, so "upstream rejected before
+            // matching" is no longer true of every recorded error (measured 2026-09-01).
+            if (got.WhileMatching != expected.WhileMatching)
             {
                 return OracleVerdict.Diverge;
             }

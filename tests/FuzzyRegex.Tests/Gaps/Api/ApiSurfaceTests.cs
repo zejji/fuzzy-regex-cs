@@ -106,18 +106,48 @@ public sealed class ApiSurfaceTests
     [Test]
     public void The_members_no_slice_has_reached_are_still_stubs()
     {
-        // The other half of what the S16 replacement inherited: iteration, substitution and
-        // splitting are S24 and S25, and partial matching is phase 4. When one of these starts
-        // failing, the slice that made it fail should assert on it for real instead.
+        // The other half of what the S16 replacement inherited: iteration and splitting are S25,
+        // and partial matching is phase 4. Substitution left this list in S24 for the test below.
+        // When one of these starts failing, the slice that made it fail should assert on it for
+        // real instead.
         Action matches = () => _ = new FuzzyRegex("a").Matches("abc");
-        Action replace = () => _ = new FuzzyRegex("a").Replace("abc", "z");
         Action split = () => _ = new FuzzyRegex("a").Split("abc");
         Action partial = () => _ = new FuzzyRegex("a").Match("abc", partial: true);
 
         matches.Should().Throw<NotImplementedException>();
-        replace.Should().Throw<NotImplementedException>();
         split.Should().Throw<NotImplementedException>();
         partial.Should().Throw<NotImplementedException>().WithMessage("needs:partial*");
+    }
+
+    [Test]
+    public void The_eight_substitution_entry_points_answer_for_a_pattern_the_engine_can_run()
+    {
+        // S24's half of the test above: every Replace/ReplaceFormat overload and both Match
+        // expanders, wired to the right upstream operation. The ported suite covers what each
+        // *does*; what is checked here is that no overload was left throwing, and that the two
+        // count-reporting ones report the count rather than the number of scans.
+        var pattern = new FuzzyRegex("(a)");
+
+        FuzzyRegex.Replace("aba", "(a)", "z").Should().Be("zbz");
+        FuzzyRegex.Replace("aba", "(a)", m => m.Value.ToUpperInvariant()).Should().Be("AbA");
+        FuzzyRegex.ReplaceFormat("aba", "(a)", "[{1}]").Should().Be("[a]b[a]");
+
+        pattern.Replace("aba", "z", 1).Should().Be("zba");
+        pattern.Replace("aba", m => m.Value.ToUpperInvariant(), 1).Should().Be("Aba");
+        pattern.ReplaceFormat("aba", "[{1}]", 1).Should().Be("[a]ba");
+
+        pattern.Replace("aba", "z", -1, out int templateCount).Should().Be("zbz");
+        templateCount.Should().Be(2);
+
+        pattern.Replace("aba", _ => "z", -1, out int evaluatorCount).Should().Be("zbz");
+        evaluatorCount.Should().Be(2);
+
+        pattern.ReplaceFormat("aba", "[{1}]", -1, out int formatCount).Should().Be("[a]b[a]");
+        formatCount.Should().Be(2);
+
+        Match match = pattern.Match("aba");
+        match.Result(@"<\1>").Should().Be("<a>");
+        match.ResultFormat("<{1}>").Should().Be("<a>");
     }
 
     [Test]

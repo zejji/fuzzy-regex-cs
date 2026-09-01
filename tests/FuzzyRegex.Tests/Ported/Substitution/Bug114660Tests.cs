@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class Bug114660Tests
 {
     [Test]
-    [Skip("needs:substitution - group references in a template are not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_114660#1")]
     public void Replace_collapses_whitespace_between_two_captured_non_space_characters() =>
         FuzzyRegex.Replace("hello  there", @"(\S)\s+(\S)", @"\1 \2").Should().Be("hello there");

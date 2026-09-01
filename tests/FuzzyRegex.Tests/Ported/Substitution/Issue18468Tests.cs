@@ -17,7 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class Issue18468Tests
 {
     [Test]
-    [Skip("needs:substitution - regex.sub is not implemented yet")]
     [Property("Upstream", "RegexTests.test_issue_18468#1")]
     public void Sub_replaces_a_literal() => FuzzyRegex.Replace("xyz", "y", "a").Should().Be("xaz");
 }

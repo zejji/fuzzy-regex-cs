@@ -290,13 +290,11 @@ public sealed class SearchReverseTests
     }
 
     [Test]
-    [Skip("needs:substitution - Pattern.Replace is not implemented yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#48")]
     public void Replace_with_a_single_group_backreference_reproduces_the_subject() =>
         FuzzyRegex.Replace("abc", "(.)", @"\1").Should().Be("abc");
 
     [Test]
-    [Skip("needs:substitution - right-to-left matching works from S23; FuzzyRegex.Replace is S24")]
     [Property("Upstream", "RegexTests.test_search_reverse#49")]
     public void Replace_with_a_reversed_single_group_backreference_reproduces_the_subject() =>
         FuzzyRegex.Replace("abc", "(?r)(.)", @"\1").Should().Be("abc");

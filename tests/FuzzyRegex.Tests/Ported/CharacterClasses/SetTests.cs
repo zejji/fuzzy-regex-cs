@@ -47,9 +47,6 @@ public sealed class SetTests
     }
 
     [Test]
-    [Skip(
-        "needs:substitution - Replace is not implemented; also needs (?V0) to parse and the V0 rule that lets [ and ] stand as literals inside a class"
-    )]
     [Property("Upstream", "RegexTests.test_set#5")]
     public void Version0_flag_allows_literal_brackets_inside_a_character_class() =>
         FuzzyRegex.Replace("a[b]c", @"(?V0)([][])", "-").Should().Be("a-b-c");

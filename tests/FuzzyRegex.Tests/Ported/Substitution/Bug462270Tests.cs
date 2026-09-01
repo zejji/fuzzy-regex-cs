@@ -15,7 +15,6 @@ public sealed class Bug462270Tests
     [Test]
     [Arguments("(?V0)x*", "-a-b--d-")]
     [Arguments("(?V1)x*", "-a-b--d-")]
-    [Skip("needs:substitution - a star quantifier's empty matches are not replaced yet")]
     [Property("Upstream", "RegexTests.test_bug_462270#1-2")]
     public void Replace_with_a_star_quantifier_also_replaces_the_empty_matches_between_characters(
         string pattern,
@@ -23,7 +22,6 @@ public sealed class Bug462270Tests
     ) => FuzzyRegex.Replace("abxd", pattern, "-").Should().Be(expected);
 
     [Test]
-    [Skip("needs:substitution - Pattern.Replace is not implemented yet")]
     [Property("Upstream", "RegexTests.test_bug_462270#3")]
     public void Replace_with_a_plus_quantifier_does_not_replace_empty_matches() =>
         FuzzyRegex.Replace("abxd", "x+", "-").Should().Be("ab-d");

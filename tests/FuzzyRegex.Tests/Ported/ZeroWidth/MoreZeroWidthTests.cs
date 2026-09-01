@@ -21,7 +21,6 @@ public sealed class MoreZeroWidthTests
         FuzzyRegex.Split("a::bc", @"\b|:+").Should().Equal("", "a", "", "", "bc", "");
 
     [Test]
-    [Skip("needs:substitution - Pattern.Replace is not implemented yet")]
     [Property("Upstream", "RegexTests.test_more_zerowidth#2")]
     public void Replacing_a_word_boundary_or_colon_run_inserts_a_dash_at_every_zero_width_position() =>
         FuzzyRegex.Replace("a::bc", @"\b|:+", "-").Should().Be("-a---bc-");

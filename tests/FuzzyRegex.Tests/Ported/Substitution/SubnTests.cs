@@ -8,7 +8,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Substitution;
 public sealed class SubnTests
 {
     [Test]
-    [Skip("needs:substitution - the Replace(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_subn#1")]
     public void Replace_reports_the_string_and_the_replacement_count_case_insensitively()
     {
@@ -19,7 +18,6 @@ public sealed class SubnTests
     }
 
     [Test]
-    [Skip("needs:substitution - the Replace(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_subn#2")]
     public void Replace_reports_the_string_and_the_replacement_count()
     {
@@ -30,7 +28,6 @@ public sealed class SubnTests
     }
 
     [Test]
-    [Skip("needs:substitution - the Replace(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_subn#3")]
     public void Replace_reports_zero_replacements_when_nothing_matches()
     {
@@ -41,7 +38,6 @@ public sealed class SubnTests
     }
 
     [Test]
-    [Skip("needs:substitution - a star quantifier's empty matches are not counted yet")]
     [Property("Upstream", "RegexTests.test_re_subn#4")]
     public void Replace_counts_every_empty_match_of_a_star_quantifier()
     {
@@ -52,7 +48,6 @@ public sealed class SubnTests
     }
 
     [Test]
-    [Skip("needs:substitution - the Replace(replacement, count, out replacements) overload is not implemented yet")]
     [Property("Upstream", "RegexTests.test_re_subn#5")]
     public void Replace_with_a_count_stops_early_and_reports_only_that_many_replacements()
     {
