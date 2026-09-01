@@ -125,16 +125,29 @@ Short on purpose. Anything whose cost of forgetting is high belongs in a script 
 this list.
 
 - **Launch the driver detached, never as a background tool call**: `pwsh -File
-  tools/launch-slice.ps1 s<nn>`, which prints the PID and returns in a second. Measured 2026-08-31:
-  a backgrounded driver was killed by the harness 42 minutes in, mid-slice, before it could roll
-  back or rescue. Detaching removes the dependency entirely.
+  tools/launch-slice.ps1 s<nn>`. Measured 2026-08-31: a backgrounded driver was killed by the
+  harness 42 minutes in, mid-slice, before it could roll back or rescue. Detaching removes the
+  dependency entirely - measured again 2026-09-01, when the harness killed the launching call and
+  the driver and its slice session both carried on.
+  **The launching call itself does not return promptly**, though; it holds until its timeout, so
+  expect it to be backgrounded and read the PID out of `.scratch/driver-s<nn>.log`. Two causes were
+  tested and disproved on 2026-09-01 - inherited stdin, and a long-lived grandchild - so the reason
+  is still unknown. It costs one timeout per launch and nothing else.
 - **Arm a heartbeat in the same turn you launch**: `bash tools/heartbeat.sh <pid> s<nn>` under
   whatever polls for you. It must print every few minutes whether or not anything changed. A
   monitor that only emits on change is silent for the whole run and tells you nothing. It also
   fires a one-shot alarm at 160 minutes, before the driver's 180-minute force-kill, while the
   slice session can still be asked to commit.
-- Both scripts are tracked, not left in `.scratch/`, because **slice sessions clear `.scratch`**
-  and they were lost mid-run on 2026-09-01 having already been recreated twice.
+- **Re-run any recorded negative control**: `python tools/run-controls.py --check` resolves every
+  recorded mutation site without building anything, `--ids S19-A` runs one, `--slices S19,S20` runs
+  a slice's worth. The mutations live in `tools/controls.json`, one object per control carrying the
+  file, an anchor and its nth occurrence, the exact before and after text, the generator, the row
+  count and the seeds. The anchor matters: two sites in this engine share their text, so a bare
+  string replace silently mutates the wrong one, which is a control that measures nothing.
+- These scripts are tracked, not left in `.scratch/`, because **slice sessions clear `.scratch`**.
+  The launcher and heartbeat were lost mid-run on 2026-09-01 having already been recreated twice,
+  and S18's negative controls were lost that way for good - its recorded numbers can never be
+  reproduced. Scratch output still goes to `.scratch/`; only the inputs are tracked.
 - **Verify every slice yourself**: run the ratchet and read the numbers, confirm a clean tree, the
   commit, the slice file moved to `done/`, and reproduce the slice's own evidence rather than
   reading it out of the closing notes. Where a slice claims to have CHANGED behaviour, prove it
