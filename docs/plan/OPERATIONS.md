@@ -124,12 +124,17 @@ After Phase 1, recalibrate: `docs/plan/slice-log.jsonl` will hold what each slic
 Short on purpose. Anything whose cost of forgetting is high belongs in a script that fails, not in
 this list.
 
-- **Launch the driver detached, never as a background tool call.** Measured 2026-08-31: a
-  backgrounded driver was killed by the harness 42 minutes in, mid-slice, before it could roll back
-  or rescue. Detaching removes the dependency entirely.
-- **Arm a heartbeat monitor in the same turn you launch.** It must print every few minutes whether
-  or not anything changed. A monitor that only emits on change is silent for the whole run and
-  tells you nothing.
+- **Launch the driver detached, never as a background tool call**: `pwsh -File
+  tools/launch-slice.ps1 s<nn>`, which prints the PID and returns in a second. Measured 2026-08-31:
+  a backgrounded driver was killed by the harness 42 minutes in, mid-slice, before it could roll
+  back or rescue. Detaching removes the dependency entirely.
+- **Arm a heartbeat in the same turn you launch**: `bash tools/heartbeat.sh <pid> s<nn>` under
+  whatever polls for you. It must print every few minutes whether or not anything changed. A
+  monitor that only emits on change is silent for the whole run and tells you nothing. It also
+  fires a one-shot alarm at 160 minutes, before the driver's 180-minute force-kill, while the
+  slice session can still be asked to commit.
+- Both scripts are tracked, not left in `.scratch/`, because **slice sessions clear `.scratch`**
+  and they were lost mid-run on 2026-09-01 having already been recreated twice.
 - **Verify every slice yourself**: run the ratchet and read the numbers, confirm a clean tree, the
   commit, the slice file moved to `done/`, and reproduce the slice's own evidence rather than
   reading it out of the closing notes. Where a slice claims to have CHANGED behaviour, prove it
