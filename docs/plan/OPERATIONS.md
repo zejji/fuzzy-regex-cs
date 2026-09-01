@@ -148,6 +148,15 @@ this list.
   The launcher and heartbeat were lost mid-run on 2026-09-01 having already been recreated twice,
   and S18's negative controls were lost that way for good - its recorded numbers can never be
   reproduced. Scratch output still goes to `.scratch/`; only the inputs are tracked.
+- **A red ratchet with no test report is a build failure, not a slice failure.** The driver cannot
+  tell them apart and rolls back either way, so read its log before believing the slice broke.
+  Measured 2026-09-01: a locked `obj/.../FuzzyRegex.sourcelink.json` rolled back an S26 commit that
+  was green. Tag the rolled-back SHA first, then `dotnet build-server shutdown` - reading BOTH lines
+  of its output, because a server reporting a failed shutdown is the first suspect - then
+  `tools/find-lock-holder.ps1 <the path the error named>`, which names the holders outright. That
+  day the answer was `VBCSCompiler` and `csc`, after the lock had been wrongly blamed on the IDE and
+  the owner had restarted it for nothing. Verify the recovered commit in a worktree, which has its
+  own `obj/`, then `git merge --ff-only`.
 - **Verify every slice yourself**: run the ratchet and read the numbers, confirm a clean tree, the
   commit, the slice file moved to `done/`, and reproduce the slice's own evidence rather than
   reading it out of the closing notes. Where a slice claims to have CHANGED behaviour, prove it
