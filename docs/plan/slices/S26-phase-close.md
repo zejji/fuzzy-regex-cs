@@ -35,6 +35,16 @@ swept the whole surface at once, and Phase 4's author has a handover.
 - **The prefilter contingency, checked**: confirm no ported test is skipped-for-timeout because
   of the deferral (S19's contingency). If any is, port the needed prefilter now rather than hand
   Phase 4 a slow engine with a hidden hole.
+  **Widened 2026-09-01: the symptom is not only a skip, it is a test that passes slowly.**
+  `MatchAtStart_lazy_dot_star_cd_handles_a_long_repeated_prefix` takes **372 seconds** where
+  upstream takes **0.0003**, and with its two siblings accounts for 433 of the suite's 515
+  measured seconds - the ratchet went from 1m28s to over 6 minutes on S24's watch, and every
+  future slice pays that. The suite's own numbers put the growth at **n^2.29** (20,004 chars in
+  30.08s, 60,002 in 372.43s), so this is quadratic behaviour, most likely the UTF-16 position
+  walking in the repeat loop rather than a missing prefilter - `MatchAtStart` is anchored, so
+  `locate_required_string` is not what saves upstream. Measure it, name the cause, and decide
+  explicitly whether Phase 7 fixes it or Phase 3 closes with a documented quadratic. Do not let it
+  pass unremarked because the tests are green. DECISIONS 2026-09-01.
 - **Un-skip sweep**: walk the remaining skipped tests whose tags Phase 3 delivered - any test
   still skipped on a delivered tag is either a defect (fix it) or mis-tagged (retag with prose),
   the S13 rule that a phase does not close with its own tags still on the board.
