@@ -141,6 +141,15 @@ Then:
    appears nowhere in `Matcher.cs`. It was reproducible only because the intent was obvious.
    Copy the lines out of the file.
 
+   **Run every control one final time against the code and generator you are about to commit,
+   and record those numbers.** A control run partway through a slice measures a generator that no
+   longer exists by the end of it. S22 recorded 15 divergences for its Control A and the committed
+   code gives 42; its B and C were out by 1 to 3; only D - the control whose own notes describe
+   three later widenings, so the one run last - reproduced. Widening a generator or fixing an
+   engine bug after a control has run invalidates its number, and the blind review's own fixes
+   land after everything else. The final re-run is seconds; do it after the last code change, not
+   before.
+
    **Re-run each control that fired at ONE seed the slice has not used, and record both
    numbers.** It costs about three seconds and it is the only way to tell a control that
    catches a fault from one that caught a coincidence. S20's Control C gave 2 divergences of

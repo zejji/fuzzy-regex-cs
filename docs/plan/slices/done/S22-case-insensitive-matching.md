@@ -133,16 +133,30 @@ expanding alphabet twice in the rotation. Each widening's before/after numbers a
 beside it.
 
 **Negative controls.** All figures from
-`pwsh -File tools/run-oracle.ps1 -Generator case-folding -Count 600 -Seed <n>`, run against the
-generator as committed.
+`pwsh -File tools/run-oracle.ps1 -Generator case-folding -Count 600 -Seed <n>`.
+
+> **Corrected 2026-09-01 by the orchestrator.** The figures below were re-measured against the
+> code and generator as committed, and three of the four had been recorded from an earlier state
+> of the slice. The originals are kept in brackets. Control A was recorded at 15/16 and is really
+> **42/23**; B at 7/8 is really **8/8**; C at 5/5 is really **4/8**; D's 0/4/1 reproduces exactly.
+> D is the control whose notes describe three later widenings of the generator, so it was the one
+> run last - which is the whole explanation. Controls run partway through a slice and not re-run
+> before the commit measure a generator that no longer exists. The `port-slice` skill now requires
+> the final re-run. Nothing here is an engine defect: every control fires at least as hard as
+> claimed, the ratchet is green and the committed oracle wave agrees at 2700 rows.
+>
+> Also corrected: Control D's snippet is a single line that appears nowhere in `Matcher.cs`, which
+> wraps that condition across four lines. The anchor below is the line as the file reads.
 
 > Control A, `same-char-ign-off-by-one`: in `Matcher.cs`, `SameCharIgn`, change
 > `        for (int i = 1; i < count; i++)` to `        for (int i = 2; i < count; i++)`.
-> Wave: `case-folding`, 600 rows, seed 7. Result: 585 agree, **15 diverge**. Seed 4242: **16**.
+> Wave: `case-folding`, 600 rows. Measured 2026-09-01 on the committed code: seed 7 **42 diverge**
+> [recorded 15], seed 4242 **23** [recorded 16], seed 99 **30**.
 
 > Control B, `in-range-ign-skips-the-character`: in `Matcher.cs`, `InRangeIgn`, change
 > `        for (int i = 0; i < count; i++)` to `        for (int i = 1; i < count; i++)`.
-> Wave: `case-folding`, 600 rows, seed 7. Result: 593 agree, **7 diverge**. Seed 4242: **8**.
+> Wave: `case-folding`, 600 rows. Measured 2026-09-01 on the committed code: seed 7 **8 diverge**
+> [recorded 7], seed 4242 **8**, seed 99 **4**.
 > Before `FOLD_ONE_CASE_RANGES` was added it was 3 at both seeds.
 
 > Control C, `string-fld-advances-both-sides`: in `Matcher.cs`, the `Opcode.StringFld` case,
@@ -154,15 +168,17 @@ generator as committed.
 >                                 }
 > ```
 > with `                                state.TextPos = state.NextPos(state.TextPos);`.
-> Wave: `case-folding`, 600 rows, seed 7. Result: 595 agree, **5 diverge**. Seed 4242: **5**.
+> Wave: `case-folding`, 600 rows. Measured 2026-09-01 on the committed code: seed 7 **4 diverge**
+> [recorded 5], seed 4242 **8** [recorded 5], seed 99 **5**.
 > Before the `folded-literal` shape was added it was 0 at seed 7 and 1 at seed 4242.
 
 > Control D, `ref-group-fld-does-not-fold-the-capture`: in `Matcher.cs`, the `Opcode.RefGroupFld`
 > case, change
-> `                        if (foldedPos < foldedLen && SameCharIgn(state.Encoding, gfolded[gfoldedPos], folded[foldedPos]))`
+> `                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos], folded[foldedPos])`
 > to
-> `                        if (foldedPos < foldedLen && SameCharIgn(state.Encoding, state.CharAt(stringPos), folded[foldedPos]))`.
-> Wave: `case-folding`, 600 rows. Result: seed 7 **0 diverge**, seed 4242 **4**, seed 99 **1**.
+> `                            && SameCharIgn(state.Encoding, state.CharAt(stringPos), folded[foldedPos])`.
+> Wave: `case-folding`, 600 rows. Measured 2026-09-01 on the committed code: seed 7 **0 diverge**,
+> seed 4242 **4**, seed 99 **1** - reproduces exactly as recorded.
 > **This control does not fire reliably and the generator is why**, after three attempts to widen
 > it (doubled subjects, a `folded-backref` shape, subject-aware group selection): only 1 of 19
 > FULLCASE backreference rows that match at all has a captured character that expands on folding,
