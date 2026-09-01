@@ -901,8 +901,22 @@ internal static class Matcher
     /// <returns>The stepped position.</returns>
     private static int StepBy(MatchState state, int pos, long count, long step)
     {
+        // The walks below run 'for (i = 0; i < count; ...)', so a count of zero or less steps
+        // nowhere; the arithmetic arms would step backwards, so they get the same floor.
+        if (count < 0)
+        {
+            count = 0;
+        }
+
         if (step > 0)
         {
+            if (state.OneUnitPerCharacter)
+            {
+                // Upstream's arithmetic, restored: one character is one code unit, so the walk below
+                // can only end at 'pos + count' or at the bound it stops on.
+                return pos >= state.SliceEnd ? pos : (int)Math.Min(pos + count, state.SliceEnd);
+            }
+
             for (long i = 0; i < count && pos < state.SliceEnd; i++)
             {
                 pos = state.NextPos(pos);
@@ -910,6 +924,11 @@ internal static class Matcher
         }
         else if (step < 0)
         {
+            if (state.OneUnitPerCharacter)
+            {
+                return pos <= state.SliceStart ? pos : (int)Math.Max(pos - count, state.SliceStart);
+            }
+
             for (long i = 0; i < count && pos > state.SliceStart; i++)
             {
                 pos = state.PrevPos(pos);
@@ -936,6 +955,13 @@ internal static class Matcher
     {
         int pos = Math.Min(from, to);
         int end = Math.Max(from, to);
+
+        if (state.OneUnitPerCharacter)
+        {
+            // Upstream's subtraction, restored: see StepBy.
+            return end - pos;
+        }
+
         long count = 0;
 
         while (pos < end)

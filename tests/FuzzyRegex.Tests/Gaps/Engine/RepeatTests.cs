@@ -132,6 +132,35 @@ public sealed class RepeatTests
     }
 
     [Test]
+    public void A_repeat_counts_a_lone_surrogate_as_one_character_and_a_pair_as_one_character()
+    {
+        // The boundary of 'MatchState.OneUnitPerCharacter', which decides whether the repeat arms
+        // convert a count to a position by arithmetic or by walking. The flag is off for any subject
+        // holding a high surrogate, so this subject takes the walk - and it holds both a *lone* high
+        // surrogate, which is one character and one code unit, and a well-formed pair, which is one
+        // character and two. A predicate that looked for pairs rather than for high surrogates would
+        // still be right here; one that assumed every high surrogate starts a pair would not.
+        //
+        // Python holds lone surrogates in a str, so upstream answers this directly. Measured against
+        // regex 2026.7.19 on 2026-09-01, subject '\ud800' 'ab' '\U0001F600' 'cd' - six codepoints,
+        // seven UTF-16 code units:
+        //   regex.match('.{3}', s).span()  == (0, 3) in codepoints
+        //   regex.match('.+?c', s).span()  == (0, 5) in codepoints
+        //   regex.match('.+d',  s).span()  == (0, 6) in codepoints
+        const string mixed = "\uD800ab\U0001F600cd";
+        mixed.Should().HaveLength(7, "six characters, one of which occupies two UTF-16 code units");
+
+        Match three = FuzzyRegex.MatchAtStart(mixed, ".{3}");
+        (three.Index, three.Length).Should().Be((0, 3), "the lone surrogate is one character of one unit");
+
+        Match lazyAdvance = FuzzyRegex.MatchAtStart(mixed, ".+?c");
+        (lazyAdvance.Index, lazyAdvance.Length).Should().Be((0, 6), "five characters, one of them a pair");
+
+        Match greedyRetreat = FuzzyRegex.MatchAtStart(mixed, ".+d");
+        (greedyRetreat.Index, greedyRetreat.Length).Should().Be((0, 7));
+    }
+
+    [Test]
     public void A_bounded_repeat_compares_its_count_inclusively_at_both_ends()
     {
         // The boundaries a '{m,n}' port gets wrong by one. Upstream, measured on 'a' * n:
@@ -181,5 +210,27 @@ public sealed class RepeatTests
         //   regex.match('a{2,3}?b', 'aaab').span() == (0, 4)
         FuzzyRegex.MatchAtStart("aaaab", "a{2,3}?b").Success.Should().BeFalse();
         FuzzyRegex.MatchAtStart("aaab", "a{2,3}?b").Length.Should().Be(4);
+    }
+
+    [Test]
+    public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
+    {
+        // The complexity guard for LAZY_REPEAT_ONE and GREEDY_REPEAT_ONE. Both backtrack arms
+        // convert between a character count and a UTF-16 position, and both are re-entered once per
+        // repeat position, so a conversion that walks the subject makes the whole scan quadratic.
+        // Measured before the fix, in Release, on '.*?cd' over 'abc' * n + 'de': 6,002 characters
+        // 0.213s, 12,002 0.273s, 24,002 1.265s, 48,002 4.185s - and the walk counters were exactly
+        // n^2 + n^2/2 in each direction, which is the shape this test exists to refuse.
+        //
+        // The subject is four times upstream's test_bug_418626#3, so a quadratic scan costs sixteen
+        // times what it costs there and a linear one four times. The engine's own timeout is what
+        // enforces the ceiling, so a regression fails in twenty seconds instead of hanging the suite
+        // for an hour.
+        string subject = string.Concat(Enumerable.Repeat("abc", 80000)) + "de";
+        var pattern = new FuzzyRegex(".*?cd", FuzzyRegexOptions.None, TimeSpan.FromSeconds(20));
+
+        Match m = pattern.MatchAtStart(subject);
+
+        (m.Index + m.Length).Should().Be(240001);
     }
 }

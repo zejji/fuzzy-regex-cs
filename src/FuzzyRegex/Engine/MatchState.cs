@@ -254,11 +254,27 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
 
+    /// <summary>
+    /// Whether one character of <see cref="Text"/> is exactly one UTF-16 code unit, so that a
+    /// character count and a code-unit offset are the same number - which is what upstream gets for
+    /// free by indexing the subject by codepoint.
+    /// </summary>
+    /// <remarks>
+    /// Not an upstream field. <see cref="NextPos"/> steps two units only across a well-formed
+    /// surrogate pair, and a pair needs a high surrogate, so "the subject holds no high surrogate"
+    /// is sufficient - and it is conservative, because a lone high surrogate turns the flag off and
+    /// costs nothing but the walk that would have happened anyway. The scan is one vectorised pass
+    /// over the subject, done once per matching operation, and it buys back the per-position walks
+    /// in the repeat opcodes' backtrack arms that made a lazy scan quadratic.
+    /// </remarks>
+    internal readonly bool OneUnitPerCharacter;
+
     private MatchState(PatternObject pattern, string text)
     {
         Pattern = pattern;
         Text = text;
         TextLength = text.Length;
+        OneUnitPerCharacter = text.AsSpan().IndexOfAnyInRange('\uD800', '\uDBFF') < 0;
     }
 
     /// <summary>
