@@ -468,6 +468,25 @@ internal sealed class MatchState : IDisposable
     /// One codepoint back from <paramref name="pos"/>: upstream's <c>--text_pos</c> and
     /// <c>char_at(text_pos - 1)</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asymmetric with <see cref="NextPos"/> and <see cref="CharAt"/> on purpose, and the asymmetry
+    /// is a decision rather than an oversight (S26, DECISIONS 2026-09-01). Those two refuse to pair
+    /// a high and a low surrogate when the low one is at or past <see cref="TextEnd"/>; this one
+    /// pairs regardless of any bound. So above <c>TextEnd</c> the two disagree about where a
+    /// character starts.
+    /// </para>
+    /// <para>
+    /// Left that way because no position above <c>TextEnd</c> is reachable from the engine - S25
+    /// surfaced the difference by sweeping positions directly, not through a match - and because the
+    /// bound this would have to test sits in the inner loop of every reverse step and every
+    /// <see cref="CharBefore"/>. What the *public* surface does when <c>beginning</c>/<c>length</c>
+    /// cuts through a surrogate pair is a separate question, and it is settled and pinned: the slice
+    /// ends on a lone high surrogate, which matches as one character exactly as it does in a Python
+    /// <c>str</c> holding one. See
+    /// <c>MatchSpineTests.A_length_that_cuts_a_surrogate_pair_leaves_a_lone_surrogate_that_matches_as_one_character</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="pos">The position.</param>
     /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
     internal int PrevPos(int pos) =>

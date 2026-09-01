@@ -367,6 +367,7 @@ GENERATORS = (
     "reverse",
     "substitution",
     "iteration",
+    "interactions",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -841,10 +842,15 @@ BOUNDARY_SHAPE_WEIGHTS = (4, 4, 2, 3)
 # shape, and it is not an assertion but a marker.
 BOUNDARY_INFIXES = (r"\b", r"\B", r"\m", r"\M")
 
-# The last three put the `\K` inside an alternative or an optional group, so a branch that fails
+# The last five put the `\K` inside an alternative or an optional group, so a branch that fails
 # after the marker has to backtrack past it and put the reported match start back. That branch was
 # also found by a control that did not fire: removing the restore left the first five shapes
 # agreeing on all 600 rows, because none of them can fail after the `\K`.
+#
+# Weighted, and widened from three failing shapes to five, by S26. With a uniform draw over eight
+# shapes the same control fired on 3 rows of 600 at seed 7 and **0** at seed 20260901 - a control
+# that fires at one seed and not another is a finding about the generator, so the shapes that can
+# reach the restore are now three times as likely to be drawn as the ones that cannot.
 BOUNDARY_KEEP_SHAPES = (
     r"%s\K%s",
     r"(%s\K%s)",
@@ -854,7 +860,13 @@ BOUNDARY_KEEP_SHAPES = (
     r"%s\K%s%s|%s%s",
     r"(?:%s\K%s|%s)%s",
     r"(%s\K%s)?%s%s",
+    # Two branches that both set the marker, so the second crossing has to restore before it sets
+    # it again, and a repeat whose body sets it and can fail, which is the only shape here that
+    # crosses the marker more than once in one attempt.
+    r"(?:%s\K%s|%s\K%s)%s",
+    r"(?:%s\K%s)*%s",
 )
+BOUNDARY_KEEP_SHAPE_WEIGHTS = (1, 1, 1, 1, 1, 3, 3, 3, 3, 3)
 BOUNDARY_GRAPHEME_SHAPES = (r"\X", r"\X\X", r"\X+", r"\X*", r"\X+?", r"\X{2}", r"\X%s", r"%s\X")
 
 
@@ -863,9 +875,11 @@ def _generate_boundaries(rng: random.Random, count: int):
 
     The subject is drawn independently of the pattern, as the class and quantifier generators do: a
     boundary assertion is zero-width, so slicing the whole pattern out of the subject would say
-    nothing extra. Measured over 200 rows of seed 1: 59 match, 141 do not, 49 with an astral
-    subject, no parse errors, and every one of `\\b`, `\\B`, `\\m`, `\\M`, `\\K`, `\\X`, `(?a)` and
-    `(?w)` recorded at least 17 times.
+    nothing extra. Measured over 200 rows of seed 1, re-taken after S26 weighted the `\\K` shapes:
+    40 match, 160 do not, 66 have an astral subject, none is rejected, and every one of `\\b`,
+    `\\B`, `\\m`, `\\M`, `\\K`, `\\X`, `(?a)`, `(?w)` and `(?V1)` is recorded at least 28 times.
+    (Before that widening the same 200 rows gave 59 matching and 49 astral; the keep shapes that can
+    fail *after* the marker match less often, which is the point of them.)
     """
     for i in range(count):
         alphabet = BOUNDARY_SUBJECT_ALPHABETS[i % len(BOUNDARY_SUBJECT_ALPHABETS)]
@@ -912,7 +926,7 @@ def _generate_boundaries(rng: random.Random, count: int):
 
             pattern = left + rng.choice(BOUNDARY_INFIXES) + right
         elif shape == "keep":
-            form = rng.choice(BOUNDARY_KEEP_SHAPES)
+            form = rng.choices(BOUNDARY_KEEP_SHAPES, weights=BOUNDARY_KEEP_SHAPE_WEIGHTS)[0]
             pattern = form % tuple(literal() for _ in range(form.count("%s")))
         else:
             form = rng.choice(BOUNDARY_GRAPHEME_SHAPES)
@@ -1921,6 +1935,315 @@ def _generate_iteration(rng: random.Random, count: int):
         }
 
 
+# --------------------------------------------------------------------------------------------
+# S26's generator: every family at once, rather than one family at a time
+# --------------------------------------------------------------------------------------------
+#
+# What the per-slice generators structurally miss. Each of them holds one construct fixed and
+# varies the rest - `classes` never quantifies an atom, `quantifiers` never puts a class under
+# `(?i)`, `backrefs` never reverses - so the cells where two features meet are reached only by
+# accident, and the interaction is exactly where a port breaks: S23's own control measured it, at 1
+# divergence of 600 when the reverse wave drew its folding rows from `case-folding` and 21 when it
+# drew them from rows built for the interaction.
+#
+# So this one composes: a class inside a quantified capture group, referenced back, under
+# case-insensitivity and reverse and MULTILINE at once, over subjects that hold ASCII and
+# expanding-fold and astral characters in the same string, through all eight operations.
+
+# The class atoms, S17's inventory narrowed to what is worth quantifying. `\p{Cyrillic}` and friends
+# are dropped: quantified over these subjects they match nothing, and the row is then a statement
+# about the failure path rather than about the interaction.
+INTERACTION_CLASS_ATOMS = (
+    "[a]",
+    "[^a]",
+    "[abz]",
+    "[a-f]",
+    "[^a-f]",
+    "[A-Z]",
+    r"\d",
+    r"\D",
+    r"\w",
+    r"\W",
+    r"\s",
+    r"\S",
+    r"[\w\s]",
+    r"[a\d]",
+    r"[^\d]",
+    "[[:alpha:]]",
+    "[[:digit:]]",
+    r"\p{L}",
+    r"\p{Lu}",
+    r"\p{Ll}",
+    r"\p{Nd}",
+    r"\p{ASCII}",
+    r"[\p{L}\p{N}]",
+    r"[^\p{L}]",
+    ".",
+)
+
+# The V1-only set operators, drawn only when the row carries VERSION1.
+INTERACTION_V1_CLASS_ATOMS = (
+    r"[\p{ASCII}&&\p{L}]",
+    r"[\p{ASCII}--\p{L}]",
+    r"[[a-z]--[aei]]",
+    r"[\w--[0-9]]",
+    r"[\p{L}||\p{N}]",
+    r"[[a-f]~~[d-k]]",
+    r"[^[\p{L}--[a-z]]]",
+)
+
+# The subjects, and the point of the generator in one table. The first three bands are the ones the
+# per-family generators already draw from; the fourth holds all three kinds of character in the same
+# string, which is the band no other generator has - a fold that expands, a character that occupies
+# two UTF-16 code units and a plain ASCII letter, so a row can reach the expanding-fold path and the
+# surrogate-stepping path in one match.
+INTERACTION_SUBJECT_ALPHABETS = (
+    "aAbB0_ .",
+    "aAsSß\ufb00\ufb01\u0130\u0131",
+    "aA\U0001f600\U0001d518\U00010400\U00010428",
+    "aAß\ufb03\U00010400\U0001f600_",
+)
+
+# Inserted rather than drawn, so a row can hold several and so CR/LF lands as a pair - which is what
+# makes MULTILINE's `^` and `$` interesting anywhere but the two ends.
+INTERACTION_LINE_BREAKS = ("\n", "\r", "\r\n", "", " ")
+
+# What a row's pattern is built from.
+#   'quant-group': a class atom in a capture group with a quantifier - the cell `classes` and
+#                  `quantifiers` share and neither reaches.
+#   'backref':     a reference to one of those groups, so the reference reads back text that a
+#                  quantified class captured, under whatever folding and direction the row carries.
+#   'cond':        a group-existence conditional on one of them.
+#   'class':       a bare or quantified atom, so not every piece opens a group.
+#   'keep':        `\K`, which moves the reported match start - and interacts with substitution and
+#                  with reverse in ways nothing else here does.
+#   'boundary':    `\b` / `\B` / `\m` / `\M`, the predicates that ask about both sides of a position.
+#   'literal':     a character the subject holds, escaped - so a row can actually match.
+#   'group-then-ref': the headline cell, emitted as a unit: a quantified class in a capture group
+#                  with the reference to that group immediately after it. Left to chance - a group
+#                  from one piece and a reference from another - a reference came up on 56 rows of
+#                  600 at seed 1, because a reference to a group two pieces back rarely matches.
+#                  As a unit, and as the forced shape of a one-piece row, it is 390 of 600.
+INTERACTION_PIECES = (
+    "quant-group",
+    "class",
+    "backref",
+    "cond",
+    "keep",
+    "boundary",
+    "literal",
+    "group-then-ref",
+)
+INTERACTION_PIECE_WEIGHTS = (24, 12, 12, 9, 5, 9, 11, 18)
+
+# Wrapped round the whole pattern, so the anchors and the boundaries are asked about positions an
+# interior piece has reached rather than only about position 0.
+INTERACTION_AFFIXES = (("^", ""), ("", "$"), ("^", "$"), (r"\b", ""), ("", r"\b"), ("", ""), ("", ""))
+
+INTERACTION_BOUNDARIES = (r"\b", r"\B", r"\m", r"\M")
+
+MAX_INTERACTION_SUBJECT_LENGTH = 7
+MAX_INTERACTION_PIECES = 3
+
+# How often each flag is set. IGNORECASE and reverse are the two that change what every other piece
+# means, so they are on about half the rows each; FULLCASE only differs from IGNORECASE when a
+# folding expands, which is why two of the four alphabets carry expanding characters.
+INTERACTION_IGNORECASE_PROBABILITY = 0.5
+INTERACTION_FULLCASE_PROBABILITY = 0.5
+INTERACTION_REVERSE_PROBABILITY = 0.45
+INTERACTION_MULTILINE_PROBABILITY = 0.5
+INTERACTION_VERSION1_PROBABILITY = 0.35
+INTERACTION_ASCII_PROBABILITY = 0.2
+
+# How often the subject is built from doubled characters rather than drawn one at a time. See
+# _generate_interactions for what it is worth.
+INTERACTION_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+
+def _interaction_subject_class(rng: random.Random, subject: str) -> str:
+    """A character class built from characters the subject holds, preferring a repeated one.
+
+    ``re.escape`` on each member, because the alphabets hold ``.``, ``_`` and ``-``, and an
+    unescaped ``-`` inside a class is a range rather than a member.
+    """
+    usable = [c for c in subject if c not in "\r\n"]
+    if not usable:
+        return "[a-z]"
+
+    doubled = [subject[i] for i in range(len(subject) - 1) if subject[i] == subject[i + 1]]
+    members = [rng.choice(doubled) if doubled else rng.choice(usable)]
+    if rng.random() < 0.5:
+        members.append(rng.choice(usable))
+
+    return "[" + "".join(re.escape(c) for c in dict.fromkeys(members)) + "]"
+
+
+def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tuple[str, int, list[str]]:
+    """One composed pattern, with the group inventory a substitution template needs.
+
+    Built strictly left to right, as ``_backref_pattern`` is, so a group number is only handed out
+    once the group that owns it has been emitted - a reference to a group defined later is legal
+    upstream but is `backrefs`' own test, not this one's.
+    """
+    atoms = INTERACTION_CLASS_ATOMS + INTERACTION_V1_CLASS_ATOMS if version1 else INTERACTION_CLASS_ATOMS
+    counter = [0]
+    names: list[str] = []
+    defined: list[int] = []
+    pieces: list[str] = []
+
+    def group(body: str) -> str:
+        counter[0] += 1
+        defined.append(counter[0])
+        if rng.random() < 0.25:
+            name = f"g{counter[0]}"
+            names.append(name)
+            return f"(?P<{name}>{body})"
+        return f"({body})"
+
+    # A one-piece row is allowed, but only as a 'group-then-ref' - which is itself an interaction of
+    # four features, and is the only shape short enough that a seven-character subject can satisfy
+    # the whole pattern. Every extra piece is another thing that has to match at the same time, and
+    # a wave that cannot match tests the failure path and nothing else.
+    wanted = rng.randrange(1, MAX_INTERACTION_PIECES + 1)
+    for _ in range(wanted):
+        kind = rng.choices(INTERACTION_PIECES, weights=INTERACTION_PIECE_WEIGHTS)[0]
+        if wanted == 1:
+            kind = "group-then-ref"
+        if not defined and kind in ("backref", "cond"):
+            kind = "quant-group"
+
+        if kind == "group-then-ref":
+            # Half the time the class is built out of characters the subject actually holds, rather
+            # than drawn from the table. A reference can only match where the subject repeats what
+            # the group captured, and a class drawn independently often cannot capture anything at
+            # all: measured over 600 rows of seed 1 (`.scratch/ablate.py` in the S26 session), 34 of
+            # 387 reference rows produced an answer with the table alone and 50 of 390 with this. It
+            # is still the cell this generator exists for - a class, in a quantified capture group,
+            # referenced back - only aimed at a subject that can satisfy it.
+            body = _interaction_subject_class(rng, subject) if rng.random() < 0.5 else rng.choice(atoms)
+            body += _quantifier(rng) if rng.random() < 0.5 else ""
+            opened = group(body) + (_quantifier(rng) if rng.random() < 0.4 else "")
+            pieces.append(opened + f"\\{defined[-1]}")
+        elif kind == "quant-group":
+            # The quantifier goes outside the group as often as inside it: '(\w)+' captures once per
+            # iteration and '(\w+)' captures once, and a reference reads a different span in each.
+            body = rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.5 else "")
+            pieces.append(group(body) + (_quantifier(rng) if rng.random() < 0.5 else ""))
+        elif kind == "class":
+            pieces.append(rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.6 else ""))
+        elif kind == "backref":
+            number = rng.choice(defined)
+            pieces.append(rng.choice((f"\\{number}", f"\\g<{number}>")))
+        elif kind == "cond":
+            number = rng.choice(defined)
+            yes, no = rng.choice(atoms), rng.choice(atoms)
+            pieces.append(rng.choice((f"(?({number}){yes}|{no})", f"(?({number}){yes})")))
+        elif kind == "keep":
+            pieces.append(r"\K")
+        elif kind == "boundary":
+            pieces.append(rng.choice(INTERACTION_BOUNDARIES))
+        else:
+            # A character the subject holds, so the row can match at all. Escaped, because the
+            # alphabets hold '.' and '_' and an unescaped '.' would be a third dot atom rather than
+            # a literal.
+            candidates = [c for c in subject if c not in "\r\n"]
+            pieces.append(re.escape(rng.choice(candidates)) if candidates else "a")
+
+    prefix, suffix = rng.choice(INTERACTION_AFFIXES)
+    return prefix + "".join(pieces) + suffix, counter[0], names
+
+
+def _generate_interactions(rng: random.Random, count: int):
+    """S26's generator: the S16-S25 constructs composed, over all eight operations.
+
+    Measured by `python tools/record-oracle.py --generator interactions --count 600 --seed 1`, after
+    the last change to this generator: 114 rows produce an answer - a match, a non-empty match list,
+    a split with more than one part or a substitution that replaced something - 470 produce none and
+    16 are rejected by upstream. 285 rows carry IGNORECASE, 144 FULLCASE, 301 MULTILINE, 213
+    VERSION1, 78 ASCII and 273 are reversed; 213 have an astral subject and 192 a subject holding a
+    character that expands on folding. 390 hold a backreference, 293 a quantified group, 179 a named
+    group, 54 a `\\K` and 37 a group-existence conditional. Every one of the eight operations is
+    recorded exactly 75 times, because the operation is cycled by row index rather than drawn.
+
+    The answer rate is deliberately in line with `classes` and `backrefs` rather than higher: a
+    composed pattern has more that must line up at once, and buying matches by shortening the
+    pattern would spend the generator's whole point. What it must not be is *low on the interaction
+    cell*, which is why the two subject tricks below carry measurements.
+
+    Re-taken from scratch after every widening: adding one entry to any table above shifts the whole
+    RNG stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        # Drawn from the seeded stream rather than from `i`: `ALL_OPERATIONS` has eight entries and
+        # this table has four, so indexing both by `i` would pair each alphabet with exactly two
+        # operations for ever - the aliasing the S16 blind review found in the anchors generator.
+        alphabet = rng.choice(INTERACTION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_INTERACTION_SUBJECT_LENGTH + 1)
+
+        if rng.random() < INTERACTION_DOUBLED_SUBJECT_PROBABILITY:
+            # Built from doubled characters, the trick `backrefs` and `case-folding` both use: a
+            # reference cannot match unless the subject repeats something, and a reference is on
+            # nearly two thirds of these rows. Worth less here than there, and the figure is
+            # recorded rather than assumed - measured over 600 rows of seed 1, 43 of 371 reference
+            # rows produced an answer without it and 50 of 390 with it (114 answers against 111
+            # overall). Kept because it is a gain on the cell this generator exists for, not because
+            # it is a large one.
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        version1 = rng.random() < INTERACTION_VERSION1_PROBABILITY
+        pattern, groups, names = _interaction_pattern(rng, subject, version1)
+
+        flags = 0
+        if version1:
+            flags |= VERSION1
+        if rng.random() < INTERACTION_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < INTERACTION_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < INTERACTION_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+        # Never ASCII where the pattern holds a property: upstream does not agree with *itself*
+        # about a cased property under the ASCII encoding, so such a row is a guaranteed divergence
+        # that says nothing about this port. The measurement and the six patterns are recorded
+        # against `_generate_casefolding`, and DECISIONS 2026-08-31 carries the finding.
+        if rng.random() < INTERACTION_ASCII_PROBABILITY and not re.search(r"\\[pP]\{|\[\[:", pattern):
+            flags |= ASCII
+
+        # `(?r)` as inline pattern text, as S23 and S25 write it: it is what a caller writes, and a
+        # global flag has to be at the start of the pattern anyway.
+        if rng.random() < INTERACTION_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "interactions",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names)
+                if operation == "sub"
+                else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -1965,6 +2288,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "iteration":
         yield from _generate_iteration(rng, count)
+        return
+
+    if name == "interactions":
+        yield from _generate_interactions(rng, count)
         return
 
     dotted = name == "literal-dot"

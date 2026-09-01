@@ -36,12 +36,43 @@ itself is left alone: Phase 2 was parser work and Phase 3 is engine work, so its
 evidence about Phase 3's, and revising a number on the strength of a different kind of work would
 be worse than leaving it.
 
-**Phase 3 as authored (2026-08-31) is 13 slices, S14-S26** - inside the 11-16 band - so at the
-measured 1.35 sessions per slice, budget about 18 driver sessions. The Phase 3 content line above
+**Phase 3's measured rate, recorded at its close (S26, 2026-09-01). Thirteen slices, thirteen
+sessions: 1.0, not Phase 2's 1.35.** `docs/plan/slice-log.jsonl` has no `failed` and no `parked`
+entry between S14 and S26, where Phase 2 had three across eight slices. What moved was the cost per
+slice rather than the number of attempts: the twelve logged slices S14-S25 came to 690M tokens, a
+median of **60.5M** against Phase 2's median of 48M, spread from 10.5M (S14, the harness alone) to
+91.5M (S22, case folding). So a Phase 3 slice cost about a quarter more than a Phase 2 slice and
+landed first time where Phase 2's often did not, and the two effects roughly cancel in tokens per
+phase. (S26's own figure is not in that median - a slice cannot log its own cost before it ends -
+and the log has no entry at all for S08 or for the successful retries of S07 and S10, so Phase 2's
+*total* is not recoverable from it. Only the medians and the session counts are.)
+
+**Why the failures stopped is worth carrying forward, because it is not luck.** Every Phase 2
+failure was a slice that ran out of road inside one session - S07 twice, S10 once. Phase 3's slices
+were authored after that, each with its verification named in the slice file, and the driver gained
+the rescue stash. **Do not read 1.0 as the rate for a phase whose slices are authored less
+tightly**; read it as what a well-scoped slice costs. Budget Phase 4 at 1.0-1.35 and expect the
+higher number if a slice file leaves its verification open.
+
+**Phase 3 as authored (2026-08-31) was 13 slices, S14-S26** - inside the 11-16 band, and it landed
+in exactly 13. The Phase 3 content line above
 was corrected the same day: the original omitted the Match object, substitution and the iteration
 API, which are necessarily Phase 3 work (Phase 4/5 do not claim them, `Match.Result` was
 constrained to Phase 3 at the S13 close, and group/backref tests cannot run without `m.Groups`);
 four of the 13 slices are that unlisted work, and the band still held.
+
+**Does Phase 4's 8-12 hold, seen from the close of Phase 3? For the content named above, yes - but
+four capability families have no phase at all, and assigning them is an owner decision rather than a
+slice's (flagged S26, 2026-09-01).** The generated board's remaining tags divide cleanly. Phase 4's
+row claims lookaround (61 tests), lookbehind (17), recursion (60), branch reset (21), named lists
+(20), POSIX (8), possessive (8), partial matching (82) and the conditional-with-lookaround form
+(15); Phase 5 claims the nine `fuzzy-*` tags (184). What nothing claims is **`inline-flags` (29
+tests), `backtracking-verbs` (34), `version-flags` (11) and `comments` (4)** - 78 tests, more than
+lookaround and lookbehind together. Three of the four are parser-adjacent rather than engine work,
+so they were plausibly *assumed* into Phase 2 and are not in fact done. The options are to widen
+Phase 4 to 10-14 slices, or to leave Phase 4 as authored and open a small phase for the flag-scoping
+families. Either way the tags want assigning before Phase 4's slices are written, because a slice
+file cannot verify a capability no phase has claimed.
 
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now

@@ -139,6 +139,38 @@ public sealed class MatchSpineTests
     }
 
     [Test]
+    public void A_length_that_cuts_a_surrogate_pair_leaves_a_lone_surrogate_that_matches_as_one_character()
+    {
+        // The semantics S26 had to decide, pinned here rather than left to be re-derived. This
+        // surface takes UTF-16 indices, so a caller can pass a 'length' that ends between the two
+        // halves of an astral character; upstream cannot express the same slice, because it indexes
+        // by codepoint. What it *can* hold is a str whose last character is a lone surrogate, which
+        // is exactly the string this slice denotes - and that is the oracle. Measured against regex
+        // 2026.7.19 on 2026-09-01:
+        //   regex.search('.', '\ud83d').span()        == (0, 1)
+        //   regex.search('a.', 'a\ud83d').span()      == (0, 2)
+        //   regex.search('(?r).', 'a\ud83d').span()   == (1, 2)
+        // So a lone surrogate is one character, matched by '.', in both directions - and this port
+        // must answer the same for the slice that produces one.
+        const string subject = "a\U0001F600b";
+        var one = new FuzzyRegex("a.");
+        var two = new FuzzyRegex("a..");
+
+        // Cut after the high surrogate: the slice is "a" + a lone high surrogate, two code units.
+        one.Match(subject, beginning: 0, length: 2).Length.Should().Be(2);
+        new FuzzyRegex(".").Match(subject, beginning: 1, length: 1).Length.Should().Be(1);
+        new FuzzyRegex("(?r).").Match(subject, beginning: 0, length: 2).Index.Should().Be(1);
+
+        // 'a..' cannot match that slice: there is one character after the 'a', not two.
+        two.Match(subject, beginning: 0, length: 2).Success.Should().BeFalse();
+
+        // And with the pair whole, the same pattern sees one character across two code units, which
+        // is what makes the assertions above statements about the cut rather than about the dot.
+        one.Match(subject, beginning: 0, length: 3).Length.Should().Be(3);
+        two.Match(subject, beginning: 0, length: 4).Length.Should().Be(4);
+    }
+
+    [Test]
     public void Multiline_changes_which_anchor_opcode_the_pattern_compiles_to()
     {
         // Without MULTILINE, '^' is START_OF_STRING and '$' is END_OF_STRING_LINE; with it they are

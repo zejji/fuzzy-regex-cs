@@ -2,39 +2,35 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase:** 3, the engine. **S25 is DONE** and committed; the tree is clean. Pending queue: S26 only,
-and it is the phase close - the driver stops at the phase boundary after it.
+**PHASE 3 IS COMPLETE.** S26 is done and committed, the pending queue is empty, and
+`tools/run-slices.ps1` refuses to cross a phase boundary - so **this is the owner checkpoint**.
+Review `docs/STATUS.md`, skim the recent commits, then open a fresh session and paste the prompt in
+`docs/plan/OPERATIONS.md`: *"Read docs/plan/STATE.md and the spec. Phase 3 is complete. Author the
+slice files for phase 4 per the roadmap, present them for my review, and wait."*
 
-**Current slice:** none in flight. **Next is S26** (`phase-close`).
+**Current slice:** none. **Blockers:** none.
 
-**Where the port stands:** ratchet GREEN, 5161 passing, 5715 total, nothing failing; overall parity
-**71.8%** (was 59.3%). Eleven areas at 100%, including `FindAll`, `Splitting`, `Overlapped`,
-`Boundaries`, `CharacterClasses` and `UnicodeProperties`. `Reverse` 86.5%, `Substitution` 95.5%,
-`Various` 95.4%, `ZeroWidth` 64.3%, `Regressions` 43.1%. **Phase 3 has no behaviour tag left**:
-every remaining win is Phase 4 or 5 - `fuzzy-matching` 98, `partial` 82, `lookaround` 61,
-`recursion` 60. `needs:partial` is the only `NotImplementedException` seam on the public surface.
+**Where the port stands:** ratchet GREEN, nothing failing, overall parity **71.8%** with fifteen
+areas at 100% - but read `docs/STATUS.md` for the figures rather than quoting them from here. The
+engine matches everything in Phase 3's scope: literals, classes, quantifiers, groups, backrefs,
+boundaries, `\K`, case folding, reverse, substitution and iteration. **No test is skipped on a tag
+Phase 3 delivered.**
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice; its default list
-now has **twelve** generators, `iteration` included, and the wave compares whole *sequences* for the
-three new operations (`finditer`, `finditer-overlapped`, `split`). Latest:
-`agree 18000 unsupported 0 diverge 0` at 1500 rows each, seed 606. Of six negative controls all six
-fired (54, 103, 92, 21, 33 and 61 divergences of 600, each re-run at seed 4242) and all six are
-reproducible from the S25 closing notes.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Thirteen
+generators now - S26 added `interactions`, which composes the other twelve's constructs instead of
+running one family at a time - and each row is bounded at ten seconds
+(`OracleComparer._rowTimeout`), because an unbounded row used to hang the run rather than fail it.
 
-**Blockers:** none.
+**Two things for the owner to decide before Phase 4 is authored:**
 
-**S26 inherits these duties:**
+- **Four capability families are claimed by no phase**: `inline-flags` (29 tests),
+  `backtracking-verbs` (34), `version-flags` (11), `comments` (4). Widen Phase 4 to 10-14 slices, or
+  give them their own. ROADMAP states both options; a slice cannot verify what no phase claims.
+- **`docs/plan/budget.json`'s `maxSlicesPerWeek` of 12** binds after two and a half busy days.
 
-- **Re-run the build yourself after any review pass that edited files.** S25's reviewer left
-  `Engine/Iteration.cs` with CRLF endings, which fails `IDE0055` and so the build; its own report
-  said the ratchet was green. `dotnet csharpier format src/FuzzyRegex` fixes it.
-- **Format a mutated file before running a control wave, and never pipe a long wave into `grep`.**
-  An unformatted mutation fails the build and the harness reports RED with no verdict line, which
-  looks exactly like a control that fired; `grep` buffers, so a running wave and a hung one look
-  alike. `.scratch/run-controls.py` in the S25 session did both correctly - the shape is in the
-  closing notes.
-- **`baseline: N` from the ratchet counts distinct test ids, not results.** 5054 ids and 5161
-  passing results are the same run; do not read the difference as a corrupted baseline.
-- **Re-take every measurement you quote, after the last change to the thing measured.** S25 quoted
-  seven parity figures from memory of the pre-slice board and all seven were wrong; the generated
-  `docs/STATUS.md` is the only source for them.
+**Phase 4's author should read the S26 closing notes' handover section first.** In one line: both
+seams are `default:` arms in `Matcher.BasicMatch` (`:4567` advance, `:5207` backtrack);
+`state_init_2` deliberately allocates no fuzzy or group-call guards; the `push_groups` /
+`push_repeats` families are unported with their call sites listed in PORTMAP, and their *backtrack*
+halves are what an opcode-by-opcode port misses; and **partial matching is the cheapest 82 tests on
+the board**, because the matcher's partial arms already exist and the seam is a four-line guard.

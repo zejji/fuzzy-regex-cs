@@ -404,7 +404,7 @@ internal sealed record OracleHeader(
 /// </param>
 /// <param name="Count">
 /// The replacement limit in <b>upstream's</b> convention, where 0 means no limit. This surface
-/// spells no limit as -1, so <see cref="OracleComparer.Run"/> translates it; recording upstream's
+/// spells no limit as -1, so <see cref="OracleComparer.Run(OracleRow)"/> translates it; recording upstream's
 /// own number keeps the wave a transcript of what upstream was asked.
 /// </param>
 internal sealed record OracleRow(

@@ -9,6 +9,18 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// </remarks>
 internal static class OracleComparer
 {
+    /// <summary>How long one row may take before its answer counts as a wrong one.</summary>
+    /// <remarks>
+    /// Bounded rather than <see cref="FuzzyRegex.InfiniteMatchTimeout"/>, added in S26. A row this
+    /// port cannot answer is a divergence worth reading; a row it never *stops* answering used to
+    /// be a hung run, which looks exactly like a slow build and tells nobody anything. Measured
+    /// while re-running S17's negative control on 2026-09-01: the mutant took over six minutes on
+    /// a 1,200-row wave the honest engine answers in one second, and the harness reported nothing
+    /// at all. Ten seconds is generous - every generator's subjects are eight characters or fewer,
+    /// and the recorder would itself have stalled on a row upstream could not answer quickly.
+    /// </remarks>
+    internal static readonly TimeSpan RowTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// The .NET exceptions that count as "this port rejected the input", when upstream raised
     /// something whose class name has no counterpart here.
@@ -35,7 +47,7 @@ internal static class OracleComparer
     /// <summary>Puts every row's question to an engine and tallies the verdicts.</summary>
     /// <param name="rows">The wave's rows.</param>
     /// <param name="engine">
-    /// What answers a row. <see cref="Run"/> in the wave run; a deliberately wrong stand-in in
+    /// What answers a row. <see cref="Run(OracleRow)"/> in the wave run; a deliberately wrong stand-in in
     /// <c>OracleWaveTests.Corrupting_a_recorded_row_is_reported_as_a_divergence</c>, which is the
     /// only way this loop can be shown to notice a wrong answer while the real engine still
     /// answers <see cref="OracleVerdict.Unsupported"/> to everything.
@@ -69,7 +81,17 @@ internal static class OracleComparer
     /// of an unported seam, or <see cref="CompiledButUnmatched"/> if it compiled and the seam is in
     /// the matcher. The two are not interchangeable: only the first knows nothing at all.
     /// </returns>
-    public static IOracleOutcome? Run(OracleRow row)
+    public static IOracleOutcome? Run(OracleRow row) => Run(row, RowTimeout);
+
+    /// <summary>Puts a row's question to this port, with an explicit deadline.</summary>
+    /// <remarks>
+    /// The deadline is a parameter only so a test can prove it reaches the engine without waiting
+    /// <see cref="RowTimeout"/> to find out. Every real caller uses the overload above.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="timeout">How long the matching call may take.</param>
+    /// <returns>This port's answer, as the overload above describes it.</returns>
+    internal static IOracleOutcome? Run(OracleRow row, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -84,7 +106,7 @@ internal static class OracleComparer
             compiled = new FuzzyRegex(
                 row.Pattern,
                 (FuzzyRegexOptions)row.Flags,
-                FuzzyRegex.InfiniteMatchTimeout,
+                timeout,
                 row.NamedLists.ToDictionary(
                     entry => entry.Key,
                     entry => (IReadOnlyCollection<string>)entry.Value,

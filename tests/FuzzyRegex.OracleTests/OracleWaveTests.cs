@@ -108,6 +108,66 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_this_port_cannot_answer_in_time_is_a_divergence_and_never_agreement()
+    {
+        // S26 gave each row a deadline. Two properties make that a fix rather than a mask, and
+        // neither is visible in a wave run - a green wave looks the same either way - so both are
+        // pinned here. Without the first, a runaway row hangs the run instead of failing it, which
+        // is what it did while S17's control was being re-run: six minutes of silence on a wave the
+        // honest engine answers in 589ms. Without the second, the deadline would *hide* a
+        // divergence by filing a timed-out row as this port rejecting the input.
+        OracleComparer
+            .RowTimeout.Should()
+            .BeLessThan(TimeSpan.FromMinutes(1), "a row that never finishes must fail the run, not hang it");
+        OracleComparer.RowTimeout.Should().BePositive();
+
+        ErrorOutcome timedOut = ErrorOutcome.From(
+            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)*b", OracleComparer.RowTimeout),
+            whileMatching: true
+        );
+
+        // Upstream answered; we ran out of time. That is a wrong answer, not a rejection.
+        OracleRow matched = OracleWave.ParseRows(_recordedRows)[0];
+        OracleComparer.Compare(matched, timedOut).Should().Be(OracleVerdict.Diverge);
+
+        // The allow-list of exceptions that count as "this port rejected the input" must not grow
+        // to include this one. Asserted against a rejection upstream raised *while matching*, and
+        // one whose class is not `error`, because those are the two conditions under which the
+        // allow-list is the only thing left deciding: with either absent, the phase rule or the
+        // message comparison answers first and this assertion would pass without touching it.
+        OracleRow rejectedWhileMatching = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "x", "flags": 0, "namedLists": {}, "subject": "x", "operation": "search", "codepointSpan": null, "outcome": {"kind": "error", "exception": "TypeError", "message": "expected string", "whileMatching": true}}
+            """
+        )[0];
+        OracleComparer.Compare(rejectedWhileMatching, timedOut).Should().Be(OracleVerdict.Diverge);
+
+        // And the deadline reaches the engine, which is the half a value assertion cannot see: this
+        // row does not stop on its own, so the test returning at all is the proof. 50ms rather than
+        // `RowTimeout`, so proving it costs no wall clock - upstream's own figure for this pattern
+        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve.
+        //
+        // What is deliberately *not* pinned: that the one-argument `Run` passes `RowTimeout` rather
+        // than something else. Pinning that token needs a row that runs for the whole deadline, so
+        // it would cost ten seconds on every oracle run for ever, to catch an edit to a single line
+        // sitting directly under the field whose remarks explain why it exists.
+        OracleRow catastrophic = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(a|a)*b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            """
+        )[0];
+
+        IOracleOutcome? ranOut = OracleComparer.Run(catastrophic, TimeSpan.FromMilliseconds(50));
+
+        ranOut
+            .Should()
+            .BeOfType<ErrorOutcome>()
+            .Which.Exception.Should()
+            .Be(nameof(System.Text.RegularExpressions.RegexMatchTimeoutException));
+        OracleComparer.Compare(catastrophic, ranOut).Should().Be(OracleVerdict.Diverge);
+    }
+
+    [Test]
     public void A_wrong_lastindex_alone_is_reported_as_a_divergence()
     {
         // Added S18 with 'lastindex'/'lastgroup'. They are compared because nothing about the group
