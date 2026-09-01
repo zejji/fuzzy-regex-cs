@@ -6,9 +6,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Recursion;
 /// Ported from <c>upstream/regex/tests/test_regex.py</c> <c>test_recursive</c> (lines 2805-2875).
 /// </summary>
 /// <remarks>
-/// Every <c>(?r)</c> variant here is right-to-left, not a duplicate of its unflagged sibling, and
-/// is tagged <c>needs:right-to-left</c> instead of <c>needs:recursion</c> even where the expected
-/// values happen to differ only in which group captured which text. Assertion #29 (line 2869,
+/// Every <c>(?r)</c> variant here is right-to-left, not a duplicate of its unflagged sibling, even
+/// where the expected values happen to differ only in which group captured which text. They were
+/// tagged <c>needs:right-to-left</c> until S23 delivered that direction; every one of them also
+/// recurses, so they now carry <c>needs:recursion</c> like their unflagged siblings.
+/// Assertion #29 (line 2869,
 /// <c>#self.assertEqual(bool(rgx.search('&lt;foo/&gt;foo')), False)</c>) is commented out in
 /// upstream with the note "The next regex should and does match. Perl 5.14 agrees.", so it is not
 /// executed there either; it is not ported, and its index is left out of the map below on purpose
@@ -52,12 +54,12 @@ public sealed class RecursiveTests
         FuzzyRegex.Match("dontmatchme", @"(\w)(?:(?R)|(\w?))\1").Success.Should().BeFalse();
 
     [Test]
+    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Arguments("xx", "xx", "", "x")]
     [Arguments("aba", "aba", "b", "a")]
     [Arguments("abba", "abba", null, "a")]
     [Arguments("kayak", "kayak", null, "k")]
     [Arguments("paper", "pap", "a", "p")]
-    [Skip("needs:right-to-left - (?r) right-to-left recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#7-11")]
     public void Reversed_recursive_backreference_matches_the_run_around_a_repeated_character(
         string subject,
@@ -81,7 +83,7 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - (?r) right-to-left recursion is not implemented yet")]
+    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#12")]
     public void Reversed_recursive_backreference_does_not_match_without_a_repeated_character() =>
         FuzzyRegex.Match("dontmatchme", @"(?r)\2(?:(\w?)|(?R))(\w)").Success.Should().BeFalse();
@@ -109,9 +111,7 @@ public sealed class RecursiveTests
             .Equal("ab", "cd", "(cd)", "ef");
 
     [Test]
-    [Skip(
-        "needs:right-to-left - needs right-to-left search, (?R) recursion and atomic groups; the engine has none of them yet"
-    )]
+    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#15")]
     public void Reversed_recursive_atomic_alternation_matches_balanced_parens_and_captures_the_first_run()
     {
@@ -122,9 +122,7 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip(
-        "needs:right-to-left - needs right-to-left search, (?R) recursion, atomic groups and capture lists; the engine has none of them yet"
-    )]
+    [Skip("needs:recursion - needs (?R) recursion, atomic groups and capture lists; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_recursive#16")]
     public void Reversed_recursive_atomic_alternation_captures_every_repetition_of_group_one_in_reverse() =>
         FuzzyRegex
@@ -146,7 +144,7 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - (?r) right-to-left recursion is not implemented yet")]
+    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#18")]
     public void Reversed_recursive_alternation_matches_the_innermost_balanced_group_within_surrounding_text()
     {
@@ -170,9 +168,7 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip(
-        "needs:right-to-left - needs right-to-left search, (?2) numbered-group recursion and atomic groups; the engine has none of them yet"
-    )]
+    [Skip("needs:recursion - needs (?2) numbered-group recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#20")]
     public void Reversed_recursive_numbered_group_reference_matches_nested_parens_in_a_function_call()
     {

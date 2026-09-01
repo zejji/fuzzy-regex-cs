@@ -43,7 +43,7 @@ public sealed class ZeroWidthTests
         FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs anchors (^)")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#6,7")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
         FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
@@ -67,7 +67,7 @@ public sealed class ZeroWidthTests
         new FuzzyRegex("").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs splitting")]
+    [Skip("needs:splitting - right-to-left matching works from S23; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_zerowidth#16")]
     public void Split_on_a_reversed_empty_pattern_yields_every_char_in_reverse_with_empty_ends() =>
         new FuzzyRegex("(?r)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");

@@ -81,7 +81,7 @@ public sealed class SplitTests
     // which is not ported - see docs/PORTMAP.md.
 
     [Test]
-    [Skip("needs:right-to-left - Pattern.Split with the (?r) right-to-left flag is not implemented yet")]
+    [Skip("needs:splitting - right-to-left matching works from S23; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_re_split#11")]
     public void Split_right_to_left_on_a_literal_delimiter() =>
         FuzzyRegex.Split("xaxbxc", "(?r)x").Should().Equal("c", "b", "a", "");
@@ -99,7 +99,7 @@ public sealed class SplitTests
     // which is not ported - see docs/PORTMAP.md.
 
     [Test]
-    [Skip("needs:right-to-left - Pattern.Split with the (?r) right-to-left flag is not implemented yet")]
+    [Skip("needs:splitting - right-to-left matching works from S23; FuzzyRegex.Split is S25")]
     [Property("Upstream", "RegexTests.test_re_split#15")]
     public void Split_right_to_left_on_an_alternation_of_two_groups() =>
         FuzzyRegex.Split("xaxbxc", "(?r)(x)|(y)").Should().Equal("c", "x", null, "b", "x", null, "a", "x", null, "");

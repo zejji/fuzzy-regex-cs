@@ -273,6 +273,7 @@ GENERATORS = (
     "boundaries",
     "backrefs",
     "case-folding",
+    "reverse",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -1211,14 +1212,23 @@ FOLD_ONE_CASE_RANGES = (
 )
 
 
-def _fold_pattern(rng: random.Random, literal: str, subject: str) -> tuple[str, str]:
+def _fold_pattern(
+    rng: random.Random,
+    literal: str,
+    subject: str,
+    shapes: tuple[str, ...] = FOLD_SHAPES,
+    weights: tuple[int, ...] = FOLD_SHAPE_WEIGHTS,
+) -> tuple[str, str]:
     """Wraps a literal drawn from the folding inventory in one of the shapes above.
 
     Returns the pattern and the shape that produced it; the caller needs the shape to decide
     whether the ASCII flag is safe on this row. The subject is needed only by the two backreference
     shapes, which pick a character the subject already repeats.
+
+    ``shapes``/``weights`` are overridable so a caller aiming at one opcode family can narrow the
+    draw to the shapes that reach it; S23's ``_generate_reverse_fold`` is the only such caller.
     """
-    shape = rng.choices(FOLD_SHAPES, weights=FOLD_SHAPE_WEIGHTS, k=1)[0]
+    shape = rng.choices(shapes, weights=weights, k=1)[0]
 
     if shape == "property":
         quantified = rng.choice(FOLD_QUANTIFIERS) if rng.random() < 0.4 else ""
@@ -1368,6 +1378,118 @@ def _generate_casefolding(rng: random.Random, count: int):
         }
 
 
+# Which generators the reverse generator draws from: every earlier one, one share each.
+REVERSE_SOURCES = (
+    "literals",
+    "literal-dot",
+    "anchors",
+    "classes",
+    "groups",
+    "quantifiers",
+    "boundaries",
+    "backrefs",
+    "case-folding",
+)
+
+# ... plus this many shares of the expanding-fold emphasis below. Upstream fixed exactly the
+# reverse-plus-full-casefolding interaction in 2026.5.9 ("Reverse matching with full unicode
+# casefolding could lead to out-of-range string indexes", upstream/changelog.txt), so that is the
+# cell this slice was told to probe hardest - and a plain 'case-folding' share barely reaches it,
+# because STRING_FLD_REV and REF_GROUP_FLD_REV only behave differently from their _IGN_REV twins
+# when a *folding expands*, and the shares, the FULLCASE coin, the shape draw and the alphabet
+# rotation multiply out to almost nothing. With STRING_FLD_REV reading folded[0] instead of
+# folded[folded_pos - 1] (S23 control D), 600 rows of a wave whose fold shares came from
+# 'case-folding' gave 1 divergence at seed 7; with these two shares in their place, 21 at seed 7
+# and 20 at seed 4242 (measured 2026-09-01).
+REVERSE_FOLD_BATCHES = 2
+
+# The shapes the expanding-fold emphasis draws from: the four that reach a *_FLD_REV opcode.
+# 'bare' and 'folded-literal' are STRING_FLD_REV, the two backreference shapes REF_GROUP_FLD_REV.
+REVERSE_FOLD_SHAPES = ("bare", "folded-literal", "backref", "folded-backref")
+REVERSE_FOLD_SHAPE_WEIGHTS = (1, 1, 1, 1)
+
+
+def _generate_reverse_fold(rng: random.Random, count: int):
+    """Rows aimed squarely at STRING_FLD_REV and REF_GROUP_FLD_REV.
+
+    ``_generate_casefolding`` with three things forced rather than drawn: FULLCASE on every row,
+    an alphabet that always carries expanding characters (half of them astral as well), and a
+    subject of at least two characters. Everything else - the doubling trick, the substring cut,
+    the shape wrapper - is shared with it, because the point is the same rows aimed at a narrower
+    target, not a different kind of row.
+
+    ASCII is never set. It cannot be: the flag turns full casefolding off, which is the thing
+    being probed.
+    """
+    alphabets = (
+        FOLD_ASCII + _expanding_characters(),
+        FOLD_ASCII + FOLD_ASTRAL + _expanding_characters(),
+    )
+
+    for i in range(count):
+        alphabet = alphabets[i % len(alphabets)]
+        length = rng.randrange(2, MAX_FOLD_SUBJECT_LENGTH + 1)
+
+        if rng.random() < FOLD_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        start = rng.randrange(len(subject))
+        end = rng.randrange(start + 1, min(len(subject), start + MAX_FOLD_PATTERN_LENGTH) + 1)
+        literal = subject[start:end]
+
+        pattern, _ = _fold_pattern(rng, literal, subject, REVERSE_FOLD_SHAPES, REVERSE_FOLD_SHAPE_WEIGHTS)
+
+        yield {
+            "generator": "case-folding",
+            "pattern": pattern,
+            "flags": IGNORECASE | FULLCASE,
+            "namedLists": {},
+            "subject": subject,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+
+
+def _generate_reverse(rng: random.Random, count: int):
+    """S23's generator: every earlier generator's rows, searched right to left.
+
+    Not a new shape of pattern - the point of ``(?r)`` is that it changes the *direction* every
+    other construct runs in, so the honest wave is the ones already written with ``(?r)`` in front.
+    Prefixed as inline pattern text rather than passed as a flag because that is what a caller
+    writes and what the ported tests use, and because a global flag has to be at the start of the
+    pattern anyway.
+
+    Drawn in whole batches per source rather than one row at a time: every source generator picks
+    its alphabet by the row index it is on, so asking each of them for one row repeatedly would
+    hand out index 0 every time and the astral alphabet would never appear - which is the half of
+    the subject space this slice most needs.
+
+    Measured by `python tools/record-oracle.py --generator reverse --count 1100 --seed 1`, after
+    the last change to this generator: 358 match, 742 do not, no parse errors; 279 rows have an
+    astral subject and 246 carry FULLCASE.
+    """
+    total = len(REVERSE_SOURCES) + REVERSE_FOLD_BATCHES
+    per, extra = divmod(count, total)
+    sizes = [per + (1 if k < extra else 0) for k in range(total)]
+
+    batches = [list(_generate(name, rng, sizes[k])) for k, name in enumerate(REVERSE_SOURCES)]
+    for k in range(REVERSE_FOLD_BATCHES):
+        batches.append(list(_generate_reverse_fold(rng, sizes[len(REVERSE_SOURCES) + k])))
+
+    for k in range(max((len(b) for b in batches), default=0)):
+        for batch in batches:
+            if k >= len(batch):
+                continue
+            row = dict(batch[k])
+            row["generator"] = "reverse"
+            row["pattern"] = "(?r)" + row["pattern"]
+            yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -1400,6 +1522,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "case-folding":
         yield from _generate_casefolding(rng, count)
+        return
+
+    if name == "reverse":
+        yield from _generate_reverse(rng, count)
         return
 
     dotted = name == "literal-dot"

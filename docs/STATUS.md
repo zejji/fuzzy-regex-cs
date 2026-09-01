@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 53.0%** (1041 of 1966 ported upstream tests passing).
+**Overall parity: 53.5%** (1052 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -27,7 +27,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | FindAll | 27 | 0 | 27 | 0 | 0.0% |
 | Flags | 20 | 4 | 16 | 0 | 20.0% |
 | Format | 11 | 0 | 11 | 0 | 0.0% |
-| FullMatch | 12 | 6 | 6 | 0 | 50.0% |
+| FullMatch | 12 | 12 | 0 | 0 | 100.0% |
 | Fuzzy | 112 | 7 | 105 | 0 | 6.3% |
 | Grapheme | 5 | 2 | 3 | 0 | 40.0% |
 | Groups | 65 | 64 | 1 | 0 | 98.5% |
@@ -38,8 +38,8 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 8 | 8 | 0 | 50.0% |
 | Quantifiers | 53 | 52 | 1 | 0 | 98.1% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 111 | 353 | 0 | 23.9% |
-| Reverse | 37 | 0 | 37 | 0 | 0.0% |
+| Regressions | 464 | 114 | 350 | 0 | 24.6% |
+| Reverse | 37 | 2 | 35 | 0 | 5.4% |
 | Splitting | 24 | 0 | 24 | 0 | 0.0% |
 | Substitution | 88 | 7 | 81 | 0 | 8.0% |
 | UnicodeProperties | 70 | 52 | 18 | 0 | 74.3% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3640 | 3640 | 0 | 0 |
+| Gaps | 3679 | 3679 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,32 +61,31 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `find-all` | 181 |
-| `substitution` | 104 |
+| `find-all` | 195 |
+| `substitution` | 105 |
 | `fuzzy-matching` | 98 |
 | `partial` | 82 |
+| `recursion` | 60 |
 | `lookaround` | 58 |
-| `recursion` | 50 |
-| `right-to-left` | 49 |
-| `splitting` | 35 |
+| `splitting` | 38 |
 | `backtracking-verbs` | 34 |
 | `inline-flags` | 29 |
 | `fuzzy-counts` | 28 |
 | `branch-reset` | 21 |
 | `named-lists` | 20 |
 | `fuzzy-bestmatch` | 18 |
-| `fuzzy-budget` | 17 |
 | `lookbehind` | 17 |
+| `fuzzy-budget` | 17 |
 | `conditionals` | 15 |
-| `format` | 11 |
+| `overlapped` | 14 |
 | `version-flags` | 11 |
-| `fuzzy-changes` | 8 |
+| `format` | 11 |
 | `posix-matching` | 8 |
 | `possessive` | 8 |
+| `fuzzy-changes` | 8 |
 | `fuzzy-enhancematch` | 6 |
-| `overlapped` | 4 |
 | `comments` | 4 |
 | `fuzzy-substitution` | 3 |
-| `fuzzy-deletion` | 3 |
 | `fuzzy-insertion` | 3 |
+| `fuzzy-deletion` | 3 |
 

@@ -31,13 +31,13 @@ public sealed class OverlappedTests
             .Equal("ab", "bc", "cd", "de");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_overlapped#3,8")]
     public void Matches_value_for_reversed_two_char_runs_without_overlap() =>
         FuzzyRegex.Matches("abcde", "(?r)..").Select(m => m.Value).Should().Equal("de", "bc");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#4,9")]
     public void Matches_value_for_reversed_two_char_runs_with_overlap() =>
         new FuzzyRegex("(?r)..")
@@ -77,7 +77,7 @@ public sealed class OverlappedTests
             .Equal("b", "c");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -87,7 +87,7 @@ public sealed class OverlappedTests
             .Equal("b", "a");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -97,7 +97,7 @@ public sealed class OverlappedTests
             .Equal("-", "-");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")

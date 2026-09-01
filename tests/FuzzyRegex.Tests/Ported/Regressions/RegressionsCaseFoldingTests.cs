@@ -132,7 +132,6 @@ public sealed class RegressionsCaseFoldingTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - the (?r) flag needs CHARACTER_REV and REF_GROUP_FLD_REV, which are S23")]
     [Property("Upstream", "RegexTests.test_hg_bugs#226")]
     public void Full_case_backreference_matches_right_to_left_with_the_word_repeated_in_a_different_case()
     {

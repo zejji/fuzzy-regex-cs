@@ -167,6 +167,49 @@ Describe 'Update-Baseline' {
         @($ids | Where-Object { $_ -cmatch '^X\.Resolves\(ABC\)$' }).Count | Should -Be 1
         @($ids | Where-Object { $_ -cmatch '^X\.Resolves\(abc\)$' }).Count | Should -Be 1
     }
+
+    It 'keeps both of two passing tests whose ids differ only by a compatibility character' {
+        # -CaseSensitive fixed the case collision above but not the culture-sensitivity behind it:
+        # the comparer still folds U+212A KELVIN SIGN into 'K', so these two collapsed into one and
+        # the baseline silently stopped covering whichever lost. Found by S23's blind review, in
+        # S23's own regenerated baseline - the '(?i)[a-z]' rows of CaseInsensitiveMatchingTests are
+        # exactly this pair, and regenerating swapped which of them was listed.
+        $path = Join-Path $TestDrive 'kelvin.json'
+        $kelvin = [char]0x212A
+        $results = @(
+            [pscustomobject]@{ Id = 'X.Folds(K)'; Outcome = 'Passed' }
+            [pscustomobject]@{ Id = "X.Folds($kelvin)"; Outcome = 'Passed' }
+        )
+
+        Update-Baseline -Results $results -BaselinePath $path -UpstreamCommit 'abc123'
+
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        $ids = @($saved.passing)
+        $saved.passingCount | Should -Be 2
+        $ids.Count | Should -Be 2
+        # [string]::Equals with StringComparison.Ordinal, not '-eq': PowerShell's own string
+        # comparison is culture-sensitive too, and matches both of these against either.
+        $ordinal = [System.StringComparison]::Ordinal
+        @($ids | Where-Object { [string]::Equals($_, 'X.Folds(K)', $ordinal) }).Count | Should -Be 1
+        @($ids | Where-Object { [string]::Equals($_, "X.Folds($kelvin)", $ordinal) }).Count | Should -Be 1
+    }
+
+    It 'drops a result with no id rather than baselining an empty string' {
+        # The pipeline that used to sort these dropped a $null on the way through; casting to
+        # [string[]] turns one into '' instead, and an empty id in the baseline is a test the
+        # ratchet then reports as Missing for ever. Found by S23's second blind pass.
+        $path = Join-Path $TestDrive 'nullid.json'
+        $results = @(
+            [pscustomobject]@{ Id = $null; Outcome = 'Passed' }
+            [pscustomobject]@{ Id = 'X.Has(anId)'; Outcome = 'Passed' }
+        )
+
+        Update-Baseline -Results $results -BaselinePath $path -UpstreamCommit 'abc123'
+
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        $saved.passingCount | Should -Be 1
+        @($saved.passing) | Should -Be @('X.Has(anId)')
+    }
 }
 
 Describe 'Get-BaselinePassing' {

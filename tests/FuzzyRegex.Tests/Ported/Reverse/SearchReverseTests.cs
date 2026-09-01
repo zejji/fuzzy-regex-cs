@@ -22,25 +22,25 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Reverse;
 public sealed class SearchReverseTests
 {
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#1,6,8")]
     public void Matches_value_walks_backward_one_char_at_a_time() =>
         FuzzyRegex.Matches("abc", "(?r).").Select(m => m.Value).Should().Equal("c", "b", "a");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#2")]
     public void Matches_value_walks_backward_one_char_at_a_time_when_overlapped_is_requested() =>
         new FuzzyRegex("(?r).").Matches("abc", overlapped: true).Select(m => m.Value).Should().Equal("c", "b", "a");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#3")]
     public void Matches_value_walks_backward_two_chars_at_a_time_without_overlap() =>
         FuzzyRegex.Matches("abcde", "(?r)..").Select(m => m.Value).Should().Equal("de", "bc");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#4,7,9")]
     public void Matches_value_walks_backward_two_chars_at_a_time_with_overlap() =>
         new FuzzyRegex("(?r)..")
@@ -50,7 +50,7 @@ public sealed class SearchReverseTests
             .Equal("de", "cd", "bc", "ab");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#5")]
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -60,7 +60,7 @@ public sealed class SearchReverseTests
             .Equal("b", "a");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#5")]
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -70,7 +70,7 @@ public sealed class SearchReverseTests
             .Equal("-", "-");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#5")]
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
@@ -86,7 +86,7 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs anchors (^)")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#12,16")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
         FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
@@ -116,13 +116,13 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("abcd", @".{2}(?<=\G.*)").Select(m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs anchors (\\G)")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#20")]
     public void Matches_is_empty_when_a_reversed_pattern_requires_a_forward_G_anchor() =>
         FuzzyRegex.Matches("abcd ef", @"(?r)\G\w{2}").Select(m => m.Value).Should().BeEmpty();
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs anchors (\\G)")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#21")]
     public void Matches_value_when_a_reversed_pattern_places_the_G_anchor_after_the_run() =>
         FuzzyRegex.Matches("abcd ef", @"(?r)\w{2}\G").Select(m => m.Value).Should().Equal("ef");
@@ -134,7 +134,7 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("qqwe", "q*").Select(m => m.Value).Should().Equal("qq", "", "", "");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#24")]
     public void Matches_value_for_a_star_quantified_literal_scans_backward() =>
         FuzzyRegex.Matches("qqwe", "(?r)q*").Select(m => m.Value).Should().Equal("", "", "qq", "");
@@ -158,7 +158,7 @@ public sealed class SearchReverseTests
         new FuzzyRegex(".").Matches("abcd", beginning: 1, length: 2).Select(m => m.Value).Should().Equal("b", "c");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#30,32")]
     public void Matches_value_for_a_reversed_pattern_is_restricted_to_the_beginning_and_length_window() =>
         new FuzzyRegex("(?r).").Matches("abcd", beginning: 1, length: 2).Select(m => m.Value).Should().Equal("c", "b");
@@ -170,7 +170,7 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("aB", "[ab]", FuzzyRegexOptions.IgnoreCase).Select(m => m.Value).Should().Equal("a", "B");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#35")]
     public void Matches_value_for_a_reversed_case_insensitive_character_class() =>
         FuzzyRegex
@@ -180,13 +180,13 @@ public sealed class SearchReverseTests
             .Equal("B", "a");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#36,40")]
     public void Matches_value_for_a_reversed_two_char_repeat_without_overlap() =>
         FuzzyRegex.Matches("abc", "(?r).{2}").Select(m => m.Value).Should().Equal("bc");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs overlapped matching")]
+    [Skip("needs:overlapped - the engine has no overlapped-match mode yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#37,41")]
     public void Matches_value_for_a_reversed_two_char_repeat_with_overlap() =>
         new FuzzyRegex("(?r).{2}").Matches("abc", overlapped: true).Select(m => m.Value).Should().Equal("bc", "ab");
@@ -212,7 +212,7 @@ public sealed class SearchReverseTests
             .Equal("second", "fourth");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#39")]
     public void Matches_group_one_value_for_two_space_separated_word_groups_scanned_backward() =>
         FuzzyRegex
@@ -222,7 +222,7 @@ public sealed class SearchReverseTests
             .Equal("fourth", "second");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#39")]
     public void Matches_group_two_value_for_two_space_separated_word_groups_scanned_backward() =>
         FuzzyRegex
@@ -242,7 +242,7 @@ public sealed class SearchReverseTests
             .Equal("first second", "third fourth");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
+    [Skip("needs:find-all - right-to-left matching works from S23; FuzzyRegex.Matches is S25")]
     [Property("Upstream", "RegexTests.test_search_reverse#43")]
     public void Matches_value_for_two_space_separated_word_groups_scanned_backward_is_the_whole_match() =>
         FuzzyRegex
@@ -262,7 +262,6 @@ public sealed class SearchReverseTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#45")]
     public void Match_span_for_a_reversed_plain_literal()
     {
@@ -282,7 +281,6 @@ public sealed class SearchReverseTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#47")]
     public void Match_span_for_a_reversed_case_insensitive_literal()
     {
@@ -298,7 +296,7 @@ public sealed class SearchReverseTests
         FuzzyRegex.Replace("abc", "(.)", @"\1").Should().Be("abc");
 
     [Test]
-    [Skip("needs:right-to-left - the engine has no right-to-left match direction yet; also needs substitution")]
+    [Skip("needs:substitution - right-to-left matching works from S23; FuzzyRegex.Replace is S24")]
     [Property("Upstream", "RegexTests.test_search_reverse#49")]
     public void Replace_with_a_reversed_single_group_backreference_reproduces_the_subject() =>
         FuzzyRegex.Replace("abc", "(?r)(.)", @"\1").Should().Be("abc");

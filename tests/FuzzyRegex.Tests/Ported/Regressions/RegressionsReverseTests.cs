@@ -21,7 +21,6 @@ public sealed class RegressionsReverseTests
     }
 
     [Test]
-    [Skip("needs:right-to-left - RightToLeft searching is not implemented")]
     [Property("Upstream", "RegexTests.test_hg_bugs#223")]
     public void Inline_reverse_flag_finds_the_alternation_match_nearest_the_end()
     {

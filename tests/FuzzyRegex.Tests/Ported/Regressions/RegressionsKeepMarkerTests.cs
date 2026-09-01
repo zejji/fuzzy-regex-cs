@@ -31,7 +31,6 @@ public sealed class RegressionsKeepMarkerTests
         FuzzyRegex.Matches("abcdefgh", @"(\w\w\K\w\w)").Select(m => m.Value).Should().Equal("abcd", "efgh");
 
     [Test]
-    [Skip("needs:right-to-left - \\K works from S20; the reverse match direction is S23")]
     [Property("Upstream", "RegexTests.test_hg_bugs#166")]
     public void Keep_marker_drops_the_suffix_from_the_overall_match_when_searching_right_to_left()
     {

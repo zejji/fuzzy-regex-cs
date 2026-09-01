@@ -61,30 +61,6 @@ internal static class Seam
     private static string Tag(Opcode op) =>
         op switch
         {
-            Opcode.AnyAllRev
-            or Opcode.AnyRev
-            or Opcode.AnyURev
-            or Opcode.CharacterIgnRev
-            or Opcode.CharacterRev
-            or Opcode.PropertyIgnRev
-            or Opcode.PropertyRev
-            or Opcode.RangeIgnRev
-            or Opcode.RangeRev
-            or Opcode.RefGroupFldRev
-            or Opcode.RefGroupIgnRev
-            or Opcode.RefGroupRev
-            or Opcode.SetDiffIgnRev
-            or Opcode.SetDiffRev
-            or Opcode.SetInterIgnRev
-            or Opcode.SetInterRev
-            or Opcode.SetSymDiffIgnRev
-            or Opcode.SetSymDiffRev
-            or Opcode.SetUnionIgnRev
-            or Opcode.SetUnionRev
-            or Opcode.StringFldRev
-            or Opcode.StringIgnRev
-            or Opcode.StringRev => "right-to-left",
-
             // S19 delivered the whole GREEDY_REPEAT / LAZY_REPEAT / *_REPEAT_ONE family and the
             // BODY_*, MATCH_* and TAIL_START backtrack markers, so 'quantifiers' has no arm here -
             // naming a delivered tag would put a capability the status board says we have on an
@@ -94,6 +70,7 @@ internal static class Seam
             // Phase 4's. S22 delivered every forward _IGN and _FLD opcode - CHARACTER_IGN,
             // PROPERTY_IGN, RANGE_IGN, the four SET_*_IGN, STRING_IGN, STRING_FLD, REF_GROUP_IGN
             // and REF_GROUP_FLD - so 'ignore-case' and 'case-folding' have no arm here either.
+            // S23 delivered every _REV opcode, so 'right-to-left' has no arm here either.
             Opcode.Conditional or Opcode.EndConditional => "conditionals",
 
             Opcode.CallRef or Opcode.GroupCall or Opcode.GroupReturn => "recursion",
@@ -706,17 +683,20 @@ internal static class Matcher
     private static bool MatchesOne(CaseEncoding encoding, Node node, uint ch) =>
         node.Op switch
         {
-            Opcode.Character => MatchesCharacter(node, ch),
-            Opcode.CharacterIgn => MatchesCharacterIgn(encoding, node, ch),
-            Opcode.Property => MatchesProperty(encoding, node, ch),
-            Opcode.PropertyIgn => MatchesPropertyIgn(encoding, node, ch),
-            Opcode.Range => MatchesRange(node, ch),
-            Opcode.RangeIgn => MatchesRangeIgn(encoding, node, ch),
-            Opcode.SetDiffIgn or Opcode.SetInterIgn or Opcode.SetSymDiffIgn or Opcode.SetUnionIgn => MatchesSetIgn(
-                encoding,
-                node,
-                ch
-            ),
+            Opcode.Character or Opcode.CharacterRev => MatchesCharacter(node, ch),
+            Opcode.CharacterIgn or Opcode.CharacterIgnRev => MatchesCharacterIgn(encoding, node, ch),
+            Opcode.Property or Opcode.PropertyRev => MatchesProperty(encoding, node, ch),
+            Opcode.PropertyIgn or Opcode.PropertyIgnRev => MatchesPropertyIgn(encoding, node, ch),
+            Opcode.Range or Opcode.RangeRev => MatchesRange(node, ch),
+            Opcode.RangeIgn or Opcode.RangeIgnRev => MatchesRangeIgn(encoding, node, ch),
+            Opcode.SetDiffIgn
+            or Opcode.SetDiffIgnRev
+            or Opcode.SetInterIgn
+            or Opcode.SetInterIgnRev
+            or Opcode.SetSymDiffIgn
+            or Opcode.SetSymDiffIgnRev
+            or Opcode.SetUnionIgn
+            or Opcode.SetUnionIgnRev => MatchesSetIgn(encoding, node, ch),
             _ => MatchesSet(encoding, node, ch),
         };
 
@@ -755,7 +735,12 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The repeated node.</param>
-    /// <param name="pos">The position.</param>
+    /// <param name="pos">
+    /// Where the character to test starts. Upstream's <c>_REV</c> steppers read <c>text_ptr[-1]</c>
+    /// and this port's cannot, because one code unit back is not one character back, so
+    /// <see cref="CountOne"/> passes the already-stepped position and the predicate is the same
+    /// either way.
+    /// </param>
     /// <returns><see langword="true"/> if the character there is one more repeat.</returns>
     private static bool MatchesMany(MatchState state, Node node, int pos)
     {
@@ -763,16 +748,15 @@ internal static class Matcher
 
         return node.Op switch
         {
-            Opcode.Any => MatchesAny(ch),
-            Opcode.AnyAll => true,
-            Opcode.AnyU => MatchesAnyU(state.Encoding, ch),
+            Opcode.Any or Opcode.AnyRev => MatchesAny(ch),
+            Opcode.AnyAll or Opcode.AnyAllRev => true,
+            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(state.Encoding, ch),
             _ => MatchesOne(state.Encoding, node, ch) == node.Match,
         };
     }
 
     /// <summary>
-    /// Upstream <c>count_one</c> (<c>upstream/src/_regex.c</c> line 4989), reduced to the forward
-    /// opcodes this port matches: how many times
+    /// Upstream <c>count_one</c> (<c>upstream/src/_regex.c</c> line 4989): how many times
     /// <paramref name="node"/> repeats from <paramref name="textPos"/>, up to
     /// <paramref name="maxCount"/>.
     /// </summary>
@@ -799,7 +783,7 @@ internal static class Matcher
     /// <param name="maxCount">The most repeats to count.</param>
     /// <param name="isPartial">
     /// Receives upstream's <c>*is_partial</c>: the count ran out of subject rather than out of
-    /// matches, and a partial match on the right was asked for.
+    /// matches, and a partial match on the side it ran out of was asked for.
     /// </param>
     /// <param name="endPos">Receives the position the count reached.</param>
     /// <returns>The number of repeats.</returns>
@@ -820,6 +804,10 @@ internal static class Matcher
             return 0;
         }
 
+        // Upstream splits forwards from backwards by having a separate case per opcode; the two
+        // families differ only in which way the walk below runs and which bound it stops at.
+        bool reverse;
+
         switch (node.Op)
         {
             case Opcode.Any:
@@ -839,29 +827,57 @@ internal static class Matcher
             case Opcode.SetSymDiffIgn:
             case Opcode.SetUnion:
             case Opcode.SetUnionIgn:
+                reverse = false;
+                break;
+            case Opcode.AnyRev:
+            case Opcode.AnyAllRev:
+            case Opcode.AnyURev:
+            case Opcode.CharacterRev:
+            case Opcode.CharacterIgnRev:
+            case Opcode.PropertyRev:
+            case Opcode.PropertyIgnRev:
+            case Opcode.RangeRev:
+            case Opcode.RangeIgnRev:
+            case Opcode.SetDiffRev:
+            case Opcode.SetDiffIgnRev:
+            case Opcode.SetInterRev:
+            case Opcode.SetInterIgnRev:
+            case Opcode.SetSymDiffRev:
+            case Opcode.SetSymDiffIgnRev:
+            case Opcode.SetUnionRev:
+            case Opcode.SetUnionIgnRev:
+                reverse = true;
                 break;
             default:
                 // Upstream's switch has no default at all, so an opcode it does not list falls off
                 // the end of the function with 'count' uninitialised. Every opcode that reaches
-                // here is one 'SequenceMatchesOne' accepted, so what is missing from the list
-                // above is the reverse (S23) half.
+                // here is one 'SequenceMatchesOne' accepted, so nothing is missing from the two
+                // lists above.
                 throw Seam.For(node.Op);
         }
 
         long count = 0;
         int pos = textPos;
 
-        while (count < maxCount && pos < state.SliceEnd && MatchesMany(state, node, pos))
+        while (
+            count < maxCount
+            && (reverse ? pos > state.SliceStart : pos < state.SliceEnd)
+            && MatchesMany(state, node, reverse ? state.PrevPos(pos) : pos)
+        )
         {
-            pos = state.NextPos(pos);
+            pos = reverse ? state.PrevPos(pos) : state.NextPos(pos);
             ++count;
         }
 
         endPos = pos;
 
-        // Upstream's 'count == (size_t)(state->text_end - text_pos)': the walk consumed everything
-        // there was, which in code-unit indices is the walk having stopped at 'text_end'.
-        isPartial = pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
+        // Upstream's 'count == (size_t)(state->text_end - text_pos)' forwards and
+        // 'count == (size_t)(text_pos)' backwards: the walk consumed everything there was, which in
+        // code-unit indices is the walk having stopped at 'text_end' or at 'text_start' - and
+        // 'text_start' is always 0, which is the number upstream compares against.
+        isPartial = reverse
+            ? pos == state.TextStart && count < maxCount && state.PartialSide == MatchState.PartialLeft
+            : pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
 
         return count;
     }
@@ -1636,6 +1652,48 @@ internal static class Matcher
         return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(state.Encoding, state.CharAt(textPos)));
     }
 
+    /// <summary>Upstream <c>try_match_ANY_REV</c> (line 6962).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchAnyRev(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+        }
+
+        return MatchStatus.From(textPos > state.SliceStart && MatchesAny(state.CharBefore(textPos)));
+    }
+
+    /// <summary>Upstream <c>try_match_ANY_ALL_REV</c> (line 6947).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchAnyAllRev(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+        }
+
+        return MatchStatus.From(textPos > state.SliceStart);
+    }
+
+    /// <summary>Upstream <c>try_match_ANY_U_REV</c> (line 6995).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchAnyURev(MatchState state, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+        }
+
+        return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(state.Encoding, state.CharBefore(textPos)));
+    }
+
     /// <summary>Upstream <c>try_match_BOUNDARY</c> (line 7010).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node.</param>
@@ -1793,15 +1851,36 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>match_one</c> (<c>upstream/src/_regex.c</c> line 11373), reduced to the forward
-    /// opcodes this port matches.
+    /// The <c>_REV</c> half of <see cref="TryMatchOne"/>: upstream's
+    /// <c>try_match_CHARACTER_REV</c> (<c>upstream/src/_regex.c</c> line 7072),
+    /// <c>try_match_PROPERTY_REV</c> (<c>:7205</c>), <c>try_match_RANGE_REV</c> (<c>:7271</c>),
+    /// <c>try_match_SET_REV</c> (<c>:7343</c>) and their four <c>_IGN_REV</c> counterparts.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchOneRev(MatchState state, Node node, int textPos)
+    {
+        if (textPos <= state.TextStart)
+        {
+            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+        }
+
+        return MatchStatus.From(
+            textPos > state.SliceStart && MatchesOne(state.Encoding, node, state.CharBefore(textPos)) == node.Match
+        );
+    }
+
+    /// <summary>
+    /// Upstream <c>match_one</c> (<c>upstream/src/_regex.c</c> line 11373).
     /// </summary>
     /// <remarks>
     /// Upstream's default arm answers <c>FALSE</c> for an opcode it has no <c>try_match_*</c> for.
     /// Here that would turn a construct a later slice delivers into a silent "no repeat here", so
     /// the leaf throws instead - the S07 rule. The only caller is the <c>LAZY_REPEAT_ONE</c>
-    /// backtrack case, whose node is whatever <c>SequenceMatchesOne</c> accepted, so what is missing
-    /// from the list is the reverse (S23) half.
+    /// backtrack case, whose node is whatever <c>SequenceMatchesOne</c> accepted, so nothing that
+    /// can reach here is missing from the list.
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="node">The node.</param>
@@ -1813,6 +1892,23 @@ internal static class Matcher
             Opcode.Any => TryMatchAny(state, textPos),
             Opcode.AnyAll => TryMatchAnyAll(state, textPos),
             Opcode.AnyU => TryMatchAnyU(state, textPos),
+            Opcode.AnyRev => TryMatchAnyRev(state, textPos),
+            Opcode.AnyAllRev => TryMatchAnyAllRev(state, textPos),
+            Opcode.AnyURev => TryMatchAnyURev(state, textPos),
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.PropertyRev
+            or Opcode.PropertyIgnRev
+            or Opcode.RangeRev
+            or Opcode.RangeIgnRev
+            or Opcode.SetDiffRev
+            or Opcode.SetDiffIgnRev
+            or Opcode.SetInterRev
+            or Opcode.SetInterIgnRev
+            or Opcode.SetSymDiffRev
+            or Opcode.SetSymDiffIgnRev
+            or Opcode.SetUnionRev
+            or Opcode.SetUnionIgnRev => TryMatchOneRev(state, node, textPos),
             Opcode.Character
             or Opcode.CharacterIgn
             or Opcode.Property
@@ -2459,6 +2555,40 @@ internal static class Matcher
                     }
 
                     break;
+                // ANY_REV (:11977), ANY_ALL_REV (:11957) and ANY_U_REV (:12017). Upstream gives each
+                // its own case, differing from the forward one only in the predicate it calls and in
+                // stepping back rather than forward; one case group with the predicate chosen by a
+                // switch says the same thing.
+                case Opcode.AnyRev: // Any character except a newline, backwards.
+                case Opcode.AnyAllRev: // Any character at all, backwards.
+                case Opcode.AnyURev: // Any character except a line separator, backwards.
+                    status = node.Op switch
+                    {
+                        Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
+                        Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
+                        _ => TryMatchAnyURev(state, state.TextPos),
+                    };
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        state.TextPos = state.PrevPos(state.TextPos);
+                        node = node.Next1.Node!;
+                    }
+                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+                    else
+                    {
+                        goto backtrack;
+                    }
+
+                    break;
                 case Opcode.Atomic: // Start of an atomic group.
                     PushCaptures(state, state.Bstack);
 
@@ -2954,6 +3084,47 @@ internal static class Matcher
                     if (
                         state.TextPos < state.SliceEnd
                         && MatchesOne(state.Encoding, node, state.CharAt(state.TextPos)) == node.Match
+                    )
+                    {
+                        state.TextPos = Step(state, state.TextPos, node.Step);
+                        node = node.Next1.Node!;
+                    }
+                    else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+                    else
+                    {
+                        goto backtrack;
+                    }
+
+                    break;
+                // The same block backwards (:12191, :12169, :13872, :13850, :13982, :13960,
+                // :14520-14523, :14496-14499). Three things change and nothing else does: the
+                // partial side, the bound the position is tested against, and reading the character
+                // *before* the position rather than at it.
+                case Opcode.CharacterRev: // A character, backwards.
+                case Opcode.CharacterIgnRev: // A character, backwards, ignoring case.
+                case Opcode.PropertyRev: // A property, backwards.
+                case Opcode.PropertyIgnRev: // A property, backwards, ignoring case.
+                case Opcode.RangeRev: // A range, backwards.
+                case Opcode.RangeIgnRev: // A range, backwards, ignoring case.
+                case Opcode.SetDiffRev: // Set difference, backwards.
+                case Opcode.SetDiffIgnRev: // Set difference, backwards, ignoring case.
+                case Opcode.SetInterRev: // Set intersection, backwards.
+                case Opcode.SetInterIgnRev: // Set intersection, backwards, ignoring case.
+                case Opcode.SetSymDiffRev: // Set symmetric difference, backwards.
+                case Opcode.SetSymDiffIgnRev: // Set symmetric difference, backwards, ignoring case.
+                case Opcode.SetUnionRev: // Set union, backwards.
+                case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
+                    if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                    {
+                        return MatchStatus.Partial;
+                    }
+
+                    if (
+                        state.TextPos > state.SliceStart
+                        && MatchesOne(state.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
                     )
                     {
                         state.TextPos = Step(state, state.TextPos, node.Step);
@@ -3546,6 +3717,217 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                // REF_GROUP_REV (:14375). The same walk from the other end: 'stringPos' starts at
+                // the capture's end and both sides retreat.
+                case Opcode.RefGroupRev: // Reference to a capture group, backwards.
+                {
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.End;
+                    }
+
+                    // Try comparing.
+                    while (stringPos > span.Start)
+                    {
+                        if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                        {
+                            return MatchStatus.Partial;
+                        }
+
+                        if (
+                            state.TextPos > state.SliceStart
+                            && SameChar(state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+                        )
+                        {
+                            stringPos = state.PrevPos(stringPos);
+                            state.TextPos = state.PrevPos(state.TextPos);
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // REF_GROUP_IGN_REV (:14318).
+                case Opcode.RefGroupIgnRev: // Reference to a capture group, backwards, ignoring case.
+                {
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.End;
+                    }
+
+                    // Try comparing.
+                    while (stringPos > span.Start)
+                    {
+                        if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                        {
+                            return MatchStatus.Partial;
+                        }
+
+                        if (
+                            state.TextPos > state.SliceStart
+                            && SameCharIgn(state.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+                        )
+                        {
+                            stringPos = state.PrevPos(stringPos);
+                            state.TextPos = state.PrevPos(state.TextPos);
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // REF_GROUP_FLD_REV (:14161). REF_GROUP_FLD with both foldings consumed from their
+                // last character back, so each side's position counts down from its length instead
+                // of up from zero.
+                //
+                // S1854 (useless assignment) is right about this port and wrong about the program
+                // being ported: walking down means only 'gfoldedPos' is ever read afterwards, so
+                // every store to 'gfoldedLen' before the loop's own is dead *here*. Upstream's
+                // reader is 'fuzzy_match_group_fld(..., gfolded_len, ...)', which is a throwing
+                // seam until Phase 5. Deleting the variable now would mean re-deriving it then, in
+                // the code where a transcription slip costs most, so it is kept and the rule is
+                // disapplied over this case alone - a genuine dead store anywhere else in this file
+                // still fails the build.
+#pragma warning disable S1854
+                case Opcode.RefGroupFldRev: // Reference to a capture group, backwards, ignoring case.
+                {
+                    // Did the group capture anything?
+                    GroupData refGroup = state.Groups[(int)node.Values[0] - 1];
+                    if (refGroup.Current < 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    GroupSpan span = refGroup.Captures[refGroup.Current];
+                    int foldedLen;
+                    int gfoldedLen;
+
+                    if (stringPos < 0)
+                    {
+                        stringPos = span.End;
+                        foldedPos = 0;
+                        foldedLen = 0;
+                        gfoldedPos = 0;
+                        gfoldedLen = 0;
+                    }
+                    else
+                    {
+                        // Only Phase 5's fuzzy retry leaves 'stringPos' non-negative on the way in,
+                        // so nothing reaches this arm yet.
+                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+                        gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
+                    }
+
+                    // Try comparing.
+                    while (stringPos > span.Start)
+                    {
+                        // Case-fold at current position in text.
+                        if (foldedPos <= 0)
+                        {
+                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            {
+                                return MatchStatus.Partial;
+                            }
+
+                            foldedLen =
+                                state.TextPos > state.SliceStart
+                                    ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded)
+                                    : 0;
+
+                            foldedPos = foldedLen;
+                        }
+
+                        // Case-fold at current position in group.
+                        if (gfoldedPos <= 0)
+                        {
+                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
+                            gfoldedPos = gfoldedLen;
+                        }
+
+                        if (
+                            foldedPos > 0
+                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1])
+                        )
+                        {
+                            --foldedPos;
+                            --gfoldedPos;
+                        }
+                        else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+                        else
+                        {
+                            stringPos = -1;
+                            goto backtrack;
+                        }
+
+                        if (foldedPos <= 0 && foldedLen > 0)
+                        {
+                            state.TextPos = state.PrevPos(state.TextPos);
+                        }
+
+                        if (gfoldedPos <= 0)
+                        {
+                            stringPos = state.PrevPos(stringPos);
+                        }
+                    }
+
+                    stringPos = -1;
+
+                    // A folding that ran out on one side but not the other did not line up.
+                    if (foldedPos > 0 || gfoldedPos > 0)
+                    {
+                        goto backtrack;
+                    }
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+#pragma warning restore S1854
                 // REF_GROUP_FLD (:14060). The hard one: the captured text and the subject are both
                 // full-case-folded, and the two foldings need not be the same length, so each side
                 // has its own buffer and its own position and only advances when its buffer runs
@@ -3915,6 +4297,231 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                // STRING_REV (:15103). The pattern's values are consumed from the last back, and the
+                // subject retreats with them.
+                case Opcode.StringRev: // A string, backwards.
+                {
+                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    {
+                        // Unreachable until Phase 7 ports the required-string locator, which is the
+                        // only thing that sets 'req_pos'.
+                        state.TextPos = state.ReqEnd;
+                    }
+                    else
+                    {
+                        if (stringPos < 0)
+                        {
+                            stringPos = node.Values.Count;
+                        }
+
+                        // Try comparing.
+                        while (stringPos > 0)
+                        {
+                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            {
+                                return MatchStatus.Partial;
+                            }
+
+                            if (
+                                state.TextPos > state.SliceStart
+                                && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
+                            )
+                            {
+                                --stringPos;
+                                state.TextPos = state.PrevPos(state.TextPos);
+                            }
+                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                throw Seam.For(Opcode.Fuzzy);
+                            }
+                            else
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+                        }
+                    }
+
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // STRING_IGN_REV (:15046): STRING_REV with 'same_char_ign' in place of 'same_char'.
+                case Opcode.StringIgnRev: // A string, backwards, ignoring case.
+                {
+                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    {
+                        // Unreachable until Phase 7 ports the required-string locator.
+                        state.TextPos = state.ReqEnd;
+                    }
+                    else
+                    {
+                        if (stringPos < 0)
+                        {
+                            stringPos = node.Values.Count;
+                        }
+
+                        // Try comparing.
+                        while (stringPos > 0)
+                        {
+                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            {
+                                return MatchStatus.Partial;
+                            }
+
+                            if (
+                                state.TextPos > state.SliceStart
+                                && SameCharIgn(
+                                    state.Encoding,
+                                    state.CharBefore(state.TextPos),
+                                    node.Values[stringPos - 1]
+                                )
+                            )
+                            {
+                                --stringPos;
+                                state.TextPos = state.PrevPos(state.TextPos);
+                            }
+                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                throw Seam.For(Opcode.Fuzzy);
+                            }
+                            else
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+                        }
+                    }
+
+                    if ((node.Status & NodeStatus.Fuzzy) != 0)
+                    {
+                        throw Seam.For(Opcode.Fuzzy);
+                    }
+
+                    stringPos = -1;
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                // STRING_FLD_REV (:14882). STRING_FLD with the subject's folding consumed from its
+                // last character back, so 'foldedPos' counts down from 'foldedLen' to zero and
+                // 'text_pos' retreats when it reaches zero.
+                //
+                // S1854 is disapplied over this case for the reason spelled out at REF_GROUP_FLD_REV
+                // above: upstream's reader of 'folded_len' here is
+                // 'fuzzy_match_string_fld(..., folded_len, -1)', a throwing seam until Phase 5.
+#pragma warning disable S1854
+                case Opcode.StringFldRev: // A string, backwards, ignoring case.
+                {
+                    int foldedLen;
+
+                    if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
+                    {
+                        // Unreachable until Phase 7 ports the required-string locator.
+                        state.TextPos = state.ReqEnd;
+                    }
+                    else
+                    {
+                        int length = node.Values.Count;
+
+                        if (stringPos < 0)
+                        {
+                            stringPos = length;
+                            foldedPos = 0;
+                            foldedLen = 0;
+                        }
+                        else
+                        {
+                            // Only Phase 5's fuzzy retry reaches this arm.
+                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+
+                            if (foldedPos <= 0)
+                            {
+                                if (state.TextPos <= state.SliceStart)
+                                {
+                                    goto backtrack;
+                                }
+
+                                state.TextPos = state.PrevPos(state.TextPos);
+                                foldedPos = 0;
+                                foldedLen = 0;
+                            }
+                        }
+
+                        // Try comparing.
+                        while (stringPos > 0)
+                        {
+                            if (foldedPos <= 0)
+                            {
+                                if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                                {
+                                    return MatchStatus.Partial;
+                                }
+
+                                foldedLen =
+                                    state.TextPos > state.SliceStart
+                                        ? Encodings.FullCaseFold(
+                                            state.Encoding,
+                                            state.CharBefore(state.TextPos),
+                                            folded
+                                        )
+                                        : 0;
+
+                                foldedPos = foldedLen;
+                            }
+
+                            if (
+                                foldedPos > 0
+                                && SameCharIgn(state.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
+                            )
+                            {
+                                --stringPos;
+                                --foldedPos;
+
+                                if (foldedPos <= 0)
+                                {
+                                    state.TextPos = state.PrevPos(state.TextPos);
+                                }
+                            }
+                            else if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                throw Seam.For(Opcode.Fuzzy);
+                            }
+                            else
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+                        }
+
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            throw Seam.For(Opcode.Fuzzy);
+                        }
+
+                        stringPos = -1;
+
+                        // The subject character's folding was longer than what the pattern
+                        // consumed, so this string is only part of it.
+                        if (foldedPos > 0)
+                        {
+                            goto backtrack;
+                        }
+                    }
+
+                    // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+#pragma warning restore S1854
                 case Opcode.Success: // Success.
                     // Must the match advance past its start?
                     if (state.TextPos == state.SearchAnchor && state.MustAdvance)
