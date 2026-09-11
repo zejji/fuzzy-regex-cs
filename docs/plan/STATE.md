@@ -2,38 +2,40 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S29 is **closed** and in `done/` (2026-09-11, second session). Next is S30,
-recursion and group calls.
+**Current slice:** none. S30 is **closed** and in `done/` (2026-09-11). Next is S31, partial matching.
 
 **Blockers:** none.
 
-**What S29's close changed, and it is not what the last session predicted.** The finishing scope said
-recording `verbs` against a prefilter-free upstream would make the wave green. Measured: it changes
-**0 rows of 3600** across five seeds, and the four wave divergences survive it untouched. They are a
-second, different mechanism - **upstream's `search_start`** (`_regex.c:8385`), which this port does
-not implement. Its scanners bound themselves with `text_end`/`text_start` where the `try_match_*`
-predicates `basic_match` consults bound themselves with `slice_end`/`slice_start`; only a `(*SKIP)`
-moves the slice mid-attempt, and then upstream's fast path skips a start position its own slow path
-accepts. Minimised to `regex.finditer(r"(?r)(?:a*(*SKIP)b|[^a-f])$", "\nb", regex.M)` - upstream one
-match, this port two - and confirmed by emulating the scanner in front of each attempt.
+**Where the port stands:** ratchet GREEN, 5737 tests, 5462 passing, tree clean. Oracle GREEN over the
+sixteen default generators - `recursion` joined the list this slice - 6400/6400 at seed 20260911.
+`verbs` is still off the default list for S29's reason; run it explicitly.
 
-**Where the port stands:** ratchet GREEN, 5731 tests, 5396 passing, tree clean. Oracle GREEN over the
-fifteen default generators. **`verbs` stays off the default list until Phase 7**, now for a named and
-permanent reason rather than an open question; run it explicitly.
+**What S30 landed.** All six arms of `CALL_REF`, `GROUP_CALL` and `GROUP_RETURN`, plus
+`push_groups`/`pop_groups`, which also completes `push_repeats`/`pop_repeats`'s last six call sites.
+41 skips removed, 60 tests delivered, no `needs:recursion` left. `ByteStack.PushNode` now carries
+upstream's `NULL` as index -1. `GROUP_CALL` reassigns `node` rather than calling the matcher, so a
+10,000-deep `(?R)` costs heap, not .NET stack.
 
-**For Phase 7's author:** porting **either** `locate_required_string` **or** `search_start` turns the
-`verbs` wave red on purpose. Delete the `prefilter-free` wrapper in `record-oracle.py`, invert the two
-gap tests in `Gaps/Engine/BacktrackingVerbTests.cs` (both marked), put `verbs` back on the default
-list, and rewrite control S29-A, whose mutation neutralises the same asymmetry and runs *negative* at
-one seed. PORTMAP's two deferral rows carry the detail.
+**Two things a later slice should not re-derive.** Upstream's `group_call_guard_list` is **write-only**
+- six sites, no read - so it is now a permanent row in PORTMAP's "deliberately not ported" table
+rather than an open Phase 4 hole; only the fuzzy-guard allocation is still owed, by Phase 5. And
+`Match.GroupAt` used to drop the capture list of any group with `Current < 0`; upstream keeps
+`current` and `count` apart, and a group call is the first construct that makes them disagree.
 
-**For S30's author:** `findall` and `finditer` are not the same loop once `(*SKIP)` moves
-`slice_start` (S29 notes); `push_repeats`/`pop_repeats` are ported (S28), so recursion ports
-`push_groups`/`pop_groups` and the group-call guard list only.
+**One divergence, and it is upstream's.** A `(?&name)` call inside a **lookbehind** matches here and
+fails upstream whenever anything else is in the sequence. Minimal:
+`regex.compile(r"(?(DEFINE)(?<a>a))(?<=(?&a))c").match("ac", pos=1)` is `None`, ours is `(1, 2)`.
+Upstream contradicts itself twice over it (its `search` and `match` disagree at one position; `c?`
+matches the `c` that `c` refuses). Ruled out: our parser, and the required-string prefilter. Pinned in
+`Gaps/Engine/GroupCallTests.cs`, sits with upstream issue 614 for Phase 6. **Nothing is drafted or
+filed upstream - that needs the owner's approval.** The `recursion` generator does not draw the shape.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
-`python tools/run-controls.py --slices S29`. Delete `.scratch/control-waves/` after a generator
-change. Read control figures against the honest engine's own baseline, not as totals.
+`python tools/run-controls.py --slices S30`. Delete `.scratch/control-waves/` after a generator
+change. S30-B needs 2400 rows to fire reliably - at 600 it caught nothing at one seed; the slice
+notes say why, and say to re-measure both controls after any widening.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. And S29 closed with its "oracle wave green" box ticked as *superseded* - see its last section.
+real. And `check-ratchet.ps1 -UpdateBaseline` reports recording 5462 while a fresh run reads the
+baseline as 5354; the same 108-test gap was there at S29 (5396 vs 5288), so it is the tool's, not
+this slice's - worth a look before it hides a real regression.

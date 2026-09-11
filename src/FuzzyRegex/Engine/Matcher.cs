@@ -2001,6 +2001,42 @@ internal static class Matcher
         int PublicIndex
     );
 
+    /// <summary>Upstream <c>push_groups</c> (<c>upstream/src/_regex.c</c> line 2490).</summary>
+    /// <remarks>
+    /// Only each group's <c>current</c>, where <see cref="PushCaptures"/> also saves its
+    /// <c>count</c>. A group call leaves the callee's captures in place on purpose - a
+    /// <c>(?&amp;name)</c> call that matches records a capture the caller can read afterwards - and
+    /// restores only where each group's span currently is.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to push onto.</param>
+    private static void PushGroups(MatchState state, ByteStack stack)
+    {
+        foreach (GroupData group in state.Groups)
+        {
+            stack.PushSize(group.Current);
+        }
+    }
+
+    /// <summary>Upstream <c>pop_groups</c> (line 2662).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopGroups(MatchState state, ByteStack stack)
+    {
+        for (int g = state.Groups.Length - 1; g >= 0; g--)
+        {
+            if (!stack.PopSize(out long current))
+            {
+                return false;
+            }
+
+            state.Groups[g].Current = (int)current;
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Upstream <c>push_captures</c> (<c>upstream/src/_regex.c</c> line 2513).
     /// </summary>
@@ -3409,6 +3445,21 @@ internal static class Matcher
 
                     break;
                 }
+                case Opcode.CallRef: // A group call reference (:12106).
+                    // The node a called group is entered through. Reached in the ordinary forward
+                    // direction it means the group is being matched where it was written rather
+                    // than called, so the NULL tells the matching GROUP_RETURN there is no caller
+                    // to return to. GROUP_CALL enters the group by skipping over this node.
+                    state.Sstack.PushNode(null);
+                    state.Bstack.PushUInt8((byte)Opcode.CallRef);
+
+                    /* sstack: NULL
+                     *
+                     * bstack: CALL_REF
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
                 // Upstream gives each of these its own case with the same eleven-line tail copied
                 // out (:12968, :13804, :13914, :14446-14449 case-sensitive; :12146, :13827, :13937,
                 // :14471-14474 ignoring case), differing only in which 'matches_*' predicate it
@@ -3769,6 +3820,40 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                case Opcode.GroupCall: // Group call (:13394).
+                {
+                    int groupCallIndex = (int)node.Values[0];
+                    Node groupCallReturnNode = node.Next1.Node!;
+
+                    // For the caller.
+                    PushGroups(state, state.Sstack);
+                    PushRepeats(state, state.Sstack);
+                    state.Sstack.PushSize(state.CaptureChange);
+                    state.Sstack.PushNode(groupCallReturnNode);
+                    state.Bstack.PushUInt8((byte)Opcode.GroupCall);
+
+                    /* sstack: caller_groups caller_repeats capture_change return_node
+                     *
+                     * bstack: GROUP_CALL
+                     */
+
+                    // Clear the repeat guards for the group call. They'll be restored on return -
+                    // 'push_repeats' above saved the guard lists in full. Without this a repeat
+                    // inside the called group would inherit "already failed at this position" from
+                    // the caller's own pass over the same text, and a recursive pattern visits the
+                    // same positions by design.
+                    foreach (RepeatData groupCallRepeat in state.Repeats)
+                    {
+                        groupCallRepeat.BodyGuardList.Reset();
+                        groupCallRepeat.TailGuardList.Reset();
+                    }
+
+                    // Call a group, skipping its CALL_REF node. Be aware that we might be calling
+                    // the entire pattern, which has no CALL_REF node of its own.
+                    Node? groupCallRefNode = pattern.CallRefInfoList[groupCallIndex].Node;
+                    node = groupCallRefNode is not null ? groupCallRefNode.Next1.Node! : pattern.StartNode!;
+                    break;
+                }
                 // GROUP_EXISTS (:13442). Nothing is pushed to the backtracking stack: the opcode
                 // only picks an exit, and both exits are reachable from the enclosing structure's
                 // own backtracking, so there is nothing here to undo.
@@ -3800,6 +3885,77 @@ internal static class Matcher
                                 ? node.Next1.Node! // The 'true' branch.
                                 : node.Next2.Node!; // The 'false' branch.
                     }
+
+                    break;
+                }
+                case Opcode.GroupReturn: // Group return (:13474).
+                {
+                    /* If called:
+                     *
+                     * sstack: caller_groups caller_repeats capture_change return_node
+                     *
+                     * bstack: -
+                     *
+                     * else:
+                     *
+                     * sstack: NULL
+                     *
+                     * bstack: -
+                     */
+
+                    if (!state.Sstack.PopNode(pattern, out Node? groupReturnNode))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (groupReturnNode is not null)
+                    {
+                        // The group was called.
+                        node = groupReturnNode;
+
+                        // For the callee.
+                        PushGroups(state, state.Bstack);
+                        PushRepeats(state, state.Bstack);
+                        state.Bstack.PushSize(state.CaptureChange);
+                        state.Bstack.PushNode(groupReturnNode);
+                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
+
+                        // For the caller. The callee's group spans and repeats go on the
+                        // backtracking stack and the caller's come back off the saved stack, so
+                        // matching resumes exactly where the call left it. The captures themselves
+                        // are untouched, which is how a called group's capture survives the return.
+                        if (
+                            !state.Sstack.PopSize(out long groupReturnCaptureChange)
+                            || !PopRepeats(state, state.Sstack)
+                            || !PopGroups(state, state.Sstack)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = groupReturnCaptureChange;
+                    }
+                    else
+                    {
+                        // The group was not called.
+                        state.Bstack.PushNode(null);
+                        state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
+
+                        node = node.Next1.Node!;
+                    }
+
+                    /* If called:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: callee_groups callee_repeats capture_change return_node GROUP_RETURN
+                     *
+                     * else:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: NULL GROUP_RETURN
+                     */
 
                     break;
                 }
@@ -5060,6 +5216,18 @@ internal static class Matcher
 
                     break;
                 }
+                case Opcode.CallRef: // A group call ref (:15367).
+                    /* sstack: NULL
+                     *
+                     * bstack: -
+                     */
+
+                    if (!state.Sstack.DropSize())
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
                 case Opcode.Conditional: // Conditional subpattern (:15378).
                 {
                     /* sstack: node slice_start slice_end text_pos ...
@@ -5132,6 +5300,96 @@ internal static class Matcher
                     {
                         return MatchStatus.Illegal;
                     }
+
+                    break;
+                }
+                case Opcode.GroupCall: // Group call (:16354).
+                {
+                    /* sstack: caller_groups caller_repeats capture_change return_node
+                     *
+                     * bstack: -
+                     */
+
+                    // The return node is dropped rather than popped: backtracking past the call
+                    // means the call never happened, so there is nowhere to return to.
+                    if (
+                        !state.Sstack.DropSize()
+                        || !state.Sstack.PopSize(out long groupCallCaptureChange)
+                        || !PopRepeats(state, state.Sstack)
+                        || !PopGroups(state, state.Sstack)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // For the caller.
+                    state.CaptureChange = groupCallCaptureChange;
+                    break;
+                }
+                case Opcode.GroupReturn: // Group return (:16375).
+                {
+                    /* If called:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: callee_groups callee_repeats capture_change return_node
+                     *
+                     * else:
+                     *
+                     * sstack: -
+                     *
+                     * bstack: NULL
+                     */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? groupReturnBackNode))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (groupReturnBackNode is not null)
+                    {
+                        // For the caller. The forward arm's exchange, run the other way round: the
+                        // caller's state goes back on the saved stack and the callee's comes off
+                        // the backtracking stack, so the callee resumes inside the call.
+                        PushGroups(state, state.Sstack);
+                        PushRepeats(state, state.Sstack);
+                        state.Sstack.PushSize(state.CaptureChange);
+                        state.Sstack.PushNode(groupReturnBackNode);
+
+                        /* sstack: caller_groups caller_repeats capture_change return_node
+                         *
+                         * bstack: callee_groups callee_repeats capture_change
+                         */
+
+                        // For the callee.
+                        if (
+                            !state.Bstack.PopSize(out long groupReturnBackCaptureChange)
+                            || !PopRepeats(state, state.Bstack)
+                            || !PopGroups(state, state.Bstack)
+                        )
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = groupReturnBackCaptureChange;
+                    }
+                    else
+                    {
+                        state.Sstack.PushNode(null);
+                    }
+
+                    /* If called:
+                     *
+                     * sstack: caller_groups caller_repeats capture_change return_node
+                     *
+                     * bstack: -
+                     *
+                     * else:
+                     *
+                     * sstack: NULL
+                     *
+                     * bstack: -
+                     */
 
                     break;
                 }

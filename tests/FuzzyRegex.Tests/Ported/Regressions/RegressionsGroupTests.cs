@@ -12,7 +12,6 @@ public sealed class RegressionsGroupTests
     // match.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#326-327")]
-    [Skip("needs:recursion - '(?P<x>.)*(?&x)' needs a group call as well as the repeat")]
     public void Subroutine_call_captures_every_iteration_but_group_reports_the_last()
     {
         Match m = FuzzyRegex.FullMatch("abc", "(?P<x>.)*(?&x)");

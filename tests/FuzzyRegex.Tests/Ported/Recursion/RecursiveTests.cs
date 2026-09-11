@@ -8,8 +8,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Recursion;
 /// <remarks>
 /// Every <c>(?r)</c> variant here is right-to-left, not a duplicate of its unflagged sibling, even
 /// where the expected values happen to differ only in which group captured which text. They were
-/// tagged <c>needs:right-to-left</c> until S23 delivered that direction; every one of them also
-/// recurses, so they now carry <c>needs:recursion</c> like their unflagged siblings.
+/// tagged <c>needs:right-to-left</c> until S23 delivered that direction, then <c>needs:recursion</c>
+/// like their unflagged siblings, because every one of them also recurses; S30 delivered that and
+/// removed the last of the skips from this file.
 /// Assertion #29 (line 2869,
 /// <c>#self.assertEqual(bool(rgx.search('&lt;foo/&gt;foo')), False)</c>) is commented out in
 /// upstream with the note "The next regex should and does match. Perl 5.14 agrees.", so it is not
@@ -24,7 +25,6 @@ public sealed class RecursiveTests
     [Arguments("abba", "abba", "a", null)]
     [Arguments("kayak", "kayak", "k", null)]
     [Arguments("paper", "pap", "p", "a")]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#1-5")]
     public void Recursive_backreference_matches_the_run_around_a_repeated_character(
         string subject,
@@ -48,13 +48,11 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#6")]
     public void Recursive_backreference_does_not_match_without_a_repeated_character() =>
         FuzzyRegex.Match("dontmatchme", @"(\w)(?:(?R)|(\w?))\1").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Arguments("xx", "xx", "", "x")]
     [Arguments("aba", "aba", "b", "a")]
     [Arguments("abba", "abba", null, "a")]
@@ -83,13 +81,11 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#12")]
     public void Reversed_recursive_backreference_does_not_match_without_a_repeated_character() =>
         FuzzyRegex.Match("dontmatchme", @"(?r)\2(?:(\w?)|(?R))(\w)").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#13")]
     public void Recursive_atomic_alternation_matches_balanced_parens_and_captures_the_last_run()
     {
@@ -100,7 +96,6 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - needs (?R) recursion, atomic groups and capture lists; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_recursive#14")]
     public void Recursive_atomic_alternation_captures_every_repetition_of_group_one() =>
         FuzzyRegex
@@ -111,7 +106,6 @@ public sealed class RecursiveTests
             .Equal("ab", "cd", "(cd)", "ef");
 
     [Test]
-    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#15")]
     public void Reversed_recursive_atomic_alternation_matches_balanced_parens_and_captures_the_first_run()
     {
@@ -122,7 +116,6 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - needs (?R) recursion, atomic groups and capture lists; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_recursive#16")]
     public void Reversed_recursive_atomic_alternation_captures_every_repetition_of_group_one_in_reverse() =>
         FuzzyRegex
@@ -133,7 +126,6 @@ public sealed class RecursiveTests
             .Equal("ef", "cd", "(cd)", "ab");
 
     [Test]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#17")]
     public void Recursive_alternation_matches_the_innermost_balanced_group_within_surrounding_text()
     {
@@ -144,7 +136,6 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     [Property("Upstream", "RegexTests.test_recursive#18")]
     public void Reversed_recursive_alternation_matches_the_innermost_balanced_group_within_surrounding_text()
     {
@@ -155,7 +146,6 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - needs (?2) numbered-group recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#19")]
     public void Recursive_numbered_group_reference_matches_nested_parens_in_a_function_call()
     {
@@ -168,7 +158,6 @@ public sealed class RecursiveTests
     }
 
     [Test]
-    [Skip("needs:recursion - needs (?2) numbered-group recursion and atomic groups; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_recursive#20")]
     public void Reversed_recursive_numbered_group_reference_matches_nested_parens_in_a_function_call()
     {
@@ -193,9 +182,6 @@ public sealed class RecursiveTests
     [Arguments("<foo>foo</foo>", true)]
     [Arguments("<foo><bar/>foo</foo>", true)]
     [Arguments("<a><b><c></c></b></a>", true)]
-    [Skip(
-        "needs:recursion - needs (?1) numbered-group recursion, conditionals ((?(3)|...)) and a backreference; the engine has none of them yet"
-    )]
     [Property("Upstream", "RegexTests.test_recursive#21-28,30-33")]
     public void Recursive_numbered_group_reference_checks_balanced_xml_like_tags(string subject, bool expected) =>
         FuzzyRegex.Match(subject, _htmlLikeTagPattern).Success.Should().Be(expected);

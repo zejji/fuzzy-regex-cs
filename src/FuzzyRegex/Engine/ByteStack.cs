@@ -23,11 +23,10 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// </para>
 /// <para>
 /// Only the typed helpers the matcher actually pushes are here. The rest of upstream's set
-/// (<c>push_int8</c>, <c>push_code</c>, <c>push_int</c>, <c>push_groups</c>, <c>push_captures</c>,
-/// <c>push_repeat_data</c>) arrives with its first caller: <c>push_groups</c> and
-/// <c>push_captures</c> are only ever called by <c>ATOMIC</c>, <c>CONDITIONAL</c>,
-/// <c>LOOKAROUND</c>, <c>GROUP_CALL</c> and <c>GROUP_RETURN</c>, which are Phase 4's.
-/// <c>docs/PORTMAP.md</c> records them.
+/// (<c>push_int8</c>, <c>push_code</c>, <c>push_int</c>) still arrives with its first caller;
+/// <c>push_groups</c>, <c>push_captures</c> and <c>push_repeat_data</c> have theirs, and live on
+/// <see cref="Matcher"/> and <see cref="GuardList"/> rather than here because each walks the match
+/// state. <c>docs/PORTMAP.md</c> records them.
 /// </para>
 /// <para>
 /// <b>Upstream's <c>push_pointer</c> is <see cref="PushNode"/> here</b>, and it pushes an index
@@ -43,6 +42,14 @@ internal sealed class ByteStack : IDisposable
 {
     /// <summary>Upstream <c>RE_MEMORY_LIMIT</c> (<c>upstream/src/_regex.c</c> line 40).</summary>
     private const int _memoryLimit = 0x40000000;
+
+    /// <summary>
+    /// The index that stands for upstream's <c>NULL</c> node pointer. <c>CALL_REF</c> and
+    /// <c>GROUP_RETURN</c> both push a null pointer to mean "this group was not called"
+    /// (<c>upstream/src/_regex.c</c> lines 12110 and 13520), and read it back as a truth value, so
+    /// the sentinel has to be a value no real <see cref="PatternObject.NodeList"/> index can take.
+    /// </summary>
+    private const long _nullNode = -1;
 
     private byte[] _storage = [];
 
@@ -232,12 +239,12 @@ internal sealed class ByteStack : IDisposable
     /// Upstream <c>push_pointer</c> (line 2472) for the one kind of pointer this port pushes - see
     /// the remarks on this class for why it is an index rather than a reference.
     /// </summary>
-    /// <param name="node">The node to push.</param>
-    internal void PushNode(Node node) => PushSize(node.Index);
+    /// <param name="node">The node to push, or <see langword="null"/> for upstream's <c>NULL</c>.</param>
+    internal void PushNode(Node? node) => PushSize(node?.Index ?? _nullNode);
 
     /// <summary>Upstream <c>pop_pointer</c> (line 2645), for a node.</summary>
     /// <param name="pattern">The pattern whose <see cref="PatternObject.NodeList"/> the index is into.</param>
-    /// <param name="node">Receives the node.</param>
+    /// <param name="node">Receives the node, or <see langword="null"/> for upstream's <c>NULL</c>.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool PopNode(PatternObject pattern, out Node? node)
     {
@@ -247,7 +254,7 @@ internal sealed class ByteStack : IDisposable
             return false;
         }
 
-        node = pattern.NodeList[(int)index];
+        node = index == _nullNode ? null : pattern.NodeList[(int)index];
         return true;
     }
 

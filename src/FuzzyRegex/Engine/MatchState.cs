@@ -324,8 +324,10 @@ internal sealed class MatchState : IDisposable
         // branch-reset group's private number is larger than its public one and START_GROUP indexes
         // by the private one.
         //
-        // NOT PORTED: the fuzzy-guard and group-call-guard allocations. Their contents belong to
-        // Phases 4 and 5, and each of those slices allocates what it reads.
+        // NOT PORTED: the fuzzy-guard allocation, whose contents belong to Phase 5, and the
+        // group-call-guard allocation, which S30 settled as never to be ported - upstream's
+        // 'group_call_guard_list' is written in five places and read in none, so it guards nothing.
+        // docs/PORTMAP.md's "deliberately not ported" table has the grep and the date.
         var groups = new GroupData[pattern.TrueGroupCount];
         for (int g = 0; g < groups.Length; g++)
         {

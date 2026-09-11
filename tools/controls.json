@@ -846,5 +846,36 @@
    4242,
    314159
   ]
+ },
+ {
+  "id": "S30-A",
+  "name": "pop-groups restores nothing",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "    private static bool PopGroups(MatchState state, ByteStack stack)",
+  "anchorNth": 1,
+  "before": "            state.Groups[g].Current = (int)current;\n",
+  "after": "            _ = current;\n",
+  "generator": "recursion",
+  "count": 600,
+  "seeds": [
+   7,
+   20260901
+  ]
+ },
+ {
+  "id": "S30-B",
+  "name": "group call does not clear the repeat guards",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.GroupCall: // Group call (:13394).",
+  "anchorNth": 1,
+  "before": "                    foreach (RepeatData groupCallRepeat in state.Repeats)\n                    {\n                        groupCallRepeat.BodyGuardList.Reset();\n                        groupCallRepeat.TailGuardList.Reset();\n                    }\n\n",
+  "after": "",
+  "generator": "recursion",
+  "count": 2400,
+  "seeds": [
+   7,
+   20260901,
+   4242
+  ]
  }
 ]

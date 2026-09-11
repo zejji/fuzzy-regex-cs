@@ -179,11 +179,21 @@ public sealed class Match : Group
 
         if (group.Current < 0)
         {
-            // The group took no part in the match. Upstream reports -1 from start, end and span and
+            // The group has no current capture. Upstream reports -1 from start, end and span and
             // None from group; this surface reports Success == false, and an unsuccessful group's
             // span is (0, 0) - the shape the built-in Regex uses, and the one the oracle recorder
             // writes for a group whose Python span is (-1, -1) (tools/record-oracle.py:223).
-            return new Group(_subject, 0, 0, success: false, name, []);
+            //
+            // The capture list still goes out in full, because 'current' and the list are separate
+            // in upstream too: 'match_get_group_by_index' (:18847) consults 'current' where
+            // 'match_get_captures_by_index' (:19137) walks 'count' and never looks at it. A group
+            // called with '(?&name)' is exactly the case where the two disagree - GROUP_RETURN
+            // restores the caller's 'current' and leaves the callee's captures in place - and
+            // upstream reports it that way (verified 2026-09-11, regex 2026.x):
+            //
+            //     regex.match(r'(?&routine)(?(DEFINE)(?<routine>.))', 'a')
+            //     .group('routine') is None, .captures('routine') == ['a']
+            return new Group(_subject, 0, 0, success: false, name, group.Captures);
         }
 
         Engine.GroupSpan span = group.Captures[group.Current];

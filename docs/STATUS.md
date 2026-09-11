@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 83.0%** (1631 of 1966 ported upstream tests passing).
+**Overall parity: 86.0%** (1691 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -37,8 +37,8 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | PartialMatching | 18 | 0 | 18 | 0 | 0.0% |
 | Possessive | 16 | 16 | 0 | 0 | 100.0% |
 | Quantifiers | 53 | 53 | 0 | 0 | 100.0% |
-| Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 286 | 178 | 0 | 61.6% |
+| Recursion | 32 | 32 | 0 | 0 | 100.0% |
+| Regressions | 464 | 314 | 150 | 0 | 67.7% |
 | Reverse | 37 | 37 | 0 | 0 | 100.0% |
 | Splitting | 24 | 24 | 0 | 0 | 100.0% |
 | Substitution | 88 | 88 | 0 | 0 | 100.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3744 | 3744 | 0 | 0 |
+| Gaps | 3750 | 3750 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -63,7 +63,6 @@ What the next slice should deliver, biggest win first.
 |---|---:|
 | `fuzzy-matching` | 99 |
 | `partial` | 82 |
-| `recursion` | 60 |
 | `fuzzy-counts` | 28 |
 | `fuzzy-bestmatch` | 18 |
 | `fuzzy-budget` | 17 |

@@ -441,6 +441,7 @@ GENERATORS = (
     "lookaround",
     "conditionals",
     "verbs",
+    "recursion",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -3005,6 +3006,182 @@ def _generate_verbs(rng: random.Random, count: int):
         yield row
 
 
+# --------------------------------------------------------------------------------------------
+# S30's generator: recursion and group calls
+# --------------------------------------------------------------------------------------------
+
+
+# Subjects for the self-similar shapes, which only say anything when the brackets actually nest.
+# The last two carry an astral character and an expanding fold, so a call can step over a surrogate
+# pair and a called group can reach the folding path.
+RECURSION_SUBJECT_ALPHABETS = (
+    "()ab",
+    "()()ab",
+    "[]<>ab",
+    "(){}a,",
+    "aA\U0001f600()",
+    "aAßﬃ()",
+)
+
+# Every whole-pattern shape this generator draws, each checked by hand for one property: it cannot
+# reach its own recursive call without first consuming a character, in either direction. That
+# matters because the generator also reverses about a third of its rows, and `(?r)` turns a trailing
+# recursive call into a leading one - `\w(?R)?` is safe as written and raises MemoryError from
+# upstream the moment `(?r)` is prefixed (measured 2026-09-11), because the recursion then never
+# advances. Anything added here gets the same check, under both directions.
+#
+# Deliberately absent: a call inside a *lookbehind*, `(?<=(?&name))`. Upstream matches that shape
+# only when the lookbehind is the whole pattern and fails on every longer sequence, while this port
+# matches it - the divergence S30 minimised and pinned in
+# tests/FuzzyRegex.Tests/Gaps/Engine/GroupCallTests.cs. Drawing it here would colour the whole wave
+# with one known upstream defect and hide whatever else a run found. A lookbehind *inside* a called
+# group is drawn, because the two engines agree on it.
+RECURSION_SHAPES = (
+    # Balanced brackets, one line per call syntax, so each of the seven forms is exercised.
+    r"\((?:[^()]|(?R))*\)",
+    r"\((?:[^()]|(?0))*\)",
+    r"(?<b>\((?:[^()]|(?&b))*\))",
+    r"(?<b>\((?:[^()]|(?P>b))*\))",
+    r"(\((?:[^()]|(?1))*\))",
+    r"(\((?:[^()]|(?-1))*\))",
+    r"(\[(?:[^\[\]]|(?1))*\])",
+    r"(<(?:[^<>]|(?1))*>)",
+    # Palindrome shapes: the call sits between two copies of the same atom.
+    r"(?<p>a(?&p)?a|b)",
+    r"(?<p>[ab](?&p)?[ab]|[ab])",
+    r"a(?R)?b",
+    # A backreference to a group that was set inside the call. Upstream restores the caller's
+    # spans on return but not its capture lists, so what the reference reads is the question.
+    r"(?<w>(?<c>\w)(?&w)?\2)",
+    r"(?<g>(\w))(?&g)\2",
+    # A lookaround inside a called group, and a call inside a lookahead.
+    r"(?<g>\w(?=\w))(?&g)",
+    r"(?<g>\w(?<=\w))(?&g)",
+    r"(?<g>[ab]+)(?=(?&g))",
+    r"(?<g>[ab]+)(?!(?&g))",
+    # A call inside a repeat, which is what makes GROUP_CALL push and pop the repeat state.
+    r"(?<g>[ab])(?:(?&g))*",
+    r"(?<g>[ab])(?:(?&g))+",
+    r"(?<g>[ab])(?&g)?",
+    r"(?<g>[ab]{1,3})(?:(?&g))*",
+    # A repeat *inside* a called group, which is the shape GROUP_CALL's guard clearing exists for:
+    # the caller's own pass guards positions in the repeat's body, and the call then walks the same
+    # positions. Without these four the control that deletes that clearing barely fires - it found
+    # 0 rows of 600 at one seed and 4 at another before they were added.
+    r"(?<g>(?:[ab]+c)*d)(?&g)",
+    r"(?<g>(?:[ab]*c)+)(?&g)?",
+    r"(?<g>(?:[ab]|cd)+)(?&g)",
+    r"((?:[ab]+,)*;)(?1)",
+    r"(?<b>\((?:[^()]+|(?&b))*\))",
+    # Plain calls: forward, backward and relative.
+    r"(?+1)(?<h>[ab])",
+    r"(?<g>[ab])(?<h>[ab])(?-1)",
+    r"(?<g>[ab])(?<h>[ab])(?-2)",
+    r"([ab])(?1)",
+    # A group that is only ever reached through a call.
+    r"(?(DEFINE)(?<d>[ab]+))(?&d)",
+    r"(?(DEFINE)(?<d>[ab]+))(?&d)x?",
+)
+
+RECURSION_AFFIXES = (("^", ""), ("", "$"), ("^", "$"), (r"\b", ""), ("", ""), ("", ""))
+
+RECURSION_IGNORECASE_PROBABILITY = 0.4
+RECURSION_FULLCASE_PROBABILITY = 0.5
+RECURSION_MULTILINE_PROBABILITY = 0.3
+RECURSION_REVERSE_PROBABILITY = 0.35
+
+# How often a shape gets an ordinary atom stuck on the end, so the call is not always the last thing
+# in the pattern and the state GROUP_RETURN restores has to serve something afterwards.
+RECURSION_TAIL_PROBABILITY = 0.35
+
+MAX_RECURSION_SUBJECT_LENGTH = 10
+
+
+def _recursion_pattern(rng: random.Random, subject: str) -> tuple[str, int, list[str]]:
+    """One pattern, with the group inventory a substitution template needs.
+
+    The shape carries the recursion; the optional tail and the affixes are what stop every row
+    being the same pattern in a different order.
+    """
+    shape = rng.choice(RECURSION_SHAPES)
+
+    tail = ""
+    if rng.random() < RECURSION_TAIL_PROBABILITY:
+        candidates = [c for c in subject if c not in "\r\n"]
+        atom = re.escape(rng.choice(candidates)) if candidates else "a"
+        tail = atom if rng.random() < 0.5 else rng.choice(INTERACTION_CLASS_ATOMS) + "?"
+
+    prefix, suffix = rng.choice(RECURSION_AFFIXES)
+    pattern = prefix + shape + tail + suffix
+
+    # Counted rather than tracked while building, because the shapes are literals: the capture
+    # groups are the '(' that is not '(?', and the names are the '(?<name>' forms.
+    groups = len(re.findall(r"\((?!\?)", shape)) + len(re.findall(r"\(\?P?<[A-Za-z_]", shape))
+    names = re.findall(r"\(\?P?<([A-Za-z_][A-Za-z_0-9]*)>", shape)
+    return pattern, groups, names
+
+
+def _generate_recursion(rng: random.Random, count: int):
+    """S30's generator: '(?R)', '(?0)', '(?1)', '(?-1)', '(?+1)', '(?&name)' and '(?P>name)'.
+
+    The subjects are bracket-heavy rather than ``lookaround``'s, because a self-similar shape only
+    reaches its own call on a subject that nests - a wave over letters would record 600 rows of
+    'no match' and say nothing about GROUP_CALL at all.
+
+    Measured by `python tools/record-oracle.py --generator recursion --count 600 --seed 7`, after the
+    last change to this generator: 22 rows answer with a single match, 203 with no match, 150 with a
+    match list, 142 with a substitution and 75 with a split, and 8 are rejected by upstream. Every one
+    of the seven call syntaxes is drawn - 350 rows hold a '(?&name)', 103 a '(?N)', 54 a '(?-N)', 30 a
+    '(?R)', 22 a '(?P>name)', 21 a '(?+N)' and 20 a '(?0)'; 44 hold a '(?(DEFINE)...)' group that is
+    only ever reached through a call, 59 a lookaround containing or contained by one, and 43 a
+    backreference to a group the call set. 230 carry IGNORECASE, 121 FULLCASE, 171 MULTILINE, 197 are
+    reversed and 79 have an astral subject. Every one of the eight operations is recorded exactly 75
+    times, because the operation is cycled by row index rather than drawn.
+
+    Re-take from scratch after any widening: adding one entry to any table above shifts the whole RNG
+    stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        alphabet = rng.choice(RECURSION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_RECURSION_SUBJECT_LENGTH + 1)
+        subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(2)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        pattern, groups, names = _recursion_pattern(rng, subject)
+
+        flags = 0
+        if rng.random() < RECURSION_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < RECURSION_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < RECURSION_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+
+        if rng.random() < RECURSION_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "recursion",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names) if operation == "sub" else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -3065,6 +3242,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "verbs":
         yield from _generate_verbs(rng, count)
+        return
+
+    if name == "recursion":
+        yield from _generate_recursion(rng, count)
         return
 
     dotted = name == "literal-dot"

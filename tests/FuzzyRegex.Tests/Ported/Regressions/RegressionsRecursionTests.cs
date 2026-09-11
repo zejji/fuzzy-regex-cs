@@ -10,10 +10,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Regressions;
 public sealed class RegressionsRecursionTests
 {
     [Test]
-    [Skip(
-        "needs:recursion - the capture list it reads lands in S18, but '(?&rec)' is a group call and "
-            + "'[^()]++' is possessive"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#54")]
     public void Named_recursive_group_captures_every_nested_parenthesized_run()
     {
@@ -28,7 +24,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#3")]
-    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     public void Recursive_atomic_alternation_matches_every_top_level_balanced_group()
     {
         // Hg issue 31: atomic and normal groups in recursive patterns.
@@ -41,7 +36,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#4")]
-    [Skip("needs:recursion - (?R) whole-pattern recursion is not implemented yet")]
     public void Recursive_alternation_without_an_atomic_group_matches_every_top_level_balanced_group() =>
         FuzzyRegex
             .Matches("a(bcd(e)f)g(h)", @"\((?:(?:[^()]+)|(?R))*\)")
@@ -51,7 +45,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#5")]
-    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     public void Recursive_atomic_alternation_stops_at_the_first_unbalanced_close_paren() =>
         FuzzyRegex
             .Matches("a(b(cd)e)f)g)h", @"\((?:(?>[^()]+)|(?R))*\)")
@@ -61,15 +54,11 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#6")]
-    [Skip("needs:recursion - needs (?R) recursion and atomic groups; the engine has neither yet")]
     public void Recursive_atomic_alternation_matches_the_innermost_balanced_group_in_an_unbalanced_subject() =>
         FuzzyRegex.Matches("a(bc(d(e)f)gh", @"\((?:(?>[^()]+)|(?R))*\)").Select(m => m.Value).Should().Equal("(d(e)f)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#7")]
-    [Skip(
-        "needs:recursion - needs right-to-left search, (?R) recursion and atomic groups; the engine has none of them yet"
-    )]
     public void Recursive_atomic_alternation_matches_the_innermost_balanced_group_when_searched_right_to_left() =>
         FuzzyRegex
             .Matches("a(bc(d(e)f)gh", @"(?r)\((?:(?>[^()]+)|(?R))*\)")
@@ -79,22 +68,17 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#8")]
-    [Skip(
-        "needs:recursion - needs (?0) whole-pattern recursion and a possessive quantifier; the engine has neither yet"
-    )]
     public void Recursive_possessive_alternation_matches_the_innermost_balanced_group() =>
         FuzzyRegex.Matches("a(b(c(de)fg)h", @"\((?:[^()]*+|(?0))*\)").Select(m => m.Value).Should().Equal("(c(de)fg)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#32")]
-    [Skip("needs:recursion - needs (?1) numbered-group recursion inside a lookbehind; the engine does not have it yet")]
     public void Numbered_group_recursion_inside_a_lookbehind_matches_the_preceding_group() =>
         // Hg issue 49: regex.search("(a)(?<=b(?1))", "baz", regex.V1) returns None incorrectly.
         FuzzyRegex.Match("baz", "(?V1)(a)(?<=b(?1))").Value.Should().Be("a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#37")]
-    [Skip("needs:recursion - needs (?1)/(?2) numbered-group recursion; the engine has neither yet")]
     public void Mutually_recursive_numbered_groups_match_without_using_the_second_branch()
     {
         // Hg issue 51: regex.search("((a)(?1)|(?2))", "a", flags=regex.V1) returns None
@@ -108,7 +92,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#47")]
-    [Skip("needs:recursion - needs (?1) numbered-group recursion and repeat opcodes; the engine has neither yet")]
     public void Repeated_recursive_group_matches_the_shortest_valid_repetition_count()
     {
         // Hg issue 66: regex.search("((a|b(?1)c){3,5})", "baaaaca", flags=regex.V1).groups()
@@ -122,7 +105,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#254")]
-    [Skip("needs:recursion - needs named recursion and atomic groups; the engine has neither yet")]
     public void Named_recursive_atomic_group_matches_balanced_parens_around_a_sign()
     {
         // Hg issue 211: Segmentation fault with recursive matches and atomic groups.
@@ -133,7 +115,6 @@ public sealed class RegressionsRecursionTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#255")]
-    [Skip("needs:recursion - needs named recursion and atomic groups; the engine has neither yet")]
     public void Named_recursive_atomic_group_fails_when_a_sign_is_followed_by_an_extra_quantifier() =>
         FuzzyRegex.MatchAtStart("((-)+)", @"\A(?P<whole>(?>\((?&whole)\)|[+\-]))\Z").Success.Should().BeFalse();
 }
