@@ -10,7 +10,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Lookaround;
 public sealed class Bug725149Tests
 {
     [Test]
-    [Skip("needs:lookaround - the engine has no lookahead opcodes yet")]
     [Property("Upstream", "RegexTests.test_bug_725149#1")]
     public void Repeated_group_with_positive_lookahead_leaves_the_inner_group_unset()
     {
@@ -22,7 +21,6 @@ public sealed class Bug725149Tests
     }
 
     [Test]
-    [Skip("needs:lookaround - the engine has no lookahead opcodes yet")]
     [Property("Upstream", "RegexTests.test_bug_725149#2")]
     public void Repeated_group_with_negative_lookahead_leaves_the_inner_groups_unset()
     {

@@ -1963,6 +1963,23 @@ internal static class Matcher
         group.Current >= 0 && SameSpan(group.Captures[group.Current], span);
 
     /// <summary>
+    /// Port of <c>RE_LookaroundStateData</c> (<c>upstream/src/_regex.c</c> lines 409-414): what
+    /// <c>LOOKAROUND</c> parks on the <i>structure</i> stack so that <c>END_LOOKAROUND</c> and the
+    /// backtrack case can put the text position and the slice back.
+    /// </summary>
+    /// <remarks>
+    /// The lookaround node itself is parked because both readers need its <see cref="Node.Match"/>
+    /// to tell a positive lookaround from a negative one, and the negative one needs its
+    /// <see cref="Node.Next2"/> as the 'false' branch.
+    /// </remarks>
+    /// <param name="Node">The <c>LOOKAROUND</c> node.</param>
+    /// <param name="SliceStart">The slice start before the lookaround widened it.</param>
+    /// <param name="SliceEnd">The slice end before the lookaround widened it.</param>
+    /// <param name="TextPos">The text position the lookaround started at, and returns to.</param>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct LookaroundStateData(Node Node, int SliceStart, int SliceEnd, int TextPos);
+
+    /// <summary>
     /// Port of <c>RE_GroupStateData</c> (<c>upstream/src/_regex.c</c> lines 416-422): what
     /// <c>START_GROUP</c> and <c>END_GROUP</c> put on the backtracking stack so their own backtrack
     /// case can undo them.
@@ -2020,6 +2037,42 @@ internal static class Matcher
             state.Groups[g].Count = (int)count;
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Upstream's <c>ByteStack_push_block(..., &amp;data_l, sizeof(data_l))</c>, field by field.
+    /// </summary>
+    /// <param name="stack">The structure stack.</param>
+    /// <param name="data">What to push.</param>
+    private static void PushLookaroundStateData(ByteStack stack, LookaroundStateData data)
+    {
+        stack.PushNode(data.Node);
+        stack.PushSize(data.SliceStart);
+        stack.PushSize(data.SliceEnd);
+        stack.PushSize(data.TextPos);
+    }
+
+    /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
+    /// <param name="pattern">The pattern the parked node index is into.</param>
+    /// <param name="stack">The structure stack.</param>
+    /// <param name="data">Receives what was pushed.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopLookaroundStateData(PatternObject pattern, ByteStack stack, out LookaroundStateData data)
+    {
+        data = default;
+
+        if (
+            !stack.PopSize(out long textPos)
+            || !stack.PopSize(out long sliceEnd)
+            || !stack.PopSize(out long sliceStart)
+            || !stack.PopNode(pattern, out Node? node)
+        )
+        {
+            return false;
+        }
+
+        data = new LookaroundStateData(node!, (int)sliceStart, (int)sliceEnd, (int)textPos);
         return true;
     }
 
@@ -3067,6 +3120,89 @@ internal static class Matcher
 
                     break;
                 }
+                case Opcode.EndLookaround: // End of a lookaround subpattern (:12918).
+                {
+                    /* sstack: node slice_start slice_end text_pos ...
+                     *
+                     * bstack: [captures TRUE | FALSE] capture_change sstack LOOKAROUND ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    // Everything the body pushed while it matched goes: a lookaround is atomic, so
+                    // there is nothing left to backtrack into once it has succeeded.
+                    if (!state.Pstack.PopSize(out long endLookBstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Bstack.Count = (int)endLookBstackCount;
+
+                    if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endLookSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)endLookSstackCount;
+
+                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // A lookaround consumes nothing: the text position and the slice both go back to
+                    // what they were at the LOOKAROUND.
+                    state.TextPos = endLookData.TextPos;
+                    state.SliceEnd = endLookData.SliceEnd;
+                    state.SliceStart = endLookData.SliceStart;
+                    Node endLookNode = endLookData.Node;
+
+                    /* sstack: -
+                     *
+                     * bstack: [captures TRUE | FALSE] capture_change
+                     *
+                     * pstack: -
+                     */
+
+                    if (endLookNode.Match)
+                    {
+                        // It's a positive lookaround that's succeeded. The captures its body made
+                        // stay visible; the block stays on the stack for the backtrack case to undo.
+                        state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
+
+                        /* bstack: [captures TRUE | FALSE] capture_change END_LOOKAROUND */
+
+                        // Go to the 'true' branch.
+                        node = node.Next1.Node!;
+                    }
+                    else
+                    {
+                        // It's a negative lookaround that's succeeded, which means the whole
+                        // lookaround has failed. Undo the body's captures before failing.
+                        if (!state.Bstack.PopSize(out long endLookCaptureChange))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = endLookCaptureChange;
+
+                        // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                        if (!state.Bstack.PopBool(out bool endLookHasGroups))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        if (endLookHasGroups && !PopCaptures(state, state.Bstack))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        // Go to the 'false' branch.
+                        goto backtrack;
+                    }
+
+                    break;
+                }
                 // Upstream gives each of these its own case with the same eleven-line tail copied
                 // out (:12968, :13804, :13914, :14446-14449 case-sensitive; :12146, :13827, :13937,
                 // :14471-14474 ignoring case), differing only in which 'matches_*' predicate it
@@ -3651,6 +3787,43 @@ internal static class Matcher
 
                     // Advance into the tail.
                     state.TextPos = pos;
+                    node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.Lookaround: // Start of a lookaround subpattern (:13758).
+                {
+                    PushLookaroundStateData(
+                        state.Sstack,
+                        new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
+                    );
+
+                    bool lookHasGroups = (node.Status & NodeStatus.HasGroups) != 0;
+                    if (lookHasGroups)
+                    {
+                        PushCaptures(state, state.Bstack);
+                    }
+
+                    state.Bstack.PushBool(lookHasGroups);
+
+                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
+                    // block on the stack is the same shape at both ends.
+                    state.Bstack.PushSize(state.CaptureChange);
+                    state.Bstack.PushSize(state.Sstack.Count);
+                    state.Bstack.PushUInt8((byte)Opcode.Lookaround);
+                    state.Pstack.PushSize(state.Bstack.Count);
+
+                    /* sstack: node slice_start slice_end text_pos
+                     *
+                     * bstack: [captures TRUE | FALSE] capture_change sstack LOOKAROUND
+                     *
+                     * pstack: bstack
+                     */
+
+                    // A lookaround may read outside the slice the match is confined to: '(?<=a)b'
+                    // against 'ab' searched from position 1 has to see the 'a'.
+                    state.SliceStart = state.TextStart;
+                    state.SliceEnd = state.TextEnd;
+
                     node = node.Next1.Node!;
                     break;
                 }
@@ -4745,6 +4918,33 @@ internal static class Matcher
 
                     break;
                 }
+                case Opcode.EndLookaround: // End of a lookaround subpattern (:15650).
+                {
+                    /* bstack: [captures TRUE | FALSE] capture_change */
+
+                    // The 'true' branch of a positive lookaround is being given up, so the captures
+                    // its body made go with it. Leaving this out is invisible to any test that does
+                    // not backtrack past the lookaround.
+                    if (!state.Bstack.PopSize(out long endLookCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = endLookCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!state.Bstack.PopBool(out bool endLookHasGroups))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (endLookHasGroups && !PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
+                }
                 case Opcode.Failure: // Failure.
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
@@ -5120,6 +5320,70 @@ internal static class Matcher
                     // The tail couldn't match.
                     rpData.Start = start;
                     rpData.Count = savedCount;
+                    break;
+                }
+                case Opcode.Lookaround: // Lookaround subpattern (:17109).
+                {
+                    /* sstack: node slice_start slice_end text_pos ...
+                     *
+                     * bstack: [captures TRUE | FALSE] capture_change sstack
+                     *
+                     * pstack: bstack
+                     */
+
+                    // The body failed to match. Unlike END_LOOKAROUND, which truncated the bstack to
+                    // the parked count, here the body's own entries have already been popped by the
+                    // backtracking that brought us here, so the pstack entry is simply dropped.
+                    if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long lookSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)lookSstackCount;
+
+                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.TextPos = lookData.TextPos;
+                    state.SliceEnd = lookData.SliceEnd;
+                    state.SliceStart = lookData.SliceStart;
+                    Node lookNode = lookData.Node;
+
+                    /* sstack: -
+                     *
+                     * bstack: [captures TRUE | FALSE] capture_change
+                     *
+                     * pstack: -
+                     */
+
+                    if (!state.Bstack.PopSize(out long lookCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = lookCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!state.Bstack.PopBool(out bool lookHasGroups))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (lookHasGroups && !PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    if (!lookNode.Match)
+                    {
+                        // It's a negative lookaround that's failed, which means the lookaround as a
+                        // whole has succeeded.
+                        node = lookNode.Next2.Node!;
+                        goto advance;
+                    }
+
                     break;
                 }
                 case Opcode.MatchBody:

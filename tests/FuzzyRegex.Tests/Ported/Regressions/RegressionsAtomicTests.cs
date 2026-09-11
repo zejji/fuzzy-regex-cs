@@ -45,7 +45,6 @@ public sealed class RegressionsAtomicTests
         FuzzyRegex.Match("a/b", "(?>.*/)b").Value.Should().Be("a/b");
 
     [Test]
-    [Skip("needs:lookaround - the atomic group works from S20; the (?<!...) lookbehind and FuzzyRegex.Matches do not")]
     [Property("Upstream", "RegexTests.test_hg_bugs#206")]
     public void Negative_lookbehind_before_an_atomic_alternation_finds_exactly_one_match() =>
         FuzzyRegex.Matches(_hgIssue154Subject, @"(?<!\d)(?>2014|2013 ?2012)").Should().HaveCount(1);
@@ -63,7 +62,6 @@ public sealed class RegressionsAtomicTests
 
     // Hg issue 213: Segmentation Fault.
     [Test]
-    [Skip("needs:lookaround - the atomic groups work from S20; the (?=...) lookahead has no opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#258")]
     public void Nested_atomic_alternation_over_quoted_strings_does_not_match_a_non_conforming_subject() =>
         FuzzyRegex.Match(_hgIssue213Subject, _hgIssue213Pattern).Success.Should().BeFalse();

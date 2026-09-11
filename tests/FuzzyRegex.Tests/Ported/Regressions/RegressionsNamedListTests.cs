@@ -127,7 +127,6 @@ public sealed class RegressionsNamedListTests
     // Hg issue 208: Named list, (?ri) flags, Backreference.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#250")]
-    [Skip("needs:lookaround - the named list matches since S13; the enclosing (?<=...) lookbehind has no opcode yet")]
     public void Reverse_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
         var regex = new FuzzyRegex(
@@ -143,7 +142,6 @@ public sealed class RegressionsNamedListTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#251")]
-    [Skip("needs:lookaround - the named list matches since S13; the enclosing (?<=...) lookbehind has no opcode yet")]
     public void Reverse_case_insensitive_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
         var regex = new FuzzyRegex(

@@ -94,7 +94,6 @@ public sealed class RegressionsDefineTests
     [Test]
     // Upstream's control for #273: this pattern has no (?(DEFINE) in it, so it is tagged for
     // the negative lookahead it does need rather than for the construct it is contrasted with.
-    [Skip("needs:lookaround - the engine has no negative-lookahead opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#272")]
     public void Negative_lookahead_run_without_define_finds_only_the_trailing_letters() =>
         FuzzyRegex.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(m => m.Value).Should().Equal("efgh");

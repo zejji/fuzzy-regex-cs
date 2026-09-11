@@ -77,7 +77,6 @@ public sealed class RegressionsConditionalTests
     // The GROUP_EXISTS half landed in S21, but the forced fail is not an optimised-away FAILURE
     // node: upstream compiles '(.)(?(1)(?!))' to '[30, 1, 1, 1, 2, 0, 20, 32, 1, 35, 0, 1, 20, 20,
     // 1]', where 35 is LOOKAROUND over an empty body (probed against regex 2026.7.19, 2026-08-31).
-    [Skip("needs:lookaround - '(?!)' compiles to LOOKAROUND, not FAILURE, so this waits for Phase 4")]
     [Property("Upstream", "RegexTests.test_hg_bugs#154")]
     public void Forced_fail_in_the_conditionals_yes_branch_makes_the_whole_match_fail() =>
         FuzzyRegex.MatchAtStart("xy", @"(.)(?(1)(?!))").Success.Should().BeFalse();
@@ -123,7 +122,6 @@ public sealed class RegressionsConditionalTests
     [Test]
     // Upstream's control for #213: no conditional in this pattern, so it is tagged for the
     // lookahead it does need.
-    [Skip("needs:lookaround - the engine has no lookahead opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#212")]
     public void Non_conditional_lookahead_alternation_matches_the_whole_digit_run()
     {

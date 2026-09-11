@@ -59,7 +59,6 @@ public sealed class RegressionsSubstitutionTests
         FuzzyRegex.Replace("test", "(?V1).*?", "|").Should().Be("|||||||||");
 
     [Test]
-    [Skip("needs:lookaround - Replace lands in S24; the (?!...) lookahead has no opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#88")]
     public void Sub_with_a_negative_lookahead_and_dotall_inserts_a_divider_after_the_at_sign() =>
         // Hg issue 112: re: OK, but regex: SystemError.

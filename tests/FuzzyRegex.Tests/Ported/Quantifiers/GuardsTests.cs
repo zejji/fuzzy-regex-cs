@@ -36,7 +36,6 @@ public sealed class GuardsTests
     }
 
     [Test]
-    [Skip("needs:lookaround - the repeats work from S19, but '(?!\\d)' is a negative lookahead")]
     [Property("Upstream", "RegexTests.test_guards#3")]
     public void An_optional_group_that_does_not_participate_reports_no_success()
     {

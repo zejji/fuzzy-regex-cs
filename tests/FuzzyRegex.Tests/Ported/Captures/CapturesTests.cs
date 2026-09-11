@@ -67,7 +67,6 @@ public sealed class CapturesTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_captures#6")]
-    [Skip("needs:lookaround - '.*?(?=(.)+)b' needs a lookahead as well as its two repeats")]
     public void A_group_repeated_only_inside_a_lookahead_still_reports_its_captures()
     {
         Match m = FuzzyRegex.Match("ab", @".*?(?=(.)+)b");

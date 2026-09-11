@@ -98,7 +98,6 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
-    [Skip("needs:lookaround - the (?<=...) lookbehind has no opcode yet; also needs FuzzyRegex.Matches")]
     [Property("Upstream", "RegexTests.test_search_reverse#19")]
     public void Matches_value_for_two_char_runs_using_a_lookbehind_G_check() =>
         FuzzyRegex.Matches("abcd", @".{2}(?<=\G.*)").Select(m => m.Value).Should().Equal("ab", "cd");

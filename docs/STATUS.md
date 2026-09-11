@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 76.5%** (1504 of 1966 ported upstream tests passing).
+**Overall parity: 80.6%** (1584 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -20,7 +20,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Basics | 3 | 3 | 0 | 0 | 100.0% |
 | Boundaries | 41 | 41 | 0 | 0 | 100.0% |
 | BranchReset | 21 | 21 | 0 | 0 | 100.0% |
-| Captures | 8 | 7 | 1 | 0 | 87.5% |
+| Captures | 8 | 8 | 0 | 0 | 100.0% |
 | CaseFolding | 69 | 67 | 2 | 0 | 97.1% |
 | CharacterClasses | 52 | 52 | 0 | 0 | 100.0% |
 | Escapes | 103 | 103 | 0 | 0 | 100.0% |
@@ -31,19 +31,19 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Fuzzy | 112 | 7 | 105 | 0 | 6.3% |
 | Grapheme | 5 | 5 | 0 | 0 | 100.0% |
 | Groups | 65 | 65 | 0 | 0 | 100.0% |
-| Lookaround | 38 | 0 | 38 | 0 | 0.0% |
+| Lookaround | 38 | 38 | 0 | 0 | 100.0% |
 | NamedLists | 10 | 10 | 0 | 0 | 100.0% |
 | Overlapped | 10 | 10 | 0 | 0 | 100.0% |
 | PartialMatching | 18 | 0 | 18 | 0 | 0.0% |
 | Possessive | 16 | 16 | 0 | 0 | 100.0% |
-| Quantifiers | 53 | 52 | 1 | 0 | 98.1% |
+| Quantifiers | 53 | 53 | 0 | 0 | 100.0% |
 | Recursion | 32 | 0 | 32 | 0 | 0.0% |
-| Regressions | 464 | 214 | 250 | 0 | 46.1% |
-| Reverse | 37 | 36 | 1 | 0 | 97.3% |
+| Regressions | 464 | 239 | 225 | 0 | 51.5% |
+| Reverse | 37 | 37 | 0 | 0 | 100.0% |
 | Splitting | 24 | 24 | 0 | 0 | 100.0% |
-| Substitution | 88 | 84 | 4 | 0 | 95.5% |
+| Substitution | 88 | 88 | 0 | 0 | 100.0% |
 | UnicodeProperties | 70 | 70 | 0 | 0 | 100.0% |
-| Various | 524 | 514 | 10 | 0 | 98.1% |
+| Various | 524 | 524 | 0 | 0 | 100.0% |
 | ZeroWidth | 14 | 14 | 0 | 0 | 100.0% |
 
 ## Our own tests (gap tests and conventions)
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3729 | 3729 | 0 | 0 |
+| Gaps | 3737 | 3737 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -63,13 +63,11 @@ What the next slice should deliver, biggest win first.
 |---|---:|
 | `fuzzy-matching` | 99 |
 | `partial` | 82 |
-| `lookaround` | 63 |
 | `recursion` | 60 |
 | `backtracking-verbs` | 32 |
 | `fuzzy-counts` | 28 |
 | `fuzzy-bestmatch` | 18 |
 | `fuzzy-budget` | 17 |
-| `lookbehind` | 17 |
 | `conditionals` | 15 |
 | `fuzzy-changes` | 8 |
 | `posix-matching` | 8 |

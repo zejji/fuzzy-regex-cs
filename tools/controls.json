@@ -658,5 +658,50 @@
    7,
    20260901
   ]
+ },
+ {
+  "id": "S27-A",
+  "name": "lookaround backtrack drops text_pos",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.Lookaround: // Lookaround subpattern (:17109).",
+  "anchorNth": 1,
+  "before": "                    state.TextPos = lookData.TextPos;\n                    state.SliceEnd = lookData.SliceEnd;\n",
+  "after": "                    state.SliceEnd = lookData.SliceEnd;\n",
+  "generator": "lookaround",
+  "count": 600,
+  "seeds": [
+   7,
+   20260911
+  ]
+ },
+ {
+  "id": "S27-B",
+  "name": "lookaround never saves its captures",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.Lookaround: // Start of a lookaround subpattern (:13758).",
+  "anchorNth": 1,
+  "before": "                    bool lookHasGroups = (node.Status & NodeStatus.HasGroups) != 0;\n",
+  "after": "                    bool lookHasGroups = false;\n",
+  "generator": "lookaround",
+  "count": 600,
+  "seeds": [
+   7,
+   20260911
+  ]
+ },
+ {
+  "id": "S27-C",
+  "name": "lookbehind body compiled forwards",
+  "file": "src/FuzzyRegex/Parsing/Nodes.cs",
+  "anchor": "            [(uint)Opcode.Lookaround, flags, Behind ? 0u : 1u],",
+  "anchorNth": 1,
+  "before": "            .. Subpattern.Compile(Behind),\n",
+  "after": "            .. Subpattern.Compile(false),\n",
+  "generator": "lookaround",
+  "count": 600,
+  "seeds": [
+   7,
+   20260911
+  ]
  }
 ]

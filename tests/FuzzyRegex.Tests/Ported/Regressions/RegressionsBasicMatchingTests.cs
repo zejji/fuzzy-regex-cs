@@ -62,7 +62,6 @@ public sealed class RegressionsBasicMatchingTests
     [Arguments("10 months 1 hour ago", "1 hour ago")]
     [Arguments("1 month 10 hours ago", "10 hours ago")]
     // Retagged in S16: the pattern opens with a lookbehind and closes with a lookahead.
-    [Skip("needs:lookbehind - the pattern is '(?<=...)(alternation)(?=...)'")]
     [Property("Upstream", "RegexTests.test_hg_bugs#413-416")]
     public void Relative_time_pattern_finds_the_rightmost_recognised_phrase(string subject, string expected) =>
         new FuzzyRegex(_relativeTimePattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0)

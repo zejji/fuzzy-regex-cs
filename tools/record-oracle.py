@@ -368,6 +368,7 @@ GENERATORS = (
     "substitution",
     "iteration",
     "interactions",
+    "lookaround",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -2244,6 +2245,224 @@ def _generate_interactions(rng: random.Random, count: int):
         yield row
 
 
+# The four lookaround forms, as (opener, closer). The first two are lookaheads and the last two
+# lookbehinds, whose body the compiler marks reversed - so the pair is a direction test as much as an
+# assertion test. The negative ones are the halves an opcode-by-opcode port gets wrong: a negative
+# lookaround *succeeding* means the whole assertion failed, so it leaves by the backtrack path.
+LOOKAROUND_FORMS = ("(?=", "(?!", "(?<=", "(?<!")
+
+# What goes inside a lookaround. Deliberately not just literals: the body is an ordinary subpattern,
+# so a quantifier or an alternation inside it is a variable-length lookbehind - which upstream allows
+# and .NET's own engine does not, and which is therefore a shape no borrowed implementation could
+# have got right by accident.
+#
+# 'sequence' is the one that earns its place rather than rounding out a list. Every other kind is a
+# single atom, and a single atom either matches or fails *without moving*: a body that never consumed
+# anything before failing never exercises the text-position restore, which is the whole job of the
+# LOOKAROUND backtrack arm. A two-atom body whose first atom the subject holds and whose second
+# usually does not is the shape that leaves text_pos moved when the body gives up. Measured over 600
+# rows at seeds 7 and 20260911: with only the single-atom kinds, control S27-A found 1 divergence and
+# 2; with 'sequence' added it found 8 and 6, and at the weight below, 12 and 7.
+# 'nested' is last because the depth guard below drops the final entry.
+LOOKAROUND_BODY_KINDS = ("literal", "class", "quantified", "alternation", "group", "sequence", "nested")
+LOOKAROUND_BODY_WEIGHTS = (14, 12, 12, 11, 11, 30, 10)
+
+# What a row's pattern is built from.
+#   'look':            a bare lookaround, sometimes quantified - '(?=abc){3}abc' is a ported test.
+#   'look-then-ref':   the headline cell. A capture made inside a *positive* lookahead stays visible
+#                      after it, so '(?=(a))\1' matches; inside a negative one the capture is
+#                      discarded on the way out. Both halves are emitted, because the difference
+#                      between them is exactly what the two END_LOOKAROUND branches do.
+#   'repeat-of-look':  a lookaround inside a repeat, so the backtrack arm runs more than once per
+#                      row - the arm a single-visit row never reaches.
+#   'literal'/'class': plain atoms, so the lookaround has somewhere to assert *about* other than
+#                      position 0.
+#   'alt-with-look':   a branch that leads with a lookaround, beside a fallback branch that does
+#                      not. Everything else here reaches a lookaround once per match attempt, and a
+#                      construct visited once cannot show whether what it undoes is undone properly.
+#                      This one is tried and *given up within the same attempt*, which is the only
+#                      way into the LOOKAROUND backtrack arm, and the only way a capture made inside
+#                      an assertion that then failed can be seen leaking past it. Measured over 600
+#                      rows at seeds 7 and 20260911: without it control S27-B found 1 divergence and
+#                      1; with it, 7 and 6.
+LOOKAROUND_PIECES = ("look", "look-then-ref", "repeat-of-look", "alt-with-look", "literal", "class")
+LOOKAROUND_PIECE_WEIGHTS = (18, 16, 8, 30, 16, 12)
+
+LOOKAROUND_AFFIXES = (("^", ""), ("", "$"), ("^", "$"), (r"\b", ""), ("", ""), ("", ""))
+
+MAX_LOOKAROUND_PIECES = 3
+
+# The three flags S27 names. Reverse is written inline as '(?r)', which is what a caller writes.
+LOOKAROUND_IGNORECASE_PROBABILITY = 0.5
+LOOKAROUND_FULLCASE_PROBABILITY = 0.5
+LOOKAROUND_MULTILINE_PROBABILITY = 0.5
+LOOKAROUND_REVERSE_PROBABILITY = 0.4
+
+# As in `interactions`: a doubled subject is what lets a reference to a capture made inside a
+# lookahead match at all. See _generate_lookaround for what it is worth here.
+LOOKAROUND_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+
+def _lookaround_body(rng: random.Random, subject: str, depth: int) -> str:
+    """One lookaround body: what the assertion asks about."""
+    kinds = LOOKAROUND_BODY_KINDS
+    weights = LOOKAROUND_BODY_WEIGHTS
+    if depth >= 1:
+        # One level of nesting only. Two lookarounds inside each other is the construct; three is a
+        # pattern too long for a seven-character subject to satisfy, so it would only test failure.
+        kinds = kinds[:-1]
+        weights = weights[:-1]
+
+    kind = rng.choices(kinds, weights=weights)[0]
+    candidates = [c for c in subject if c not in "\r\n"]
+
+    if kind == "literal":
+        return re.escape(rng.choice(candidates)) if candidates else "a"
+    if kind == "class":
+        return _interaction_subject_class(rng, subject) if rng.random() < 0.5 else rng.choice(INTERACTION_CLASS_ATOMS)
+    if kind == "quantified":
+        atom = _interaction_subject_class(rng, subject) if rng.random() < 0.5 else rng.choice(INTERACTION_CLASS_ATOMS)
+        return atom + _quantifier(rng)
+    if kind == "alternation":
+        # '(?<=a|bc)' - the two branches have different lengths, so the lookbehind cannot be compiled
+        # to a fixed step back.
+        left = re.escape(rng.choice(candidates)) if candidates else "a"
+        right = "".join(re.escape(c) for c in (candidates[:2] or "bc"))
+        return f"{left}|{right}"
+    if kind == "group":
+        return "(" + _lookaround_body(rng, subject, depth + 1) + ")"
+    if kind == "sequence":
+        # Two or three atoms, the first drawn from the subject so it usually matches and the rest
+        # left to chance so the body usually fails partway through. That is the only shape here that
+        # leaves the text position moved when the body gives up, and therefore the only one that can
+        # tell whether the backtrack arm puts it back.
+        head = re.escape(rng.choice(candidates)) if candidates else "a"
+        rest = []
+        for _ in range(rng.randrange(1, 3)):
+            if rng.random() < 0.5 and candidates:
+                rest.append(re.escape(rng.choice(candidates)))
+            else:
+                rest.append(rng.choice(INTERACTION_CLASS_ATOMS))
+        return head + "".join(rest)
+
+    return rng.choice(LOOKAROUND_FORMS) + _lookaround_body(rng, subject, depth + 1) + ")"
+
+
+def _lookaround_pattern(rng: random.Random, subject: str) -> tuple[str, int, list[str]]:
+    """One pattern, with the group inventory a substitution template needs.
+
+    Built left to right like ``_interaction_pattern``, so a reference is only emitted once the group
+    it names exists.
+    """
+    counter = [0]
+    names: list[str] = []
+    pieces: list[str] = []
+    candidates = [c for c in subject if c not in "\r\n"]
+
+    def group(body: str) -> str:
+        counter[0] += 1
+        if rng.random() < 0.25:
+            name = f"g{counter[0]}"
+            names.append(name)
+            return f"(?P<{name}>{body})"
+        return f"({body})"
+
+    for _ in range(rng.randrange(1, MAX_LOOKAROUND_PIECES + 1)):
+        kind = rng.choices(LOOKAROUND_PIECES, weights=LOOKAROUND_PIECE_WEIGHTS)[0]
+
+        if kind == "look":
+            piece = rng.choice(LOOKAROUND_FORMS) + _lookaround_body(rng, subject, 0) + ")"
+            pieces.append(piece + (_quantifier(rng) if rng.random() < 0.2 else ""))
+        elif kind == "look-then-ref":
+            form = rng.choice(LOOKAROUND_FORMS)
+            body = group(_lookaround_body(rng, subject, 1))
+            pieces.append(form + body + ")" + f"\\{counter[0]}")
+        elif kind == "repeat-of-look":
+            inner = rng.choice(LOOKAROUND_FORMS) + _lookaround_body(rng, subject, 1) + ")"
+            atom = re.escape(rng.choice(candidates)) if candidates else "a"
+            pieces.append(f"(?:{inner}{atom})" + _quantifier(rng))
+        elif kind == "alt-with-look":
+            form = rng.choice(LOOKAROUND_FORMS)
+            # A capture inside the assertion most of the time: the group is what makes the leak
+            # visible, since a leaked capture is reported in the groups the consumer compares.
+            body = _lookaround_body(rng, subject, 1)
+            body = group(body) if rng.random() < 0.6 else body
+            first = re.escape(rng.choice(candidates)) if candidates else "a"
+            second = re.escape(rng.choice(candidates)) if candidates else "b"
+            pieces.append("(?:" + form + body + ")" + first + "|" + second + ")")
+        elif kind == "literal":
+            pieces.append(re.escape(rng.choice(candidates)) if candidates else "a")
+        else:
+            pieces.append(rng.choice(INTERACTION_CLASS_ATOMS) + (_quantifier(rng) if rng.random() < 0.4 else ""))
+
+    prefix, suffix = rng.choice(LOOKAROUND_AFFIXES)
+    return prefix + "".join(pieces) + suffix, counter[0], names
+
+
+def _generate_lookaround(rng: random.Random, count: int):
+    """S27's generator: the four lookaround forms, over all eight operations.
+
+    Measured by `python tools/record-oracle.py --generator lookaround --count 600 --seed 7`, after
+    the last change to this generator: 125 rows produce an answer, 469 produce none and 6 are
+    rejected by upstream - an answer rate in line with `interactions` (114 of 600), which is what a
+    composed pattern costs. 201 rows hold a positive lookahead, 199 a negative one, 199 a positive
+    lookbehind and 208 a negative one; 281 hold two or more lookarounds, 101 a lookaround inside a
+    repeat, 101 a variable-length body, 178 a reference to a group defined inside a lookaround. 288
+    carry IGNORECASE, 131 FULLCASE, 306 MULTILINE, 238 are reversed and 210 have an astral subject.
+    Every one of the eight operations is recorded exactly 75 times, because the operation is cycled
+    by row index rather than drawn.
+
+    Re-take from scratch after any widening: adding one entry to any table above shifts the whole RNG
+    stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        alphabet = rng.choice(INTERACTION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_INTERACTION_SUBJECT_LENGTH + 1)
+
+        if rng.random() < LOOKAROUND_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        pattern, groups, names = _lookaround_pattern(rng, subject)
+
+        flags = 0
+        if rng.random() < LOOKAROUND_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < LOOKAROUND_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < LOOKAROUND_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+
+        if rng.random() < LOOKAROUND_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "lookaround",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names) if operation == "sub" else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -2292,6 +2511,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "interactions":
         yield from _generate_interactions(rng, count)
+        return
+
+    if name == "lookaround":
+        yield from _generate_lookaround(rng, count)
         return
 
     dotted = name == "literal-dot"

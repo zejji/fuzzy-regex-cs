@@ -24,7 +24,6 @@ public sealed class VariousLookaroundTests
     [Arguments("a(?=c|d).", "abad", "0", new string?[] { "ad" })]
     [Arguments("^([ab]*?)(?=(b)?)c", "abc", "1,2", new string?[] { "ab", null })]
     [Arguments("^([ab]*?)(?!(b))c", "abc", "1,2", new string?[] { "ab", null })]
-    [Skip("needs:lookaround - the engine has no lookaround opcodes yet")]
     [Property("Upstream", "RegexTests.test_various#467-469,519-520")]
     public void Search_returns_the_expected_group_values(
         string pattern,

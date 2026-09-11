@@ -24,7 +24,6 @@ public sealed class VariousLookbehindTests
     [Arguments("(?<!\\?)'(.*?)(?<!\\?)'", "a'bc?'de'f", "1", new string?[] { "bc?'de" })]
     [Arguments("(?<!abc)(d.f)", "abcdefdof", "0", new string?[] { "dof" })]
     [Arguments("^([ab]*?)(?<!(a))c", "abc", "1,2", new string?[] { "ab", null })]
-    [Skip("needs:lookbehind - the engine has no lookbehind opcode yet")]
     [Property("Upstream", "RegexTests.test_various#474-476,504,521")]
     public void Search_returns_the_expected_group_values(
         string pattern,

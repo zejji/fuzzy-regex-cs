@@ -41,7 +41,6 @@ public sealed class RegressionsQuantifierTests
     }
 
     [Test]
-    [Skip("needs:lookaround - '(?=abc){3}abc' repeats a lookahead, and the matcher has no LOOKAROUND yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#23")]
     public void A_repeated_lookahead_group_does_not_throw_nothing_to_repeat()
     {
