@@ -16,15 +16,33 @@
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
     'verbs' is deliberately NOT in the default list, and S29 is the slice that left it out. It finds
-    a real, reproducible divergence in '(*SKIP)' under '(?r)' across a multi-match operation - four
-    rows in 1200 at seed 20260913 - which S29 did not resolve and parked rather than guess at. Until
-    it is fixed, leaving the generator in the default list would turn every later slice's oracle run
-    red for S29's reason and hide that slice's own result. Run it explicitly:
+    four rows in 1200 at seed 20260913 - 502, 504, 519 and 863, all '(?r)', all carrying a '(*SKIP)',
+    all a multi-match operation - where this port starts a later match of the same scan at a position
+    upstream never tries. That shows three ways: row 502 gains a match upstream does not have, rows
+    519 and 863 keep the count and move one match's span, and row 504 splits into three parts where
+    upstream splits into one. They are NOT a verb defect. They are upstream's 'search_start'
+    (upstream/src/_regex.c:8385), which this port does not
+    implement: each 'search_start_*' scanner bounds itself with text_end/text_start where the
+    'try_match_*' predicate 'basic_match' consults bounds itself with slice_end/slice_start. Nothing
+    but a '(*SKIP)' moves the slice inside an attempt, so the two agree on every other pattern -
+    and once one does, upstream's fast path walks past a start position its own slow path accepts,
+    while this port, having only the slow path, tries it. Minimised to
+
+        regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\n' + 'b', regex.M)   # upstream: one match
+
+    and pinned in tests/FuzzyRegex.Tests/Gaps/Engine/BacktrackingVerbTests.cs. Leaving the generator
+    in the default list would turn every later slice's oracle run red for this reason and hide that
+    slice's own result. Run it explicitly:
 
         tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed 20260913
 
-    See docs/plan/slices/S29-backtracking-verbs.md and DECISIONS 2026-09-11. Put it back in this
-    list the moment the divergence is fixed.
+    Phase 7 owns the fix, because porting 'search_start' is the fix; put 'verbs' back in this list
+    the moment it lands. See docs/plan/slices/done/S29-backtracking-verbs.md, docs/PORTMAP.md's
+    prefilter row and DECISIONS 2026-09-11.
+
+    Note that the recorder ALSO neutralises upstream's other start-position prefilter for this
+    generator - 'locate_required_string', see PREFILTER_FREE_GENERATORS in tools/record-oracle.py -
+    which is a different mechanism and does not fix these four rows.
 
 .PARAMETER Seed
     The generator seed. Omitted, the recorder picks one at random and records it in the wave

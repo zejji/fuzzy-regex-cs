@@ -176,6 +176,76 @@ def _to_index_length(offsets: list[int], span: tuple[int, int]) -> list[int]:
 # --------------------------------------------------------------------------------------------
 
 
+# Generators recorded against an upstream whose required-string prefilter is switched off, and the
+# only intentional divergence from "upstream as shipped" this recorder carries.
+#
+# Why. `locate_required_string` (upstream/src/_regex.c:11082) finds the pattern's required literal in
+# the subject and moves the *first* attempt to `found_pos - req_offset`, so positions before that are
+# never tried at all. That is invisible for every other generator - skipping a position that cannot
+# match changes nothing - but a `(*SKIP)` moves `slice_start` from wherever the attempt began, so the
+# attempt upstream skips is an attempt with a different answer:
+#
+#     >>> import regex
+#     >>> regex.compile(r"(?:..(*SKIP)x|q)x").search("ab cd xx")     # None
+#     >>> regex.compile(r"(?:..(*SKIP)x|q)x").match("ab cd xx", 4)   # (4, 8)
+#
+# Upstream's own compile call carries `req_offset=3, req_chars=(120,)` for that pattern (measured
+# 2026-09-11 by intercepting `regex._regex.compile`), so `x` at 6 puts the first attempt at 3, the
+# verb steps 3 -> 5, and position 4 is never tried. Perl does the identical thing - `use re "debug"`
+# prints `Found floating substr "x" at offset 6 (rx_origin now 3)` - and PCRE2 documents the class
+# under "Optimizations that affect backtracking verbs". It is not a bug on either side.
+#
+# This port has no prefilter until Phase 7, so recording plain upstream here would file a *missing
+# optimisation* as a matching divergence, on rows nobody can act on until Phase 7 arrives. Switching
+# the prefilter off instead compares the two matchers, which is what the generator is for: with it
+# off, every case that diverged agrees (`ab cd xx` -> (4, 8); `abcdxxx` -> (2, 6), not (3, 7)).
+#
+# PHASE 7 MUST DELETE THIS. The moment `locate_required_string` is ported, plain upstream and this
+# port agree and the `prefilter-free` tag becomes a lie: remove the generator from the tuple below,
+# expect the `verbs` wave to go red until the port's own prefilter is right, and invert the two gap
+# tests in tests/FuzzyRegex.Tests/Gaps/Engine/BacktrackingVerbTests.cs that pin (4, 8) and (2, 6).
+# Both are marked. See docs/plan/slices/done/S29-backtracking-verbs.md and DECISIONS 2026-09-11.
+PREFILTER_FREE_GENERATORS = ("verbs",)
+
+# Where `req_offset` and `req_chars` sit in the positional argument list `_main.py:660` passes to
+# `_regex.compile(pattern, flags, code, group_index, index_group, named_lists, named_list_indexes,
+# req_offset, req_chars, req_flags, group_count)`. The C extension takes them positionally only.
+_REQ_OFFSET_ARG = 7
+_REQ_CHARS_ARG = 8
+
+
+def _compile_upstream(regex, recorded: dict, pattern: str, flags: int, named_lists: dict):
+    """Compiles one row's pattern, with the required-string prefilter off where a generator wants it.
+
+    The interception is at ``regex._regex.compile`` - the boundary between upstream's Python compiler
+    and its C matcher - because that is the one place both values pass through and neither is
+    reachable afterwards: ``_regex.compile`` bakes them into the pattern object. Matching then needs
+    no wrapper at all.
+
+    ``cache_pattern=False`` so neither the lookup nor the store touches upstream's own cache
+    (``_main._compile``, ``cache_it``). Without it a prefilter-free pattern object could be handed
+    back to another generator's row, or an ordinary cached one handed back to this one, and either
+    way the row would not be recorded against what its tag says.
+    """
+    if recorded["generator"] not in PREFILTER_FREE_GENERATORS:
+        return regex.compile(pattern, flags, **named_lists)
+
+    recorded["oracle"] = "prefilter-free"
+    inner = regex._regex.compile
+
+    def without_required_string(*args):
+        args = list(args)
+        args[_REQ_OFFSET_ARG] = -1
+        args[_REQ_CHARS_ARG] = None
+        return inner(*args)
+
+    regex._regex.compile = without_required_string
+    try:
+        return regex.compile(pattern, flags, cache_pattern=False, **named_lists)
+    finally:
+        regex._regex.compile = inner
+
+
 def _record_row(regex, row: dict) -> dict:
     """Runs one row against upstream and returns it with its recorded outcome attached."""
     pattern = row["pattern"]
@@ -244,7 +314,7 @@ def _record_row(regex, row: dict) -> dict:
         return recorded
 
     try:
-        compiled = regex.compile(pattern, flags, **named_lists)
+        compiled = _compile_upstream(regex, recorded, pattern, flags, named_lists)
     except Exception as e:  # noqa: BLE001 - the exception *is* the recorded answer
         return failed(e, while_matching=False)
 

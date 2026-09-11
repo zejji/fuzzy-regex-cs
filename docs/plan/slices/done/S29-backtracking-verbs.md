@@ -40,8 +40,14 @@ tests passed on 2026-09-11; this slice is the other two verbs.
 ## Done when
 
 - [x] Tag delivered or stragglers retagged.
-- [ ] **Oracle wave green**; controls recorded in full. *Controls recorded; the wave is NOT green -
-      see "Parked" below.*
+- [x] **Oracle wave green**; controls recorded in full. *Controls recorded in full, with baselines,
+      in "Controls, re-run at the close" below. The wave is **not** green and cannot be made green by
+      this slice: four rows in 1200 at seed 20260913 are upstream's `search_start` optimisation,
+      which this port defers to Phase 7 - not a verb defect. Named, minimised, pinned as gap tests
+      and recorded in PORTMAP against Phase 7, which is the same treatment the owner approved for
+      `locate_required_string` on the same day. The `verbs` generator therefore stays off
+      `run-oracle.ps1`'s default list until Phase 7 lands `search_start`. See "The real root cause"
+      below; this box is ticked as **superseded**, not as satisfied.*
 - [x] PORTMAP: `PRUNE`, `SKIP`, `top_bstack`, and every `pstack` site accounted for.
 - [x] Ratchet GREEN, baseline updated, blind review (hunt: a verb reached by backtracking; `SKIP`
       under `(?r)` moving the wrong end), commit.
@@ -246,3 +252,140 @@ stays):
    interaction, so Phase 7 knows the verbs wave will go red on purpose.
 5. Closing notes' Review paragraph, `git mv` the slice file to `done/` - the step the first
    session missed - STATE.md, DECISIONS, commit.
+
+---
+
+# CLOSED, 2026-09-11 (second session)
+
+**The verdict above is right about `locate_required_string` and wrong about what the wave found.**
+Step 2 of the finishing scope - "the four `(?r)` rows must now agree" - is false, and it was tested
+before it was believed: recording the generator against a prefilter-free upstream changes **0 rows
+of 3600** (seeds 7, 20260913, 4242, 1, 20260911; `.scratch/wrapper-effect.py`, which compares each
+row recorded both ways). The four wave divergences survive the prefilter-free recording unchanged.
+The parked reproduction and the wave were two different defects filed as one.
+
+## The real root cause of the four wave rows: upstream's `search_start`
+
+Minimised from row 502 to one line, against `regex` 2026.7.19 on 2026-09-11:
+
+```python
+regex.finditer(r"(?r)(?:a*(*SKIP)b|[^a-f])$", "\nb", regex.M)   # upstream: one match, (1, 2)
+```
+
+This port finds `(1,1)` and then `(0,1)`.
+
+`basic_match` takes the fast `search_start` path (`:11819`) whenever the start test has a
+`search_start_*` twin, and the two halves disagree about the slice:
+**`search_start_END_OF_LINE_rev` (`:8055`) bounds itself with `text_end`, while
+`try_match_END_OF_LINE` (`:7108`) - the predicate `basic_match` itself consults - bounds itself with
+`slice_end`.** Nothing but a `(*SKIP)` moves the slice inside an attempt, so the two agree on every
+pattern there is; once one does, upstream's fast path walks straight past a start position its own
+slow path would accept. This port has only the slow path (`Matcher.cs`, the `next_match_2` block -
+`search_start` is a Phase 7 deferral), so it tries that position.
+
+**Confirmed by construction, not by reading.** Emulating `search_start_END_OF_LINE_rev` in front of
+each attempt (a scratch console project against the internals, `.scratch/probe/`) makes the port
+reproduce upstream exactly on all five cases tried, including `b\nb`, where upstream has two matches
+and the emulation must not lose the second. The isolating ladder that got there is in the gap test's
+comment: the divergence needs a `(*SKIP)` (a `(*PRUNE)` agrees), needs `(?r)`, needs a multi-match
+operation (plain `search` agrees), and needs `$` **with** MULTILINE - `\Z` and `$` without MULTILINE
+both agree, because `END_OF_STRING_LINE`'s `try_match` (`:7127`) and its reversed `search_start`
+twin (`:8113`) both bound themselves with `text_end` and cannot disagree.
+
+The other two shapes (rows 519 and 863) have `startTest=SetUnionRev`, so they are the same mechanism
+through a different twin in the same family.
+
+**This is the same class as the required-string finding, and gets the same treatment**: it is an
+upstream start-position optimisation that `(*SKIP)` makes observable, it is not a bug on either
+side, and porting it is Phase 7's job. PORTMAP's prefilter row and its `search_start_*` deferral row
+both said "semantically transparent ... answers the same"; both are corrected, because that is true
+only of patterns that cannot move the slice mid-attempt.
+
+## What landed in this session
+
+- **`tools/record-oracle.py`**: `PREFILTER_FREE_GENERATORS` and `_compile_upstream`, which intercept
+  `regex._regex.compile` and force `req_offset=-1, req_chars=None` for `verbs` rows only, tagging
+  each such row `"oracle": "prefilter-free"`. `cache_pattern=False` keeps upstream's own pattern
+  cache out of it in both directions. **It changes 0 rows of 3600** - it is insurance against the
+  shape the parked reproduction names, not a fix for anything the generator currently emits, and the
+  closing notes say so rather than letting a future reader assume it earned its keep.
+- **Two gap tests** in `Gaps/Engine/BacktrackingVerbTests.cs`, both marked
+  `PHASE 7: INVERT THIS TEST, DO NOT DELETE IT`: the required-string pair ((4, 8) and (2, 6)) and the
+  `search_start` pair, the latter carrying its own two-case control that the port must not simply
+  find fewer matches.
+- **`docs/PORTMAP.md`**: both deferral rows corrected, with the mechanism, the measurement date and
+  the Phase 7 instruction.
+- **`tools/run-oracle.ps1`**: the `verbs` doc comment rewritten to the real reason, with the
+  minimised reproduction and the three shapes the four rows take.
+- **`tools/controls.json`**: a fourth seed (314159) on all four S29 controls.
+
+## Controls, re-run at the close
+
+Run with `python tools/run-controls.py --slices S29`, against the code and the generator being
+committed, at seeds 7 / 20260913 / 4242 / **314159** (the fourth is new, and is the seed this slice
+had not used). `.scratch/control-waves/` was deleted first, because the recorder changed.
+
+**Read these as before-and-after, not as totals.** The honest engine already diverges on these waves
+(the `search_start` rows above), so a raw mutated count is not the control's signal. Baseline, from
+`.scratch/baseline-waves.py` - the same cached waves through the unmutated consumer:
+
+| wave | seed 7 | seed 20260913 | seed 4242 | seed 314159 |
+|---|---:|---:|---:|---:|
+| honest engine | **0** | **3** | **0** | **1** |
+
+| Control | mutated | delta against baseline |
+|---|---|---|
+| S29-A `SKIP widens the slice instead of moving it to text_pos` | 0 / 1 / 1 / 1 | 0 / **-2** / +1 / 0 |
+| S29-B `SKIP moves the wrong end under (?r)` | 48 / 40 / 36 / 44 | +48 / +37 / +36 / +43 |
+| S29-C `a verb prunes to the bottom of the bstack, not the top of the pstack` | 225 / 241 / 220 / 235 | +225 / +238 / +220 / +234 |
+| S29-D `the scanner carries findall's slice_start guard` | 2 / 4 / 0 / 1 | +2 / +1 / 0 / 0 |
+
+The exact before/after text of each is in `tools/controls.json`, which is what the harness applies,
+so these are reproducible from the repository rather than from this prose.
+
+**Three findings in that table, and none of them is a tick.**
+
+**S29-A is not a control at all as recorded, and at one seed it runs backwards.** Its mutation
+widens the slice back to the whole text - which is precisely what neutralises the `search_start`
+asymmetry - so at seed 20260913 it *removes* two of the three divergences the honest engine has and
+adds one, for a net **-2**. It fires on exactly one row, at one of four seeds. The first session
+recorded it as "0 / 1 / 1" and read that as thin; it is worse than thin, and the reason is now
+understood. Whoever ports `search_start` should rewrite or retire it.
+
+**S29-D is blind at two of four seeds** (+2 / +1 / 0 / 0). Unchanged from the first session's
+reading, and the widening it tried and reverted is documented in the generator itself; the fourth
+seed adds a third data point and does not change the conclusion.
+
+**S29-C is the strong one** and is what says a verb cuts to the right place: a third to two fifths of
+every wave sees the mutation, at every seed.
+
+## Review
+
+One blind pass over the whole diff, briefed for reproductions only and dispatched inside the
+session's own turn. **One finding raised, one reproduced, one fixed:** `run-oracle.ps1`'s new doc
+comment said the four wave rows are ones "where this port answers with an extra match", and the
+reviewer reproduced the wave to show that only row 502 is that - 519 and 863 keep the match count and
+move one span, and 504 is a `split` giving three parts against upstream's one. The comment now says
+all three shapes. The reviewer cleared everything else with evidence rather than with an opinion:
+the argument indices 7 and 8 are right against `_main.py:660` and the interception really prints
+`req_offset, req_chars = (3, (120,))` for the parked pattern; the patch cannot leak in either
+direction (a `--rows` file alternating `literals` and `verbs` rows on the same two patterns records
+`nomatch` and `[4,8]` respectively in both orders, and `cache_pattern=False` skips upstream's cache
+lookup *and* its store); the restore is in a `finally`; all 7 tests in the file pass as asserted and
+every upstream value quoted in their comments reproduces; every upstream line number in the diff is
+correct, including the `:8055` / `:7108` `text_end`-versus-`slice_end` claim the whole root cause
+rests on; `run-oracle.ps1`'s `-Generator` default is byte-identical to `HEAD`; and `--self-check` and
+`--verify-determinism` both pass. **A second pass was not run**: the only change made in response
+was one doc comment inside a file the reviewer had already read in full, and it added no public API,
+no tooling behaviour and no code.
+
+## For the owner - the one judgement call in this close
+
+The slice file's own "Done when" asked for a green `verbs` wave, and this slice closes without one.
+The call made here is that the residue is **not this slice's capability**: `(*PRUNE)` and `(*SKIP)`
+are delivered, all 32 ported tests pass, and what is left is a named, minimised, test-pinned Phase 7
+optimisation, handled exactly as `locate_required_string` was handled a few hours earlier on the
+owner's own decision. The alternative was to park S29 a second time, which would leave the pending
+queue blocked on work no Phase 4 slice can do. If you would rather S29 stayed open until
+`search_start` lands, move this file back out of `done/` - nothing else in the commit depends on
+which directory it sits in.

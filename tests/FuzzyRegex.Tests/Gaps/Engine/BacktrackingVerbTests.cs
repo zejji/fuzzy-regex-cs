@@ -121,6 +121,93 @@ public sealed class BacktrackingVerbTests
     }
 
     [Test]
+    public void Skip_past_a_required_string_tries_a_start_position_upstreams_prefilter_skips()
+    {
+        // PHASE 7: INVERT THIS TEST, DO NOT DELETE IT.
+        //
+        // Upstream's 'locate_required_string' (upstream/src/_regex.c:11082) moves the *first* attempt
+        // to 'found_pos - req_offset', so positions before that are never tried. Skipping a position
+        // that cannot match changes nothing - except that a '(*SKIP)' moves slice_start from wherever
+        // the attempt began, so the attempt upstream skips is an attempt with a different answer.
+        //
+        // Measured against regex 2026.7.19 on 2026-09-11. Upstream's own compile call carries
+        // req_offset=3, req_chars=('x',) for the first pattern (intercept regex._regex.compile), so
+        // 'x' at 6 puts the first attempt at 3, the verb steps 3 -> 5, and position 4 is never tried:
+        //
+        //   regex.compile(r'(?:..(*SKIP)x|q)x').search('ab cd xx')     is None
+        //   regex.compile(r'(?:..(*SKIP)x|q)x').match('ab cd xx', 4)   spans (4, 8)
+        //
+        // Perl agrees with upstream bit for bit ('use re "debug"' prints `Found floating substr "x"
+        // at offset 6 (rx_origin now 3)'), and PCRE2 documents the class under "Optimizations that
+        // affect backtracking verbs" - so this is not a bug on either side. This port has no
+        // prefilter until Phase 7 and answers what upstream answers with its prefilter switched off.
+        // The moment Phase 7 ports 'locate_required_string', both of these become no-match, and the
+        // 'prefilter-free' wrapper in tools/record-oracle.py has to go at the same time.
+        FuzzyRegex
+            .Match("ab cd xx", "(?:..(*SKIP)x|q)x")
+            .Should()
+            .Match<Match>(m => m.Index == 4 && m.Length == 4);
+        FuzzyRegex.Match("aaaaxx", "(?:aa(*SKIP)x|M)x").Should().Match<Match>(m => m.Index == 2 && m.Length == 4);
+    }
+
+    [Test]
+    public void Skip_under_reverse_tries_a_start_position_upstreams_search_start_skips()
+    {
+        // PHASE 7: INVERT THIS TEST, DO NOT DELETE IT. Found 2026-09-11 by the S29 oracle wave
+        // (generator 'verbs', seed 20260913, rows 502, 504, 519 and 863), and NOT the required-string
+        // interaction the test above pins - the two were conflated in S29's first verdict.
+        //
+        // Upstream's 'search_start' (upstream/src/_regex.c:8385) is the fast scan for the next
+        // plausible start position, and 'basic_match' takes it whenever the start test has a
+        // 'search_start_*' twin (:11819). The two halves do not agree about the slice:
+        // 'search_start_END_OF_LINE_rev' (:8055) bounds itself with TEXT_end, while
+        // 'try_match_END_OF_LINE' (:7108) - which 'basic_match' consults - bounds itself with
+        // SLICE_end. Nothing else moves the slice inside an attempt, so the two agree on every
+        // pattern there is, until a '(*SKIP)' moves it. Then upstream's fast path walks straight past
+        // a start position its own slow path would accept.
+        //
+        // This port does not implement 'search_start' at all (Matcher.cs, the 'next_match_2' block),
+        // so it has only the slow path and tries that position. Measured against regex 2026.7.19 on
+        // 2026-09-11:
+        //
+        //   [m.span() for m in regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\nb', regex.M)]
+        //   is [(1, 2)] - one match; this port finds (1,1) and then (0,1).
+        //
+        // Confirmed by emulating 'search_start_END_OF_LINE_rev' in front of each attempt: the port
+        // then reproduces upstream exactly on every case here, including the three-match subject
+        // below, where it must NOT lose upstream's second match.
+        new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
+            .Matches("\nb")
+            .Select(m => (m.Index, m.Length))
+            .Should()
+            .Equal((1, 1), (0, 1));
+
+        // Upstream: [(6, 7), (4, 5)]. This port adds (5, 1) between them.
+        new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
+            .Matches("\rbbb\r\nb")
+            .Select(m => (m.Index, m.Length))
+            .Should()
+            .Equal((6, 1), (5, 1), (4, 1));
+
+        // The control that says this is not simply "the port finds too many": with no '(*SKIP)' the
+        // slice never moves, the two halves agree, and both sides answer the same.
+        new FuzzyRegex("(?r)(?:a*b|[^a-f])$", FuzzyRegexOptions.Multiline)
+            .Matches("\nb")
+            .Select(m => (m.Index, m.Length))
+            .Should()
+            .Equal((1, 1));
+
+        // And '$' without MULTILINE agrees too, which is the discriminator: that is END_OF_STRING_LINE,
+        // whose try_match (:7127) and reversed search_start twin (:8113) BOTH bound themselves with
+        // text_end and final_newline, so they cannot disagree about a moved slice.
+        new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$")
+            .Matches("\nb")
+            .Select(m => (m.Index, m.Length))
+            .Should()
+            .Equal((1, 1));
+    }
+
+    [Test]
     public void Prune_leaves_the_slice_alone_where_skip_moves_it()
     {
         // The two verbs are the same opcode body but for the two lines SKIP has first (:14552-14555),
