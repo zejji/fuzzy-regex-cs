@@ -20,7 +20,6 @@ public sealed class VariousCommentTests
 {
     [Test]
     [Arguments("w(?# comment 1)xy(?# comment 2)z", "wxyz", "0", new string?[] { "wxyz" })]
-    [Skip("needs:comments - the parser strips (?#...) since S10; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_various#478")]
     public void Search_returns_the_expected_group_values(
         string pattern,

@@ -30,7 +30,6 @@ public sealed class ZeroWidthTests
         new FuzzyRegex(@"\b").Split("a b").Should().Equal("", "a", " ", "b", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?V1) yet; also needs anchors and splitting")]
     [Property("Upstream", "RegexTests.test_zerowidth#3")]
     public void Split_on_a_word_boundary_under_the_V1_flag_gives_the_same_pieces() =>
         new FuzzyRegex(@"(?V1)\b").Split("a b").Should().Equal("", "a", " ", "b", "");
@@ -46,13 +45,11 @@ public sealed class ZeroWidthTests
         FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?V1) yet; also needs anchors (^)")]
     [Property("Upstream", "RegexTests.test_zerowidth#8,9")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_forward() =>
         FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?rV1) yet; also needs right-to-left and anchors (^)")]
     [Property("Upstream", "RegexTests.test_zerowidth#10,11")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_backward() =>
         FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
@@ -68,13 +65,11 @@ public sealed class ZeroWidthTests
         new FuzzyRegex("(?r)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?V1) yet; also needs splitting")]
     [Property("Upstream", "RegexTests.test_zerowidth#20")]
     public void Split_on_an_empty_V1_pattern_yields_every_char_with_empty_ends() =>
         new FuzzyRegex("(?V1)").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?rV1) yet; also needs right-to-left and splitting")]
     [Property("Upstream", "RegexTests.test_zerowidth#22")]
     public void Split_on_a_reversed_empty_V1_pattern_yields_every_char_in_reverse_with_empty_ends() =>
         new FuzzyRegex("(?rV1)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");

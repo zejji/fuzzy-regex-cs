@@ -83,13 +83,11 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?V1) yet; also needs anchors (^)")]
     [Property("Upstream", "RegexTests.test_search_reverse#11,15")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_forward() =>
         FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?rV1) yet; also needs right-to-left and anchors (^)")]
     [Property("Upstream", "RegexTests.test_search_reverse#13,17")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_backward() =>
         FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
@@ -126,13 +124,11 @@ public sealed class SearchReverseTests
         FuzzyRegex.Matches("qqwe", "(?r)q*").Select(m => m.Value).Should().Equal("", "", "qq", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?V1) yet")]
     [Property("Upstream", "RegexTests.test_search_reverse#23")]
     public void Matches_value_for_a_star_quantified_literal_under_the_V1_flag_scans_forward() =>
         FuzzyRegex.Matches("qqwe", "(?V1)q*").Select(m => m.Value).Should().Equal("qq", "", "", "");
 
     [Test]
-    [Skip("needs:version-flags - the parser does not accept (?rV1) yet; also needs right-to-left")]
     [Property("Upstream", "RegexTests.test_search_reverse#25")]
     public void Matches_value_for_a_star_quantified_literal_under_the_V1_flag_scans_backward() =>
         FuzzyRegex.Matches("qqwe", "(?rV1)q*").Select(m => m.Value).Should().Equal("", "", "qq", "");

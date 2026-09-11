@@ -162,14 +162,12 @@ public sealed class RegressionsFlagTests
     // Hg issue 39: regex.search("((?i)blah)\s+\1", "blah BLAH") doesn't return None. Changed to
     // positional flags in regex 2023.12.23.
     [Test]
-    [Skip("needs:inline-flags - positional (mid-pattern) inline flags are not scoped correctly yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#17")]
     public void Positional_inline_case_fold_flag_does_not_apply_to_a_later_backreference() =>
         FuzzyRegex.Match("blah BLAH", @"((?i)blah)\s+\1").Success.Should().BeFalse();
 
     // Hg issue 46: regex.compile("a(?x: b c )d") causes "_regex_core.error: missing )".
     [Test]
-    [Skip("needs:inline-flags - scoped (?x: ...) verbose groups fail to parse")]
     [Property("Upstream", "RegexTests.test_hg_bugs#26")]
     public void Scoped_verbose_flag_group_ignores_whitespace_inside_the_group_only() =>
         FuzzyRegex.Match("abcd", "a(?x: b c )d").Value.Should().Be("abcd");

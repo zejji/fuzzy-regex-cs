@@ -42,13 +42,11 @@ public sealed class NamedListTests
     [Test]
     [Arguments("333\\L<bar>444", "333one444")]
     [Arguments("(?i)333\\L<bar>444", "333TWO444")]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#1-2")]
     public void A_named_list_matches_any_of_its_entries(string pattern, string subject) =>
         FuzzyRegex.MatchAtStart(subject, pattern, FuzzyRegexOptions.None, _bar).Value.Should().Be(subject);
 
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#3")]
     public void A_named_list_does_not_match_a_word_outside_it() =>
         FuzzyRegex
@@ -57,7 +55,6 @@ public sealed class NamedListTests
             .BeFalse();
 
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#7")]
     public void The_same_named_list_can_be_referenced_twice_and_quantified()
     {
@@ -69,7 +66,6 @@ public sealed class NamedListTests
     // The entries are matched as literals, so the regex metacharacters in "+s\ol[i}d" are not
     // special - and "+solid" in the second case is found only because it is there literally.
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#8")]
     public void Named_list_entries_are_literals_not_patterns()
     {
@@ -82,7 +78,6 @@ public sealed class NamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#9")]
     public void A_named_list_entry_matches_where_it_occurs_literally()
     {
@@ -100,7 +95,6 @@ public sealed class NamedListTests
 
     // (?f) is FULLCASE, so ß folds to ss and the six-code-unit "straße" matches "STRASSE".
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; this needs the engine and full case-folding")]
     [Property("Upstream", "RegexTests.test_named_lists#10-11")]
     public void Full_case_folding_matches_a_named_list_entry_of_a_different_length()
     {
@@ -119,7 +113,6 @@ public sealed class NamedListTests
 
     // The other direction: the subject is the seven-code-unit "STRASSE".
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; this needs the engine and full case-folding")]
     [Property("Upstream", "RegexTests.test_named_lists#12")]
     public void Full_case_folding_works_from_the_expanded_form_too()
     {
@@ -136,9 +129,6 @@ public sealed class NamedListTests
 
     // İ (U+0130) case-folds to i, so "kit" is found inside "SKİTS" as well as inside "SKITS".
     [Test]
-    [Skip(
-        "needs:named-lists - the parser reads \\L<name> since S13; this needs the engine and case-insensitive matching"
-    )]
     [Property("Upstream", "RegexTests.test_named_lists#13-14")]
     public void A_named_list_folds_case_when_searching()
     {
@@ -154,7 +144,6 @@ public sealed class NamedListTests
     }
 
     [Test]
-    [Skip("needs:named-lists - the parser reads \\L<name> since S13; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_named_lists#17")]
     public void An_empty_named_list_matches_the_empty_subject()
     {

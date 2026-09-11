@@ -21,7 +21,6 @@ public sealed class InlineFlagsTests
     [Test]
     [Arguments(_upperAWithDotBelow, _lowerAWithDotBelow)]
     [Arguments(_lowerAWithDotBelow, _upperAWithDotBelow)]
-    [Skip("needs:inline-flags - the parser does not compile flags yet")]
     [Property("Upstream", "RegexTests.test_inline_flags#1-2")]
     public void MatchAtStart_ignore_case_folds_A_with_dot_below(string pattern, string subject)
         // Upstream also passes regex.U; incidental for a str pattern, which is Unicode by default.
@@ -31,7 +30,6 @@ public sealed class InlineFlagsTests
     [Test]
     [Arguments(_upperAWithDotBelow, _lowerAWithDotBelow)]
     [Arguments(_lowerAWithDotBelow, _upperAWithDotBelow)]
-    [Skip("needs:inline-flags - the parser does not compile flags yet")]
     [Property("Upstream", "RegexTests.test_inline_flags#3-4")]
     public void MatchAtStart_inline_ignore_case_flag_folds_A_with_dot_below(string pattern, string subject)
         // Upstream also passes regex.U as a construct-time flag; incidental for a str pattern.
@@ -41,7 +39,6 @@ public sealed class InlineFlagsTests
     [Test]
     [Arguments(_upperAWithDotBelow, _lowerAWithDotBelow)]
     [Arguments(_lowerAWithDotBelow, _upperAWithDotBelow)]
-    [Skip("needs:inline-flags - the parser does not compile flags yet")]
     [Property("Upstream", "RegexTests.test_inline_flags#5-6")]
     public void MatchAtStart_inline_iu_flags_fold_A_with_dot_below(string pattern, string subject)
         // Upstream's inline "(?iu)"; u is incidental for a str pattern (Unicode by default), so
@@ -50,13 +47,11 @@ public sealed class InlineFlagsTests
         new FuzzyRegex("(?i)" + pattern).IsMatchAtStart(subject).Should().BeTrue();
 
     [Test]
-    [Skip("needs:inline-flags - the parser does not compile flags yet")]
     [Property("Upstream", "RegexTests.test_inline_flags#7")]
     public void MatchAtStart_inline_ignore_case_flag_at_the_start_of_the_pattern_applies() =>
         FuzzyRegex.MatchAtStart("A", "(?i)a").Success.Should().BeTrue();
 
     [Test]
-    [Skip("needs:inline-flags - the parser does not compile flags yet")]
     [Property("Upstream", "RegexTests.test_inline_flags#8")]
     public void MatchAtStart_inline_ignore_case_flag_after_the_pattern_content_does_not_apply() =>
         FuzzyRegex.MatchAtStart("A", "a(?i)").Success.Should().BeFalse();

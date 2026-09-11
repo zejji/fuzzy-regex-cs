@@ -29,7 +29,6 @@ public sealed class VariousInlineFlagTests
     [Arguments("(?x) foo ", "foo", "0", new string?[] { "foo" })]
     [Arguments("(?x)foo ", "foo", "0", new string?[] { "foo" })]
     [Arguments("(?ms).*?x\\s*\\Z(.*)", "xx\nx\n", "1", new string?[] { "" })]
-    [Skip("needs:inline-flags - the parser does not apply inline flags yet")]
     [Property("Upstream", "RegexTests.test_various#46,48-49,482,484-485,487,502-503,509")]
     public void Search_returns_the_expected_group_values(
         string pattern,
@@ -48,7 +47,6 @@ public sealed class VariousInlineFlagTests
     [Arguments("a.b(?s)", "a\nb")]
     [Arguments("a.*(?s)b", "acc\nccb")]
     [Arguments(" (?x)foo ", "foo")]
-    [Skip("needs:inline-flags - the parser does not apply inline flags yet")]
     [Property("Upstream", "RegexTests.test_various#45,47,501")]
     public void Search_does_not_match(string pattern, string subject) =>
         FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();

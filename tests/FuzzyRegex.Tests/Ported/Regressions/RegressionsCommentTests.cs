@@ -10,7 +10,6 @@ public sealed class RegressionsCommentTests
 {
     // Hg issue 43: regex.compile("a(?#xxx)*") causes "_regex_core.error: nothing to repeat".
     [Test]
-    [Skip("needs:comments - the parser strips (?#...) since S10; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#22")]
     public void Quantifier_after_a_comment_group_still_repeats_the_preceding_literal() =>
         FuzzyRegex.Match("aaa", "a(?#xxx)*").Value.Should().Be("aaa");
@@ -18,14 +17,12 @@ public sealed class RegressionsCommentTests
     // Hg issue 47: regex.compile("a#comment\n*", flags=regex.X) causes "_regex_core.error:
     // nothing to repeat".
     [Test]
-    [Skip("needs:comments - the parser strips (?#...) since S10; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#27")]
     public void Quantifier_after_a_verbose_mode_line_comment_still_repeats_the_preceding_literal() =>
         FuzzyRegex.Match("aaa", "a#comment\n*", FuzzyRegexOptions.IgnorePatternWhitespace).Value.Should().Be("aaa");
 
     // Hg issue 271: Comment logic different between Re and Regex.
     [Test]
-    [Skip("needs:comments - the parser strips (?#...) since S10; the engine cannot match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#309")]
     public void Escaped_close_paren_inside_a_comment_group_does_not_end_the_comment_early() =>
         FuzzyRegex.MatchAtStart("abcd", @"ab(?#comment\))cd").Success.Should().BeTrue();
