@@ -29,6 +29,4 @@ pin (4, 8) and (2, 6); both are marked.
 `python tools/run-controls.py --slices S29`. Delete `.scratch/control-waves/` after a generator
 change or you measure the old generator.
 
-**Still open for the owner:** `slice-log.jsonl` records S26 as `failed` with its own commit as the
-abandoned SHA, and S29 likewise (`8e80b21`, rolled back for the unmoved slice file, restored by
-hand). Both commits are real; both rows are the driver's verdict at the time.
+**Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are real (restored by hand).
