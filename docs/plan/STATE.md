@@ -2,31 +2,33 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S29, **PARKED - owner decision needed (2026-09-11).** Its commit `8e80b21` is on
-main (the driver rolled it back for not moving the slice file; the owner's session restored it and
-killed the driver's automatic retry before it did any work). Ratchet GREEN, 5394 passing, tree
-clean. **Do not launch a driver on S29 until the decision below is made.**
+**Current slice:** S29, re-opened to finish (2026-09-11). Its engine code is committed (`8e80b21`);
+what remains is the closing scope in the slice file's last section: record the `verbs` generator
+against a prefilter-free upstream, put it back on the default oracle list, re-run wave and
+controls, pin two gap tests, PORTMAP note, and **`git mv` the slice file to `done/`** - the step the
+first session missed, which made the driver roll back a green commit.
 
-**The blocker is an upstream defect, not ours - root cause found.** `regex.compile(
-r"(?:..(*SKIP)x|q)x").search("ab cd xx")` is `None` upstream, yet `.search(s, 4)` and `.match(s, 4)`
-both give `(4, 8)`: a search from 0 misses a match that a search from 4 finds, which no
-definition of `search` permits. Cause: `locate_required_string` (`_regex.c:11082`) caches where
-the required literal `x` was found (`req_pos`); after a `(*SKIP)` moves `slice_start` the cache and
-the moved slice disagree and the attempt fails before matching. Three probes prove the prefilter
-is the mechanism (table in the S29 slice file): no required literal gives `(4, 8)`; an early `x`
-gives `(4, 8)`; a fixed-offset literal makes the locator jump *below* the skip point. Our port has
-no prefilter (Phase 7) and answers `(4, 8)`, as PCRE and upstream-from-4 do. Same mechanism as
-upstream #612, already a Phase 6 sweep item. DECISIONS 2026-09-11, second entry.
+**Blockers:** none. The blocker the first session parked on is resolved: upstream's `None` on
+`(?:..(*SKIP)x|q)x` / `ab cd xx` is its required-string prefilter moving the first attempt to 3
+(`req_offset=3`, `locate_required_string`, `_regex.c:11082`), Perl-identical and PCRE2-documented,
+not a verb defect on either side. With that prefilter neutralised upstream gives the port's (4, 8).
+Details and the finishing steps: S29 slice file, last two sections; DECISIONS 2026-09-11.
 
-**The four `(?r)` wave divergences** (`tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed
-20260913`, rows 502, 504, 519, 863) each skip a match after a `(*SKIP)` before a required atom -
-the same shape, reversed. Not re-derived individually.
+**Where the port stands:** ratchet GREEN, 5729 tests, 5394 passing, parity 81.3%, tree clean.
+Oracle GREEN over fifteen default generators; `verbs` rejoins the list when S29 closes.
 
-**Options for the owner** (ROADMAP already specifies the mechanism for the first):
-1. Pull the strict intentional-divergence allowlist forward from Phase 6 into S29, list these rows
-   against upstream #612, put `verbs` back on the default list, close S29. Draft the upstream
-   report for approval.
-2. Close S29 as-is with `verbs` off the default list. Cheapest; hides verb regressions to Phase 6.
-3. Narrow the `verbs` generator away from required literals after `(*SKIP)`. Not recommended.
+**For S30's author:** `findall` and `finditer` are not the same loop once `(*SKIP)` moves
+`slice_start` (S29 closing notes); `push_repeats`/`pop_repeats` are ported (S28), so recursion
+ports `push_groups`/`pop_groups` and the group-call guard list only.
 
-**Then:** S30 recursion - `pwsh -File tools/launch-slice.ps1 s30` once S29 is closed.
+**For Phase 7's author:** porting `locate_required_string` will turn the `verbs` wave red on
+purpose. Remove the prefilter-free wrapper in `record-oracle.py` and invert the two gap tests that
+pin (4, 8) and (2, 6); both are marked.
+
+**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
+`python tools/run-controls.py --slices S29`. Delete `.scratch/control-waves/` after a generator
+change or you measure the old generator.
+
+**Still open for the owner:** `slice-log.jsonl` records S26 as `failed` with its own commit as the
+abandoned SHA, and S29 likewise (`8e80b21`, rolled back for the unmoved slice file, restored by
+hand). Both commits are real; both rows are the driver's verdict at the time.

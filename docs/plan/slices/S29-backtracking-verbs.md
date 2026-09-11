@@ -205,3 +205,44 @@ Our port has no prefilter until Phase 7 and returns `(4, 8)`, matching PCRE and 
 The four `(?r)` wave divergences (seed 20260913, rows 502, 504, 519, 863) have the same shape
 reversed. This is the mechanism of upstream #612 in the Phase 6 triage. What to do about the
 `verbs` generator is the owner's call - see STATE.md.
+
+## Verdict and finishing scope, set at the owner checkpoint (2026-09-11)
+
+**Refinement of the root cause above, and the verdict.** Upstream's own compile call carries
+`req_offset=3, req_chars="x"` for `(?:..(*SKIP)x|q)x` (intercept `regex._regex.compile`), so
+`locate_required_string` (`_regex.c:11082`) moves the *first attempt* to `found_pos - 3`: `x` at 6
+puts it at 3, and from 3 the verb legitimately steps 3 -> 5 and position 4 is never tried. That is
+the fixed-offset jump, not the cache. Perl's `use re "debug"` shows the same: `Found floating substr
+"x" at offset 6 (rx_origin now 3)`, attempts at 3 and 5 only, and Perl agrees with upstream on 20+
+probes bit for bit. PCRE2 documents the class ("Optimizations that affect backtracking verbs",
+pcre2pattern). With upstream's prefilter neutralised from Python (`req_offset=-1, req_chars=None`),
+every divergent case gives the port's answer: `ab cd xx` -> (4, 8); `abcdxxx` -> (2, 6) not (3, 7);
+`(?:aa(*SKIP)x|M)x` on `aaaaxx` -> (2, 6). 450 oracle rows of verb patterns with **no literal
+anywhere** (so no required string exists) agree with the port completely. A blind Opus review tried
+to falsify this and its counter-cases all flipped the same way under the neutralised prefilter.
+
+**So: not an upstream bug to report, and not a port bug to fix.** The port has no prefilter until
+Phase 7 and matches upstream-without-its-prefilter exactly. Phase 7 porting `locate_required_string`
+faithfully will make the real upstream and the port agree.
+
+**Finish the slice as follows** (this is the pending queue's work; the code committed in `8e80b21`
+stays):
+
+1. **Record the `verbs` generator against a prefilter-free upstream.** In `tools/record-oracle.py`,
+   for rows of this generator only, wrap `regex._regex.compile` so that argument 7 (`req_offset`)
+   is `-1` and argument 8 (`req_chars`) is `None`, and tag each such row (for example
+   `"oracle": "prefilter-free"`) so the wave file says what it was recorded against. Quote the
+   reproduction above in the docstring, and say that **Phase 7 must remove this wrapper the moment
+   `locate_required_string` is ported** - at which point the plain upstream and the port agree and
+   the tag becomes a lie. That is the strictness the ROADMAP asks of an intentional divergence.
+2. **Put `verbs` back on `run-oracle.ps1`'s default list.** Re-run `-Generator verbs -Count 1200
+   -Seed 20260913`: the four `(?r)` rows must now agree; zero divergences overall. Re-run every
+   S29 control against the committed generator, at the recorded seed and one fresh seed, and
+   re-record the figures (they will change: the wave's ground truth changed).
+3. **A gap test** pinning `(?:..(*SKIP)x|q)x` on `ab cd xx` -> (4, 8) and `(?:aa(*SKIP)x|M)x` on
+   `aaaaxx` -> (2, 6), whose comment says both become `None` when Phase 7 lands the prefilter and
+   that the test must then be inverted, not deleted.
+4. **PORTMAP**: extend the deferred `locate_required_string` row with one sentence naming this
+   interaction, so Phase 7 knows the verbs wave will go red on purpose.
+5. Closing notes' Review paragraph, `git mv` the slice file to `done/` - the step the first
+   session missed - STATE.md, DECISIONS, commit.
