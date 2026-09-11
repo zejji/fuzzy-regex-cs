@@ -14,7 +14,7 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
-| 4 | Advanced: lookaround, atomic and possessive, recursion, branch reset, named lists, POSIX, partial matching | 8-12 | Opus |
+| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 7 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
 | 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 7-12 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
@@ -73,6 +73,24 @@ so they were plausibly *assumed* into Phase 2 and are not in fact done. The opti
 Phase 4 to 10-14 slices, or to leave Phase 4 as authored and open a small phase for the flag-scoping
 families. Either way the tags want assigning before Phase 4's slices are written, because a slice
 file cannot verify a capability no phase has claimed.
+
+**Phase 4 as authored (2026-09-11) is 7 slices, S27-S33, and the two owner decisions above are
+closed by evidence rather than by choice.** At the checkpoint every remaining tag on the board was
+probed - its `[Skip]` attributes removed, the suite run - and 92 skipped tests already passed:
+`inline-flags`, `version-flags`, `comments`, `branch-reset`, `possessive` and `(*FAIL)` entirely,
+and 17 of the 20 `named-lists` tests. Upstream has no `STRING_SET` opcode (`StringSet` lowers to
+`BRANCH`, `_regex_core.py:4069`) and no possessive one (`PossessiveRepeat._compile` emits `ATOMIC`
+plus the greedy repeat, `:3034`), so both families were done the moment S13, S19 and S20 landed,
+and the skip prose describing "a parser that does not compile flags yet" was Phase 1's view of a
+parser that has existed since S13. The four unclaimed families therefore collapse to `(*PRUNE)` and
+`(*SKIP)`, 32 tests, which Phase 4 takes as S29; nothing needs a phase of its own. The un-skip is
+commit `8ae8607`; the rule that every phase close probes the board this way is in DECISIONS and
+in S33. The content line above is corrected to what is actually left: lookaround 63 and lookbehind
+17 (S27), conditionals 15 (S28), verbs 32 (S29), recursion 60 (S30), partial 82 (S31), POSIX 8
+(S32), and the close (S33). Seven slices against the 8-12 estimate, because four of the families
+the estimate counted were already done. Budget it at 1.0-1.35 sessions per slice as the Phase 3
+note says: 7-10 driver sessions. The `budget.json` question is also closed - it was raised to 20 a
+day and 30 a week on 2026-08-31, and STATE.md's note was stale.
 
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now

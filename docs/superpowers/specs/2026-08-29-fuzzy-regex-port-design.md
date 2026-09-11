@@ -669,3 +669,18 @@ amended text is inline above; this list is the record of what changed and why.
    exhaustive mutation for one mutant per covered line, scoped to the diff under review, with
    unproductive lines suppressed (Petrovic and Ivankovic, ICSE-SEIP 2018; Petrovic et al., TSE
    2021).
+
+15. **Phase 4's content is corrected to what is actually unported, and the four "unclaimed"
+    capability families are absorbed into it** (section 12; ROADMAP 2026-09-11 note; DECISIONS
+    2026-09-11). At the Phase 4 checkpoint every remaining `needs:` tag was probed by removing its
+    skip attributes and running the suite. Atomic, possessive, branch reset and named lists - four
+    of the seven families the Phase 4 row listed - already matched: upstream has no possessive or
+    `STRING_SET` opcode, both lower to constructs Phases 2-3 ported, and the skip prose was Phase
+    1's description of a parser that has existed since S13. The same probe showed inline flags,
+    version flags, comments and `(*FAIL)` done, leaving `(*PRUNE)`/`(*SKIP)` as the only unclaimed
+    work, which Phase 4 takes. Phase 4 is therefore lookaround, conditional-with-lookaround, the
+    two verbs, recursion, partial matching and POSIX, in seven slices (S27-S33) against the 8-12
+    estimated - fewer because the estimate counted finished work, not because the remaining work
+    got cheaper. Ninety-two tests were un-skipped in commit `8ae8607`. Every phase close from now
+    on probes the board this way before writing its handover. Decided by evidence; owner to
+    confirm at the Phase 4 review.
