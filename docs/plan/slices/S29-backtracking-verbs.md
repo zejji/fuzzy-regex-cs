@@ -184,3 +184,24 @@ slice-end branch is on the correct side (inverting it is control S29-B, 2 -> 145
 It also confirmed the `IsInSlice` removal causes no hang and no regression - 12000 rows across the
 fifteen other generators at seed 5150 agree, and the full suite is 5729 tests, 0 failed. No second
 pass was needed, because nothing was changed in response.
+
+## Root cause, found at the owner checkpoint (2026-09-11, after the park)
+
+Not a verb defect and not ours: **upstream's required-string prefilter.** `locate_required_string`
+(`_regex.c:11082`) caches where the pattern's required literal was last found (`req_pos`, `req_end`)
+and reuses the cache while `text_pos <= req_pos`. When the required literal has a variable offset
+(`req_offset < 0`, as `x` does in `(?:..(*SKIP)x|q)x`) and a `(*SKIP)` has moved `slice_start`,
+the cached position and the moved slice disagree and the attempt fails before `basic_match` runs.
+Three probes isolate it (`regex` 2026.7.19, `.scratch/skip-probe3.py`, re-creatable from this list):
+
+| Pattern | Subject | Upstream | Why it discriminates |
+|---|---|---|---|
+| `(?:..(*SKIP)x\|q)x` | `ab cd xx` | `None` | the parked reproduction; `.search(s, 4)` is `(4, 8)` |
+| `(?:..(*SKIP)x\|q)[xy]` | `ab cd xx` | `(4, 8)` | same verb, no required literal |
+| `(?:..(*SKIP)x\|q)x` | `abxcd xx` | `(4, 8)` | an early `x` moves the cache |
+| `..(*SKIP)xx` | `cd xxx` | `(1, 5)` | fixed `req_offset`: locator jumps to 1, the verb never fires |
+
+Our port has no prefilter until Phase 7 and returns `(4, 8)`, matching PCRE and upstream-from-4.
+The four `(?r)` wave divergences (seed 20260913, rows 502, 504, 519, 863) have the same shape
+reversed. This is the mechanism of upstream #612 in the Phase 6 triage. What to do about the
+`verbs` generator is the owner's call - see STATE.md.
