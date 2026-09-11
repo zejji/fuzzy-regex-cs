@@ -56,6 +56,33 @@ internal sealed class GuardList
     /// <summary>Upstream <c>reset_guard_list</c> (<c>upstream/src/_regex.c</c> line 3363).</summary>
     internal void Reset() => Count = 0;
 
+    /// <summary>Upstream <c>push_guard_data</c> (line 2541): the live spans, then how many.</summary>
+    /// <param name="stack">The stack to push onto.</param>
+    internal void PushTo(ByteStack stack)
+    {
+        stack.PushBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));
+        stack.PushSize(Count);
+    }
+
+    /// <summary>Upstream <c>pop_guard_data</c> (line 2712).</summary>
+    /// <remarks>
+    /// The array is never too small to pop back into: the same list pushed this block earlier in the
+    /// same match, and the array only ever grows. Upstream relies on the same invariant.
+    /// <c>last_text_pos = -1</c> is not ported, for the reason given on this type.
+    /// </remarks>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopFrom(ByteStack stack)
+    {
+        if (!stack.PopSize(out long count))
+        {
+            return false;
+        }
+
+        Count = (int)count;
+        return stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));
+    }
+
     /// <summary>Upstream <c>insert_guard_span</c> (line 9296): makes room at <paramref name="index"/>.</summary>
     /// <param name="index">Where the new span goes.</param>
     private void InsertSpan(int index)

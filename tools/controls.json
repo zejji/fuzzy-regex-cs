@@ -703,5 +703,80 @@
    7,
    20260911
   ]
+ },
+ {
+  "id": "S28-A",
+  "name": "a condition that holds takes the no-branch",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.EndConditional: // End of a conditional subpattern (:12356).",
+  "anchorNth": 1,
+  "before": "                        // Go to the 'true' branch.\n                        node = node.Next1.Node!;\n",
+  "after": "                        // Go to the 'true' branch.\n                        node = endCondNode.Next2.Node!;\n",
+  "generator": "conditionals",
+  "count": 600,
+  "seeds": [
+   7,
+   20260912
+  ]
+ },
+ {
+  "id": "S28-B",
+  "name": "a negative condition that holds takes the yes-branch",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.EndConditional: // End of a conditional subpattern (:12356).",
+  "anchorNth": 1,
+  "before": "                        // Go to the 'false' branch.\n                        node = endCondNode.Next2.Node!;\n",
+  "after": "                        // Go to the 'false' branch.\n                        node = node.Next1.Node!;\n",
+  "generator": "conditionals",
+  "count": 600,
+  "seeds": [
+   7,
+   20260912
+  ]
+ },
+ {
+  "id": "S28-C",
+  "name": "push_repeats saves the wrong repeat count",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "    private static void PushRepeatData(ByteStack stack, RepeatData repeatData)",
+  "anchorNth": 1,
+  "before": "        stack.PushSize(repeatData.Count);\n",
+  "after": "        stack.PushSize(repeatData.Count + 1);\n",
+  "generator": "conditionals",
+  "count": 600,
+  "seeds": [
+   7,
+   20260912
+  ]
+ },
+ {
+  "id": "S28-E",
+  "name": "the repeat guard lists are not restored",
+  "file": "src/FuzzyRegex/Engine/GuardList.cs",
+  "anchor": "    internal bool PopFrom(ByteStack stack)",
+  "anchorNth": 1,
+  "before": "        Count = (int)count;\n        return stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));\n",
+  "after": "        int savedCount = Count;\n        Count = (int)count;\n        bool ok = stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));\n        Count = savedCount;\n        return ok;\n",
+  "generator": "conditionals",
+  "count": 600,
+  "seeds": [
+   7,
+   20260912
+  ]
+ },
+ {
+  "id": "S28-D",
+  "name": "a condition that fails takes the wrong branch",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.Conditional: // Conditional subpattern (:15378).",
+  "anchorNth": 1,
+  "before": "                    node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;\n",
+  "after": "                    node = condNode.Match ? condNode.TrueNode! : condNode.Next2.Node!;\n",
+  "generator": "conditionals",
+  "count": 600,
+  "seeds": [
+   7,
+   20260912
+  ]
  }
 ]

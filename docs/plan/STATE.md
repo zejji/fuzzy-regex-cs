@@ -2,34 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none - S27 landed. **Blockers:** none. **Next:** `pwsh -File tools/launch-slice.ps1 s28`.
+**Current slice:** none - S28 landed. **Blockers:** none. **Next:** `pwsh -File tools/launch-slice.ps1 s29`.
 
-**Where the port stands:** ratchet GREEN, nothing failing, overall parity **80.6%** (was 76.5% at
-the S27 open) with 24 areas at 100%, `Lookaround` and `Various` among them. Oracle GREEN over all
-fourteen generators, 4200 rows, zero divergences.
+**Where the port stands:** ratchet GREEN, nothing failing, overall parity **81.3%** (was 80.6% at
+the S28 open) with 24 areas at 100%. Oracle GREEN over all fifteen generators, 4500 rows, zero
+divergences and zero unsupported.
 
-**What S27 did.** Lookaround, both directions and both polarities: four cases in
-`Matcher.BasicMatch` (`LOOKAROUND` and `END_LOOKAROUND`, advance and backtrack arms each) and the
-`LookaroundStateData` struct. 80 tests un-skipped - 63 `needs:lookaround`, 17 `needs:lookbehind` -
-and both tags are now gone from the suite. No parser or compiler change was needed: S15/S16 had
-already built it.
+**What S28 did.** The lookaround-condition form `(?(?=...)yes|no)`: four cases in
+`Matcher.BasicMatch` (`CONDITIONAL` and `END_CONDITIONAL`, advance and backtrack arms each), plus
+the repeat stack they need - `PushRepeats`/`PopRepeats`/`PushRepeatData`/`PopRepeatData` and
+`GuardList.PushTo`/`PopFrom`. 15 tests un-skipped, `needs:conditionals` gone from the board. No new
+state type: `CONDITIONAL` reuses S27's `LookaroundStateData`, and `BuildConditional` has existed
+since S13.
 
-**Two things S28 inherits.** `CONDITIONAL` (`_regex.c:12215`) pushes the *same*
-`RE_LookaroundStateData`, so `PushLookaroundStateData`/`PopLookaroundStateData` are already there.
-But its push also calls `push_repeats`, which is **not ported** - PORTMAP's `push_int8` row lists
-all ten of its call sites, every one S28's or S30's. That is S28's real work, not the conditional.
+**What S30 inherits.** Six of the ten `push_repeats`/`pop_repeats` call sites are still unported and
+all six are S30's, inside `GROUP_CALL` and `GROUP_RETURN`; PORTMAP's new row lists them by line.
+`push_groups`/`pop_groups` is still entirely S30's, all six sites.
 
-**What is left before fuzzy**: partial 82, recursion 60, verbs 32, conditionals 15, POSIX 8. Every
-one still fails on a `NotImplementedException` seam, none on a wrong answer.
+**What is left before fuzzy**: partial 82, recursion 60, verbs 32, POSIX 8. Every one still fails on
+a `NotImplementedException` seam, none on a wrong answer.
 
-**A warning worth carrying, from S27's controls.** Its first control C mutated `subargs.Forward` in
-`NodeCompiler.BuildLookaround` and found **zero** divergences in 1200 rows: `args.Forward` is read
-only by the repeat builders, so it was never the lookbehind direction mechanism. The direction is
-in the *parser*, `Subpattern.Compile(Behind)`. A control that fires at zero measures nothing - check
-each one fires before believing the generator has teeth.
+**A warning worth carrying, from S28's controls.** The repeat stack is nearly invisible to a
+differential wave: a repeat's own backtrack entries restore the same state along the same path, so
+`pop_repeats` mostly restores what would have been restored anyway. Control C sits at 2 and 8
+divergences of 600 and two widenings failed to move it; control E, on the guard lists, fires at 0
+and 1 and is kept only as a re-runnable negative result. **S30 must not read a green wave as
+evidence its repeat handling is right.**
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice; `lookaround` is
-on the default list from S27. Controls: `python tools/run-controls.py --slices S27` (or `--check`).
+**And a trap in the tooling.** `tools/run-controls.py` caches waves in `.scratch/control-waves/`.
+Widen a generator without deleting the cached wave and you measure the old generator - it reported
+byte-identical figures here until the cache was cleared.
+
+**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice; `conditionals` is
+on the default list from S28. Controls: `python tools/run-controls.py --slices S28` (or `--check`).
 
 **One oddity still open for the owner:** `slice-log.jsonl` records S26 as `failed` (145.8M tokens)
 with its own commit `b778b07` as the abandoned SHA; the commit is real, the log row is stale.

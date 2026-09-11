@@ -369,6 +369,7 @@ GENERATORS = (
     "iteration",
     "interactions",
     "lookaround",
+    "conditionals",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -2463,6 +2464,236 @@ def _generate_lookaround(rng: random.Random, count: int):
         yield row
 
 
+# What a conditional's branch holds. A branch can be empty - '(?(?=X))' and '(?(?=A)A|)' are both
+# ported tests - and an empty branch is where an engine that restores the wrong amount of state
+# shows up, because nothing after it moves the text position to cover the mistake.
+CONDITIONAL_BRANCH_KINDS = ("literal", "class", "sequence", "group", "empty")
+CONDITIONAL_BRANCH_WEIGHTS = (26, 20, 20, 20, 14)
+
+# What a row's pattern is built from.
+#   'cond':           a bare conditional, sometimes quantified.
+#   'cond-then-ref':  a capture made *inside the condition*, referenced after the conditional. This
+#                     is the headline cell, and it is what distinguishes CONDITIONAL from a
+#                     lookaround followed by a branch: a positive condition that holds leaves its
+#                     captures visible, and a negative one that holds pops them back. The two
+#                     END_CONDITIONAL arms differ in exactly that.
+#   'repeat-of-cond': a conditional inside a repeat, so the condition is re-evaluated per iteration
+#                     and the backtrack arm runs more than once per row.
+#   'alt-with-cond':  a branch leading with a conditional beside a fallback that does not, so the
+#                     conditional is entered and then given up within one match attempt. That is the
+#                     only way into the CONDITIONAL backtrack arm (S27 learned the same thing about
+#                     lookaround the hard way).
+#   'literal'/'class': plain atoms, so a conditional has somewhere to assert about other than
+#                     position 0.
+CONDITIONAL_PIECES = ("cond", "cond-then-ref", "repeat-of-cond", "alt-with-cond", "literal", "class")
+CONDITIONAL_PIECE_WEIGHTS = (20, 16, 24, 22, 12, 6)
+
+MAX_CONDITIONAL_PIECES = 3
+
+# 'repeat-of-cond' uses these rather than `_quantifier`, which draws '?' and '{0,1}' often enough
+# that most of those rows would enter the repeat body at most once - and the slice this generator was
+# written for asks for a condition that is *re-evaluated per iteration*, which a body entered once is
+# not. It did not buy what it was meant to buy. Measured with the count-saving mutation S28-C
+# carried at the time (`stack.PushSize(0)`), over 600 rows at seeds 7 and 20260912: 4 divergences
+# and 5 with `_quantifier` at a weight of 12, and 1 and 5 with these at a weight of 24. The repeat
+# stack is nearly invisible to this wave for a structural reason, not a weighting one - see S28's
+# closing notes - so this is kept for the construct it produces rather than for a number it
+# improved. S28-C was then changed to the mutation it now carries, which reads 2 and 8.
+CONDITIONAL_REPEAT_QUANTIFIERS = ("+", "*", "{1,3}", "{2,3}", "+?", "{1,3}?")
+
+# How often a condition body is a repeat over more than one character. It has to be more than one,
+# because a single-character repeat compiles to GREEDY_REPEAT_ONE, which carries no RE_RepeatData -
+# and RE_RepeatData is precisely what push_repeats/pop_repeats save and restore. Without this the
+# generator would exercise the repeat stack only by accident.
+CONDITIONAL_REPEAT_CONDITION_PROBABILITY = 0.35
+
+# How often the conditional has a 'no' branch at all, and how often the 'no' branch is itself a
+# conditional - '(?(?<=A)|(?(?![^B])C|D))' is a ported regression.
+CONDITIONAL_ELSE_PROBABILITY = 0.7
+CONDITIONAL_NESTED_PROBABILITY = 0.2
+
+CONDITIONAL_AFFIXES = (("^", ""), ("", "$"), ("^", "$"), (r"\b", ""), ("", ""), ("", ""))
+
+CONDITIONAL_IGNORECASE_PROBABILITY = 0.5
+CONDITIONAL_FULLCASE_PROBABILITY = 0.5
+CONDITIONAL_MULTILINE_PROBABILITY = 0.5
+CONDITIONAL_REVERSE_PROBABILITY = 0.4
+CONDITIONAL_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+
+def _conditional_branch(rng: random.Random, subject: str, group) -> str:
+    """One branch of a conditional: the 'yes' or the 'no'."""
+    candidates = [c for c in subject if c not in "\r\n"]
+    kind = rng.choices(CONDITIONAL_BRANCH_KINDS, weights=CONDITIONAL_BRANCH_WEIGHTS)[0]
+
+    if kind == "empty":
+        return ""
+    if kind == "literal":
+        return re.escape(rng.choice(candidates)) if candidates else "a"
+    if kind == "class":
+        return rng.choice(INTERACTION_CLASS_ATOMS) + (_quantifier(rng) if rng.random() < 0.4 else "")
+    if kind == "group":
+        return group(re.escape(rng.choice(candidates)) if candidates else "a")
+
+    # A two-atom branch, the first drawn from the subject and the second usually not: the shape that
+    # is entered, moves the text position and then fails, so the row reaches the backtrack arm with
+    # a branch half-matched rather than never started.
+    head = re.escape(rng.choice(candidates)) if candidates else "a"
+    return head + rng.choice(INTERACTION_CLASS_ATOMS)
+
+
+def _conditional_condition(rng: random.Random, subject: str) -> str:
+    """The condition: one of the four lookaround forms round a body."""
+    form = rng.choice(LOOKAROUND_FORMS)
+
+    if rng.random() < CONDITIONAL_REPEAT_CONDITION_PROBABILITY:
+        candidates = [c for c in subject if c not in "\r\n"]
+        head = re.escape(rng.choice(candidates)) if candidates else "a"
+        tail = rng.choice(INTERACTION_CLASS_ATOMS)
+        body = f"(?:{head}|{tail}){_quantifier(rng)}"
+    else:
+        body = _lookaround_body(rng, subject, 1)
+
+    return form + body + ")"
+
+
+def _conditional(rng: random.Random, subject: str, group, depth: int = 0) -> str:
+    """One conditional, '(?' + condition + 'yes' + optional '|no' + ')'."""
+    condition = _conditional_condition(rng, subject)
+    yes = _conditional_branch(rng, subject, group)
+
+    if depth == 0 and rng.random() < CONDITIONAL_NESTED_PROBABILITY:
+        no = "|" + _conditional(rng, subject, group, depth + 1)
+    elif rng.random() < CONDITIONAL_ELSE_PROBABILITY:
+        no = "|" + _conditional_branch(rng, subject, group)
+    else:
+        no = ""
+
+    return "(?" + condition + yes + no + ")"
+
+
+def _conditional_pattern(rng: random.Random, subject: str) -> tuple[str, int, list[str]]:
+    """One pattern, with the group inventory a substitution template needs.
+
+    Built left to right like ``_lookaround_pattern``, so a reference is only emitted once the group
+    it names exists.
+    """
+    counter = [0]
+    names: list[str] = []
+    pieces: list[str] = []
+    candidates = [c for c in subject if c not in "\r\n"]
+
+    def group(body: str) -> str:
+        counter[0] += 1
+        if rng.random() < 0.25:
+            name = f"g{counter[0]}"
+            names.append(name)
+            return f"(?P<{name}>{body})"
+        return f"({body})"
+
+    for _ in range(rng.randrange(1, MAX_CONDITIONAL_PIECES + 1)):
+        kind = rng.choices(CONDITIONAL_PIECES, weights=CONDITIONAL_PIECE_WEIGHTS)[0]
+
+        if kind == "cond":
+            pieces.append(_conditional(rng, subject, group) + (_quantifier(rng) if rng.random() < 0.2 else ""))
+        elif kind == "cond-then-ref":
+            form = rng.choice(LOOKAROUND_FORMS)
+            condition = form + group(_lookaround_body(rng, subject, 1)) + ")"
+            # '\g<1>' rather than '\1': the next piece often begins with a digit, and a bare '\1'
+            # followed by '0' is read as group 10, which upstream rejects outright - so the row
+            # tests the parse-error path instead of the cell this piece exists for. Verified against
+            # regex 2026.7.19 on 2026-09-11: `regex.match(r'(a)\g<1>0', 'aa0')` matches, and
+            # `regex.match(r'(a)\10', 'aa0')` raises "invalid group reference at position 6".
+            reference = f"\\g<{counter[0]}>"
+            yes = _conditional_branch(rng, subject, group)
+            no = ("|" + _conditional_branch(rng, subject, group)) if rng.random() < CONDITIONAL_ELSE_PROBABILITY else ""
+            pieces.append("(?" + condition + yes + no + ")" + reference)
+        elif kind == "repeat-of-cond":
+            atom = re.escape(rng.choice(candidates)) if candidates else "a"
+            pieces.append(
+                f"(?:{_conditional(rng, subject, group)}{atom})" + rng.choice(CONDITIONAL_REPEAT_QUANTIFIERS)
+            )
+        elif kind == "alt-with-cond":
+            first = re.escape(rng.choice(candidates)) if candidates else "a"
+            second = re.escape(rng.choice(candidates)) if candidates else "b"
+            pieces.append("(?:" + _conditional(rng, subject, group) + first + "|" + second + ")")
+        elif kind == "literal":
+            pieces.append(re.escape(rng.choice(candidates)) if candidates else "a")
+        else:
+            pieces.append(rng.choice(INTERACTION_CLASS_ATOMS) + (_quantifier(rng) if rng.random() < 0.4 else ""))
+
+    prefix, suffix = rng.choice(CONDITIONAL_AFFIXES)
+    return prefix + "".join(pieces) + suffix, counter[0], names
+
+
+def _generate_conditionals(rng: random.Random, count: int):
+    """S28's generator: the lookaround-condition form, over all eight operations.
+
+    The subject material is ``lookaround``'s, for the same reason: a conditional's condition is a
+    lookaround, and the rows only say anything if the condition sometimes holds and sometimes does
+    not.
+
+    Measured by `python tools/record-oracle.py --generator conditionals --count 600 --seed 7`, after
+    the last change to this generator: 30 rows answer with a single match, 195 with no match, 150
+    with a match list, 145 with a substitution and 75 with a split, and 5 are rejected by upstream.
+    248 rows hold a positive lookahead condition, 252 a negative one, 243 a positive lookbehind and
+    235 a negative one; 368 hold two or more conditionals, 430 a conditional inside a repeat, 294 a
+    condition whose body is a repeat, 13 a conditional nested in another's no-branch and 181 a
+    reference to a group defined inside a condition. 295 carry IGNORECASE, 139 FULLCASE, 308
+    MULTILINE, 244 are reversed and 221 have an astral subject. Every one of the eight operations is
+    recorded exactly 75 times, because the operation is cycled by row index rather than drawn.
+
+    Re-take from scratch after any widening: adding one entry to any table above shifts the whole RNG
+    stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        alphabet = rng.choice(INTERACTION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_INTERACTION_SUBJECT_LENGTH + 1)
+
+        if rng.random() < CONDITIONAL_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        pattern, groups, names = _conditional_pattern(rng, subject)
+
+        flags = 0
+        if rng.random() < CONDITIONAL_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < CONDITIONAL_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < CONDITIONAL_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+
+        if rng.random() < CONDITIONAL_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "conditionals",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names) if operation == "sub" else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -2515,6 +2746,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "lookaround":
         yield from _generate_lookaround(rng, count)
+        return
+
+    if name == "conditionals":
+        yield from _generate_conditionals(rng, count)
         return
 
     dotted = name == "literal-dot"

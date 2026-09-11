@@ -132,19 +132,11 @@ public sealed class RegressionsConditionalTests
     }
 
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#213")]
     public void Conditional_on_a_bare_lookahead_with_no_else_branch_does_not_match_without_a_boundary() =>
         FuzzyRegex.MatchAtStart("123abc", @"(?(?=\d)\d+\b|\w+)").Success.Should().BeFalse();
 
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#214")]
     public void Conditional_choosing_between_two_lookbehind_predicates_matches_the_word_after_love()
     {
@@ -155,10 +147,6 @@ public sealed class RegressionsConditionalTests
     }
 
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#215")]
     public void Findall_with_a_lookbehind_conditional_finds_both_the_loved_and_hated_targets() =>
         FuzzyRegex
@@ -169,10 +157,6 @@ public sealed class RegressionsConditionalTests
 
     // Hg issue 217: Core dump in conditional ahead match and matching \! character.
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#263")]
     public void Conditional_lookahead_with_a_literal_bang_does_not_match_a_lone_bang() =>
         FuzzyRegex.MatchAtStart("!", @"(?(?=.*\!.*)(?P<true>.*\!\w*\:.*)|(?P<false>.*))").Success.Should().BeFalse();
@@ -184,10 +168,6 @@ public sealed class RegressionsConditionalTests
     [Arguments(@"(?(?=A)A|)", "B", 0, 0)]
     [Arguments(@"(?(?=X)X|)", "", 0, 0)]
     [Arguments(@"(?(?=X))", "", 0, 0)]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#295-299")]
     public void Conditional_on_a_bare_lookahead_predicate_matches_the_expected_span(
         string pattern,
@@ -204,19 +184,11 @@ public sealed class RegressionsConditionalTests
 
     // Git issue 479: Segmentation fault when using conditional pattern.
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#439")]
     public void Nested_conditional_with_lookbehind_and_a_negative_class_does_not_match_at_the_start() =>
         FuzzyRegex.MatchAtStart("A", @"(?(?<=A)|(?(?![^B])C|D))").Success.Should().BeFalse();
 
     [Test]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#440")]
     public void Same_nested_conditional_matches_an_empty_span_after_the_A_via_search()
     {
@@ -232,10 +204,6 @@ public sealed class RegressionsConditionalTests
     [Arguments(@"(?(?=b).|..)", 2)]
     [Arguments(@"(?(?!a).|..)", 2)]
     [Arguments(@"(?(?!b).|..)", 1)]
-    [Skip(
-        "needs:conditionals - S21 delivered GROUP_EXISTS, the group-existence condition; the "
-            + "lookaround-condition form is the separate CONDITIONAL opcode and is Phase 4's"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#442-445")]
     public void Conditional_with_no_else_branch_chooses_one_dot_or_two_depending_on_the_lookahead(
         string pattern,

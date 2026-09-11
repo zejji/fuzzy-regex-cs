@@ -2040,6 +2040,75 @@ internal static class Matcher
         return true;
     }
 
+    /// <summary>Upstream <c>push_repeat_data</c> (<c>upstream/src/_regex.c</c> line 2552).</summary>
+    /// <param name="stack">The stack to push onto.</param>
+    /// <param name="repeatData">The repeat to save.</param>
+    private static void PushRepeatData(ByteStack stack, RepeatData repeatData)
+    {
+        repeatData.BodyGuardList.PushTo(stack);
+        repeatData.TailGuardList.PushTo(stack);
+        stack.PushSize(repeatData.Count);
+        stack.PushSize(repeatData.Start);
+        stack.PushSize(repeatData.CaptureChange);
+    }
+
+    /// <summary>Upstream <c>pop_repeat_data</c> (line 2726).</summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <param name="repeatData">The repeat to restore.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData)
+    {
+        if (
+            !stack.PopSize(out long captureChange)
+            || !stack.PopSize(out long start)
+            || !stack.PopSize(out long count)
+            || !repeatData.TailGuardList.PopFrom(stack)
+            || !repeatData.BodyGuardList.PopFrom(stack)
+        )
+        {
+            return false;
+        }
+
+        repeatData.CaptureChange = captureChange;
+        repeatData.Start = (int)start;
+        repeatData.Count = count;
+        return true;
+    }
+
+    /// <summary>Upstream <c>push_repeats</c> (line 2570): every repeat's state, in index order.</summary>
+    /// <remarks>
+    /// Unlike the captures, this saves the guard lists in full. A conditional's test can run a repeat
+    /// and guard positions inside it, and those guards have to go when the test is undone - otherwise
+    /// the yes-branch inherits "already failed here" from a subpattern that was only being asked
+    /// about.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to push onto.</param>
+    private static void PushRepeats(MatchState state, ByteStack stack)
+    {
+        foreach (RepeatData repeat in state.Repeats)
+        {
+            PushRepeatData(stack, repeat);
+        }
+    }
+
+    /// <summary>Upstream <c>pop_repeats</c> (line 2744).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    private static bool PopRepeats(MatchState state, ByteStack stack)
+    {
+        for (int r = state.Repeats.Length - 1; r >= 0; r--)
+        {
+            if (!PopRepeatData(stack, state.Repeats[r]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_l, sizeof(data_l))</c>, field by field.
     /// </summary>
@@ -2701,6 +2770,126 @@ internal static class Matcher
                      */
 
                     node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.Conditional: // Start of a conditional subpattern (:12213).
+                {
+                    // The condition is a lookaround, so it parks exactly what LOOKAROUND parks.
+                    PushLookaroundStateData(
+                        state.Sstack,
+                        new LookaroundStateData(node, state.SliceStart, state.SliceEnd, state.TextPos)
+                    );
+
+                    // Upstream saves the captures unconditionally here, with no has-groups flag on
+                    // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
+                    PushCaptures(state, state.Bstack);
+                    PushRepeats(state, state.Bstack);
+
+                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
+                    // block on the stack is the same shape at both ends.
+                    state.Bstack.PushSize(state.CaptureChange);
+                    state.Bstack.PushSize(state.Sstack.Count);
+                    state.Bstack.PushUInt8((byte)Opcode.Conditional);
+                    state.Pstack.PushSize(state.Bstack.Count);
+
+                    /* sstack: node slice_start slice_end text_pos
+                     *
+                     * bstack: captures repeats capture_change sstack CONDITIONAL
+                     *
+                     * pstack: bstack
+                     */
+
+                    // The condition may read outside the slice the match is confined to, for the same
+                    // reason a lookaround may.
+                    state.SliceStart = state.TextStart;
+                    state.SliceEnd = state.TextEnd;
+
+                    node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.EndConditional: // End of a conditional subpattern (:12356).
+                {
+                    /* sstack: node slice_start slice_end text_pos ...
+                     *
+                     * bstack: captures repeats capture_change sstack CONDITIONAL ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    // The condition matched. It is atomic, like a lookaround, so everything it pushed
+                    // while matching goes: the condition is asked once and never re-asked.
+                    if (!state.Pstack.PopSize(out long endCondBstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Bstack.Count = (int)endCondBstackCount;
+
+                    if (!state.Bstack.Drop() || !state.Bstack.PopSize(out long endCondSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)endCondSstackCount;
+
+                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // The condition consumes nothing: text position and slice go back to the
+                    // CONDITIONAL's.
+                    state.TextPos = endCondData.TextPos;
+                    state.SliceEnd = endCondData.SliceEnd;
+                    state.SliceStart = endCondData.SliceStart;
+                    Node endCondNode = endCondData.Node;
+
+                    /* sstack: -
+                     *
+                     * bstack: captures repeats capture_change
+                     *
+                     * pstack: -
+                     */
+
+                    if (endCondNode.Match)
+                    {
+                        // It's a positive lookaround that's succeeded, so the condition holds. The
+                        // saved block stays on the stack for the backtrack case to undo.
+                        state.Bstack.PushUInt8((byte)Opcode.EndConditional);
+
+                        /* bstack: captures repeats capture_change END_CONDITIONAL */
+
+                        // Go to the 'true' branch.
+                        node = node.Next1.Node!;
+                    }
+                    else
+                    {
+                        // It's a negative lookaround that's succeeded, so the condition does not
+                        // hold. Undo what the condition did before taking the other branch.
+                        if (!state.Bstack.PopSize(out long endCondCaptureChange))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.CaptureChange = endCondCaptureChange;
+
+                        // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                        if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        /* sstack: -
+                         *
+                         * bstack: -
+                         *
+                         * pstack: -
+                         */
+
+                        // Go to the 'false' branch.
+                        node = endCondNode.Next2.Node!;
+                    }
+
                     break;
                 }
                 case Opcode.Branch: // 2-way branch.
@@ -4803,6 +4992,81 @@ internal static class Matcher
 
                     // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
                     if (!PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    break;
+                }
+                case Opcode.Conditional: // Conditional subpattern (:15378).
+                {
+                    /* sstack: node slice_start slice_end text_pos ...
+                     *
+                     * bstack: captures repeats capture_change sstack
+                     *
+                     * pstack: bstack
+                     */
+
+                    // The condition failed to match. As with LOOKAROUND, the condition's own bstack
+                    // entries have already been popped by the backtracking that got here, so the
+                    // pstack entry is simply dropped.
+                    if (!state.Pstack.DropSize() || !state.Bstack.PopSize(out long condSstackCount))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.Sstack.Count = (int)condSstackCount;
+
+                    if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.TextPos = condData.TextPos;
+                    state.SliceEnd = condData.SliceEnd;
+                    state.SliceStart = condData.SliceStart;
+                    Node condNode = condData.Node;
+
+                    /* sstack: -
+                     *
+                     * bstack: captures repeats capture_change
+                     *
+                     * pstack: -
+                     */
+
+                    if (!state.Bstack.PopSize(out long condCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = condCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // A positive condition that failed means the condition does not hold, so take the
+                    // 'false' branch; a negative one that failed means it does, so take the 'true'
+                    // branch. Neither is a failure of the conditional itself, so this goes forward
+                    // rather than on backtracking.
+                    node = condNode.Match ? condNode.Next2.Node! : condNode.TrueNode!;
+                    goto advance;
+                }
+                case Opcode.EndConditional: // End of a conditional subpattern (:15460).
+                {
+                    /* bstack: captures repeats capture_change */
+
+                    if (!state.Bstack.PopSize(out long endCondCaptureChange))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.CaptureChange = endCondCaptureChange;
+
+                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
