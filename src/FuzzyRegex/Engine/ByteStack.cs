@@ -219,6 +219,15 @@ internal sealed class ByteStack : IDisposable
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool DropSize() => DropBlock(sizeof(long));
 
+    /// <summary>Upstream <c>top_size</c> (line 2805), which reads without popping.</summary>
+    /// <param name="item">Receives the value, which stays on the stack.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool TopSize(out long item)
+    {
+        item = 0;
+        return TopBlock(MemoryMarshal.AsBytes(new Span<long>(ref item)));
+    }
+
     /// <summary>
     /// Upstream <c>push_pointer</c> (line 2472) for the one kind of pointer this port pushes - see
     /// the remarks on this class for why it is an index rather than a reference.

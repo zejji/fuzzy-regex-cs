@@ -537,8 +537,8 @@ internal sealed class MatchState : IDisposable
     /// The overlapped branch steps one <b>codepoint</b> from where the match started, not one code
     /// unit and not from where it ended, because upstream indexes the subject by codepoint. A step
     /// off either end of the slice is left to show as a <see cref="TextPos"/> outside
-    /// <see cref="SliceStart"/>..<see cref="SliceEnd"/>, which is what upstream's own loop condition
-    /// tests, so the caller checks it rather than this.
+    /// <see cref="SliceStart"/>..<see cref="SliceEnd"/>, which <c>do_match</c> tests on the next
+    /// turn (<c>upstream/src/_regex.c</c> line 18128), so the matcher catches it rather than this.
     /// </remarks>
     internal void AdvancePastMatch()
     {
@@ -554,13 +554,6 @@ internal sealed class MatchState : IDisposable
             MustAdvance = TextPos == MatchPos;
         }
     }
-
-    /// <summary>
-    /// Whether the scan has somewhere left to look: upstream's <c>pattern_findall</c> loop
-    /// condition (<c>upstream/src/_regex.c</c> line 22415).
-    /// </summary>
-    /// <returns><see langword="true"/> if <see cref="TextPos"/> is still inside the slice.</returns>
-    internal bool IsInSlice() => SliceStart <= TextPos && TextPos <= SliceEnd;
 
     /// <summary>Upstream <c>clear_groups</c> (<c>upstream/src/_regex.c</c> line 3369).</summary>
     /// <remarks>

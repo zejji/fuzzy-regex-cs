@@ -15,6 +15,17 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
+    'verbs' is deliberately NOT in the default list, and S29 is the slice that left it out. It finds
+    a real, reproducible divergence in '(*SKIP)' under '(?r)' across a multi-match operation - four
+    rows in 1200 at seed 20260913 - which S29 did not resolve and parked rather than guess at. Until
+    it is fixed, leaving the generator in the default list would turn every later slice's oracle run
+    red for S29's reason and hide that slice's own result. Run it explicitly:
+
+        tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed 20260913
+
+    See docs/plan/slices/S29-backtracking-verbs.md and DECISIONS 2026-09-11. Put it back in this
+    list the moment the divergence is fixed.
+
 .PARAMETER Seed
     The generator seed. Omitted, the recorder picks one at random and records it in the wave
     header, which is what makes a divergence reproducible.

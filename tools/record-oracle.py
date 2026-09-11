@@ -370,6 +370,7 @@ GENERATORS = (
     "interactions",
     "lookaround",
     "conditionals",
+    "verbs",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -2694,6 +2695,246 @@ def _generate_conditionals(rng: random.Random, count: int):
         yield row
 
 
+# The two verbs this generator exists for. '(*FAIL)' is not drawn: it is the FAILURE opcode and has
+# been matching since S16, so a row carrying it would spend itself on a delivered cell.
+VERBS = ("(*PRUNE)", "(*SKIP)")
+
+# The runs a verb cuts behind. Greedy, lazy and possessive, because the three leave different
+# amounts on the backtracking stack for the verb to cut: a greedy run leaves one entry per position
+# it could give back, a lazy run leaves one per position it could take, and a possessive run leaves
+# none at all - so a verb after a possessive run is the case where cutting too far and cutting
+# correctly look identical, and the lookbehind pieces are the only thing that separates them. The
+# possessive forms are also what upstream's own ported tests use ('\d++(?<=3(*PRUNE))zzd|[4d]$').
+VERB_RUN_QUANTIFIERS = ("+", "*", "+?", "*?", "{1,3}", "{1,3}?", "{2,4}", "++", "*+")
+
+# What a row's pattern is built from.
+#   'run-then-verb':    a run, the verb, then an atom that may or may not match where the run
+#                       stopped. This is the headline cell and upstream's own '\d+(*PRUNE)\d': with
+#                       the verb the run cannot be given back, so the row answers "no match" where
+#                       the same pattern without the verb matches.
+#   'alt-with-verb':    the verb inside one branch of an alternation, beside a fallback branch. The
+#                       two verbs differ from each other here rather than in isolation - PRUNE cuts
+#                       the backtracking but leaves the search position alone, SKIP also moves the
+#                       slice start, so the *next* match's start is what tells them apart, and only
+#                       a multi-match operation can see it.
+#   'atomic-with-verb': the verb inside an atomic group. This is upstream issue 613's shape, where a
+#                       SKIP inside an atomic group leaves a stale backtrack limit behind.
+#   'look-with-verb':   the verb inside a positive or negative lookaround, sometimes with a body and
+#                       sometimes bare ('(?<=(*PRUNE))' is a ported test). A lookaround pushes its
+#                       own pruning-stack entry, so a verb inside one must cut back only to the
+#                       lookaround's entry and leave the backtracking outside it alone.
+#   'repeat-of-verb':   the verb inside a repeat body, so it runs once per iteration and cuts a
+#                       backtracking stack that the enclosing repeat is still adding to.
+#   'literal'/'class':  plain atoms, so a verb has somewhere to prune *behind* other than position 0.
+VERB_PIECES = (
+    "run-then-verb",
+    "alt-with-verb",
+    "atomic-with-verb",
+    "look-with-verb",
+    "repeat-of-verb",
+    "literal",
+    "class",
+)
+VERB_PIECE_WEIGHTS = (24, 22, 12, 16, 12, 8, 6)
+
+MAX_VERB_PIECES = 3
+
+# A widening was tried here and reverted, and the reason is worth keeping so nobody repeats it.
+# S29 weighted the piece count towards one, raised the doubled-subject probability, dropped most of
+# the anchoring affixes, broadened the run atoms and raised the share of atoms drawn from the
+# subject - all aimed at the one cell a moved slice start can show in, which needs a row that
+# matches more than once. Measured at 4800 rows, seed 7, before and after: the overlapped rows
+# carrying a '(*SKIP)' went 384 -> 319, those matching more than once 23 -> 49, and the rows where
+# the moved slice start actually changes the answer 13 -> 12. So it doubled the coverage it aimed at
+# and did not move the cell at all - what limits that cell is not "does the row match twice" but
+# "does a '(*SKIP)' land two or more characters past the match start and the pattern still match one
+# position on".
+#
+# It was reverted because it also drove the wave into a region where upstream's own answer is not
+# well defined - '(*SKIP)' at or near the end of a match, read by an overlapped scan. See the S29
+# closing notes and DECISIONS 2026-09-11: in one shape upstream returns four matches or six for the
+# same call depending on whether the caller kept the previous MatchObject alive. The narrow
+# generator stays until Phase 6 has the intentional-divergence allowlist that region needs.
+
+# 'repeat-of-verb' draws from these rather than from `_quantifier`, for the reason S28 recorded
+# about `CONDITIONAL_REPEAT_QUANTIFIERS`: '?' and '{0,1}' enter the body at most once, and a verb
+# that runs once inside a repeat is just a verb.
+VERB_REPEAT_QUANTIFIERS = ("+", "*", "{1,3}", "{2,3}", "+?", "{1,3}?")
+
+# How often a lookaround holding a verb has a body at all, and how often the verb comes after that
+# body rather than before it. Upstream's ported tests cover all three arrangements - '(?<=3(*PRUNE))',
+# '(?<=(*PRUNE)3)' and '(?<=2(*PRUNE)3)' - and they are not the same row: a verb before the body
+# prunes a lookaround that has not matched anything yet.
+VERB_LOOKAROUND_BODY_PROBABILITY = 0.7
+VERB_LOOKAROUND_VERB_LAST_PROBABILITY = 0.5
+
+# How often a piece is wrapped in a capture group, so a substitution template has something to name
+# and so END_GROUP sits between the verb and the pruning point.
+VERB_GROUP_PROBABILITY = 0.3
+
+VERB_AFFIXES = (("^", ""), ("", "$"), (r"\b", ""), ("", ""), ("", ""), ("", ""))
+
+VERB_IGNORECASE_PROBABILITY = 0.4
+VERB_FULLCASE_PROBABILITY = 0.5
+VERB_MULTILINE_PROBABILITY = 0.4
+VERB_REVERSE_PROBABILITY = 0.4
+
+VERB_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+
+def _verb_atom(rng: random.Random, subject: str) -> str:
+    """One atom: half the time a character the subject actually holds, half the time a class.
+
+    Both halves are needed. An atom drawn from the subject is what makes the tail after a verb
+    sometimes match, and a class is what makes it sometimes not - a generator that only ever emitted
+    one of them would produce rows that all answer the same way.
+    """
+    candidates = [c for c in subject if c not in "\r\n"]
+    if candidates and rng.random() < 0.5:
+        return re.escape(rng.choice(candidates))
+    return rng.choice(INTERACTION_CLASS_ATOMS)
+
+
+def _verb_run(rng: random.Random) -> str:
+    """A quantified class: the backtracking the verb behind it cuts."""
+    return rng.choice(INTERACTION_CLASS_ATOMS) + rng.choice(VERB_RUN_QUANTIFIERS)
+
+
+def _verb_piece(rng: random.Random, subject: str) -> str:
+    """One piece of a pattern, per the table above."""
+    kind = rng.choices(VERB_PIECES, weights=VERB_PIECE_WEIGHTS)[0]
+    verb = rng.choice(VERBS)
+
+    if kind == "run-then-verb":
+        return _verb_run(rng) + verb + _verb_atom(rng, subject)
+
+    if kind == "alt-with-verb":
+        return (
+            "(?:"
+            + _verb_run(rng)
+            + verb
+            + _verb_atom(rng, subject)
+            + "|"
+            + _verb_atom(rng, subject)
+            + ")"
+        )
+
+    if kind == "atomic-with-verb":
+        return "(?>" + _verb_run(rng) + verb + _verb_atom(rng, subject) + ")"
+
+    if kind == "look-with-verb":
+        form = rng.choice(LOOKAROUND_FORMS)
+        body = _verb_atom(rng, subject) if rng.random() < VERB_LOOKAROUND_BODY_PROBABILITY else ""
+        inside = (body + verb) if rng.random() < VERB_LOOKAROUND_VERB_LAST_PROBABILITY else (verb + body)
+        return _verb_run(rng) + form + inside + ")" + _verb_atom(rng, subject)
+
+    if kind == "repeat-of-verb":
+        return (
+            "(?:"
+            + rng.choice(INTERACTION_CLASS_ATOMS)
+            + verb
+            + ")"
+            + rng.choice(VERB_REPEAT_QUANTIFIERS)
+        )
+
+    if kind == "literal":
+        candidates = [c for c in subject if c not in "\r\n"]
+        return re.escape(rng.choice(candidates)) if candidates else "a"
+
+    return rng.choice(INTERACTION_CLASS_ATOMS) + (_quantifier(rng) if rng.random() < 0.4 else "")
+
+
+def _verb_pattern(rng: random.Random, subject: str) -> tuple[str, int, list[str]]:
+    """One pattern, with the group inventory a substitution template needs."""
+    counter = [0]
+    names: list[str] = []
+    pieces: list[str] = []
+
+    def group(body: str) -> str:
+        counter[0] += 1
+        if rng.random() < 0.25:
+            name = f"g{counter[0]}"
+            names.append(name)
+            return f"(?P<{name}>{body})"
+        return f"({body})"
+
+    for _ in range(rng.randrange(1, MAX_VERB_PIECES + 1)):
+        piece = _verb_piece(rng, subject)
+        if rng.random() < VERB_GROUP_PROBABILITY:
+            piece = group(piece)
+        pieces.append(piece)
+
+    prefix, suffix = rng.choice(VERB_AFFIXES)
+    return prefix + "".join(pieces) + suffix, counter[0], names
+
+
+def _generate_verbs(rng: random.Random, count: int):
+    """S29's generator: '(*PRUNE)' and '(*SKIP)', over all eight operations.
+
+    The subject material is ``lookaround``'s and ``conditionals``', for a reason of its own: a verb
+    only says anything about a row where the run in front of it could have been given back, so the
+    subjects want repeated characters, and the doubling below is what supplies them.
+
+    Measured by `python tools/record-oracle.py --generator verbs --count 600 --seed 7`, after the
+    last change to this generator: 27 rows answer with a single match, 198 with no match, 150 with a
+    match list, 139 with a substitution and 75 with a split, and 11 are rejected by upstream (all
+    eleven on the substitution template, not on the pattern). 373 rows hold a '(*PRUNE)' and 380 a
+    '(*SKIP)', 329 hold two or more verbs and 41 hold none; 130 put a verb in an atomic group, 168
+    in or beside a lookaround, 187 behind a possessive run. 248 carry IGNORECASE, 120 FULLCASE, 254
+    MULTILINE, 260 are reversed and 199 have an astral subject. Every one of the eight operations is
+    recorded exactly 75 times, because the operation is cycled by row index rather than drawn.
+
+    Re-take from scratch after any widening: adding one entry to any table above shifts the whole RNG
+    stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        alphabet = rng.choice(INTERACTION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_INTERACTION_SUBJECT_LENGTH + 1)
+
+        if rng.random() < VERB_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        pattern, groups, names = _verb_pattern(rng, subject)
+
+        flags = 0
+        if rng.random() < VERB_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < VERB_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < VERB_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+
+        if rng.random() < VERB_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "verbs",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names) if operation == "sub" else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -2750,6 +2991,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "conditionals":
         yield from _generate_conditionals(rng, count)
+        return
+
+    if name == "verbs":
+        yield from _generate_verbs(rng, count)
         return
 
     dotted = name == "literal-dot"

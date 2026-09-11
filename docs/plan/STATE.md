@@ -2,39 +2,43 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none - S28 landed. **Blockers:** none. **Next:** `pwsh -File tools/launch-slice.ps1 s29`.
+**Current slice:** S29, **PARKED not done**. **Blocker:** `(*SKIP)` does not commit the search
+position. **Next:** an owner decision - finish S29 from the reproduction below, or start S30 and
+come back. The slice file stays in `slices/`, so the driver will pick it up again.
 
-**Where the port stands:** ratchet GREEN, nothing failing, overall parity **81.3%** (was 80.6% at
-the S28 open) with 24 areas at 100%. Oracle GREEN over all fifteen generators, 4500 rows, zero
-divergences and zero unsupported.
+**Where the port stands:** ratchet GREEN, nothing failing, 5729 tests with 5394 passing. Oracle
+GREEN over the fifteen default generators. The sixteenth, `verbs`, is new and **deliberately not in
+`run-oracle.ps1`'s default list** - it finds the blocker, and leaving it in would turn every later
+slice's oracle run red for S29's reason and hide that slice's own result.
 
-**What S28 did.** The lookaround-condition form `(?(?=...)yes|no)`: four cases in
-`Matcher.BasicMatch` (`CONDITIONAL` and `END_CONDITIONAL`, advance and backtrack arms each), plus
-the repeat stack they need - `PushRepeats`/`PopRepeats`/`PushRepeatData`/`PopRepeatData` and
-`GuardList.PushTo`/`PopFrom`. 15 tests un-skipped, `needs:conditionals` gone from the board. No new
-state type: `CONDITIONAL` reuses S27's `LookaroundStateData`, and `BuildConditional` has existed
-since S13.
+**What S29 landed.** `PRUNE` and `SKIP` as two forward cases in `Matcher.BasicMatch`, `top_bstack`
+over a new `ByteStack.TopSize`, 32 tests un-skipped and passing, the `verbs` generator, four
+controls, and gap tests. Every `pstack` site is accounted for in PORTMAP - the slice file's claim
+that only one push was ported was stale, S27 and S28 had taken all ten.
 
-**What S30 inherits.** Six of the ten `push_repeats`/`pop_repeats` call sites are still unported and
-all six are S30's, inside `GROUP_CALL` and `GROUP_RETURN`; PORTMAP's new row lists them by line.
-`push_groups`/`pop_groups` is still entirely S30's, all six sites.
+**The blocker, reproducible in three lines.** Deterministic, stable across repeats, forward
+direction, plain `search` - no `(?r)` and no multi-match operation needed:
 
-**What is left before fuzzy**: partial 82, recursion 60, verbs 32, POSIX 8. Every one still fails on
-a `NotImplementedException` seam, none on a wrong answer.
+    import regex
+    regex.compile(r"(?:..(*SKIP)x|q)x").search("ab cd xx")    # None
+    regex.compile(r"(?:..(*SKIP)x|q)x").match("ab cd xx", 4)  # (4, 8) - what our port returns
 
-**A warning worth carrying, from S28's controls.** The repeat stack is nearly invisible to a
-differential wave: a repeat's own backtrack entries restore the same state along the same path, so
-`pop_repeats` mostly restores what would have been restored anyway. Control C sits at 2 and 8
-divergences of 600 and two widenings failed to move it; control E, on the guard lists, fires at 0
-and 1 and is kept only as a re-runnable negative result. **S30 must not read a green wave as
-evidence its repeat handling is right.**
+Upstream finds that match only when the search *starts* at 4. A failed attempt in which a `(*SKIP)`
+fired commits the search past position 4; our port re-tries it. **Do not guess at a fix**: a hand
+trace of upstream's `FAILURE` advance (`:15695`-`:15738`, whose `text_pos < slice_start` clamp *is*
+ported, at `Matcher.cs:5334`) predicts upstream should match at 4, and it does not. Instrument
+upstream on this reproduction first. The same cause is likely behind the four `(?r)` multi-match
+divergences at `tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed 20260913`, which are **not**
+upstream instability - each is stable whether or not the caller holds the previous match.
 
-**And a trap in the tooling.** `tools/run-controls.py` caches waves in `.scratch/control-waves/`.
-Widen a generator without deleting the cached wave and you measure the old generator - it reported
-byte-identical figures here until the cache was cleared.
+**A real bug S29 did fix, which S30 should know about.** `findall` and `finditer` are not the same
+loop: only `pattern_findall` carries the `slice_start <= text_pos` guard (`:22415`). S25 recorded
+them as identical on nine measured pairs, and they are - until a `(*SKIP)` moves `slice_start`.
+`Iteration.Scan`/`Next` lost that guard and `MatchState.IsInSlice` is deleted.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice; `conditionals` is
-on the default list from S28. Controls: `python tools/run-controls.py --slices S28` (or `--check`).
+**A trap in the tooling, found the hard way.** `run-oracle.ps1 -SkipRecord` silently **ignores**
+`-Rows` and re-compares whatever wave is already on disk. It reported a confident GREEN against
+S28's stale wave here. Use `-Rows` without `-SkipRecord`.
 
-**One oddity still open for the owner:** `slice-log.jsonl` records S26 as `failed` (145.8M tokens)
-with its own commit `b778b07` as the abandoned SHA; the commit is real, the log row is stale.
+**Controls:** `python tools/run-controls.py --slices S29`. Cached waves in `.scratch/control-waves/`
+must be deleted after any generator change, or you measure the old generator.

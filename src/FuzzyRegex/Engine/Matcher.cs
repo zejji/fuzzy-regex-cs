@@ -82,8 +82,8 @@ internal static class Seam
             // S20 delivered BOUNDARY, DEFAULT_BOUNDARY, DEFAULT_START_OF_WORD, DEFAULT_END_OF_WORD,
             // START_OF_WORD, END_OF_WORD, GRAPHEME_BOUNDARY, KEEP, ATOMIC and END_ATOMIC, so
             // 'word-flag', 'grapheme', 'keep-marker' and 'atomic' have no arm here either - same
-            // reason as 'quantifiers' above.
-            Opcode.Prune or Opcode.Skip => "backtracking-verbs",
+            // reason as 'quantifiers' above. S29 delivered PRUNE and SKIP, so 'backtracking-verbs'
+            // is gone from here too.
 
             // Every remaining opcode either has a case above in the dispatch switch or never
             // reaches the matcher at all (END, NEXT, GROUP - which build_GROUP consumes into a
@@ -2109,6 +2109,23 @@ internal static class Matcher
         return true;
     }
 
+    /// <summary>Upstream <c>top_bstack</c> (line 2811).</summary>
+    /// <remarks>
+    /// Reads the top entry of the pruning stack straight into <see cref="ByteStack.Count"/> of the
+    /// backtracking stack without popping it, which truncates the backtracking stack back to the
+    /// size it had when the most recent <c>push_bstack</c> ran. Upstream ignores the return value at
+    /// both call sites, so an empty pruning stack leaves the backtracking stack alone - and cannot
+    /// happen anyway, because <c>start_match</c> pushes one entry before the first opcode runs.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void TopBstack(MatchState state)
+    {
+        if (state.Pstack.TopSize(out long bstackCount))
+        {
+            state.Bstack.Count = (int)bstackCount;
+        }
+    }
+
     /// <summary>
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_l, sizeof(data_l))</c>, field by field.
     /// </summary>
@@ -4016,6 +4033,24 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
+                case Opcode.Prune: // Prune the backtracking (:13894).
+                {
+                    /* bstack: ... | ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    // Prune the backtracking back to an appropriate backtracking point.
+                    TopBstack(state);
+
+                    /* bstack: ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
+                }
                 // REF_GROUP (:14004). Like STRING, it pushes nothing to the backtracking stack: the
                 // only state it carries between visits is 'stringPos', which the fuzzy retry block
                 // (:17269) reads and which Phase 5 will need a backtrack arm for.
@@ -4451,6 +4486,33 @@ internal static class Matcher
                     stringPos = -1;
 
                     // Successful match.
+                    node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.Skip: // Skip the part of the text already matched (:14544).
+                {
+                    /* bstack: ... | ...
+                     *
+                     * pstack: bstack
+                     */
+
+                    if ((node.Status & NodeStatus.Reverse) != 0)
+                    {
+                        state.SliceEnd = state.TextPos;
+                    }
+                    else
+                    {
+                        state.SliceStart = state.TextPos;
+                    }
+
+                    // Prune the backtracking back to an appropriate backtracking point.
+                    TopBstack(state);
+
+                    /* bstack: ...
+                     *
+                     * pstack: bstack
+                     */
+
                     node = node.Next1.Node!;
                     break;
                 }

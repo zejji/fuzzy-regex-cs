@@ -39,8 +39,148 @@ tests passed on 2026-09-11; this slice is the other two verbs.
 
 ## Done when
 
-- [ ] Tag delivered or stragglers retagged.
-- [ ] Oracle wave green; controls recorded in full.
-- [ ] PORTMAP: `PRUNE`, `SKIP`, `top_bstack`, and every `pstack` site accounted for.
-- [ ] Ratchet GREEN, baseline updated, blind review (hunt: a verb reached by backtracking; `SKIP`
+- [x] Tag delivered or stragglers retagged.
+- [ ] **Oracle wave green**; controls recorded in full. *Controls recorded; the wave is NOT green -
+      see "Parked" below.*
+- [x] PORTMAP: `PRUNE`, `SKIP`, `top_bstack`, and every `pstack` site accounted for.
+- [x] Ratchet GREEN, baseline updated, blind review (hunt: a verb reached by backtracking; `SKIP`
       under `(?r)` moving the wrong end), commit.
+
+---
+
+# PARKED, 2026-09-11 - not moved to `done/`
+
+`(*PRUNE)` is delivered and believed correct. **`(*SKIP)` is not faithful**, the differential oracle
+found it, and this slice stopped rather than guess at the fix. Everything below is committed and
+green except the one criterion above.
+
+## What landed
+
+- **`PRUNE` (`:13894`) and `SKIP` (`:14544`)** as two forward cases in `Matcher.BasicMatch`, placed
+  where upstream places them. Neither has a backtrack arm, because neither pushes anything.
+- **`top_bstack` (`:2811`)** as `Matcher.TopBstack`, over a new `ByteStack.TopSize` (`top_size`,
+  `:2805`). Reading the top of the pruning stack into `Bstack.Count` truncates the backtracking
+  stack, and that one line is the whole of what a verb does.
+- **Every `pstack` site accounted for.** The slice file said one push was ported; that was stale -
+  S27 and S28 had taken all ten sites. Nothing was missing. PORTMAP now lists them by line.
+- **32 ported tests un-skipped**, all passing; `needs:backtracking-verbs` is gone from the board.
+- **A root-cause fix in `Engine/Iteration.cs`**, described below - unrelated to the verbs themselves
+  but only reachable through one.
+- **Oracle generator `verbs`**, and four negative controls.
+- **Gap tests** in `tests/FuzzyRegex.Tests/Gaps/Engine/BacktrackingVerbTests.cs`.
+
+Ratchet GREEN: 5729 tests, 5394 passing, baseline updated. Parity 81.3% -> the board is regenerated.
+
+## The blocker: `(*SKIP)` does not commit the search position
+
+Reproduced against `regex` 2026.7.19 on 2026-09-11, deterministic and stable across repeats:
+
+```python
+import regex
+p = regex.compile(r"(?:..(*SKIP)x|q)x")
+p.search("ab cd xx")      # None   - twice running, and findall gives []
+p.match("ab cd xx", 4)    # (4, 8) - the match our port returns from search
+```
+
+Our port returns `(4, 8)` from `search`. Upstream finds that match only when the search *starts* at
+4; started at 0, a failed attempt in which a `(*SKIP)` fired commits the search past it, and
+position 4 is never tried. Our port re-tries it. This is forward-direction and plain `search` - it
+needs no `(?r)` and no multi-match operation - so it is the core semantics of the verb, not an edge.
+
+The same root cause is very likely behind the four `(?r)` multi-match divergences the wave also
+found, e.g. at 1200 rows, seed 20260913:
+
+```
+tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed 20260913   # agree 1196, diverge 4
+```
+
+rows 502 (`finditer`), 504 (`split`), 519 and 863 (`finditer-overlapped`), all `(?r)`, all carrying
+a `(*SKIP)`. Checked and **not** upstream instability: each is stable when the caller holds the
+previous `MatchObject` and when it does not.
+
+**Why this was not fixed here.** The mechanism is not understood - a hand trace of upstream's
+`FAILURE` advance (`:15695`-`:15738`, whose `text_pos < slice_start` clamp *is* ported, at
+`Matcher.cs:5334`) predicts upstream should match at 4, and it does not. Guessing at a fix in
+`basic_match`'s search-advance path risks breaking the 5394 passing tests for a cell no ported test
+covers. S30 or a follow-up slice should start by instrumenting upstream's advance on the
+reproduction above.
+
+**`verbs` is deliberately NOT in `run-oracle.ps1`'s default generator list.** Leaving it there would
+turn every later slice's oracle run red for S29's reason and hide that slice's own result. The
+parameter's doc comment says so and says to put it back the moment this is fixed.
+
+## A real bug this slice did fix: `findall` and `finditer` are not the same loop
+
+S25 recorded that `pattern_findall` and the scanner were "measurably the same function - verified
+2026-09-01 ... on nine subject/pattern pairs". They are not. Only `pattern_findall` carries a
+`slice_start <= text_pos <= slice_end` loop guard (`:22415`); `scanner_search_or_match` (`:20903`),
+`pattern_subx` (`:21859`) and `pattern_split` (`:22285`) leave it to `do_match`'s own test
+(`:18128`), which compares `text_pos` against `slice_end` going forward and never against
+`slice_start`. The two agree on every pattern that cannot move `slice_start` mid-scan, which in S25
+was every pattern there was - so the nine pairs could not have separated them. Measured:
+
+```python
+regex.findall(r"[A-Z]*(*SKIP)_", "__BB__B", overlapped=True)          # 3 matches
+[m.span() for m in regex.finditer(r"[A-Z]*(*SKIP)_", "__BB__B", overlapped=True)]
+# [(0,1), (1,2), (2,5), (3,5), (4,5), (5,6)] - 6 matches
+```
+
+The six are correct: each equals `p.match("__BB__B", k)` for k = 0..5, so the scanner agrees with a
+fresh state at every position and `findall`'s guard is what cuts its own scan short. `Iteration.Scan`
+and `Iteration.Next` had that guard; this surface has no `findall` (`Matches` returns `Match`
+objects), so the guard is removed and `MatchState.IsInSlice` is deleted. Verified independently of
+the oracle, against per-position ground truth.
+
+## Controls
+
+Run with `python tools/run-controls.py --slices S29`. Figures are from the committed code and the
+committed generator, re-run after the last change to either. Generator `verbs`, 600 rows, seeds 7 /
+20260913 / 4242.
+
+> **Control S29-A, `SKIP widens the slice instead of moving it to text_pos`**: in `Matcher.cs`, the
+> `case Opcode.Skip` body, change `state.SliceEnd = state.TextPos;` to `state.SliceEnd =
+> state.TextEnd;` and `state.SliceStart = state.TextPos;` to `state.SliceStart = state.TextStart;`.
+> Result: **0 / 1 / 1** divergences of 600.
+
+> **Control S29-B, `SKIP moves the wrong end under (?r)`**: in the same body, swap the two arms so
+> the reverse branch assigns `SliceStart` and the forward branch `SliceEnd`. Result:
+> **48 / 40 / 36** of 600.
+
+> **Control S29-C, `a verb prunes to the bottom of the bstack, not the top of the pstack`**: in
+> `Matcher.TopBstack`, replace the whole `if (state.Pstack.TopSize(out long bstackCount)) { ... }`
+> with `state.Bstack.Count = 0;`. Result: **225 / 241 / 220** of 600 (seed 4242 also reports 1
+> unsupported).
+
+> **Control S29-D, `the scanner carries findall's slice_start guard`**: in `Iteration.Scan`, change
+> `while (true)` back to `while (state.SliceStart <= state.TextPos && state.TextPos <=
+> state.SliceEnd)`. Result: **2 / 4 / 0** of 600.
+
+The exact before/after text of each is in `tools/controls.json`, which is what the harness applies,
+so these are reproducible from the repository rather than from this prose.
+
+**A and D are thin, and that is a finding about the generator, not a tick.** Both probe the same
+cell - a moved slice start only changes where a *later* match in the same scan may begin - and D is
+blind at seed 4242. A widening was tried and **reverted**; the measurement is worth keeping so
+nobody repeats it. Weighting the piece count towards one, raising the doubled-subject probability,
+dropping most anchoring affixes, broadening the run atoms and drawing more atoms from the subject,
+measured at 4800 rows, seed 7, before and after: overlapped rows carrying a `(*SKIP)` 384 -> 319,
+rows matching more than once 23 -> 49, rows where the moved slice start changes the answer
+**13 -> 12**. It doubled the coverage it aimed at and did not move the cell at all. What limits the
+cell is not "does the row match twice" but "does a `(*SKIP)` land two or more characters past the
+match start and the pattern still match one position on". It was reverted because it also drove the
+wave into the unresolved region above.
+
+C is the strong one, and it is the control that matters: it is the mutation that makes a verb cut to
+the wrong place, and a fifth to two fifths of the wave sees it.
+
+## Review
+
+One blind pass over the whole diff, briefed for reproductions only. **One finding raised, one
+reproduced, zero fixed** - the finding is the `(*SKIP)` search-commit blocker above, which is why
+this slice is parked rather than done. The reviewer also cleared the other three hunts with evidence:
+no wave or test reached a verb by backtracking (neither opcode pushes to `Bstack`); the `(?r)`
+slice-end branch is on the correct side (inverting it is control S29-B, 2 -> 145 divergences at seed
+424242 on its own run); and `TopBstack`'s narrowing and empty-pstack cases produced no failing case.
+It also confirmed the `IsInSlice` removal causes no hang and no regression - 12000 rows across the
+fifteen other generators at seed 5150 agree, and the full suite is 5729 tests, 0 failed. No second
+pass was needed, because nothing was changed in response.

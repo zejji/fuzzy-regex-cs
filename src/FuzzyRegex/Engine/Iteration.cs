@@ -6,15 +6,26 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Port of three loops in <c>upstream/src/_regex.c</c> that say the same thing three times:
-/// <c>scanner_search_or_match</c> (<c>:20874</c>), which drives <c>finditer</c> one match per call;
-/// <c>pattern_findall</c> (<c>:22360</c>), which is that loop written out; and
-/// <c>pattern_split</c> (<c>:22235</c>), which is it again with the text between the matches
-/// collected instead of the matches. <see cref="Scan"/> is the first two, because they are
-/// measurably the same function - verified 2026-09-01, <c>findall</c> and <c>finditer</c> agree
-/// match for match on nine subject/pattern pairs including the overlapped, zero-width and reverse
-/// cases where only <c>findall</c> carries the <c>slice_start &lt;= text_pos &lt;= slice_end</c>
-/// guard.
+/// Port of three loops in <c>upstream/src/_regex.c</c>: <c>scanner_search_or_match</c>
+/// (<c>:20874</c>), which drives <c>finditer</c> one match per call; <c>pattern_findall</c>
+/// (<c>:22360</c>), which is that loop written out; and <c>pattern_split</c> (<c>:22235</c>), which
+/// is it again with the text between the matches collected instead of the matches.
+/// <see cref="Scan"/> is the <b>scanner</b>, not <c>findall</c>.
+/// </para>
+/// <para>
+/// <b>That distinction is real, and S25 got it wrong.</b> Only <c>pattern_findall</c> carries the
+/// <c>slice_start &lt;= text_pos &lt;= slice_end</c> loop guard (<c>:22415</c>); the scanner,
+/// <c>pattern_subx</c> (<c>:21859</c>) and <c>pattern_split</c> (<c>:22285</c>) all rely on
+/// <c>do_match</c>'s own "is there enough to search" test (<c>:18128</c>) instead, which compares
+/// <c>text_pos</c> against <c>slice_end</c> going forward and against <c>slice_start</c> going back.
+/// The two agree on every pattern that cannot move <c>slice_start</c> mid-scan, which in S25 was
+/// every pattern there was - so the nine pairs it measured could not have separated them.
+/// <c>(*SKIP)</c> moves it, and then they part. Measured against regex 2026.7.19 on 2026-09-11:
+/// <c>regex.findall(r'[A-Z]*(*SKIP)_', '__BB__B', overlapped=True)</c> gives 3 matches and
+/// <c>regex.finditer(...)</c> on the same arguments gives 6, because the third match's
+/// <c>(*SKIP)</c> leaves <c>slice_start</c> at 4 while the overlapped step resumes at 3 - which
+/// fails <c>findall</c>'s guard and is invisible to <c>do_match</c>'s. S29's oracle wave found it
+/// as two diverging rows.
 /// </para>
 /// <para>
 /// <b>One <see cref="MatchState"/> per operation, never one per match.</b> Upstream keeps one
@@ -65,8 +76,8 @@ internal static class Iteration
 
     /// <summary>
     /// How many matches the given part of the subject holds. No upstream counterpart - upstream
-    /// spells this <c>len(findall(...))</c> - so this is <see cref="Scan"/> with nothing built per
-    /// match.
+    /// spells this <c>len(finditer(...))</c> - so this is <see cref="Scan"/> with nothing built per
+    /// match, and it counts what <see cref="FindAll"/> returns.
     /// </summary>
     /// <param name="regex">The pattern being scanned with.</param>
     /// <param name="input">The subject.</param>
@@ -78,9 +89,9 @@ internal static class Iteration
         Scan(regex, input, start, end, overlapped, visibleCaptures: false, onMatch: null);
 
     /// <summary>
-    /// The scan itself: <c>pattern_findall</c> (<c>upstream/src/_regex.c</c> line 22360) less its
-    /// argument parsing and its per-match tuple building, which is what
-    /// <paramref name="onMatch"/> stands in for.
+    /// The scan itself: <c>scanner_search_or_match</c> (<c>upstream/src/_regex.c</c> line 20874)
+    /// driven to exhaustion, with <paramref name="onMatch"/> standing in for what the caller of
+    /// <c>finditer</c> does with each match.
     /// </summary>
     /// <param name="regex">The pattern being scanned with.</param>
     /// <param name="input">The subject.</param>
@@ -118,7 +129,10 @@ internal static class Iteration
 
         int count = 0;
 
-        while (state.IsInSlice())
+        // No loop condition, because the scanner has none: `do_match` returns FAILURE once there is
+        // nothing left to search, and that is what ends the walk. See the remarks on this class for
+        // why this is not `pattern_findall`'s guard.
+        while (true)
         {
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
@@ -138,8 +152,8 @@ internal static class Iteration
             // indexes the subject by codepoint. Measured 2026-09-01: regex.finditer('..',
             // '\U0001F600\U0001F601\U0001F602', overlapped=True) gives spans (0, 2) and (1, 3) in
             // codepoints, so the second match starts on the second emoji rather than inside the
-            // first one's surrogate pair. A step off either end of the slice fails the loop
-            // condition above, exactly as it does upstream.
+            // first one's surrogate pair. A step off either end of the slice is caught by
+            // `do_match` on the next turn, exactly as it is upstream.
             state.AdvancePastMatch();
         }
 
@@ -208,11 +222,8 @@ internal static class Iteration
         state.TextPos = state.Reverse ? matchStart : matchEnd;
         state.AdvancePastMatch();
 
-        if (!state.IsInSlice())
-        {
-            return regex.NoMatch(input);
-        }
-
+        // No guard here either: this is one turn of the scanner, and `do_match` answers FAILURE when
+        // the step landed outside what is left to search.
         int status = Matcher.DoMatch(state, search: true);
         if (status == MatchStatus.Cancelled)
         {

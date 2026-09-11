@@ -26,25 +26,16 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#174")]
     public void Prune_verb_commits_the_preceding_run_so_a_trailing_atom_cannot_reuse_it() =>
         FuzzyRegex.Match("123", @"\d+(*PRUNE)\d").Success.Should().BeFalse();
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#175")]
     public void Prune_verb_inside_a_lookahead_does_not_constrain_backtracking_outside_it() =>
         FuzzyRegex.Match("123", @"\d+(?=(*PRUNE))\d").Value.Should().Be("123");
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"\d+(*PRUNE)bcd|[3d]", "123bcd", "123bcd")]
     [Arguments(@"\d+(*PRUNE)bcd|[3d]", "123zzd", "d")]
     [Arguments(@"\d+?(*PRUNE)bcd|[3d]", "123bcd", "3bcd")]
@@ -57,9 +48,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"\d++(?<=3(*PRUNE))zzd|[4d]$", "123zzd", "123zzd")]
     [Arguments(@"\d++(?<=3(*PRUNE))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"\d++(?<=(*PRUNE)3)zzd|[4d]$", "124zzd", "d")]
@@ -72,25 +60,16 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#184")]
     public void Prune_verb_commits_the_preceding_run_when_searching_right_to_left() =>
         FuzzyRegex.Match("123", @"(?r)\d(*PRUNE)\d+").Success.Should().BeFalse();
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Property("Upstream", "RegexTests.test_hg_bugs#185")]
     public void Prune_verb_inside_a_lookbehind_does_not_constrain_backtracking_outside_it_when_searching_right_to_left() =>
         FuzzyRegex.Match("123", @"(?r)\d(?<=(*PRUNE))\d+").Value.Should().Be("123");
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"(?r)\d+(*PRUNE)bcd|[3d]", "123bcd", "123bcd")]
     [Arguments(@"(?r)\d+(*PRUNE)bcd|[3d]", "123zzd", "d")]
     [Property("Upstream", "RegexTests.test_hg_bugs#186-187")]
@@ -101,9 +80,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "123zzd", "123zzd")]
     [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=(*PRUNE)3)zzd|[4d]$", "124zzd", "d")]
@@ -116,9 +92,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"\d+(*SKIP)bcd|[3d]", "123bcd", "123bcd")]
     [Arguments(@"\d+(*SKIP)bcd|[3d]", "123zzd", "d")]
     [Arguments(@"\d+?(*SKIP)bcd|[3d]", "123bcd", "3bcd")]
@@ -131,9 +104,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"\d++(?<=3(*SKIP))zzd|[4d]$", "123zzd", "123zzd")]
     [Arguments(@"\d++(?<=3(*SKIP))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"\d++(?<=(*SKIP)3)zzd|[4d]$", "124zzd", "d")]
@@ -146,9 +116,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"(?r)\d+(*SKIP)bcd|[3d]", "123bcd", "123bcd")]
     [Arguments(@"(?r)\d+(*SKIP)bcd|[3d]", "123zzd", "d")]
     [Property("Upstream", "RegexTests.test_hg_bugs#200-201")]
@@ -159,9 +126,6 @@ public sealed class RegressionsBacktrackingVerbTests
     ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
-    [Skip(
-        "needs:backtracking-verbs - the matcher has no PRUNE or SKIP opcode yet ((*FAIL) works, it is the FAILURE opcode)"
-    )]
     [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "123zzd", "123zzd")]
     [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "124zzd", "d")]
     [Arguments(@"(?r)\d++(?<=(*SKIP)3)zzd|[4d]$", "124zzd", "d")]

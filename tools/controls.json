@@ -778,5 +778,69 @@
    7,
    20260912
   ]
+ },
+ {
+  "id": "S29-A",
+  "name": "SKIP widens the slice instead of moving it to text_pos",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.Skip: // Skip the part of the text already matched (:14544).",
+  "anchorNth": 1,
+  "before": "                    if ((node.Status & NodeStatus.Reverse) != 0)\n                    {\n                        state.SliceEnd = state.TextPos;\n                    }\n                    else\n                    {\n                        state.SliceStart = state.TextPos;\n                    }\n",
+  "after": "                    if ((node.Status & NodeStatus.Reverse) != 0)\n                    {\n                        state.SliceEnd = state.TextEnd;\n                    }\n                    else\n                    {\n                        state.SliceStart = state.TextStart;\n                    }\n",
+  "generator": "verbs",
+  "count": 600,
+  "seeds": [
+   7,
+   20260913,
+   4242
+  ]
+ },
+ {
+  "id": "S29-B",
+  "name": "SKIP moves the wrong end under (?r)",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "                case Opcode.Skip: // Skip the part of the text already matched (:14544).",
+  "anchorNth": 1,
+  "before": "                    if ((node.Status & NodeStatus.Reverse) != 0)\n                    {\n                        state.SliceEnd = state.TextPos;\n                    }\n                    else\n                    {\n                        state.SliceStart = state.TextPos;\n                    }\n",
+  "after": "                    if ((node.Status & NodeStatus.Reverse) != 0)\n                    {\n                        state.SliceStart = state.TextPos;\n                    }\n                    else\n                    {\n                        state.SliceEnd = state.TextPos;\n                    }\n",
+  "generator": "verbs",
+  "count": 600,
+  "seeds": [
+   7,
+   20260913,
+   4242
+  ]
+ },
+ {
+  "id": "S29-C",
+  "name": "a verb prunes to the bottom of the bstack, not the top of the pstack",
+  "file": "src/FuzzyRegex/Engine/Matcher.cs",
+  "anchor": "    private static void TopBstack(MatchState state)",
+  "anchorNth": 1,
+  "before": "        if (state.Pstack.TopSize(out long bstackCount))\n        {\n            state.Bstack.Count = (int)bstackCount;\n        }\n",
+  "after": "        state.Bstack.Count = 0;\n",
+  "generator": "verbs",
+  "count": 600,
+  "seeds": [
+   7,
+   20260913,
+   4242
+  ]
+ },
+ {
+  "id": "S29-D",
+  "name": "the scanner carries findall's slice_start guard",
+  "file": "src/FuzzyRegex/Engine/Iteration.cs",
+  "anchor": "        int count = 0;",
+  "anchorNth": 1,
+  "before": "        while (true)\n",
+  "after": "        while (state.SliceStart <= state.TextPos && state.TextPos <= state.SliceEnd)\n",
+  "generator": "verbs",
+  "count": 600,
+  "seeds": [
+   7,
+   20260913,
+   4242
+  ]
  }
 ]
