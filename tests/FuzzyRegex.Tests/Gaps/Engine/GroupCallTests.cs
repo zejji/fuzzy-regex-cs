@@ -236,7 +236,7 @@ public sealed class GroupCallTests
 
         matches.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1), (1, 0));
         matches
-            .SelectMany(static m => m.Groups["g1"].Captures.Select(c => (c.Index, c.Length)))
+            .SelectMany(static m => m.Groups["g1"].Captures.Select(static c => (c.Index, c.Length)))
             .Should()
             // Every capture inside the one-character subject, which is the whole claim.
             .Equal((0, 1), (0, 1), (1, 0), (0, 1));

@@ -1,10 +1,18 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-# Formatting only, and deliberately nothing else. The suite runs on pre-push and in CI; a
-# pre-commit hook that ran it would double the test time of every unattended slice (the driver
-# has already run check-ratchet.ps1 seconds earlier) and would refuse the failing-test commits
-# that test-first development is made of. Reasoning in full: docs/plan/slices/done/S01b.
+# Formatting, then the IDE-only inspections; deliberately NOT the test suite. The suite runs on
+# pre-push and in CI; a pre-commit hook that ran it would double the test time of every unattended
+# slice (the driver has already run check-ratchet.ps1 seconds earlier) and would refuse the
+# failing-test commits that test-first development is made of. Reasoning in full:
+# docs/plan/slices/done/S01b.
+#
+# The inspections step was added 2026-09-12 by owner decision: Rider reports "Anonymous function
+# can be made static" (IDE0320) as an ERROR, `dotnet build` on the .NET 10.0.400 SDK never reports
+# it at all (DECISIONS), and the CI job that does was not on any path a commit had to pass through -
+# S36 committed one such lambda the same day the gate was written. So the gate runs here, on every
+# commit that stages a .cs file. It takes about four minutes; that is the price of not shipping
+# what the IDE calls an error. Docs-only commits skip it.
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR -z -- '*.cs' | tr '\0' '\n')
 [ -z "$staged" ] && exit 0
@@ -22,3 +30,11 @@ fi
 
 printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 dotnet csharpier format || exit 1
 printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git add
+
+# ReSharper's command-line inspector over the whole solution, ERROR severity, --no-build (the
+# caller has built; the ratchet always has). Fails the commit on any finding.
+echo "pre-commit: running IDE inspections (about four minutes) ..."
+pwsh -NoProfile -File tools/check-inspections.ps1 -Output .scratch/inspect-precommit.xml || {
+  echo "pre-commit: IDE inspections RED - fix the findings above (or see .scratch/inspect-precommit.xml)."
+  exit 1
+}

@@ -72,6 +72,11 @@ pwsh -File tools/check-ratchet.ps1                  # must print GREEN
 pwsh -File tools/check-ratchet.ps1 -UpdateBaseline  # only once it is green
 ```
 
+**The pre-commit hook runs the IDE inspections** (`tools/check-inspections.ps1`, ReSharper CLI, about
+four minutes) on any commit that stages a `.cs` file, and refuses the commit on an ERROR such as
+"Anonymous function can be made static" (IDE0320). That pause is not a hang: wait for it. If it goes
+RED, make the lambda `static` (or fix whatever it names) and commit again; never `--no-verify`.
+
 Then one blind review pass over the diff. Brief the subagent to hand over a **reproduction** -
 the exact command and its output, or a failing test - not prose. Do not ask it for explanations or
 proposed corrections: prompts that request those measurably raise misjudgement rates. Style
