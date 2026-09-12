@@ -78,7 +78,16 @@ $verdict = Test-Ratchet -Results $results -AcceptRemovals:$AcceptRemovals `
     -BaselinePassing @(Get-BaselinePassing -BaselinePath $baselinePath)
 
 Write-Host ''
-Write-Host "Tests: $($results.Count)  passing: $($verdict.PassingCount)  baseline: $($verdict.BaselineCount)"
+# Distinct ids, not results: a ported test with two identical [Arguments] rows (upstream has
+# duplicate rows, and the port keeps them) runs twice under one id, so the baseline - a set -
+# holds fewer entries than the run has passing results. 108 such pairs on 2026-09-12. The gap
+# hides nothing: Test-Ratchet reds on ANY failed result, whatever its id.
+# Ordinal, for the reason Update-Baseline gives: Sort-Object -Unique folds case and
+# compatibility characters and under-counts by 40 here.
+$distinct = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]@($results | Where-Object Outcome -eq 'Passed' | ForEach-Object Id | Where-Object { $null -ne $_ }),
+    [System.StringComparer]::Ordinal).Count
+Write-Host "Tests: $($results.Count)  passing: $($verdict.PassingCount) ($distinct distinct ids)  baseline: $($verdict.BaselineCount)"
 
 if ($verdict.IsGreen) {
     Write-Host 'Ratchet: GREEN' -ForegroundColor Green
@@ -91,7 +100,7 @@ if ($verdict.IsGreen) {
 
     if ($UpdateBaseline) {
         Update-Baseline -Results $results -BaselinePath $baselinePath -UpstreamCommit $upstreamCommit
-        Write-Host "Baseline updated: $($verdict.PassingCount) passing tests recorded." -ForegroundColor Green
+        Write-Host "Baseline updated: $distinct distinct passing test ids recorded." -ForegroundColor Green
     }
 
     exit 0

@@ -36,6 +36,7 @@ change. S30-B needs 2400 rows to fire reliably - at 600 it caught nothing at one
 notes say why, and say to re-measure both controls after any widening.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. And `check-ratchet.ps1 -UpdateBaseline` reports recording 5462 while a fresh run reads the
-baseline as 5354; the same 108-test gap was there at S29 (5396 vs 5288), so it is the tool's, not
-this slice's - worth a look before it hides a real regression.
+real. The 108-test baseline gap is explained and closed (2026-09-12): 107 ported tests carry two
+identical `[Arguments]` rows, faithfully, so they run twice under one id; the baseline is a set. The
+ratchet now prints the distinct-id count beside the result count. Nothing was hidden: it reds on
+any failed result.
