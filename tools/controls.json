@@ -954,5 +954,37 @@
       31,
       4242
     ]
+  },
+  {
+    "id": "S32-A",
+    "name": "check_posix_match prefers the SHORTER match",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void CheckPosixMatch(MatchState state)",
+    "anchorNth": 1,
+    "before": "        if (newLength > bestLength)\n",
+    "after": "        if (newLength < bestLength)\n",
+    "generator": "posix",
+    "count": 2000,
+    "seeds": [
+      31,
+      4242,
+      7
+    ]
+  },
+  {
+    "id": "S32-B",
+    "name": "restore_best_match puts the span back but not the captures",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void RestoreBestMatch(MatchState state)",
+    "anchorNth": 1,
+    "before": "            bestGroup.Captures.AsSpan(0, bestGroup.Count).CopyTo(group.Captures);\n",
+    "after": "            bestGroup.Captures.AsSpan(0, 0).CopyTo(group.Captures);\n",
+    "generator": "posix",
+    "count": 2000,
+    "seeds": [
+      31,
+      4242,
+      7
+    ]
   }
 ]

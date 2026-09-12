@@ -247,4 +247,33 @@ public sealed class ReverseMatchingTests
     public void Reverse_match_that_cannot_succeed_fails_cleanly() =>
         // upstream: regex.match('(?r)x', 'abc') is None
         FuzzyRegex.MatchAtStart("abc", "(?r)x").Success.Should().BeFalse();
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reverse_fullmatch_of_a_repeat_over_a_narrowed_slice_succeeds_here()
+    {
+        // Raised by the S32 blind review as an aside - it reproduces with and without `(?p)`, so it
+        // is not POSIX's - and left for a slice of its own. The same slice-versus-text bounds family
+        // S31 pinned in PartialMatchingTests: half of upstream's arms bound themselves with
+        // slice_start/slice_end and half with text_start/text_end, and the two agree exactly as long
+        // as the slice IS the whole subject.
+        //
+        // Measured against regex 2026.7.19 on 2026-09-12:
+        //   compile(r'(?r)(ab)+').fullmatch('xabz', 1, 3)  -> None      ; this port matches (1, 3)
+        //   compile(r'(?r)(ab)+').match('xabz', 1, 3)      -> (1, 3)    ; agrees
+        //   compile(r'(?r)(ab)+').fullmatch('ab', 0, 2)    -> (0, 2)    ; agrees, slice is the whole
+        //   compile(r'(ab)+').fullmatch('xabz', 1, 3)      -> (1, 3)    ; agrees, forward
+        //   compile(r'(?r)a+').fullmatch('aabb', 1, 2)     -> (1, 2)    ; agrees, a *_ONE repeat
+        //
+        // So it needs all three at once: reversed, a general repeat rather than a `*_ONE` one, and a
+        // slice narrower than the subject - and only `fullmatch` sees it, because `match_all` is the
+        // test that asks where the slice ends. Which side is right is NOT settled here: upstream
+        // refusing to fullmatch 'ab' against the slice that is exactly 'ab' looks wrong, and saying
+        // so needs the research and the second opinion an upstream-bug claim gets. When it is
+        // settled, this test either inverts or grows a citation.
+        Match m = new FuzzyRegex("(?r)(ab)+").FullMatch("xabz", beginning: 1, length: 2);
+
+        m.Success.Should().BeTrue("upstream answers None here and this port matches");
+        (m.Index, m.Length).Should().Be((1, 2));
+    }
 }

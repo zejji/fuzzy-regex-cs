@@ -503,6 +503,7 @@ GENERATORS = (
     "recursion",
     "partial",
     "partial-sliced",
+    "posix",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -3369,6 +3370,291 @@ def _generate_partial(rng: random.Random, count: int, sliced: bool = False):
         yield row
 
 
+# regex.POSIX (upstream/regex/_regex_core.py), and also FuzzyRegexOptions.Posix - the oracle hands
+# the same integer to both sides.
+POSIX = 0x10000
+
+# The alphabets a `posix` row draws from, cycled row by row. Deliberately tiny: leftmost-longest
+# only answers differently from leftmost-first when a shorter alternative is a prefix of a longer
+# one, and a wide alphabet makes that collision rare. The third band holds a BMP and an astral
+# character so `check_posix_match`'s length comparison is asked about a surrogate pair - it counts
+# UTF-16 code units in this port and codepoints upstream, and the two must order the same way.
+POSIX_SUBJECT_ALPHABETS = ("ab", "abc", "aé\U0001f600")
+
+MAX_POSIX_SUBJECT_LENGTH = 6
+
+# How often a subject gets a prefix of itself glued on the end. A chain like `a|ab|abc` only reaches
+# its longer alternatives on a subject that repeats, and an independently drawn one rarely does.
+POSIX_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+# How often the alternatives of a chain are shuffled out of shortest-first order. Shortest-first is
+# the interesting order - it is where leftmost-first takes the short branch and POSIX does not - so
+# it is the default, and the shuffle exists so that "the alternation order does not matter under
+# POSIX" is recorded too.
+POSIX_SHUFFLE_PROBABILITY = 0.25
+
+# How often a row actually asks for POSIX. The rest are the same grammar through the ordinary door,
+# which is what pins that the FLAG and not the shape produced the answer - the same pairing
+# `partial` makes with PARTIAL_ASKED_PROBABILITY.
+POSIX_APPLIED_PROBABILITY = 0.8
+
+# Of the rows that do ask, how often through the inline `(?p)` rather than the compile-time flag.
+# Both doors reach the same `RE_FLAG_POSIX` bit, and the ported tests only use the inline one.
+POSIX_INLINE_PROBABILITY = 0.5
+
+POSIX_REVERSE_PROBABILITY = 0.3
+POSIX_IGNORECASE_PROBABILITY = 0.2
+POSIX_FULLCASE_PROBABILITY = 0.4
+POSIX_MULTILINE_PROBABILITY = 0.2
+POSIX_NAMED_GROUP_PROBABILITY = 0.2
+
+# Quantifiers hung on a piece. The lazy ones are here because `(?p)a*(.*?)` - upstream's own Hg
+# issue 180 - is the case where POSIX and laziness pull opposite ways: the group wants to match
+# nothing and the overall match wants to be as long as possible.
+POSIX_QUANTIFIERS = ("", "", "", "?", "*", "+", "{1,2}", "{1,3}", "*?", "+?", "??")
+
+# The shapes one piece can take, and how often. `chain` and `captured` carry the slice's own
+# subject - an alternation whose first alternative is a prefix of a later one - so they are drawn
+# most; `nested` is what makes a chain appear inside another one.
+POSIX_PIECE_KINDS = ("chain", "captured", "optional", "tail", "nested")
+POSIX_PIECE_WEIGHTS = (5, 4, 3, 2, 2)
+
+MAX_POSIX_PIECE_DEPTH = 2
+
+# Affixes, so a row is not always unanchored. `\b` is in the list because a boundary either side of
+# a chain changes which alternative can win rather than merely which position is tried.
+POSIX_AFFIXES = (
+    ("", ""),
+    ("", ""),
+    ("^", ""),
+    ("", "$"),
+    ("^", "$"),
+    (r"\b", ""),
+    ("", r"\b"),
+    (r"\A", r"\Z"),
+)
+
+
+def _posix_run(rng: random.Random, subject: str) -> str:
+    """A short run of characters drawn from the subject, two or three long where it can be.
+
+    Two is the floor because a one-character run makes a chain with a single alternative, which is
+    not an alternation at all and cannot tell POSIX from leftmost-first. Measured over 600 rows of
+    seed 7, against the rest of this generator as it stands: allowing runs of one left 49 of the 463
+    rows that ask for POSIX actually depending on the flag, and this floor gives 57 of 488.
+    """
+    plain = [c for c in subject if c not in "\r\n"]
+    if not plain:
+        return "ab"
+
+    # The start is held back from the end so that two characters are still available; a subject of
+    # one character is the only case that can still give a run of one.
+    start = rng.randrange(max(0, len(plain) - 2) + 1)
+    end = min(len(plain), start + rng.choice((2, 2, 3)))
+    return "".join(plain[start:end])
+
+
+def _posix_group(rng: random.Random, body: str, namer) -> str:
+    """Wraps a body in a capture group, named some of the time."""
+    if rng.random() < POSIX_NAMED_GROUP_PROBABILITY:
+        return f"(?<{namer()}>{body})"
+
+    return f"({body})"
+
+
+def _posix_chain(rng: random.Random, run: str) -> str:
+    """``a|ab|abc``: every prefix of the run, as alternatives."""
+    parts = [re.escape(run[:n]) for n in range(1, len(run) + 1)]
+    if rng.random() < POSIX_SHUFFLE_PROBABILITY:
+        rng.shuffle(parts)
+
+    return "|".join(parts)
+
+
+def _posix_captured_chain(rng: random.Random, run: str, namer) -> str:
+    """``(a)|(ab)``: the same chain with each alternative in its own group.
+
+    This is the shape that catches a restore which puts the overall span back but leaves the
+    captures of the first, shorter match behind: the short branch's group must end up unset.
+    """
+    parts = [_posix_group(rng, re.escape(run[:n]), namer) for n in range(1, len(run) + 1)]
+    if rng.random() < POSIX_SHUFFLE_PROBABILITY:
+        rng.shuffle(parts)
+
+    return "|".join(parts)
+
+
+def _posix_optional(rng: random.Random, run: str, namer) -> str:
+    """``one(self)?(selfsufficient)?``: optional suffixes that overlap.
+
+    Upstream's own test #162, generalised. Leftmost-first takes the first optional group and then
+    cannot take the second; POSIX keeps looking and finds the pairing that spans more text.
+    """
+    head = re.escape(run[:1])
+    rest = run[1:] or run
+    tails = [re.escape(rest[:n]) for n in range(1, len(rest) + 1)]
+    return head + "".join(_posix_group(rng, t, namer) + "?" for t in tails)
+
+
+def _posix_tail(rng: random.Random, run: str, namer) -> str:
+    """``a*(.*?)`` and ``a*(.*)``: upstream's Hg issue 180, both ways round."""
+    head = re.escape(run[:1])
+    inner = ".*?" if rng.random() < 0.5 else ".*"
+    return head + "*" + _posix_group(rng, inner, namer)
+
+
+def _posix_piece(rng: random.Random, subject: str, namer, depth: int = 0) -> str:
+    """One piece of a `posix` pattern, quantified only where that is safe.
+
+    **A quantifier goes on a piece only if the piece holds none already**, which is what keeps this
+    generator out of catastrophic backtracking. `chain` and `captured` are alternations of plain
+    literals and take one; `optional`, `tail` and `nested` already carry `?`, `*` or a quantified
+    child and take none.
+
+    That rule was written against a measurement rather than a principle. Without it, seed 31 row 1407
+    of 2000 was
+
+        (?:(?:(?:e*(.*?))+|(?:X|Xe)+)*?|((e)|(?<g0>ea)|(ea e))??){1,3}(?:a|ae){1,3}
+
+    - three quantifiers deep over a five-character subject - and POSIX, which explores every path
+    instead of stopping at the first, turned a 15ms row into 17.9s in a Debug build and red the wave
+    on the 10s row timeout. It was never a divergence: the port and upstream both answer four
+    matches, in 1.1s and 0.69s respectively in their optimised builds. An exponential pattern is a
+    property of the pattern, so a generator that emits one is measuring the build configuration
+    rather than the port.
+    """
+    kind = rng.choices(POSIX_PIECE_KINDS, weights=POSIX_PIECE_WEIGHTS)[0]
+    if kind == "nested" and depth >= MAX_POSIX_PIECE_DEPTH:
+        kind = "chain"
+
+    run = _posix_run(rng, subject)
+
+    if kind == "chain":
+        body = _posix_chain(rng, run)
+    elif kind == "captured":
+        body = _posix_captured_chain(rng, run, namer)
+    elif kind == "optional":
+        body = _posix_optional(rng, run, namer)
+    elif kind == "tail":
+        body = _posix_tail(rng, run, namer)
+    else:
+        left = _posix_piece(rng, subject, namer, depth + 1)
+        right = _posix_piece(rng, subject, namer, depth + 1)
+        body = f"{left}|{right}"
+
+    quantifier = rng.choice(POSIX_QUANTIFIERS) if kind in ("chain", "captured") else ""
+
+    # An alternation has to be bracketed before anything can be hung on it, and a quantifier has to
+    # be hung on a bracket rather than on a bare chain - otherwise `a|ab+` quantifies the 'b'.
+    if quantifier or "|" in body:
+        body = _posix_group(rng, body, namer) if rng.random() < 0.5 else f"(?:{body})"
+
+    return body + quantifier
+
+
+def _posix_pattern(rng: random.Random, subject: str) -> tuple[str, int, list[str]]:
+    """One pattern, with the group inventory a substitution template needs."""
+    names: list[str] = []
+
+    def namer() -> str:
+        name = f"g{len(names)}"
+        names.append(name)
+        return name
+
+    pieces = [_posix_piece(rng, subject, namer) for _ in range(rng.randrange(1, 3))]
+    prefix, suffix = rng.choice(POSIX_AFFIXES)
+    pattern = prefix + "".join(pieces) + suffix
+
+    # Counted the same way `_recursion_pattern` counts: an unnamed group is a '(' not followed by
+    # '?', a named one is a '(?<name>'.
+    groups = len(re.findall(r"\((?!\?)", pattern)) + len(names)
+    return pattern, groups, names
+
+
+def _generate_posix(rng: random.Random, count: int):
+    """S32's generator: leftmost-longest matching, over alternations that make it visible.
+
+    Every shape here exists so that leftmost-first and leftmost-longest can disagree: a chain whose
+    alternatives are prefixes of one another, overlapping optional suffixes, and a lazy group under
+    a greedy overall match. A generator that emitted ordinary patterns would record a wave in which
+    POSIX changed nothing and no arm of `check_posix_match` was ever reached twice.
+
+    One row in five is recorded WITHOUT POSIX, through the same grammar, so the wave also says what
+    these patterns do through the ordinary door - the flag is then the only difference between the
+    two populations.
+
+    Measured by `python tools/record-oracle.py --generator posix --count 600 --seed 7`, after the
+    last change to this generator: 141 rows answer with a single match, 84 with no match, 150 with a
+    match list, 121 with a substitution and 75 with a split, and 29 are rejected by upstream. Not one
+    of the 29 is a rejected pattern: 22 are the `{N[2]}` capture subscript `_subf_template` emits on
+    purpose, 5 an out-of-range `\\g<N>` and 2 an out-of-range positional field. 488 rows ask for
+    POSIX, 267 through the inline `(?p)` and 221 through the compile-time flag, and 112 do not ask at
+    all. 191 rows are reversed, 197 hold a named group, 120 carry IGNORECASE, 43 FULLCASE, 119
+    MULTILINE, 121 have a newline in the subject and 139 an astral one. Every one of the eight
+    operations is recorded exactly 75 times, because the operation is cycled by row index rather than
+    drawn.
+
+    **What the flag is actually worth here: POSIX changes upstream's own answer on 57 of the 488 rows
+    that ask for it**, and of the 176 single-match rows among those, 14 move a group span and 5 unset
+    a group that leftmost-first had set. The other 431 asked rows still drive every line of
+    `save_best_match`, `check_posix_match` and `restore_best_match` - they are the ones that say
+    POSIX must *not* change the answer when nothing longer exists, which is what a restore that
+    dropped the captures would break.
+
+    Re-take from scratch after any widening: adding one entry to any table above shifts the whole RNG
+    stream, so a figure measured before it describes a wave this generator no longer produces.
+    """
+    for i in range(count):
+        alphabet = POSIX_SUBJECT_ALPHABETS[i % len(POSIX_SUBJECT_ALPHABETS)]
+        length = rng.randrange(1, MAX_POSIX_SUBJECT_LENGTH + 1)
+        subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        if rng.random() < POSIX_DOUBLED_SUBJECT_PROBABILITY:
+            # A prefix of itself glued on the end, so a chain reaches past its first alternative.
+            subject += subject[: rng.randrange(1, len(subject) + 1)]
+
+        if rng.random() < POSIX_MULTILINE_PROBABILITY:
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + "\n" + subject[at:]
+
+        pattern, groups, names = _posix_pattern(rng, subject)
+
+        flags = 0
+        if rng.random() < POSIX_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < POSIX_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < POSIX_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+
+        if rng.random() < POSIX_APPLIED_PROBABILITY:
+            if rng.random() < POSIX_INLINE_PROBABILITY:
+                pattern = "(?p)" + pattern
+            else:
+                flags |= POSIX
+
+        if rng.random() < POSIX_REVERSE_PROBABILITY:
+            pattern = "(?r)" + pattern
+
+        operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
+        row = {
+            "generator": "posix",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": operation,
+        }
+        if operation in SUB_OPERATIONS:
+            row["template"] = (
+                _sub_template(rng, groups, names) if operation == "sub" else _subf_template(rng, groups, names)
+            )
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if operation in SUB_OPERATIONS else ITER_LIMITS)
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -3441,6 +3727,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "partial-sliced":
         yield from _generate_partial(rng, count, sliced=True)
+        return
+
+    if name == "posix":
+        yield from _generate_posix(rng, count)
         return
 
     dotted = name == "literal-dot"

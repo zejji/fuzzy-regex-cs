@@ -74,6 +74,18 @@ public enum FuzzyRegexOptions
     /// Leftmost-longest (POSIX) matching instead of leftmost-first. Upstream <c>POSIX</c> /
     /// <c>P</c>.
     /// </summary>
+    /// <remarks>
+    /// The match still starts as far left as it can; the flag only decides between matches that
+    /// start in the same place, taking the longest rather than the first the pattern happens to
+    /// produce. So <c>a|ab|abc</c> matches <c>abc</c> in <c>"abcd"</c> under this flag and <c>a</c>
+    /// without it.
+    /// <para>
+    /// <b>It can be much slower.</b> Ordinary matching stops at the first match it reaches; this
+    /// one keeps backtracking through every remaining path so that it can be sure nothing longer
+    /// exists. A pattern that answers instantly without the flag can take seconds with it - so set
+    /// a <c>matchTimeout</c> on any pattern you did not write yourself.
+    /// </para>
+    /// </remarks>
     Posix = 0x10000,
 
     /// <summary>

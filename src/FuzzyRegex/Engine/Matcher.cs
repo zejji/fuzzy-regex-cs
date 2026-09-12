@@ -1942,6 +1942,111 @@ internal static class Matcher
     private static bool AtEnd(MatchState state) =>
         state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd;
 
+    /// <summary>
+    /// Upstream <c>save_best_match</c> (<c>upstream/src/_regex.c</c> line 11493): saves the match as
+    /// the best POSIX match (leftmost longest) found so far.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's lazy allocation and <c>capacity</c> arithmetic (<c>:11508-11554</c>) are the
+    /// manual-memory half of this function and have no counterpart here: <see cref="GroupData.Copy"/>
+    /// already produces a snapshot holding exactly the live spans. Reusing the storage across saves
+    /// is a Phase 7 question, not a correctness one.
+    /// </para>
+    /// <para>
+    /// NOT PORTED: the <c>best_fuzzy_counts</c> copy (<c>:11501</c>), which is Phase 5's.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void SaveBestMatch(MatchState state)
+    {
+        state.BestMatchPos = state.MatchPos;
+        state.BestTextPos = state.TextPos;
+        state.FoundMatch = true;
+
+        state.BestMatchGroups = GroupData.CopyGroups(state.Groups, state.Groups.Length);
+    }
+
+    /// <summary>
+    /// Upstream <c>restore_best_match</c> (<c>upstream/src/_regex.c</c> line 11565): puts the best
+    /// POSIX match back into the state, so that the caller reads it as the match.
+    /// </summary>
+    /// <remarks>
+    /// The spans are copied into the live <see cref="GroupData"/> objects rather than the array
+    /// being swapped, exactly as upstream's <c>Py_MEMCPY</c> does: a group's captures array is grown
+    /// in place elsewhere, so the identity of these objects is what the rest of the match holds.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void RestoreBestMatch(MatchState state)
+    {
+        if (!state.FoundMatch)
+        {
+            return;
+        }
+
+        state.MatchPos = state.BestMatchPos;
+        state.TextPos = state.BestTextPos;
+
+        // NOT PORTED: the 'fuzzy_counts' copy (:11575), which is Phase 5's.
+        GroupData[] best = state.BestMatchGroups!;
+
+        for (int g = 0; g < state.Groups.Length; g++)
+        {
+            GroupData group = state.Groups[g];
+            GroupData bestGroup = best[g];
+
+            group.Count = bestGroup.Count;
+            group.Current = bestGroup.Current;
+
+            // The saved count can never exceed the array this group already had when it was saved,
+            // and a captures array only ever grows, so upstream's unchecked memcpy is safe here too.
+            bestGroup.Captures.AsSpan(0, bestGroup.Count).CopyTo(group.Captures);
+        }
+    }
+
+    /// <summary>
+    /// Upstream <c>check_posix_match</c> (<c>upstream/src/_regex.c</c> line 11602): keeps the new
+    /// match if it is longer than the best one so far.
+    /// </summary>
+    /// <remarks>
+    /// Only the <i>length</i> is compared, never the start: the leftmost start is already settled by
+    /// the time this is first reached, because the FAILURE backtrack case returns the best match
+    /// rather than advancing the search once <see cref="MatchState.FoundMatch"/> is set. Upstream
+    /// measures that length from <c>match_pos</c> rather than from <c>best_match_pos</c> for the
+    /// same reason - within one <c>basic_match</c> the two are equal.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void CheckPosixMatch(MatchState state)
+    {
+        if (!state.FoundMatch)
+        {
+            SaveBestMatch(state);
+            return;
+        }
+
+        int bestLength;
+        int newLength;
+
+        if (state.Reverse)
+        {
+            // We're searching backwards.
+            bestLength = state.MatchPos - state.BestTextPos;
+            newLength = state.MatchPos - state.TextPos;
+        }
+        else
+        {
+            // We're searching forwards.
+            bestLength = state.BestTextPos - state.MatchPos;
+            newLength = state.TextPos - state.MatchPos;
+        }
+
+        if (newLength > bestLength)
+        {
+            // It's a longer match.
+            SaveBestMatch(state);
+        }
+    }
+
     /// <summary>Upstream <c>same_span</c> (<c>upstream/src/_regex.c</c> line 11634).</summary>
     /// <param name="span1">One span.</param>
     /// <param name="span2">The other.</param>
@@ -5257,7 +5362,9 @@ internal static class Matcher
                     {
                         // If we're looking for a POSIX match, check whether this one is better and
                         // then keep looking.
-                        throw Seam.For("posix-matching", "POSIX leftmost-longest matching is not implemented yet");
+                        CheckPosixMatch(state);
+
+                        goto backtrack;
                     }
 
                     return MatchStatus.Success;
@@ -5651,8 +5758,12 @@ internal static class Matcher
                     // Have we been looking for a POSIX match?
                     if (state.FoundMatch)
                     {
-                        // Unreachable: the SUCCESS case throws before this can be set.
-                        throw Seam.For("posix-matching", "POSIX leftmost-longest matching is not implemented yet");
+                        // Upstream writes 'return RE_OP_SUCCESS' here (:15688) where every other arm
+                        // returns an RE_ERROR_* code. The two constants are both 1 (_regex.h:20,
+                        // _regex.c:104), so the slip is invisible; this is the code it means.
+                        RestoreBestMatch(state);
+
+                        return MatchStatus.Success;
                     }
 
                     // Do we have to advance?

@@ -181,6 +181,23 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>pstack</c>: the pruning stack.</summary>
     internal readonly ByteStack Pstack = new();
 
+    /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
+    internal int BestMatchPos;
+
+    /// <summary>Upstream <c>best_text_pos</c>: where the best POSIX match so far ends.</summary>
+    internal int BestTextPos;
+
+    /// <summary>
+    /// Upstream <c>best_match_groups</c>: the groups of the best POSIX match so far, or
+    /// <see langword="null"/> before one has been saved.
+    /// </summary>
+    /// <remarks>
+    /// Only ever read when <see cref="FoundMatch"/> is true, which is what upstream relies on too -
+    /// it leaves the array allocated for the life of the state and clears the flag in
+    /// <see cref="InitMatch"/> rather than the storage.
+    /// </remarks>
+    internal GroupData[]? BestMatchGroups;
+
     /// <summary>Upstream <c>min_width</c>, a codepoint count.</summary>
     internal long MinWidth;
 

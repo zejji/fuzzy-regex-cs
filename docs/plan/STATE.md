@@ -2,37 +2,38 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S31 is **closed** and in `done/` (2026-09-12). Next is S32, POSIX matching.
+**Current slice:** none. S32 is **closed** and in `done/` (2026-09-12). Next is S33, the phase close -
+**the last slice of Phase 4**, after which the driver stops at the phase boundary for the owner.
 
 **Blockers:** none.
 
-**Where the port stands:** ratchet GREEN, 5750 tests, 5557 passing, tree clean. Oracle GREEN over the
-seventeen default generators - `partial` joined this slice - 6400/6400 at seed 20260912. `verbs` and
-the new `partial-sliced` are off the default list; run both explicitly.
+**Where the port stands:** ratchet GREEN, 5759 tests, 5574 passing, tree clean. Oracle GREEN over the
+eighteen default generators - `posix` joined this slice - 5400/5400 at seed 20260913. `verbs` and
+`partial-sliced` are off the default list; run both explicitly.
 
-**What S31 landed.** All 82 `needs:partial` tests, and the seam was three lines: `do_match`'s
-fallback was already ported and correct, and only `NewMatch` treated `RE_ERROR_PARTIAL` as an error.
-Two real engine defects came out of the wave, not the suite - `TryMatch` swallowing a PARTIAL, and
-`LAZY_REPEAT_ONE`'s default arm never asking `partial_side`. **Scope correction: `finditer` does take
-`partial`** (the slice file said otherwise), so `Matches` gained it; `findall` really does refuse it,
-so `Count` did not.
+**What S32 landed.** All 8 `needs:posix-matching` tests, and the port was three helpers
+(`SaveBestMatch`, `RestoreBestMatch`, `CheckPosixMatch`) plus the two arms that drive them. No engine
+defect came out of the wave. **Two scope corrections**, both in PORTMAP: `same_values` and
+`equivalent_nodes` are *not* POSIX's - their one caller is the `do_search_start` suppression at
+`:11771`, so they are Phase 7 with the rest of the prefilter - and the `RE_BestList` family is
+`do_best_fuzzy_match`'s and stays Phase 5. **PORTMAP's symbol-audit counts were edited by hand and no
+longer match `.scratch/symbol-audit.py`'s 2026-09-01 output; re-running it is S33's.**
 
-**Three divergence families are pinned and parked**, each with a test in
-`Gaps/Engine/PartialMatchingTests.cs` marked to invert: upstream's unported `search_start` prefilter
-answering a partial of its own (~1 row in 2000, same mechanism as S29's `verbs`); a partial at the
-left edge of a **narrowed slice**, which the new non-default `partial-sliced` generator finds at 8
-rows in 2000; and a **bounded lazy repeat** losing its partial (`ba??x` on `baa`).
+**POSIX is exhaustive, so it is slow**, and the first `posix` generator emitted a backtracking bomb
+that red a wave on the row timeout - a 15ms row became 17.9s in Debug, where upstream takes 0.69s and
+this port 1.1s optimised. It was never a divergence. The rule that fixed it is in the generator: a
+quantifier goes on a piece only if the piece holds none already.
 
-**Do not re-try the lazy-repeat fix without reading its test first.** S31 tried the obvious guard and
-the second blind pass measured it over 20,160 rows as 125 rows fixed and **219 introduced** - the
-repair needs upstream's specialised `*_REPEAT_ONE` arms, which are Phase 7's. The measurement is in
-the test comment and in `run-oracle.ps1`.
+**One divergence is pinned and parked**, found by the S32 blind review and *not* POSIX's:
+`regex.compile(r'(?r)(ab)+').fullmatch('xabz', 1, 3)` is `None` upstream and matches here. Needs
+reversed + a general repeat + a narrowed slice, all three; only `fullmatch` sees it. Same
+slice-versus-text bounds family as S31's partial rows. Test in
+`Gaps/Engine/ReverseMatchingTests.cs`. **Which side is right is open** - upstream refusing the slice
+that is exactly the match looks wrong - so it is recorded, not diagnosed.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
-`python tools/run-controls.py --slices S31`. Delete `.scratch/control-waves/` after a generator
-change. S31-D and S31-E are **thin** - 0 to 4 rows over baseline in 2400 - and the closing notes say
-so rather than dress it up; widening the generator to reach those cells is worth a look.
+`python tools/run-controls.py --slices S32`. Delete `.scratch/control-waves/` after a generator
+change. S32-A and S32-B are strong - 338 to 451 rows of 2000, stable within 35 across three seeds.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. The 108-test baseline gap is explained and closed (2026-09-12): ported tests carrying two
-identical `[Arguments]` rows run twice under one id, and the baseline is a set.
+real.
