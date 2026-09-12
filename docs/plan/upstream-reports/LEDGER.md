@@ -398,6 +398,45 @@ itself: its scanner against its own `match` at the same positions, against its o
 **Verified against 2026.9.10 on 2026-09-12:** the reversed rows reproduce span for span, `g1`
 included.
 
+**A third symptom, added by S36 on 2026-09-12: the carried slice does not only move a span, it
+invents whole matches.** Three rows of a 2000-row `verbs` wave (seeds 4242 and 7) have upstream's
+reversed overlapped scan reporting matches this port does not, and each one refutes itself.
+
+*The assertion form*, minimised to three characters:
+
+```python
+>>> [m.span() for m in regex.finditer(r'(?r)(?:.{2}(*SKIP)A|x)$', 'bxA', regex.M, overlapped=True)]
+[(0, 3), (1, 2)]
+```
+
+`(1, 2)` needs `$` to hold at index 2 of `'bxA'`, where the subject has an `A`. Ask upstream whether
+it can, with no verb in the pattern, and it says no - `regex.finditer(r'(?r)x$', 'bxA', regex.M,
+overlapped=True)` finds nothing there. The controls isolate the verb: the same pattern with the
+`(*SKIP)` deleted, and with it replaced by `(*PRUNE)`, both give `[(0, 3)]`. So the extra match is
+`$` reading the `slice_end` the verb moved to 2, which is this report's mechanism seen through an
+assertion rather than through a span.
+
+*The capture form*, which is the reversed twin of the `(5, 6)` capture above:
+
+```python
+>>> p = r'(?r)([^a]{2,4}(*SKIP)[a\d])((?:[^\d]++(*SKIP)\s|\ ))'
+>>> [(m.span(), m.span(2)) for m in regex.compile(p).finditer('b0 0\n A', overlapped=True)]
+[((0, 6), (4, 6)), ((0, 5), (4, 6))]
+>>> regex.compile(p).search('b0 0\n A', 0, 5), regex.compile(p).match('b0 0\n A', 0, 5)
+(None, None)
+```
+
+The second match ends at 5 and carries a capture ending at 6, and upstream's own doors over that
+slice deny the match outright.
+
+Both rows need the required-string prefilter neutralised to reproduce - the oracle records `verbs`
+that way (`tools/record-oracle.py:223`) - which is worth stating in the report, because a reader who
+pastes them into a plain interpreter will see fewer matches and conclude the report is wrong.
+
+**Verified 2026-09-12** against `regex` 2026.7.19; pinned in this port by
+`BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves`
+and classified by `ExpectedDivergences.overlapped-skip-extra-match-reversed`.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern
@@ -508,3 +547,10 @@ mapping at all.
 **Not fixed in this port either, and deliberately** - see `Sequence.FixFullCasefold`'s remarks in
 `src/FuzzyRegex/Parsing/Nodes.cs`. This port follows upstream's folding tables, so `İ` behaves the
 same way here; the half-fix would make the parser and the matcher disagree with each other.
+
+**Where it goes, decided at the Phase 4 close (S36, 2026-09-12).** It is an inherited bug, and the
+owner's rule is that every conclusively identified bug is fixed here before 1.0, inherited or not. It
+needs the folding tables changed rather than the parser, so it is a slice of its own in **Phase 6's
+opening sweep** - the first item of the sweep's third slice, recorded in ROADMAP. It is the only
+ledger entry with a fix scheduled in this port; the other six are upstream's to fix and stay pinned
+as divergences until they do.

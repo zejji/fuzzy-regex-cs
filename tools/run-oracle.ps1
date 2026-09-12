@@ -21,7 +21,7 @@
     Both had been held out because a handful of their rows diverge for a reason already judged, and
     holding a whole generator out for a few per cent of its rows trades all of its coverage for
     none. What replaced that is an accounted-for list,
-    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: six named families, each with the reason,
+    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: seven named families, each with the reason,
     the engine that is right, the permanent test that pins this port's answer, and the minimised row
     it was found on. A row one of them accounts for is printed in the report as 'EXPECTED <id>' and
     tallied separately; every other divergence still reds the run.
@@ -31,8 +31,8 @@
     'Every_expected_divergence_still_diverges', which runs each entry's minimised row through the
     live engine on every oracle run and fails when one stops diverging.
 
-    The six families, in short - plus the one S35 deleted, kept here because how it went is the whole
-    argument for the list being strict:
+    The seven families, in short - plus the one S35 deleted, kept here because how it went is the
+    whole argument for the list being strict:
 
     'search-start-partial' - upstream's 'search_start' prefilter (upstream/src/_regex.c:8385) gives
     every scanner a partial arm of its own; the slow path this port runs has none, and neither does
@@ -66,6 +66,19 @@
     Printing each match as it arrives segfaults the interpreter, which is the same instability the
     forward entry records as a gc.collect() changing the answer. Two rows in 1200 at seed 20260913.
 
+    'overlapped-skip-extra-match-reversed' - the same carry-over again, judged by S36 on the three
+    rows S35 left, and the reason a row count is a seed by another name: all three come from `verbs`
+    at 2000 rows and the default wave of 300 reaches none of them. Here upstream does not move a span,
+    it reports matches this port does not, each one refuting itself on the row alone:
+
+        regex.finditer(r'(?r)(?:.{2}(*SKIP)A|x)$', 'bxA', regex.M, overlapped=True)
+        # upstream (0, 3) then (1, 2) - the second needs '$' to hold at index 2, where 'A' is
+
+    Delete the verb, or make it '(*PRUNE)', and upstream gives (0, 3) alone, so the extra match is '$'
+    reading the slice_end the verb moved - the defect S35 fixed on this side. The other two rows show
+    it as a capture recorded OUTSIDE its own match, and one of those was suspected of depending on
+    call order: it does not, `verbs` is recorded prefilter-free and the run that disagreed was not.
+
     'reverse-fullmatch-narrowed-slice' - an upstream bug, settled by S33. 'try_match's RE_OP_SUCCESS
     arm (:7829) bounds a reversed fullmatch by text_start where 'basic_match' (:15167) and the search
     loop (:11880) both bound it by slice_start, so a general repeat asking whether its tail could
@@ -92,7 +105,7 @@
     release, past the pin. THIS PORT STILL CARRIES THE PRE-FIX CODE, in Matcher.cs's GreedyRepeatOne
     backtrack arm; the Phase 6 sync ports it, test-first.
 
-    'reverse-group-call-direction' - an upstream bug that upstream has ALREADY FIXED, so there
+    'group-call-direction' - an upstream bug that upstream has ALREADY FIXED, so there
     is nothing to report and the sync is where it goes away. build_GROUP() did not propagate the
     match direction into a called group, so a group called from a lookaround running the other way
     ran its body backwards and recorded the span without swapping its ends:
@@ -104,6 +117,18 @@
     inline copy of the called body - '(?r)(?<g>[ab]+)(?=([ab]+))b' - already gives this port's
     answer. It also surfaces as an EMPTY capture rather than an inverted one, which is what seed 31
     draws for r'(?r)\b(?<g>[ab]+)(?=(?&g))b'; the entry covers both.
+
+    S36 dropped 'reverse-' from the name, because the defect is the direction not reaching a called
+    group and not '(?r)': the forward mirror is a LOOKBEHIND in an ordinary pattern, which the
+    composed 'interactions' wave drew at seed 7.
+
+        regex.compile(r'(?P<g1>A*)(?<=(?&g1))').finditer('A')
+        # upstream records g1's second capture at (2, 1) on a ONE-character subject - a start past
+        # the end, and an end before its own start. 2026.9.10 answers (0, 1), and so does this port.
+
+    That row also broke the recorder outright, which indexed a codepoint table with 2 and raised
+    IndexError, so one upstream bug took out a whole 2000-row wave: see _utf16_index in
+    tools/record-oracle.py.
 
     'bounded-lazy-repeat-partial' - port right, and the one entry keyed on ROWS rather than on a
     predicate. A bounded lazy repeat that reaches its maximum loses its partial here:

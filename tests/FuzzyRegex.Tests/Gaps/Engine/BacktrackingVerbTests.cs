@@ -319,6 +319,70 @@ public sealed class BacktrackingVerbTests
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
+    public void An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves()
+    {
+        // The three rows S35 left for S36 to judge, all found by the `verbs` generator at 2000 rows
+        // (seeds 4242 and 7). Same mechanism as the test above - under '(?r)' a '(*SKIP)' moves
+        // slice_end (upstream/src/_regex.c:14545) and nothing puts it back between the matches of one
+        // scan - but seen as upstream reporting MATCHES THIS PORT DOES NOT, rather than as spans that
+        // moved right. Measured 2026-09-12 against regex 2026.7.19, recorded prefilter-free as the
+        // `verbs` generator always is; the probe is
+        // tools/probes/upstream-reversed-overlapped-skip.py.
+        //
+        // ONE: the assertion case, row 1567, minimised from an eight-codepoint astral subject to
+        // three ASCII characters. Upstream's second match needs '$' to hold at index 2 of 'bxA',
+        // where the subject has an 'A'.
+        //
+        //   regex.finditer(r'(?r)(?:.{2}(*SKIP)A|x)$', 'bxA', regex.M, overlapped=True)
+        //   # upstream (0, 3) then (1, 2); ours (0, 3) alone
+        //
+        // The control is the same pattern with the verb removed, and with it replaced by '(*PRUNE)',
+        // which moves no bound: both give (0, 3) alone, upstream included. So the extra match exists
+        // only because '(*SKIP)' moved slice_end to 2 and upstream's '$' read it - which is exactly
+        // the defect S35 fixed on this side, where 'TryMatchEndOfLine' now reads TextEnd. Asked
+        // whether '$' can hold there at all with no verb in the pattern, upstream says no:
+        // regex.finditer(r'(?r)\U0001F600$', subject, regex.M, overlapped=True) finds nothing on the
+        // original row's subject, where its scan of the '(*SKIP)' pattern reported a match ending
+        // inside it.
+        new FuzzyRegex("(?r)(?:.{2}(*SKIP)A|x)$", FuzzyRegexOptions.Multiline)
+            .Matches("bxA", overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 3));
+
+        // TWO: the capture case, row 1863. Upstream's extra match is (0, 5) and it carries group 2 at
+        // (4, 6) - a capture ending one character OUTSIDE the match it belongs to, in a pattern with
+        // no lookaround that could put one there. Its own doors deny the match: search('b0 0\n A',
+        // 0, 5) and match('b0 0\n A', 0, 5) are both None. Removing the verbs, or making them
+        // '(*PRUNE)', removes the extra match from upstream too.
+        MatchCollection captureCase = new FuzzyRegex(@"(?r)([^a]{2,4}(*SKIP)[a\d])((?:[^\d]++(*SKIP)\s|\ ))").Matches(
+            "b0 0\n A",
+            overlapped: true
+        );
+
+        captureCase.Select(static m => (m.Index, m.Length)).Should().Equal((0, 6));
+        captureCase
+            .Select(static m => (m.Groups[1].Index, m.Groups[1].Length, m.Groups[2].Index, m.Groups[2].Length))
+            .Should()
+            .Equal((0, 4, 4, 2));
+
+        // THREE: row 1439, the same capture tell twice over - upstream's two extra matches are (0, 5)
+        // and (0, 4) and both carry group 1 at (5, 7). The S36 slice file suspected this row's ground
+        // truth depended on CALL ORDER, because the wave recorded three matches where a run on the row
+        // alone gave one. It does not: `verbs` rows are recorded with upstream's required-string
+        // prefilter off (tools/record-oracle.py) and the isolated run was not. Recompiled
+        // prefilter-free, upstream gives the same three matches every time, before and after a
+        // gc.collect(). So the recorder needs no per-row isolation, and this is one family, not two.
+        MatchCollection prefilterCase = new FuzzyRegex(
+            @"(?r)(?:[a\d]*(*SKIP)\D|\p{Nd})(?:[\p{L}\p{N}]{1,3}(*SKIP)\S|.)((?>\s+(*PRUNE)A))"
+        ).Matches("İİAAA AS", overlapped: true);
+
+        prefilterCase.Select(static m => (m.Index, m.Length)).Should().Equal((0, 7));
+        prefilterCase.Select(static m => (m.Groups[1].Index, m.Groups[1].Length)).Should().Equal((5, 2));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
     public void An_overlapped_scan_of_a_skip_inside_a_bounded_repeat_matches_what_upstreams_own_matcher_accepts()
     {
         // Found by S33's blind review, running `verbs` at seeds S29 never used, and judged in S34.

@@ -160,6 +160,8 @@ def main() -> int:
     parser.add_argument("--ids", default="", help="comma-separated control ids")
     parser.add_argument("--slices", default="", help="comma-separated slice prefixes")
     parser.add_argument("--record-only", action="store_true", help="record the waves and stop")
+    parser.add_argument("--seeds", type=int, default=0,
+                        help="run only the first N of each control's seeds (0: all of them)")
     args = parser.parse_args()
 
     # The two selectors are a union, not an intersection: "these ids and those slices" is what a
@@ -174,6 +176,16 @@ def main() -> int:
         ]
     if not controls:
         raise SystemExit("no controls selected")
+
+    # A control accumulates seeds - every slice that re-runs it adds one - and re-running all of
+    # them costs hours by the time a phase closes, because a mutated engine is not merely wrong but
+    # often slow (S28-C's 2400-row wave went from 44 seconds to ten minutes under its mutation).
+    # `--seeds 2` takes each control's FIRST seed, which is the one its slice recorded, plus the
+    # next, which is why a phase close that adds a fresh seed inserts it at index 1 rather than
+    # appending it. S36 added this; the default is unchanged.
+    if args.seeds:
+        for control in controls:
+            control["seeds"] = control["seeds"][: args.seeds]
 
     if args.check:
         bad = 0

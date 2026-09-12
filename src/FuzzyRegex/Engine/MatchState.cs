@@ -590,9 +590,14 @@ internal sealed class MatchState : IDisposable
 
     /// <summary>Upstream <c>reset_guards</c> (<c>upstream/src/_regex.c</c> line 3383).</summary>
     /// <remarks>
-    /// The fuzzy-section and group-call halves (<c>:3392-3400</c>) are not ported: there are no
-    /// fuzzy guards until Phase 5 and no group-call guards until Phase 4, and a pattern needing
-    /// either throws at its own opcode before anything could have written one.
+    /// The fuzzy-section and group-call halves (<c>:3392-3400</c>) are not ported, for two different
+    /// reasons. The fuzzy half waits for Phase 5, and until then a pattern needing it throws at its
+    /// own opcode before anything could have written a guard. The group-call half is **never** to be
+    /// ported: S30 landed group calls without it, because upstream's
+    /// <c>group_call_guard_list</c> is written in five places and read in none - see the allocation
+    /// in <see cref="Create"/> and the "deliberately not ported" table in <c>docs/PORTMAP.md</c>,
+    /// which carries the grep and the date. Corrected at the Phase 4 close (S36); the line read
+    /// "no group-call guards until Phase 4" until then.
     /// </remarks>
     internal void ResetGuards()
     {

@@ -211,6 +211,37 @@ public sealed class GroupCallTests
             .Equal((2, 3), (1, 2));
     }
 
+    // DIVERGES FROM UPSTREAM AT THE PIN ONLY, and this test pins OUR answer - which is also the
+    // answer regex 2026.9.10 gives.
+    [Test]
+    public void A_group_called_from_a_lookbehind_records_its_capture_inside_the_subject_here()
+    {
+        // The forward mirror of the test above, found by S36's composed `interactions` wave at seed 7
+        // and the reason the oracle entry lost its `reverse-` prefix: issue 614 is the match direction
+        // not reaching a called group, so it needs the call and the pattern to run opposite ways, and
+        // '(?r)' plus a lookahead is only one way to arrange that. A lookbehind in an ordinary forward
+        // pattern is the other.
+        //
+        //   regex.compile(r'(?P<g1>A*)(?<=(?&g1))').finditer('A')            # regex 2026.7.19
+        //   # g1's captures are [(0, 1), (2, 1)] - a start PAST THE END of a one-character subject,
+        //   # with an end before its own start
+        //   # regex 2026.9.10 gives [(0, 1), (0, 1)], which is what this port has always given
+        //
+        // Two things came out of that one row. The first is this assertion. The second is that the
+        // recorder could not write the row down at all - `_to_index_length` indexed a two-entry
+        // codepoint table with 2 and raised IndexError, so one upstream bug failed a whole 2000-row
+        // wave; it now extends the index instead, and tools/record-oracle.py's `_utf16_index` says
+        // why.
+        MatchCollection matches = new FuzzyRegex("(?P<g1>A*)(?<=(?&g1))").Matches("A");
+
+        matches.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1), (1, 0));
+        matches
+            .SelectMany(static m => m.Groups["g1"].Captures.Select(c => (c.Index, c.Length)))
+            .Should()
+            // Every capture inside the one-character subject, which is the whole claim.
+            .Equal((0, 1), (0, 1), (1, 0), (0, 1));
+    }
+
     // NOT TESTED, deliberately: left recursion. '(?R)?b' against 'b' and '(?<x>(?&x)?a)' against
     // 'aaa' both recurse without consuming, and neither engine guards against it - upstream grows
     // its stack until re_alloc fails and raises MemoryError, and this port grows the ByteStack until

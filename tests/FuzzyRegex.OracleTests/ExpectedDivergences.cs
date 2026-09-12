@@ -24,6 +24,14 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// <c>verbs</c> on the default list - in that order, which is the order the rule requires.
 /// </para>
 /// <para>
+/// <b>And the same thing happened again at 2000 rows, which is why the entry count keeps moving.</b>
+/// S34's wider wave left three <c>verbs</c> rows unjudged at seeds 7 and 4242; S35 fixed one half of
+/// what they showed and handed the rest to S36, which judged all three as one family and added
+/// <c>overlapped-skip-extra-match-reversed</c>. The default wave is 300 rows per generator and
+/// reaches none of them, so a row count is a seed by another name: widen both before believing a
+/// green run.
+/// </para>
+/// <para>
 /// <b>One entry has been REMOVED because the port stopped diverging, and that is the list working.</b>
 /// <c>search-start-skip-slice</c> classified every reversed <c>(*SKIP)</c> scan whose answer differed,
 /// on S29's verdict that upstream's <c>search_start_END_OF_LINE_rev</c> disagreeing with its own
@@ -102,6 +110,23 @@ internal static class ExpectedDivergences
     private const string _boundedLazyRows = """
         {"generator": "partial", "pattern": "^([A-Z]??)__$", "flags": 0, "namedLists": {}, "subject": "__aA ", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial-sliced", "pattern": "(?r)A(.??)", "flags": 0, "namedLists": {}, "subject": "_\ufb03", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        """;
+
+    /// <summary>
+    /// The three rows of <c>overlapped-skip-extra-match-reversed</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12. All three are listed rather
+    /// than one, because the entry has two tells and the third row is the one whose ground truth was
+    /// suspected of depending on call order - a claim the staleness alarm should keep re-testing.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is row 1567 of the seed-4242 wave, minimised from an eight-codepoint astral subject to
+    /// 'bxA'; rows 2 and 3 are rows 1863 (seed 4242) and 1439 (seed 7) as the wave drew them, because
+    /// a shorter pattern loses the second <c>(*SKIP)</c> that makes the carry-over observable.
+    /// </remarks>
+    private const string _reversedExtraMatchRows = """
+        {"generator": "verbs", "pattern": "(?r)(?:.{2}(*SKIP)A|x)$", "flags": 8, "namedLists": {}, "subject": "bxA", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
+        {"generator": "verbs", "pattern": "(?r)([^a]{2,4}(*SKIP)[a\\d])((?:[^\\d]++(*SKIP)\\s|\\ ))", "flags": 0, "namedLists": {}, "subject": "b0 0\n A", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}]}}
+        {"generator": "verbs", "pattern": "(?r)(?:[a\\d]*(*SKIP)\\D|\\p{Nd})(?:[\\p{L}\\p{N}]{1,3}(*SKIP)\\S|.)((?>\\s+(*PRUNE)A))", "flags": 0, "namedLists": {}, "subject": "İİAAA AS", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 4]}]}}
         """;
 
     /// <summary>
@@ -280,7 +305,61 @@ internal static class ExpectedDivergences
                 && EveryStaleSliceHasOnlyMovedSpansRight(theirScan, ourScan)
         ),
         new(
-            Id: "reverse-group-call-direction",
+            Id: "overlapped-skip-extra-match-reversed",
+            Reason: "Upstream bug, and the same carried slice as the two entries above seen as EXTRA "
+                + "MATCHES rather than as moved spans: under `(?r)` a `(*SKIP)` moves `slice_end` "
+                + "(upstream/src/_regex.c:14545), nothing puts it back between the matches of one "
+                + "scan, and upstream's next attempt then succeeds in a view of the subject that "
+                + "ends where the verb left the bound. This port's scan is a PREFIX of upstream's, "
+                + "and every match upstream reports beyond it refutes itself on the row alone, in "
+                + "one of two ways.\n"
+                + "ONE, the assertion tell: the pattern ends in `$` and upstream's extra match ends "
+                + "at a position that is not the end of a line in the real subject. "
+                + "`regex.finditer(r'(?r)(?:.{2}(*SKIP)A|x)$', 'bxA', regex.M, overlapped=True)` "
+                + "gives (0, 3) then (1, 2), and the second needs `$` to hold at index 2, where the "
+                + "subject has an 'A'. Removing the verb, or making it `(*PRUNE)`, leaves upstream "
+                + "with (0, 3) alone - so the extra match exists only because `$` read the moved "
+                + "bound, which is precisely the defect S35 fixed on this side.\n"
+                + "TWO, the capture tell: upstream's extra match carries a capture OUTSIDE its own "
+                + "span, in a pattern with no lookaround that could put one there - the same "
+                + "self-evident symptom `overlapped-skip-stale-slice` records. "
+                + "`(?r)([^a]{2,4}(*SKIP)[a\\d])((?:[^\\d]++(*SKIP)\\s|\\ ))` over 'b0 0\\n A' has "
+                + "upstream reporting (0, 5) with group 2 at (4, 6), and its own `search` and "
+                + "`match` over (0, 5) are both None.\n"
+                + "Judged in S36 on rows 1567 and 1863 (seed 4242) and 1439 (seed 7) of a 2000-row "
+                + "`verbs` wave. Row 1439 was suspected of depending on CALL ORDER, because the wave "
+                + "recorded three matches where a run on the row alone gave one; it does not - "
+                + "`verbs` is recorded prefilter-free (tools/record-oracle.py) and the isolated run "
+                + "was not. Recompiled prefilter-free it gives the same three matches every time, so "
+                + "the recorder needs no per-row isolation. Ledger entry 5.",
+            PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_"
+                + "upstreams_own_extra_matches_refute_themselves",
+            Example: _reversedExtraMatchRows,
+            // Narrow on the two tells, and on the prefix: a port defect that shortens a match, moves
+            // a span or changes a capture makes the prefix comparison fail and is reported. What is
+            // left is a scan this port ended where upstream kept going.
+            //
+            // The hole, said out loud: a port defect that ended a reversed overlapped scan one match
+            // early would be classified IF the match it dropped happened to carry a capture outside
+            // itself or to end where a trailing `$` is false. The second is out of reach -
+            // `TryMatchEndOfLine` reads TextEnd since S35 - and the first is out of reach only
+            // because `CarriesACaptureOutsideItself` excludes the three constructs that can put a
+            // capture there: a lookaround, and `\K`, which the S36 blind review found missing from
+            // the list. Read that method's remarks before trusting this paragraph again.
+            // Closing it properly needs upstream's own answer to each extra match, which is the
+            // reversed `anchoredScan` tools/record-oracle.py refuses - moving `endpos` truncates the
+            // subject and changes what `$` means, which is the very thing this entry is about.
+            // Phase 6 oracle hardening.
+            Applies: static (row, ours) =>
+                row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
+                && IsReversed(row)
+                && string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal)
+                && row.Expected is MatchesOutcome theirScan
+                && ours is MatchesOutcome ourScan
+                && OnlyExtraMatchesTheRowItselfRefutes(row, theirScan, ourScan)
+        ),
+        new(
+            Id: "group-call-direction",
             Reason: "Upstream bug, and one upstream has already fixed: `build_GROUP()` did not "
                 + "propagate the match direction into a called group, so a group called from a "
                 + "lookaround whose direction differs from the pattern's ran its body the wrong way "
@@ -297,16 +376,27 @@ internal static class ExpectedDivergences
                 + "tools/probes/upstream-reversed-group-call.py. The same defect also surfaces as a capture of length "
                 + "ZERO rather than of negative length - seed 31 draws "
                 + "`(?r)\\b(?<g>[ab]+)(?=(?&g))b`, where upstream's call records an empty capture "
-                + "for `[ab]+`, which needs at least one character - so the entry covers both.",
-            PinnedBy: "GroupCallTests.A_group_called_from_a_lookahead_under_reverse_matches_forwards_here",
+                + "for `[ab]+`, which needs at least one character - so the entry covers both.\n"
+                + "WIDENED BY S36 FROM `reverse-group-call-direction`, and renamed with it: the "
+                + "defect is the direction not reaching a called group, not `(?r)`, so the forward "
+                + "mirror - a LOOKBEHIND in an ordinary forward pattern - has it too. The composed "
+                + "`interactions` wave drew it at seed 7: `(?P<g1>A*)(?<=(?&g1))` over 'A' records "
+                + "g1's second capture as (2, 1), a start past the end of a one-character subject. "
+                + "2026.9.10 answers (0, 1), which is this port's answer and always has been. That "
+                + "row also broke the RECORDER, which indexed a two-entry codepoint table with 2 - "
+                + "see `_utf16_index` in tools/record-oracle.py.",
+            PinnedBy: "GroupCallTests.A_group_called_from_a_lookahead_under_reverse_matches_forwards_here"
+                + " and .A_group_called_from_a_lookbehind_records_its_capture_inside_the_subject_here",
             Example: """
             {"generator": "recursion", "pattern": "(?r)(?<g>[ab]+)(?=(?&g))b", "flags": 0, "namedLists": {}, "subject": "abbaa", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[2, -1], [0, 2]]}], "lastIndex": 1, "lastGroup": "g", "partial": false}}
+            {"generator": "interactions", "pattern": "(?P<g1>A*)(?<=(?&g1))", "flags": 0, "namedLists": {}, "subject": "A", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1], [2, -1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 1, "success": true, "index": 1, "length": 0, "captures": [[1, 0], [2, -1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [1, 1]}]}}
             """,
-            // Narrow on three counts: the pattern must be reversed AND contain a group call, which
-            // is the defect's precondition and not a symptom; the two answers must agree capture
-            // for capture everywhere else; and the only captures allowed to differ are ones where
-            // upstream recorded nothing - a negative length, or an empty span - and this port
-            // recorded text. An ordinary engine defect that shortens or moves a capture is
+            // Narrow on three counts: the pattern must contain a group call AND run the called body
+            // the other way round from itself - reversed with any lookaround, or forward with a
+            // lookbehind - which is the defect's precondition and not a symptom; the two answers must
+            // agree capture for capture everywhere else; and the only captures allowed to differ are
+            // ones where upstream recorded nothing - a negative length, or an empty span - and this
+            // port recorded text. An ordinary engine defect that shortens or moves a capture is
             // reported, because its upstream side is a real span.
             //
             // The hole, said out loud: a called group whose body CAN match empty would make an
@@ -314,8 +404,8 @@ internal static class ExpectedDivergences
             // capture would be classified. Closing it needs the body's minimum width, which the
             // row does not carry.
             Applies: static (row, ours) =>
-                IsReversed(row)
-                && HasGroupCall(row.Pattern)
+                HasGroupCall(row.Pattern)
+                && (IsReversed(row) || HasLookbehind(row.Pattern))
                 && OnlyDifferenceIsACaptureUpstreamLeftEmpty(row.Expected, ours)
         ),
         new(
@@ -460,6 +550,153 @@ internal static class ExpectedDivergences
 
         return moved;
     }
+
+    /// <summary>
+    /// Whether this port's scan is a prefix of upstream's and every match upstream reports beyond it
+    /// is one the row itself refutes - either by carrying a capture outside its own span, or by
+    /// ending where the pattern's trailing <c>$</c> cannot hold in the real subject.
+    /// </summary>
+    /// <param name="row">The row, for the pattern and the subject the tells are read against.</param>
+    /// <param name="upstream">Upstream's scan.</param>
+    /// <param name="ours">This port's scan.</param>
+    /// <returns><see langword="true"/> if that is the whole of the difference.</returns>
+    private static bool OnlyExtraMatchesTheRowItselfRefutes(OracleRow row, MatchesOutcome upstream, MatchesOutcome ours)
+    {
+        if (upstream.Matches.Count <= ours.Matches.Count)
+        {
+            return false;
+        }
+
+        // Rendering for rendering, so a difference in any span, capture, `lastindex` or `lastgroup`
+        // among the matches the two scans share is reported rather than classified.
+        for (int m = 0; m < ours.Matches.Count; m++)
+        {
+            if (!string.Equals(upstream.Matches[m].Describe(), ours.Matches[m].Describe(), StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        for (int m = ours.Matches.Count; m < upstream.Matches.Count; m++)
+        {
+            MatchOutcome extra = upstream.Matches[m];
+            if (!CarriesACaptureOutsideItself(row.Pattern, extra) && !EndsWhereATrailingDollarIsFalse(row, extra))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a match records a capture that lies outside its own span, which nothing but a
+    /// lookaround or a <c>\K</c> can justify - and the pattern has neither.
+    /// </summary>
+    /// <param name="pattern">The pattern, for the precondition.</param>
+    /// <param name="match">The match.</param>
+    /// <returns><see langword="true"/> if it contradicts itself this way.</returns>
+    /// <remarks>
+    /// <b><c>\K</c> is in the exclusion list because the S36 blind review put it there, and the entry
+    /// above overstated its own safety until it did.</b> <c>\K</c> moves the reported match start, so
+    /// a group captured before it lies outside the match and this port produces that itself:
+    /// <c>new FuzzyRegex(@"(?r)ab\K(cd)(*SKIP)").Matches("abcdabcd", overlapped: true)</c> gives
+    /// (4, 6) with group 1 at (6, 8), and (0, 2) with group 1 at (2, 4). Without this clause a port
+    /// defect that ended such a scan one match early would have been classified.
+    /// </remarks>
+    private static bool CarriesACaptureOutsideItself(string pattern, MatchOutcome match)
+    {
+        if (
+            pattern.Contains("(?=", StringComparison.Ordinal)
+            || pattern.Contains("(?!", StringComparison.Ordinal)
+            || HasLookbehind(pattern)
+            || pattern.Contains(@"\K", StringComparison.Ordinal)
+            || match.Groups.Count == 0
+        )
+        {
+            return false;
+        }
+
+        OracleGroup whole = match.Groups[0];
+        int start = whole.Index;
+        int end = whole.Index + whole.Length;
+
+        return match
+            .Groups.Skip(1)
+            .Where(static group => group.Success)
+            .SelectMany(static group => group.Captures)
+            .Any(capture => capture.Index < start || capture.Index + capture.Length > end);
+    }
+
+    /// <summary>
+    /// Whether a match ends where the pattern's trailing <c>$</c> cannot hold in the real subject,
+    /// which is what a <c>(*SKIP)</c>-moved <c>slice_end</c> makes upstream believe.
+    /// </summary>
+    /// <param name="row">The row, for the pattern and the subject.</param>
+    /// <param name="match">The match.</param>
+    /// <returns><see langword="true"/> if it contradicts itself this way.</returns>
+    /// <remarks>
+    /// Deliberately conservative at both ends. The <c>$</c> has to be the last thing in the pattern,
+    /// unescaped, so that it is the match END it constrains rather than some position inside it; and
+    /// the character the match ends on has to be one no engine reads as a line separator, so the
+    /// verdict does not depend on which set of them upstream recognises. <c>\Z</c> and <c>\z</c> are
+    /// not read: no row has needed them, and a row that does should red the run and be judged.
+    /// </remarks>
+    private static bool EndsWhereATrailingDollarIsFalse(OracleRow row, MatchOutcome match)
+    {
+        if (match.Groups.Count == 0 || !EndsWithAnUnescapedDollar(row.Pattern))
+        {
+            return false;
+        }
+
+        int end = match.Groups[0].Index + match.Groups[0].Length;
+
+        return end < row.Subject.Length && !IsALineSeparatorAnywhere(row.Subject[end]);
+    }
+
+    /// <summary>
+    /// Whether a character is one that any engine might read as ending a line. The union rather than
+    /// upstream's own set, so a verdict above does not depend on which of them <c>$</c> recognises.
+    /// </summary>
+    /// <param name="character">The character.</param>
+    /// <returns><see langword="true"/> if some engine would treat it as a line separator.</returns>
+    private static bool IsALineSeparatorAnywhere(char character) =>
+        character
+            is '\n'
+                or '\r'
+                or (char)0x000b // VT
+                or (char)0x000c // FF
+                or (char)0x0085 // NEL
+                or (char)0x2028 // LINE SEPARATOR
+                or (char)0x2029; // PARAGRAPH SEPARATOR
+
+    /// <summary>Whether the pattern's last character is a <c>$</c> that is not itself escaped.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> if it ends in a live <c>$</c>.</returns>
+    private static bool EndsWithAnUnescapedDollar(string pattern)
+    {
+        if (!pattern.EndsWith('$'))
+        {
+            return false;
+        }
+
+        int backslashes = 0;
+        for (int i = pattern.Length - 2; i >= 0 && pattern[i] == '\\'; i--)
+        {
+            backslashes++;
+        }
+
+        return backslashes % 2 == 0;
+    }
+
+    /// <summary>
+    /// Whether the pattern contains a lookbehind, which is what makes a called group in an otherwise
+    /// forward pattern run the other way round from the pattern that called it.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> if it contains one.</returns>
+    private static bool HasLookbehind(string pattern) =>
+        pattern.Contains("(?<=", StringComparison.Ordinal) || pattern.Contains("(?<!", StringComparison.Ordinal);
 
     /// <summary>Whether the pattern calls a group by name, which is the defect's precondition.</summary>
     /// <param name="pattern">The pattern.</param>

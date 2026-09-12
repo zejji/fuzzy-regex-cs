@@ -35,6 +35,17 @@ module needs to know where this port deliberately behaves differently.
   (`Matches`, `Count`, `NextMatch`, `Split` and overlapped matching). Overall parity against
   upstream's own suite: **71.8%**, with fifteen feature areas at 100%. What is left is Phase 4's and
   Phase 5's: lookaround, recursion, branch reset, named lists, POSIX, partial and fuzzy matching.
+- Phase 4: **every non-fuzzy construct upstream has.** Lookahead and lookbehind, including the
+  variable-length lookbehinds upstream allows and .NET's own engine does not; conditionals whose
+  condition is a lookaround as well as a group number; the `(*PRUNE)` and `(*SKIP)` backtracking
+  verbs; recursion and group calls (`(?R)`, `(?&name)`, `(?P>name)`, `(?(DEFINE)...)`); partial
+  matching, both kinds - a subject that runs out and a slice that narrows; and POSIX
+  leftmost-longest (`(?p)`). Branch reset, named lists, possessive quantifiers, inline and version
+  flags, comments and `(*FAIL)` turned out to have been finished by Phases 2 and 3: the phase
+  checkpoint removed their `[Skip]` attributes and 92 tests passed unchanged, which is now the rule
+  every phase close follows. Overall parity: **90.7%**, with 28 feature areas at 100%. What is left
+  is Phase 5's, and it is the reason this port exists: fuzzy matching, `BESTMATCH` and
+  `ENHANCEMATCH`.
 
 ### Fixed
 
@@ -51,5 +62,19 @@ suite.
   per repeat position. `.*?cd` over 60,002 characters took 69 seconds where upstream takes 0.0003.
   Now two paths - upstream's arithmetic restored for a subject with no surrogate pair, and a sampled
   position table for the rest - and two permanent complexity guards over 240,000-code-unit subjects.
+
+Phase 4's three were found the same way, two of them by widening the oracle rather than by adding a
+feature.
+
+- A reversed partial match at the left edge of a narrowed slice was missed, because the six
+  `try_match_STRING*` arms bound themselves by the slice where this port's `STRING` opcodes bound
+  themselves by the text. Only reachable with `(?r)` and `pos > 0`, which is why nothing before the
+  sliced-partial generator saw it.
+- `$` under MULTILINE read a bound that a `(*SKIP)` had moved, so it could be true one character
+  before an ordinary letter. Every assertion now reads the real end of the text. Upstream has the
+  same defect and still answers the other way, which is one of the pinned divergences.
+- Full case folding sliced the unfolded characters with offsets taken from the folded text, which
+  crashed on `(?r)^İﬁ` under `IGNORECASE|FULLCASE` and, worse, silently answered "no match" for
+  `ﬁaﬁ` against `fiafi`. Two expansions in one run were needed, which is why one had always worked.
 
 [Unreleased]: https://github.com/zejji/fuzzy-regex-cs/commits/main

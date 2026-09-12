@@ -94,6 +94,30 @@ and the phase close became S34; S34 was then added the same day, after S33's rev
 note says: 7-10 driver sessions. The `budget.json` question is also closed - it was raised to 20 a
 day and 30 a week on 2026-08-31, and STATE.md's note was stale.
 
+**Phase 4's measured rate, recorded at its close (S36, 2026-09-12). Ten slices, eleven sessions:
+1.1, between Phase 2's 1.35 and Phase 3's 1.0.** `docs/plan/slice-log.jsonl` has one `failed` entry
+across S27-S35 - S29's first attempt - and S36 is the eleventh session, so the estimate of 7-10
+sessions was one short. The nine completed slices before this one came to 468M tokens, a **median of
+50.9M**, spread from 17.2M (S28, conditionals) to 108.6M (S34, the three-seed sweep); the failed S29
+attempt cost 54.9M, which is again about what a successful slice costs. So a Phase 4 slice was
+slightly cheaper than a Phase 3 one (median 60.5M) and the attempt rate slightly worse, and the two
+roughly cancel.
+
+**Where the extra three slices came from is the part worth carrying into Phase 5, because it was not
+scope creep.** Phase 4 was authored as seven and closed as ten, and none of the three additions was a
+feature: S33 acted on the divergence research, S34 made three seeds the floor after S33's review
+found the default wave had never been reliably green, and S35 fixed the two bugs S34's wider wave
+exposed. All three came out of *verification getting stricter*, and each found a real defect. S36
+then found two more the same way, by composing Phase 4's families into the `interactions` generator.
+Budget Phase 5 accordingly: its 5-8 counts fuzzy features, and the oracle will add slices to it.
+
+**Does Phase 5's 5-8 still look right? Yes, with one caveat worth stating now.** The nine `fuzzy-*`
+tags are 185 tests and the machinery is enumerated - 33 functions in PORTMAP's fuzzy bucket, three
+`do_*_fuzzy_match` entry points, 27 `Seam.For(Opcode.Fuzzy)` sites in `Matcher.cs` - so the count is
+grounded rather than guessed. The caveat is that fuzzy matching has no oracle generator at all yet,
+and every phase so far has found its worst bugs through one. Expect a generator slice *inside*
+Phase 5 rather than after it, and read 5-8 as 6-10 sessions at Phase 4's measured 1.1.
+
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
 binds after two and a half busy days. Changing it is an owner decision, not a slice's.

@@ -671,6 +671,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260911
     ]
   },
@@ -686,6 +687,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260911
     ]
   },
@@ -701,6 +703,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260911
     ]
   },
@@ -716,6 +719,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260912
     ]
   },
@@ -731,6 +735,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260912
     ]
   },
@@ -743,9 +748,10 @@
     "before": "        stack.PushSize(repeatData.Count);\n",
     "after": "        stack.PushSize(repeatData.Count + 1);\n",
     "generator": "conditionals",
-    "count": 600,
+    "count": 2400,
     "seeds": [
       7,
+      99991,
       20260912
     ]
   },
@@ -758,9 +764,10 @@
     "before": "        Count = (int)count;\n        return stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));\n",
     "after": "        int savedCount = Count;\n        Count = (int)count;\n        bool ok = stack.PopBlock(MemoryMarshal.AsBytes(_spans.AsSpan(0, Count)));\n        Count = savedCount;\n        return ok;\n",
     "generator": "conditionals",
-    "count": 600,
+    "count": 2400,
     "seeds": [
       7,
+      99991,
       20260912
     ]
   },
@@ -776,6 +783,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260912
     ]
   },
@@ -791,6 +799,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260913,
       4242,
       314159
@@ -808,6 +817,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260913,
       4242,
       314159
@@ -825,6 +835,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260913,
       4242,
       314159
@@ -842,6 +853,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260913,
       4242,
       314159
@@ -859,6 +871,7 @@
     "count": 600,
     "seeds": [
       7,
+      99991,
       20260901
     ]
   },
@@ -874,6 +887,7 @@
     "count": 2400,
     "seeds": [
       7,
+      99991,
       20260901,
       4242
     ]
@@ -890,6 +904,7 @@
     "count": 600,
     "seeds": [
       31,
+      99991,
       4242
     ]
   },
@@ -905,6 +920,7 @@
     "count": 600,
     "seeds": [
       31,
+      99991,
       4242
     ]
   },
@@ -920,6 +936,7 @@
     "count": 600,
     "seeds": [
       31,
+      99991,
       4242
     ]
   },
@@ -935,6 +952,7 @@
     "count": 2400,
     "seeds": [
       31,
+      99991,
       4242,
       7
     ]
@@ -951,6 +969,7 @@
     "count": 2400,
     "seeds": [
       7,
+      99991,
       31,
       4242
     ]
@@ -967,6 +986,7 @@
     "count": 2000,
     "seeds": [
       31,
+      99991,
       4242,
       7
     ]
@@ -983,6 +1003,7 @@
     "count": 2000,
     "seeds": [
       31,
+      99991,
       4242,
       7
     ]
@@ -999,6 +1020,7 @@
     "count": 8000,
     "seeds": [
       31,
+      99991,
       4242
     ]
   },
@@ -1014,6 +1036,7 @@
     "count": 2000,
     "seeds": [
       31,
+      99991,
       4242,
       7
     ]
@@ -1030,6 +1053,7 @@
     "count": 1200,
     "seeds": [
       7,
+      99991,
       4242,
       20260913,
       31,

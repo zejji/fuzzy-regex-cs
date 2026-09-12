@@ -468,8 +468,11 @@ public sealed class RegressionsFuzzyTests
             .Equal((0, 5), (5, 10), (10, 13), (13, 13));
 
     // Hg issue 199: Segfault in re.compile.
+    // Un-skipped at the Phase 4 close (S36) by the tag probe the 2026-09-11 rule requires: it asserts
+    // only that the pattern COMPILES, which the parser has done since S13, so nothing about it was
+    // ever waiting on the matcher. Two of the 185 fuzzy-tagged tests are this shape; the other 183
+    // still fail and still wait for Phase 5.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#236")]
     public void A_pattern_with_a_fuzzy_recursive_group_reference_compiles()
     {
@@ -477,9 +480,9 @@ public sealed class RegressionsFuzzyTests
         act.Should().NotThrow();
     }
 
-    // Hg issue 200: AttributeError in regex.compile with latest regex.
+    // Hg issue 200: AttributeError in regex.compile with latest regex. Un-skipped by the same probe:
+    // compile-only, same reasoning as the test above.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#237")]
     public void A_pattern_starting_with_a_literal_nul_before_a_fuzzy_recursive_reference_compiles()
     {

@@ -164,11 +164,33 @@ def _utf16_offsets(subject: str) -> list[int]:
     return offsets
 
 
+def _utf16_index(offsets: list[int], codepoint: int) -> int:
+    """One codepoint index as a UTF-16 one, surviving an index that is not in the subject at all.
+
+    Upstream can report one. The composed `interactions` wave S36 added draws
+    ``(?P<g1>A*)(?<=(?&g1))`` over ``'A'``, and regex 2026.7.19 records g1's second capture as
+    ``(2, 1)`` - a start PAST the end of a one-character subject, and an end before its own start.
+    That is issue 614, the match direction not reaching a called group, and 2026.9.10 answers
+    ``(0, 1)`` for it; this port has always answered ``(0, 1)``.
+
+    Before this function existed, ``offsets[start]`` raised ``IndexError`` and the whole wave failed
+    to record - so one upstream bug took out two thousand rows that had nothing to do with it. The
+    index is therefore EXTENDED rather than clamped: one unit per codepoint past the end, and a
+    negative index kept as it is, so the impossible span reaches the consumer still impossible and
+    is reported as a divergence instead of being quietly made plausible.
+    """
+    if 0 <= codepoint < len(offsets):
+        return offsets[codepoint]
+    if codepoint < 0:
+        return codepoint
+    return offsets[-1] + (codepoint - (len(offsets) - 1))
+
+
 def _to_index_length(offsets: list[int], span: tuple[int, int]) -> list[int]:
     """A Python codepoint ``(start, end)`` as the UTF-16 ``[Index, Length]`` our API returns."""
     start, end = span
-    index = offsets[start]
-    return [index, offsets[end] - index]
+    index = _utf16_index(offsets, start)
+    return [index, _utf16_index(offsets, end) - index]
 
 
 # --------------------------------------------------------------------------------------------
@@ -220,6 +242,16 @@ def _to_index_length(offsets: list[int], span: tuple[int, int]) -> list[int]:
 # So plain upstream answers a partial or no match on the same subject according to whether the pattern
 # happens to carry a required literal, which is a property of the optimiser and not of the language.
 # PHASE 7 MUST DELETE THIS TOO, on the same terms as the line above.
+#
+# `interactions` is NOT on this list, and S36 tried putting it there and took it off again, which is
+# worth recording because the a-priori argument for adding it is good. The Phase 4 widening put
+# `(*SKIP)` into its patterns and `partial=True` on its rows, so it draws both of the shapes above -
+# and yet recording it prefilter-free changes nothing that matters: over 6000 rows at five seeds it
+# removed one diverging row and introduced another, and left all three of the `(*SKIP)`-plus-partial
+# rows diverging exactly as before. Those three are `search_start`, which is NOT reachable from
+# Python, rather than `locate_required_string`, which is. So the change bought nothing and would have
+# altered how every `interactions` row is recorded; the slice that judges those three rows is the one
+# that should decide it, with the measurement in front of it.
 PREFILTER_FREE_GENERATORS = ("verbs", "partial-sliced")
 
 # Where `req_offset` and `req_chars` sit in the positional argument list `_main.py:660` passes to
@@ -2291,6 +2323,14 @@ INTERACTION_LINE_BREAKS = ("\n", "\r", "\r\n", "", " ")
 #                  from one piece and a reference from another - a reference came up on 56 rows of
 #                  600 at seed 1, because a reference to a group two pieces back rarely matches.
 #                  As a unit, and as the forced shape of a one-piece row, it is 390 of 600.
+#   'called-group': S36's headline cell, and the reason this generator was widened at the Phase 4
+#                  close: a lookaround round a GROUP CALL, inside a group-existence CONDITIONAL,
+#                  inside a REPEAT. Four of Phase 4's six families in one piece, and emitted as a
+#                  unit for the same reason 'group-then-ref' is - a call needs its named group to
+#                  exist already, and left to chance across pieces it would almost never appear.
+#   'verb-alt':    an alternation with a `(*PRUNE)` or a `(*SKIP)` in one branch, which is S29's
+#                  cell. A verb only shows where something AFTER it fails and the other branch has
+#                  to be tried, so it goes in as a two-branch unit rather than as a bare verb.
 INTERACTION_PIECES = (
     "quant-group",
     "class",
@@ -2300,8 +2340,10 @@ INTERACTION_PIECES = (
     "boundary",
     "literal",
     "group-then-ref",
+    "called-group",
+    "verb-alt",
 )
-INTERACTION_PIECE_WEIGHTS = (24, 12, 12, 9, 5, 9, 11, 18)
+INTERACTION_PIECE_WEIGHTS = (24, 12, 12, 9, 5, 9, 11, 18, 12, 8)
 
 # Wrapped round the whole pattern, so the anchors and the boundaries are asked about positions an
 # interior piece has reached rather than only about position 0.
@@ -2325,6 +2367,15 @@ INTERACTION_ASCII_PROBABILITY = 0.2
 # How often the subject is built from doubled characters rather than drawn one at a time. See
 # _generate_interactions for what it is worth.
 INTERACTION_DOUBLED_SUBJECT_PROBABILITY = 0.5
+
+# Added by S36, at the Phase 4 close, so the composed wave reaches the two things Phase 4 added that
+# are properties of the CALL rather than of the pattern: POSIX leftmost-longest (S32) and a subject
+# cut short under `partial=True` (S31). Both are low: they only change an answer where the rest of
+# the row already produced one, and a row that cannot match tests neither.
+INTERACTION_POSIX_PROBABILITY = 0.15
+INTERACTION_POSIX_INLINE_PROBABILITY = 0.5
+INTERACTION_PARTIAL_PROBABILITY = 0.3
+INTERACTION_PARTIAL_CUT_PROBABILITY = 0.6
 
 
 def _interaction_subject_class(rng: random.Random, subject: str) -> str:
@@ -2358,10 +2409,10 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
     defined: list[int] = []
     pieces: list[str] = []
 
-    def group(body: str) -> str:
+    def group(body: str, named: bool = False) -> str:
         counter[0] += 1
         defined.append(counter[0])
-        if rng.random() < 0.25:
+        if named or rng.random() < 0.25:
             name = f"g{counter[0]}"
             names.append(name)
             return f"(?P<{name}>{body})"
@@ -2376,7 +2427,9 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
         kind = rng.choices(INTERACTION_PIECES, weights=INTERACTION_PIECE_WEIGHTS)[0]
         if wanted == 1:
             kind = "group-then-ref"
-        if not defined and kind in ("backref", "cond"):
+        # 'cond' is no longer in this guard: since S36 half of its conditions are a LOOKAROUND rather
+        # than a group number, and that form needs no group to have been defined.
+        if not defined and kind == "backref":
             kind = "quant-group"
 
         if kind == "group-then-ref":
@@ -2402,9 +2455,33 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
             number = rng.choice(defined)
             pieces.append(rng.choice((f"\\{number}", f"\\g<{number}>")))
         elif kind == "cond":
-            number = rng.choice(defined)
             yes, no = rng.choice(atoms), rng.choice(atoms)
-            pieces.append(rng.choice((f"(?({number}){yes}|{no})", f"(?({number}){yes})")))
+            if defined and rng.random() < 0.5:
+                head = f"(?({rng.choice(defined)})"
+            else:
+                # S28's form, added here by S36: the condition is a LOOKAROUND rather than a group
+                # number, so the test consumes nothing and can be a lookbehind - which makes the
+                # branch chosen depend on the text on the OTHER side of the position.
+                head = "(?" + rng.choice(LOOKAROUND_FORMS) + rng.choice(atoms) + ")"
+            pieces.append(rng.choice((f"{head}{yes}|{no})", f"{head}{yes})")))
+        elif kind == "called-group":
+            # Phase 4's families composed into one piece, which is what no per-slice wave reaches:
+            # the named group, then a repeat round a conditional whose yes-branch is a lookaround
+            # round a call back to that group. `(?&g1)` and `(?P>g1)` only - `\g<g1>` is a call in a
+            # pattern and a backreference in a template, and this generator writes both.
+            body = _interaction_subject_class(rng, subject) if rng.random() < 0.5 else rng.choice(atoms)
+            opened = group(body + (_quantifier(rng) if rng.random() < 0.5 else ""), named=True)
+            number, name = defined[-1], names[-1]
+            call = rng.choice((f"(?&{name})", f"(?P>{name})"))
+            yes = rng.choice(LOOKAROUND_FORMS) + call + ")" + rng.choice(atoms)
+            inner = (
+                f"(?({number}){yes}|{rng.choice(atoms)})" if rng.random() < 0.5 else f"(?({number}){yes})"
+            )
+            pieces.append(opened + f"(?:{inner})" + (_quantifier(rng) if rng.random() < 0.6 else ""))
+        elif kind == "verb-alt":
+            verb = rng.choice(("(*PRUNE)", "(*SKIP)"))
+            left = rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.5 else "")
+            pieces.append(f"(?:{left}{verb}{rng.choice(atoms)}|{rng.choice(atoms)})")
         elif kind == "keep":
             pieces.append(r"\K")
         elif kind == "boundary":
@@ -2423,14 +2500,22 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
 def _generate_interactions(rng: random.Random, count: int):
     """S26's generator: the S16-S25 constructs composed, over all eight operations.
 
+    **Widened at the Phase 4 close (S36) to compose Phase 4's six families with the S16-S25 ones.**
+    Two new pieces - `called-group` and `verb-alt` - plus a lookaround-as-condition arm on `cond`,
+    POSIX at the row level and `partial=True` with the subject cut short. The cell the widening
+    exists for is a lookaround round a group call inside a conditional inside a repeat, which no
+    per-slice wave reaches; it found two things in its first three seeds, an upstream capture recorded
+    outside the subject and a recorder that raised `IndexError` rather than write it down.
+
     Measured by `python tools/record-oracle.py --generator interactions --count 600 --seed 1`, after
-    the last change to this generator: 114 rows produce an answer - a match, a non-empty match list,
-    a split with more than one part or a substitution that replaced something - 470 produce none and
-    16 are rejected by upstream. 285 rows carry IGNORECASE, 144 FULLCASE, 301 MULTILINE, 213
-    VERSION1, 78 ASCII and 273 are reversed; 213 have an astral subject and 192 a subject holding a
-    character that expands on folding. 390 hold a backreference, 293 a quantified group, 179 a named
-    group, 54 a `\\K` and 37 a group-existence conditional. Every one of the eight operations is
-    recorded exactly 75 times, because the operation is cycled by row index rather than drawn.
+    the last change to this generator: 119 rows produce an answer - a match, a non-empty match list,
+    a split with more than one part or a substitution that replaced something - 469 produce none and
+    12 are rejected by upstream. 299 rows carry IGNORECASE, 142 FULLCASE, 283 MULTILINE, 230
+    VERSION1, 68 ASCII and 280 are reversed; 94 are POSIX (42 by flag, 52 as `(?p)`), 71 ask for a
+    partial match, and 190 have an astral subject. 379 hold a backreference, 210 a named group, 133 a
+    conditional (48 of them on a lookaround), 123 a lookaround, 81 a group call, 67 a backtracking
+    verb and 39 a `\\K`. Every one of the eight operations is recorded exactly 75 times, because the
+    operation is cycled by row index rather than drawn.
 
     The answer rate is deliberately in line with `classes` and `backrefs` rather than higher: a
     composed pattern has more that must line up at once, and buying matches by shortening the
@@ -2485,9 +2570,18 @@ def _generate_interactions(rng: random.Random, count: int):
         if rng.random() < INTERACTION_ASCII_PROBABILITY and not re.search(r"\\[pP]\{|\[\[:", pattern):
             flags |= ASCII
 
+        # Half as the flag and half inline, exactly as `posix` writes it, because the two reach the
+        # parser by different routes and a composed row is where a mis-scoped flag would show.
+        if rng.random() < INTERACTION_POSIX_PROBABILITY:
+            if rng.random() < INTERACTION_POSIX_INLINE_PROBABILITY:
+                pattern = "(?p)" + pattern
+            else:
+                flags |= POSIX
+
         # `(?r)` as inline pattern text, as S23 and S25 write it: it is what a caller writes, and a
         # global flag has to be at the start of the pattern anyway.
-        if rng.random() < INTERACTION_REVERSE_PROBABILITY:
+        reverse = rng.random() < INTERACTION_REVERSE_PROBABILITY
+        if reverse:
             pattern = "(?r)" + pattern
 
         operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
@@ -2499,6 +2593,16 @@ def _generate_interactions(rng: random.Random, count: int):
             "subject": subject,
             "operation": operation,
         }
+
+        # `partial` only on the three operations that take one - upstream raises ValueError for the
+        # rest - and the subject cut short after the pattern was built from it, which is what makes
+        # the partial reachable. Cut by codepoint, and from the LEFT for a reversed row, because a
+        # reversed match runs out of text at the left end. Both rules are `partial`'s own.
+        if operation in OPERATIONS and rng.random() < INTERACTION_PARTIAL_PROBABILITY:
+            row["partial"] = True
+            if subject and rng.random() < INTERACTION_PARTIAL_CUT_PROBABILITY:
+                keep = rng.randrange(len(subject) + 1)
+                row["subject"] = subject[len(subject) - keep :] if reverse else subject[:keep]
         if operation in SUB_OPERATIONS:
             row["template"] = (
                 _sub_template(rng, groups, names)
@@ -4101,6 +4205,15 @@ def _self_check() -> int:
             got = _to_index_length(offsets, span)
             if got != expected:
                 failures.append(f"codepoint span {span} translates to {got}, expected {expected}")
+
+        # And a span upstream can report that is not in the subject at all - see `_utf16_index`.
+        # It has to stay impossible on this side too, or the consumer is handed a plausible span
+        # and agrees with a defect. Codepoint 5 is two past the end of a three-codepoint subject,
+        # so its UTF-16 index is the total 4 plus 2, and (5, 3) keeps its negative length.
+        for span, expected in (((5, 3), [6, -2]), ((4, 4), [5, 0])):
+            got = _to_index_length(offsets, span)
+            if got != expected:
+                failures.append(f"out-of-subject span {span} translates to {got}, expected {expected}")
 
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
