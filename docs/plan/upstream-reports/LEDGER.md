@@ -357,9 +357,46 @@ restore them after, the way `do_best_fuzzy_match` (`:17899`, `:17994`) already d
 loop; or reset them in `init_match` alongside the guards. The `GREEDY_REPEAT_ONE` clamp added by
 `b77694a` fixes one place the stale slice is read, and this would fix the class.
 
+**The reversed half, added by S35 on 2026-09-12, and it is the sharpest version of this report.**
+Under `(?r)` the verb moves `slice_end` instead (`:14545`) and the same carry-over moves every later
+span to the right. Two rows of the S29 `verbs` wave, seed 20260913:
+
+```python
+>>> pat = r'(?r)(?:\p{L}+(*SKIP)\w|A)(?P<g1>(?:[a-f]{1,3}?(*SKIP)A|[\w\s]))'
+>>> [(m.span(), m.span('g1')) for m in regex.compile(pat).finditer('AAAA00', overlapped=True)]
+[((0, 6), (5, 6)), ((0, 5), (5, 6))]
+>>> regex.compile(pat).search('AAAA00', 0, 5)      # its own single-shot door
+<regex.Match object; span=(0, 5), match='AAAA0'>   # ... with g1 at (4, 5)
+```
+
+The second match spans `(0, 5)` and reports `g1` at `(5, 6)` - **outside the match it belongs to**,
+in a pattern with no lookaround that could put a capture there - where the same pattern's own
+`search` over the same slice puts it at `(4, 5)`.
+
+**And it is memory-unsafe, not merely wrong.** Printing each match as it arrives segfaults the
+interpreter, where the quiet list comprehension above completes:
+
+```
+$ python tools/probes/upstream-reversed-overlapped-skip.py
+regex 2026.7.19
+overlapped scan: [((0, 6), (5, 6)), ((0, 5), (5, 6))]
+   match (0, 5) capture (5, 6) inside: False
+search(0, 5): ((0, 5), (4, 5))
+
+$ python tools/probes/upstream-reversed-overlapped-skip.py --crash
+   (0, 6) (5, 6)
+Segmentation fault (exit 139)
+```
+
+That is the same instability as the `gc.collect()` above, at the next level of severity, and it puts
+this report in the same class as the 2026 fuzzing fixes 611-614.
+
 **Second opinion.** PCRE2 10.47 has no overlapped scan, so the comparison here is `regex` against
-itself: its scanner against its own `match` at the same positions, and against its own answer with a
-`gc.collect()` in the loop.
+itself: its scanner against its own `match` at the same positions, against its own answer with a
+`gc.collect()` in the loop, and - reversed - against its own `search` over the same slice.
+
+**Verified against 2026.9.10 on 2026-09-12:** the reversed rows reproduce span for span, `g1`
+included.
 
 ---
 
@@ -387,22 +424,87 @@ Each part is needed: dropping `(?r)`, dropping `^`, dropping `F`, or replacing e
 an ASCII one compiles cleanly. Both characters are ones whose full case folding is longer than one
 character - `U+0130` folds to `i` plus a combining dot, `U+FB01` to `fi`.
 
-**Where it comes from.** `String.get_firstset` (`_regex_core.py:4036`) indexes `self.characters`
-without checking that it has any, and an **empty** `String` node reaches it. Traced by wrapping
-`String.get_firstset`:
+**Where it comes from - found by S35, 2026-09-12, and it is not only a crash.**
+`Sequence._fix_full_casefold` (`_regex_core.py:3636`) finds its chunks in the **folded** text
+(`:3643`) and then slices the **unfolded** `characters` tuple with those offsets (`:3661`, `:3666`).
+The two are the same length only while nothing in the run expands, and finding what expands is the
+whole job of the function, so every expansion shifts every later offset right. With one expansion it
+works out; with two it does not.
 
+`İﬁ` is the crashing shape. `characters` is two long, the folded text `i̇fi` is four, `fi` is found at
+2, and `characters[2:4]` is empty - so `_flush_characters` (`:3627`) builds a zero-length `String`,
+and `String.get_firstset` (`:4036`) then indexes `characters[0]` on it. `(?r)` puts that node first
+in the first-set walk and `^` is what makes the walk happen at all
+(`_main.py:643`, `if not parsed.has_simple_start()`), which is why all four parts are needed.
+
+**The same arithmetic answers wrongly without crashing, which is the more serious half:**
+
+```python
+>>> regex.compile('ﬁaﬁ', regex.I | regex.F).fullmatch('fiafi')   # None
+>>> regex.compile('ﬀaﬃ', regex.I | regex.F).fullmatch('ffaffi')  # None
+>>> 'ﬁaﬁ'.casefold() == 'fiafi'.casefold()
+True
 ```
-String node with characters=() folded_characters=() case_flags=regex.F|I
-```
 
-So the optimiser built a zero-length `String` for this pattern and the first-set walk then indexed
-it.
+The second ligature lands in the simple-`IGNORECASE` chunk, so it never matches its own expansion.
+`ﬁa`, `aﬁ` and `ﬁﬁ` are all correct, which is what isolates the second expansion as the trigger.
 
-**Proposed fix.** Two candidates, and the maintainer will know which is right: make
-`String.get_firstset` return an empty set when `self.characters` is empty, or stop the zero-length
-`String` being built in the first place - the latter looks like the real defect, since a node that
-matches nothing should not be in the sequence at all.
+**Proposed fix.** Record where each character's fold begins and move each chunk's start back to the
+character containing it, so the slice indices are in character space. Both the folding and the
+`.lower()` are per-codepoint, so the per-character folds concatenate to exactly the whole-run fold
+this function already computes. The chunk's *end* can be left alone: it drifts the same way, so it
+only ever takes in trailing characters that did not need the full fold, and a character whose full
+fold differs from its simple fold is by definition one that expands and has a chunk of its own.
+Guarding `String.get_firstset` against an empty node would stop the traceback and leave the wrong
+answers.
 
-**Why it is worth filing even though it only raises.** It is reachable from
+**Why it is worth filing even though the first symptom only raises.** It is reachable from
 `regex.compile` on a user-supplied pattern, and the exception is an `IndexError` rather than a
-`regex.error`, so a caller that guards against bad patterns the documented way does not catch it.
+`regex.error`, so a caller that guards against bad patterns the documented way does not catch it -
+and the silent wrong answers need no anchor and no `(?r)` at all.
+
+**Verified against 2026.9.10 on 2026-09-12:** both the traceback and both wrong answers reproduce
+unchanged.
+
+---
+
+## 7. Full case folding never applies to `U+0130`, because the expansion list is not lower-cased
+
+**Title:** `İ` does not match `i̇` under `FULLCASE | IGNORECASE`
+
+**Body:**
+
+```python
+>>> import regex
+>>> regex.compile('İ', regex.I | regex.F).fullmatch('i̇')
+None
+>>> 'İ'.casefold() == 'i̇'.casefold()
+True
+```
+
+Every other expanding character matches its expansion: `ß`/`ss`, `ﬁ`/`fi`, `ﬃ`/`ffi` all do.
+`U+0130` is in `_regex.get_expand_on_folding()`, so the module knows it expands.
+
+**Where it comes from.** `Sequence._fix_full_casefold` builds its inventory of expansions with
+`fold_case` alone (`:3639`) and then looks for them in a text that has been through
+`fold_case(...).lower()` (`:3643`). `U+0130` is the one character the two disagree about:
+
+```python
+>>> _regex.fold_case(FULL_CASE_FOLDING, 'İ')            # 'İ' - unchanged
+>>> _regex.fold_case(FULL_CASE_FOLDING, 'İ').lower()    # 'i̇'
+```
+
+So its expansion is never found in the folded text, no chunk is ever marked for it, and the
+character compiles to `CHARACTER_IGN` instead of reaching the full fold at all.
+
+**Proposed fix.** Lower-case the inventory the same way the text is lower-cased - `[_regex.fold_case(
+FULL_CASE_FOLDING, c).lower() for c in _regex.get_expand_on_folding()]`. That alone is not enough:
+the matcher's `STRING_FLD` folds the subject with the same `fold_case`, so `U+0130` would have to
+expand there too, which is a change to the folding table rather than to this function. The
+maintainer's call is whether `U+0130` is excluded from full folding on purpose - CaseFolding.txt
+gives it an `F` mapping of `0069 0307` and a Turkic-only `T` mapping of `0069`, and no `C` or `S`
+mapping at all.
+
+**Not fixed in this port either, and deliberately** - see `Sequence.FixFullCasefold`'s remarks in
+`src/FuzzyRegex/Parsing/Nodes.cs`. This port follows upstream's folding tables, so `İ` behaves the
+same way here; the half-fix would make the parser and the matcher disagree with each other.

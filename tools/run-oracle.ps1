@@ -31,7 +31,8 @@
     'Every_expected_divergence_still_diverges', which runs each entry's minimised row through the
     live engine on every oracle run and fails when one stops diverging.
 
-    The six families, in short:
+    The six families, in short - plus the one S35 deleted, kept here because how it went is the whole
+    argument for the list being strict:
 
     'search-start-partial' - upstream's 'search_start' prefilter (upstream/src/_regex.c:8385) gives
     every scanner a partial arm of its own; the slow path this port runs has none, and neither does
@@ -43,16 +44,27 @@
     docs/plan/2026-09-12-divergence-research.md. It reaches 'partial' at about one row in two
     thousand and 'partial-sliced' at about three in a thousand.
 
-    'search-start-skip-slice' - the same prefilter, seen from the other end. Each 'search_start_*'
-    scanner bounds itself with text_end/text_start where the 'try_match_*' predicate 'basic_match'
-    consults bounds itself with slice_end/slice_start. Nothing but a '(*SKIP)' moves the slice inside
-    an attempt, so the two agree on every other pattern; once one does, upstream's fast path walks
-    past a start position its own slow path accepts:
+    'search-start-skip-slice' - GONE, deleted by S35, and worth knowing about because it is the one
+    entry the strictness alarm has ever removed. It classified every reversed '(*SKIP)' scan that
+    answered differently, on S29's verdict that upstream's 'search_start_END_OF_LINE_rev' bounding by
+    text_end where its own 'try_match_END_OF_LINE' bounds by slice_end made this port right. An
+    independent verification reversed that: '$' under MULTILINE is false one character before a 'b'
+    whichever bound the code reads, so the SLOW path was wrong on both sides. S35 made every
+    assertion read text_end, the entry's example row stopped diverging, the alarm reddened the run,
+    and the entry went. Two rows of its family survived and are a different mechanism - see the next
+    entry.
 
-        regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\n' + 'b', regex.M)   # upstream: one match
+    'overlapped-skip-stale-slice-reversed' - those two rows, judged in S35. The reversed half of
+    'overlapped-skip-stale-slice' below: under '(?r)' the verb moves slice_end (:14545), nothing puts
+    it back between the matches of one scan, and every span upstream reports afterwards moves right:
 
-    Four rows in 1200 at seed 20260913 - 502, 504, 519 and 863, all '(?r)', all a multi-match
-    operation. Port right on every '(*SKIP)' case PCRE2 can be asked.
+        pat = r'(?r)(?:\p{L}+(*SKIP)\w|A)(?P<g1>(?:[a-f]{1,3}?(*SKIP)A|[\w\s]))'
+        regex.compile(pat).finditer('AAAA00', overlapped=True)
+        # upstream (0,6) g1 (5,6) then (0,5) g1 (5,6) - the second capture is OUTSIDE its match
+        # its own search('AAAA00', 0, 5) is (0,5) with g1 at (4,5), which is this port's answer
+
+    Printing each match as it arrives segfaults the interpreter, which is the same instability the
+    forward entry records as a gc.collect() changing the answer. Two rows in 1200 at seed 20260913.
 
     'reverse-fullmatch-narrowed-slice' - an upstream bug, settled by S33. 'try_match's RE_OP_SUCCESS
     arm (:7829) bounds a reversed fullmatch by text_start where 'basic_match' (:15167) and the search

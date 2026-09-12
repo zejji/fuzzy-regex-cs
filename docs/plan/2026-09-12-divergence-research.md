@@ -27,7 +27,7 @@ retry below that position is not permitted.
 |---|---|---|---|---|---|
 | `(?:..(*SKIP)x\|q)x` on `ab cd xx`, search | None | (4,8), with and without `NO_START_OPTIMIZE` | None | (4,8) | **Port right.** Upstream and Perl answers come from their start optimisers; PCRE2 documents the class and names Perl. |
 | `..(*SKIP)xx` on `cd xxx`, search | (1,5) | (2,6) both ways | (2,6) | (2,6) | **Upstream bug.** Its answer retries *below* the position the verb committed past. |
-| `(?r)(?:a*(*SKIP)b\|[^a-f])$` on `\nb`, MULTILINE, finditer | 1 match | n/a (no reverse) | n/a | 2 matches | **Port right by construction**: upstream's `search_start_END_OF_LINE_rev` bounds by `text_end` while its own slow path bounds by `slice_end`; emulating the fast path reproduces upstream exactly (S29 notes). Upstream internal inconsistency. |
+| `(?r)(?:a*(*SKIP)b\|[^a-f])$` on `\nb`, MULTILINE, finditer | 1 match | n/a (no reverse) | n/a | ~~2 matches~~ 1 match since S35 | ~~Port right by construction~~ **REVERSED, 2026-09-12, and fixed in S35 - PORT BUG.** The independent verifier's case H. `$` under MULTILINE is true at the end of the text and before a newline and nowhere else, and at position 1 of `\nb` the next character is `b`, so the second match could never have been right whichever bound the code read. Upstream's `search_start_END_OF_LINE_rev` does bound by `text_end` and its `try_match_END_OF_LINE` by `slice_end`, exactly as S29 said - but that makes the slow path wrong on both sides, not the fast path over-eager. `TryMatchEndOfLine` now reads `TextEnd` like every other assertion here. |
 | `ba??x` on `baa`, match, partial | partial (0,3) | None soft and hard, anchored | n/a | None | **Upstream bug.** `baa` cannot be extended to a match; upstream's greedy `ba?x` agrees with everyone. Same on `bab`. |
 | `a(bc)*` on the empty slice `abc[1:1]`, reversed, partial | partial (1,1) | None (PCRE2 rule 1: no character inspected) | n/a | **None** forward-partial, reversed-None | **Port bug.** Upstream deliberately differs from PCRE2 on empty subjects (README `\d{4}` example, issue 469) and the port follows it forward and on whole empty subjects; only the reversed narrowed-slice arm disagrees. |
 | `(?r)\b$` on empty, search, partial | partial reversed, None forward, None `match` | partial (its `\b`-at-end rule) | n/a | None | **Port right, upstream inconsistent.** Maintainer's model (issue 589) evaluates `\b` on the real string; the empty string has no word character. Upstream's reversed answer is its prefilter's. |
@@ -73,9 +73,12 @@ it's partial as soon as it hits the end of the string"), 539 and 546 (two partia
 Every conclusively identified bug gets fixed in the port before 1.0, inherited or not. So:
 
 - **Port bug, fix now (S33):** the reversed empty-slice partial.
-- **Port right, pin permanently (S33):** the three `(*SKIP)` cases, the lazy-repeat partial, the
-  `\b$` reversed search. Their gap tests currently say inverted in Phase 7; that instruction is
-  withdrawn. Phase 7 ports upstream's prefilters **without** importing their answers: a pinned
+- **Port bug, found after this document was written and fixed in S35:** the `(?r)…$` MULTILINE row
+  above, whose verdict an independent blind verification reversed the same day. Read the table row,
+  not this list's original wording.
+- **Port right, pin permanently (S33):** the ~~three~~ two remaining `(*SKIP)` cases, the
+  lazy-repeat partial, the `\b$` reversed search. Their gap tests currently say inverted in Phase 7;
+  that instruction is withdrawn. Phase 7 ports upstream's prefilters **without** importing their answers: a pinned
   "port is right" test changing is a regression, and ROADMAP's Phase 7 entry now says so.
 - **Upstream bug the port reproduces today:** none of the above - in every row where upstream is
   wrong the port already answers correctly. The inherited bugs remain the Phase 6 list (issues

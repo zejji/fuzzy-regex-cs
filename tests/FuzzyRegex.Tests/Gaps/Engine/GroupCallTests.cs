@@ -135,6 +135,12 @@ public sealed class GroupCallTests
         // required-string prefilter this port does not implement: switching upstream's off the way
         // tools/record-oracle.py does for 'verbs' leaves the answer None.
         //
+        // NOT COVERED BY ISSUE 614's FIX, and S34's notes assumed it was. Re-run on 2026-09-12
+        // against regex 2026.9.10 - the newest release, which carries commit 9398a6d - the same
+        // pattern is still None: regex.compile(r'(?(DEFINE)(?<a>a))(?<=(?&a))c').match('ac', pos=1).
+        // So the Phase 6 sync will not make this go away, and nothing here should say it is waiting
+        // for one.
+        //
         // Nothing is filed upstream. Phase 6 owns the open-issue sweep, this sits next to issue 614
         // in it, and the rule is that the owner approves the report text first.
         FuzzyRegex

@@ -1782,11 +1782,33 @@ internal static class Matcher
         MatchStatus.From(state.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
+    /// <remarks>
+    /// DELIBERATE DIVERGENCE, S35: upstream bounds this one with <c>slice_end</c> where every other
+    /// zero-width assertion it has bounds itself with <c>text_end</c>, and this reads
+    /// <see cref="MatchState.TextEnd"/> like the rest of them. In everything the port implements
+    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (the <see cref="Opcode.Skip"/>
+    /// arm, <c>:14545</c>), and a verb moves where the next attempt starts and nothing else - PCRE2
+    /// pcre2pattern, "Verbs that act after backtracking" - so an assertion about the text must not
+    /// read a bound a verb has moved. <b>Phase 5 gets a second mover</b>, flagged by S35's blind
+    /// review: <c>do_best_fuzzy_match</c> (<c>:17802</c>) and <c>do_enhanced_fuzzy_match</c>
+    /// (<c>:17976</c>) narrow the slice around a candidate and re-run <c>basic_match</c> inside it.
+    /// That one is a genuine narrowing of the text under consideration rather than a bumpalong, so
+    /// whoever ports it has to decide what <c>$</c> means inside it rather than assume this line
+    /// already answers.
+    /// Reading <c>slice_end</c> made <c>$</c> true one character early: on <c>"\nb"</c>,
+    /// <c>(?r)(?:a*(*SKIP)b|[^a-f])$</c> under MULTILINE reported a second match at (0, 1) whose
+    /// <c>$</c> sits at position 1, where the next character is <c>b</c>. Upstream answers the one
+    /// match, but from its <c>search_start_END_OF_LINE_rev</c> fast path (<c>:8055</c>), which does
+    /// bound itself with <c>text_end</c>; its slow path has the identical fault, so the divergence
+    /// is invisible to it and to us until a <c>(*SKIP)</c> is present. Pinned by
+    /// <c>Gaps/Engine/BacktrackingVerbTests.cs</c>,
+    /// <c>Multiline_dollar_after_a_skip_reads_the_text_end_and_not_the_moved_slice</c>.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchEndOfLine(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.SliceEnd || state.CharAt(textPos) == '\n');
+        MatchStatus.From(textPos >= state.TextEnd || state.CharAt(textPos) == '\n');
 
     /// <summary>Upstream <c>try_match_END_OF_LINE_U</c> (line 7115).</summary>
     /// <param name="state">The match state.</param>

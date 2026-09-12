@@ -24,6 +24,18 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// <c>verbs</c> on the default list - in that order, which is the order the rule requires.
 /// </para>
 /// <para>
+/// <b>One entry has been REMOVED because the port stopped diverging, and that is the list working.</b>
+/// <c>search-start-skip-slice</c> classified every reversed <c>(*SKIP)</c> scan whose answer differed,
+/// on S29's verdict that upstream's <c>search_start_END_OF_LINE_rev</c> disagreeing with its own
+/// <c>try_match_END_OF_LINE</c> made this port right. An independent verification reversed that on
+/// 2026-09-12 - <c>$</c> under MULTILINE is simply false one character before a <c>b</c>, whichever
+/// bound the code reads - and S35 fixed the port. The staleness alarm below is what said so: the
+/// entry's own example row stopped diverging and reddened the run. Its whole family went with it,
+/// rows 519 and 863 included; <c>verbs</c> at 600 rows is now 600 agree, 0 expected, 0 diverge at
+/// all three default seeds. The entry was deleted rather than kept "in case", because an entry that
+/// does not fire is the rot this list exists to avoid.
+/// </para>
+/// <para>
 /// <b>One entry is for a bug upstream has since fixed, and it is here on purpose.</b>
 /// <c>reverse-group-call-direction</c> is issue 614, fixed by commit <c>9398a6d</c>, released in
 /// 2026.8.30, and verified fixed on 2026-09-12 against 2026.9.10 (the span is now (3, 6), this
@@ -72,24 +84,14 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// and two exact answer shapes. <c>overlapped-skip-stale-slice</c> carries S34's
 /// <c>anchoredScan</c>, upstream's own answer to the same scan taken one match at a time;
 /// <c>bounded-lazy-repeat-partial</c> is keyed on individually judged rows and on this port's answer
-/// to each, because no predicate for it survives the same test.
-/// </para>
-/// <para>
-/// <b>The still-wide one is <c>search-start-skip-slice</c>, and S34 tried and failed to narrow it.</b>
-/// Every row it covers is a REVERSED scan, and stepping a reversed scan through upstream's public
-/// API means moving <c>endpos</c>, which truncates the subject and changes what every
-/// end-of-subject assertion means - so the recorder refuses to walk one rather than record a third
-/// opinion. Its entry has the measurements. The alarm for that family is still S29's four controls
-/// plus its example row, and narrowing it is Phase 6 oracle hardening.
+/// to each, because no predicate for it survives the same test. With
+/// <c>search-start-skip-slice</c> gone, no entry left here is wide.
 /// </para>
 /// </remarks>
 internal static class ExpectedDivergences
 {
     /// <summary>Upstream's <c>REVERSE</c> flag bit, which is <c>regex.R</c>.</summary>
     private const int _reverse = 0x400;
-
-    /// <summary>The operations that scan for more than one match.</summary>
-    private static readonly string[] _scans = ["finditer", "finditer-overlapped", "split", "sub", "subf"];
 
     /// <summary>
     /// The rows of the bounded-lazy-repeat partial family, recorded by
@@ -188,52 +190,6 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
-            Id: "search-start-skip-slice",
-            Reason: "Upstream's `search_start_*_rev` scanners bound themselves with "
-                + "`text_end`/`text_start` where the `try_match_*` predicates `basic_match` consults "
-                + "bound themselves with `slice_end`/`slice_start`. Nothing but a `(*SKIP)` moves the "
-                + "slice inside an attempt, so the two agree everywhere else; once one does, "
-                + "upstream's fast path walks past a start position its own slow path accepts. Port "
-                + "right on every `(*SKIP)` case PCRE2 10.47 can be asked - "
-                + "docs/plan/2026-09-12-divergence-research.md. Phase 7 owns the prefilter.",
-            PinnedBy: "BacktrackingVerbTests.Skip_under_reverse_tries_a_start_position_upstreams_"
-                + "search_start_skips",
-            Example: """
-            {"generator": "verbs", "pattern": "(?r)(?:a*(*SKIP)b|[^a-f])$", "flags": 8, "namedLists": {}, "subject": "\nb", "operation": "finditer", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
-            """,
-            // THE BROADEST, AND STILL WITHOUT A DISCRIMINATOR - but the reason is now measured
-            // rather than merely outstanding. S34 built the one the previous note designed,
-            // `anchoredScan`, upstream's own answer to the same scan taken one match at a time
-            // from a fresh state, and it CANNOT BE APPLIED TO THIS ENTRY: every row here is a
-            // reversed scan, and stepping a reversed scan through the public API means moving
-            // `endpos`, which truncates the subject and changes what every end-of-subject
-            // assertion means. The recorder therefore refuses to record a walk for a reversed
-            // row at all, rather than record a third opinion. Its `_anchored_scan` docstring has
-            // the measurement.
-            //
-            // Two further things were learned trying, and both are why this is not a stopgap to
-            // be finished in an afternoon. A walk cannot demand equality with this port's answer
-            // even where it exists: this port carries the `(*SKIP)`-moved slice across a scan on
-            // purpose, because upstream's slow path does, and the walk drops it, so the three
-            // answers are ORDERED rather than equal - at seed 20260913, upstream (6) (4), this
-            // port (6) (5) (4), the walk (6) (5) (4) (3) (2) (1) (0). And a non-overlapped walk
-            // needs `must_advance`, which no Python call carries.
-            //
-            // So the alarm for this family remains S29's four controls plus the example row - and
-            // it is a weaker alarm than that sounds, measured 2026-09-12. S29's control D, which
-            // gives the scanner `findall`'s `slice_start <= text_pos` guard, is ABSORBED WHOLE by
-            // this entry at seed 20260913: the honest `verbs` wave at 600 rows is 3 expected and
-            // 0 diverge, and the mutated one is 4 expected and 0 diverge, the mutation's own row
-            // landing here. It still fires at seeds 7 and 314159. Whoever narrows this entry should
-            // re-measure that pair of numbers as the test of whether they have.
-            Applies: static (row, ours) =>
-                row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
-                && IsReversed(row)
-                && _scans.Contains(row.Operation, StringComparer.Ordinal)
-                // Both sides produced an answer of the same kind: one side crashing is never this.
-                && row.Expected.GetType() == ours.GetType()
-        ),
-        new(
             Id: "overlapped-skip-stale-slice",
             Reason: "Upstream bug, and the one S33's review found by running `verbs` at a seed no "
                 + "earlier slice had used. A `(*SKIP)` moves `slice_start`/`slice_end` mid-attempt "
@@ -274,6 +230,54 @@ internal static class ExpectedDivergences
                 row.AnchoredScan is { } anchored
                 && !string.Equals(row.Expected.Describe(), anchored.Describe(), StringComparison.Ordinal)
                 && string.Equals(ours.Describe(), anchored.Describe(), StringComparison.Ordinal)
+        ),
+        new(
+            Id: "overlapped-skip-stale-slice-reversed",
+            Reason: "Upstream bug, and the same carry-over as `overlapped-skip-stale-slice` seen "
+                + "from the reversed side, where `(*SKIP)` moves `slice_end` rather than "
+                + "`slice_start` (upstream/src/_regex.c:14545). Nothing puts it back between the "
+                + "matches of one scan, so an overlapped scan's next attempt starts later than it "
+                + "should, and every span it reports moves right. These two rows were classified by "
+                + "`search-start-skip-slice` until S35 deleted that entry; they are what is left "
+                + "once the `$`-reads-the-slice defect that entry was really about is fixed, and "
+                + "they are a different mechanism - no prefilter is involved.\n"
+                + "THREE FACTS, all measured 2026-09-12 against regex 2026.7.19 on "
+                + "`(?r)(?:\\p{L}+(*SKIP)\\w|A)(?P<g1>(?:[a-f]{1,3}?(*SKIP)A|[\\w\\s]))` over "
+                + "'AAAA00'. One: upstream's own single-shot door gives THIS PORT's answer - "
+                + "`regex.compile(pat).search('AAAA00', 0, 5)` is (0, 5) with g1 at (4, 5), where "
+                + "its overlapped scan reports g1 at (5, 6). Two: (5, 6) lies OUTSIDE the match "
+                + "(0, 5) it belongs to, in a pattern with no lookaround to justify one. Three: the "
+                + "scan is not merely wrong but memory-unsafe - printing each match as it arrives "
+                + "SEGFAULTS the interpreter (exit 139), which is the same instability the forward "
+                + "entry records as a `gc.collect()` changing the answer. All three are re-runnable: "
+                + "`python tools/probes/upstream-reversed-overlapped-skip.py [--crash]`.",
+            PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_keeps_every_"
+                + "span_where_upstreams_own_single_shot_door_puts_it",
+            Example: """
+            {"generator": "verbs", "pattern": "(?r)(?:\\p{L}+(*SKIP)\\w|A)(?P<g1>(?:[a-f]{1,3}?(*SKIP)A|[\\w\\s]))", "flags": 0, "namedLists": {}, "subject": "AAAA00", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 5]}]}}
+            """,
+            // Narrow, and shaped by the mechanism rather than by the symptom. A reversed scan
+            // visits END positions, so the two engines must agree on every match's end - they are
+            // answering at the same places - and a slice_end carried over from the last match can
+            // only ever make an attempt start LATER, never earlier. So every span upstream reports
+            // must be at or to the right of this port's, and at least one strictly to the right.
+            // An ordinary engine defect here moves a span the other way, shortens a match at its
+            // end, or changes how many matches there are, and each of those is reported.
+            //
+            // The hole, said out loud: a port defect that wrongly extended a span LEFTWARDS while
+            // keeping its end and the match count would satisfy this. What bounds it is that the
+            // reversed walk cannot be recorded to check against - tools/record-oracle.py refuses an
+            // `anchoredScan` for a reversed row, because stepping one means moving `endpos`, which
+            // truncates the subject and changes what every end-of-subject assertion means. Making
+            // that walk conditional on the pattern having no such assertion is the way to close
+            // this, and it is Phase 6 oracle hardening.
+            Applies: static (row, ours) =>
+                row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
+                && IsReversed(row)
+                && string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal)
+                && row.Expected is MatchesOutcome theirScan
+                && ours is MatchesOutcome ourScan
+                && EveryStaleSliceHasOnlyMovedSpansRight(theirScan, ourScan)
         ),
         new(
             Id: "reverse-group-call-direction",
@@ -373,6 +377,89 @@ internal static class ExpectedDivergences
             CultureInfo.InvariantCulture,
             $"{row.Pattern}\0{row.Flags}\0{row.Subject}\0{row.Operation}\0{row.Partial}\0{row.Pos}\0{row.EndPos}"
         );
+
+    /// <summary>
+    /// Whether two reversed overlapped scans differ only in the way a carried <c>slice_end</c> can
+    /// make them: the same matches, ending in the same places, with the same <c>lastindex</c>,
+    /// <c>lastgroup</c> and capture counts, and every one of upstream's spans at or to the right of
+    /// this port's, at least one strictly to the right.
+    /// </summary>
+    /// <param name="upstream">Upstream's scan.</param>
+    /// <param name="ours">This port's scan.</param>
+    /// <returns><see langword="true"/> if that is the whole of the difference.</returns>
+    private static bool EveryStaleSliceHasOnlyMovedSpansRight(MatchesOutcome upstream, MatchesOutcome ours)
+    {
+        if (upstream.Matches.Count != ours.Matches.Count)
+        {
+            return false;
+        }
+
+        bool moved = false;
+
+        for (int m = 0; m < upstream.Matches.Count; m++)
+        {
+            MatchOutcome theirs = upstream.Matches[m];
+            MatchOutcome mine = ours.Matches[m];
+
+            if (
+                theirs.Groups.Count != mine.Groups.Count
+                || theirs.Partial != mine.Partial
+                // Not derivable from the groups, so compared here or not at all - S35's blind review
+                // built a row that differed only in these and was classified.
+                || theirs.LastIndex != mine.LastIndex
+                || !string.Equals(theirs.LastGroup, mine.LastGroup, StringComparison.Ordinal)
+                // A reversed scan visits end positions, so the two are answering at the same place
+                // only while the ends agree.
+                || theirs.Groups[0].Index + theirs.Groups[0].Length != mine.Groups[0].Index + mine.Groups[0].Length
+            )
+            {
+                return false;
+            }
+
+            for (int g = 0; g < theirs.Groups.Count; g++)
+            {
+                OracleGroup theirGroup = theirs.Groups[g];
+                OracleGroup ourGroup = mine.Groups[g];
+
+                if (
+                    theirGroup.Success != ourGroup.Success
+                    // A capture LOST or GAINED is never a moved slice: the carry-over changes where
+                    // an attempt starts, not how many times a group took part.
+                    || theirGroup.Captures.Count != ourGroup.Captures.Count
+                    // Nor does it change how LONG an inner span is - it shifts the whole thing
+                    // right. Only group 0 may change length, because its end is pinned above and
+                    // its start is what moved. A capture one character too long is a real defect
+                    // and must be reported; S35's blind review built the row that proved it.
+                    || (g > 0 && theirGroup.Length != ourGroup.Length)
+                )
+                {
+                    return false;
+                }
+
+                if (theirGroup.Success && theirGroup.Index < ourGroup.Index)
+                {
+                    return false;
+                }
+
+                for (int c = 0; c < theirGroup.Captures.Count; c++)
+                {
+                    if (
+                        theirGroup.Captures[c].Index < ourGroup.Captures[c].Index
+                        || (g > 0 && theirGroup.Captures[c].Length != ourGroup.Captures[c].Length)
+                    )
+                    {
+                        return false;
+                    }
+
+                    moved |= theirGroup.Captures[c] != ourGroup.Captures[c];
+                }
+
+                moved |= theirGroup.Index != ourGroup.Index;
+            }
+        }
+
+        return moved;
+    }
 
     /// <summary>Whether the pattern calls a group by name, which is the defect's precondition.</summary>
     /// <param name="pattern">The pattern.</param>

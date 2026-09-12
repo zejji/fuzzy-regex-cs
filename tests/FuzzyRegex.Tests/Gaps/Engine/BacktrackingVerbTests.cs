@@ -171,74 +171,84 @@ public sealed class BacktrackingVerbTests
     }
 
     [Test]
-    public void Skip_under_reverse_tries_a_start_position_upstreams_search_start_skips()
+    public void Multiline_dollar_after_a_skip_reads_the_text_end_and_not_the_moved_slice()
     {
-        // PERMANENT: the port is right, see docs/plan/2026-09-12-divergence-research.md. A change
-        // here is a regression, and the earlier instruction to invert it in Phase 7 is WITHDRAWN on
-        // the same grounds as the test above. Found 2026-09-11 by the S29 oracle wave (generator
-        // 'verbs', seed 20260913, rows 502, 504, 519 and 863), and NOT the required-string
-        // interaction the test above pins - the two were conflated in S29's first verdict.
+        // PERMANENT, and the OPPOSITE of what S29 and S33 concluded. Found 2026-09-11 by the S29
+        // oracle wave (generator 'verbs', seed 20260913, rows 502, 504, 519 and 863); called "port
+        // right by construction" then; REVERSED on 2026-09-12 by an independent, blind,
+        // specification-grounded verification, and fixed here in S35.
         //
-        // The second engine cannot be quoted on this one: PCRE2 has no reverse matching, so there is
-        // nothing to ask. What settles it instead is that UPSTREAM DISAGREES WITH ITSELF - its
-        // 'search_start_END_OF_LINE_rev' bounds by text_end while its own slow path bounds by
-        // slice_end, and emulating the fast path in front of each attempt reproduces upstream here
-        // exactly (S29's notes, and the emulation paragraph below). A prefilter is supposed to skip
-        // positions that cannot match, not positions whose answer it disagrees with.
+        // What settles it is the definition of '$', not either engine's internals. Under MULTILINE
+        // '$' is true at the end of the text and before a newline, and nowhere else. In '\nb' at
+        // position 1 the next character is 'b', so '$' is FALSE there, so the second match this port
+        // used to report - (0, 1), whose reversed attempt tests '$' at 1 before consuming '\n'
+        // backwards - could never have been right. Upstream reports the one match, and does so from
+        // its 'search_start_END_OF_LINE_rev' fast path (upstream/src/_regex.c:8055), which bounds
+        // itself with text_end; its own slow-path predicate 'try_match_END_OF_LINE' (:7108) bounds
+        // itself with SLICE_end and has the identical fault. S29 read that internal disagreement as
+        // upstream being inconsistent and this port being right; the disagreement is real, but it is
+        // the slow path that is wrong on both sides.
         //
-        // These rows are classified as 'search-start-skip-slice' in
-        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs from S33, but the generator is still
-        // NOT on the default oracle list - the S33 blind review found a fifth, unjudged '(*SKIP)'
-        // family at seeds S29 never ran. See the Generator note in tools/run-oracle.ps1.
+        // Mechanism: '(*SKIP)' under '(?r)' sets slice_end to the text position (:14545, ported at
+        // Matcher.cs's RE_OP_SKIP arm) so the next attempt starts there. A verb moves where the next
+        // attempt STARTS and nothing else - PCRE2 pcre2pattern, "Verbs that act after backtracking" -
+        // so an assertion about the text must not read a bound a verb has moved. Every other
+        // zero-width assertion here already reads text_start/text_end; END_OF_LINE was the one that
+        // did not, and it now does too (Matcher.cs, TryMatchEndOfLine).
         //
-        // Upstream's 'search_start' (upstream/src/_regex.c:8385) is the fast scan for the next
-        // plausible start position, and 'basic_match' takes it whenever the start test has a
-        // 'search_start_*' twin (:11819). The two halves do not agree about the slice:
-        // 'search_start_END_OF_LINE_rev' (:8055) bounds itself with TEXT_end, while
-        // 'try_match_END_OF_LINE' (:7108) - which 'basic_match' consults - bounds itself with
-        // SLICE_end. Nothing else moves the slice inside an attempt, so the two agree on every
-        // pattern there is, until a '(*SKIP)' moves it. Then upstream's fast path walks straight past
-        // a start position its own slow path would accept.
-        //
-        // This port does not implement 'search_start' at all (Matcher.cs, the 'next_match_2' block),
-        // so it has only the slow path and tries that position. Measured against regex 2026.7.19 on
-        // 2026-09-11:
+        // Measured against regex 2026.7.19 and 2026.9.10 on 2026-09-12:
         //
         //   [m.span() for m in regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\nb', regex.M)]
-        //   is [(1, 2)] - one match; this port finds (1,1) and then (0,1).
-        //
-        // Confirmed by emulating 'search_start_END_OF_LINE_rev' in front of each attempt: the port
-        // then reproduces upstream exactly on every case here, including the three-match subject
-        // below, where it must NOT lose upstream's second match.
+        //   is [(1, 2)] - one match. This port agreed after S35 and found (1,1) then (0,1) before.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\nb")
             .Select(static m => (m.Index, m.Length))
             .Should()
-            .Equal((1, 1), (0, 1));
+            .Equal((1, 1));
 
-        // Upstream: [(6, 7), (4, 5)]. This port adds (5, 1) between them.
+        // The control that says the fix did not simply make the engine find fewer matches: upstream
+        // gives [(6, 7), (4, 5)] here and the port used to insert a spurious (5, 1) between them.
+        // Both of upstream's matches survive.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\rbbb\r\nb")
             .Select(static m => (m.Index, m.Length))
             .Should()
-            .Equal((6, 1), (5, 1), (4, 1));
+            .Equal((6, 1), (4, 1));
 
-        // The control that says this is not simply "the port finds too many": with no '(*SKIP)' the
-        // slice never moves, the two halves agree, and both sides answer the same.
+        // With no '(*SKIP)' the slice never moves, so this shape could never have diverged and must
+        // still not: it is the isolating control for the verb itself.
         new FuzzyRegex("(?r)(?:a*b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\nb")
             .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((1, 1));
 
-        // And '$' without MULTILINE agrees too, which is the discriminator: that is END_OF_STRING_LINE,
-        // whose try_match (:7127) and reversed search_start twin (:8113) BOTH bound themselves with
-        // text_end and final_newline, so they cannot disagree about a moved slice.
+        // '$' without MULTILINE is END_OF_STRING_LINE, whose try_match (:7127) already bounded itself
+        // with text_end and final_newline, so it never diverged and must not start.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$")
             .Matches("\nb")
             .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((1, 1));
+
+        // '\b' after the same verb finds two matches on both sides, and still must: the boundary
+        // between '\n' and 'b' is a real one, so (0, 1) is a correct match here where it was not
+        // above. This is what distinguishes "the assertion read a moved bound" from "reverse scans
+        // over-report".
+        new FuzzyRegex(@"(?r)(?:a*(*SKIP)b|[^a-f])\b", FuzzyRegexOptions.Multiline)
+            .Matches("\nb")
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((1, 1), (0, 1));
+
+        // Forward '(*SKIP)' moves slice_start, and '^' under MULTILINE reads text_start, so the
+        // mirror shape has to agree with upstream as well:
+        // [m.span() for m in regex.finditer(r'^(?:b(*SKIP)a*|[^a-f])', 'b\n', regex.M)] is [(0, 1)].
+        new FuzzyRegex("^(?:b(*SKIP)a*|[^a-f])", FuzzyRegexOptions.Multiline)
+            .Matches("b\n")
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 1));
     }
 
     [Test]
@@ -258,6 +268,53 @@ public sealed class BacktrackingVerbTests
             .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 1), (1, 1), (2, 3), (3, 2), (4, 1), (5, 1));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void An_overlapped_reversed_scan_of_a_skip_keeps_every_span_where_upstreams_own_single_shot_door_puts_it()
+    {
+        // The reversed half of the test below, and the two rows left over when S35 deleted the
+        // 'search-start-skip-slice' entry: they were classified under that entry's verdict, they are
+        // not the '$'-reads-the-slice defect S35 fixed, and they are not a prefilter at all. Under
+        // '(?r)' a '(*SKIP)' moves slice_end (upstream/src/_regex.c:14545) and nothing puts it back
+        // between the matches of one scan, so upstream's next attempt starts later than it should and
+        // every span it reports moves right.
+        //
+        // UPSTREAM IS WRONG HERE, on three measured counts (regex 2026.7.19, 2026-09-12).
+        //
+        // One: its own single-shot door gives THIS PORT's answer.
+        //   regex.compile(pat).search('AAAA00', 0, 5)   is (0, 5) with g1 at (4, 5)
+        // where its overlapped scan reports g1 at (5, 6) for the same match.
+        //
+        // Two: (5, 6) lies OUTSIDE the match (0, 5) it belongs to, and there is no lookaround in the
+        // pattern that could put a capture there.
+        //
+        // Three: the scan is memory-unsafe, not merely wrong. Printing each match as it arrives
+        // SEGFAULTS the interpreter - exit 139, .scratch/s35-row863b.py, the quiet list-comprehension
+        // form completing first and printing the two spans above. That is the same instability the
+        // forward case records as a gc.collect() between iterations changing the answer.
+        //
+        // Found by the S29 wave at seed 20260913, rows 863 and 519, and quoted here as the wave draws
+        // them rather than minimised: a shorter pattern loses the second '(*SKIP)' that makes the
+        // carry-over observable, and a reproduction nobody can run is not evidence.
+        MatchCollection first = new FuzzyRegex(
+            @"(?r)(?:\p{L}+(*SKIP)\w|A)(?P<g1>(?:[a-f]{1,3}?(*SKIP)A|[\w\s]))"
+        ).Matches("AAAA00", overlapped: true);
+
+        first.Select(static m => (m.Index, m.Length)).Should().Equal((0, 6), (0, 5));
+        first.Select(static m => (m.Groups["g1"].Index, m.Groups["g1"].Length)).Should().Equal((5, 1), (4, 1));
+
+        // Row 519, upstream: (2,2) (2,1) (0,2), the middle one starting where the first did and one
+        // character long for a pattern whose minimum width is two. This port walks the scan down.
+        new FuzzyRegex(
+            @"(?r)((?:\s*(*SKIP)[[:alpha:]]|[[:digit:]]))(?:\S{2,4}(*PRUNE)[a\d]|ı)",
+            FuzzyRegexOptions.IgnoreCase
+        )
+            .Matches("ıııı\r\nS", overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((2, 2), (1, 2), (0, 2));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.

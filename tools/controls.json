@@ -1017,5 +1017,23 @@
       4242,
       7
     ]
+  },
+  {
+    "id": "S35-A",
+    "name": "dollar-reads-slice-end",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    internal static int TryMatchEndOfLine(MatchState state, int textPos) =>",
+    "anchorNth": 1,
+    "before": "    internal static int TryMatchEndOfLine(MatchState state, int textPos) =>\n        MatchStatus.From(textPos >= state.TextEnd || state.CharAt(textPos) == '\\n');\n",
+    "after": "    internal static int TryMatchEndOfLine(MatchState state, int textPos) =>\n        MatchStatus.From(textPos >= state.SliceEnd || state.CharAt(textPos) == '\\n');\n",
+    "generator": "verbs",
+    "count": 1200,
+    "seeds": [
+      7,
+      4242,
+      20260913,
+      31,
+      314159
+    ]
   }
 ]

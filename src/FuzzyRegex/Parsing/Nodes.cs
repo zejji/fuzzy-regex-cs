@@ -2535,14 +2535,50 @@ internal sealed class Sequence : RegexBase
 
     /// <summary>Upstream <c>Sequence._fix_full_casefold</c> (lines 3636-3668).</summary>
     /// <remarks>
+    /// <para>
     /// Splits a literal needing full case-folding into chunks that need it and chunks that can use
     /// simple case-folding, which is faster.
+    /// </para>
     /// <para>
-    /// The chunk offsets are found in the <b>folded</b> text and then used to slice the
-    /// <b>unfolded</b> characters, which are not the same length when a character expands. That is
-    /// upstream's own arithmetic, and it works out because an expansion begins where its character
-    /// does: <c>aß</c> folds to <c>ass</c>, <c>ss</c> is found at 1, and <c>characters[1:3]</c>
-    /// clamps to just the <c>ß</c>. Python's slicing clamps, so this one does too.
+    /// DELIBERATE DIVERGENCE, S35. Upstream finds its chunks in the <b>folded</b> text and then
+    /// slices the <b>unfolded</b> <c>characters</c> tuple with those offsets (<c>:3661</c> and
+    /// <c>:3666</c>). The two are the same length only while nothing in the run expands, and finding
+    /// what expands is the whole job of the function, so the arithmetic is wrong exactly where it is
+    /// used: every expansion shifts every later offset right. One expansion still works out, which
+    /// is what S29 saw and what upstream's own suite covers; two do not. <c>ﬁaﬁ</c> put its second
+    /// ligature in the simple-<c>IGNORECASE</c> chunk and stopped matching <c>fiafi</c>, and
+    /// <c>(?r)^İﬁ</c> ran the last chunk off the end of the run and built an empty <c>String</c>
+    /// node, which crashes in <see cref="String.GetFirstset"/> (upstream <c>:4036</c>,
+    /// <c>IndexError</c>) - both engines, both still on 2026.9.10.
+    /// </para>
+    /// <para>
+    /// So this records where each character's fold begins and moves each chunk's <b>start</b> back
+    /// to the character containing it. Both the fold and the lower-casing are per-codepoint here
+    /// (<see cref="Unicode.PythonStr.Lower"/> says why the one context-sensitive lowercase rule
+    /// cannot fire), so concatenating the per-character folds is upstream's whole-run fold,
+    /// character for character.
+    /// </para>
+    /// <para>
+    /// The <b>end</b> is left as upstream's drifted offset on purpose, and it is the only thing in
+    /// here that is not in character space. It drifts the same way, to the right, so the chunk can
+    /// only take in trailing characters that did not need the full fold - and doing so cannot change
+    /// an answer, because a character whose full fold differs from its simple fold is by definition
+    /// one that expands, and an expanding character has a chunk of its own. Measured 2026-09-12:
+    /// <c>ﬁs</c> against <c>fiß</c> is None on both sides with either reading, so the folded run
+    /// will not consume half of an expansion. What it does buy is that the emitted bytecode stays
+    /// bit-identical to upstream's on every pattern upstream gets right, including corpus rows #323
+    /// and #333, which a both-ends mapping splits differently for no behavioural gain. It costs the
+    /// <c>pos &gt;= characters.Count</c> guard in the loop, because a drifted end can reach the end of
+    /// the run while chunks remain, and it means the trailing literal is sliced from a drifted
+    /// <c>pos</c> - which drops nothing, because the literal that moved <c>pos</c> there was sliced
+    /// with the same value and so covered everything up to it.
+    /// </para>
+    /// <para>
+    /// NOT fixed here, and not this function's defect: <c>expanded</c> is built from
+    /// <c>fold_case</c> while the text it is sought in is <c>fold_case(...).lower()</c>, so
+    /// <c>U+0130</c> - the one character the two disagree about - is never marked at all. Making it
+    /// match <c>i̇</c> means expanding it in <c>fold_case</c>, which is a change to the
+    /// case-folding tables and to every construct that reads them. Ledger entry 7.
     /// </para>
     /// </remarks>
     private static List<Literal> FixFullCasefold(List<int> characters)
@@ -2555,7 +2591,21 @@ internal sealed class Sequence : RegexBase
                 .Select(static c => Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])),
         ];
 
-        int[] text = Unicode.PythonStr.Lower(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [.. characters]));
+        // The folded text, plus the offset in it at which each character's own fold begins.
+        // 'boundary' is one longer than the run, so boundary[i]..boundary[i + 1] is character i.
+        int[] boundary = new int[characters.Count + 1];
+        List<int> folded = [];
+
+        for (int i = 0; i < characters.Count; i++)
+        {
+            boundary[i] = folded.Count;
+            folded.AddRange(
+                Unicode.PythonStr.Lower(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [characters[i]]))
+            );
+        }
+
+        boundary[characters.Count] = folded.Count;
+        int[] text = [.. folded];
 
         List<(int Start, int End)> chunks = [];
         foreach (int[] e in expanded)
@@ -2574,12 +2624,30 @@ internal sealed class Sequence : RegexBase
 
         foreach ((int start, int end) in MergeChunks(chunks))
         {
-            if (pos < start)
+            if (pos >= characters.Count)
             {
-                literals.Add(new Literal(PySlice(characters, pos, start), RegexFlags.IgnoreCase));
+                // The previous chunk's end - which is a folded offset, see the remarks - has already
+                // reached the end of the run, so its literal covered every remaining character and
+                // there is nothing for this chunk to take. Without this the slice below is empty and
+                // builds a zero-length String node, which is the crash this whole change is about:
+                // 'ﬃaﬁ' folds to six codepoints for three characters, so the first chunk alone puts
+                // 'pos' on 3. Found by S35's blind review after the first fix passed both of its
+                // minimised cases and still crashed on 1,764 runs of four characters.
+                break;
             }
 
-            literals.Add(new Literal(PySlice(characters, start, end), RegexFlags.FullIgnoreCase));
+            // Back the chunk's start up to the character whose fold contains it. A chunk can begin
+            // inside one character's expansion, and a character either needs the full fold or does
+            // not. Never behind what has already been emitted: two chunks can back up onto one
+            // character.
+            int startIndex = Math.Max(CharacterContaining(boundary, start), pos);
+
+            if (pos < startIndex)
+            {
+                literals.Add(new Literal(PySlice(characters, pos, startIndex), RegexFlags.IgnoreCase));
+            }
+
+            literals.Add(new Literal(PySlice(characters, startIndex, end), RegexFlags.FullIgnoreCase));
             pos = end;
         }
 
@@ -2589,6 +2657,19 @@ internal sealed class Sequence : RegexBase
         }
 
         return literals;
+    }
+
+    /// <summary>The character whose fold contains a folded offset: the last boundary at or below it.</summary>
+    /// <param name="boundary">Where each character's fold begins, plus the total length.</param>
+    /// <param name="offset">An offset into the folded text.</param>
+    /// <returns>The index of the character.</returns>
+    private static int CharacterContaining(int[] boundary, int offset)
+    {
+        int index = Array.BinarySearch(boundary, offset);
+
+        // A miss returns the bitwise complement of the first boundary above the offset, so the
+        // character containing it is the one before that.
+        return index >= 0 ? index : ~index - 1;
     }
 
     /// <summary>Upstream <c>Sequence._merge_chunks</c> (lines 3670-3689).</summary>
