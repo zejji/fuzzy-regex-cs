@@ -52,3 +52,4 @@ docs/plan/slice-log.jsonl
 # because an unignored file at the repo root shows in `git status --porcelain`, which is exactly
 # what the driver fails a slice for.
 ORCHESTRATOR-PROMPT.md
+.venvs/
