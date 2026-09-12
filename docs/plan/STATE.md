@@ -2,34 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S33 is closed. **Next:** S34, the three-seed sweep, authored 2026-09-12 at
-the checkpoint - `pwsh -File tools/launch-slice.ps1 s34`. Then S35 closes the phase.
+**Current slice:** none. S34 is closed. **Next:** S35, the phase close -
+`pwsh -File tools/launch-slice.ps1 s35`. It is the last slice of Phase 4.
 
-**Blockers:** none. The owner decision S33 asked for is taken: the three residual divergences get
-their own slice (S34) before the close, because a phase cannot close on a default wave that is red at
-two of three seeds. Rule from the owner, 2026-09-12: no known bug ships, inherited or not.
+**Blockers:** none for S35. Two things are handed to Phase 6 and must not be lost:
 
-**Where the port stands:** ratchet GREEN, 5761 tests, 5576 passing, parity **90.6%**, tree clean.
-`partial-sliced` is on the default oracle list and clean at three seeds; `verbs` rejoins in S34.
-`tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs` classifies judged upstream-side rows and
-`Every_expected_divergence_still_diverges` is the staleness alarm - read its remarks before adding.
+1. **A crash both engines share**, found by S34's `-Count 2000` run and NOT fixed:
+   `regex.compile('(?r)^İﬁ', regex.I | regex.F)` raises `IndexError` from
+   `String.get_firstset` (`_regex_core.py:4036`) on an empty `String` node, and this port raises
+   `IndexOutOfRangeException` from `Nodes.cs:2099`. Drafted as upstream report 6; there is no
+   upstream answer to port, so it belongs to the issue sweep.
+2. **This port carries upstream's pre-613 `GreedyRepeatOne` backtrack code.** Upstream fixed it in
+   2026.8.30 (`b77694a`); the sync slice ports it test-first. Issue 614 (`9398a6d`) is likewise
+   already fixed upstream, and two `ExpectedDivergences` entries are pinned against the older
+   release waiting for it.
 
-**For S34's author, probed at the checkpoint (`tools/probes/upstream-overlapped-skip-scan.py`):** on
-item 1, upstream's own `match` and `search` at every start position agree with the port; only its
-stateful overlapped scanner disagrees, so start from `scanner_search_or_match` (`:20874`) and the
-slice bound a `(*SKIP)` leaves behind between scans. Item 2 is a span with end before start - invalid
-on its face; issue 614 (fixed upstream 2026-08-30) is the first suspect.
+**Where the port stands:** ratchet GREEN, 5763 tests, 5578 passing, baseline 5470, tree clean.
+**Every generator is on the default oracle list, `verbs` included, and the default run is green at
+three seeds.** Six named families in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`; read its
+remarks before adding a seventh, and read the `port-slice` note below.
 
-**Phase 6 now opens with the upstream sync and bug sweep** (ROADMAP, spec amendment 17): upstream is
-at 2026.9.10, 21 commits and five releases past our pin, and head equals the release. Releases only,
-for the pin and the oracle.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` - now three seeds by default (7, 4242, the run's
+date), and green only when all three are. **Raise `-Count` too**: 300 rows per generator is what the
+default gives, 2000 is what found item 1 above. Controls:
+`python tools/run-controls.py --slices S29,S31,S33`; delete `.scratch/control-waves/` after any
+recorder or generator change.
 
-**Upstream report drafted, NOT filed:** `docs/plan/upstream-reports/2026-09-12-draft.md`, four
-issues. The owner approves the text first. S34 may add two more.
+**Outstanding, needs the owner:** S34 could not edit `.claude/skills/port-slice/SKILL.md` - the
+harness refused write access - so the three-seed rule landed in `docs/VERIFICATION.md` (rule 7a)
+only. The skill should point at it.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice, at **three seeds**.
-Controls: `python tools/run-controls.py --slices S29,S31,S33`. Delete `.scratch/control-waves/` after
-a generator change.
+**Upstream report drafted, NOT filed:** `docs/plan/upstream-reports/2026-09-12-draft.md`, now six
+issues; item 5 is marked HOLD until the sync can test it against 2026.9.10. The owner approves the
+text first.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. Phase 4 so far: 7 slices closed, parity 76.5% to 90.6%.
+real. Phase 4: 8 slices closed, parity 76.5% to 90.6%.

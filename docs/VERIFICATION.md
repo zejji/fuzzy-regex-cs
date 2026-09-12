@@ -21,6 +21,11 @@ design spec section 8 and amendments 9-10.
 7. **Passing the ported suite is evidence of parity, not proof.** From phase 3, run the differential
    oracle locally before committing any slice that touches the engine, and minimise every divergence
    into a permanent test.
+7a. **A wave counts at THREE SEEDS and not before.** `tools/run-oracle.ps1` runs three by default -
+   7, 4242 and the run's date - and is green only when every one of them is. One seed is how four
+   divergence families stayed hidden from S14 to S33: every slice ran one, each happened to be
+   clean, and "the wave is green" was concluded from it every time. A single-seed run is for
+   minimising a row you already have, never for believing a result.
 8. **Prove the test fails without the fix.** A test that cannot go red is not a test. Mutate it once
    and watch it fail.
 9. **Verify on real output**, not just on green tests: the actual rows, the rendered file, the built
@@ -60,6 +65,7 @@ Do not add "explain your reasoning" or "suggest a fix" to this brief. Both make 
 | 5 | Four benchmarked review techniques scored 2.79-9.22% precision; LLM reviewers systematically over-flag correct code (arXiv:2509.01494, arXiv:2603.00539). |
 | 6 | Two repair rounds against error tracebacks capture 76-95% of achievable improvement across seven models, no model regressing (arXiv:2604.10508). |
 | 7 | Only 72% of LLM-transpiled functions were semantically equivalent despite compiling and passing the existing tests; differential testing against the reference caught the rest at 85.7-88.2% precision, 100% recall (arXiv:2510.07604). |
+| 7a | Not from a study - from this repo. S33's blind review ran the generators at seeds no earlier slice had used and found three unjudged divergence families at once, none of them caused by S33 (DECISIONS 2026-09-12). A 2000-row generator run costs about fifteen seconds, so the third seed is not the expensive part of anything. |
 
 ## Limits
 

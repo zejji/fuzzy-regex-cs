@@ -187,9 +187,23 @@ internal static class OracleWave
             row.TryGetProperty("pos", out JsonElement pos) ? pos.GetInt32() : null,
             row.TryGetProperty("endpos", out JsonElement endpos) ? endpos.GetInt32() : null,
             row.TryGetProperty("searchOnlyPartial", out JsonElement searchOnly)
-                && searchOnly.ValueKind == JsonValueKind.True
+                && searchOnly.ValueKind == JsonValueKind.True,
+            ReadAnchoredScan(row)
         );
     }
+
+    /// <summary>
+    /// The recorder's <c>anchoredScan</c>, or <see langword="null"/> when the row does not carry
+    /// one. It carries one only when it is an overlapped, forward <c>finditer</c> whose pattern
+    /// contains <c>(*SKIP)</c> - so a reversed row, a non-overlapped one, a <c>split</c> and every
+    /// row recorded before S34 all read as <see langword="null"/> here.
+    /// </summary>
+    /// <param name="row">The row.</param>
+    /// <returns>The spans, or <see langword="null"/>.</returns>
+    private static MatchesOutcome? ReadAnchoredScan(JsonElement row) =>
+        row.TryGetProperty("anchoredScan", out JsonElement scan) && scan.ValueKind == JsonValueKind.Array
+            ? new MatchesOutcome([.. scan.EnumerateArray().Select(ReadMatch)])
+            : null;
 
     private static IOracleOutcome ReadOutcome(JsonElement outcome)
     {
@@ -477,6 +491,20 @@ internal sealed record OracleHeader(
 /// Never compared - it is a second fact about upstream, and only
 /// <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="AnchoredScan">
+/// Recorded only on an OVERLAPPED, FORWARD <c>finditer</c> row whose pattern contains
+/// <c>(*SKIP)</c>: the same scan asked of upstream one match at a time, each step from a fresh
+/// state, so that the slice a <c>(*SKIP)</c> moved cannot carry from one match into the next.
+/// Upstream's stateful scanner carries it - nothing in <c>init_match</c>, <c>do_match</c> or
+/// <c>scanner_search_or_match</c> puts the slice back - so a difference between this and the row's
+/// own answer is upstream contradicting its own matcher. Groups and all, not just the spans,
+/// because a stale slice shows in a capture as readily as in a whole-match span.
+/// <see langword="null"/> on every other row and on any wave recorded before S34. Never compared;
+/// only <see cref="ExpectedDivergences"/> reads it. <b>The two exclusions are load-bearing</b> - a
+/// non-overlapped step needs <c>must_advance</c> and a reversed one needs <c>endpos</c>, and
+/// neither can be asked through the public API without changing the question. The recorder's
+/// <c>_anchored_scan</c> docstring has the measurements.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -492,7 +520,8 @@ internal sealed record OracleRow(
     bool Partial = false,
     int? Pos = null,
     int? EndPos = null,
-    bool SearchOnlyPartial = false
+    bool SearchOnlyPartial = false,
+    MatchesOutcome? AnchoredScan = null
 );
 
 /// <summary>What a matching operation answered.</summary>

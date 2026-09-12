@@ -228,6 +228,10 @@ PREFILTER_FREE_GENERATORS = ("verbs", "partial-sliced")
 _REQ_OFFSET_ARG = 7
 _REQ_CHARS_ARG = 8
 
+# Upstream's REVERSE flag bit, which is `regex.R`. Spelled out rather than read off the module so
+# this file states the number the wave's `flags` field carries.
+_REVERSE_FLAG = 0x400
+
 
 def _compile_upstream(regex, recorded: dict, pattern: str, flags: int, named_lists: dict):
     """Compiles one row's pattern, with the required-string prefilter off where a generator wants it.
@@ -422,6 +426,11 @@ def _record_row(regex, row: dict) -> dict:
                     for m in found
                 ],
             }
+            # OVERLAPPED AND FORWARD ONLY, and the two exclusions are not tidiness - each is a case
+            # where the walk below cannot ask upstream the same question the scanner asks, so a
+            # recorded answer would be a third opinion rather than a second one. See its docstring.
+            if overlapped and "(*SKIP)" in pattern and (compiled.flags & _REVERSE_FLAG) == 0:
+                recorded["anchoredScan"] = _anchored_scan(compiled, subject, offsets)
         return recorded
 
     # Pattern.match/search/fullmatch take (string, pos, endpos, concurrent, partial, timeout), so
@@ -506,6 +515,86 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
         # did not ask for a partial, so every generator's rows now also assert "not partial".
         "partial": bool(match.partial),
     }
+
+
+def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict]:
+    """The same overlapped scan, asked of upstream one match at a time from a fresh state each step.
+
+    A SECOND FACT ABOUT UPSTREAM, never compared against anything, and recorded only for a
+    ``finditer`` row that is OVERLAPPED, FORWARD, and whose pattern contains ``(*SKIP)``. Only that
+    verb moves ``slice_start``/``slice_end`` mid-attempt (``upstream/src/_regex.c:14553``), and
+    nothing puts them back: ``init_match`` (``:3404``), ``do_match`` (``:18121``) and
+    ``scanner_search_or_match`` (``:20874``) all leave them alone, and the only other writer is
+    ``state_init`` (``:18438``), which runs once per scanner. So a scan of such a pattern carries
+    whatever slice the previous match's last ``(*SKIP)`` left, and this walk is the same scan with
+    that carry-over removed - every step a fresh ``search``, which is upstream's own single-shot
+    door.
+
+    What it is FOR. The consumer's ``ExpectedDivergences`` needs a discriminator, exactly as
+    ``searchOnlyPartial`` is one for the partial family: without it a "``(*SKIP)`` scan whose two
+    answers differ" predicate also swallows a genuine defect in this port's own scan. With it, an
+    entry can demand that upstream's stateful scanner contradicts upstream's own matcher AND that
+    this port agrees with the matcher.
+
+    WHY OVERLAPPED ONLY, AND WHY FORWARD ONLY. Both exclusions were found by S34's blind review,
+    which built a row the walk got wrong and showed the list absorbing an engine mutation because of
+    it. Neither is tidiness: in each case the public API cannot ask upstream the same question its
+    scanner asks, so a recorded answer would be a third opinion rather than a second one.
+
+    * **Non-overlapped needs ``must_advance``, and no Python call carries it.** After a zero-width
+      match at *p* the scanner re-attempts AT *p* with ``must_advance`` set (``:20912``), which
+      forbids another zero-width match there but still allows a longer one starting there. A plain
+      ``search(subject, p)`` cannot express that, and ``search(subject, p + 1)`` skips the longer
+      match. Measured: ``regex.compile('a??').finditer('aa')`` is
+      ``(0,0) (0,1) (1,1) (1,2) (2,2)`` and a ``p + 1`` walk gives ``(0,0) (1,1) (2,2)``. The
+      overlapped branch sets ``must_advance = FALSE`` and steps to ``match_pos + 1``, which
+      ``search(subject, match_pos + 1)`` reproduces exactly.
+
+    * **Reversed needs ``endpos``, and ``endpos`` truncates the subject.** A reversed scan is
+      anchored by its end, so stepping it means moving ``endpos`` - and every assertion that
+      reads the end of the subject changes meaning at a truncated one: the dollar anchor, the
+      end-of-text escape and both word-boundary escapes. Measured: a reversed word-boundary
+      pattern over 'bab' gives (3,3) (0,0) from finditer and (3,3) (2,2) (1,1) from the same
+      walk, because positions 1 and 2 are boundaries only in a truncated 'bab'.
+
+    WHAT WAS CHECKED AND DOES NOT MATTER, so the next reader does not re-derive it.
+    ``search(subject, pos)`` sets ``slice_start`` to *pos* where the scanner leaves it at the
+    row's own start, which looks like it should change an anchor's meaning and does not: the
+    start-of-string and start-of-line predicates are bound by ``text_start``, not by
+    ``slice_start`` (``try_match_START_OF_STRING``, ``:7373``), and so are the word-boundary escape and a
+    lookbehind. Measured 2026-09-12: ``regex.compile('^a').search('ba', 1)`` and
+    the same question asked with the start-of-string escape are both ``None``, with or without an
+    ``endpos``.
+
+    That is a checked list, not a proof. If a future row makes this walk disagree with the
+    scanner for a reason that is not the carried slice, the direction is safe for the one entry
+    that demands equality with the walk - a walk that differs for any reason makes the entry NOT
+    apply, and the row is reported rather than classified.
+    """
+    found: list[dict] = []
+
+    # One more step than there are positions is the most any correct walk can take, so a pattern
+    # that somehow fails to advance stops here instead of hanging the recorder.
+    limit = len(subject) + 2
+    pos = 0
+
+    while 0 <= pos <= len(subject) and len(found) < limit:
+        match = compiled.search(subject, pos)
+        if match is None:
+            break
+
+        # The SAME shape a `matches` outcome's entries have, groups and all, so the consumer can
+        # compare the whole rendering rather than only the spans. A stale slice shows up in a
+        # CAPTURE as readily as in a whole-match span: at seed 314159 upstream's overlapped scan of
+        # `((?:\p{L}(*SKIP))+)` reports group 1 as (0, 4) for a match spanning (1, 4), a capture
+        # outside its own match, where this walk gives (1, 4).
+        found.append(dict(_describe_match(compiled, match, offsets), codepointSpan=list(match.span(0))))
+
+        # scanner_search_or_match's own overlapped step (:20903), which MatchState.AdvancePastMatch
+        # ports: one character past where the match STARTED.
+        pos = match.span(0)[0] + 1
+
+    return found
 
 
 def _canonical_named_lists(named_lists: dict) -> dict:

@@ -84,23 +84,37 @@ public sealed class OracleWaveTests
             entry.Reason.Should().NotBeEmpty("{0}: an unexplained expected divergence is a hidden one", entry.Id);
             entry.PinnedBy.Should().NotBeEmpty("{0}: the permanent test is the second alarm", entry.Id);
 
-            OracleRow row = OracleWave.ParseRows(entry.Example).Should().ContainSingle().Subject;
-            IOracleOutcome ours = OracleComparer
-                .Run(row)
-                .Should()
-                .NotBeNull("{0}: the example must be a row this port can answer", entry.Id)
-                .And.Subject.Should()
-                .BeAssignableTo<IOracleOutcome>()
-                .Subject;
+            // One row for a family a predicate describes, and every listed row for an entry keyed
+            // on rows - `bounded-lazy-repeat-partial` is one, because no predicate for it exists
+            // that does not also swallow a genuine missed partial. Each listed row has to earn its
+            // place, or the list grows entries nobody can tell are stale.
+            IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(entry.Example);
+            rows.Should().NotBeEmpty("{0}: an entry with no example cannot be checked for staleness", entry.Id);
 
-            OracleComparer
-                .Compare(row, ours)
-                .Should()
-                .Be(OracleVerdict.Diverge, "{0}: the example row is what makes the entry current", entry.Id);
-            ExpectedDivergences
-                .For(row, ours)
-                .Should()
-                .BeSameAs(entry, "{0}: an entry must account for its own example", entry.Id);
+            foreach (OracleRow row in rows)
+            {
+                IOracleOutcome ours = OracleComparer
+                    .Run(row)
+                    .Should()
+                    .NotBeNull("{0}: the example must be a row this port can answer", entry.Id)
+                    .And.Subject.Should()
+                    .BeAssignableTo<IOracleOutcome>()
+                    .Subject;
+
+                OracleComparer
+                    .Compare(row, ours)
+                    .Should()
+                    .Be(
+                        OracleVerdict.Diverge,
+                        "{0}: example row {1} is what makes the entry current",
+                        entry.Id,
+                        row.Number
+                    );
+                ExpectedDivergences
+                    .For(row, ours)
+                    .Should()
+                    .BeSameAs(entry, "{0}: an entry must account for its own example row {1}", entry.Id, row.Number);
+            }
         }
     }
 

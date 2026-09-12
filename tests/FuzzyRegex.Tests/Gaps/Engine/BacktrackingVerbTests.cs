@@ -256,4 +256,72 @@ public sealed class BacktrackingVerbTests
             .Should()
             .Equal((0, 1), (1, 1), (2, 3), (3, 2), (4, 1), (5, 1));
     }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void An_overlapped_scan_of_a_skip_inside_a_bounded_repeat_matches_what_upstreams_own_matcher_accepts()
+    {
+        // Found by S33's blind review, running `verbs` at seeds S29 never used, and judged in S34.
+        // A `(*SKIP)` moves `slice_start` mid-attempt (upstream/src/_regex.c:14553) and nothing puts
+        // it back - `init_match` (:3404), `do_match` (:18121) and `scanner_search_or_match` (:20874)
+        // all leave it alone - so a scanner carries it from one match into the next. An overlapped
+        // scan then resumes BELOW it, at `match_pos + 1` (:20903), which no other path can produce.
+        //
+        // UPSTREAM IS WRONG HERE, on three counts, and none of them is a judgement call.
+        //
+        // One: its own doors disagree. regex.finditer(r'(?:[^\d](*SKIP)){2,3}', '\r\naabb ',
+        // regex.M, overlapped=True) gives (0,3) (1,4) (2,4) (3,4) (4,7) (5,7), while its own
+        // `match` at positions 0..5 gives (0,3) (1,4) (2,5) (3,6) (4,7) (5,7) - which is this test's
+        // first expectation, span for span.
+        //
+        // Two: it returns a match NARROWER THAN THE PATTERN'S MINIMUM WIDTH. On the smaller case
+        // below, '(?:[^\d](*SKIP)){2}' must match two characters and upstream's third match is one:
+        //
+        //     regex.compile(r'(?:[^\d](*SKIP)){2}').finditer('abcde', overlapped=True)
+        //     # (0,2) (1,3) (2,3) (3,5)   - and its own .match('abcde', 2) is (2, 4)
+        //
+        // Three: its answer is not stable. A `gc.collect()` between iterations of the first case
+        // changes it to (0,3) (3,6) (4,7) (5,7), and an `open()` to (0,3) (3,6) - three different
+        // answers to one call, varying only in unrelated interleaved work (tools/probes/upstream-overlapped-skip-instability.py,
+        // 2026-09-12).
+        //
+        // Upstream has since patched one consequence of exactly this carry-over: commit b77694a,
+        // issue 613, which clamps the retreat limit in GREEDY_REPEAT_ONE's backtrack down to the
+        // current position, because a stale slice could raise that limit above it and make the
+        // equality-only stop unreachable, letting a repeat unmatch below its minimum. That is in
+        // the 2026.8.30 release, past the pin - THIS PORT STILL CARRIES THE PRE-FIX CODE at
+        // Matcher.cs's GreedyRepeatOne backtrack arm, and the Phase 6 sync is what ports it,
+        // test-first. Classified in the oracle as `overlapped-skip-stale-slice`.
+        new FuzzyRegex("(?:[^\\d](*SKIP)){2,3}", FuzzyRegexOptions.Multiline)
+            .Matches("\r\naabb ", overlapped: true)
+            .Select(m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 3), (1, 4), (2, 5), (3, 6), (4, 7), (5, 7));
+
+        new FuzzyRegex("(?:[^\\d](*SKIP)){2}")
+            .Matches("abcde", overlapped: true)
+            .Select(m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 2), (1, 3), (2, 4), (3, 5));
+
+        // Every span above is one this port also produces when asked at that position on its own,
+        // which is what makes the scan self-consistent where upstream's is not. Asserted rather
+        // than said, because self-consistency is the whole claim.
+        var bounded = new FuzzyRegex("(?:[^\\d](*SKIP)){2}");
+        Enumerable
+            .Range(0, 4)
+            .Select(i => bounded.MatchAtStart("abcde", i))
+            .Select(m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 2), (1, 3), (2, 4), (3, 5));
+
+        // The control: with the verb removed the slice never moves, and upstream's overlapped scan
+        // agrees with this port - regex.finditer(r'(?:[^\d]){2,3}', '\r\naabb ', regex.M,
+        // overlapped=True) is the same six spans as the first assertion.
+        new FuzzyRegex("(?:[^\\d]){2,3}", FuzzyRegexOptions.Multiline)
+            .Matches("\r\naabb ", overlapped: true)
+            .Select(m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 3), (1, 4), (2, 5), (3, 6), (4, 7), (5, 7));
+    }
 }

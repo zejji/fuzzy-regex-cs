@@ -144,6 +144,67 @@ public sealed class GroupCallTests
         FuzzyRegex.Match("abcd", "(?(DEFINE)(?<ab>ab))(?<=(?&ab))cd").Success.Should().BeTrue();
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_group_called_from_a_lookahead_under_reverse_matches_forwards_here()
+    {
+        // The mirror image of the test above, found by S33's blind review at seed 4242 and judged in
+        // S34: a group called from a LOOKAHEAD inside a reversed pattern. The lookahead runs forward
+        // - upstream agrees, and says so itself wherever the called body is not a variable repeat -
+        // but upstream ran the called body backwards, and then recorded the span it had walked
+        // without swapping its ends. All measured against regex 2026.7.19 on 2026-09-12,
+        // tools/probes/upstream-reversed-group-call.py.
+        //
+        //   regex.compile(r'(?r)(?<g>[ab]+)(?=(?&g))b').search('abbaa').spans('g')
+        //   # [(2, 1), (0, 2)] - the first span's END PRECEDES ITS START, and upstream renders it
+        //   #                    as the empty string, which '[ab]+' cannot match
+        //
+        // Upstream's own inline copy of the called body answers what this port answers:
+        //
+        //   regex.compile(r'(?r)(?<g>[ab]+)(?=([ab]+))b').search('abbaa')   # g2 == [(2, 5)] 'baa'
+        //
+        // and a fixed-count body through the call is right too, which is what places the fault in
+        // the repeat rather than in the lookahead: '(?r)(?<g>[ab]{2})(?=(?&g))b' records (2, 4).
+        //
+        // ALREADY FIXED UPSTREAM, unlike the lookbehind case above, so there is nothing to report:
+        // this is issue 614, `build_GROUP()` not propagating the match direction, fixed on
+        // 2026-08-30 by commit 9398a6d - one line, `subargs.forward = forward;` - and released in
+        // 2026.8.30, which is past the version this oracle records against. The Phase 6 sync is
+        // where upstream stops diverging here, and the strict divergence list is what must notice:
+        // the oracle entry is `reverse-group-call-direction`.
+        Match reversed = new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
+
+        (reversed.Index, reversed.Index + reversed.Length).Should().Be((0, 3));
+        reversed
+            .Groups["g"]
+            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Should()
+            // The call's capture is the forward '[ab]+' upstream's own inline copy also finds.
+            .Equal((2, 5), (0, 2));
+
+        // The same pattern with the call written out, which upstream and this port agree on. Without
+        // it the assertion above would be this port marking its own homework.
+        Match inlined = new FuzzyRegex("(?r)(?<g>[ab]+)(?=([ab]+))b").Match("abbaa");
+
+        (inlined.Groups["g"].Index, inlined.Groups["g"].Length).Should().Be((0, 2));
+        (inlined.Groups[2].Index, inlined.Groups[2].Length).Should().Be((2, 3));
+
+        // And the shapes upstream gets right through the call, so this is a statement about the
+        // variable repeat and not about group calls under '(?r)' in general.
+        new FuzzyRegex("(?r)(?<g>[ab]{2})(?=(?&g))b")
+            .Match("abbaa")
+            .Groups["g"]
+            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Should()
+            .Equal((2, 4), (0, 2));
+        new FuzzyRegex("(?r)(?<g>[ab])(?=(?&g))b")
+            .Match("abb")
+            .Groups["g"]
+            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Should()
+            .Equal((2, 3), (1, 2));
+    }
+
     // NOT TESTED, deliberately: left recursion. '(?R)?b' against 'b' and '(?<x>(?&x)?a)' against
     // 'aaa' both recurse without consuming, and neither engine guards against it - upstream grows
     // its stack until re_alloc fails and raises MemoryError, and this port grows the ByteStack until
