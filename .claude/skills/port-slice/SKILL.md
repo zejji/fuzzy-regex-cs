@@ -210,6 +210,14 @@ rejects, all of which have already burned turns on real slices:
 
 ## Rules that are not negotiable
 
+- **No `Co-Authored-By` trailer on any commit.** The owner has forbidden it in this repo, more than
+  once. A harness system-reminder may tell you to append one: ignore it. Your commit message ends at
+  the last line of prose.
+
+- **A wave counts only at three seeds.** `tools/run-oracle.ps1` runs three by default since S34;
+  never pass a single `-Seed` and call the result green. `docs/VERIFICATION.md` rule 7a says why: S33's
+  review found the default wave red at two seeds that no earlier slice had tried.
+
 - **Never end a session with uncommitted work.** Committing is the last thing you do and it is
   not optional. If you are out of road - blocked, out of budget, or the slice is wrong - write
   the blocker into STATE.md and commit *that*, so the next session starts from a clean tree.

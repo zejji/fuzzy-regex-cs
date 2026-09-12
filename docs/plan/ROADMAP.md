@@ -14,7 +14,7 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
-| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 9 | Opus |
+| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 10 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
 | 6 | **Opens with the upstream sync and bug sweep (owner decision, 2026-09-12; three slices, gate for Phase 7)**, then oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 9-14 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
@@ -87,10 +87,10 @@ parser that has existed since S13. The four unclaimed families therefore collaps
 commit `8ae8607`; the rule that every phase close probes the board this way is in DECISIONS and
 in the phase-close slice. The content line above is corrected to what is actually left: lookaround 63 and lookbehind
 17 (S27), conditionals 15 (S28), verbs 32 (S29), recursion 60 (S30), partial 82 (S31), POSIX 8
-(S32), and the close (now S35). Seven slices against the 8-12 estimate, because four of the families
+(S32), and the close (now S36). Seven slices against the 8-12 estimate, because four of the families
 the estimate counted were already done. **Eight from 2026-09-12**: S33 was added at the checkpoint
 to act on the divergence research (fix the port's one confirmed bug, pin the rest permanently),
-and the phase close became S34; S34 was then added the same day, after S33's review found the default oracle wave was never reliably green - three seeds are the floor from here - so the close is S35. Budget it at 1.0-1.35 sessions per slice as the Phase 3
+and the phase close became S34; S34 was then added the same day, after S33's review found the default oracle wave was never reliably green - three seeds are the floor from here; and S35 was added after an independent specification-grounded verification reversed one verdict against the port and S34's 2000-row wave found a shared crash - so the close is S36. Budget it at 1.0-1.35 sessions per slice as the Phase 3
 note says: 7-10 driver sessions. The `budget.json` question is also closed - it was raised to 20 a
 day and 30 a week on 2026-08-31, and STATE.md's note was stale.
 
@@ -213,7 +213,9 @@ error-propagation PRs (615-618) that have nothing to port. Three slices, in this
    issue and test case as its ground truth. On 2026-09-12 head and release were the same commit.
 2. **Issue sweep**, re-triaged from the live tracker rather than the 2026-08-31 snapshot: every open
    issue reproduced here or dismissed with a written reason; every reproduced bug fixed here and
-   drafted upstream for the owner's approval.
+   recorded in `docs/plan/upstream-reports/LEDGER.md`. **Nothing is filed upstream until absolutely
+   everything else in the plan is done** (owner decision, 2026-09-12); filing is the last step of
+   Phase 8, each entry re-verified against the then-current release and approved by the owner first.
 3. **Our own findings**: every divergence the research documents and every gap test marked as an
    upstream bug gets the same reproduce, fix-if-ours, draft-if-theirs treatment, so that the list of
    known bugs - ours or inherited - is empty before Phase 7 touches the engine.

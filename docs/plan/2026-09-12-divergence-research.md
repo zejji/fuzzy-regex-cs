@@ -83,7 +83,7 @@ Every conclusively identified bug gets fixed in the port before 1.0, inherited o
 - **Open, needs the same research:** `(?r)(ab)+` fullmatch on a narrowed slice. S33 settles it.
 - **Report upstream**, after the owner approves the text: `..(*SKIP)xx` retry-below-commit, the
   lazy-repeat partial, the `\b$` reversed inconsistency, and the reversed-fullmatch case if S33
-  confirms it. Draft: `docs/plan/upstream-reports/2026-09-12-draft.md`.
+  confirms it. Draft: `docs/plan/upstream-reports/LEDGER.md`.
 
 ## Settled by S33, 2026-09-12
 

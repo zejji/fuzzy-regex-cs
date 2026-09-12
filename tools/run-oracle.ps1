@@ -63,7 +63,7 @@
 
     Phase 7 owns the first two, because porting 'search_start' is the fix - and it must port the
     prefilter WITHOUT importing its answers, which is what the pinned tests are for. The third is
-    upstream's to fix; see docs/plan/upstream-reports/2026-09-12-draft.md.
+    upstream's to fix; see docs/plan/upstream-reports/LEDGER.md.
 
     'overlapped-skip-stale-slice' - an upstream bug, judged by S34, and not the prefilter: nothing
     but the verb is involved. A '(*SKIP)' moves slice_start mid-attempt (:14553) and nothing puts it

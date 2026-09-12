@@ -1,25 +1,25 @@
-# Draft upstream reports, 2026-09-12
+# Upstream defect ledger
 
-**NOT FILED.** Nothing here goes to `mrabarnett/mrab-regex` until the owner has approved the text
-(DECISIONS 2026-08-31; `gh` is deliberately outside the driver's allowlist in
-`tools/run-slices.ps1`, so an unattended session cannot post). Written by S33 out of
-`docs/plan/2026-09-12-divergence-research.md`.
+**Nothing here is filed.** Owner decision, 2026-09-12: no report goes to `mrabarnett/mrab-regex` until
+absolutely everything else in the plan is done, and then only with the owner's approval of the text.
+Until then this file is a *ledger* of defects identified in this port's work that would need fixing
+upstream - kept correct, re-verified against each newer upstream release at every sync, never queued.
+`gh` is deliberately outside the driver's allowlist so an unattended session cannot post.
 
-Four issues, one per defect, in the shape the maintainer acts on fastest - measured over the 20 most
-recently closed issues on 2026-08-31, of which #607 and #608 were fixed the same evening: a minimal
-directly runnable reproduction with the version pinned, the faulting function named rather than only
-the symptom, the bug distinguished from any similar one already fixed, and a concrete fix proposed.
-Design-trade-off arguments stall, so none of these makes one.
+Each entry keeps what a report would need so it can be sent later without re-deriving anything: a
+minimal runnable reproduction pinned to a version, the faulting function, the port's answer and why
+it is right, a second engine's actual answer where one exists, and a proposed fix. Entries are in the
+shape the maintainer acts on fastest (measured 2026-08-31: #607 and #608 fixed the same evening).
 
-Everything below was run on 2026-09-12 against `regex` 2026.7.19 from PyPI (submodule
-`1760a20647f1c2ddcc025128407fe6f7edb905a1`) on Windows 11, CPython 3.13. The second-opinion figures
-are PCRE2 10.47 (2025-10-21) called directly through Git for Windows' `libpcre2-8-0.dll` -
-`tools/probes/pcre2-partial-and-skip.py` - not derived from its manual. Line numbers are
+**Verified against 2026.9.10 on 2026-09-12** (`tools/probes/`, venv `.venvs/regex-2026.9.10`): every
+entry below reproduces unchanged on the newest release except where an entry says otherwise. Issue
+614's fix changed only the reversed group-call span (entry 7's case G analogue: now `(3, 6)`, the
+port's answer) and did **not** fix the `(?<=(?&a))c` row S30 pinned.
+
+Original drafting notes: written by S33 and S34 out of `docs/plan/2026-09-12-divergence-research.md`
+against `regex` 2026.7.19 (submodule `1760a20647f1c2ddcc025128407fe6f7edb905a1`), Windows 11,
+CPython 3.13/3.14; PCRE2 10.47 via `tools/probes/pcre2-partial-and-skip.py`. Line numbers are
 `upstream/src/_regex.c` at that commit.
-
-Order to file them in, if the owner wants them staged: 1 and 4 first (both are lost matches with
-short reproductions), then 2, then 3. Issue 3 overlaps the maintainer's own open #589 and may be
-better as a comment there than as a new issue.
 
 ---
 
@@ -299,7 +299,9 @@ turn out to be bugs the maintainer has **already fixed**, so reporting them woul
 
 ---
 
-## 5. An overlapped scan with `(*SKIP)` contradicts the same pattern's own `match` - HOLD, see above
+## 5. An overlapped scan with `(*SKIP)` contradicts the same pattern's own `match`
+
+**HOLD lifted 2026-09-12:** re-run against 2026.9.10, identical output, so issue 613's fix does not cover it.
 
 **Title:** overlapped `finditer` with `(*SKIP)` returns a match shorter than the pattern's minimum
 width

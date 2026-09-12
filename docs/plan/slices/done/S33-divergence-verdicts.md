@@ -47,7 +47,7 @@ inverted later.**
    list the residual rows in a strict manifest that fails when they stop diverging - the
    ROADMAP Phase 6 shape, pulled forward. Either way the default wave must be green with `verbs`
    in it, and every excluded row must be named.
-5. **Draft the upstream report** into `docs/plan/upstream-reports/2026-09-12-draft.md`: one issue
+5. **Draft the upstream report** into `docs/plan/upstream-reports/LEDGER.md`: one issue
    per defect (`..(*SKIP)xx` retry-below-commit; lazy-repeat partial `ba??x`; `\b$` reversed
    search inconsistency; the reversed fullmatch if item 2 confirms it), each with a minimal
    runnable reproduction pinned to 2026.7.19, the faulting function named, the fix proposed, and
@@ -128,7 +128,7 @@ node, `:11770`), so `locate_required_string` is the only prefilter the recorder 
 and S33 added `partial-sliced` to `PREFILTER_FREE_GENERATORS` after finding that on a partial row it
 can suppress a partial outright rather than merely move an attempt.
 
-**Item 5.** `docs/plan/upstream-reports/2026-09-12-draft.md`, four issues, every reproduction run
+**Item 5.** `docs/plan/upstream-reports/LEDGER.md`, four issues, every reproduction run
 and its output quoted. Not filed.
 
 ### What was not done, and why

@@ -102,7 +102,7 @@ public enum FuzzyRegexOptions
 
     /// <summary>
     /// Enhanced behaviour: nested sets, set operations, and the other mrab-regex extensions.
-    /// Upstream <c>VERSION1</c> / <c>V1</c>, and upstream's default.
+    /// Upstream <c>VERSION1</c> / <c>V1</c>. Not the default: upstream's effective <c>DEFAULT_VERSION</c> is <c>VERSION0</c> (set in <c>_main.py</c>), and so is this port's.
     /// </summary>
     Version1 = 0x100,
 }
