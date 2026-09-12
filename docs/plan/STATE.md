@@ -5,7 +5,7 @@ Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 **Current slice:** none. S35 is closed. **Next:** S36, the Phase 4 close -
 `pwsh -File tools/launch-slice.ps1 s36`. It is the last slice of the phase.
 
-**Blockers:** none.
+**Blockers:** none. The default wave (300 rows) is green at three seeds; `verbs` at 2000 is not, see below.
 
 **Where the port stands:** ratchet GREEN, 5768 tests, 5583 passing, parity **90.6%**, tree clean.
 Default oracle GREEN at three seeds, 6000 rows each. Release build and ReSharper inspections clean.
@@ -18,20 +18,18 @@ entry is deleted; two surviving rows are a different mechanism, now
 `overlapped-skip-stale-slice-reversed`. (2) `Sequence.FixFullCasefold` sliced the unfolded run with
 folded offsets, which crashed on `(?r)^İﬁ` and silently answered `None` to `ﬁaﬁ` against `fiafi`.
 
-**Known bug left open, and it is the only one:** ledger entry 7 - `İ` never reaches the full fold,
-because upstream's expansion inventory is not lower-cased where the text it is sought in is. Fixing
-it properly means changing the folding tables, so it needs a slice of its own before 1.0. **Owner
-decision wanted:** does Phase 6's sweep take it, or does it get its own slice?
+**Known bug left open, and where it goes:** ledger entry 7 - `İ` never reaches the full fold - is on
+Phase 6's fix list (ROADMAP, first item of the sweep's third slice); it needs the folding tables changed.
+**S36 opens by judging the three `verbs` rows still unexpected at 2000 rows** (seeds 7, 4242): one
+looks like a port bug (row 1567: the overlapped reversed scan drops a match the engine finds
+stateless), one like upstream's stateful scanner (row 1863), and one (row 1439) records differently
+in the wave than in isolation - upstream's answer depends on call order. Details in the S36 file.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds by default). Controls:
-`python tools/run-controls.py --slices S29,S31,S33,S35`. Delete `.scratch/control-waves/` after a
-generator change. S35-A fires at 2 of 5 seeds - a thin control, and the widening it wants (a
-trailing `$` share in `_verb_pattern`) is named in S35's notes as Phase 6 oracle hardening.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Controls: `python tools/run-controls.py
+--slices S29,S31,S33,S35`; S35-A is thin (2 of 5 seeds), widening named in S35's notes for Phase 6.
 
-**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`, seven entries now).
-Nothing is filed until everything else in the plan is done, and the owner approves the text first.
-Every entry re-verified against 2026.9.10 on 2026-09-12: 614's fix does **not** cover S30's
-`(?<=(?&a))c`, and 613's does **not** cover the overlapped-`(*SKIP)` family.
+**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`, seven entries): nothing
+filed until everything else in the plan is done. Re-verified against 2026.9.10 on 2026-09-12.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
 real. Phase 4: 9 slices closed, 1 to go.

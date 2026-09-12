@@ -218,7 +218,10 @@ error-propagation PRs (615-618) that have nothing to port. Three slices, in this
    Phase 8, each entry re-verified against the then-current release and approved by the owner first.
 3. **Our own findings**: every divergence the research documents and every gap test marked as an
    upstream bug gets the same reproduce, fix-if-ours, draft-if-theirs treatment, so that the list of
-   known bugs - ours or inherited - is empty before Phase 7 touches the engine.
+   known bugs - ours or inherited - is empty before Phase 7 touches the engine. **Ledger entry 7 - `İ` (U+0130) never
+   reaches the full case fold because upstream's expansion inventory is not lower-cased where the text
+   it is sought in is - is the first item on this list** (S35, 2026-09-12): a port bug inherited from
+   upstream, fixable only by changing the folding tables, so it is a slice of its own here.
 
 The estimate moves from 7-12 to 9-14 for the two slices this adds beyond the sweep already planned.
 

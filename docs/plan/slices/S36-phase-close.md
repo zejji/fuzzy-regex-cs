@@ -12,6 +12,32 @@ the oracle has swept them in combination, and Phase 5's author has a handover.
 
 ## Scope
 
+- **First, judge the three `verbs` rows still unexpected at 2000 rows** (seeds 7 and 4242; S35 left
+  them). All are reversed overlapped scans with `(*SKIP)` where upstream reports MORE matches than
+  this port. Probed at the checkpoint (`tools/probes/upstream-reversed-overlapped-skip.py`, and the
+  recorder run on each row in isolation):
+  - **Row 1567 (seed 4242)** `(?r)(?:[^\d]{2,4}(*SKIP)A|😀)$` MULTILINE on the emoji subject: upstream
+    `[(4,9),(7,8)]` both in the wave and in isolation, and upstream's stateless `search(endpos=8)` is
+    `(7,8)`; **this port's own stateless search at the same end position also finds it** (UTF-16
+    `(12,14)`) yet its overlapped scan reports only `(8,15)`. The scan is dropping a match the engine
+    finds, most likely a slice bound a `(*SKIP)` moved in the first scan and the scanner carried into
+    the next. **Port bug on the evidence so far**: fix test-first, then re-check row 1439.
+  - **Row 1863 (seed 4242)** `(?r)([^a]{2,4}(*SKIP)[a\d])((?:[^\d]++(*SKIP)\s|\ ))` on `b0 0
+ A`:
+    upstream `[(0,6),(0,5)]` but its own stateless `search(endpos=5)` and `match(endpos=5)` are `None`,
+    so the second match is upstream's stateful scanner carrying a moved slice - the case-F mechanism.
+    **Upstream bug, port right** unless a probe says otherwise; classify in `ExpectedDivergences` and
+    add to the ledger's entry 5.
+  - **Row 1439 (seed 7)**: the wave recorded upstream at 3 matches, but the recorder run on that row
+    alone gives **1**, identical to the port. Upstream's answer depends on what ran before it in the
+    same process - a `(*SKIP)`-moved bound surviving across independent calls through the compiled
+    pattern's cached scanner state, or similar. Confirm by recording the row after its wave
+    predecessors, name the mechanism, and record it as a ledger entry: an oracle row whose ground
+    truth depends on call order is a recorder hazard for every later wave, so decide whether the
+    recorder must isolate each row (fresh process or `cache_pattern=False`) from here on.
+- **Ledger entry 7 (`İ` never reaches the full fold) is decided: it goes on Phase 6's fix list** (owner
+  rule: fixed before 1.0; it needs the folding tables changed, which is a slice of its own there).
+  Record that in the ROADMAP's Phase 6 opening and in the ledger; nothing else about it here.
 - **Widen the `interactions` generator** to compose the six new families with the S16-S25 ones:
   a lookaround round a group call inside a conditional inside a repeat, cut short under
   `partial=True`, under `(?p)`, with a `(*PRUNE)` in one alternative - the interactions no
