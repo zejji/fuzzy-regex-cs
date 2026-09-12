@@ -986,5 +986,36 @@
       4242,
       7
     ]
+  },
+  {
+    "id": "S33-A",
+    "name": "the reversed string test bounds itself by text_start, not slice_start",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "            case Opcode.StringRev:",
+    "anchorNth": 1,
+    "before": "                    if (pos <= state.SliceStart)\n",
+    "after": "                    if (pos <= state.TextStart)\n",
+    "generator": "partial-sliced",
+    "count": 8000,
+    "seeds": [
+      31,
+      4242
+    ]
+  },
+  {
+    "id": "S33-B",
+    "name": "try_match never consults a string test node at all",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int TryMatch(MatchState state, NextNode next, int textPos, out Position nextPosition)",
+    "anchorNth": 1,
+    "before": "        if (IsStringTest(test.Op))\n",
+    "after": "        if (test.Op == Opcode.Failure && IsStringTest(test.Op))\n",
+    "generator": "partial-sliced",
+    "count": 2000,
+    "seeds": [
+      31,
+      4242,
+      7
+    ]
   }
 ]

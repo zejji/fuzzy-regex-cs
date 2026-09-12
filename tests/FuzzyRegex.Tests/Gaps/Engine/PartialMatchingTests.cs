@@ -275,7 +275,18 @@ public sealed class PartialMatchingTests
         // So this cannot be repaired by adding guards to the default arm: it needs upstream's
         // specialised LAZY_REPEAT_ONE arms, which are the Phase 7 optimisation the S31 slice file
         // holds out of scope. See docs/PORTMAP.md's row for that sub-switch and DECISIONS
-        // 2026-09-12. When those arms land, this test inverts: expect (0,3), (0,4), (0,3), (0,3).
+        // 2026-09-12.
+        //
+        // PERMANENT, decided 2026-09-12: the port is right and UPSTREAM HAS A BUG, so when those arms
+        // land this test does NOT invert - a Phase 7 slice that turns it red has ported the bug with
+        // the optimisation. See docs/plan/2026-09-12-divergence-research.md. Two things settle it.
+        // First the definition, which upstream's own README gives: a partial match is one "that
+        // matches up to the end of string, but that string has been truncated and you want to know
+        // whether a complete match could be possible if the string had not been truncated" - and
+        // 'baa' cannot be extended into a match of 'ba??x', because 'a??' is capped at one. Second
+        // the second engine: PCRE2 10.47, called directly (tools/probes/pcre2-partial-and-skip.py,
+        // 2026-09-12), answers NO MATCH to 'ba??x' against 'baa', soft and hard, anchored and
+        // unanchored. Upstream's own greedy twin 'ba?x' agrees with both of them.
         foreach (
             (string pattern, string subject) in new[] { ("ba??x", "baa"), ("ba{0,2}?x", "baaa"), ("(?r)xa??b", "aab") }
         )
@@ -319,8 +330,23 @@ public sealed class PartialMatchingTests
         // Measured 2026-09-12, .scratch/probe-searchstart2.py. The patterns `(?r)\m$`, `(?r)a\b$`
         // and `(?r)([abz]{1})\b$` all behave the same way, and `(?r)$` - no boundary, so no such
         // start test - agrees on all three doors. Same mechanism as S29's four `verbs` rows: see
-        // the Generator note in tools/run-oracle.ps1, and DECISIONS 2026-09-12. When `search_start`
-        // lands, this test inverts, and should then expect Success and a partial at (0, 0).
+        // the Generator note in tools/run-oracle.ps1, and DECISIONS 2026-09-12.
+        //
+        // PERMANENT, decided 2026-09-12: the port is right, upstream is internally inconsistent, and
+        // this test does NOT invert when `search_start` lands - a Phase 7 slice that turns it red has
+        // ported the bug. See docs/plan/2026-09-12-divergence-research.md. The reasoning is the
+        // maintainer's own, from upstream issue 589: `\b` is evaluated against the real string, and
+        // the empty string contains no word character, so there is no boundary at position 0 to be
+        // partial about. PCRE2 10.47 answers a partial here, but on a different rule of its own -
+        // `pcre2partial`'s "the next pattern item must be one that inspects a character" test, which
+        // upstream deliberately does not share (README's `\d{4}` example, upstream issue 469) - so it
+        // is not a second opinion on the same question. What is decisive is that upstream's own
+        // `match` and `fullmatch` answer None to this row, and only the door that consults
+        // `search_start` answers otherwise.
+        //
+        // The `partial` and `partial-sliced` generators ARE on the default oracle list from S33, with
+        // these rows classified as `search-start-partial` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
         var pattern = new FuzzyRegex(@"(?r)\b$");
 
         pattern.Match("", partial: true).Success.Should().BeFalse("search_start is not ported");
@@ -336,47 +362,83 @@ public sealed class PartialMatchingTests
         (anchored.Index, anchored.Length).Should().Be((0, 0));
     }
 
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_reverse_partial_at_the_left_edge_of_a_narrowed_slice_is_not_found_here()
+    public void A_reverse_partial_at_the_left_edge_of_a_narrowed_slice_is_found()
     {
-        // Raised by the S31 blind review and left for a slice of its own. Half of upstream's partial
-        // arms are bounded by slice_start/slice_end and half by text_start/text_end - compare
+        // Raised by the S31 blind review, diagnosed and fixed in S33. Half of upstream's partial arms
+        // are bounded by slice_start/slice_end and half by text_start/text_end - compare
         // try_match_STRING (upstream/src/_regex.c:7396, slice_end) with the STRING opcode's own arm
-        // in basic_match (text_end) - and the two agree exactly as long as the slice IS the whole
-        // subject. Narrow it and they part company; `Matcher.TryMatch` consults only the
-        // one-character tests, so the slice_start family is never asked here.
+        // in basic_match (:14730, text_end) - and the two agree exactly as long as the slice IS the
+        // whole subject. At the top level slice_end IS text_end (do_match sets both to endpos,
+        // :18435), so only the reversed half can part company, and it does the moment pos > 0.
+        // `Matcher.TryMatch` consulted only the one-character tests, so the slice_start family was
+        // never asked here; S33 ported the six try_match_STRING* arms (:7383-:7668).
         //
-        // Measured 2026-09-12, .scratch/review-f2.py:
+        // Measured against regex 2026.7.19 on 2026-09-12, .scratch/up-s33-expected.py:
         //   compile(r'(?r)a(bc)*').match('abc', 1, 1, partial=True) -> ((1, 1), partial)
+        //   compile(r'(?r)a(bc)*').match('abc', 2, 2, partial=True) -> ((2, 2), partial)
         //   compile(r'(?r)ab|abcd').match('ab', 1, 2, partial=True) -> ((1, 2), partial)
         //   compile(r'(?r)a(bc)*').finditer('abab', 1, 4, partial=True) -> [((2,3), False), ((1,1), True)]
-        //
-        // The oracle generator that finds the family is `partial-sliced`, deliberately NOT in the
-        // default list: 8 rows in 2000 at seed 31, every one reversed. See the Generator note in
-        // tools/run-oracle.ps1 and DECISIONS 2026-09-12. When the family is fixed, this test
-        // inverts: expect a partial at (1, 1) and at (1, 2).
-        new FuzzyRegex("(?r)a(bc)*")
-            .MatchAtStart("abc", beginning: 1, length: 0, partial: true)
-            .Success.Should()
-            .BeFalse("upstream answers a partial at (1, 1) and this port does not");
-        new FuzzyRegex("(?r)ab|abcd")
-            .MatchAtStart("ab", beginning: 1, length: 1, partial: true)
-            .Success.Should()
-            .BeFalse("upstream answers a partial at (1, 2) and this port does not");
+        foreach (int beginning in new[] { 1, 2 })
+        {
+            Match empty = new FuzzyRegex("(?r)a(bc)*").MatchAtStart("abc", beginning, length: 0, partial: true);
 
-        // The scan inherits it: upstream's finditer yields the complete match and then the partial,
-        // where this port yields only the complete one.
+            empty.PartialMatch.Should().BeTrue($"upstream answers a partial at ({beginning}, {beginning})");
+            (empty.Index, empty.Length).Should().Be((beginning, 0));
+        }
+
+        Match branch = new FuzzyRegex("(?r)ab|abcd").MatchAtStart("ab", beginning: 1, length: 1, partial: true);
+
+        branch.PartialMatch.Should().BeTrue();
+        (branch.Index, branch.Index + branch.Length).Should().Be((1, 2));
+
+        // The scan inherits it: the complete match first, then the partial at the left edge.
         new FuzzyRegex("(?r)a(bc)*")
             .Matches("abab", beginning: 1, length: 3, partial: true)
             .Select(m => (m.Index, m.Length, m.PartialMatch))
             .Should()
-            .Equal((2, 1, false));
+            .Equal((2, 1, false), (1, 0, true));
 
-        // Unnarrowed, the same patterns agree with upstream - which is what confines the family.
+        // Unnarrowed, the same pattern agreed with upstream before the fix and still does.
         new FuzzyRegex("(?r)ab|abcd")
             .MatchAtStart("b", partial: true)
             .PartialMatch.Should()
             .BeTrue();
+    }
+
+    [Test]
+    public void The_narrowed_slice_partial_is_a_per_opcode_answer_and_not_a_general_rule()
+    {
+        // The trap in the S33 fix, pinned so nobody "simplifies" it into one rule about slice_start.
+        // Upstream's CHARACTER_REV opcode arm (:12190) and its try_match_CHARACTER_REV (:7137) both
+        // bound by text_start, so a single reversed character at the left edge of a narrowed slice is
+        // NO match; only the STRING family's try_match arms bound by slice_start. Measured
+        // 2026-09-12, .scratch/up-rev-partial.py and .scratch/up-rev-partial2.py:
+        //
+        //   compile(r'(?r)a').match('abc', 1, 1, partial=True)      -> None
+        //   compile(r'(?r)a').match('abc', 0, 0, partial=True)      -> ((0, 0), partial)
+        //   compile(r'(?r)ab*').match('abc', 1, 1, partial=True)    -> None   (REPEAT_ONE, not STRING)
+        //   compile(r'(?r)a(b)*').match('abc', 1, 1, partial=True)  -> None   (one-character body)
+        //   compile(r'(?r)a(bc)+').match('abc', 1, 1, partial=True) -> None   (min 1, tail never tried)
+        //   compile(r'(?r)qz|qzzz').match('qz', 1, 2, partial=True) -> None   (common suffix 'z' is
+        //                                                   factored out, so the test is CHARACTER_REV)
+        foreach (string pattern in new[] { "(?r)a", "(?r)ab*", "(?r)a(b)*", "(?r)a(bc)+" })
+        {
+            new FuzzyRegex(pattern)
+                .MatchAtStart("abc", beginning: 1, length: 0, partial: true)
+                .Success.Should()
+                .BeFalse($"upstream answers None for {pattern} on abc[1:1]");
+        }
+
+        new FuzzyRegex("(?r)qz|qzzz")
+            .MatchAtStart("qz", beginning: 1, length: 1, partial: true)
+            .Success.Should()
+            .BeFalse("the branches share the suffix 'z', so the test node is CHARACTER_REV");
+
+        // At pos 0 the slice starts where the subject does, and the character arm answers a partial.
+        Match atZero = new FuzzyRegex("(?r)a").MatchAtStart("abc", beginning: 0, length: 0, partial: true);
+
+        atZero.PartialMatch.Should().BeTrue();
+        (atZero.Index, atZero.Length).Should().Be((0, 0));
     }
 }

@@ -205,7 +205,22 @@ def _to_index_length(offsets: list[int], span: tuple[int, int]) -> list[int]:
 # expect the `verbs` wave to go red until the port's own prefilter is right, and invert the two gap
 # tests in tests/FuzzyRegex.Tests/Gaps/Engine/BacktrackingVerbTests.cs that pin (4, 8) and (2, 6).
 # Both are marked. See docs/plan/slices/done/S29-backtracking-verbs.md and DECISIONS 2026-09-11.
-PREFILTER_FREE_GENERATORS = ("verbs",)
+#
+# S33 added `partial-sliced` for the same reason on a different symptom. The prefilter does not only
+# move an attempt; on a partial match it can SUPPRESS one, because `locate_required_string` returning
+# -1 makes `basic_match` answer FAILURE (:11812) before any partial arm is reached, and that check
+# runs for `match` and `fullmatch` too rather than only for a search. Measured 2026-09-12,
+# .scratch/row719h.py, on the row the S33 wave found at seed 31:
+#
+#     >>> regex.compile(r"(?rimf)(x)[\p{L}\p{N}]{2,}?").match("a\na..A", 6, 6, partial=True)
+#     None                                    # prefilter-free: ((6, 6), True), which is our answer
+#     >>> regex.compile(r"(?rimf)[\p{L}\p{N}]{2,}?").match("a\na..A", 6, 6, partial=True)
+#     ((6, 6), True)                          # the same pattern with nothing for the prefilter to find
+#
+# So plain upstream answers a partial or no match on the same subject according to whether the pattern
+# happens to carry a required literal, which is a property of the optimiser and not of the language.
+# PHASE 7 MUST DELETE THIS TOO, on the same terms as the line above.
+PREFILTER_FREE_GENERATORS = ("verbs", "partial-sliced")
 
 # Where `req_offset` and `req_chars` sit in the positional argument list `_main.py:660` passes to
 # `_regex.compile(pattern, flags, code, group_index, index_group, named_lists, named_list_indexes,
@@ -426,6 +441,33 @@ def _record_row(regex, row: dict) -> dict:
 
     recorded["codepointSpan"] = list(match.span(0))
     recorded["outcome"] = {"kind": "match", **_describe_match(compiled, match, _utf16_offsets(subject))}
+
+    # One extra question, asked only of a SEARCH that answered a partial, and recorded as a fact
+    # about upstream rather than compared against anything: does upstream's own `match` answer the
+    # same partial over the span the search reported?
+    #
+    # `search_start` (upstream/src/_regex.c:8385) is consulted on a search and nowhere else, and
+    # every one of its scanners can report RE_ERROR_PARTIAL of its own where the slow path has no
+    # such arm. So "search says partial here, match says None here" is upstream's two doors
+    # disagreeing, which is the signature of the prefilter family the consumer's
+    # `search-start-partial` entry accounts for. "Both doors say partial" is the matcher's own
+    # answer, and a port that misses THAT has a bug.
+    #
+    # Added by S33 because without it the entry could not tell the two apart, and a control proved
+    # it: mutating `IsStringTestPartial`'s reversed bound back to `text_start` - the exact defect
+    # S33 fixed - produced ZERO reported divergences over 2,000 rows at three seeds, because the one
+    # row that caught it was being classified as the prefilter family. With this field the same
+    # control fires. Measured 2026-09-12; six prefilter rows at seed 31 all answer None from `match`
+    # and the real-bug row answers the same partial (.scratch/discriminator.py).
+    if operation == "search" and partial and match.partial:
+        start, end = match.span(0)
+        try:
+            same = compiled.match(subject, start, end, partial=True)
+        except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
+            recorded["searchOnlyPartial"] = False
+        else:
+            recorded["searchOnlyPartial"] = same is None or not same.partial
+
     return recorded
 
 

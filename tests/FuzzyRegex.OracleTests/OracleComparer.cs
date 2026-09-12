@@ -52,7 +52,7 @@ internal static class OracleComparer
     /// only way this loop can be shown to notice a wrong answer while the real engine still
     /// answers <see cref="OracleVerdict.Unsupported"/> to everything.
     /// </param>
-    /// <returns>The tally and one rendered block per diverging row.</returns>
+    /// <returns>The tally, one rendered block per diverging row, and one per expected divergence.</returns>
     public static OracleRunSummary RunWave(IEnumerable<OracleRow> rows, Func<OracleRow, IOracleOutcome?> engine)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -60,18 +60,34 @@ internal static class OracleComparer
 
         var tally = new Dictionary<OracleVerdict, int>();
         var divergences = new List<string>();
+        var expected = new List<string>();
         foreach (OracleRow row in rows)
         {
             IOracleOutcome? actual = engine(row);
             OracleVerdict verdict = Compare(row, actual);
+
+            // A divergence only. An agreement is never reclassified: the entries exist to account
+            // for rows the two engines answer differently, and one that stopped diverging must show
+            // up as agreement so `Every_expected_divergence_still_diverges` can call the entry stale.
+            ExpectedDivergence? accounted =
+                verdict == OracleVerdict.Diverge && actual is not null ? ExpectedDivergences.For(row, actual) : null;
+            if (accounted is not null)
+            {
+                verdict = OracleVerdict.Expected;
+            }
+
             tally[verdict] = tally.GetValueOrDefault(verdict) + 1;
             if (verdict == OracleVerdict.Diverge)
             {
                 divergences.Add(OracleWave.Describe(row, actual));
             }
+            else if (accounted is not null)
+            {
+                expected.Add(OracleWave.Describe(row, actual, accounted));
+            }
         }
 
-        return new OracleRunSummary(tally, divergences);
+        return new OracleRunSummary(tally, divergences, expected);
     }
 
     /// <summary>Puts a row's question to this port.</summary>

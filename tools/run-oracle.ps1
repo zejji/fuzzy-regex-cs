@@ -15,81 +15,95 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    'verbs' is deliberately NOT in the default list, and S29 is the slice that left it out. It finds
-    four rows in 1200 at seed 20260913 - 502, 504, 519 and 863, all '(?r)', all carrying a '(*SKIP)',
-    all a multi-match operation - where this port starts a later match of the same scan at a position
-    upstream never tries. That shows three ways: row 502 gains a match upstream does not have, rows
-    519 and 863 keep the count and move one match's span, and row 504 splits into three parts where
-    upstream splits into one. They are NOT a verb defect. They are upstream's 'search_start'
-    (upstream/src/_regex.c:8385), which this port does not
-    implement: each 'search_start_*' scanner bounds itself with text_end/text_start where the
-    'try_match_*' predicate 'basic_match' consults bounds itself with slice_end/slice_start. Nothing
-    but a '(*SKIP)' moves the slice inside an attempt, so the two agree on every other pattern -
-    and once one does, upstream's fast path walks past a start position its own slow path accepts,
-    while this port, having only the slow path, tries it. Minimised to
+    'partial-sliced' joined the default list in S33. 'verbs' did NOT, and the reason changed:
+    it is no longer the four judged rows S29 held it out for - those are classified now - but a
+    FIFTH, unjudged family the S33 blind review found by running the generator at seeds S29 never
+    used. Details below under "What S33 found and did not fix".
 
-        regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\n' + 'b', regex.M)   # upstream: one match
+    Both generators were held out because a handful of their rows diverge for a reason already
+    judged, and holding a whole generator out for a few per cent of its rows trades all of its
+    coverage for none. What replaced that is an accounted-for list,
+    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: three named families, each with the reason,
+    the engine that is right, the permanent test that pins this port's answer, and the minimised row
+    it was found on. A row one of them accounts for is printed in the report as 'EXPECTED <id>' and
+    tallied separately; every other divergence still reds the run.
 
-    and pinned in tests/FuzzyRegex.Tests/Gaps/Engine/BacktrackingVerbTests.cs. Leaving the generator
-    in the default list would turn every later slice's oracle run red for this reason and hide that
-    slice's own result. Run it explicitly:
+    Read that file before trusting a green wave. It is NOT xfail_strict - a wave's rows come from a
+    random seed, so there is no row identity to pin - and what makes it honest instead is
+    'Every_expected_divergence_still_diverges', which runs each entry's minimised row through the
+    live engine on every oracle run and fails when one stops diverging.
 
-        tools/run-oracle.ps1 -Generator verbs -Count 1200 -Seed 20260913
+    The three families, in short:
 
-    Phase 7 owns the fix, because porting 'search_start' is the fix; put 'verbs' back in this list
-    the moment it lands. See docs/plan/slices/done/S29-backtracking-verbs.md, docs/PORTMAP.md's
-    prefilter row and DECISIONS 2026-09-11.
-
-    Note that the recorder ALSO neutralises upstream's other start-position prefilter for this
-    generator - 'locate_required_string', see PREFILTER_FREE_GENERATORS in tools/record-oracle.py -
-    which is a different mechanism and does not fix these four rows.
-
-    'partial' IS in the default list, and shares that same 'search_start' exposure at about one row
-    in two thousand. S31 kept it in on the measured rate rather than on principle: clean over the
-    6,800 rows of a default run at seed 20260912, clean over 600 at seed 31, and 1, 2 and 1 rows in
-    2,400 at seeds 31, 4242 and 7 - so a 300-row default run reds this way roughly one time in
-    seven. Those are the ONLY rows it finds; in particular it does not reach the bounded-lazy-repeat
-    family described at the end of this note, which was found by hand rather than by a wave. The shape is always the same and recognisable on sight: a SEARCH, for a pattern whose
-    leading end in its direction of travel is an anchor plus a word boundary, over a subject with
-    no word at that edge, where upstream answers a zero-width partial at the slice edge and this
-    port answers no match. Both directions; three of the four seen were '(?r)' and the fourth was
-    '^\b...$'. Minimised to
+    'search-start-partial' - upstream's 'search_start' prefilter (upstream/src/_regex.c:8385) gives
+    every scanner a partial arm of its own; the slow path this port runs has none, and neither does
+    upstream's, which is why upstream's own 'match' and 'fullmatch' answer None to the same row:
 
         regex.compile(r'(?r)\b$').search('', partial=True)   # upstream: (0, 0) partial; ours: None
 
-    and pinned in tests/FuzzyRegex.Tests/Gaps/Engine/PartialMatchingTests.cs, which also records the
-    measurement that identifies the cause: upstream's own 'match' and 'fullmatch' answer None to
-    that same row, because 'search_start' is consulted on a search and nowhere else. Phase 7 owns
-    the fix, because porting 'search_start' is the fix - the same sentence as for 'verbs'. If a
-    later slice finds this hiding its own result, move 'partial' out of the list below; the reason
-    to leave it in is that it is the largest single generator of partial-match coverage there is.
+    Port right, judged against PCRE2 10.47 and upstream issue 589 in
+    docs/plan/2026-09-12-divergence-research.md. It reaches 'partial' at about one row in two
+    thousand and 'partial-sliced' at about three in a thousand.
 
-    'partial-sliced' is NOT in the default list, and S31 is the slice that left it out. It is the
-    'partial' generator with one thing added - a pos/endpos slice narrower than the subject - which
-    is the only way to tell upstream's two families of partial arm apart: half are bounded by
-    slice_start/slice_end and half by text_start/text_end, and they agree exactly as long as the
-    slice IS the subject. Compare try_match_STRING (upstream/src/_regex.c:7396, slice_end) with the
-    STRING opcode's own arm in basic_match (text_end).
+    'search-start-skip-slice' - the same prefilter, seen from the other end. Each 'search_start_*'
+    scanner bounds itself with text_end/text_start where the 'try_match_*' predicate 'basic_match'
+    consults bounds itself with slice_end/slice_start. Nothing but a '(*SKIP)' moves the slice inside
+    an attempt, so the two agree on every other pattern; once one does, upstream's fast path walks
+    past a start position its own slow path accepts:
 
-    It finds 8 rows in 2000 at seed 31, one coherent family: a REVERSED pattern whose partial is at
-    the LEFT edge of a narrowed slice. Six are upstream answering a zero-width partial at slice_start
-    where this port answers no match; two are the other way round, this port matching where upstream
-    does not (rows 756 and 1026). Every one is '(?r)'. Raised by the S31 blind review, which
-    minimised the first of them by hand:
+        regex.finditer(r'(?r)(?:a*(*SKIP)b|[^a-f])$', '\n' + 'b', regex.M)   # upstream: one match
 
-        regex.compile(r'(?r)a(bc)*').match('abc', 1, 1, partial=True)   # upstream: (1, 1) partial
-        regex.compile(r'(?r)ab|abcd').match('ab', 1, 2, partial=True)   # upstream: (1, 2) partial
+    Four rows in 1200 at seed 20260913 - 502, 504, 519 and 863, all '(?r)', all a multi-match
+    operation. Port right on every '(*SKIP)' case PCRE2 can be asked.
 
-    Both are None here, and both are pinned in PartialMatchingTests.cs. This is a slice's worth of
-    work rather than a review fix - it spans the STRING test nodes, the boundary opcodes and at
-    least one over-match - so S31 recorded it and stopped. Run it explicitly:
+    'reverse-fullmatch-narrowed-slice' - an upstream bug, settled by S33. 'try_match's RE_OP_SUCCESS
+    arm (:7829) bounds a reversed fullmatch by text_start where 'basic_match' (:15167) and the search
+    loop (:11880) both bound it by slice_start, so a general repeat asking whether its tail could
+    match is told no:
 
-        tools/run-oracle.ps1 -Generator partial-sliced -Count 2000 -Seed 31
+        regex.compile(r'(?r)(ab)+').fullmatch('xabz', 1, 3)   # upstream: None; ours: (1, 3)
 
-    Put it in the list below once the family is fixed.
+    Phase 7 owns the first two, because porting 'search_start' is the fix - and it must port the
+    prefilter WITHOUT importing its answers, which is what the pinned tests are for. The third is
+    upstream's to fix; see docs/plan/upstream-reports/2026-09-12-draft.md.
 
-    A THIRD family is known and NO generator here reaches it, so a green wave does not mean it is
-    gone. A bounded lazy repeat that reaches its maximum loses its partial:
+    The recorder also neutralises upstream's other start-position prefilter, 'locate_required_string',
+    for 'verbs' and 'partial-sliced' - see PREFILTER_FREE_GENERATORS in tools/record-oracle.py. That
+    is a different mechanism from 'search_start', it IS reachable from Python where 'search_start' is
+    not, and on a partial row it can suppress a partial outright rather than merely move an attempt.
+
+    WHAT S33 FOUND AND DID NOT FIX. Running the generators at seeds no earlier slice had used turned
+    up three unjudged divergences, none of them caused by S33's change (each reproduces identically
+    on the commit before it) and none of them in its scope. **A default wave is NOT reliably green
+    today**, and was not before S33 either - the single seed each slice happened to run was what made
+    it look so. All three are reproduced, with their commands, in docs/plan/STATE.md and are the
+    subject of the next slice.
+
+    1. Forward '(*SKIP)' inside a bounded repeat, and the reason 'verbs' stays off this list. Red at
+       seeds 7, 31 and 4242; clean only at 20260913, which is the seed S29 quoted:
+
+           regex.finditer(r'(?:[^\d](*SKIP)){2,3}', '\r\naabb ', regex.M, overlapped=True)
+           # upstream (0,3) (1,4) (2,4) (3,4) (4,7) (5,7); this port (2,5) and (3,6) in the middle
+
+       Not the prefilter: upstream answers the same with 'locate_required_string' switched off.
+
+    2. A reversed group call records a capture whose end is before its start, which is upstream's
+       own number and not a translation slip here:
+
+           regex.compile(r'(?r)(?<g>[ab]+)(?=(?&g))b').search('>abbaa\r<').spans('g')
+           # [(3, 2), (1, 3)] - the first is an inverted span for an empty capture
+
+       This port records (3, 3) for it. 'recursion' is in the list below and has been since S30, so
+       this one reds a default wave at seed 4242 whatever happens to 'verbs'.
+
+    3. The bounded-lazy-repeat family below, which the note used to say no generator reaches. It
+       does: 'partial' and 'partial-sliced' at seed 314159 give two rows of it, '^([A-Z]??)__$' over
+       '__aA ' and '(?r)A(.??)' over '_ﬃ'[0:2]. Judged and PORT RIGHT, so it could be
+       classified - it is not, because no discriminator for it has been found that does not also
+       swallow a real missed partial. Until one is, this is a known red.
+
+    A FOURTH FAMILY, and the one item 3 above is about. A bounded lazy repeat that reaches its
+    maximum loses its partial:
 
         regex.compile('ba??x').match('baa', partial=True)   # upstream: (0, 3) partial; ours: None
 
@@ -120,7 +134,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,posix',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix',
     [int]$Seed = -1,
     [int]$Count = 300,
     [string]$Rows,

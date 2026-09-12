@@ -123,7 +123,20 @@ public sealed class BacktrackingVerbTests
     [Test]
     public void Skip_past_a_required_string_tries_a_start_position_upstreams_prefilter_skips()
     {
-        // PHASE 7: INVERT THIS TEST, DO NOT DELETE IT.
+        // PERMANENT: the port is right, see docs/plan/2026-09-12-divergence-research.md. A change
+        // here is a regression. The earlier instruction to invert this test when Phase 7 lands is
+        // WITHDRAWN (owner rule, 2026-09-12, DECISIONS and ROADMAP's Phase 7 entry): Phase 7 ports
+        // upstream's prefilters without importing their answers, so a Phase 7 slice that turns this
+        // red has ported a bug, and the fix is to make the prefilter honour the slice the verb moved
+        // the way upstream's own slow path does.
+        //
+        // The second engine, quoted. PCRE2 10.47 called directly through libpcre2-8-0.dll
+        // (tools/probes/pcre2-partial-and-skip.py, 2026-09-12) answers (4, 8) to the first case here,
+        // with its own start optimiser on AND with PCRE2_NO_START_OPTIMIZE - so it agrees with this
+        // port either way, and its own manual says why upstream and Perl do not: "When one of these
+        // optimizations bypasses the running of a match, any included backtracking verbs will not, of
+        // course, be processed... Experiments with Perl suggest that it too has similar
+        // optimizations" (pcre2pattern, "Optimizations that affect backtracking verbs").
         //
         // Upstream's 'locate_required_string' (upstream/src/_regex.c:11082) moves the *first* attempt
         // to 'found_pos - req_offset', so positions before that are never tried. Skipping a position
@@ -141,8 +154,12 @@ public sealed class BacktrackingVerbTests
         // at offset 6 (rx_origin now 3)'), and PCRE2 documents the class under "Optimizations that
         // affect backtracking verbs" - so this is not a bug on either side. This port has no
         // prefilter until Phase 7 and answers what upstream answers with its prefilter switched off.
-        // The moment Phase 7 ports 'locate_required_string', both of these become no-match, and the
-        // 'prefilter-free' wrapper in tools/record-oracle.py has to go at the same time.
+        // When Phase 7 ports 'locate_required_string' the 'prefilter-free' wrapper in
+        // tools/record-oracle.py goes at the same time - but these two assertions do NOT change,
+        // because the prefilter has to be made to honour the moved slice rather than to reproduce
+        // upstream's answer. Upstream's own '..(*SKIP)xx' case is the proof that its answer is wrong:
+        // it retries at a position BELOW the one the verb committed past, which PCRE2's definition of
+        // '(*SKIP)' forbids outright (upstream (1,5); PCRE2, Perl and this port (2,6)).
         FuzzyRegex
             .Match("ab cd xx", "(?:..(*SKIP)x|q)x")
             .Should()
@@ -153,9 +170,23 @@ public sealed class BacktrackingVerbTests
     [Test]
     public void Skip_under_reverse_tries_a_start_position_upstreams_search_start_skips()
     {
-        // PHASE 7: INVERT THIS TEST, DO NOT DELETE IT. Found 2026-09-11 by the S29 oracle wave
-        // (generator 'verbs', seed 20260913, rows 502, 504, 519 and 863), and NOT the required-string
+        // PERMANENT: the port is right, see docs/plan/2026-09-12-divergence-research.md. A change
+        // here is a regression, and the earlier instruction to invert it in Phase 7 is WITHDRAWN on
+        // the same grounds as the test above. Found 2026-09-11 by the S29 oracle wave (generator
+        // 'verbs', seed 20260913, rows 502, 504, 519 and 863), and NOT the required-string
         // interaction the test above pins - the two were conflated in S29's first verdict.
+        //
+        // The second engine cannot be quoted on this one: PCRE2 has no reverse matching, so there is
+        // nothing to ask. What settles it instead is that UPSTREAM DISAGREES WITH ITSELF - its
+        // 'search_start_END_OF_LINE_rev' bounds by text_end while its own slow path bounds by
+        // slice_end, and emulating the fast path in front of each attempt reproduces upstream here
+        // exactly (S29's notes, and the emulation paragraph below). A prefilter is supposed to skip
+        // positions that cannot match, not positions whose answer it disagrees with.
+        //
+        // These rows are classified as 'search-start-skip-slice' in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs from S33, but the generator is still
+        // NOT on the default oracle list - the S33 blind review found a fifth, unjudged '(*SKIP)'
+        // family at seeds S29 never ran. See the Generator note in tools/run-oracle.ps1.
         //
         // Upstream's 'search_start' (upstream/src/_regex.c:8385) is the fast scan for the next
         // plausible start position, and 'basic_match' takes it whenever the start test has a

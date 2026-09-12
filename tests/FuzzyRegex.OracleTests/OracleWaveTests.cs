@@ -52,7 +52,7 @@ public sealed class OracleWaveTests
         wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
 
         OracleRunSummary run = OracleComparer.RunWave(wave.Rows, OracleComparer.Run);
-        string summary = OracleWave.WriteReport(wave.Header, wave.Rows.Count, run.Tally, run.Divergences);
+        string summary = OracleWave.WriteReport(wave.Header, wave.Rows.Count, run.Tally, run.Divergences, run.Expected);
 
         // Count, not the collection: a wave is hundreds of rows, and a failure that dumps every
         // block is unreadable. The report file holds them all.
@@ -65,6 +65,66 @@ public sealed class OracleWaveTests
                 Environment.NewLine,
                 run.Divergences.Count > 0 ? run.Divergences[0] : ""
             );
+    }
+
+    [Test]
+    public void Every_expected_divergence_still_diverges()
+    {
+        // The staleness alarm for ExpectedDivergences, and the only strict thing about that list: a
+        // wave's rows come from a random seed, so there is no row identity to pin and no predicate
+        // over the recorded half alone that is narrow enough to demand a divergence. Each entry
+        // therefore carries the minimised row its family was found on, and this runs those through
+        // the live engine. The day Phase 7 ports `search_start`, or someone fixes an entry's cause
+        // without removing the entry, the row stops diverging and this goes red - which is what
+        // Chromium's TestExpectations lacks and pytest's xfail_strict has.
+        ExpectedDivergences.All.Should().NotBeEmpty();
+
+        foreach (ExpectedDivergence entry in ExpectedDivergences.All)
+        {
+            entry.Reason.Should().NotBeEmpty("{0}: an unexplained expected divergence is a hidden one", entry.Id);
+            entry.PinnedBy.Should().NotBeEmpty("{0}: the permanent test is the second alarm", entry.Id);
+
+            OracleRow row = OracleWave.ParseRows(entry.Example).Should().ContainSingle().Subject;
+            IOracleOutcome ours = OracleComparer
+                .Run(row)
+                .Should()
+                .NotBeNull("{0}: the example must be a row this port can answer", entry.Id)
+                .And.Subject.Should()
+                .BeAssignableTo<IOracleOutcome>()
+                .Subject;
+
+            OracleComparer
+                .Compare(row, ours)
+                .Should()
+                .Be(OracleVerdict.Diverge, "{0}: the example row is what makes the entry current", entry.Id);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .BeSameAs(entry, "{0}: an entry must account for its own example", entry.Id);
+        }
+    }
+
+    [Test]
+    public void An_accounted_divergence_is_reported_but_does_not_fail_the_run()
+    {
+        // Half one: the wave loop reclassifies, tallies and renders it as EXPECTED rather than
+        // dropping it. Without the rendering half, a classified row would be invisible in the report
+        // and the list would be a silencer rather than a ledger.
+        OracleRow accounted = OracleWave.ParseRows(ExpectedDivergences.All[0].Example)[0];
+        OracleRunSummary run = OracleComparer.RunWave([accounted], OracleComparer.Run);
+
+        run.Tally.GetValueOrDefault(OracleVerdict.Diverge).Should().Be(0);
+        run.Tally.GetValueOrDefault(OracleVerdict.Expected).Should().Be(1);
+        run.Divergences.Should().BeEmpty();
+        run.Expected.Should().ContainSingle().Which.Should().StartWith("EXPECTED " + ExpectedDivergences.All[0].Id);
+
+        // Half two: an ordinary wrong answer on a row no entry covers is still a divergence, so the
+        // reclassification above is a statement about the list rather than about RunWave.
+        OracleRow ordinary = OracleWave.ParseRows(_recordedRows)[0];
+        OracleRunSummary wrong = OracleComparer.RunWave([ordinary], _ => new NoMatchOutcome());
+
+        wrong.Tally.GetValueOrDefault(OracleVerdict.Expected).Should().Be(0);
+        wrong.Divergences.Should().ContainSingle().Which.Should().StartWith("DIVERGE row");
     }
 
     [Test]

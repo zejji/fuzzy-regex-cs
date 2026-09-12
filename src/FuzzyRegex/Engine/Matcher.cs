@@ -2604,7 +2604,17 @@ internal static class Matcher
 
         // Upstream's own first line: a fuzzy test node is not consulted at all (:7678).
         Node? test = next.Test;
-        if (test is null || (test.Status & NodeStatus.Fuzzy) != 0 || !IsOneCharacterTest(test.Op))
+        if (test is null || (test.Status & NodeStatus.Fuzzy) != 0)
+        {
+            return MatchStatus.Success;
+        }
+
+        if (IsStringTest(test.Op))
+        {
+            return IsStringTestPartial(state, test, textPos) ? MatchStatus.Partial : MatchStatus.Success;
+        }
+
+        if (!IsOneCharacterTest(test.Op))
         {
             return MatchStatus.Success;
         }
@@ -2613,6 +2623,178 @@ internal static class Matcher
 
         return status == MatchStatus.Partial ? status : MatchStatus.Success;
     }
+
+    /// <summary>
+    /// Whether <c>try_match</c> hands this test node to one of its six <c>try_match_STRING*</c> arms
+    /// (<c>upstream/src/_regex.c</c> <c>:7811-7827</c>).
+    /// </summary>
+    /// <param name="op">The test node's opcode.</param>
+    /// <returns><see langword="true"/> if it is a string test.</returns>
+    private static bool IsStringTest(Opcode op) =>
+        op
+            is Opcode.String
+                or Opcode.StringIgn
+                or Opcode.StringFld
+                or Opcode.StringRev
+                or Opcode.StringIgnRev
+                or Opcode.StringFldRev;
+
+    /// <summary>
+    /// The partial-match answer of upstream's six <c>try_match_STRING*</c> arms:
+    /// <c>try_match_STRING</c> (<c>upstream/src/_regex.c:7383</c>), <c>_STRING_FLD</c> (<c>:7415</c>),
+    /// <c>_STRING_FLD_REV</c> (<c>:7488</c>), <c>_STRING_IGN</c> (<c>:7559</c>), <c>_STRING_IGN_REV</c>
+    /// (<c>:7598</c>) and <c>_STRING_REV</c> (<c>:7635</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reduced the way <see cref="TryMatch"/> reduces the one-character tests: only a
+    /// <c>RE_ERROR_PARTIAL</c> answer is propagated, because reporting <c>FAILURE</c> as
+    /// <c>SUCCESS</c> costs a wasted branch and nothing else while reporting <c>PARTIAL</c> as
+    /// <c>SUCCESS</c> is a different answer. So this returns "would upstream have said partial",
+    /// which is "the string ran off the end of the SLICE before it mismatched".
+    /// </para>
+    /// <para>
+    /// <b>Slice, not subject, and that is the whole point (S33).</b> These six bound by
+    /// <c>slice_end</c> and <c>slice_start</c>, where the <c>STRING*</c> opcode arms in
+    /// <c>basic_match</c> bound by <c>text_end</c> and <c>text_start</c> (<c>:14737</c>,
+    /// <c>:15133</c>). <c>do_match</c> sets <c>text_end</c> and <c>slice_end</c> to the same
+    /// <c>endpos</c> (<c>:18435</c>), so the forward halves cannot disagree at the top level; only
+    /// <c>slice_start</c>, which is <c>pos</c>, differs from <c>text_start</c>, which is always 0.
+    /// That asymmetry is the entire bug S33 fixes: without these arms
+    /// <c>regex.compile(r'(?r)a(bc)*').match('abc', 1, 1, partial=True)</c> is a partial at (1, 1)
+    /// upstream and no match here. It is an opcode-by-opcode answer and not a rule about
+    /// <c>slice_start</c>: <c>try_match_CHARACTER_REV</c> (<c>:7137</c>) keeps the <c>text_start</c>
+    /// bound, so <c>(?r)a</c> on the same slice is no match in both engines. See
+    /// <c>Gaps/Engine/PartialMatchingTests.cs</c> and
+    /// <c>docs/plan/2026-09-12-divergence-research.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The string test node.</param>
+    /// <param name="textPos">The position to test at.</param>
+    /// <returns><see langword="true"/> if the answer is a partial match.</returns>
+    private static bool IsStringTestPartial(MatchState state, Node test, int textPos)
+    {
+        int length = test.Values.Count;
+        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        int pos = textPos;
+        int sPos = 0;
+        int foldedPos = 0;
+        int foldedLen = 0;
+
+        switch (test.Op)
+        {
+            case Opcode.String:
+            case Opcode.StringIgn:
+                for (; sPos < length; sPos++)
+                {
+                    if (pos >= state.SliceEnd)
+                    {
+                        return state.PartialSide == MatchState.PartialRight;
+                    }
+
+                    if (!SameStringChar(state, test.Op, state.CharAt(pos), test.Values[sPos]))
+                    {
+                        return false;
+                    }
+
+                    pos = state.NextPos(pos);
+                }
+
+                return false;
+            case Opcode.StringRev:
+            case Opcode.StringIgnRev:
+                for (; sPos < length; sPos++)
+                {
+                    if (pos <= state.SliceStart)
+                    {
+                        return state.PartialSide == MatchState.PartialLeft;
+                    }
+
+                    if (!SameStringChar(state, test.Op, state.CharBefore(pos), test.Values[length - sPos - 1]))
+                    {
+                        return false;
+                    }
+
+                    pos = state.PrevPos(pos);
+                }
+
+                return false;
+            case Opcode.StringFld:
+                while (sPos < length)
+                {
+                    if (foldedPos >= foldedLen)
+                    {
+                        if (pos >= state.SliceEnd)
+                        {
+                            return state.PartialSide == MatchState.PartialRight;
+                        }
+
+                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+                        foldedPos = 0;
+                    }
+
+                    if (!SameCharIgn(state.Encoding, test.Values[sPos], folded[foldedPos]))
+                    {
+                        return false;
+                    }
+
+                    ++sPos;
+                    ++foldedPos;
+
+                    if (foldedPos >= foldedLen)
+                    {
+                        pos = state.NextPos(pos);
+                    }
+                }
+
+                return false;
+            default:
+                // StringFldRev.
+                while (sPos < length)
+                {
+                    if (foldedPos >= foldedLen)
+                    {
+                        if (pos <= state.SliceStart)
+                        {
+                            return state.PartialSide == MatchState.PartialLeft;
+                        }
+
+                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(pos), folded);
+                        foldedPos = 0;
+                    }
+
+                    if (!SameCharIgn(state.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
+                    {
+                        return false;
+                    }
+
+                    ++sPos;
+                    ++foldedPos;
+
+                    if (foldedPos >= foldedLen)
+                    {
+                        pos = state.PrevPos(pos);
+                    }
+                }
+
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// <c>same_char</c> for the exact string tests and <c>same_char_ign</c> for the <c>_IGN</c> ones,
+    /// which is the only line that differs between <c>try_match_STRING</c> and
+    /// <c>try_match_STRING_IGN</c> (<c>upstream/src/_regex.c:7405</c> against <c>:7583</c>) and
+    /// between their two reversed twins (<c>:7655</c> against <c>:7622</c>).
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="op">The string opcode.</param>
+    /// <param name="ch">The character from the subject.</param>
+    /// <param name="value">The character from the pattern.</param>
+    /// <returns><see langword="true"/> if they match.</returns>
+    private static bool SameStringChar(MatchState state, Opcode op, uint ch, uint value) =>
+        op is Opcode.StringIgn or Opcode.StringIgnRev ? SameCharIgn(state.Encoding, ch, value) : SameChar(ch, value);
 
     /// <summary>
     /// Whether a <c>LAZY_REPEAT_ONE</c> backtrack has run out of text for its tail before it can

@@ -31,7 +31,7 @@ retry below that position is not permitted.
 | `ba??x` on `baa`, match, partial | partial (0,3) | None soft and hard, anchored | n/a | None | **Upstream bug.** `baa` cannot be extended to a match; upstream's greedy `ba?x` agrees with everyone. Same on `bab`. |
 | `a(bc)*` on the empty slice `abc[1:1]`, reversed, partial | partial (1,1) | None (PCRE2 rule 1: no character inspected) | n/a | **None** forward-partial, reversed-None | **Port bug.** Upstream deliberately differs from PCRE2 on empty subjects (README `\d{4}` example, issue 469) and the port follows it forward and on whole empty subjects; only the reversed narrowed-slice arm disagrees. |
 | `(?r)\b$` on empty, search, partial | partial reversed, None forward, None `match` | partial (its `\b`-at-end rule) | n/a | None | **Port right, upstream inconsistent.** Maintainer's model (issue 589) evaluates `\b` on the real string; the empty string has no word character. Upstream's reversed answer is its prefilter's. |
-| `(?r)(ab)+` fullmatch `xabz[1:3]` | None | n/a | n/a | (1,3) | **Upstream bug**, found by S32's review. Upstream fullmatches the same slice at `pos=0` (`abz[0:2]` gives (0,2)), matches it with `match`, and fullmatches it forward; only reversed + general repeat + `pos > 0` fails. Fullmatching `ab` against a slice that is exactly `ab` cannot be None. |
+| `(?r)(ab)+` fullmatch `xabz[1:3]` | None | n/a | n/a | (1,3) | **Upstream bug**, found by S32's review, **confirmed by S33 with the mechanism named** (see below). Upstream fullmatches the same slice at `pos=0` (`abz[0:2]` gives (0,2)), matches it with `match`, and fullmatches it forward; only reversed + general repeat + `pos > 0` fails. Fullmatching `ab` against a slice that is exactly `ab` cannot be None. |
 
 ## What the documents predicted, and where they were wrong
 
@@ -84,3 +84,27 @@ Every conclusively identified bug gets fixed in the port before 1.0, inherited o
 - **Report upstream**, after the owner approves the text: `..(*SKIP)xx` retry-below-commit, the
   lazy-repeat partial, the `\b$` reversed inconsistency, and the reversed-fullmatch case if S33
   confirms it. Draft: `docs/plan/upstream-reports/2026-09-12-draft.md`.
+
+## Settled by S33, 2026-09-12
+
+**The reversed empty-slice partial (port bug) is fixed.** It was `try_match`'s six
+`try_match_STRING*` arms (`:7383-7668`), which bound themselves with `slice_end`/`slice_start` where
+the `STRING*` opcode arms in `basic_match` bound themselves with `text_end`/`text_start`. `do_match`
+sets `text_end` and `slice_end` to the same `endpos` (`:18435`), which is why only the reversed half
+could ever diverge. Ported as `Matcher.IsStringTestPartial`.
+
+**The reversed narrowed-slice `fullmatch` (last open case) is upstream's bug, confirmed.** Upstream
+has three `match_all` checks and only one disagrees with the others: `try_match`'s `RE_OP_SUCCESS`
+arm (`:7832`) bounds it by `text_start`, while `basic_match`'s own `SUCCESS` opcode (`:15167`) and
+the search loop (`:11880`) bound it by `slice_start`. A general repeat is the one construct that
+consults `try_match` for its tail, which predicts all four conditions the symptom needs, and every
+prediction held (`.scratch/up-rev-fullmatch.py`, 2026-09-12). Second symptom, same defect: a complete
+zero-width match reported as a partial (`.scratch/row756.py`). No second engine to ask - PCRE2, Perl
+and Boost have no reverse matching - so what settles it is upstream disagreeing with itself.
+
+**Three NEW unjudged divergences were found by running the generators at seeds no earlier slice had
+used**, none caused by S33 and all reproducing on `fb4e705`: forward `(*SKIP)` inside a bounded
+repeat (the port matches more than upstream), a reversed group call recording an inverted capture
+span, and the bounded-lazy-repeat family reaching a wave after all. They are in `docs/plan/STATE.md`
+with their commands and are the next slice's work. **A default oracle wave is not reliably green
+today and was not before S33; one seed per slice is what hid it.**

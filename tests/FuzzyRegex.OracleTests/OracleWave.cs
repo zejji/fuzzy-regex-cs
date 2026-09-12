@@ -185,7 +185,9 @@ internal static class OracleWave
             count,
             row.TryGetProperty("partial", out JsonElement partial) && partial.GetBoolean(),
             row.TryGetProperty("pos", out JsonElement pos) ? pos.GetInt32() : null,
-            row.TryGetProperty("endpos", out JsonElement endpos) ? endpos.GetInt32() : null
+            row.TryGetProperty("endpos", out JsonElement endpos) ? endpos.GetInt32() : null,
+            row.TryGetProperty("searchOnlyPartial", out JsonElement searchOnly)
+                && searchOnly.ValueKind == JsonValueKind.True
         );
     }
 
@@ -254,18 +256,24 @@ internal static class OracleWave
     /// <param name="rowCount">How many rows the wave held.</param>
     /// <param name="tally">How many rows fell into each verdict.</param>
     /// <param name="divergences">One rendered block per diverging row.</param>
+    /// <param name="expected">
+    /// One rendered block per row <see cref="ExpectedDivergences"/> accounted for. Printed rather
+    /// than dropped: an expected divergence nobody can see in the report is a hidden one.
+    /// </param>
     /// <returns>The single-line summary, which is also the first line of the report.</returns>
     public static string WriteReport(
         OracleHeader header,
         int rowCount,
         IReadOnlyDictionary<OracleVerdict, int> tally,
-        IReadOnlyList<string> divergences
+        IReadOnlyList<string> divergences,
+        IReadOnlyList<string>? expected = null
     )
     {
         string summary = string.Create(
             CultureInfo.InvariantCulture,
             $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
                 + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
+                + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
                 + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
         );
 
@@ -286,6 +294,12 @@ internal static class OracleWave
             report.AppendLine(divergence);
         }
 
+        foreach (string block in expected ?? [])
+        {
+            report.AppendLine();
+            report.AppendLine(block);
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(ReportPath)!);
         File.WriteAllText(ReportPath, report.ToString());
         return summary;
@@ -294,14 +308,20 @@ internal static class OracleWave
     /// <summary>Renders one diverging row: what was asked, what upstream said, what we said.</summary>
     /// <param name="row">The row that diverged.</param>
     /// <param name="actual">This port's answer, or <see langword="null"/> if it was unsupported.</param>
+    /// <param name="accounted">
+    /// The <see cref="ExpectedDivergences"/> entry that accounts for this row, if one does. Changes
+    /// the heading from <c>DIVERGE</c> to <c>EXPECTED</c> and names the entry, so a reader can tell a
+    /// classified row from an unaccounted one at a glance.
+    /// </param>
     /// <returns>The rendered block.</returns>
-    public static string Describe(OracleRow row, IOracleOutcome? actual)
+    public static string Describe(OracleRow row, IOracleOutcome? actual, ExpectedDivergence? accounted = null)
     {
         var block = new StringBuilder();
         block.AppendLine(
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"DIVERGE row {row.Number} ({row.Generator}) {row.Operation} flags=0x{row.Flags:x}"
+                $"{(accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id)} row {row.Number} "
+                    + $"({row.Generator}) {row.Operation} flags=0x{row.Flags:x}"
             )
         );
         block.AppendLine("  pattern  " + Printable(row.Pattern));
@@ -390,9 +410,14 @@ internal sealed record OracleWaveFile(OracleHeader Header, IReadOnlyList<OracleR
 /// <summary>What one pass over a wave produced.</summary>
 /// <param name="Tally">How many rows fell into each verdict.</param>
 /// <param name="Divergences">One rendered block per diverging row, in wave order.</param>
+/// <param name="Expected">
+/// One rendered block per row <see cref="ExpectedDivergences"/> accounted for, in wave order. These
+/// do not fail the run and are printed anyway.
+/// </param>
 internal sealed record OracleRunSummary(
     IReadOnlyDictionary<OracleVerdict, int> Tally,
-    IReadOnlyList<string> Divergences
+    IReadOnlyList<string> Divergences,
+    IReadOnlyList<string> Expected
 );
 
 /// <summary>Which oracle produced a wave, and how it was generated.</summary>
@@ -443,6 +468,15 @@ internal sealed record OracleHeader(
 /// Upstream's <c>endpos</c>, or <see langword="null"/> for the end of the subject. Independent of
 /// <paramref name="Pos"/>: a row may carry either end, both or neither.
 /// </param>
+/// <param name="SearchOnlyPartial">
+/// Recorded only on a <c>search</c> asked with <c>partial</c> that upstream answered with a partial:
+/// whether upstream's own <c>match</c>, over the span that search reported, answers something OTHER
+/// than the same partial. True means upstream's two doors disagree at that position, which is the
+/// signature of its <c>search_start</c> prefilter and nothing else; false means the partial is the
+/// matcher's own answer, and a port that misses it has a bug rather than a missing optimisation.
+/// Never compared - it is a second fact about upstream, and only
+/// <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -457,7 +491,8 @@ internal sealed record OracleRow(
     int Count = 0,
     bool Partial = false,
     int? Pos = null,
-    int? EndPos = null
+    int? EndPos = null,
+    bool SearchOnlyPartial = false
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -652,4 +687,11 @@ internal enum OracleVerdict
 
     /// <summary>This port cannot answer yet. Informational: the engine lands slice by slice.</summary>
     Unsupported,
+
+    /// <summary>
+    /// They gave different answers, and <see cref="ExpectedDivergences"/> names the family, says
+    /// which engine is right and points at the permanent test that pins it. Does not fail the run;
+    /// always printed, with its id, so it is accounted for rather than hidden.
+    /// </summary>
+    Expected,
 }

@@ -248,32 +248,60 @@ public sealed class ReverseMatchingTests
         // upstream: regex.match('(?r)x', 'abc') is None
         FuzzyRegex.MatchAtStart("abc", "(?r)x").Success.Should().BeFalse();
 
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    // DIVERGES FROM UPSTREAM. PERMANENT: the port is right and upstream has a bug. A change here is
+    // a regression - see docs/plan/2026-09-12-divergence-research.md and the S33 closing notes.
     [Test]
     public void A_reverse_fullmatch_of_a_repeat_over_a_narrowed_slice_succeeds_here()
     {
         // Raised by the S32 blind review as an aside - it reproduces with and without `(?p)`, so it
-        // is not POSIX's - and left for a slice of its own. The same slice-versus-text bounds family
-        // S31 pinned in PartialMatchingTests: half of upstream's arms bound themselves with
-        // slice_start/slice_end and half with text_start/text_end, and the two agree exactly as long
-        // as the slice IS the whole subject.
+        // is not POSIX's - and settled by S33 by reading upstream's three `match_all` checks.
         //
-        // Measured against regex 2026.7.19 on 2026-09-12:
+        //   try_match's RE_OP_SUCCESS arm    upstream/src/_regex.c:7829   text_pos > text_start
+        //   basic_match's SUCCESS opcode                          :15167   text_pos != slice_start
+        //   the search loop, after a match                        :11880   text_pos == slice_start
+        //
+        // Two of the three bound a reversed fullmatch by `slice_start`; only the prefilter predicate
+        // bounds it by `text_start`, which is always 0. A GENERAL repeat is the one construct that
+        // asks `try_match` whether its tail could match, so it is told the match may not end where
+        // the slice does, gives up, and the whole fullmatch fails. Measured 2026-09-12,
+        // .scratch/up-rev-fullmatch.py, and every prediction of that reading held:
+        //
         //   compile(r'(?r)(ab)+').fullmatch('xabz', 1, 3)  -> None      ; this port matches (1, 3)
-        //   compile(r'(?r)(ab)+').match('xabz', 1, 3)      -> (1, 3)    ; agrees
-        //   compile(r'(?r)(ab)+').fullmatch('ab', 0, 2)    -> (0, 2)    ; agrees, slice is the whole
-        //   compile(r'(ab)+').fullmatch('xabz', 1, 3)      -> (1, 3)    ; agrees, forward
-        //   compile(r'(?r)a+').fullmatch('aabb', 1, 2)     -> (1, 2)    ; agrees, a *_ONE repeat
+        //   compile(r'(?r)(ab)+').fullmatch('abz', 0, 2)   -> (0, 2)    ; pos 0, so the bounds agree
+        //   compile(r'(?r)(ab)+').match('xabz', 1, 3)      -> (1, 3)    ; no `match_all`, agrees
+        //   compile(r'(ab)+').fullmatch('xabz', 1, 3)      -> (1, 3)    ; forward, slice_end IS
+        //                                                                 text_end, so agrees
+        //   compile(r'(?r)a+').fullmatch('xaaz', 1, 3)     -> (1, 3)    ; a *_ONE repeat, agrees
+        //   compile(r'(?r)(a)+').fullmatch('xaaz', 1, 3)   -> None      ; general repeat, one-char
+        //                                                                 body, still fails
         //
-        // So it needs all three at once: reversed, a general repeat rather than a `*_ONE` one, and a
-        // slice narrower than the subject - and only `fullmatch` sees it, because `match_all` is the
-        // test that asks where the slice ends. Which side is right is NOT settled here: upstream
-        // refusing to fullmatch 'ab' against the slice that is exactly 'ab' looks wrong, and saying
-        // so needs the research and the second opinion an upstream-bug claim gets. When it is
-        // settled, this test either inverts or grows a citation.
+        // Upstream fullmatching 'ab' against a slice that is exactly 'ab' cannot be None, and its own
+        // `match` on the same slice says (1, 3). Reported: docs/plan/upstream-reports/2026-09-12-draft.md.
         Match m = new FuzzyRegex("(?r)(ab)+").FullMatch("xabz", beginning: 1, length: 2);
 
         m.Success.Should().BeTrue("upstream answers None here and this port matches");
         (m.Index, m.Length).Should().Be((1, 2));
+
+        // The same defect's second symptom, found by the S33 `partial-sliced` wave at seed 31, row
+        // 756: the match is not lost, it is flagged as a partial. `try_match` refuses the tail, the
+        // lazy repeat's body answers PARTIAL from its own string test at the slice edge, and the
+        // repeat returns that partial instead of the complete zero-width match its slow path finds.
+        //
+        //   compile(r'(?r)([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2)  -> (2, 2) partial True
+        //   ... .match('AAB', 2, 2)                                       -> (2, 2) partial False
+        //   ... .search('AAB', 2, 2)                                      -> (2, 2) partial False
+        //   ... .fullmatch('AAB', 0, 0)                                   -> (0, 0) partial False
+        //   compile(r'([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2)      -> (2, 2) partial False
+        //
+        // Measured 2026-09-12, .scratch/row756.py. A complete match is not a partial one, and
+        // upstream's own other three doors agree with this port.
+        Match zeroWidth = new FuzzyRegex(
+            @"([\p{L}\p{N}])??",
+            FuzzyRegexOptions.RightToLeft | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase
+        ).FullMatch("AAB", beginning: 2, length: 0, partial: true);
+
+        zeroWidth.Success.Should().BeTrue();
+        (zeroWidth.Index, zeroWidth.Length).Should().Be((2, 0));
+        zeroWidth.PartialMatch.Should().BeFalse("upstream calls this complete match a partial one");
     }
 }

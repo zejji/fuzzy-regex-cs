@@ -50,7 +50,13 @@ CONTROLS = Path(__file__).resolve().parent / "controls.json"
 WAVES = REPO / ".scratch" / "control-waves"
 LIVE_WAVE = REPO / "TestResults" / "oracle" / "wave.jsonl"
 REPORT = REPO / "TestResults" / "oracle" / "report.txt"
-SUMMARY = re.compile(r"agree (\d+)\s+unsupported (\d+)\s+diverge (\d+)\s+of (\d+) rows")
+# `expected` is optional so a report written before S33 added the accounted-for list still parses.
+# Counted and printed rather than folded into `diverge`: a mutation whose damage happens to look like
+# an entry in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs lands here instead of there, and a
+# control whose expected count moved is as much a finding as one whose diverge count did.
+SUMMARY = re.compile(
+    r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
+)
 CONSUME_TIMEOUT = 240
 
 
@@ -201,9 +207,10 @@ def main() -> int:
                 summary, tail = consume(wave_for(control["generator"], control["count"], seed))
                 match = SUMMARY.search(summary)
                 if match:
-                    agree, unsupported, diverge, rows = match.groups()
+                    agree, unsupported, expected, diverge, rows = match.groups()
                     print(f"{control['id']:8} {control['name']:34} seed {seed:>9}  "
-                          f"agree {agree:>5}  unsupported {unsupported:>4}  diverge {diverge:>5}  of {rows}")
+                          f"agree {agree:>5}  unsupported {unsupported:>4}  "
+                          f"expected {expected or '-':>4}  diverge {diverge:>5}  of {rows}")
                 else:
                     print(f"{control['id']:8} {control['name']:34} seed {seed:>9}  {summary} {tail[:300]}")
                 sys.stdout.flush()
