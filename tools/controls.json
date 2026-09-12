@@ -1059,5 +1059,53 @@
       31,
       314159
     ]
+  },
+  {
+    "id": "S37-A",
+    "name": "a-called-group-is-never-recompiled-for-the-callers-direction",
+    "file": "src/FuzzyRegex/Parsing/ParseFunctions.cs",
+    "anchor": "                    // Calling a capture group.",
+    "anchorNth": 1,
+    "before": "                    if ((defReverse, defFuzzy) != (reverse, fuzzy))\n",
+    "after": "                    if ((defReverse, defFuzzy) != (defReverse, fuzzy))\n",
+    "generator": "recursion",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      555
+    ]
+  },
+  {
+    "id": "S37-B",
+    "name": "every-partial-covers-the-whole-slice-as-upstreams-prefilter-does",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "        if (status is MatchStatus.Success or MatchStatus.Partial)",
+    "anchorNth": 1,
+    "before": "                state.TextPos = state.Reverse ? state.SliceStart : state.SliceEnd;\n",
+    "after": "                state.TextPos = state.Reverse ? state.SliceStart : state.SliceEnd;\n                state.MatchPos = state.Reverse ? state.SliceEnd : state.SliceStart;\n",
+    "generator": "partial-sliced",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      555
+    ]
+  },
+  {
+    "id": "S37-C",
+    "name": "a-reversed-overlapped-scan-skips-a-start-position",
+    "file": "src/FuzzyRegex/Engine/MatchState.cs",
+    "anchor": "    internal void AdvancePastMatch()",
+    "anchorNth": 1,
+    "before": "            TextPos = Reverse ? PrevPos(MatchPos) : NextPos(MatchPos);\n",
+    "after": "            TextPos = Reverse ? PrevPos(PrevPos(MatchPos)) : NextPos(MatchPos);\n",
+    "generator": "interactions",
+    "count": 6000,
+    "seeds": [
+      7,
+      4242,
+      555
+    ]
   }
 ]

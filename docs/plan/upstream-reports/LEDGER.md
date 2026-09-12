@@ -554,3 +554,84 @@ needs the folding tables changed rather than the parser, so it is a slice of its
 opening sweep** - the first item of the sweep's third slice, recorded in ROADMAP. It is the only
 ledger entry with a fix scheduled in this port; the other six are upstream's to fix and stay pinned
 as divergences until they do.
+
+---
+
+## 8. A group call inside a lookaround that runs the other way loses the match, even on a path that never enters the call
+
+**Title:** A `(?&name)` call inside a lookaround of the opposite direction makes the whole pattern
+fail, where deleting the optional piece that holds it succeeds
+
+**Body:**
+
+```python
+>>> import regex
+>>> regex.__version__
+'2026.7.19'
+>>> pat = r'\b(?(?![\w\s])[[:digit:]])(\w)(?P<g2>[^\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*'
+>>> flags = regex.I | regex.M | regex.V1 | regex.F
+>>> [m.span() for m in regex.finditer(pat, 'İİ\nİİﬁﬁ ', flags, overlapped=True)]
+[(0, 4)]
+>>> shorter = r'\b(?(?![\w\s])[[:digit:]])(\w)(?P<g2>[^\d]{3})'
+>>> [m.span() for m in regex.finditer(shorter, 'İİ\nİİﬁﬁ ', flags, overlapped=True)]
+[(0, 4), (3, 7)]
+```
+
+The piece deleted between the two is `(?:...)*` - a repeat that can take **zero** iterations - so the
+first pattern's language contains the second's, and it cannot have fewer matches. It has fewer.
+
+The same thing happens with a `??` optional, a `?` optional, and under `(?r)` with a lookahead
+instead of a lookbehind, which is the mirror arrangement:
+
+```python
+>>> regex.compile(r'(?r)\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\S)){3}(\p{Nd}+?)?', regex.I | regex.M)
+>>> [m.span() for m in _.finditer('AA..0', overlapped=True)]
+[]
+>>> [m.span() for m in regex.finditer(r'(?r)\b(?P<g1>[A])(\p{Nd}+?)?', 'AA..0', regex.I | regex.M,
+...                                  overlapped=True)]
+[(0, 1)]
+```
+
+Here the `{3}` is not optional, and it does not need to be: its body is a conditional with no
+no-branch whose group is not yet set at that point, so each iteration matches empty. Upstream says so
+itself - write the call out as the class it calls and the same pattern matches (0, 1), one character
+for a `{3}` that would have to consume three if its body were not empty:
+
+```python
+>>> [m.span() for m in regex.finditer(r'(?r)\b(?P<g1>[A])(?:(?(1)(?=[A])\S)){3}(\p{Nd}+?)?',
+...                                   'AA..0', regex.I | regex.M, overlapped=True)]
+[(0, 1)]
+```
+
+Five rows of a 6000-row generated wave show it, in four different shapes - a `finditer` that finds
+nothing, an overlapped scan one match short, a `subf` that replaces nothing and a `split` that does
+not split. All five are re-runnable:
+`python tools/probes/upstream-group-call-loses-matches.py`.
+
+**Where it comes from.** The same area as #614: `build_GROUP()` and the direction a called group's
+body is compiled with. That issue was fixed on 2026-08-30 by `9398a6d`
+(`subargs.forward = forward;`) and released in 2026.8.30. **This is not fixed by it.** All five rows
+were replayed against 2026.9.10 on 2026-09-12 and answer exactly as 2026.7.19 does, as does the row
+S30 minimised by hand:
+
+```python
+>>> regex.compile(r'(?(DEFINE)(?<a>a))(?<=(?&a))c').match('ac', pos=1)   # None, on 2026.9.10 too
+```
+
+**What this port answers.** The match, in every case - the one the shorter pattern finds. Pinned by
+`GroupCallTests.A_group_called_from_a_lookbehind_with_anything_after_it_matches_here_and_not_upstream`
+and `.A_zero_width_piece_holding_a_group_call_cannot_remove_a_match_here`, and classified in the
+oracle as `group-call-loses-the-match`.
+
+**What is NOT established, and the report must say so.** Shrinking these rows while keeping upstream
+self-contradictory produces patterns on which *this port answers what upstream answers* -
+`(?P<g1>a)((?<!(?&g1)))*` over `'a'`, `(?r)(?P<g1>[A])((?(?=(?&g1))S))` over `'A'`. So "a call
+through an opposite-direction lookaround" is not on its own sufficient for the divergence, and what
+else the longer shapes supply is unknown. The reproduction above stands on its own - it needs no
+second engine, only upstream's answer to a pattern and to the same pattern with a zero-width-capable
+piece removed - but a report that claimed the minimal form would be wrong.
+
+**Proposed fix.** Unknown, beyond "the same area as #614". Establishing it needs the minimal form,
+which is open work.
+
+**Related:** #614 (fixed, and does not cover this).

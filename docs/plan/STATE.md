@@ -2,32 +2,38 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S37 is next. **Phase 5 is authored (S37-S43) and approved by the owner**
-(2026-09-12). Two decisions taken at authoring, in DECISIONS: `(?e)`'s dead `same_match` check is
-not ported live; `(?b)`/`(?e)` rank by cost, not error count. Launch: `pwsh -File tools/launch-slice.ps1 s37`.
+**Current slice:** S38 is next - the fuzzy spine, and the first slice of Phase 5 that touches the
+engine. Launch: `pwsh -File tools/launch-slice.ps1 s38`. S37 closed Phase 4's last unfinished item:
+`interactions` is GREEN at 6000 rows on four seeds and the default wave is GREEN on three, so S43 can
+widen that generator with fuzzy and tell a new divergence from an old one.
 
-**The Phase 5 plan in one line each.** S37 judges the thirteen `interactions` rows red at 6000
-rows (Phase 4's leftover, no engine work expected). S38 fuzzy spine: state, constraints,
-`FUZZY`/`END_FUZZY`, one-character and zero-width items, insertions, `do_simple_fuzzy_match`,
-`Match.FuzzyCounts`/`FuzzyChanges`, and the `fuzzy` oracle generator. S39 strings, backreferences,
-full-fold arms and the `*_REPEAT_ONE` fuzzy loops. S40 the `{...:test}` constraint and delivery of
-the seven plain tags. S41 `ENHANCEMATCH`. S42 `BESTMATCH`. S43 phase close (fuzzy composed into
-`interactions`, symbol accounting, tag probe, Phase 6 handover). S38 and S39 deliver no tag by
-name: they run S36's tag probe at their close.
+**What S37 found, in one line each.** S36's thirteen rows were three families, not the three it
+named: five are upstream losing a match when a group call sits inside a lookaround running the other
+way (new entry `group-call-loses-the-match`, ledger entry 8, NOT fixed by issue 614 and unchanged on
+2026.9.10); three are `search_start`'s partial arms in the shape where this port answers its OWN
+partial elsewhere (`search-start-partial` widened); one is a reversed overlapped `(*SKIP)` extra
+match that a too-wide clause kept out of its own entry (a NEGATIVE lookaround cannot leave a
+capture, so only `(?=`, `(?<=` and `\K` are excluded now). **No port bug**: the one candidate, a
+`lastindex` difference on row 4182, is two different patterns and both engines agree on each.
+
+**Read before re-deriving it:** minimising family A **failed**, deliberately recorded. Every shrink
+that kept upstream self-contradictory landed on a pattern this port answers exactly as upstream does,
+so a call through an opposite-direction lookaround is necessary and not sufficient - and **inlining a
+called group is not semantics-preserving**, which kills the obvious recorder field. The rows are
+listed whole in `ExpectedDivergences.cs`.
 
 **Blockers:** none.
 
-**Where the port stands:** ratchet GREEN, 5770 tests, 5587 passing, parity **90.7%**, 28 areas at
-100%. Default oracle GREEN at three seeds, 6000 rows each. Every remaining skipped test (183) is
-fuzzy; no seam left anywhere in `src/` is anything but a fuzzy one (27 `Seam.For(Opcode.Fuzzy)`
-in `Matcher.cs` plus the three entry-point seams at `Matcher.cs:6582-6592`).
+**Where the port stands:** ratchet GREEN, 5772 tests, 5589 passing, parity **90.7%**, 28 areas at
+100%. Every remaining skipped test (183) is fuzzy; the 27 `Seam.For(Opcode.Fuzzy)` sites in
+`Matcher.cs` and the three entry-point seams at `Matcher.cs:6582-6592` are Phase 5's map.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Controls:
-`python tools/run-controls.py --slices S27,...,S35 --seeds 2`. Upstream 2026.9.10 for probes is in
-`.venvs/regex-2026.9.10` (git-ignored).
+**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Rows per generator is **`-Count`**;
+`-Rows` is a path to a JSONL file. Controls: `python tools/run-controls.py --slices S37 --seeds 3`.
+Upstream 2026.9.10 for probes is in `.venvs/regex-2026.9.10` (git-ignored), loaded by path.
 
-**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`, seven entries):
+**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`, eight entries):
 nothing filed until everything else in the plan is done. Entry 7 is on Phase 6's fix list.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
-`origin/main` trails local by four commits (S35, S36 and two checkpoints) and needs a push.
+`origin/main` trails local and needs a push.

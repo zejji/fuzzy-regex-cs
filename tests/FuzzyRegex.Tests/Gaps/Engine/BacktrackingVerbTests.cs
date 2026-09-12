@@ -379,6 +379,33 @@ public sealed class BacktrackingVerbTests
 
         prefilterCase.Select(static m => (m.Index, m.Length)).Should().Equal((0, 7));
         prefilterCase.Select(static m => (m.Groups[1].Index, m.Groups[1].Length)).Should().Equal((5, 2));
+
+        // FOUR: the capture tell again, in a pattern that holds a NEGATIVE lookbehind - row 5543 of a
+        // 6000-row seed-7 `interactions` wave, added by S37. Upstream's extra match is (3, 5) with g2
+        // at (5, 6), one character outside it. Deleting the verb, or making it '(*PRUNE)', leaves
+        // upstream with (3, 6) alone; writing the called group out leaves the extra match; and
+        // upstream's own search and match at every start position answer (3, 6) and never (3, 5)
+        // (measured 2026-09-12, and unchanged against 2026.9.10).
+        //
+        // It is here because the classifier used to refuse it. `CarriesACaptureOutsideItself` in
+        // ExpectedDivergences.cs excluded any pattern holding a lookaround, and a NEGATIVE lookaround
+        // cannot put a capture anywhere: it only succeeds when its body fails, so nothing it matched
+        // survives. Upstream and this port agree on that, which is the other half of the assertion
+        // below and what the widened clause rests on.
+        MatchCollection negativeLookaroundCase = new FuzzyRegex(
+            @"(?r)(?:\D{1,1}(*SKIP)[\p{ASCII}&&\p{L}]|[[a-f]~~[d-k]])(?P<g1>.*)??(?P<g2>[A])(?:(?(2)(?<!(?&g2))\p{Nd}))\b",
+            FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline
+        ).Matches("A\r\nAAA", overlapped: true);
+
+        negativeLookaroundCase.Select(static m => (m.Index, m.Length)).Should().Equal((3, 3));
+
+        // regex.search(r'(a)(?!(?:(b))x)b', 'ab') is (0, 2) with group 1 ['a'] and group 2 EMPTY, and
+        // regex.search(r'(?!(a))b', 'b') is (0, 1) with group 1 empty.
+        Match negated = new FuzzyRegex("(a)(?!(?:(b))x)b").Match("ab");
+
+        (negated.Index, negated.Length).Should().Be((0, 2));
+        negated.Groups[1].Value.Should().Be("a");
+        negated.Groups[2].Success.Should().BeFalse("a negative lookaround that succeeds captured nothing");
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.

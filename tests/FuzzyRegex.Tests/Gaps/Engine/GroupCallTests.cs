@@ -242,6 +242,55 @@ public sealed class GroupCallTests
             .Equal((0, 1), (0, 1), (1, 0), (0, 1));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_zero_width_piece_holding_a_group_call_cannot_remove_a_match_here()
+    {
+        // The same defect as the lookbehind test above - a group reached by a call from a lookaround
+        // running the other way round from the pattern - seen through the composed 'interactions'
+        // wave, which drew four more rows of it at 6000 rows (S37). Upstream does not record a bad
+        // capture here; it LOSES the match outright.
+        //
+        // UPSTREAM CONTRADICTS ITSELF ON EACH ROW, which is what places the defect there and needs no
+        // second engine. In every one of them the piece that holds the call can match ZERO-WIDTH, so
+        // deleting it cannot add a match - and deleting it is exactly what gives upstream the match
+        // it had refused. All measured against regex 2026.7.19 on 2026-09-12 and re-run unchanged
+        // against 2026.9.10, so issue 614's fix does not cover this either
+        // (tools/probes/upstream-group-call-loses-matches.py).
+        //
+        //   pat = r'\b(?(?![\w\s])[[:digit:]])(\w)(?P<g2>[^\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*'
+        //   regex.finditer(pat, 'İİ\nİİﬁﬁ ', flags, overlapped=True)     # (0, 4) only
+        //   regex.finditer(pat[:pat.index('(?:(?(2)')], ...)              # (0, 4) AND (3, 7)
+        //
+        // The trailing piece is a '*' repeat, so zero iterations is always available and the second
+        // answer is the one that must also be the first's.
+        MatchCollection forward = new FuzzyRegex(
+            @"\b(?(?![\w\s])[[:digit:]])(\w)(?P<g2>[^\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*",
+            FuzzyRegexOptions.IgnoreCase
+                | FuzzyRegexOptions.Multiline
+                | FuzzyRegexOptions.Version1
+                | FuzzyRegexOptions.FullCase
+        ).Matches("İİ\nİİﬁﬁ ", overlapped: true);
+
+        forward.Select(static m => (m.Index, m.Length)).Should().Equal((0, 4), (3, 4));
+
+        // And the reversed arrangement, where the mismatching lookaround is a LOOKAHEAD. Upstream
+        // finds nothing at all; drop the '{3}' piece and it answers (0, 1), which is this port's
+        // answer with the piece present. That the piece is zero-width capable is upstream's own
+        // statement: with the call replaced by the class it calls, upstream matches (0, 1) too - one
+        // character for a pattern whose '{3}' would have to consume three if it were not empty.
+        //
+        //   regex.finditer(r'(?r)\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\S)){3}(\p{Nd}+?)?', 'AA..0',
+        //                  regex.I | regex.M, overlapped=True)               # nothing
+        //   ... with '(?&g1)' written out as '[A]'                           # (0, 1)
+        MatchCollection reversed = new FuzzyRegex(
+            @"(?r)\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\S)){3}(\p{Nd}+?)?",
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline
+        ).Matches("AA..0", overlapped: true);
+
+        reversed.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1));
+    }
+
     // NOT TESTED, deliberately: left recursion. '(?R)?b' against 'b' and '(?<x>(?&x)?a)' against
     // 'aaa' both recurse without consuming, and neither engine guards against it - upstream grows
     // its stack until re_alloc fails and raises MemoryError, and this port grows the ByteStack until

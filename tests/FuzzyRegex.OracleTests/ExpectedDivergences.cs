@@ -113,20 +113,97 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The three rows of <c>overlapped-skip-extra-match-reversed</c>, as
-    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12. All three are listed rather
-    /// than one, because the entry has two tells and the third row is the one whose ground truth was
-    /// suspected of depending on call order - a claim the staleness alarm should keep re-testing.
+    /// The four rows of <c>overlapped-skip-extra-match-reversed</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12. All four are listed rather
+    /// than one, because the entry has two tells, the third row is the one whose ground truth was
+    /// suspected of depending on call order - a claim the staleness alarm should keep re-testing -
+    /// and the fourth is the one that pays for the negative-lookaround clause in
+    /// <see cref="CarriesACaptureOutsideItself"/>.
     /// </summary>
     /// <remarks>
     /// Row 1 is row 1567 of the seed-4242 wave, minimised from an eight-codepoint astral subject to
     /// 'bxA'; rows 2 and 3 are rows 1863 (seed 4242) and 1439 (seed 7) as the wave drew them, because
-    /// a shorter pattern loses the second <c>(*SKIP)</c> that makes the carry-over observable.
+    /// a shorter pattern loses the second <c>(*SKIP)</c> that makes the carry-over observable. Row 4
+    /// is row 5543 of a 6000-row seed-7 <c>interactions</c> wave, added by S37 and also as the wave
+    /// drew it: every cut tried removed the extra match rather than the noise, which is the same
+    /// reason rows 2 and 3 are here whole.
     /// </remarks>
     private const string _reversedExtraMatchRows = """
         {"generator": "verbs", "pattern": "(?r)(?:.{2}(*SKIP)A|x)$", "flags": 8, "namedLists": {}, "subject": "bxA", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
         {"generator": "verbs", "pattern": "(?r)([^a]{2,4}(*SKIP)[a\\d])((?:[^\\d]++(*SKIP)\\s|\\ ))", "flags": 0, "namedLists": {}, "subject": "b0 0\n A", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}]}}
         {"generator": "verbs", "pattern": "(?r)(?:[a\\d]*(*SKIP)\\D|\\p{Nd})(?:[\\p{L}\\p{N}]{1,3}(*SKIP)\\S|.)((?>\\s+(*PRUNE)A))", "flags": 0, "namedLists": {}, "subject": "İİAAA AS", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 4]}]}}
+        {"generator": "interactions", "pattern": "(?r)(?:\\D{1,1}(*SKIP)[\\p{ASCII}&&\\p{L}]|[[a-f]~~[d-k]])(?P<g1>.*)??(?P<g2>[A])(?:(?(2)(?<!(?&g2))\\p{Nd}))\\b", "flags": 264, "namedLists": {}, "subject": "A\r\nAAA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 5]}]}}
+        """;
+
+    /// <summary>
+    /// The four rows of <c>search-start-partial</c>'s second symptom - upstream's prefilter reports
+    /// a partial covering the whole searched region, and this port reports its OWN partial somewhere
+    /// else - as <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is the family minimised by hand; rows 2, 3 and 4 are rows 3497 (seed 4242), 2689 and
+    /// 4313 (seed 20260912) of a 6000-row <c>interactions</c> wave. <b>Two of the three come from
+    /// one seed and seed 7 draws none</b>, so the family is evidenced at two seeds of the three, not
+    /// at three - the S37 blind review's second pass corrected "one per seed" here.
+    /// </remarks>
+    private const string _searchStartElsewhereRows = """
+        {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "interactions", "pattern": "\\b(?:.+(*SKIP)[^\\d]|\\p{Lu})([^[\\p{L}--[a-z]]])+(?(?=\\W)[\\w--[0-9]])", "flags": 16650, "namedLists": {}, "subject": "ﬃ\nﬃaa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "interactions", "pattern": "(?r)[a](\\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\\b", "flags": 16642, "namedLists": {}, "subject": "AA𝔘𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "interactions", "pattern": "\\m(?:[\\p{L}\\p{N}]{2,}(*SKIP)\\p{ASCII}|\\w)\\B", "flags": 264, "namedLists": {}, "subject": "a😀Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_searchStartElsewhereRows"/>, in the same
+    /// order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Rows 1, 2 and 4 are the answer upstream's own <c>match(pos, partial=True)</c> gives at the
+    /// position this port stopped at. <b>Row 3 is not, and that is why this arm lists rows.</b> It is
+    /// reversed, so <c>match</c> anchors at the end; sweeping <c>endpos</c> instead, upstream answers
+    /// (0, 1) partial and (0, 2) and (0, 3) complete, and never this port's zero-width partial at
+    /// (0, 0). What judges it is the verb: delete the <c>(*SKIP)</c>, or make it <c>(*PRUNE)</c>, and
+    /// upstream's own search answers (0, 0) partial - this port's answer.
+    /// </remarks>
+    private static readonly string[] _searchStartElsewhereOurs =
+    [
+        "match 0:(4,0)[(4,0)] last=-1/- partial",
+        "match 0:(2,3)[(2,3)] 1:unset last=-1/- partial",
+        "match 0:(0,0)[(0,0)] 1:unset last=-1/- partial",
+        "match 0:(5,0)[(5,0)] last=-1/- partial",
+    ];
+
+    /// <summary>
+    /// Every row of <see cref="_searchStartElsewhereRows"/> by its question, mapped to this port's
+    /// judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _searchStartElsewhere = OracleWave
+        .ParseRows(_searchStartElsewhereRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _searchStartElsewhereOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The five rows of <c>group-call-loses-the-match</c>, as <c>tools/record-oracle.py --rows</c>
+    /// wrote them on 2026-09-12, and all five because between them they are the four OUTCOME SHAPES
+    /// the defect appears in - an empty scan, a scan one match short, a substitution that replaced
+    /// nothing, and a split that split nothing.
+    /// </summary>
+    /// <remarks>
+    /// Rows 4182 (seed 7), 4407 (seed 20260912), 5087 and 5773 (seed 4242) and 1624 (seed 99991) of a
+    /// 6000-row <c>interactions</c> wave, each as the wave drew it. The fifth arrived the way this
+    /// list is meant to work: <c>split</c> was deliberately left out of the predicate as a shape no
+    /// row had shown, the fourth seed drew one, the run went red rather than quietly classifying it,
+    /// and it was judged by the same probe as the other four. Minimisation was tried and is recorded in
+    /// the entry's own <see cref="ExpectedDivergence.Reason"/> as having failed: every shrink that
+    /// kept upstream contradicting ITSELF lost the divergence, because this port reproduces
+    /// upstream's answer on the short forms.
+    /// </remarks>
+    private const string _groupCallLostMatchRows = """
+        {"generator": "interactions", "pattern": "(?P<g1>\\S)(?:(?(1)(?<!(?P>g1))[[:alpha:]]))??([a]{0,0})?\\2\\b", "flags": 0, "namedLists": {}, "subject": "aa𐐨𐐨A", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "interactions", "pattern": "\\b(?(?![\\w\\s])[[:digit:]])(\\w)(?P<g2>[^\\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*", "flags": 16650, "namedLists": {}, "subject": "İİ\nİİﬁﬁ ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 3, "captures": [[1, 3], [1, 3]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 4]}]}}
+        {"generator": "interactions", "pattern": "(?r)\\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\\S)){3}(\\p{Nd}+?)?", "flags": 10, "namedLists": {}, "subject": "AA..0", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "interactions", "pattern": "(?r)^([[:alpha:]]+)(?P<g2>[😀])(?:(?(2)(?=(?P>g2))[^\\p{L}]))+?", "flags": 10, "namedLists": {}, "subject": "a😀\r", "operation": "subf", "template": "{g2}{{", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "a😀\r", "count": 0}}
+        {"generator": "interactions", "pattern": "(?P<g1>[𐐀A]{2,2})(?:(?(1)(?<!(?P>g1))[^\\d]|[a-f]))?([abz]{0,2})$", "flags": 65536, "namedLists": {}, "subject": "𐐀𐐀A", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["𐐀𐐀A"]}}
         """;
 
     /// <summary>
@@ -163,11 +240,39 @@ internal static class ExpectedDivergences
                 + "neither does upstream's. Upstream's own `match` and `fullmatch` answer None to the "
                 + "same row, so the two doors disagree at one position. Port right - "
                 + "docs/plan/2026-09-12-divergence-research.md, judged against PCRE2 10.47 and "
-                + "upstream issue 589. Phase 7 owns the prefilter and must not import this answer.",
+                + "upstream issue 589. Phase 7 owns the prefilter and must not import this answer.\n"
+                + "WIDENED BY S37 TO THE SECOND SYMPTOM: this port answers its OWN partial somewhere "
+                + "else rather than nothing at all. Three rows of a 6000-row `interactions` wave show "
+                + "it - one at seed 4242 and two at 20260912, none at seed 7 - and all three carry a "
+                + "`(*SKIP)`, which is the piece S36's widening put "
+                + "into the generator. `(?:\\w{2,}(*SKIP)\\w|\\w)\\B` over 'a.Aa' is the minimised "
+                + "shape: upstream's `search(partial=True)` is (0, 4) partial - the WHOLE subject, "
+                + "from the search start to the end of the text - and its own "
+                + "`match('a.Aa', 0, 4, partial=True)` over that very span is None. This port answers "
+                + "the zero-width partial at (4, 4), where `\\w` ran out of text, which is upstream's "
+                + "own `match(pos=4, partial=True)` answer. Delete the verb and upstream's search "
+                + "gives a COMPLETE match at (2, 3); make it `(*PRUNE)` and it gives this port's "
+                + "partial. Measured 2026-09-12, tools/probes/upstream-search-start-whole-region-partial.py.\n"
+                + "THE NEW ARM IS KEYED ON ROWS, exactly as `bounded-lazy-repeat-partial` below is, "
+                + "and the first draft of it was not - which the S37 blind review killed with a "
+                + "reproduction. That draft asked only that upstream's partial span the whole "
+                + "searched region, which is the prefilter's fingerprint (`search_start`'s partial "
+                + "arms set `new_position->text_pos` to the end of the text or of the slice, :8471 "
+                + "and :8487, while the match start stays where the search began) - and put NO "
+                + "condition on this port's side beyond 'a partial, rendered differently'. A "
+                + "one-character defect in the port's own partial start was then classified instead "
+                + "of reported. No predicate over this port's answer is narrow enough here, so the "
+                + "arm lists the rows a probe has individually judged with the answer this port is "
+                + "judged to be right about, and widening it means judging another row.",
             PinnedBy: "PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_"
-                + "subject_finds_no_partial_here",
+                + "subject_finds_no_partial_here and .A_skip_alternation_partial_starts_where_this_"
+                + "port_ran_out_of_text",
             Example: """
             {"generator": "partial", "pattern": "(?r)\\b$", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+            {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+            {"generator": "interactions", "pattern": "\\b(?:.+(*SKIP)[^\\d]|\\p{Lu})([^[\\p{L}--[a-z]]])+(?(?=\\W)[\\w--[0-9]])", "flags": 16650, "namedLists": {}, "subject": "ﬃ\nﬃaa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+            {"generator": "interactions", "pattern": "(?r)[a](\\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\\b", "flags": 16642, "namedLists": {}, "subject": "AA𝔘𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+            {"generator": "interactions", "pattern": "\\m(?:[\\p{L}\\p{N}]{2,}(*SKIP)\\p{ASCII}|\\w)\\B", "flags": 264, "namedLists": {}, "subject": "a😀Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
             """,
             Applies: static (row, ours) =>
                 row.Partial
@@ -180,7 +285,16 @@ internal static class ExpectedDivergences
                 // engine defect: control S33-A, which reverts this slice's own fix, reported ZERO
                 // divergences over 2,000 rows at three seeds until the field was added.
                 && row.SearchOnlyPartial
-                && ours is NoMatchOutcome
+                && (
+                    ours is NoMatchOutcome
+                    // S37's arm: this port answered its OWN partial somewhere else, on a row a probe
+                    // has judged one at a time. Keyed on the row, because no predicate over this
+                    // port's answer is narrow enough - see the Reason above.
+                    || (
+                        _searchStartElsewhere.TryGetValue(Question(row), out string? judgedPartial)
+                        && string.Equals(ours.Describe(), judgedPartial, StringComparison.Ordinal)
+                    )
+                )
         ),
         new(
             Id: "reverse-fullmatch-narrowed-slice",
@@ -409,6 +523,62 @@ internal static class ExpectedDivergences
                 && OnlyDifferenceIsACaptureUpstreamLeftEmpty(row.Expected, ours)
         ),
         new(
+            Id: "group-call-loses-the-match",
+            Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (all five "
+                + "wave rows replayed against .venvs/regex-2026.9.10 on 2026-09-12, identical). "
+                + "The same precondition as `group-call-direction` above - a group reached by a call "
+                + "from a lookaround running the other way round from the pattern - and a different "
+                + "symptom: upstream does not record a bad capture, it LOSES the match. This is the "
+                + "family S30 found and pinned as a KNOWN DIVERGENCE; S37 judged five more rows of it "
+                + "and gave it an entry so the composed wave can be green at 6000 rows.\n"
+                + "THE JUDGEMENT NEEDS NO SECOND ENGINE, because upstream contradicts itself on each "
+                + "row: DELETING THE PIECE THAT HOLDS THE CALL GIVES UPSTREAM A MATCH IT REFUSED WITH "
+                + "THE PIECE PRESENT, and in every one of these rows that piece can match zero-width, "
+                + "so it cannot remove a match. Three of the five say so outright - a `??`, a `?` and "
+                + "a `*` can always take zero iterations - and the other two say it through "
+                + "upstream's own answer to the call-free copy, whose match is no WIDER than the "
+                + "pattern without the piece, which is what proves the conditional inside it matched "
+                + "empty. Re-runnable: tools/probes/upstream-group-call-loses-matches.py.\n"
+                + "  \\b(?(?![\\w\\s])[[:digit:]])(\\w)(?P<g2>[^\\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*\n"
+                + "  over 'İİ\\nİİﬁﬁ ' overlapped: upstream (0, 4) alone; drop the trailing `(?:...)*` "
+                + "and upstream gives (0, 4) AND (3, 7), which is this port's answer.\n"
+                + "MINIMISATION FAILED AND THE FAILURE IS THE FINDING. Shrinking each row while "
+                + "upstream kept contradicting itself produced tiny patterns - "
+                + "`(?P<g1>a)((?<!(?&g1)))*` over 'a', `(?r)(?P<g1>[A])((?(?=(?&g1))S))` over 'A' - "
+                + "on which THIS PORT ANSWERS WHAT UPSTREAM ANSWERS. So the divergence is not 'a call "
+                + "through an opposite-direction lookaround' on its own; something about the wave's "
+                + "longer shapes is also needed, and what that is remains unknown. The rows are "
+                + "therefore listed whole. Phase 6's open-issue sweep owns the report, and the ledger "
+                + "entry has to carry this caveat with it.",
+            PinnedBy: "GroupCallTests.A_group_called_from_a_lookbehind_with_anything_after_it_matches_"
+                + "here_and_not_upstream and .A_zero_width_piece_holding_a_group_call_cannot_remove_a_"
+                + "match_here",
+            Example: _groupCallLostMatchRows,
+            // Narrow on three counts. The pattern must call a group AND hold a lookaround running
+            // the other way from itself, which is the defect's precondition rather than a symptom.
+            // Upstream must have found STRICTLY LESS than this port. And everything upstream did
+            // find must render identically here - every span, every capture, every `lastindex` -
+            // so a port defect that shortens a match, moves a span or drops a capture is reported.
+            //
+            // The hole, said out loud, and it is a real one: a port defect that INVENTS a match in a
+            // pattern of this shape would be classified rather than reported. Closing it needs
+            // upstream's own answer to the same question with the call resolved, and there is no
+            // such answer to record - inlining the called body is not semantics-preserving, which
+            // this slice measured rather than assumed: on the minimised rows above the inlined copy
+            // differs from the call copy for BOTH engines.
+            //
+            // The control that does bite is S37-A, and on the OTHER alarm. It stops the parser
+            // recompiling a called group for the caller's direction, which is upstream's own defect,
+            // and the port then agrees with upstream where it used to diverge: `expected` collapses
+            // to 0 and `Every_expected_divergence_still_diverges` fails outright with
+            // "group-call-direction: an entry must account for its own example row 1". A predicate
+            // cannot notice a port that has stopped diverging; the example rows can, and do.
+            Applies: static (row, ours) =>
+                HasGroupCall(row.Pattern)
+                && CallsThroughAnOppositeDirectionLookaround(row)
+                && UpstreamFoundStrictlyLess(row, ours)
+        ),
+        new(
             Id: "bounded-lazy-repeat-partial",
             Reason: "Port right, judged in docs/plan/2026-09-12-divergence-research.md and pinned "
                 + "with its evidence in PartialMatchingTests: a bounded LAZY repeat that has "
@@ -591,26 +761,59 @@ internal static class ExpectedDivergences
 
     /// <summary>
     /// Whether a match records a capture that lies outside its own span, which nothing but a
-    /// lookaround or a <c>\K</c> can justify - and the pattern has neither.
+    /// POSITIVE lookaround or a <c>\K</c> can justify - and the pattern has neither.
     /// </summary>
     /// <param name="pattern">The pattern, for the precondition.</param>
     /// <param name="match">The match.</param>
     /// <returns><see langword="true"/> if it contradicts itself this way.</returns>
     /// <remarks>
+    /// <para>
     /// <b><c>\K</c> is in the exclusion list because the S36 blind review put it there, and the entry
     /// above overstated its own safety until it did.</b> <c>\K</c> moves the reported match start, so
     /// a group captured before it lies outside the match and this port produces that itself:
     /// <c>new FuzzyRegex(@"(?r)ab\K(cd)(*SKIP)").Matches("abcdabcd", overlapped: true)</c> gives
     /// (4, 6) with group 1 at (6, 8), and (0, 2) with group 1 at (2, 4). Without this clause a port
     /// defect that ended such a scan one match early would have been classified.
+    /// </para>
+    /// <para>
+    /// <b>A NEGATIVE lookaround is not in the exclusion list, and S37 took it out.</b> The list read
+    /// <c>(?=</c>, <c>(?!</c> and either lookbehind, which is wider than the justification: a
+    /// negative lookaround only succeeds when its body FAILS, so nothing it matched survives into
+    /// the match and it cannot put a capture anywhere. Measured on 2026-09-12 against regex
+    /// 2026.7.19 and against this port, which agree on all four rows
+    /// (<c>tools/probes/upstream-negative-lookaround-captures.py</c>, and rows 9 and 10 of the S37
+    /// candidate replay):
+    /// <code>
+    /// regex.search(r'(?!(a))b', 'b')          # (0, 1), group 1 spans []
+    /// regex.search(r'(?&lt;!(a))b', 'b')         # (0, 1), group 1 spans []
+    /// regex.search(r'(a)(?!(?:(b))x)b', 'ab') # (0, 2), group 1 [(0, 1)], group 2 []
+    /// </code>
+    /// The row that paid for it is seed 7's row 5543 of a 6000-row <c>interactions</c> wave, a
+    /// reversed overlapped <c>(*SKIP)</c> scan whose extra match carries <c>g2</c> at (5, 6) for a
+    /// match spanning (3, 5). Deleting the verb, or making it <c>(*PRUNE)</c>, removes the extra
+    /// match; writing the called group out leaves it; and upstream's own <c>search</c> and
+    /// <c>match</c> at every position answer (3, 6) and never (3, 5). So it is
+    /// <c>overlapped-skip-extra-match-reversed</c> exactly, and the only thing keeping it out was the
+    /// <c>(?&lt;!</c> in its pattern.
+    /// </para>
     /// </remarks>
     private static bool CarriesACaptureOutsideItself(string pattern, MatchOutcome match)
     {
+        // Whitespace goes first, because under `(?x)` upstream reads the character after `(?<` with
+        // `source.get()` rather than `get(True)` (upstream/regex/_regex_core.py:863), so `(?<  =(a))`
+        // IS a positive lookbehind and holds a capture that can lie outside the match:
+        // `regex.compile(r'(?x)(?<  =(a))b').search('ab')` is (1, 2) with group 1 at (0, 1), and this
+        // port parses it the same way. The S37 blind review built a row on that spelling and watched
+        // it be classified while the unspaced twin was reported. No generator emits it, but the test
+        // below is the only thing standing between an engine defect and a silent classification, so
+        // it reads a pattern with every space removed. That is conservative in the safe direction:
+        // stripping can only ADD an exclusion, never remove one.
+        string bare = new([.. pattern.Where(static character => !char.IsWhiteSpace(character))]);
+
         if (
-            pattern.Contains("(?=", StringComparison.Ordinal)
-            || pattern.Contains("(?!", StringComparison.Ordinal)
-            || HasLookbehind(pattern)
-            || pattern.Contains(@"\K", StringComparison.Ordinal)
+            bare.Contains("(?=", StringComparison.Ordinal)
+            || bare.Contains("(?<=", StringComparison.Ordinal)
+            || bare.Contains(@"\K", StringComparison.Ordinal)
             || match.Groups.Count == 0
         )
         {
@@ -697,6 +900,65 @@ internal static class ExpectedDivergences
     /// <returns><see langword="true"/> if it contains one.</returns>
     private static bool HasLookbehind(string pattern) =>
         pattern.Contains("(?<=", StringComparison.Ordinal) || pattern.Contains("(?<!", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether the pattern holds a lookaround that runs the other way round from the pattern itself,
+    /// which is the direction mismatch a called group inherits.
+    /// </summary>
+    /// <param name="row">The row, for the pattern and for whether it is reversed.</param>
+    /// <returns><see langword="true"/> if it does.</returns>
+    /// <remarks>
+    /// Narrower than <c>group-call-direction</c>'s <c>IsReversed(row) || HasLookbehind(pattern)</c>,
+    /// and deliberately so: in a REVERSED pattern the mismatching lookaround is a LOOKAHEAD, and in a
+    /// forward pattern it is a LOOKBEHIND. What it does not check is that the call is INSIDE that
+    /// lookaround, which the row cannot say without a parser; a pattern holding both separately would
+    /// satisfy this and has to be caught by the rest of the predicate.
+    /// </remarks>
+    private static bool CallsThroughAnOppositeDirectionLookaround(OracleRow row) =>
+        IsReversed(row)
+            ? row.Pattern.Contains("(?=", StringComparison.Ordinal)
+                || row.Pattern.Contains("(?!", StringComparison.Ordinal)
+            : HasLookbehind(row.Pattern);
+
+    /// <summary>
+    /// Whether upstream found strictly less than this port did, and agreed with it about everything
+    /// it DID find.
+    /// </summary>
+    /// <param name="row">The row, for the subject a substitution is compared against.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if upstream's answer is this port's answer, minus something.</returns>
+    /// <remarks>
+    /// Four outcome shapes, one per shape the five judged rows take. A scan where upstream's list is
+    /// an element-for-element identical PREFIX of this port's and strictly shorter; a substitution
+    /// upstream made none of, leaving the subject untouched; a split upstream did not split, leaving
+    /// the subject as its only part; and a single-match row upstream answered None.
+    /// <para>
+    /// The <c>split</c> arm is here because a fourth seed drew one and NOT before, which is worth
+    /// recording: it was left out on purpose - "no row has shown it, and one that does should red the
+    /// run and be judged rather than fall into a predicate nobody has tested" - and seed 99991 then
+    /// reddened a 6000-row wave with exactly that row. It was judged by the same probe and the arm
+    /// added. The single-match arm is the one still unexercised, and it is here because the defect is
+    /// per attempt and a <c>search</c> row is one seed away, not as speculative cover.
+    /// </para>
+    /// </remarks>
+    private static bool UpstreamFoundStrictlyLess(OracleRow row, IOracleOutcome ours) =>
+        (row.Expected, ours) switch
+        {
+            (MatchesOutcome theirScan, MatchesOutcome ourScan) => theirScan.Matches.Count < ourScan.Matches.Count
+                && !theirScan
+                    .Matches.Where(
+                        (match, i) =>
+                            !string.Equals(match.Describe(), ourScan.Matches[i].Describe(), StringComparison.Ordinal)
+                    )
+                    .Any(),
+            (SubOutcome { Count: 0 } theirs, SubOutcome mine) => mine.Count > 0
+                && string.Equals(theirs.Text, row.Subject, StringComparison.Ordinal),
+            (SplitOutcome theirs, SplitOutcome mine) => theirs.Parts.Count == 1
+                && mine.Parts.Count > 1
+                && string.Equals(theirs.Parts[0], row.Subject, StringComparison.Ordinal),
+            (NoMatchOutcome, MatchOutcome) => true,
+            _ => false,
+        };
 
     /// <summary>Whether the pattern calls a group by name, which is the defect's precondition.</summary>
     /// <param name="pattern">The pattern.</param>

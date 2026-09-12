@@ -362,6 +362,49 @@ public sealed class PartialMatchingTests
         (anchored.Index, anchored.Length).Should().Be((0, 0));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_skip_alternation_partial_starts_where_this_port_ran_out_of_text()
+    {
+        // The same `search_start` prefilter as the test above, in its SECOND symptom, which S37 found
+        // at 6000 rows of the composed `interactions` wave - three rows, one at seed 4242 and two at
+        // 20260912, every one of them with a `(*SKIP)` in it. Here both engines report a partial and
+        // they report DIFFERENT ONES, so the row is not "upstream saw a partial and this port saw
+        // nothing".
+        //
+        // Upstream's partial covers the whole subject, from the search start to the end of the text,
+        // and its own `match` over that very span denies it. This port answers the zero-width partial
+        // at the end, where `\w` ran out of text - which is upstream's own answer once it is asked at
+        // that position instead. All measured against regex 2026.7.19 on 2026-09-12 and unchanged
+        // against 2026.9.10, tools/probes/upstream-search-start-whole-region-partial.py:
+        //
+        //   pat = regex.compile(r'(?:\w{2,}(*SKIP)\w|\w)\B')
+        //   pat.search('a.Aa', partial=True)          -> (0, 4), partial True
+        //   pat.match('a.Aa', 0, 4, partial=True)     -> None
+        //   pat.match('a.Aa', 4, partial=True)        -> (4, 4), partial True
+        //
+        // That the verb is what puts upstream on the prefilter's path is upstream's own statement
+        // too: delete the `(*SKIP)` and its search answers a COMPLETE match at (2, 3); make it
+        // `(*PRUNE)`, which moves no bound, and it answers this port's partial.
+        //
+        // PERMANENT, on the same reasoning as the test above: a Phase 7 slice that ports
+        // `search_start` and turns this red has imported the prefilter's answers along with the
+        // prefilter. Classified as `search-start-partial` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        Match partial = new FuzzyRegex(@"(?:\w{2,}(*SKIP)\w|\w)\B").Match("a.Aa", partial: true);
+
+        partial.Success.Should().BeTrue();
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((4, 0), "upstream answers (0, 4)");
+
+        // Without the verb there is a complete match, and both engines find it - which is what says
+        // the divergence above belongs to the verb and the prefilter rather than to `\B`.
+        Match complete = new FuzzyRegex(@"(?:\w{2,}\w|\w)\B").Match("a.Aa", partial: true);
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((2, 1));
+    }
+
     [Test]
     public void A_reverse_partial_at_the_left_edge_of_a_narrowed_slice_is_found()
     {
