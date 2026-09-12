@@ -684,3 +684,14 @@ amended text is inline above; this list is the record of what changed and why.
     got cheaper. Ninety-two tests were un-skipped in commit `8ae8607`. Every phase close from now
     on probes the board this way before writing its handover. Decided by evidence; owner to
     confirm at the Phase 4 review.
+
+16. **No known bug ships in this port, inherited or not** (sections 5 and 12; owner decision,
+    2026-09-12). Every bug identified with overwhelming evidence is fixed before 1.0. A divergence
+    from upstream is judged, not merely recorded: the documented definition of the feature, a
+    second engine run for real where one exists (PCRE2 for verbs and partial matching), and a blind
+    review. Where the port is wrong it is fixed test-first at once; where upstream is wrong the
+    port's answer is pinned as a permanent test and Phase 7's port of upstream's start
+    optimisations may not change it; where the port faithfully reproduces an upstream bug, that bug
+    is on Phase 6's fix list and does not reach 1.0. Phase 4 gained S33 to apply this to the
+    divergences S29, S31 and S32 had parked; the evidence is
+    `docs/plan/2026-09-12-divergence-research.md`. Decided by the project owner.

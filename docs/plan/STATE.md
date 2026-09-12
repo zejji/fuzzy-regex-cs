@@ -2,38 +2,34 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S32 is **closed** and in `done/` (2026-09-12). Next is S33, the phase close -
-**the last slice of Phase 4**, after which the driver stops at the phase boundary for the owner.
+**Current slice:** none. S32 is closed. **Next:** S33, added 2026-09-12 at the owner checkpoint -
+`pwsh -File tools/launch-slice.ps1 s33`. Then S34 closes the phase.
 
 **Blockers:** none.
 
-**Where the port stands:** ratchet GREEN, 5759 tests, 5574 passing, tree clean. Oracle GREEN over the
-eighteen default generators - `posix` joined this slice - 5400/5400 at seed 20260913. `verbs` and
-`partial-sliced` are off the default list; run both explicitly.
+**Where the port stands:** ratchet GREEN, 5760 tests, 5575 passing, parity **90.6%**, tree clean.
+Every non-fuzzy capability tag is delivered. Oracle GREEN over eighteen default generators;
+`verbs` and `partial-sliced` are off the list until S33 puts them back.
 
-**What S32 landed.** All 8 `needs:posix-matching` tests, and the port was three helpers
-(`SaveBestMatch`, `RestoreBestMatch`, `CheckPosixMatch`) plus the two arms that drive them. No engine
-defect came out of the wave. **Two scope corrections**, both in PORTMAP: `same_values` and
-`equivalent_nodes` are *not* POSIX's - their one caller is the `do_search_start` suppression at
-`:11771`, so they are Phase 7 with the rest of the prefilter - and the `RE_BestList` family is
-`do_best_fuzzy_match`'s and stays Phase 5. **PORTMAP's symbol-audit counts were edited by hand and no
-longer match `.scratch/symbol-audit.py`'s 2026-09-01 output; re-running it is S33's.**
+**Why S33 exists.** The owner asked how sure we were about the divergences S29, S31 and S32 had
+"pinned and parked", and the answer was: not sure enough, and one was called backwards. They were
+re-judged against PCRE2 run directly (`tools/probes/pcre2-partial-and-skip.py`), Perl, Boost's and
+PCRE2's definitions and upstream's issue history - `docs/plan/2026-09-12-divergence-research.md`.
+Result: the port is right on every `(*SKIP)` case, on `ba??x`/`baa` partial and on `(?r)\b$`;
+**wrong on the reversed empty-slice partial**; and `(?r)(ab)+` fullmatch on a slice is still open.
+S33 fixes the bug, settles the open case, re-marks every inverted in Phase 7 test as permanent, puts
+both generators back on the default list, and drafts (does not file) the upstream report.
 
-**POSIX is exhaustive, so it is slow**, and the first `posix` generator emitted a backtracking bomb
-that red a wave on the row timeout - a 15ms row became 17.9s in Debug, where upstream takes 0.69s and
-this port 1.1s optimised. It was never a divergence. The rule that fixed it is in the generator: a
-quantifier goes on a piece only if the piece holds none already.
+**Owner rule, 2026-09-12 (DECISIONS, spec amendment 16):** no known bug ships, inherited or not.
+Phase 7 ports upstream's prefilters without importing their answers (ROADMAP).
 
-**One divergence is pinned and parked**, found by the S32 blind review and *not* POSIX's:
-`regex.compile(r'(?r)(ab)+').fullmatch('xabz', 1, 3)` is `None` upstream and matches here. Needs
-reversed + a general repeat + a narrowed slice, all three; only `fullmatch` sees it. Same
-slice-versus-text bounds family as S31's partial rows. Test in
-`Gaps/Engine/ReverseMatchingTests.cs`. **Which side is right is open** - upstream refusing the slice
-that is exactly the match looks wrong - so it is recorded, not diagnosed.
+**For S33's author:** upstream's `RE_PARTIAL_LEFT` arms all compare `text_start`, never
+`slice_start` (grep `_regex.c`), yet upstream answers a partial on an empty reversed slice - so the
+partial comes from somewhere other than those arms. Find where before touching ours.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
-`python tools/run-controls.py --slices S32`. Delete `.scratch/control-waves/` after a generator
-change. S32-A and S32-B are strong - 338 to 451 rows of 2000, stable within 35 across three seeds.
+`python tools/run-controls.py --slices S31`. Delete `.scratch/control-waves/` after a generator
+change. Research subagents derive from manuals; run the binary instead when one is reachable.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real.
+real. Phase 4 so far: 6 slices, about 290M Opus tokens, parity 76.5% to 90.6%.

@@ -14,7 +14,7 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
-| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 7 | Opus |
+| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 8 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
 | 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 7-12 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
@@ -85,10 +85,12 @@ and the skip prose describing "a parser that does not compile flags yet" was Pha
 parser that has existed since S13. The four unclaimed families therefore collapse to `(*PRUNE)` and
 `(*SKIP)`, 32 tests, which Phase 4 takes as S29; nothing needs a phase of its own. The un-skip is
 commit `8ae8607`; the rule that every phase close probes the board this way is in DECISIONS and
-in S33. The content line above is corrected to what is actually left: lookaround 63 and lookbehind
+in the phase-close slice. The content line above is corrected to what is actually left: lookaround 63 and lookbehind
 17 (S27), conditionals 15 (S28), verbs 32 (S29), recursion 60 (S30), partial 82 (S31), POSIX 8
-(S32), and the close (S33). Seven slices against the 8-12 estimate, because four of the families
-the estimate counted were already done. Budget it at 1.0-1.35 sessions per slice as the Phase 3
+(S32), and the close (now S34). Seven slices against the 8-12 estimate, because four of the families
+the estimate counted were already done. **Eight from 2026-09-12**: S33 was added at the checkpoint
+to act on the divergence research (fix the port's one confirmed bug, pin the rest permanently),
+and the phase close became S34. Budget it at 1.0-1.35 sessions per slice as the Phase 3
 note says: 7-10 driver sessions. The `budget.json` question is also closed - it was raised to 20 a
 day and 30 a week on 2026-08-31, and STATE.md's note was stale.
 
@@ -178,6 +180,18 @@ backend, and in which form, is an open decision for the owner.
   engine, and upstream is exponential on it too (23.3s at n=26). Any compiled backend stacks on top
   of that work, not instead of it - and either backend is phase-sized, since .NET maintains
   `RegexCompiler` and its source generator as near-1:1 twins for exactly that reason.
+
+**Phase 7 ports upstream's start optimisations without importing their answers (owner rule,
+2026-09-12).** `locate_required_string` and the `search_start_*` family change what upstream answers
+on patterns with `(*SKIP)` and on some partial matches, and the research in
+`docs/plan/2026-09-12-divergence-research.md` shows those changed answers are wrong: PCRE2 agrees
+with this port on every case with its own optimiser on or off, and upstream's `..(*SKIP)xx` retries
+below the position the verb committed past. The tests that pin the port's answers in
+`Gaps/Engine/BacktrackingVerbTests.cs`, `PartialMatchingTests.cs` and `ReverseMatchingTests.cs` are
+**permanent**; a Phase 7 slice that turns one red has ported a bug, and the fix is to make the
+prefilter honour the slice the verb moved (the way upstream's own slow path does), not to invert the
+test. The oracle rows for those shapes stay recorded against a prefilter-free upstream, or in the
+strict manifest, until upstream itself is fixed.
 
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
