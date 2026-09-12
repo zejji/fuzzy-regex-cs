@@ -118,6 +118,20 @@ grounded rather than guessed. The caveat is that fuzzy matching has no oracle ge
 and every phase so far has found its worst bugs through one. Expect a generator slice *inside*
 Phase 5 rather than after it, and read 5-8 as 6-10 sessions at Phase 4's measured 1.1.
 
+**Phase 5 as authored (2026-09-12) is 7 slices, S37-S43, inside the 5-8 band.** S37 clears Phase
+4's one unfinished item first (the composed `interactions` wave red at 6000 rows), because S43
+widens that same generator with fuzzy and a generator that is red before the widening cannot tell a
+new divergence from an old one. S38-S40 are plain fuzzy matching split by upstream mechanism rather
+than by tag: the spine (state, constraints, `FUZZY`/`END_FUZZY`, one-character and zero-width items,
+insertions, `do_simple_fuzzy_match`, counts and changes, and the `fuzzy` oracle generator - written
+FIRST, as S36's handover asked), then strings, backreferences and the `*_REPEAT_ONE` loops, then the
+`{...:test}` constraint. Tags cannot follow that split - `fuzzy-matching` (97 tests) needs all three
+- so S38 and S39 deliver no tag by name and instead run S36's tag probe at their close, un-skipping
+any tag that is entirely green, and S40 is where the seven plain tags must be delivered at the
+latest. S41 (`ENHANCEMATCH`, 6 tests) and S42 (`BESTMATCH`, 18 tests) are the two entry points, each
+adding its flag to the generator; S43 closes the phase as S36 did. Budget at Phase 4's measured 1.1
+sessions per slice: 8 sessions, and the Phase 4 pattern says the wave will add one or two slices.
+
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
 binds after two and a half busy days. Changing it is an owner decision, not a slice's.
