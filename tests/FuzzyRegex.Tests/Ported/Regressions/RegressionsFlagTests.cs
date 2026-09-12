@@ -74,7 +74,7 @@ public sealed class RegressionsFlagTests
     public void Unflagged_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
         FuzzyRegex
             .Matches("9" + _fullwidthDigitNine, @"\d")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("9", _fullwidthDigitNine);
 
@@ -83,14 +83,14 @@ public sealed class RegressionsFlagTests
     public void Unicode_scoped_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
         FuzzyRegex
             .Matches("9" + _fullwidthDigitNine, @"(?u:\d)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#479")]
     public void Ascii_scoped_digit_class_matches_only_the_ascii_digit() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a:\d)").Select(m => m.Value).Should().Equal("9");
+        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     // `FuzzyRegexOptions` has no `A`/`ASCII` or `U`/`UNICODE` member, so a Python `flags=regex.A`
     // or `flags=regex.U` argument is ported as a leading inline `(?a)`/`(?u)` prefix on the
@@ -102,7 +102,7 @@ public sealed class RegressionsFlagTests
     public void Global_unicode_flag_prefix_leaves_the_digit_class_matching_both_digits() =>
         FuzzyRegex
             .Matches("9" + _fullwidthDigitNine, @"(?u)\d")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("9", _fullwidthDigitNine);
 
@@ -111,37 +111,37 @@ public sealed class RegressionsFlagTests
     public void Global_unicode_flag_prefix_does_not_change_an_already_unicode_scoped_digit_class() =>
         FuzzyRegex
             .Matches("9" + _fullwidthDigitNine, @"(?u)(?u:\d)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#482")]
     public void Global_unicode_flag_prefix_does_not_widen_an_ascii_scoped_digit_class() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?u)(?a:\d)").Select(m => m.Value).Should().Equal("9");
+        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?u)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#483")]
     public void Global_ascii_flag_prefix_narrows_the_digit_class_to_the_ascii_digit() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)\d").Select(m => m.Value).Should().Equal("9");
+        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)\d").Select(static m => m.Value).Should().Equal("9");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#484")]
     public void Global_ascii_flag_prefix_does_not_narrow_a_unicode_scoped_digit_class() =>
         FuzzyRegex
             .Matches("9" + _fullwidthDigitNine, @"(?a)(?u:\d)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("9", _fullwidthDigitNine);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#485")]
     public void Global_ascii_flag_prefix_does_not_change_an_already_ascii_scoped_digit_class() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)(?a:\d)").Select(m => m.Value).Should().Equal("9");
+        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     // Git issue 575, continued: \p{L} counts over every Latin-1 code point (0x00-0xFF) under the
     // cross product of an unscoped/(?a:...)/(?u:...) property and no/(?a)/(?u) global prefix.
-    private static readonly string _latin1CodePoints = new([.. Enumerable.Range(0, 0x100).Select(c => (char)c)]);
+    private static readonly string _latin1CodePoints = new([.. Enumerable.Range(0, 0x100).Select(static c => (char)c)]);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#486-494")]

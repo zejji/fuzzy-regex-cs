@@ -467,7 +467,7 @@ internal static class Optimiser
         }
 
         // Upstream frees the rest; here dropping the reference is the same act.
-        _ = pattern.NodeList.RemoveAll(node => (node.Status & NodeStatus.Used) == 0);
+        _ = pattern.NodeList.RemoveAll(static node => (node.Status & NodeStatus.Used) == 0);
     }
 
     /// <summary>Upstream <c>mark_named_groups</c> (line 23672).</summary>

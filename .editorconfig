@@ -32,6 +32,18 @@ csharp_style_var_elsewhere = true:suggestion
 ; IDE0007: 'use var instead of explicit type'. The three csharp_style_var_* preferences above
 ; are what we actually want; the IDE0007 diagnostic on top of them is noise, so it is off.
 dotnet_diagnostic.IDE0007.severity = none
+; IDE0320: a lambda or anonymous method that captures nothing should be 'static', so the compiler
+; neither allocates a closure nor re-creates the delegate. Rider reports it as 'Anonymous function
+; can be made static' at ERROR severity. Owner decision, 2026-09-12: this must fail the build.
+; MEASURED: on SDK 10.0.400 the IDE0320 analyzer reports nothing under `dotnet build` whatever is
+; set here (DECISIONS 2026-09-12), so the gate is `tools/check-inspections.ps1` (ReSharper's host,
+; which does run it) in CI. These two lines stay so the day Roslyn reports it in build, it fails.
+csharp_prefer_static_anonymous_function = true
+dotnet_diagnostic.IDE0320.severity = warning
+; CA1822: a member that touches no instance state should be static. Same reasoning and the same
+; Rider twin ('Member can be marked as static'). TUnit forbids static [Test] methods (TUnit0048 is a
+; build error and its source generator emits instance calls), so see the tests/ section below.
+dotnet_diagnostic.CA1822.severity = warning
 csharp_style_expression_bodied_methods = when_on_single_line:suggestion
 csharp_style_expression_bodied_properties = when_on_single_line:suggestion
 csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
@@ -158,6 +170,12 @@ dotnet_diagnostic.S907.severity = none
 
 ; --- Tests ----------------------------------------------------------------
 [tests/**/*.cs]
+; Rider's 'Member can be marked as static' on a [Test] method cannot be obeyed: TUnit0048 makes a
+; static test method a build error and TUnit's source generator emits instance calls (verified
+; 2026-09-12 in a throwaway project). Roslyn's CA1822 already exempts test methods; ReSharper's twin
+; does not, so it is off for test code. Non-test members in test projects still get CA1822.
+resharper_member_can_be_made_static_local_highlighting = none
+resharper_member_can_be_made_static_global_highlighting = none
 ; Long, vertically-structured test methods are more readable than extracted helpers.
 dotnet_diagnostic.MA0051.severity = none
 dotnet_diagnostic.S138.severity = none

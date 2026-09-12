@@ -24,11 +24,13 @@ namespace Fuzzy.Text.RegularExpressions.OracleTests;
 /// <c>verbs</c> on the default list - in that order, which is the order the rule requires.
 /// </para>
 /// <para>
-/// <b>Two entries are for bugs upstream has since fixed, and they are here on purpose.</b>
-/// <c>reverse-group-call-direction</c> is issue 614, fixed by commit <c>9398a6d</c> and released
-/// in 2026.8.30; <c>overlapped-skip-stale-slice</c> is the family upstream's issue 613 fix
-/// (<c>b77694a</c>, same release) addresses one consequence of. The oracle records against the
-/// pinned release, which is older, so both still diverge here.
+/// <b>One entry is for a bug upstream has since fixed, and it is here on purpose.</b>
+/// <c>reverse-group-call-direction</c> is issue 614, fixed by commit <c>9398a6d</c>, released in
+/// 2026.8.30, and verified fixed on 2026-09-12 against 2026.9.10 (the span is now (3, 6), this
+/// port's answer). The oracle records against the pinned release, which is older, so it still
+/// diverges here. <c>overlapped-skip-stale-slice</c> was thought to be one consequence of the
+/// issue 613 fix (<c>b77694a</c>); it is NOT - re-run against 2026.9.10 the same day, its rows
+/// reproduce unchanged, so it stays an open upstream defect (ledger entry 5).
 /// </para>
 /// <para>
 /// <b>THE SYNC MUST RE-RECORD EVERY <see cref="ExpectedDivergence.Example"/>, and that is the step
@@ -122,8 +124,8 @@ internal static class ExpectedDivergences
     /// </summary>
     private static readonly Dictionary<string, string> _boundedLazy = OracleWave
         .ParseRows(_boundedLazyRows)
-        .Select((row, i) => (Key: Question(row), Ours: _boundedLazyOurs[i]))
-        .ToDictionary(pair => pair.Key, pair => pair.Ours, StringComparer.Ordinal);
+        .Select(static (row, i) => (Key: Question(row), Ours: _boundedLazyOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     private static readonly ExpectedDivergence[] _entries =
     [

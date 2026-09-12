@@ -61,7 +61,7 @@ public sealed class PartialMatchingTests
 
         m.PartialMatch.Should().BeFalse();
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("ab");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("ab");
     }
 
     [Test]
@@ -308,7 +308,7 @@ public sealed class PartialMatchingTests
         // [((1, 4), True)] upstream.
         new FuzzyRegex("ba??x")
             .Matches("abab", partial: true)
-            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Select(static m => (m.Index, m.Index + m.Length, m.PartialMatch))
             .Should()
             .Equal((3, 4, true));
     }
@@ -395,7 +395,7 @@ public sealed class PartialMatchingTests
         // The scan inherits it: the complete match first, then the partial at the left edge.
         new FuzzyRegex("(?r)a(bc)*")
             .Matches("abab", beginning: 1, length: 3, partial: true)
-            .Select(m => (m.Index, m.Length, m.PartialMatch))
+            .Select(static m => (m.Index, m.Length, m.PartialMatch))
             .Should()
             .Equal((2, 1, false), (1, 0, true));
 

@@ -44,7 +44,7 @@ public sealed class UpstreamInternalErrorTests
     [Test]
     public void A_negated_set_of_complementary_properties_is_rejected()
     {
-        Action compile = () =>
+        Action compile = static () =>
             PatternCompiler.Compile(@"[^\s\S]", RegexFlags.IgnoreCase, _noNamedLists, PatternCompiler.DefaultVersion);
 
         compile.Should().Throw<NotSupportedException>();
@@ -75,7 +75,7 @@ public sealed class UpstreamInternalErrorTests
     [Test]
     public void An_inline_version_flag_conflicting_with_the_argument_flag_is_rejected()
     {
-        Action compile = () =>
+        Action compile = static () =>
             PatternCompiler.Compile("(?V1)a", RegexFlags.Version0, _noNamedLists, PatternCompiler.DefaultVersion);
 
         compile.Should().Throw<ArgumentOutOfRangeException>();

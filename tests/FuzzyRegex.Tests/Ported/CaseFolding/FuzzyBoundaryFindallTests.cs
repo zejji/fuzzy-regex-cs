@@ -16,11 +16,19 @@ public sealed class FuzzyBoundaryFindallTests
     [Skip("needs:fuzzy-matching - the engine has no fuzzy quantifiers yet")]
     [Property("Upstream", "RegexTests.test_case_folding#32")]
     public void V0_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
-        FuzzyRegex.Matches(_subject, "(?iV0)" + _pattern).Select(m => m.Value).Should().Equal("word234", "word23");
+        FuzzyRegex
+            .Matches(_subject, "(?iV0)" + _pattern)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("word234", "word23");
 
     [Test]
     [Skip("needs:fuzzy-matching - the engine has no fuzzy quantifiers yet")]
     [Property("Upstream", "RegexTests.test_case_folding#33")]
     public void V1_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
-        FuzzyRegex.Matches(_subject, "(?iV1)" + _pattern).Select(m => m.Value).Should().Equal("word234", "word23");
+        FuzzyRegex
+            .Matches(_subject, "(?iV1)" + _pattern)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("word234", "word23");
 }

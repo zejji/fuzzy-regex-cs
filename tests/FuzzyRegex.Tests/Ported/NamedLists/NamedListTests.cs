@@ -58,7 +58,7 @@ public sealed class NamedListTests
     [Property("Upstream", "RegexTests.test_named_lists#7")]
     public void The_same_named_list_can_be_referenced_twice_and_quantified()
     {
-        Action act = () => _ = new FuzzyRegex("3\\L<bar>4\\L<bar>+5", FuzzyRegexOptions.None, _bar);
+        Action act = static () => _ = new FuzzyRegex("3\\L<bar>4\\L<bar>+5", FuzzyRegexOptions.None, _bar);
 
         act.Should().NotThrow();
     }
@@ -88,7 +88,7 @@ public sealed class NamedListTests
 
         FuzzyRegex
             .Matches("+solid QWERT", "^\\L<options>", FuzzyRegexOptions.None, options)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("+solid");
     }

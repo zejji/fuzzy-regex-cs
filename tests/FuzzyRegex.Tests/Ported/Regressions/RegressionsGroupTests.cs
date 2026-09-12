@@ -16,7 +16,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.FullMatch("abc", "(?P<x>.)*(?&x)");
 
-        m.Groups["x"].Captures.Select(c => c.Value).Should().Equal("a", "b", "c");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
         m.Groups["x"].Value.Should().Be("b");
     }
 
@@ -26,7 +26,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.FullMatch("abc", "(?P<x>.)(?P<x>.)(?P<x>.)");
 
-        m.Groups["x"].Captures.Select(c => c.Value).Should().Equal("a", "b", "c");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
         m.Groups["x"].Value.Should().Be("c");
     }
 
@@ -41,12 +41,12 @@ public sealed class RegressionsGroupTests
         Group[] groups = [.. m.Groups];
 
         groups.Should().HaveCount(2);
-        groups[0].Captures.Select(c => c.Value).Should().Equal("abc");
-        groups[1].Captures.Select(c => c.Value).Should().Equal("a", "b", "c");
-        groups[0].Captures.Select(c => (c.Index, c.Length)).Should().Equal((0, 3));
+        groups[0].Captures.Select(static c => c.Value).Should().Equal("abc");
+        groups[1].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
+        groups[0].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 3));
         // Upstream allspans() reports (start, end); Capture exposes (Index, Length), so the
         // three one-character captures are (0, 1), (1, 1), (2, 1), not the raw span pairs.
-        groups[1].Captures.Select(c => (c.Index, c.Length)).Should().Equal((0, 1), (1, 1), (2, 1));
+        groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 1), (1, 1), (2, 1));
     }
 
     // Hg issue 100: strange results from regex.search.
@@ -56,7 +56,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.Match("WWWi", "^([^z]*(?:WWWi|W))?$");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     [Test]
@@ -65,7 +65,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.Match("WWWi", "^([^z]*(?:WWWi|w))?$");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     [Test]
@@ -74,7 +74,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.Match("WWWi", "^([^z]*?(?:WWWi|W))?$");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     // Hg issue 220: Misbehavior of group capture with OR operand.
@@ -84,7 +84,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = FuzzyRegex.MatchAtStart("easier", @"\w*(ea)\w*|\w*e(?!a)\w*");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("ea");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("ea");
     }
 
     // Hg issue 87: Allow duplicate names of groups.
@@ -96,6 +96,6 @@ public sealed class RegressionsGroupTests
 
         // Upstream spans("x") is [(1, 2), (0, 2)] as (start, end). As (Index, Length) the inner
         // group captured "b", one character at index 1, and the outer captured "ab".
-        m.Groups["x"].Captures.Select(c => (c.Index, c.Length)).Should().Equal((1, 1), (0, 2));
+        m.Groups["x"].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((1, 1), (0, 2));
     }
 }

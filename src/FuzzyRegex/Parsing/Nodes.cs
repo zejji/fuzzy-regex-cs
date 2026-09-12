@@ -1156,18 +1156,18 @@ internal class Branch : RegexBase
     /// <inheritdoc />
     internal override RegexBase RemoveCaptures()
     {
-        Branches = [.. Branches.Select(b => b.RemoveCaptures())];
+        Branches = [.. Branches.Select(static b => b.RemoveCaptures())];
         return this;
     }
 
     /// <inheritdoc />
-    internal override bool IsAtomic() => Branches.TrueForAll(b => b.IsAtomic());
+    internal override bool IsAtomic() => Branches.TrueForAll(static b => b.IsAtomic());
 
     /// <inheritdoc />
-    internal override bool CanBeAffix() => Branches.TrueForAll(b => b.CanBeAffix());
+    internal override bool CanBeAffix() => Branches.TrueForAll(static b => b.CanBeAffix());
 
     /// <inheritdoc />
-    internal override bool ContainsGroup() => Branches.Exists(b => b.ContainsGroup());
+    internal override bool ContainsGroup() => Branches.Exists(static b => b.ContainsGroup());
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -1183,10 +1183,10 @@ internal class Branch : RegexBase
     }
 
     /// <inheritdoc />
-    internal override bool IsEmpty() => Branches.TrueForAll(b => b.IsEmpty());
+    internal override bool IsEmpty() => Branches.TrueForAll(static b => b.IsEmpty());
 
     /// <inheritdoc />
-    internal override long MaxWidth() => Branches.Max(b => b.MaxWidth());
+    internal override long MaxWidth() => Branches.Max(static b => b.MaxWidth());
 
     /// <inheritdoc />
     /// <remarks>
@@ -1492,7 +1492,7 @@ internal class Branch : RegexBase
         // One of the two points PORTMAP's "Where we diverge" requires the members to be sorted at,
         // because a Python set of nodes has no stable order. The corpus recorder sorts by the same
         // rendered key.
-        List<RegexBase> ordered = [.. items.OrderBy(i => i.RenderKey(), StringComparer.Ordinal)];
+        List<RegexBase> ordered = [.. items.OrderBy(static i => i.RenderKey(), StringComparer.Ordinal)];
 
         RegexBase item = ordered.Count == 1 ? ordered[0] : new SetUnion(info, ordered).Optimise(info, reverse);
 
@@ -1568,7 +1568,11 @@ internal class Branch : RegexBase
             return null;
         }
 
-        return ParseFunctions.CheckFirstset(info, reverse, [.. charset.Select(c => (RegexBase?)new Character(c))]);
+        return ParseFunctions.CheckFirstset(
+            info,
+            reverse,
+            [.. charset.Select(static c => (RegexBase?)new Character(c))]
+        );
     }
 
     /// <summary>Python's <c>items[start:end]</c>, which clamps rather than throwing.</summary>
@@ -2238,7 +2242,9 @@ internal sealed class StringSet : Branch
         // reaches the bytecode.
         Branches =
         [
-            .. choices.OrderByDescending(choice => choice.Count).Select(choice => (RegexBase)new Sequence(choice)),
+            .. choices
+                .OrderByDescending(static choice => choice.Count)
+                .Select(static choice => (RegexBase)new Sequence(choice)),
         ];
     }
 
@@ -2386,13 +2392,13 @@ internal sealed class Sequence : RegexBase
     }
 
     /// <inheritdoc />
-    internal override bool IsAtomic() => Items.TrueForAll(s => s.IsAtomic());
+    internal override bool IsAtomic() => Items.TrueForAll(static s => s.IsAtomic());
 
     /// <inheritdoc />
     internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
-    internal override bool ContainsGroup() => Items.Exists(s => s.ContainsGroup());
+    internal override bool ContainsGroup() => Items.Exists(static s => s.ContainsGroup());
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -2425,7 +2431,7 @@ internal sealed class Sequence : RegexBase
     internal override bool HasSimpleStart() => Items.Count > 0 && Items[0].HasSimpleStart();
 
     /// <inheritdoc />
-    internal override bool IsEmpty() => Items.TrueForAll(i => i.IsEmpty());
+    internal override bool IsEmpty() => Items.TrueForAll(static i => i.IsEmpty());
 
     /// <inheritdoc />
     internal override long MaxWidth()
@@ -2546,7 +2552,7 @@ internal sealed class Sequence : RegexBase
         [
             .. Unicode
                 .RegexModule.GetExpandOnFolding()
-                .Select(c => Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])),
+                .Select(static c => Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [c])),
         ];
 
         int[] text = Unicode.PythonStr.Lower(Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [.. characters]));
@@ -2727,7 +2733,7 @@ internal abstract class SetBase(
     internal override string RenderKey() =>
         string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
-            $"({GetType().Name},({string.Join(',', Items.Select(i => i.RenderKey()))}),{Positive},{CaseFlags},{Zerowidth})"
+            $"({GetType().Name},({string.Join(',', Items.Select(static i => i.RenderKey()))}),{Positive},{CaseFlags},{Zerowidth})"
         );
 
     /// <inheritdoc />

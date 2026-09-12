@@ -28,7 +28,7 @@ public sealed class GroupCallTests
 
         (m.Index, m.Length).Should().Be((0, 3));
         m.Groups["x"].Value.Should().Be("a");
-        m.Groups["x"].Captures.Select(c => c.Value).Should().Equal("a", "a", "a");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "a", "a");
     }
 
     [Test]
@@ -46,7 +46,7 @@ public sealed class GroupCallTests
 
         m.Success.Should().BeTrue();
         m.Groups["x"].Success.Should().BeFalse();
-        m.Groups["x"].Captures.Select(c => c.Value).Should().Equal("a");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a");
     }
 
     [Test]
@@ -61,7 +61,7 @@ public sealed class GroupCallTests
         Match m = FuzzyRegex.Match("aaa", "(?<x>a*)(?&x)");
 
         (m.Index, m.Length).Should().Be((0, 3));
-        m.Groups["x"].Captures.Select(c => c.Value).Should().Equal("aaa", "");
+        m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("aaa", "");
     }
 
     [Test]
@@ -98,7 +98,7 @@ public sealed class GroupCallTests
         FuzzyRegex
             .MatchAtStart("abc", "(?(DEFINE)(?<func>.)).(?<=(?&func))")
             .Groups["func"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
     }
@@ -177,7 +177,7 @@ public sealed class GroupCallTests
         (reversed.Index, reversed.Index + reversed.Length).Should().Be((0, 3));
         reversed
             .Groups["g"]
-            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Captures.Select(static c => (c.Index, c.Index + c.Length))
             .Should()
             // The call's capture is the forward '[ab]+' upstream's own inline copy also finds.
             .Equal((2, 5), (0, 2));
@@ -194,13 +194,13 @@ public sealed class GroupCallTests
         new FuzzyRegex("(?r)(?<g>[ab]{2})(?=(?&g))b")
             .Match("abbaa")
             .Groups["g"]
-            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Captures.Select(static c => (c.Index, c.Index + c.Length))
             .Should()
             .Equal((2, 4), (0, 2));
         new FuzzyRegex("(?r)(?<g>[ab])(?=(?&g))b")
             .Match("abb")
             .Groups["g"]
-            .Captures.Select(c => (c.Index, c.Index + c.Length))
+            .Captures.Select(static c => (c.Index, c.Index + c.Length))
             .Should()
             .Equal((2, 3), (1, 2));
     }

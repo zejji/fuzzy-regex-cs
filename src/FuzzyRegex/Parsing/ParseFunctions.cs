@@ -353,7 +353,7 @@ internal static class ParseFunctions
             }
         }
 
-        return new Sequence([.. sequence.Where(item => item is not null).Select(item => item!)]);
+        return new Sequence([.. sequence.Where(static item => item is not null).Select(static item => item!)]);
     }
 
     /// <summary>Upstream <c>apply_quantifier</c> (lines 558-588).</summary>
@@ -966,7 +966,7 @@ internal static class ParseFunctions
         {
             // (*...
             int savedPos2 = source.Pos;
-            string word = source.GetWhile(c => c is ')' or '>', include: false);
+            string word = source.GetWhile(static c => c is ')' or '>', include: false);
 
             // Upstream's test is word[:1].isalpha(), which is Unicode-aware: measured against the
             // local oracle 2026-08-30, '(*e)' and '(*Ab)' both fail with "unknown verb" at
@@ -1457,7 +1457,7 @@ internal static class ParseFunctions
     /// <returns>The name.</returns>
     internal static string ParseName(Source source, bool allowNumeric = false, bool allowGroup0 = false)
     {
-        string name = source.GetWhile(c => c is ')' or '>', include: false);
+        string name = source.GetWhile(static c => c is ')' or '>', include: false);
 
         if (name.Length == 0)
         {
@@ -1595,7 +1595,10 @@ internal static class ParseFunctions
             }
 
             return new Atomic(
-                new Branch([new String([0x0D, 0x0A]), new SetUnion(info, [.. charset.Select(c => new Character(c))])])
+                new Branch([
+                    new String([0x0D, 0x0A]),
+                    new SetUnion(info, [.. charset.Select(static c => new Character(c))]),
+                ])
             );
         }
 
@@ -1710,7 +1713,7 @@ internal static class ParseFunctions
             digits += (char)next;
             savedPos = source.Pos;
             next = source.Get();
-            if (digits.All(c => RegexFlags.IsOctDigit(c)) && RegexFlags.IsOctDigit(next))
+            if (digits.All(static c => RegexFlags.IsOctDigit(c)) && RegexFlags.IsOctDigit(next))
             {
                 // 3 octal digits, so octal escape sequence.
                 int encoding = info.Flags & RegexFlags.AllEncodings;
@@ -1751,7 +1754,7 @@ internal static class ParseFunctions
         source.Pos = savedPos;
 
         string text = new([.. digits]);
-        if (text.Length > 0 && text.All(c => RegexFlags.IsOctDigit(c)))
+        if (text.Length > 0 && text.All(static c => RegexFlags.IsOctDigit(c)))
         {
             return MakeCharacter(info, Convert.ToInt32(text, 8), inSet);
         }
@@ -1942,7 +1945,7 @@ internal static class ParseFunctions
         {
             string qualifier = name;
             name = TrimPythonWhitespace(
-                source.GetWhile(c => RegexFlags.IsAlnum(c) || c is ' ' or '&' or '_' or '-' or '.' or '/')
+                source.GetWhile(static c => RegexFlags.IsAlnum(c) || c is ' ' or '&' or '_' or '-' or '.' or '/')
             );
 
             if (name.Length > 0)
@@ -2351,7 +2354,7 @@ internal static class ParseFunctions
             return rational;
         }
 
-        return new string([.. name.Where(ch => ch is not ('_' or '-' or ' '))]).ToUpperInvariant();
+        return new string([.. name.Where(static ch => ch is not ('_' or '-' or ' '))]).ToUpperInvariant();
     }
 
     /// <summary>Upstream <c>lookup_property</c> (lines 1731-1799).</summary>
@@ -2564,7 +2567,7 @@ internal static class ParseFunctions
 
                 // Upstream: `if ch and is_octal(digits + ch)`. The end of the template is falsy
                 // there and EndOfSource is not an octal digit here, so the two agree.
-                if (RegexFlags.IsOctDigit(ch) && digits.All(c => RegexFlags.IsOctDigit(c)))
+                if (RegexFlags.IsOctDigit(ch) && digits.All(static c => RegexFlags.IsOctDigit(c)))
                 {
                     // An octal escape sequence.
                     return (false, [Convert.ToInt32(digits + (char)ch, 8) & octalMask]);
@@ -2637,7 +2640,7 @@ internal static class ParseFunctions
         int savedPos = source.Pos;
         if (source.MatchText("{"))
         {
-            string name = source.GetWhile(c => RegexFlags.IsAlpha(c) || c == ' ');
+            string name = source.GetWhile(static c => RegexFlags.IsAlpha(c) || c == ' ');
 
             if (source.MatchText("}"))
             {
@@ -2784,7 +2787,7 @@ internal static class ParseFunctions
         // members to be sorted at, because a Python set of nodes has no stable order; the corpus
         // recorder sorts by the same rendered key.
         int setCaseFlags = caseFlags & ~RegexFlags.FullCase;
-        List<RegexBase> ordered = [.. members.OrderBy(m => m.RenderKey(), StringComparer.Ordinal)];
+        List<RegexBase> ordered = [.. members.OrderBy(static m => m.RenderKey(), StringComparer.Ordinal)];
 
         var set = new SetUnion(info, ordered, caseFlags: setCaseFlags, zerowidth: true);
 

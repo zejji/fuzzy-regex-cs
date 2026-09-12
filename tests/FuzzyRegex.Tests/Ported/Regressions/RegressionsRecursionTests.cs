@@ -17,7 +17,7 @@ public sealed class RegressionsRecursionTests
         FuzzyRegex
             .Match("aaa(((1+0)+1)+1)bbb", @"(?<rec>\((?:[^()]++|(?&rec))*\))")
             .Groups["rec"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("(1+0)", "((1+0)+1)", "(((1+0)+1)+1)");
     }
@@ -29,7 +29,7 @@ public sealed class RegressionsRecursionTests
         // Hg issue 31: atomic and normal groups in recursive patterns.
         FuzzyRegex
             .Matches("a(bcd(e)f)g(h)", @"\((?:(?>[^()]+)|(?R))*\)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("(bcd(e)f)", "(h)");
     }
@@ -39,7 +39,7 @@ public sealed class RegressionsRecursionTests
     public void Recursive_alternation_without_an_atomic_group_matches_every_top_level_balanced_group() =>
         FuzzyRegex
             .Matches("a(bcd(e)f)g(h)", @"\((?:(?:[^()]+)|(?R))*\)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("(bcd(e)f)", "(h)");
 
@@ -48,28 +48,36 @@ public sealed class RegressionsRecursionTests
     public void Recursive_atomic_alternation_stops_at_the_first_unbalanced_close_paren() =>
         FuzzyRegex
             .Matches("a(b(cd)e)f)g)h", @"\((?:(?>[^()]+)|(?R))*\)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("(b(cd)e)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#6")]
     public void Recursive_atomic_alternation_matches_the_innermost_balanced_group_in_an_unbalanced_subject() =>
-        FuzzyRegex.Matches("a(bc(d(e)f)gh", @"\((?:(?>[^()]+)|(?R))*\)").Select(m => m.Value).Should().Equal("(d(e)f)");
+        FuzzyRegex
+            .Matches("a(bc(d(e)f)gh", @"\((?:(?>[^()]+)|(?R))*\)")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("(d(e)f)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#7")]
     public void Recursive_atomic_alternation_matches_the_innermost_balanced_group_when_searched_right_to_left() =>
         FuzzyRegex
             .Matches("a(bc(d(e)f)gh", @"(?r)\((?:(?>[^()]+)|(?R))*\)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("(d(e)f)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#8")]
     public void Recursive_possessive_alternation_matches_the_innermost_balanced_group() =>
-        FuzzyRegex.Matches("a(b(c(de)fg)h", @"\((?:[^()]*+|(?0))*\)").Select(m => m.Value).Should().Equal("(c(de)fg)");
+        FuzzyRegex
+            .Matches("a(b(c(de)fg)h", @"\((?:[^()]*+|(?0))*\)")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("(c(de)fg)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#32")]

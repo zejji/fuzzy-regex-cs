@@ -13,7 +13,7 @@ public sealed class SetTests
 {
     // The 256 byte values 0x00-0xFF, built from a loop rather than pasted as literal characters
     // (many of which are unprintable control characters).
-    private static readonly string _allChars = new([.. Enumerable.Range(0, 0x100).Select(c => (char)c)]);
+    private static readonly string _allChars = new([.. Enumerable.Range(0, 0x100).Select(static c => (char)c)]);
 
     [Test]
     [Arguments("[a]", "a", 0, 1)]
@@ -56,7 +56,7 @@ public sealed class SetTests
     [Arguments(@"(?i)[\p{Alpha}]", "A0", "A")]
     [Property("Upstream", "RegexTests.test_set#6-7")]
     public void Alpha_property_findall_matches_only_the_letter(string pattern, string subject, string expected) =>
-        FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(expected);
+        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(expected);
 
     [Test]
     [Arguments(@"[a\p{Alpha}]", "ab0", "a", "b")]
@@ -69,7 +69,7 @@ public sealed class SetTests
         string subject,
         string first,
         string second
-    ) => FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(first, second);
+    ) => FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(first, second);
 
     [Test]
     [Arguments(@"[a-b\p{Alpha}]", "abC0", "a", "b", "C")]
@@ -81,7 +81,7 @@ public sealed class SetTests
         string first,
         string second,
         string third
-    ) => FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(first, second, third);
+    ) => FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(first, second, third);
 
     [Test]
     [Arguments(@"[\p{Alpha}]", "a0", "a")]
@@ -90,7 +90,7 @@ public sealed class SetTests
     [Arguments(@"[^\P{Alpha}]", "a0", "a")]
     [Property("Upstream", "RegexTests.test_set#14-17")]
     public void Alpha_property_and_its_negations_findall(string pattern, string subject, string expected) =>
-        FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(expected);
+        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(expected);
 
     [Test]
     [Arguments(@"[^\d-h]", "a^b12c-h", "a^bc")]
@@ -101,7 +101,7 @@ public sealed class SetTests
     [Arguments(@"[^8\d]", "a 1b2", "a b")]
     [Property("Upstream", "RegexTests.test_set#18-23")]
     public void Negated_character_class_findall_joined(string pattern, string subject, string expectedJoined) =>
-        string.Concat(FuzzyRegex.Matches(subject, pattern).Select(m => m.Value)).Should().Be(expectedJoined);
+        string.Concat(FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value)).Should().Be(expectedJoined);
 
     [Test]
     [Arguments(@"\p{ASCII}", 128)]
@@ -138,5 +138,5 @@ public sealed class SetTests
     [Arguments(@"(?iV1)[\w--a]", "abc", "b", "c")]
     [Property("Upstream", "RegexTests.test_set#39-42")]
     public void Set_difference_findall(string pattern, string subject, string first, string second) =>
-        FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(first, second);
+        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(first, second);
 }

@@ -13,7 +13,7 @@ public sealed class BadSetTests
     [Property("Upstream", "RegexTests.test_bug_545855#1")]
     public void Unterminated_set_fails_to_compile()
     {
-        Action act = () => _ = new FuzzyRegex("foo[a-");
+        Action act = static () => _ = new FuzzyRegex("foo[a-");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

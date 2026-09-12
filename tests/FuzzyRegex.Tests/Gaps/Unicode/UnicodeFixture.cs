@@ -105,8 +105,8 @@ internal static class UnicodeFixture
             root.GetProperty("tables")
                 .EnumerateObject()
                 .ToImmutableDictionary(
-                    property => property.Name,
-                    property => new TableDigest(
+                    static property => property.Name,
+                    static property => new TableDigest(
                         property.Value.GetProperty("length").GetInt32(),
                         property.Value.GetProperty("sha256").GetString()!
                     ),
@@ -115,14 +115,14 @@ internal static class UnicodeFixture
             root.GetProperty("casing")
                 .EnumerateObject()
                 .ToImmutableDictionary(
-                    property => property.Name,
-                    property => property.Value.GetString()!,
+                    static property => property.Name,
+                    static property => property.Value.GetString()!,
                     StringComparer.Ordinal
                 ),
             root.GetProperty("propertyCount").GetInt32(),
             root.GetProperty("propertyValuePairCount").GetInt32(),
             root.GetProperty("properties").GetString()!,
-            [.. root.GetProperty("hasPropertyValueCodepoints").EnumerateArray().Select(c => c.GetInt32())],
+            [.. root.GetProperty("hasPropertyValueCodepoints").EnumerateArray().Select(static c => c.GetInt32())],
             root.GetProperty("hasPropertyValue").GetString()!,
             root.GetProperty("pythonStrCodepointCount").GetInt32(),
             root.GetProperty("pythonStrSkippedNewIn17").GetInt32(),

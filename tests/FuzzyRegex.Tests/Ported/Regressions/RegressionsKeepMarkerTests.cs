@@ -21,7 +21,7 @@ public sealed class RegressionsKeepMarkerTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#164")]
     public void Keep_marker_outside_a_group_shrinks_every_match_in_a_findall() =>
-        FuzzyRegex.Matches("abcdefgh", @"\w\w\K\w\w").Select(m => m.Value).Should().Equal("cd", "gh");
+        FuzzyRegex.Matches("abcdefgh", @"\w\w\K\w\w").Select(static m => m.Value).Should().Equal("cd", "gh");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#165")]
@@ -34,7 +34,7 @@ public sealed class RegressionsKeepMarkerTests
         // [m[0] for m in regex.finditer(...)] is ['cd', 'gh']. DECISIONS 2026-09-01.
         FuzzyRegex
             .Matches("abcdefgh", @"(\w\w\K\w\w)")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("abcd", "efgh");
 
@@ -51,7 +51,7 @@ public sealed class RegressionsKeepMarkerTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#167")]
     public void Keep_marker_outside_a_group_shrinks_every_match_when_searching_right_to_left() =>
-        FuzzyRegex.Matches("abcdefgh", @"(?r)\w\w\K\w\w").Select(m => m.Value).Should().Equal("ef", "ab");
+        FuzzyRegex.Matches("abcdefgh", @"(?r)\w\w\K\w\w").Select(static m => m.Value).Should().Equal("ef", "ab");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#168")]
@@ -61,7 +61,7 @@ public sealed class RegressionsKeepMarkerTests
         // themselves are 'ef' and 'ab'.
         FuzzyRegex
             .Matches("abcdefgh", @"(?r)(\w\w\K\w\w)")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("efgh", "abcd");
 }

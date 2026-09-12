@@ -37,22 +37,22 @@ public sealed class ZeroWidthTests
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#4,5")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
+        FuzzyRegex.Matches("foo bar", @"^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#6,7")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
+        FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#8,9")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
+        FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#10,11")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
+        FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#12")]

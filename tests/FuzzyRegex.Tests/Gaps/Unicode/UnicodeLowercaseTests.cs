@@ -31,13 +31,13 @@ public sealed class UnicodeLowercaseTests
         }
 
         rows.AddRange(UnicodeLowercase.Expanding);
-        rows.Sort((a, b) => a.From.CompareTo(b.From));
+        rows.Sort(static (a, b) => a.From.CompareTo(b.From));
 
         foreach ((int from, int[] to) in rows)
         {
             text.Append(from.ToString(CultureInfo.InvariantCulture))
                 .Append(':')
-                .AppendJoin(',', to.Select(c => c.ToString(CultureInfo.InvariantCulture)))
+                .AppendJoin(',', to.Select(static c => c.ToString(CultureInfo.InvariantCulture)))
                 .Append('\n');
         }
 

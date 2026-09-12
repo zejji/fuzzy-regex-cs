@@ -21,7 +21,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, ".").Select(m => m.Value));
+        string joined = string.Concat(FuzzyRegex.Matches(subject, ".").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }
@@ -32,7 +32,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, "[eèéêëēěė]").Select(m => m.Value));
+        string joined = string.Concat(FuzzyRegex.Matches(subject, "[eèéêëēěė]").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }
@@ -43,7 +43,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, "e|è|é|ê|ë|ē|ě|ė").Select(m => m.Value));
+        string joined = string.Concat(FuzzyRegex.Matches(subject, "e|è|é|ê|ë|ē|ě|ė").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }

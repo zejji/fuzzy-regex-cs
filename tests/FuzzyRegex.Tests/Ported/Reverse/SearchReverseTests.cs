@@ -24,24 +24,28 @@ public sealed class SearchReverseTests
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#1,6,8")]
     public void Matches_value_walks_backward_one_char_at_a_time() =>
-        FuzzyRegex.Matches("abc", "(?r).").Select(m => m.Value).Should().Equal("c", "b", "a");
+        FuzzyRegex.Matches("abc", "(?r).").Select(static m => m.Value).Should().Equal("c", "b", "a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#2")]
     public void Matches_value_walks_backward_one_char_at_a_time_when_overlapped_is_requested() =>
-        new FuzzyRegex("(?r).").Matches("abc", overlapped: true).Select(m => m.Value).Should().Equal("c", "b", "a");
+        new FuzzyRegex("(?r).")
+            .Matches("abc", overlapped: true)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("c", "b", "a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#3")]
     public void Matches_value_walks_backward_two_chars_at_a_time_without_overlap() =>
-        FuzzyRegex.Matches("abcde", "(?r)..").Select(m => m.Value).Should().Equal("de", "bc");
+        FuzzyRegex.Matches("abcde", "(?r)..").Select(static m => m.Value).Should().Equal("de", "bc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#4,7,9")]
     public void Matches_value_walks_backward_two_chars_at_a_time_with_overlap() =>
         new FuzzyRegex("(?r)..")
             .Matches("abcde", overlapped: true)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("de", "cd", "bc", "ab");
 
@@ -50,7 +54,7 @@ public sealed class SearchReverseTests
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("b", "a");
 
@@ -59,7 +63,7 @@ public sealed class SearchReverseTests
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("-", "-");
 
@@ -68,110 +72,126 @@ public sealed class SearchReverseTests
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("c", "b");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#10,14")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
+        FuzzyRegex.Matches("foo bar", @"^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#12,16")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
+        FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#11,15")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(m => m.Value).Should().Equal("", "foo", "bar");
+        FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#13,17")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(m => m.Value).Should().Equal("bar", "foo", "");
+        FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#18")]
     public void Matches_value_for_two_char_runs_anchored_to_the_previous_match_end() =>
-        FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(m => m.Value).Should().Equal("ab", "cd");
+        FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(static m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#19")]
     public void Matches_value_for_two_char_runs_using_a_lookbehind_G_check() =>
-        FuzzyRegex.Matches("abcd", @".{2}(?<=\G.*)").Select(m => m.Value).Should().Equal("ab", "cd");
+        FuzzyRegex.Matches("abcd", @".{2}(?<=\G.*)").Select(static m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#20")]
     public void Matches_is_empty_when_a_reversed_pattern_requires_a_forward_G_anchor() =>
-        FuzzyRegex.Matches("abcd ef", @"(?r)\G\w{2}").Select(m => m.Value).Should().BeEmpty();
+        FuzzyRegex.Matches("abcd ef", @"(?r)\G\w{2}").Select(static m => m.Value).Should().BeEmpty();
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#21")]
     public void Matches_value_when_a_reversed_pattern_places_the_G_anchor_after_the_run() =>
-        FuzzyRegex.Matches("abcd ef", @"(?r)\w{2}\G").Select(m => m.Value).Should().Equal("ef");
+        FuzzyRegex.Matches("abcd ef", @"(?r)\w{2}\G").Select(static m => m.Value).Should().Equal("ef");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#22")]
     public void Matches_value_for_a_star_quantified_literal_scans_forward() =>
-        FuzzyRegex.Matches("qqwe", "q*").Select(m => m.Value).Should().Equal("qq", "", "", "");
+        FuzzyRegex.Matches("qqwe", "q*").Select(static m => m.Value).Should().Equal("qq", "", "", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#24")]
     public void Matches_value_for_a_star_quantified_literal_scans_backward() =>
-        FuzzyRegex.Matches("qqwe", "(?r)q*").Select(m => m.Value).Should().Equal("", "", "qq", "");
+        FuzzyRegex.Matches("qqwe", "(?r)q*").Select(static m => m.Value).Should().Equal("", "", "qq", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#23")]
     public void Matches_value_for_a_star_quantified_literal_under_the_V1_flag_scans_forward() =>
-        FuzzyRegex.Matches("qqwe", "(?V1)q*").Select(m => m.Value).Should().Equal("qq", "", "", "");
+        FuzzyRegex.Matches("qqwe", "(?V1)q*").Select(static m => m.Value).Should().Equal("qq", "", "", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#25")]
     public void Matches_value_for_a_star_quantified_literal_under_the_V1_flag_scans_backward() =>
-        FuzzyRegex.Matches("qqwe", "(?rV1)q*").Select(m => m.Value).Should().Equal("", "", "qq", "");
+        FuzzyRegex.Matches("qqwe", "(?rV1)q*").Select(static m => m.Value).Should().Equal("", "", "qq", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#26,28")]
     public void Matches_value_is_restricted_to_the_beginning_and_length_window() =>
-        new FuzzyRegex(".").Matches("abcd", beginning: 1, length: 2).Select(m => m.Value).Should().Equal("b", "c");
+        new FuzzyRegex(".")
+            .Matches("abcd", beginning: 1, length: 2)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("b", "c");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#30,32")]
     public void Matches_value_for_a_reversed_pattern_is_restricted_to_the_beginning_and_length_window() =>
-        new FuzzyRegex("(?r).").Matches("abcd", beginning: 1, length: 2).Select(m => m.Value).Should().Equal("c", "b");
+        new FuzzyRegex("(?r).")
+            .Matches("abcd", beginning: 1, length: 2)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("c", "b");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#34")]
     public void Matches_value_for_a_case_insensitive_character_class() =>
-        FuzzyRegex.Matches("aB", "[ab]", FuzzyRegexOptions.IgnoreCase).Select(m => m.Value).Should().Equal("a", "B");
+        FuzzyRegex
+            .Matches("aB", "[ab]", FuzzyRegexOptions.IgnoreCase)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("a", "B");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#35")]
     public void Matches_value_for_a_reversed_case_insensitive_character_class() =>
         FuzzyRegex
             .Matches("aB", "(?r)[ab]", FuzzyRegexOptions.IgnoreCase)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("B", "a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#36,40")]
     public void Matches_value_for_a_reversed_two_char_repeat_without_overlap() =>
-        FuzzyRegex.Matches("abc", "(?r).{2}").Select(m => m.Value).Should().Equal("bc");
+        FuzzyRegex.Matches("abc", "(?r).{2}").Select(static m => m.Value).Should().Equal("bc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#37,41")]
     public void Matches_value_for_a_reversed_two_char_repeat_with_overlap() =>
-        new FuzzyRegex("(?r).{2}").Matches("abc", overlapped: true).Select(m => m.Value).Should().Equal("bc", "ab");
+        new FuzzyRegex("(?r).{2}")
+            .Matches("abc", overlapped: true)
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("bc", "ab");
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_reverse#38")]
     public void Matches_group_one_value_for_two_space_separated_word_groups() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(\w+) (\w+)")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("first", "third");
 
@@ -180,7 +200,7 @@ public sealed class SearchReverseTests
     public void Matches_group_two_value_for_two_space_separated_word_groups() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(\w+) (\w+)")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("second", "fourth");
 
@@ -189,7 +209,7 @@ public sealed class SearchReverseTests
     public void Matches_group_one_value_for_two_space_separated_word_groups_scanned_backward() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(?r)(\w+) (\w+)")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("fourth", "second");
 
@@ -198,7 +218,7 @@ public sealed class SearchReverseTests
     public void Matches_group_two_value_for_two_space_separated_word_groups_scanned_backward() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(?r)(\w+) (\w+)")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("fifth", "third");
 
@@ -207,7 +227,7 @@ public sealed class SearchReverseTests
     public void Matches_value_for_two_space_separated_word_groups_is_the_whole_match() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(\w+) (\w+)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("first second", "third fourth");
 
@@ -216,7 +236,7 @@ public sealed class SearchReverseTests
     public void Matches_value_for_two_space_separated_word_groups_scanned_backward_is_the_whole_match() =>
         FuzzyRegex
             .Matches("first second third fourth fifth", @"(?r)(\w+) (\w+)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("fourth fifth", "second third");
 

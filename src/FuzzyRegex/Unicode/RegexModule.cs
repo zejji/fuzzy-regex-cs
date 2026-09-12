@@ -24,7 +24,7 @@ namespace Fuzzy.Text.RegularExpressions.Unicode;
 /// </remarks>
 internal static class RegexModule
 {
-    private static readonly Lazy<int[]> _expandOnFolding = new(() =>
+    private static readonly Lazy<int[]> _expandOnFolding = new(static () =>
     {
         ushort[] table = UnicodeTables.ExpandOnFolding;
         int[] result = new int[table.Length];

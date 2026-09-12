@@ -32,7 +32,7 @@ public sealed class RegressionsCommentTests
     [Property("Upstream", "RegexTests.test_hg_bugs#395")]
     public void An_empty_comment_group_compiles_on_its_own()
     {
-        Action act = () => _ = new FuzzyRegex("(?#)");
+        Action act = static () => _ = new FuzzyRegex("(?#)");
 
         act.Should().NotThrow();
     }
@@ -41,7 +41,7 @@ public sealed class RegressionsCommentTests
     [Property("Upstream", "RegexTests.test_hg_bugs#396")]
     public void An_empty_comment_group_compiles_after_a_verbose_mode_flag_group()
     {
-        Action act = () => _ = new FuzzyRegex("(?x)(?#)");
+        Action act = static () => _ = new FuzzyRegex("(?x)(?#)");
 
         act.Should().NotThrow();
     }

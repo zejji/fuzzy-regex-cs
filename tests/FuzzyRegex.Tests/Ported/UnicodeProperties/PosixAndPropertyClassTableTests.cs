@@ -53,7 +53,7 @@ public sealed class PosixAndPropertyClassTableTests
     [Arguments(@"(?i)\P{InBasicLatin}", _latinPair, "á")]
     [Property("Upstream", "RegexTests.test_properties#73")]
     public void Class_finds_exactly_its_members_in_the_subject(string pattern, string subject, string expected) =>
-        string.Concat(FuzzyRegex.Matches(subject, pattern).Select(m => m.Value)).Should().Be(expected);
+        string.Concat(FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value)).Should().Be(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_properties#70")]

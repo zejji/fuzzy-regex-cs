@@ -41,7 +41,7 @@ public sealed class RegressionsBasicMatchingTests
     {
         Match m = FuzzyRegex.Match("LtR", "([^L]*)([^R]*R)");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("", "LtR");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("", "LtR");
     }
 
     [Test]

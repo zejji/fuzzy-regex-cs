@@ -141,7 +141,7 @@ public sealed class UnicodeCasingTests
     [Arguments(RegexFlags.Ascii | RegexFlags.IgnoreCase | RegexFlags.FullCase, "Σςσ", new[] { 0x3A3, 0x3C2, 0x3C3 })]
     public void Fold_case_folds_a_whole_run(int flags, string input, int[] expected)
     {
-        int[] codepoints = [.. input.EnumerateRunes().Select(rune => rune.Value)];
+        int[] codepoints = [.. input.EnumerateRunes().Select(static rune => rune.Value)];
 
         RegexModule.FoldCase(flags, codepoints).Should().Equal(expected);
     }

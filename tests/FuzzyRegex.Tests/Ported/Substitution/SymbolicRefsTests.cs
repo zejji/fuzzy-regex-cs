@@ -14,7 +14,7 @@ public sealed class SymbolicRefsTests
     [Property("Upstream", "RegexTests.test_symbolic_refs#1")]
     public void Replace_with_an_unterminated_named_group_reference_throws()
     {
-        Action act = () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<a");
+        Action act = static () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<a");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }
@@ -23,7 +23,7 @@ public sealed class SymbolicRefsTests
     [Property("Upstream", "RegexTests.test_symbolic_refs#2")]
     public void Replace_with_an_empty_named_group_reference_throws()
     {
-        Action act = () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<");
+        Action act = static () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }
@@ -32,7 +32,7 @@ public sealed class SymbolicRefsTests
     [Property("Upstream", "RegexTests.test_symbolic_refs#3")]
     public void Replace_with_a_bare_g_and_no_angle_brackets_throws()
     {
-        Action act = () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g");
+        Action act = static () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }
@@ -53,7 +53,7 @@ public sealed class SymbolicRefsTests
     [Property("Upstream", "RegexTests.test_symbolic_refs#6")]
     public void Replace_with_a_reference_to_an_unknown_group_name_throws()
     {
-        Action act = () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<ab>");
+        Action act = static () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<ab>");
 
         act.Should().Throw<ArgumentException>();
     }
@@ -72,7 +72,7 @@ public sealed class SymbolicRefsTests
     [Property("Upstream", "RegexTests.test_symbolic_refs#9")]
     public void Replace_with_a_negative_group_number_throws()
     {
-        Action act = () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<-1>");
+        Action act = static () => _ = FuzzyRegex.Replace("xx", "(?P<a>x)", @"\g<-1>");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

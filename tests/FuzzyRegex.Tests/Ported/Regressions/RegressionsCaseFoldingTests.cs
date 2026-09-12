@@ -56,7 +56,7 @@ public sealed class RegressionsCaseFoldingTests
     public void First_alternative_wins_when_it_can_be_matched_without_expanding_a_ligature() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)pos|post")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("POS", "Pos", "pos", "po" + _longS, "po" + _ligatureSt, "po" + _ligatureLongSt);
 
@@ -65,7 +65,7 @@ public sealed class RegressionsCaseFoldingTests
     public void Longer_alternative_still_wins_when_tried_first() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)post|pos")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("POST", "Post", "post", "po" + _longS + "t", "po" + _ligatureSt, "po" + _ligatureLongSt);
 
@@ -74,7 +74,7 @@ public sealed class RegressionsCaseFoldingTests
     public void Post_alternative_matches_even_when_the_other_branch_cannot() =>
         FuzzyRegex
             .Matches(_postSubject, @"(?fi)post|another")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("POST", "Post", "post", "po" + _longS + "t", "po" + _ligatureSt, "po" + _ligatureLongSt);
 
@@ -104,7 +104,7 @@ public sealed class RegressionsCaseFoldingTests
     ) =>
         (ignoreCase ? _xxxFullCaseIgnoreCase : _xxxFullCase)
             .Matches("yxxx")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal(["xxx"], "upstream assertion #{0} expects a single xxx match", upstreamAssertion);
 

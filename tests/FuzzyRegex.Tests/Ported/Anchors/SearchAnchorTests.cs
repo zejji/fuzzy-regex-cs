@@ -11,5 +11,5 @@ public sealed class SearchAnchorTests
     [Test]
     [Property("Upstream", "RegexTests.test_search_anchor#1")]
     public void Matches_value_for_two_char_runs_anchored_to_the_previous_match_end() =>
-        FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(m => m.Value).Should().Equal("ab", "cd");
+        FuzzyRegex.Matches("abcd ef", @"\G\w{2}").Select(static m => m.Value).Should().Equal("ab", "cd");
 }

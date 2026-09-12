@@ -175,7 +175,7 @@ public sealed class FuzzyMatchingTests
     [Skip("needs:fuzzy-matching - the engine has no fuzzy matching yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#66-67")]
     public void An_unbounded_budget_matches_the_whole_subject_and_then_empty(string pattern, string subject) =>
-        FuzzyRegex.Matches(subject, pattern).Select(m => m.Value).Should().Equal(subject, "");
+        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(subject, "");
 
     // Fuzzy constraints are ignored when a branch is checked for a common prefix or suffix, so
     // the second branch's larger budget is the one that decides this.
@@ -202,7 +202,7 @@ public sealed class FuzzyMatchingTests
     private static void AssertMatches(string subject, string pattern, params string[] expected) =>
         FuzzyRegex
             .Matches(subject, pattern, FuzzyRegexOptions.None, FuzzyTestData.Words)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal(expected);
 }

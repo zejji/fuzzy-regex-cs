@@ -76,7 +76,7 @@ public sealed class NodeGraphTests
             pattern
                 .NodeList.Should()
                 .NotContain(
-                    node => node.Op == Opcode.Branch && node.Next2.Node == null,
+                    static node => node.Op == Opcode.Branch && node.Next2.Node == null,
                     "a one-way branch exists only to give the builders something to attach to"
                 );
         }
@@ -114,11 +114,11 @@ public sealed class NodeGraphTests
             pattern.PublicGroupCount.Should().Be(3);
             pattern.TrueGroupCount.Should().Be(3);
             pattern.VisibleCaptureCount.Should().Be(3);
-            pattern.GroupInfoList.Select(info => info.HasName).Should().Equal(false, true, false);
+            pattern.GroupInfoList.Select(static info => info.HasName).Should().Equal(false, true, false);
 
             // Every group closed, in order, so group_end_index counted three closures.
             pattern.GroupEndIndex.Should().Be(3);
-            pattern.GroupInfoList.Select(info => info.EndIndex).Should().Equal(1L, 2L, 3L);
+            pattern.GroupInfoList.Select(static info => info.EndIndex).Should().Equal(1L, 2L, 3L);
         }
     }
 
@@ -182,8 +182,8 @@ public sealed class NodeGraphTests
         // cannot take that path.
         using (new AssertionScope())
         {
-            Build("a*").NodeList.Select(node => node.Op).Should().Contain(Opcode.GreedyRepeatOne);
-            Build("(?:ab)*").NodeList.Select(node => node.Op).Should().Contain(Opcode.GreedyRepeat);
+            Build("a*").NodeList.Select(static node => node.Op).Should().Contain(Opcode.GreedyRepeatOne);
+            Build("(?:ab)*").NodeList.Select(static node => node.Op).Should().Contain(Opcode.GreedyRepeat);
         }
     }
 

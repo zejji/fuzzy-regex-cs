@@ -184,7 +184,7 @@ public sealed class CharacterIndexTests
         long expected
     ) =>
         $"{operation}(pos: {pos}, {argument}) gave {got}, the walk gives {expected}. "
-        + $"Subject U+[{string.Join(" ", subject.Select(c => ((int)c).ToString("X4")))}], "
+        + $"Subject U+[{string.Join(" ", subject.Select(static c => ((int)c).ToString("X4")))}], "
         + $"beginning {beginning}, end {end}.";
 
     [Test]

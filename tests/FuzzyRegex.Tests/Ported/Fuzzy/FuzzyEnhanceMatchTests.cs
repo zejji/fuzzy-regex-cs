@@ -70,7 +70,7 @@ public sealed class FuzzyEnhanceMatchTests
             FuzzyTestData.Words
         );
 
-        matches.Select(m => m.Value).Should().Equal("dog", "cot");
+        matches.Select(static m => m.Value).Should().Equal("dog", "cot");
     }
 
     // Unflagged sibling: #54, which yields ["dog ", "cot"] - again a stray space.
@@ -88,6 +88,6 @@ public sealed class FuzzyEnhanceMatchTests
             FuzzyTestData.Words
         );
 
-        matches.Select(m => m.Value).Should().Equal("dog", "cot");
+        matches.Select(static m => m.Value).Should().Equal("dog", "cot");
     }
 }

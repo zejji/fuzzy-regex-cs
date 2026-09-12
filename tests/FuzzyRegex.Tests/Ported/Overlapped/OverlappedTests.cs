@@ -17,28 +17,28 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#1,6")]
     public void Matches_value_for_two_char_runs_without_overlap() =>
-        FuzzyRegex.Matches("abcde", "..").Select(m => m.Value).Should().Equal("ab", "cd");
+        FuzzyRegex.Matches("abcde", "..").Select(static m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#2,7")]
     public void Matches_value_for_two_char_runs_with_overlap() =>
         new FuzzyRegex("..")
             .Matches("abcde", overlapped: true)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("ab", "bc", "cd", "de");
 
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#3,8")]
     public void Matches_value_for_reversed_two_char_runs_without_overlap() =>
-        FuzzyRegex.Matches("abcde", "(?r)..").Select(m => m.Value).Should().Equal("de", "bc");
+        FuzzyRegex.Matches("abcde", "(?r)..").Select(static m => m.Value).Should().Equal("de", "bc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#4,9")]
     public void Matches_value_for_reversed_two_char_runs_with_overlap() =>
         new FuzzyRegex("(?r)..")
             .Matches("abcde", overlapped: true)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("de", "cd", "bc", "ab");
 
@@ -47,7 +47,7 @@ public sealed class OverlappedTests
     public void Matches_group_one_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("a", "b");
 
@@ -56,7 +56,7 @@ public sealed class OverlappedTests
     public void Matches_group_two_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("-", "-");
 
@@ -65,7 +65,7 @@ public sealed class OverlappedTests
     public void Matches_group_three_value_for_an_overlapped_three_group_pattern() =>
         new FuzzyRegex("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("b", "c");
 
@@ -74,7 +74,7 @@ public sealed class OverlappedTests
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("b", "a");
 
@@ -83,7 +83,7 @@ public sealed class OverlappedTests
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("-", "-");
 
@@ -92,7 +92,7 @@ public sealed class OverlappedTests
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
         new FuzzyRegex("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("c", "b");
 }

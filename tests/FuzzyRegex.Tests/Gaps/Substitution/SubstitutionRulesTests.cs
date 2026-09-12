@@ -39,7 +39,7 @@ public sealed class SubstitutionRulesTests
         // `error: missing > at position 6`.
         FuzzyRegex.Replace("z", "xx", @"\g<bad").Should().Be("z");
 
-        Action longEnough = () => _ = FuzzyRegex.Replace("z", "x", @"\g<bad");
+        Action longEnough = static () => _ = FuzzyRegex.Replace("z", "x", @"\g<bad");
         longEnough.Should().Throw<FuzzyRegexParseException>();
     }
 
@@ -49,10 +49,10 @@ public sealed class SubstitutionRulesTests
         // The same template, two answers, because upstream checks it in two places:
         // regex.sub('x', r'\1', 'x')             raises error: invalid group reference
         // regex.match('x', 'x').expand(r'\1')    raises IndexError: no such group
-        Action replace = () => _ = FuzzyRegex.Replace("x", "x", @"\1");
+        Action replace = static () => _ = FuzzyRegex.Replace("x", "x", @"\1");
         replace.Should().Throw<FuzzyRegexParseException>().WithMessage("invalid group reference");
 
-        Action result = () => _ = FuzzyRegex.MatchAtStart("x", "x").Result(@"\1");
+        Action result = static () => _ = FuzzyRegex.MatchAtStart("x", "x").Result(@"\1");
         result.Should().Throw<ArgumentException>();
     }
 
@@ -64,7 +64,7 @@ public sealed class SubstitutionRulesTests
         // regex.match(r'(\w+)', 'ab').expandf('}')       raises ValueError
         FuzzyRegex.ReplaceFormat("ab", @"(\w+)", "}").Should().Be("}");
 
-        Action resultFormat = () => _ = FuzzyRegex.MatchAtStart("ab", @"(\w+)").ResultFormat("}");
+        Action resultFormat = static () => _ = FuzzyRegex.MatchAtStart("ab", @"(\w+)").ResultFormat("}");
         resultFormat.Should().Throw<FormatException>();
     }
 
@@ -116,7 +116,7 @@ public sealed class SubstitutionRulesTests
         // The BMP subject of the same code-unit length does not fit either pattern, so both engines
         // compile the template and reject it - which is what makes the line above about the
         // *arithmetic* rather than about the shortcut existing.
-        Action bmp = () => _ = FuzzyRegex.Replace("ab", "..", @"\g<bad");
+        Action bmp = static () => _ = FuzzyRegex.Replace("ab", "..", @"\g<bad");
         bmp.Should().Throw<FuzzyRegexParseException>();
     }
 
@@ -156,7 +156,7 @@ public sealed class SubstitutionRulesTests
         // once, so [1] is past the end and [-1] is the one capture there is.
         FuzzyRegex.ReplaceFormat("a", "(.)", "{1[-1]}").Should().Be("a");
 
-        Action act = () => _ = FuzzyRegex.ReplaceFormat("a", "(.)", "{1[1]}");
+        Action act = static () => _ = FuzzyRegex.ReplaceFormat("a", "(.)", "{1[1]}");
         act.Should().Throw<ArgumentException>();
     }
 
@@ -195,8 +195,8 @@ public sealed class SubstitutionRulesTests
     {
         // Upstream adds nothing to the join list when the callable returns None; the .NET
         // delegate's equivalent is a null string, which the ported suite never exercises.
-        FuzzyRegex.Replace("x", ".", _ => "\\1").Should().Be("\\1");
-        FuzzyRegex.Replace("aba", "a", _ => null!).Should().Be("b");
+        FuzzyRegex.Replace("x", ".", static _ => "\\1").Should().Be("\\1");
+        FuzzyRegex.Replace("aba", "a", static _ => null!).Should().Be("b");
     }
 
     [Test]

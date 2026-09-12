@@ -112,7 +112,7 @@ public sealed class EscapeTests
     [Test]
     public void A_null_input_is_rejected()
     {
-        Action escape = () => FuzzyRegex.Escape(null!);
+        Action escape = static () => FuzzyRegex.Escape(null!);
 
         escape.Should().Throw<ArgumentNullException>().WithParameterName("input");
     }

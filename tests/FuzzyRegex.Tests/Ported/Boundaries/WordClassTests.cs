@@ -22,12 +22,12 @@ public sealed class WordClassTests
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#1")]
     public void Word_class_findall_matches_the_whole_devanagari_run() =>
-        FuzzyRegex.Matches(_subject, @"\w+").Select(m => m.Value).Should().Equal(_hindi);
+        FuzzyRegex.Matches(_subject, @"\w+").Select(static m => m.Value).Should().Equal(_hindi);
 
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#2")]
     public void Non_word_class_findall_matches_the_surrounding_space_and_comma() =>
-        FuzzyRegex.Matches(_subject, @"\W+").Select(m => m.Value).Should().Equal(" ", ",");
+        FuzzyRegex.Matches(_subject, @"\W+").Select(static m => m.Value).Should().Equal(" ", ",");
 
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#3")]

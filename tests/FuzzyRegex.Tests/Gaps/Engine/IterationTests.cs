@@ -86,14 +86,14 @@ public sealed class IterationTests
 
         pattern
             .Matches("\U0001F600\U0001F601\U0001F602", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 4), (2, 4));
 
         // And backwards: regex.finditer('(?r)..', ..., overlapped=True) gives (1, 3) then (0, 2).
         new FuzzyRegex("(?r)..")
             .Matches("\U0001F600\U0001F601\U0001F602", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((2, 4), (0, 4));
     }
@@ -107,7 +107,7 @@ public sealed class IterationTests
         // matches, one per start position, and the scan stops when the step leaves the slice.
         new FuzzyRegex("a*")
             .Matches("aab", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 2), (1, 1), (2, 0), (3, 0));
 
@@ -116,7 +116,7 @@ public sealed class IterationTests
         // advance to 3.
         new FuzzyRegex("a*")
             .Matches("aab")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 2), (2, 0), (3, 0));
     }
@@ -134,17 +134,17 @@ public sealed class IterationTests
         //   regex.compile('^b').finditer('abab', 1)   -> nothing
         new FuzzyRegex(@"\Bb")
             .Matches("abab", beginning: 1)
-            .Select(m => m.Index)
+            .Select(static m => m.Index)
             .Should()
             .Equal(1, 3);
-        new FuzzyRegex(@"\Bb").Matches("abab", beginning: 2).Select(m => m.Index).Should().Equal(3);
+        new FuzzyRegex(@"\Bb").Matches("abab", beginning: 2).Select(static m => m.Index).Should().Equal(3);
         new FuzzyRegex("^b").Matches("abab", beginning: 1).Should().BeEmpty();
 
         // endpos moves text_end as well, so a match may not run past it. Measured:
         // regex.compile('b').finditer('abab', 0, 2) -> (1, 2) only.
         new FuzzyRegex("b")
             .Matches("abab", beginning: 0, length: 2)
-            .Select(m => m.Index)
+            .Select(static m => m.Index)
             .Should()
             .Equal(1);
     }
@@ -192,7 +192,7 @@ public sealed class IterationTests
             byNextMatch
                 .Should()
                 .Equal(
-                    collection.Select(m => (m.Index, m.Length)),
+                    collection.Select(static m => (m.Index, m.Length)),
                     $"NextMatch must walk the same sequence as Matches for {p} over {subject} (overlapped: {overlapped})"
                 );
         }
@@ -326,12 +326,12 @@ public sealed class IterationTests
         //   finditer('(?r)a*', 'aab', overlapped=True) -> (3,3) (0,2) (0,1) (0,0)
         new FuzzyRegex("a*")
             .Matches("aab", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 2), (1, 1), (2, 0), (3, 0));
         new FuzzyRegex("(?r)a*")
             .Matches("aab", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((3, 0), (0, 2), (0, 1), (0, 0));
     }
@@ -343,11 +343,11 @@ public sealed class IterationTests
         // regex.compile('').findall('abc', 1, 2) gives two.
         new FuzzyRegex("")
             .Matches("")
-            .Select(m => m.Index)
+            .Select(static m => m.Index)
             .Should()
             .Equal(0);
-        new FuzzyRegex("").Matches("", overlapped: true).Select(m => m.Index).Should().Equal(0);
-        new FuzzyRegex("").Matches("abc", beginning: 1, length: 1).Select(m => m.Index).Should().Equal(1, 2);
+        new FuzzyRegex("").Matches("", overlapped: true).Select(static m => m.Index).Should().Equal(0);
+        new FuzzyRegex("").Matches("abc", beginning: 1, length: 1).Select(static m => m.Index).Should().Equal(1, 2);
     }
 
     [Test]
@@ -369,7 +369,7 @@ public sealed class IterationTests
         // Without asking there is no partial, and the trailing prefix is simply not a match.
         new FuzzyRegex("abc")
             .Matches("abc xab")
-            .Select(m => (m.Index, m.Index + m.Length))
+            .Select(static m => (m.Index, m.Index + m.Length))
             .Should()
             .Equal((0, 3));
 
@@ -381,7 +381,7 @@ public sealed class IterationTests
         //   finditer('ab', 'abab a', overlapped=True, partial=True) -> (0,2)F (2,4)F (5,6)T
         new FuzzyRegex("ab")
             .Matches("abab a", overlapped: true, partial: true)
-            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Select(static m => (m.Index, m.Index + m.Length, m.PartialMatch))
             .Should()
             .Equal((0, 2, false), (2, 4, false), (5, 6, true));
 
@@ -392,12 +392,12 @@ public sealed class IterationTests
         //   compile('ab').finditer('xxaby',       partial=True) -> (2,4)F (5,5)T
         new FuzzyRegex("ab")
             .Matches("xxaby", beginning: 0, length: 3, partial: true)
-            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Select(static m => (m.Index, m.Index + m.Length, m.PartialMatch))
             .Should()
             .Equal((2, 3, true));
         new FuzzyRegex("ab")
             .Matches("xxaby", beginning: 0, length: 4, partial: true)
-            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Select(static m => (m.Index, m.Index + m.Length, m.PartialMatch))
             .Should()
             .Equal((2, 4, false), (4, 4, true));
         Spans("ab", "xxaby").Should().Equal((2, 4, false), (5, 5, true));
@@ -413,6 +413,6 @@ public sealed class IterationTests
         static IEnumerable<(int Start, int End, bool Partial)> Spans(string pattern, string subject) =>
             new FuzzyRegex(pattern)
                 .Matches(subject, partial: true)
-                .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch));
+                .Select(static m => (m.Index, m.Index + m.Length, m.PartialMatch));
     }
 }

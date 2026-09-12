@@ -95,13 +95,13 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_relative_call_past_the_last_group_is_rejected_as_an_unknown_group()
     {
-        Action compile = () => PatternCompiler.Compile("(a)(?+1)");
+        Action compile = static () => PatternCompiler.Compile("(a)(?+1)");
 
         compile
             .Should()
             .Throw<FuzzyRegexParseException>()
             .Which.Should()
-            .Match<FuzzyRegexParseException>(e => e.Message == "unknown group" && e.Offset == 5);
+            .Match<FuzzyRegexParseException>(static e => e.Message == "unknown group" && e.Offset == 5);
     }
 
     /// <summary>
@@ -111,13 +111,13 @@ public sealed class RelativeCallAndAliasTests
     [Test]
     public void A_relative_call_with_no_digits_falls_through_to_the_flags_parser()
     {
-        Action compile = () => PatternCompiler.Compile("(?+)");
+        Action compile = static () => PatternCompiler.Compile("(?+)");
 
         compile
             .Should()
             .Throw<FuzzyRegexParseException>()
             .Which.Should()
-            .Match<FuzzyRegexParseException>(e => e.Message == "unknown extension" && e.Offset == 2);
+            .Match<FuzzyRegexParseException>(static e => e.Message == "unknown extension" && e.Offset == 2);
     }
 
     /// <summary>

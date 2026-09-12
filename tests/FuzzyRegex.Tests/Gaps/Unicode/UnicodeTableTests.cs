@@ -19,7 +19,7 @@ public sealed class UnicodeTableTests
     [Test]
     public void Every_table_upstream_declares_is_present()
     {
-        IEnumerable<string> ours = UnicodeTables.AllTables().Select(t => t.Name);
+        IEnumerable<string> ours = UnicodeTables.AllTables().Select(static t => t.Name);
 
         ours.Should().BeEquivalentTo(UnicodeFixture.Tables.Keys, "no table may be dropped or invented");
     }

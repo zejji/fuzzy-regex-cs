@@ -88,7 +88,7 @@ public sealed class RepeatTests
         (m.Index, m.Length).Should().Be((0, 3));
         (m.Groups[1].Index, m.Groups[1].Length).Should().Be((3, 0));
         m.Groups[1]
-            .Captures.Select(c => (c.Index, c.Length))
+            .Captures.Select(static c => (c.Index, c.Length))
             .Should()
             .Equal([(0, 3), (3, 0)], "the empty final iteration is a capture of its own");
     }

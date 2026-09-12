@@ -69,7 +69,7 @@ internal static class Corpus
             row.GetProperty("flags").GetInt32(),
             ReadNamedLists(row.GetProperty("namedLists")),
             row.GetProperty("resolvedFlags").GetInt32(),
-            [.. row.GetProperty("code").EnumerateArray().Select(c => c.GetUInt32())],
+            [.. row.GetProperty("code").EnumerateArray().Select(static c => c.GetUInt32())],
             ReadGroupIndex(row.GetProperty("groupIndex")),
             ReadNamedListSets(row.GetProperty("compiledNamedLists")),
             // Sets, not lists: each entry is a frozenset upstream, so the recorder had to invent an
@@ -78,7 +78,7 @@ internal static class Corpus
             [.. row.GetProperty("namedListIndexes").EnumerateArray().Select(ReadStringSet)],
             // Int64: an offset is a repeat's maximum width, which runs to UNLIMITED - 1.
             row.GetProperty("reqOffset").GetInt64(),
-            [.. row.GetProperty("reqChars").EnumerateArray().Select(c => c.GetInt32())],
+            [.. row.GetProperty("reqChars").EnumerateArray().Select(static c => c.GetInt32())],
             row.GetProperty("reqFlags").GetInt32(),
             row.GetProperty("groupCount").GetInt32()
         );
@@ -110,7 +110,7 @@ internal static class Corpus
             [
                 .. row.GetProperty("compiled")
                     .EnumerateArray()
-                    .Select(item =>
+                    .Select(static item =>
                         item.ValueKind == JsonValueKind.Number ? (object)item.GetInt32() : item.GetString()!
                     ),
             ]
@@ -121,8 +121,9 @@ internal static class Corpus
         element
             .EnumerateObject()
             .ToImmutableDictionary(
-                property => property.Name,
-                property => (IReadOnlyList<string>)[.. property.Value.EnumerateArray().Select(v => v.GetString()!)],
+                static property => property.Name,
+                static property =>
+                    (IReadOnlyList<string>)[.. property.Value.EnumerateArray().Select(static v => v.GetString()!)],
                 StringComparer.Ordinal
             );
 
@@ -131,20 +132,20 @@ internal static class Corpus
         element
             .EnumerateObject()
             .ToImmutableDictionary(
-                property => property.Name,
-                property => ReadStringSet(property.Value),
+                static property => property.Name,
+                static property => ReadStringSet(property.Value),
                 StringComparer.Ordinal
             );
 
     private static IReadOnlySet<string> ReadStringSet(JsonElement element) =>
-        element.EnumerateArray().Select(v => v.GetString()!).ToImmutableHashSet(StringComparer.Ordinal);
+        element.EnumerateArray().Select(static v => v.GetString()!).ToImmutableHashSet(StringComparer.Ordinal);
 
     private static ImmutableDictionary<string, int> ReadGroupIndex(JsonElement element) =>
         element
             .EnumerateObject()
             .ToImmutableDictionary(
-                property => property.Name,
-                property => property.Value.GetInt32(),
+                static property => property.Name,
+                static property => property.Value.GetInt32(),
                 StringComparer.Ordinal
             );
 }

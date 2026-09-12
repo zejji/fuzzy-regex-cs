@@ -83,7 +83,7 @@ public sealed class PosixMatchingTests
         (posix.Index, posix.Length).Should().Be((0, 4));
         posix.Groups[1].Success.Should().BeFalse();
         posix.Groups[1].Captures.Should().BeEmpty();
-        posix.Groups[2].Captures.Select(c => c.Value).Should().Equal("ab", "ab");
+        posix.Groups[2].Captures.Select(static c => c.Value).Should().Equal("ab", "ab");
         posix.LastGroupNumber.Should().Be(2);
 
         // regex.compile(r'(?:(a)|(ab))+').search('abab')
@@ -91,7 +91,7 @@ public sealed class PosixMatchingTests
         Match plain = FuzzyRegex.Match("abab", "(?:(a)|(ab))+");
 
         (plain.Index, plain.Length).Should().Be((0, 1));
-        plain.Groups[1].Captures.Select(c => c.Value).Should().Equal("a");
+        plain.Groups[1].Captures.Select(static c => c.Value).Should().Equal("a");
         plain.Groups[2].Captures.Should().BeEmpty();
     }
 
@@ -135,8 +135,8 @@ public sealed class PosixMatchingTests
     public void The_flag_reaches_every_operation_and_not_just_match()
     {
         // regex.compile(r'(?p)a|ab').findall('abab')      -> ['ab', 'ab']
-        FuzzyRegex.Matches("abab", "(?p)a|ab").Select(m => m.Value).Should().Equal("ab", "ab");
-        FuzzyRegex.Matches("abab", "a|ab").Select(m => m.Value).Should().Equal("a", "a");
+        FuzzyRegex.Matches("abab", "(?p)a|ab").Select(static m => m.Value).Should().Equal("ab", "ab");
+        FuzzyRegex.Matches("abab", "a|ab").Select(static m => m.Value).Should().Equal("a", "a");
 
         // regex.compile(r'(?p)a|ab').split('xabaty')      -> ['x', '', 'ty']
         FuzzyRegex.Split("xabaty", "(?p)a|ab").Should().Equal("x", "", "ty");

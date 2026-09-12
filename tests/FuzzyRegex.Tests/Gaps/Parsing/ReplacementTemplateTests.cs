@@ -64,7 +64,7 @@ public sealed class ReplacementTemplateTests
     // T '\\N{NO SUCH NAME}' !! error msg='undefined character name' pos=16
     public void An_unknown_character_name_is_reported_at_the_closing_brace()
     {
-        Action compile = () => Compile(@"\N{NO SUCH NAME}");
+        Action compile = static () => Compile(@"\N{NO SUCH NAME}");
 
         var error = compile.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("undefined character name");
@@ -126,7 +126,7 @@ public sealed class ReplacementTemplateTests
     // what matters is that the template is rejected.
     public void A_hexadecimal_escape_above_the_last_codepoint_is_rejected()
     {
-        Action compile = () => Compile(@"\UFFFFFFFF");
+        Action compile = static () => Compile(@"\UFFFFFFFF");
 
         compile.Should().Throw<NotSupportedException>();
     }
@@ -153,7 +153,7 @@ public sealed class ReplacementTemplateTests
     // T '\\g<3>' on '(a)(b)' !! error msg='invalid group reference' pos=5
     public void A_numbered_group_reference_beyond_the_last_group_is_invalid()
     {
-        Action compile = () => Compile(@"\g<3>", groupCount: 2);
+        Action compile = static () => Compile(@"\g<3>", groupCount: 2);
 
         var error = compile.Should().Throw<FuzzyRegexParseException>().Which;
         using (new AssertionScope())
@@ -169,7 +169,7 @@ public sealed class ReplacementTemplateTests
     // the same BigInteger path parse_name uses (DECISIONS 2026-08-30).
     public void A_group_number_too_large_for_an_int_is_still_only_an_invalid_reference()
     {
-        Action compile = () => Compile(@"\g<99999999999999999999>", groupCount: 2);
+        Action compile = static () => Compile(@"\g<99999999999999999999>", groupCount: 2);
 
         var error = compile.Should().Throw<FuzzyRegexParseException>().Which;
         using (new AssertionScope())

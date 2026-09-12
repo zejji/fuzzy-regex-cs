@@ -15,7 +15,7 @@ public sealed class RegressionsLookaroundTests
     {
         Match m = FuzzyRegex.Match("abde", "^(?=ab(de))(abd)(e)");
 
-        m.Groups.Skip(1).Select(g => g.Success ? g.Value : null).Should().Equal("de", "abd", "e");
+        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("de", "abd", "e");
     }
 
     // Hg issue 157: regression: segfault on complex lookaround.
@@ -46,22 +46,30 @@ public sealed class RegressionsLookaroundTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#48")]
     public void Lookbehind_with_a_greedy_one_or_more_finds_both_words() =>
-        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S+ )\w+").Select(m => m.Value).Should().Equal("abc", "def");
+        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S+ )\w+").Select(static m => m.Value).Should().Equal("abc", "def");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#49")]
     public void Lookbehind_with_a_greedy_zero_or_more_finds_both_words() =>
-        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S* )\w+").Select(m => m.Value).Should().Equal("abc", "def");
+        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S* )\w+").Select(static m => m.Value).Should().Equal("abc", "def");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#50")]
     public void Lookbehind_with_a_lazy_one_or_more_finds_both_words() =>
-        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S+? )\w+").Select(m => m.Value).Should().Equal("abc", "def");
+        FuzzyRegex
+            .Matches(":9 abc :10 def", @"(?<=:\S+? )\w+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("abc", "def");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#51")]
     public void Lookbehind_with_a_lazy_zero_or_more_finds_both_words() =>
-        FuzzyRegex.Matches(":9 abc :10 def", @"(?<=:\S*? )\w+").Select(m => m.Value).Should().Equal("abc", "def");
+        FuzzyRegex
+            .Matches(":9 abc :10 def", @"(?<=:\S*? )\w+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("abc", "def");
 
     // Hg Issue 216: Invalid match when using negative lookbehind and pipe.
     [Test]

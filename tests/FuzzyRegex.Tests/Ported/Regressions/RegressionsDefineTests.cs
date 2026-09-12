@@ -52,7 +52,7 @@ public sealed class RegressionsDefineTests
         FuzzyRegex
             .Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))")
             .Groups["routine"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
 
@@ -80,14 +80,14 @@ public sealed class RegressionsDefineTests
     // the negative lookahead it does need rather than for the construct it is contrasted with.
     [Property("Upstream", "RegexTests.test_hg_bugs#272")]
     public void Negative_lookahead_run_without_define_finds_only_the_trailing_letters() =>
-        FuzzyRegex.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(m => m.Value).Should().Equal("efgh");
+        FuzzyRegex.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(static m => m.Value).Should().Equal("efgh");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#273")]
     public void Same_negative_lookahead_wrapped_in_a_define_subroutine_finds_the_same_match() =>
         FuzzyRegex
             .Matches("abcdefgh", @"(?(DEFINE)(?P<mydef>(?:(?![a-d]).)))(?&mydef)+")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("efgh");
 
@@ -109,7 +109,7 @@ public sealed class RegressionsDefineTests
         FuzzyRegex
             .Match("abc", @"(?(DEFINE)(?<func>.))(?&func)")
             .Groups["func"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
 
@@ -129,7 +129,7 @@ public sealed class RegressionsDefineTests
         FuzzyRegex
             .Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))")
             .Groups["func"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
 
@@ -149,7 +149,7 @@ public sealed class RegressionsDefineTests
         FuzzyRegex
             .Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))")
             .Groups["func"]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("a");
 
@@ -164,8 +164,8 @@ public sealed class RegressionsDefineTests
             @"(?(DEFINE)(?<mydef>(?<wrong>THIS_SHOULD_NOT_MATCHx?)|(?<right>right))).*(?<=(?&mydef).*)"
         );
 
-        m.Groups["mydef"].Captures.Select(c => c.Value).Should().Equal("right");
-        m.Groups["wrong"].Captures.Select(c => c.Value).Should().BeEmpty();
-        m.Groups["right"].Captures.Select(c => c.Value).Should().Equal("right");
+        m.Groups["mydef"].Captures.Select(static c => c.Value).Should().Equal("right");
+        m.Groups["wrong"].Captures.Select(static c => c.Value).Should().BeEmpty();
+        m.Groups["right"].Captures.Select(static c => c.Value).Should().Equal("right");
     }
 }

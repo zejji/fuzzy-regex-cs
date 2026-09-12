@@ -435,9 +435,9 @@ public sealed class RegressionsFuzzyTests
                 @"((brown)|(lazy)){1<=e<=3} ((dog)|(fox)){1<=e<=3}",
                 FuzzyRegexOptions.EnhanceMatch
             )
-            .Select(m => m.Groups.Skip(1).Select(g => g.Value).ToArray())
+            .Select(static m => m.Groups.Skip(1).Select(static g => g.Value).ToArray())
             .Should()
-            .BeEquivalentTo(expected, options => options.WithStrictOrdering());
+            .BeEquivalentTo(expected, static options => options.WithStrictOrdering());
     }
 
     // ---- needs:fuzzy-matching ----
@@ -451,7 +451,7 @@ public sealed class RegressionsFuzzyTests
         var rx = new FuzzyRegex(@"\bt(est){i<2}", FuzzyRegexOptions.Version1);
 
         rx.Match("Some text").Success.Should().BeFalse();
-        rx.Matches("Some text").Select(m => m.Value).Should().BeEmpty();
+        rx.Matches("Some text").Select(static m => m.Value).Should().BeEmpty();
     }
 
     // Hg issue 147: Fuzzy match can return match points beyond buffer end.
@@ -463,7 +463,7 @@ public sealed class RegressionsFuzzyTests
     public void Fuzzy_iteration_over_a_short_subject_does_not_read_past_the_end(string pattern) =>
         FuzzyRegex
             .Matches("regex failure", pattern)
-            .Select(m => (m.Index, End: m.Index + m.Length))
+            .Select(static m => (m.Index, End: m.Index + m.Length))
             .Should()
             .Equal((0, 5), (5, 10), (10, 13), (13, 13));
 
@@ -473,7 +473,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#236")]
     public void A_pattern_with_a_fuzzy_recursive_group_reference_compiles()
     {
-        Action act = () => _ = new FuzzyRegex("((?0)){e}");
+        Action act = static () => _ = new FuzzyRegex("((?0)){e}");
         act.Should().NotThrow();
     }
 
@@ -483,7 +483,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#237")]
     public void A_pattern_starting_with_a_literal_nul_before_a_fuzzy_recursive_reference_compiles()
     {
-        Action act = () => _ = new FuzzyRegex("\x00?(?0){e}");
+        Action act = static () => _ = new FuzzyRegex("\x00?(?0){e}");
         act.Should().NotThrow();
     }
 
@@ -558,7 +558,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(\d+){i<=2:[ab]}")]
     [Arguments(@"(?i)(\d+){i<=2:[ab]}")]
     public void Fuzzy_character_restriction_stops_digit_runs_from_absorbing_non_digit_non_set_letters(string pattern) =>
-        FuzzyRegex.Matches("123X4Y5", pattern).Select(m => m.Value).Should().Equal("123", "4", "5");
+        FuzzyRegex.Matches("123X4Y5", pattern).Select(static m => m.Value).Should().Equal("123", "4", "5");
 
     // Git issue 415: Fuzzy character restrictions don't apply to insertions at "right edge".
     [Test]

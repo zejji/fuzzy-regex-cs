@@ -42,6 +42,6 @@ public sealed class RegressionsGraphemeTests
         // text, so the value carries across unchanged.
         string subject = _man + _zwj + _woman + _zwj + _girl + _zwj + _boy;
 
-        FuzzyRegex.Matches(subject, @"\X").Select(m => m.Value).Should().Equal(subject);
+        FuzzyRegex.Matches(subject, @"\X").Select(static m => m.Value).Should().Equal(subject);
     }
 }

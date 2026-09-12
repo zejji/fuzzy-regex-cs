@@ -17,7 +17,7 @@ public sealed class FinditerTests
     [Test]
     [Property("Upstream", "RegexTests.test_finditer#1")]
     public void Matches_yields_whole_match_values_in_order() =>
-        FuzzyRegex.Matches("a:b::c:::d", ":+").Select(m => m.Value).Should().Equal(":", "::", ":::");
+        FuzzyRegex.Matches("a:b::c:::d", ":+").Select(static m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_581080#1")]

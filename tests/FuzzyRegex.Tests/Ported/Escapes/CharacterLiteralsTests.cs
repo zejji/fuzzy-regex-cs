@@ -100,7 +100,7 @@ public sealed class CharacterLiteralsTests
     [Property("Upstream", "RegexTests.test_sre_character_literals#7")]
     public void Escape_with_no_matching_group_fails_to_compile()
     {
-        Action act = () => FuzzyRegex.MatchAtStart("", @"\911");
+        Action act = static () => FuzzyRegex.MatchAtStart("", @"\911");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

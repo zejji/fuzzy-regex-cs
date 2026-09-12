@@ -24,7 +24,7 @@ public sealed class BacktrackingVerbTests
         // (span, m.pos) pairs are ((0,1),0) ((1,2),1) ((2,5),4) ((3,5),4) ((4,5),4) ((5,6),5).
         new FuzzyRegex("[A-Z]*(*SKIP)_")
             .Matches("__BB__B", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 1), (1, 1), (2, 3), (3, 2), (4, 1), (5, 1));
 
@@ -34,7 +34,7 @@ public sealed class BacktrackingVerbTests
         // [(0, 1), (1, 2), (2, 5), (5, 6)].
         new FuzzyRegex("[A-Z]*(*SKIP)_")
             .Matches("__BB__B")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 1), (1, 1), (2, 3), (5, 1));
     }
@@ -99,7 +99,7 @@ public sealed class BacktrackingVerbTests
 
         new FuzzyRegex("(?>a*(*SKIP))b")
             .Matches("aaab", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 4), (1, 3), (2, 2), (3, 1));
 
@@ -108,7 +108,7 @@ public sealed class BacktrackingVerbTests
         // and the fallback branch matches at both positions.
         new FuzzyRegex("(?>abc(*SKIP)d)|abc", FuzzyRegexOptions.IgnoreCase)
             .Matches("ABCABC")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 3), (3, 3));
 
@@ -163,8 +163,11 @@ public sealed class BacktrackingVerbTests
         FuzzyRegex
             .Match("ab cd xx", "(?:..(*SKIP)x|q)x")
             .Should()
-            .Match<Match>(m => m.Index == 4 && m.Length == 4);
-        FuzzyRegex.Match("aaaaxx", "(?:aa(*SKIP)x|M)x").Should().Match<Match>(m => m.Index == 2 && m.Length == 4);
+            .Match<Match>(static m => m.Index == 4 && m.Length == 4);
+        FuzzyRegex
+            .Match("aaaaxx", "(?:aa(*SKIP)x|M)x")
+            .Should()
+            .Match<Match>(static m => m.Index == 2 && m.Length == 4);
     }
 
     [Test]
@@ -209,14 +212,14 @@ public sealed class BacktrackingVerbTests
         // below, where it must NOT lose upstream's second match.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\nb")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((1, 1), (0, 1));
 
         // Upstream: [(6, 7), (4, 5)]. This port adds (5, 1) between them.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\rbbb\r\nb")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((6, 1), (5, 1), (4, 1));
 
@@ -224,7 +227,7 @@ public sealed class BacktrackingVerbTests
         // slice never moves, the two halves agree, and both sides answer the same.
         new FuzzyRegex("(?r)(?:a*b|[^a-f])$", FuzzyRegexOptions.Multiline)
             .Matches("\nb")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((1, 1));
 
@@ -233,7 +236,7 @@ public sealed class BacktrackingVerbTests
         // text_end and final_newline, so they cannot disagree about a moved slice.
         new FuzzyRegex("(?r)(?:a*(*SKIP)b|[^a-f])$")
             .Matches("\nb")
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((1, 1));
     }
@@ -252,7 +255,7 @@ public sealed class BacktrackingVerbTests
         // regex.findall on this pattern gives six matches overlapped, against SKIP's three.
         new FuzzyRegex("[A-Z]*(*PRUNE)_")
             .Matches("__BB__B", overlapped: true)
-            .Select(m => (m.Index, m.Length))
+            .Select(static m => (m.Index, m.Length))
             .Should()
             .Equal((0, 1), (1, 1), (2, 3), (3, 2), (4, 1), (5, 1));
     }

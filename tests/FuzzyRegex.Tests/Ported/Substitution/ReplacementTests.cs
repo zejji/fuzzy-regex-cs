@@ -38,5 +38,5 @@ public sealed class ReplacementTests
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#5")]
     public void Sub_with_an_evaluator_uses_its_return_value_literally_with_no_further_expansion() =>
-        FuzzyRegex.Replace("x", "(.)", _ => "\\1\\1").Should().Be("\\1\\1");
+        FuzzyRegex.Replace("x", "(.)", static _ => "\\1\\1").Should().Be("\\1\\1");
 }

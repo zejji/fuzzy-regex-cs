@@ -66,7 +66,7 @@ public sealed class GraphemeTests
 
         FuzzyRegex
             .Matches(subject, @"\X")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal(
                 "a",
@@ -87,7 +87,7 @@ public sealed class GraphemeTests
 
         FuzzyRegex
             .Matches(subject, @"\X{3}")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal(
                 "a" + _precomposedAWithGrave + _decomposedAWithGrave,
@@ -103,7 +103,7 @@ public sealed class GraphemeTests
 
         FuzzyRegex
             .Matches(subject, @"\X")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("\r", "\r\n", _bareCombiningAcute, _decomposedCapitalAWithAcute);
     }

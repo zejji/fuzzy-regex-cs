@@ -17,7 +17,7 @@ public sealed class BasicRegexSubTests
     [Property("Upstream", "RegexTests.test_basic_regex_sub#2")]
     public void Replace_with_an_evaluator_transforms_every_match() =>
         FuzzyRegex
-            .Replace("08.2 -2 23x99y", @"\d+", m => (int.Parse(m.Value) + 1).ToString())
+            .Replace("08.2 -2 23x99y", @"\d+", static m => (int.Parse(m.Value) + 1).ToString())
             .Should()
             .Be("9.3 -3 24x100y");
 
@@ -25,14 +25,14 @@ public sealed class BasicRegexSubTests
     [Property("Upstream", "RegexTests.test_basic_regex_sub#3")]
     public void Replace_with_an_evaluator_and_a_count_stops_early() =>
         new FuzzyRegex(@"\d+")
-            .Replace("08.2 -2 23x99y", m => (int.Parse(m.Value) + 1).ToString(), 3)
+            .Replace("08.2 -2 23x99y", static m => (int.Parse(m.Value) + 1).ToString(), 3)
             .Should()
             .Be("9.3 -3 23x99y");
 
     [Test]
     [Property("Upstream", "RegexTests.test_basic_regex_sub#4")]
     public void Replace_with_an_evaluator_does_not_expand_escapes_in_its_return_value() =>
-        FuzzyRegex.Replace("x", ".", _ => "\\n").Should().Be("\\n");
+        FuzzyRegex.Replace("x", ".", static _ => "\\n").Should().Be("\\n");
 
     [Test]
     [Property("Upstream", "RegexTests.test_basic_regex_sub#5")]

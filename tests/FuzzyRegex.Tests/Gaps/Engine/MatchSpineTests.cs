@@ -252,7 +252,7 @@ public sealed class MatchSpineTests
         m.Groups[1].Success.Should().BeTrue();
         (m.Groups[1].Index, m.Groups[1].Length).Should().Be((1, 1));
         m.Groups[1].Name.Should().Be("1");
-        m.Groups[1].Captures.Select(c => (c.Index, c.Length)).Should().Equal((1, 1));
+        m.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((1, 1));
         m.LastGroupNumber.Should().Be(1);
         m.LastGroupName.Should().BeNull("group 1 has no name");
     }

@@ -103,7 +103,7 @@ public sealed class CharacterClassLiteralsTests
     [Property("Upstream", "RegexTests.test_sre_character_class_literals#7")]
     public void Set_with_an_invalid_octal_escape_fails_to_compile()
     {
-        Action act = () => FuzzyRegex.MatchAtStart("", @"[\911]");
+        Action act = static () => FuzzyRegex.MatchAtStart("", @"[\911]");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

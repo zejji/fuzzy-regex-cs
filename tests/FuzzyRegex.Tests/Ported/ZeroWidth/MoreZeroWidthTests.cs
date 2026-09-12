@@ -30,8 +30,11 @@ public sealed class MoreZeroWidthTests
     {
         Match[] matches = [.. FuzzyRegex.Matches("a::bc", @"\b|:+")];
 
-        matches.Select(m => m.Value).Should().Equal("", "", "::", "", "");
-        matches.Select(m => (m.Index, m.Index + m.Length)).Should().Equal((0, 0), (1, 1), (1, 3), (3, 3), (5, 5));
+        matches.Select(static m => m.Value).Should().Equal("", "", "::", "", "");
+        matches
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 0), (1, 1), (1, 3), (3, 3), (5, 5));
     }
 
     [Test]
@@ -39,7 +42,7 @@ public sealed class MoreZeroWidthTests
     public void Multiline_lazy_zero_width_whitespace_to_end_of_line_matches_at_each_blank_line_position() =>
         FuzzyRegex
             .Matches("foo\n\n\nbar", @"(?m)^\s*?$")
-            .Select(m => (m.Index, m.Index + m.Length))
+            .Select(static m => (m.Index, m.Index + m.Length))
             .Should()
             .Equal((4, 4), (4, 5), (5, 5));
 }

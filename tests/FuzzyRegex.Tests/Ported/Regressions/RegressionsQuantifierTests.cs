@@ -102,7 +102,7 @@ public sealed class RegressionsQuantifierTests
     [Property("Upstream", "RegexTests.test_hg_bugs#57")]
     public void A_plus_quantifier_before_a_literal_slash_only_matches_the_line_containing_it() =>
         // Hg issue 83: slash handling in presence of a quantifier.
-        FuzzyRegex.Matches("cA/c\ncAb/c", "c..+/c").Select(m => m.Value).Should().Equal("cAb/c");
+        FuzzyRegex.Matches("cA/c\ncAb/c", "c..+/c").Select(static m => m.Value).Should().Equal("cAb/c");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
@@ -110,7 +110,7 @@ public sealed class RegressionsQuantifierTests
         // Hg issue 238: Not fully re backward compatible.
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("Erm....", "T...");
 
@@ -119,7 +119,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_one_to_three_times_captures_the_word_for_each_repetition() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("Erm", "T");
 
@@ -128,21 +128,25 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_one_to_three_times_captures_the_dots_for_each_repetition() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("....", "...");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#275")]
     public void Group_repeated_exactly_three_times_never_matches_the_subject() =>
-        FuzzyRegex.Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){3}").Select(m => m.Value).Should().BeEmpty();
+        FuzzyRegex
+            .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){3}")
+            .Select(static m => m.Value)
+            .Should()
+            .BeEmpty();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
     public void Group_repeated_exactly_two_times_captures_the_whole_run() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("T...");
 
@@ -151,7 +155,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_exactly_two_times_captures_the_word() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("T");
 
@@ -160,7 +164,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_exactly_two_times_captures_the_dots() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("...");
 
@@ -169,7 +173,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_exactly_once_captures_the_whole_run_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("Erm....", "T..", "T...");
 
@@ -178,7 +182,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_exactly_once_captures_the_word_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("Erm", "T", "T");
 
@@ -187,7 +191,7 @@ public sealed class RegressionsQuantifierTests
     public void Group_repeated_exactly_once_captures_the_dots_for_each_match() =>
         FuzzyRegex
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
-            .Select(m => m.Groups[3].Value)
+            .Select(static m => m.Groups[3].Value)
             .Should()
             .Equal("....", "..", "...");
 }

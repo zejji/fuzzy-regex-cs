@@ -36,7 +36,7 @@ public sealed class RegressionsSubstitutionTests
     [Property("Upstream", "RegexTests.test_hg_bugs#61")]
     public void Sub_with_an_evaluator_that_calls_Result_replaces_every_match() =>
         // Hg issue 91: match.expand is extremely slow. Check that the replacement cache works.
-        FuzzyRegex.Replace("a-b-c", "(-)", m => m.Result("x")).Should().Be("axbxc");
+        FuzzyRegex.Replace("a-b-c", "(-)", static m => m.Result("x")).Should().Be("axbxc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#82")]

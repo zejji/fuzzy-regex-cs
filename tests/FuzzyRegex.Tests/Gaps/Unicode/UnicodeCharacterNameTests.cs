@@ -219,7 +219,7 @@ internal static class CharacterNameFixture
     public static IEnumerable<(int First, int Last)> RangesAddedIn17 =>
         Root.GetProperty("codepointRangesAddedIn17")
             .EnumerateArray()
-            .Select(range => (range[0].GetInt32(), range[1].GetInt32()));
+            .Select(static range => (range[0].GetInt32(), range[1].GetInt32()));
 
     private static JsonElement Root => _loaded.Value.RootElement;
 

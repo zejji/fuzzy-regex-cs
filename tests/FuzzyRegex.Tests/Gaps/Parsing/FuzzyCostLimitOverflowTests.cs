@@ -134,7 +134,7 @@ public sealed class FuzzyCostLimitOverflowTests
     [Test]
     public void A_minimum_above_the_maximum_is_rejected_even_when_both_are_above_unlimited()
     {
-        Action compile = () => PatternCompiler.Compile("(?:abc){4294967296<=i<=4294967295}");
+        Action compile = static () => PatternCompiler.Compile("(?:abc){4294967296<=i<=4294967295}");
 
         var error = compile.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("bad fuzzy cost limit");
@@ -208,7 +208,7 @@ public sealed class FuzzyCostLimitOverflowTests
     [Test]
     public void A_minimum_above_the_maximum_is_still_rejected_at_ordinary_sizes()
     {
-        Action compile = () => PatternCompiler.Compile("(?:abc){2<=i<=1}");
+        Action compile = static () => PatternCompiler.Compile("(?:abc){2<=i<=1}");
 
         compile.Should().Throw<FuzzyRegexParseException>().WithMessage("bad fuzzy cost limit");
     }

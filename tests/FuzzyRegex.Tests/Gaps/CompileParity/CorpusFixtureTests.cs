@@ -33,9 +33,9 @@ public sealed class CorpusFixtureTests
     {
         IEnumerable<string> names =
         [
-            .. Corpus.Compiles().Select(row => row.ToString()),
-            .. Corpus.Errors().Select(row => row.ToString()),
-            .. Corpus.Templates().Select(row => row.ToString()),
+            .. Corpus.Compiles().Select(static row => row.ToString()),
+            .. Corpus.Errors().Select(static row => row.ToString()),
+            .. Corpus.Templates().Select(static row => row.ToString()),
         ];
 
         names.Should().OnlyHaveUniqueItems();
@@ -49,14 +49,14 @@ public sealed class CorpusFixtureTests
         // TRX unparseable and take the whole ratchet down with it.
         IEnumerable<string> names =
         [
-            .. Corpus.Compiles().Select(row => row.ToString()),
-            .. Corpus.Errors().Select(row => row.ToString()),
-            .. Corpus.Templates().Select(row => row.ToString()),
+            .. Corpus.Compiles().Select(static row => row.ToString()),
+            .. Corpus.Errors().Select(static row => row.ToString()),
+            .. Corpus.Templates().Select(static row => row.ToString()),
         ];
 
-        names.Should().AllSatisfy(name => name.Should().NotContainAny(ControlCharacters()));
+        names.Should().AllSatisfy(static name => name.Should().NotContainAny(ControlCharacters()));
     }
 
     private static IEnumerable<string> ControlCharacters() =>
-        Enumerable.Range(0, 0x20).Select(c => ((char)c).ToString());
+        Enumerable.Range(0, 0x20).Select(static c => ((char)c).ToString());
 }

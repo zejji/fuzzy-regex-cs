@@ -40,7 +40,7 @@ public sealed class RegressionsBackrefTests
     public void Backreference_that_cannot_match_finds_nothing_without_looping_forever() =>
         FuzzyRegex
             .Matches("To make use of one of these modules", @"\bof ([a-z]+) of \1\b")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .BeEmpty();
 

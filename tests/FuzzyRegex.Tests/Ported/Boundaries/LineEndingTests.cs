@@ -17,7 +17,7 @@ public sealed class LineEndingTests
 
         FuzzyRegex
             .Matches(subject, @"\R")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("\r\n", "\n", "\x0B", "\x0C", "\r", "\u0085", "\u2028", "\u2029");
     }

@@ -86,3 +86,23 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: TestResults/
           if-no-files-found: warn
+
+  inspections:
+    name: ReSharper inspections (IDE0320 and other IDE-only errors must fail here)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore and build
+        run: |
+          dotnet restore
+          dotnet build --no-restore
+      - name: Install the ReSharper command-line tools
+        run: dotnet tool install -g JetBrains.ReSharper.GlobalTools
+      - name: Inspections must be clean at ERROR severity
+        shell: pwsh
+        run: ./tools/check-inspections.ps1

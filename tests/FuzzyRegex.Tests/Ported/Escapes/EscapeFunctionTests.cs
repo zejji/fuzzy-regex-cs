@@ -34,7 +34,7 @@ public sealed class EscapeFunctionTests
     [Property("Upstream", "RegexTests.test_re_escape#4")]
     public void Escaping_all_256_code_points_together_still_matches_them_all()
     {
-        string p = string.Concat(Enumerable.Range(0, 256).Select(i => (char)i));
+        string p = string.Concat(Enumerable.Range(0, 256).Select(static i => (char)i));
 
         var pat = new FuzzyRegex(FuzzyRegex.Escape(p));
         Match m = pat.MatchAtStart(p);

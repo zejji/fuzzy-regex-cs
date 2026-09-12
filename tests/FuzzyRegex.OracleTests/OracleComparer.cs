@@ -124,8 +124,8 @@ internal static class OracleComparer
                 (FuzzyRegexOptions)row.Flags,
                 timeout,
                 row.NamedLists.ToDictionary(
-                    entry => entry.Key,
-                    entry => (IReadOnlyCollection<string>)entry.Value,
+                    static entry => entry.Key,
+                    static entry => (IReadOnlyCollection<string>)entry.Value,
                     StringComparer.Ordinal
                 )
             );
@@ -315,7 +315,7 @@ internal static class OracleComparer
                         true,
                         group.Index,
                         group.Length,
-                        [.. group.Captures.Select(capture => new OracleSpan(capture.Index, capture.Length))]
+                        [.. group.Captures.Select(static capture => new OracleSpan(capture.Index, capture.Length))]
                     )
                     : new OracleGroup(number, false, 0, 0, [])
             );

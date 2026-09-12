@@ -225,8 +225,8 @@ public sealed class BranchResetTests
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Value.Should().Be("b");
         m.Groups[3].Value.Should().Be("e");
-        m.Groups["a"].Captures.Select(c => c.Value).Should().Equal("a");
-        m.Groups["b"].Captures.Select(c => c.Value).Should().Equal("b");
+        m.Groups["a"].Captures.Select(static c => c.Value).Should().Equal("a");
+        m.Groups["b"].Captures.Select(static c => c.Value).Should().Equal("b");
     }
 
     [Test]
@@ -238,7 +238,7 @@ public sealed class BranchResetTests
         m.Groups[1].Value.Should().Be("d");
         m.Groups[2].Success.Should().BeFalse();
         m.Groups[3].Value.Should().Be("e");
-        m.Groups["a"].Captures.Select(c => c.Value).Should().Equal("c", "d");
+        m.Groups["a"].Captures.Select(static c => c.Value).Should().Equal("c", "d");
         m.Groups["b"].Captures.Should().BeEmpty();
     }
 }

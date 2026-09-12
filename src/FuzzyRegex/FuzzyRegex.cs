@@ -53,7 +53,7 @@ public sealed class FuzzyRegex
     /// <c>test_getattr</c> expects to see it and this port's translation of that test does not.
     /// </summary>
     private static readonly int _unexposedFlags = ~Enum.GetValues<FuzzyRegexOptions>()
-        .Aggregate(0, (mask, option) => mask | (int)option);
+        .Aggregate(0, static (mask, option) => mask | (int)option);
 
     /// <summary>
     /// Upstream <c>_METACHARS</c> (<c>upstream/regex/_main.py</c> line 445): the characters
@@ -250,8 +250,8 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists
     ) =>
         namedLists?.ToDictionary(
-            entry => entry.Key,
-            entry => (IReadOnlyList<string>)[.. entry.Value],
+            static entry => entry.Key,
+            static entry => (IReadOnlyList<string>)[.. entry.Value],
             StringComparer.Ordinal
         );
 

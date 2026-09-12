@@ -67,7 +67,7 @@ internal static class PythonStr
 
         // Runes, not chars: Python iterates codepoints, so a supplementary-plane digit such as
         // MATHEMATICAL BOLD DIGIT ZERO is one character to it and two to us.
-        return text.Length > 0 && text.EnumerateRunes().All(rune => IsDigit(rune.Value));
+        return text.Length > 0 && text.EnumerateRunes().All(static rune => IsDigit(rune.Value));
     }
 
     /// <summary>
@@ -174,7 +174,7 @@ internal static class PythonStr
             return false;
         }
 
-        return text.EnumerateRunes().Skip(1).All(rune => IsIdentifierContinue(rune.Value));
+        return text.EnumerateRunes().Skip(1).All(static rune => IsIdentifierContinue(rune.Value));
     }
 
     /// <summary>

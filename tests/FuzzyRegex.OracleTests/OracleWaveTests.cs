@@ -135,7 +135,7 @@ public sealed class OracleWaveTests
         // Half two: an ordinary wrong answer on a row no entry covers is still a divergence, so the
         // reclassification above is a statement about the list rather than about RunWave.
         OracleRow ordinary = OracleWave.ParseRows(_recordedRows)[0];
-        OracleRunSummary wrong = OracleComparer.RunWave([ordinary], _ => new NoMatchOutcome());
+        OracleRunSummary wrong = OracleComparer.RunWave([ordinary], static _ => new NoMatchOutcome());
 
         wrong.Tally.GetValueOrDefault(OracleVerdict.Expected).Should().Be(0);
         wrong.Divergences.Should().ContainSingle().Which.Should().StartWith("DIVERGE row");

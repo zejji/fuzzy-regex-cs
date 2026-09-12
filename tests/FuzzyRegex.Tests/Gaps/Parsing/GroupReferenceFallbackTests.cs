@@ -51,7 +51,7 @@ public sealed class GroupReferenceFallbackTests
     [Test]
     public void A_group_number_too_large_for_an_int_does_not_overflow_on_the_delimited_path()
     {
-        Action compile = () => PatternCompiler.Compile(@"\g<99999999999>");
+        Action compile = static () => PatternCompiler.Compile(@"\g<99999999999>");
 
         compile.Should().NotThrow<OverflowException>();
     }

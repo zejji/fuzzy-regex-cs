@@ -54,7 +54,7 @@ public sealed class RegressionsConditionalTests
     public void Conditional_group_selects_the_matching_gender_specific_branch() =>
         FuzzyRegex
             .Matches("female: her dog; male: his cat. asdsasda", @"(fe)?male: h(?(1)(er)|(is)) (\w+)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("female: her dog", "male: his cat");
 
@@ -86,7 +86,11 @@ public sealed class RegressionsConditionalTests
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_one_is_empty_on_every_match_because_it_never_participates() =>
-        FuzzyRegex.Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)").Select(m => m.Groups[1].Value).Should().Equal("", "", "");
+        FuzzyRegex
+            .Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)")
+            .Select(static m => m.Groups[1].Value)
+            .Should()
+            .Equal("", "", "");
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
@@ -94,7 +98,7 @@ public sealed class RegressionsConditionalTests
     public void Findall_group_two_captures_each_digit_in_turn() =>
         FuzzyRegex
             .Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("1", "2", "3");
 
@@ -104,7 +108,7 @@ public sealed class RegressionsConditionalTests
     public void Findall_with_a_possessive_optional_group_also_leaves_group_one_empty() =>
         FuzzyRegex
             .Matches("ax1y2z3b", @"(y)?+(\d)(?(1)\b\B)")
-            .Select(m => m.Groups[1].Value)
+            .Select(static m => m.Groups[1].Value)
             .Should()
             .Equal("", "", "");
 
@@ -114,7 +118,7 @@ public sealed class RegressionsConditionalTests
     public void Findall_with_a_possessive_optional_group_still_captures_each_digit() =>
         FuzzyRegex
             .Matches("ax1y2z3b", @"(y)?+(\d)(?(1)\b\B)")
-            .Select(m => m.Groups[2].Value)
+            .Select(static m => m.Groups[2].Value)
             .Should()
             .Equal("1", "2", "3");
 
@@ -151,7 +155,7 @@ public sealed class RegressionsConditionalTests
     public void Findall_with_a_lookbehind_conditional_finds_both_the_loved_and_hated_targets() =>
         FuzzyRegex
             .Matches("I love you but I don't hate her either", @"(?(?<=love\s)you|(?<=hate\s)her)")
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("you", "her");
 

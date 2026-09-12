@@ -123,7 +123,11 @@ internal static class OracleWave
         ParseRows(text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private static IReadOnlyList<OracleRow> ParseRows(IEnumerable<string> lines) =>
-        [.. lines.Where(line => !string.IsNullOrWhiteSpace(line)).Select((line, index) => ParseRow(line, index + 1))];
+        [
+            .. lines
+                .Where(static line => !string.IsNullOrWhiteSpace(line))
+                .Select(static (line, index) => ParseRow(line, index + 1)),
+        ];
 
     private static OracleRow ParseRow(string line, int number)
     {
@@ -226,7 +230,7 @@ internal static class OracleWave
             // whole difference between upstream's split and Regex.Split's, so null is read as null
             // rather than coalesced to "".
             "split" => new SplitOutcome([
-                .. outcome.GetProperty("parts").EnumerateArray().Select(part => part.GetString()),
+                .. outcome.GetProperty("parts").EnumerateArray().Select(static part => part.GetString()),
             ]),
             _ => throw new InvalidOperationException($"unknown outcome kind '{kind}'."),
         };
@@ -260,8 +264,9 @@ internal static class OracleWave
         namedLists
             .EnumerateObject()
             .ToDictionary(
-                property => property.Name,
-                property => (IReadOnlyList<string>)[.. property.Value.EnumerateArray().Select(v => v.GetString()!)],
+                static property => property.Name,
+                static property =>
+                    (IReadOnlyList<string>)[.. property.Value.EnumerateArray().Select(static v => v.GetString()!)],
                 StringComparer.Ordinal
             );
 
@@ -368,7 +373,7 @@ internal static class OracleWave
                 "  lists    "
                     + string.Join(
                         ", ",
-                        row.NamedLists.Select(entry =>
+                        row.NamedLists.Select(static entry =>
                             entry.Key + "=[" + string.Join(",", entry.Value.Select(Printable)) + "]"
                         )
                     )
@@ -617,7 +622,7 @@ internal sealed record MatchesOutcome(IReadOnlyList<MatchOutcome> Matches) : IOr
     /// <inheritdoc />
     public string Describe() =>
         string.Create(CultureInfo.InvariantCulture, $"matches {Matches.Count}")
-        + (Matches.Count == 0 ? "" : " | " + string.Join(" || ", Matches.Select(match => match.Describe())));
+        + (Matches.Count == 0 ? "" : " | " + string.Join(" || ", Matches.Select(static match => match.Describe())));
 }
 
 /// <summary>A split: the pieces of the subject, with the groups interleaved.</summary>
@@ -631,7 +636,7 @@ internal sealed record SplitOutcome(IReadOnlyList<string?> Parts) : IOracleOutco
     /// <inheritdoc />
     public string Describe() =>
         string.Create(CultureInfo.InvariantCulture, $"split {Parts.Count} ")
-        + string.Join(" ", Parts.Select(part => part is null ? "<null>" : OracleWave.Printable(part)));
+        + string.Join(" ", Parts.Select(static part => part is null ? "<null>" : OracleWave.Printable(part)));
 }
 
 /// <summary>The pattern matched, with one entry per group, group 0 being the whole match.</summary>
@@ -665,7 +670,7 @@ internal sealed record MatchOutcome(
     /// </remarks>
     public string Describe() =>
         "match "
-        + string.Join(" ", Groups.Select(group => group.Describe()))
+        + string.Join(" ", Groups.Select(static group => group.Describe()))
         + string.Create(CultureInfo.InvariantCulture, $" last={LastIndex}/{LastGroup ?? "-"}")
         + (Partial ? " partial" : "");
 }
@@ -689,7 +694,7 @@ internal sealed record OracleGroup(int Number, bool Success, int Index, int Leng
         Success
             ? string.Create(
                 CultureInfo.InvariantCulture,
-                $"{Number}:({Index},{Length})[{string.Join(",", Captures.Select(capture => capture.Describe()))}]"
+                $"{Number}:({Index},{Length})[{string.Join(",", Captures.Select(static capture => capture.Describe()))}]"
             )
             : string.Create(CultureInfo.InvariantCulture, $"{Number}:unset");
 }

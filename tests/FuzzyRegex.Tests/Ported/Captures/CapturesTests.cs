@@ -21,7 +21,7 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("abc", @"(\w)+");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("a", "b", "c");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
     }
 
     [Test]
@@ -30,8 +30,8 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("abcdef", @"(\w{3})+");
 
-        m.Groups[0].Captures.Select(c => c.Value).Should().Equal("abcdef");
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("abc", "def");
+        m.Groups[0].Captures.Select(static c => c.Value).Should().Equal("abcdef");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("abc", "def");
     }
 
     [Test]
@@ -40,8 +40,8 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("192.168.0.1", @"^(\d{1,3})(?:\.(\d{1,3})){3}$");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("192");
-        m.Groups[2].Captures.Select(c => c.Value).Should().Equal("168", "0", "1");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("192");
+        m.Groups[2].Captures.Select(static c => c.Value).Should().Equal("168", "0", "1");
     }
 
     [Test]
@@ -50,8 +50,8 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.MatchAtStart("3FB52A0C a2c4g3k9d3", @"^([0-9A-F]{2}){4} ([a-z]\d){5}$");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("3F", "B5", "2A", "0C");
-        m.Groups[2].Captures.Select(c => c.Value).Should().Equal("a2", "c4", "g3", "k9", "d3");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("3F", "B5", "2A", "0C");
+        m.Groups[2].Captures.Select(static c => c.Value).Should().Equal("a2", "c4", "g3", "k9", "d3");
     }
 
     [Test]
@@ -60,9 +60,9 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.MatchAtStart("aWbXcXdXeXfY", "([a-z]W)([a-z]X)+([a-z]Y)");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("aW");
-        m.Groups[2].Captures.Select(c => c.Value).Should().Equal("bX", "cX", "dX", "eX");
-        m.Groups[3].Captures.Select(c => c.Value).Should().Equal("fY");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("aW");
+        m.Groups[2].Captures.Select(static c => c.Value).Should().Equal("bX", "cX", "dX", "eX");
+        m.Groups[3].Captures.Select(static c => c.Value).Should().Equal("fY");
     }
 
     [Test]
@@ -71,7 +71,7 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("ab", @".*?(?=(.)+)b");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("b");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("b");
     }
 
     [Test]
@@ -80,7 +80,7 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("abcd", @".*?(?>(.){0,2})d");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("b", "c");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("b", "c");
     }
 
     [Test]
@@ -89,6 +89,6 @@ public sealed class CapturesTests
     {
         Match m = FuzzyRegex.Match("a", @"(.)+");
 
-        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("a");
+        m.Groups[1].Captures.Select(static c => c.Value).Should().Equal("a");
     }
 }

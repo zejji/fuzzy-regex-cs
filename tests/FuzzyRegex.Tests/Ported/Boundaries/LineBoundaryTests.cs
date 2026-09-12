@@ -12,32 +12,48 @@ public sealed class LineBoundaryTests
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#1")]
     public void Dot_plus_findall_stops_at_a_bare_newline() =>
-        FuzzyRegex.Matches("Line 1\nLine 2\n", @".+").Select(m => m.Value).Should().Equal("Line 1", "Line 2");
+        FuzzyRegex.Matches("Line 1\nLine 2\n", @".+").Select(static m => m.Value).Should().Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#2")]
     public void Dot_plus_findall_does_not_stop_at_a_bare_carriage_return() =>
-        FuzzyRegex.Matches("Line 1\rLine 2\r", @".+").Select(m => m.Value).Should().Equal("Line 1\rLine 2\r");
+        FuzzyRegex.Matches("Line 1\rLine 2\r", @".+").Select(static m => m.Value).Should().Equal("Line 1\rLine 2\r");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#3")]
     public void Dot_plus_findall_stops_before_the_newline_in_a_crlf_pair() =>
-        FuzzyRegex.Matches("Line 1\r\nLine 2\r\n", @".+").Select(m => m.Value).Should().Equal("Line 1\r", "Line 2\r");
+        FuzzyRegex
+            .Matches("Line 1\r\nLine 2\r\n", @".+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("Line 1\r", "Line 2\r");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#4")]
     public void Dot_plus_findall_with_word_flag_stops_at_a_bare_newline() =>
-        FuzzyRegex.Matches("Line 1\nLine 2\n", @"(?w).+").Select(m => m.Value).Should().Equal("Line 1", "Line 2");
+        FuzzyRegex
+            .Matches("Line 1\nLine 2\n", @"(?w).+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#5")]
     public void Dot_plus_findall_with_word_flag_also_stops_at_a_bare_carriage_return() =>
-        FuzzyRegex.Matches("Line 1\rLine 2\r", @"(?w).+").Select(m => m.Value).Should().Equal("Line 1", "Line 2");
+        FuzzyRegex
+            .Matches("Line 1\rLine 2\r", @"(?w).+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#6")]
     public void Dot_plus_findall_with_word_flag_stops_before_the_newline_in_a_crlf_pair() =>
-        FuzzyRegex.Matches("Line 1\r\nLine 2\r\n", @"(?w).+").Select(m => m.Value).Should().Equal("Line 1", "Line 2");
+        FuzzyRegex
+            .Matches("Line 1\r\nLine 2\r\n", @"(?w).+")
+            .Select(static m => m.Value)
+            .Should()
+            .Equal("Line 1", "Line 2");
 
     [Test]
     [Arguments("abc", 0)]

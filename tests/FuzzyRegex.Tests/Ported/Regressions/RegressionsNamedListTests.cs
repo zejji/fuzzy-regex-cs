@@ -35,7 +35,7 @@ public sealed class RegressionsNamedListTests
 
         regex
             .Matches(subject)
-            .Select(m => m.Value)
+            .Select(static m => m.Value)
             .Should()
             .Equal("POST", "Post", "post", $"po{_longS}t", $"po{_ligatureSt}", $"po{_ligatureLongSt}");
     }

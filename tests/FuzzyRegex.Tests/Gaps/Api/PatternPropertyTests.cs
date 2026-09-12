@@ -72,7 +72,7 @@ public sealed class PatternPropertyTests
     [Test]
     public void An_out_of_range_group_number_is_rejected()
     {
-        Action byNumber = () => new FuzzyRegex("(a)").GroupNameFromNumber(2);
+        Action byNumber = static () => new FuzzyRegex("(a)").GroupNameFromNumber(2);
 
         byNumber.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("number");
     }

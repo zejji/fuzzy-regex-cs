@@ -101,7 +101,7 @@ public sealed class RecursiveTests
         FuzzyRegex
             .Match("(ab(cd)ef)", @"\(((?>[^()]+)|(?R))*\)")
             .Groups[1]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("ab", "cd", "(cd)", "ef");
 
@@ -121,7 +121,7 @@ public sealed class RecursiveTests
         FuzzyRegex
             .Match("(ab(cd)ef)", @"(?r)\(((?R)|(?>[^()]+))*\)")
             .Groups[1]
-            .Captures.Select(c => c.Value)
+            .Captures.Select(static c => c.Value)
             .Should()
             .Equal("ef", "cd", "(cd)", "ab");
 

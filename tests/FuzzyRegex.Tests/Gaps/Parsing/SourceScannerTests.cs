@@ -105,7 +105,7 @@ public sealed class SourceScannerTests
         // every public index is a UTF-16 code unit. Verified against the local oracle 2026-08-30:
         // compiling '\U0001F63A(' raises "missing )" with pos=2, counting codepoints. Here the
         // same failure is at 3, counting the surrogate pair as the two chars .NET sees.
-        Action compile = () => PatternCompiler.Compile(char.ConvertFromUtf32(0x1F63A) + "(");
+        Action compile = static () => PatternCompiler.Compile(char.ConvertFromUtf32(0x1F63A) + "(");
 
         FuzzyRegexParseException error = compile.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("missing )");

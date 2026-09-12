@@ -68,7 +68,7 @@ public sealed class UnicodeDigitGroupNameTests
     [Test]
     public void A_numeric_name_where_numbers_are_not_allowed_never_reaches_the_conversion()
     {
-        Action compile = () => PatternCompiler.Compile("(?<²>x)");
+        Action compile = static () => PatternCompiler.Compile("(?<²>x)");
 
         compile.Should().Throw<FuzzyRegexParseException>().WithMessage("bad character in group name");
     }

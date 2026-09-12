@@ -41,7 +41,7 @@ public sealed class GroupsAndAlternationTests
         empty.Groups[1].Success.Should().BeTrue();
         empty.Groups[1].Value.Should().BeEmpty();
         (empty.Groups[1].Index, empty.Groups[1].Length).Should().Be((0, 0));
-        empty.Groups[1].Captures.Select(c => (c.Index, c.Length)).Should().Equal((0, 0));
+        empty.Groups[1].Captures.Select(static c => (c.Index, c.Length)).Should().Equal((0, 0));
         empty.LastGroupNumber.Should().Be(1);
 
         Match absent = FuzzyRegex.MatchAtStart("a", "(x)a|a");
@@ -71,7 +71,7 @@ public sealed class GroupsAndAlternationTests
         // group that closed last, not the highest-numbered one.
         Match m = FuzzyRegex.MatchAtStart("ab", "((a)(b))");
 
-        m.Groups.Select(g => (g.Index, g.Length)).Should().Equal((0, 2), (0, 2), (0, 1), (1, 1));
+        m.Groups.Select(static g => (g.Index, g.Length)).Should().Equal((0, 2), (0, 2), (0, 1), (1, 1));
         m.LastGroupNumber.Should().Be(1);
         m.LastGroupName.Should().BeNull();
     }
@@ -149,7 +149,7 @@ public sealed class GroupsAndAlternationTests
         // Upstream: regex.match('(a|b)(c|d)', 'bd') spans are (0,2), (0,1), (1,2), lastindex 2.
         Match m = FuzzyRegex.MatchAtStart("bd", "(a|b)(c|d)");
 
-        m.Groups.Select(g => g.Value).Should().Equal("bd", "b", "d");
+        m.Groups.Select(static g => g.Value).Should().Equal("bd", "b", "d");
         m.LastGroupNumber.Should().Be(2);
     }
 }

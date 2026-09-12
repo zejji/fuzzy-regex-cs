@@ -24,7 +24,7 @@ public sealed class RegressionsAtomicTests
     [Property("Upstream", "RegexTests.test_hg_bugs#1")]
     public void Atomic_group_around_a_single_literal_compiles()
     {
-        Action act = () => _ = new FuzzyRegex("(?>b)", FuzzyRegexOptions.Version1);
+        Action act = static () => _ = new FuzzyRegex("(?>b)", FuzzyRegexOptions.Version1);
 
         act.Should().NotThrow();
     }
@@ -33,7 +33,7 @@ public sealed class RegressionsAtomicTests
     [Property("Upstream", "RegexTests.test_hg_bugs#2")]
     public void Repeated_alternation_of_two_atomic_groups_compiles()
     {
-        Action act = () => _ = new FuzzyRegex(@"^((?>\w+)|(?>\s+))*$", FuzzyRegexOptions.Version1);
+        Action act = static () => _ = new FuzzyRegex(@"^((?>\w+)|(?>\s+))*$", FuzzyRegexOptions.Version1);
 
         act.Should().NotThrow();
     }

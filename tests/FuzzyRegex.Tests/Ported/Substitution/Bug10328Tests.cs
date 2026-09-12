@@ -23,7 +23,7 @@ public sealed class Bug10328Tests
     {
         var re = new FuzzyRegex(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
-        string result = re.Replace("foobar ", m => "<" + m.LastGroupName + ">", -1, out int replacements);
+        string result = re.Replace("foobar ", static m => "<" + m.LastGroupName + ">", -1, out int replacements);
 
         result.Should().Be("foobar<trailing_ws><no_final_newline>");
         replacements.Should().Be(2);
@@ -35,7 +35,7 @@ public sealed class Bug10328Tests
     {
         var re = new FuzzyRegex(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
-        re.Matches("foobar ").Select(m => m.Value).Should().Equal(" ", "");
+        re.Matches("foobar ").Select(static m => m.Value).Should().Equal(" ", "");
     }
 
     [Test]
@@ -44,7 +44,7 @@ public sealed class Bug10328Tests
     {
         var re = new FuzzyRegex(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
-        string result = re.Replace("foobar ", m => "<" + m.LastGroupName + ">", -1, out int replacements);
+        string result = re.Replace("foobar ", static m => "<" + m.LastGroupName + ">", -1, out int replacements);
 
         result.Should().Be("foobar<trailing_ws><no_final_newline>");
         replacements.Should().Be(2);
@@ -56,6 +56,6 @@ public sealed class Bug10328Tests
     {
         var re = new FuzzyRegex(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
-        re.Matches("foobar ").Select(m => m.Value).Should().Equal(" ", "");
+        re.Matches("foobar ").Select(static m => m.Value).Should().Equal(" ", "");
     }
 }

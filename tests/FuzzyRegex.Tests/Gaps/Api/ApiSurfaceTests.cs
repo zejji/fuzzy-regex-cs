@@ -37,7 +37,7 @@ public sealed class ApiSurfaceTests
     {
         // Validation at a trust boundary is tested like the real code it is: the
         // ArgumentNullException must win over anything the compiler would say.
-        Action construct = () => _ = new FuzzyRegex(null!);
+        Action construct = static () => _ = new FuzzyRegex(null!);
 
         construct.Should().Throw<ArgumentNullException>().WithParameterName("pattern");
     }
@@ -132,11 +132,11 @@ public sealed class ApiSurfaceTests
         // slicing arguments and `overlapped` reach the scan.
         var pattern = new FuzzyRegex("(a)");
 
-        pattern.Matches("aba").Select(m => m.Index).Should().Equal(0, 2);
-        FuzzyRegex.Matches("aba", "(a)").Select(m => m.Index).Should().Equal(0, 2);
-        pattern.Matches("aba", beginning: 1).Select(m => m.Index).Should().Equal(2);
-        pattern.Matches("aba", beginning: 0, length: 2).Select(m => m.Index).Should().Equal(0);
-        new FuzzyRegex("aa").Matches("aaa", overlapped: true).Select(m => m.Index).Should().Equal(0, 1);
+        pattern.Matches("aba").Select(static m => m.Index).Should().Equal(0, 2);
+        FuzzyRegex.Matches("aba", "(a)").Select(static m => m.Index).Should().Equal(0, 2);
+        pattern.Matches("aba", beginning: 1).Select(static m => m.Index).Should().Equal(2);
+        pattern.Matches("aba", beginning: 0, length: 2).Select(static m => m.Index).Should().Equal(0);
+        new FuzzyRegex("aa").Matches("aaa", overlapped: true).Select(static m => m.Index).Should().Equal(0, 1);
 
         pattern.Count("aba").Should().Be(2);
         pattern.Count("aba".AsSpan()).Should().Be(2);
@@ -167,17 +167,17 @@ public sealed class ApiSurfaceTests
         var pattern = new FuzzyRegex("(a)");
 
         FuzzyRegex.Replace("aba", "(a)", "z").Should().Be("zbz");
-        FuzzyRegex.Replace("aba", "(a)", m => m.Value.ToUpperInvariant()).Should().Be("AbA");
+        FuzzyRegex.Replace("aba", "(a)", static m => m.Value.ToUpperInvariant()).Should().Be("AbA");
         FuzzyRegex.ReplaceFormat("aba", "(a)", "[{1}]").Should().Be("[a]b[a]");
 
         pattern.Replace("aba", "z", 1).Should().Be("zba");
-        pattern.Replace("aba", m => m.Value.ToUpperInvariant(), 1).Should().Be("Aba");
+        pattern.Replace("aba", static m => m.Value.ToUpperInvariant(), 1).Should().Be("Aba");
         pattern.ReplaceFormat("aba", "[{1}]", 1).Should().Be("[a]ba");
 
         pattern.Replace("aba", "z", -1, out int templateCount).Should().Be("zbz");
         templateCount.Should().Be(2);
 
-        pattern.Replace("aba", _ => "z", -1, out int evaluatorCount).Should().Be("zbz");
+        pattern.Replace("aba", static _ => "z", -1, out int evaluatorCount).Should().Be("zbz");
         evaluatorCount.Should().Be(2);
 
         pattern.ReplaceFormat("aba", "[{1}]", -1, out int formatCount).Should().Be("[a]b[a]");
@@ -210,7 +210,7 @@ public sealed class ApiSurfaceTests
         [
             .. typeof(FuzzyRegex)
                 .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .Where(field => !field.IsInitOnly),
+                .Where(static field => !field.IsInitOnly),
         ];
 
         mutable.Should().BeEmpty("FuzzyRegex is documented as safe to share between threads");
@@ -247,7 +247,7 @@ public sealed class ApiSurfaceTests
         FuzzyRegexOptions[] options = Enum.GetValues<FuzzyRegexOptions>();
 
         options.Should().OnlyHaveUniqueItems();
-        options.Should().AllSatisfy(option => ((int)option & ~allUpstreamFlags).Should().Be(0));
+        options.Should().AllSatisfy(static option => ((int)option & ~allUpstreamFlags).Should().Be(0));
     }
 
     [Test]
@@ -298,7 +298,7 @@ public sealed class ApiSurfaceTests
         );
 
         escape.Should().NotBeNull();
-        escape.GetParameters().Select(p => p.Name).Should().Equal("input", "specialOnly", "literalSpaces");
+        escape.GetParameters().Select(static p => p.Name).Should().Equal("input", "specialOnly", "literalSpaces");
     }
 
     [Test]
