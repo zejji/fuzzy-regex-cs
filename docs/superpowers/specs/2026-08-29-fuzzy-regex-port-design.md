@@ -695,3 +695,13 @@ amended text is inline above; this list is the record of what changed and why.
     is on Phase 6's fix list and does not reach 1.0. Phase 4 gained S33 to apply this to the
     divergences S29, S31 and S32 had parked; the evidence is
     `docs/plan/2026-09-12-divergence-research.md`. Decided by the project owner.
+
+17. **Phase 6 opens with an upstream sync and a bug sweep, and Phase 7 is gated on them** (sections
+    10 and 12; owner decision, 2026-09-12). Before any optimisation work, the port is brought level
+    with upstream's newest *release* (never its head: the oracle must stay a PyPI wheel, amendment
+    7), every changelog entry since the pin is ported or recorded as not applicable, the issue
+    tracker is re-triaged live, and every bug we have identified or reproduced from an issue is
+    fixed here and drafted upstream for approval. Unreleased fixes found on head are ported with
+    their own issue as ground truth and recorded as such. Measured at the decision: 21 commits and
+    five releases behind, all substantive fixes already on the inherited-bug list. Estimate 7-12
+    becomes 9-14. Decided by the project owner.

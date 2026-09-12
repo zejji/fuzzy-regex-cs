@@ -2,41 +2,34 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S33 is closed. **Next:** S34, the phase close - but read the blocker first.
+**Current slice:** none. S33 is closed. **Next:** S34, the three-seed sweep, authored 2026-09-12 at
+the checkpoint - `pwsh -File tools/launch-slice.ps1 s34`. Then S35 closes the phase.
 
-**Blocker, and it is an owner decision.** S33's blind review found that **a default oracle wave is
-not reliably green, and was not before S33 either** - every slice so far ran one seed and that seed
-happened to be clean. Three unjudged divergences, none caused by S33 (each reproduces on `fb4e705`):
-
-1. `regex.finditer(r'(?:[^\d](*SKIP)){2,3}', '\r\naabb ', regex.M, overlapped=True)` - upstream
-   `(0,3)(1,4)(2,4)(3,4)(4,7)(5,7)`, this port has `(2,5)` and `(3,6)` in the middle. Forward
-   `(*SKIP)` in a bounded repeat; not the prefilter (prefilter-free upstream answers the same). **The
-   port matches MORE than upstream, so this is the likeliest of the three to be a port bug.**
-   `tools/run-oracle.ps1 -Generator verbs -Count 2000 -Seed 7`
-2. `regex.compile(r'(?r)(?<g>[ab]+)(?=(?&g))b').search('>abbaa\r<').spans('g')` is
-   `[(3, 2), (1, 3)]` - upstream records a capture whose end is before its start. This port records
-   `(3, 3)`. `-Generator recursion -Count 2000 -Seed 4242`
-3. The bounded-lazy-repeat partial family (`ba??x`) reaches a wave after all: `-Generator
-   partial,partial-sliced -Count 2000 -Seed 314159`, two rows. Judged and port-right already, but no
-   safe classifier predicate was found, so it is a known red.
-
-Each needs S33's treatment: research, an isolating probe, a blind review of the verdict, then a fix
-or a permanent test. The no-known-bugs rule makes item 1 non-optional before 1.0. **Author a slice
-for these before S34, or fold them into S34 - that is yours to decide.**
+**Blockers:** none. The owner decision S33 asked for is taken: the three residual divergences get
+their own slice (S34) before the close, because a phase cannot close on a default wave that is red at
+two of three seeds. Rule from the owner, 2026-09-12: no known bug ships, inherited or not.
 
 **Where the port stands:** ratchet GREEN, 5761 tests, 5576 passing, parity **90.6%**, tree clean.
-`partial-sliced` is on the default oracle list and clean at seeds 7, 31 and 4242. `verbs` is not,
-for reason 1 above; its judged rows are classified in
-`tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, which is new - read its remarks before adding
-an entry, and write the control first (S33's own control caught the list eating a mutation).
+`partial-sliced` is on the default oracle list and clean at three seeds; `verbs` rejoins in S34.
+`tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs` classifies judged upstream-side rows and
+`Every_expected_divergence_still_diverges` is the staleness alarm - read its remarks before adding.
 
-**Rule learned, worth more than the slice:** run every generator at **three** seeds before believing
-a wave. Fifteen seconds a generator, and it found all three of the above.
+**For S34's author, probed at the checkpoint (`tools/probes/upstream-overlapped-skip-scan.py`):** on
+item 1, upstream's own `match` and `search` at every start position agree with the port; only its
+stateful overlapped scanner disagrees, so start from `scanner_search_or_match` (`:20874`) and the
+slice bound a `(*SKIP)` leaves behind between scans. Item 2 is a span with end before start - invalid
+on its face; issue 614 (fixed upstream 2026-08-30) is the first suspect.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
-`python tools/run-controls.py --slices S29,S31,S33`. Delete `.scratch/control-waves/` after a
-generator change. Upstream report drafted, NOT filed:
-`docs/plan/upstream-reports/2026-09-12-draft.md` - the owner approves the text first.
+**Phase 6 now opens with the upstream sync and bug sweep** (ROADMAP, spec amendment 17): upstream is
+at 2026.9.10, 21 commits and five releases past our pin, and head equals the release. Releases only,
+for the pin and the oracle.
+
+**Upstream report drafted, NOT filed:** `docs/plan/upstream-reports/2026-09-12-draft.md`, four
+issues. The owner approves the text first. S34 may add two more.
+
+**Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice, at **three seeds**.
+Controls: `python tools/run-controls.py --slices S29,S31,S33`. Delete `.scratch/control-waves/` after
+a generator change.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. Phase 4 so far: 7 slices, parity 76.5% to 90.6%.
+real. Phase 4 so far: 7 slices closed, parity 76.5% to 90.6%.

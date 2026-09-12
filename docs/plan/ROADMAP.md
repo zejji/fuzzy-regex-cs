@@ -14,9 +14,9 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 1 | Port the full upstream test suite, all skipped initially | 3-6 | Sonnet under Opus |
 | 2 | **Compile-parity corpus first**, then parser and compiler (`_regex_core.py`), Unicode tables and case folding, pattern-level public API | 8 | Opus |
 | 3 | **Differential oracle harness first**, then VM core: literals, classes, quantifiers, groups, backrefs, anchors - plus the Match object, substitution and the iteration API (`Matches`/`Split`/`Replace`), which nothing else claims and without which no group test can even run | 11-16 | Opus |
-| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 8 | Opus |
+| 4 | Advanced: lookaround (lookahead and lookbehind), conditional-with-lookaround, the `(*PRUNE)`/`(*SKIP)` verbs, recursion and group calls, partial matching, POSIX leftmost-longest. (Atomic, possessive, branch reset and named lists were listed here originally and turned out to be finished by Phases 2-3 - see the 2026-09-11 note below) | 9 | Opus |
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
-| 6 | Oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, the upstream open-issue sweep, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 7-12 | Opus/Sonnet |
+| 6 | **Opens with the upstream sync and bug sweep (owner decision, 2026-09-12; three slices, gate for Phase 7)**, then oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 9-14 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
 | 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, the engine in a Web Worker, deployed to GitHub Pages | 2-3 | Opus |
@@ -87,10 +87,10 @@ parser that has existed since S13. The four unclaimed families therefore collaps
 commit `8ae8607`; the rule that every phase close probes the board this way is in DECISIONS and
 in the phase-close slice. The content line above is corrected to what is actually left: lookaround 63 and lookbehind
 17 (S27), conditionals 15 (S28), verbs 32 (S29), recursion 60 (S30), partial 82 (S31), POSIX 8
-(S32), and the close (now S34). Seven slices against the 8-12 estimate, because four of the families
+(S32), and the close (now S35). Seven slices against the 8-12 estimate, because four of the families
 the estimate counted were already done. **Eight from 2026-09-12**: S33 was added at the checkpoint
 to act on the divergence research (fix the port's one confirmed bug, pin the rest permanently),
-and the phase close became S34. Budget it at 1.0-1.35 sessions per slice as the Phase 3
+and the phase close became S34; S34 was then added the same day, after S33's review found the default oracle wave was never reliably green - three seeds are the floor from here - so the close is S35. Budget it at 1.0-1.35 sessions per slice as the Phase 3
 note says: 7-10 driver sessions. The `budget.json` question is also closed - it was raised to 20 a
 day and 30 a week on 2026-08-31, and STATE.md's note was stale.
 
@@ -192,6 +192,33 @@ below the position the verb committed past. The tests that pin the port's answer
 prefilter honour the slice the verb moved (the way upstream's own slow path does), not to invert the
 test. The oracle rows for those shapes stay recorded against a prefilter-free upstream, or in the
 strict manifest, until upstream itself is fixed.
+
+**Phase 6 opens with the upstream sync and the bug sweep, and Phase 7 does not start until both are
+closed (owner decision, 2026-09-12).** Measured that day: the pin is 2026.8.12 and upstream had moved
+21 commits and five releases to 2026.9.10, which is also PyPI's newest and is byte-for-byte upstream's
+head - 188 lines of `_regex.c`, three of the parser, no new tests. The substance was the four
+memory-safety fixes (issues 611-614, all already on the inherited-bug list; 614 is the
+group-call-in-lookbehind divergence S30 found, where this port was right) and four Python-API
+error-propagation PRs (615-618) that have nothing to port. Three slices, in this order:
+
+1. **Sync upstream** to the newest *release* with the `sync-upstream` skill: bump the submodule, walk
+   the changelog delta one entry at a time, port each fix test-first, record every entry in PORTMAP as
+   ported or not-applicable-with-reason. Rebuild the local oracle to the same release and confirm
+   `src/` at the tag is byte-identical to the PyPI wheel, as amendment 7 requires. Re-run every wave;
+   `ExpectedDivergences` must fire on each pinned divergence upstream has since fixed, which is the
+   proof the list is strict. **Releases, never head, for the pin and the oracle**: a head-only fix has
+   no PyPI wheel to compare against, and a local C build is a choice this project made against. But
+   diff release..head at every sync, and if head carries an unreleased engine or parser fix, port it
+   too, test-first, recorded in PORTMAP as "ahead of release, from commit X", with the fix's own
+   issue and test case as its ground truth. On 2026-09-12 head and release were the same commit.
+2. **Issue sweep**, re-triaged from the live tracker rather than the 2026-08-31 snapshot: every open
+   issue reproduced here or dismissed with a written reason; every reproduced bug fixed here and
+   drafted upstream for the owner's approval.
+3. **Our own findings**: every divergence the research documents and every gap test marked as an
+   upstream bug gets the same reproduce, fix-if-ours, draft-if-theirs treatment, so that the list of
+   known bugs - ours or inherited - is empty before Phase 7 touches the engine.
+
+The estimate moves from 7-12 to 9-14 for the two slices this adds beyond the sweep already planned.
 
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.

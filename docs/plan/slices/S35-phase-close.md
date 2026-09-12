@@ -1,11 +1,11 @@
 ---
-slice: S34
+slice: S35
 phase: 4
 title: Composed oracle wave, symbol accounting, and closing Phase 4
 delivers: []
 ---
 
-# S34 - Composed oracle wave, symbol accounting, and closing Phase 4
+# S35 - Composed oracle wave, symbol accounting, and closing Phase 4
 
 The last Phase 4 slice, shaped like S26. After it every non-fuzzy construct in upstream matches,
 the oracle has swept them in combination, and Phase 5's author has a handover.
@@ -34,7 +34,7 @@ the oracle has swept them in combination, and Phase 5's author has a handover.
   five `a{e<=1:\X}`-style rejections S15/S26 recorded; and upstream issues 470, 563, 564, 596
   (fuzzy and BESTMATCH bugs, Phase 6) so Phase 5 recognises them.
 - **Roadmap and budget**: Phase 4's measured sessions-per-slice from `docs/plan/slice-log.jsonl`
-  against the 7-slice estimate (8 once S33 was added at the checkpoint); flag whether Phase 5's 5-8 still looks right. `CHANGELOG.md`
+  against the 7-slice estimate (9 once S33 and S34 were added at the checkpoint); flag whether Phase 5's 5-8 still looks right. `CHANGELOG.md`
   gains Phase 4's entry.
 
 ## Verification
