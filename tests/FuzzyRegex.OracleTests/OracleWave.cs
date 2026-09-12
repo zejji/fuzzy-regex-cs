@@ -182,7 +182,10 @@ internal static class OracleWave
             ReadOutcome(row.GetProperty("outcome")),
             ReadCodepointSpan(row.GetProperty("codepointSpan")),
             template,
-            count
+            count,
+            row.TryGetProperty("partial", out JsonElement partial) && partial.GetBoolean(),
+            row.TryGetProperty("pos", out JsonElement pos) ? pos.GetInt32() : null,
+            row.TryGetProperty("endpos", out JsonElement endpos) ? endpos.GetInt32() : null
         );
     }
 
@@ -217,7 +220,10 @@ internal static class OracleWave
         new(
             [.. match.GetProperty("groups").EnumerateArray().Select(ReadGroup)],
             match.GetProperty("lastIndex").GetInt32(),
-            match.GetProperty("lastGroup").GetString()
+            match.GetProperty("lastGroup").GetString(),
+            // Optional and false by default, like 'whileMatching': every wave recorded before S31
+            // means "not a partial match", and a hand-written minimisation row need not carry it.
+            match.TryGetProperty("partial", out JsonElement partial) && partial.GetBoolean()
         );
 
     private static OracleGroup ReadGroup(JsonElement group) =>
@@ -300,6 +306,21 @@ internal static class OracleWave
         );
         block.AppendLine("  pattern  " + Printable(row.Pattern));
         block.AppendLine("  subject  " + Printable(row.Subject));
+
+        // Only when the row narrowed the slice, so every pre-S31 block still renders as it did -
+        // and so a narrowed row is reproducible, which is the whole reason the field exists. Either
+        // end on its own counts as narrowed: a row carrying only `endpos` printed no slice line at
+        // all until the S31 second blind pass, which made its divergence unreadable.
+        if (row.Pos is not null || row.EndPos is not null)
+        {
+            block.AppendLine(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"  slice    utf16 [{row.Pos ?? 0}, {row.EndPos ?? row.Subject.Length})"
+                )
+            );
+        }
+
         if (row.Template is { } template)
         {
             block.AppendLine(
@@ -407,6 +428,21 @@ internal sealed record OracleHeader(
 /// spells no limit as -1, so <see cref="OracleComparer.Run(OracleRow)"/> translates it; recording upstream's
 /// own number keeps the wave a transcript of what upstream was asked.
 /// </param>
+/// <param name="Partial">
+/// Whether the row was asked with upstream's <c>partial=True</c>. Part of the question, not of the
+/// answer: the same pattern and subject give different results with it and without it, so a row that
+/// lost this flag would be compared against an answer to a different question.
+/// </param>
+/// <param name="Pos">
+/// Upstream's <c>pos</c>, or <see langword="null"/> for the whole subject. Also part of the
+/// question. It exists because half of upstream's partial arms are bounded by
+/// <c>slice_start</c>/<c>slice_end</c> and half by <c>text_start</c>/<c>text_end</c>, and the two
+/// are indistinguishable until the slice is narrower than the subject.
+/// </param>
+/// <param name="EndPos">
+/// Upstream's <c>endpos</c>, or <see langword="null"/> for the end of the subject. Independent of
+/// <paramref name="Pos"/>: a row may carry either end, both or neither.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -418,7 +454,10 @@ internal sealed record OracleRow(
     IOracleOutcome Expected,
     (int Start, int End)? CodepointSpan,
     string? Template = null,
-    int Count = 0
+    int Count = 0,
+    bool Partial = false,
+    int? Pos = null,
+    int? EndPos = null
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -543,14 +582,28 @@ internal sealed record SplitOutcome(IReadOnlyList<string?> Parts) : IOracleOutco
 /// Upstream's <c>lastgroup</c>, which is <c>Match.LastGroupName</c>. Also not derivable: it names
 /// the last *named* group even when an unnamed one succeeded later.
 /// </param>
-internal sealed record MatchOutcome(IReadOnlyList<OracleGroup> Groups, int LastIndex, string? LastGroup)
-    : IOracleOutcome
+/// <param name="Partial">
+/// Upstream's <c>Match.partial</c>, which is <c>Match.PartialMatch</c>. Only a row asking for a
+/// partial match can produce a true here, and the span alone does not carry it: a partial and a
+/// complete match of the same text are the same span and different answers.
+/// </param>
+internal sealed record MatchOutcome(
+    IReadOnlyList<OracleGroup> Groups,
+    int LastIndex,
+    string? LastGroup,
+    bool Partial = false
+) : IOracleOutcome
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// The partial marker is appended only when it is set, so every row recorded before S31 - and
+    /// every row of every generator that does not ask for a partial - renders exactly as it did.
+    /// </remarks>
     public string Describe() =>
         "match "
         + string.Join(" ", Groups.Select(group => group.Describe()))
-        + string.Create(CultureInfo.InvariantCulture, $" last={LastIndex}/{LastGroup ?? "-"}");
+        + string.Create(CultureInfo.InvariantCulture, $" last={LastIndex}/{LastGroup ?? "-"}")
+        + (Partial ? " partial" : "");
 }
 
 /// <summary>One group's result.</summary>

@@ -104,14 +104,23 @@ public sealed class ApiSurfaceTests
     }
 
     [Test]
-    public void The_members_no_slice_has_reached_are_still_stubs()
+    public void The_three_matching_entry_points_carry_partial_into_the_engine()
     {
-        // Partial matching is phase 4, and it is now the only stub left on this surface:
-        // substitution answered in S24 and iteration in S25, each leaving a real assertion below.
-        // When this starts failing, the slice that made it fail should assert on it for real too.
-        Action partial = () => _ = new FuzzyRegex("a").Match("abc", partial: true);
+        // S31's half of the stub test this replaces: partial matching was the last stub on this
+        // surface (substitution answered in S24, iteration in S25). What is checked here is that
+        // each of the three overloads taking `partial` reaches the engine with it and reports the
+        // answer back through Match.PartialMatch - what each *does* is the ported suite's job.
+        var pattern = new FuzzyRegex("abcd");
 
-        partial.Should().Throw<NotImplementedException>().WithMessage("needs:partial*");
+        pattern.Match("xxab", partial: true).PartialMatch.Should().BeTrue();
+        pattern.MatchAtStart("ab", partial: true).PartialMatch.Should().BeTrue();
+        pattern.FullMatch("ab", partial: true).PartialMatch.Should().BeTrue();
+
+        // A complete match is still complete: the fallback runs only when the normal match failed.
+        pattern.MatchAtStart("abcd", partial: true).PartialMatch.Should().BeFalse();
+
+        // And without asking, there is no partial match to have.
+        pattern.MatchAtStart("ab").Success.Should().BeFalse();
     }
 
     [Test]

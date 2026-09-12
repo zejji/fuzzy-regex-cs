@@ -315,11 +315,6 @@ public sealed class FuzzyRegex
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (partial)
-        {
-            throw new NotImplementedException("needs:partial - partial matching is not implemented yet");
-        }
-
         (int start, int end) = Limits(input, beginning, length);
 
         using var state = Engine.MatchState.Create(
@@ -423,7 +418,9 @@ public sealed class FuzzyRegex
     /// <returns>The match, successful or not.</returns>
     internal Match NewMatch(Engine.MatchState state, string input, int status)
     {
-        if (status != Engine.MatchStatus.Success)
+        // Upstream's guard is `status > 0 || status == RE_ERROR_PARTIAL` (:20741): a partial match
+        // is a result, not an error, even though its status code is negative.
+        if (status is not (Engine.MatchStatus.Success or Engine.MatchStatus.Partial))
         {
             return NoMatch(input);
         }
@@ -446,7 +443,9 @@ public sealed class FuzzyRegex
             state.SliceEnd,
             state.Overlapped,
             state.LastIndex,
-            state.LastGroup
+            state.LastGroup,
+            // Upstream `match->partial = status == RE_ERROR_PARTIAL` (:20774).
+            partial: status == Engine.MatchStatus.Partial
         );
     }
 
@@ -540,17 +539,28 @@ public sealed class FuzzyRegex
     /// Whether matches may overlap. Upstream's <c>overlapped=True</c>; the built-in <c>Regex</c>
     /// always resumes after the previous match.
     /// </param>
+    /// <param name="partial">
+    /// Whether the scan may end with a partial match. Upstream's <c>finditer(partial=True)</c>
+    /// (<c>_main.py:351</c>, <c>pattern_scanner</c>'s <c>kwlist</c> at <c>:21089</c>): the partial
+    /// is yielded like any other match and is always the last one.
+    /// </param>
     /// <returns>The matches, leftmost first.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The scan ran out of time. The whole scan shares one budget, as upstream's does.
     /// </exception>
-    public MatchCollection Matches(string input, int beginning = 0, int length = -1, bool overlapped = false)
+    public MatchCollection Matches(
+        string input,
+        int beginning = 0,
+        int length = -1,
+        bool overlapped = false,
+        bool partial = false
+    )
     {
         ArgumentNullException.ThrowIfNull(input);
 
         (int start, int end) = Limits(input, beginning, length);
 
-        return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped));
+        return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped, partial));
     }
 
     /// <summary>Counts the matches in the given part of the subject.</summary>

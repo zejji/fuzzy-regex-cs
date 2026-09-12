@@ -2,41 +2,37 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S30 is **closed** and in `done/` (2026-09-11). Next is S31, partial matching.
+**Current slice:** none. S31 is **closed** and in `done/` (2026-09-12). Next is S32, POSIX matching.
 
 **Blockers:** none.
 
-**Where the port stands:** ratchet GREEN, 5737 tests, 5462 passing, tree clean. Oracle GREEN over the
-sixteen default generators - `recursion` joined the list this slice - 6400/6400 at seed 20260911.
-`verbs` is still off the default list for S29's reason; run it explicitly.
+**Where the port stands:** ratchet GREEN, 5750 tests, 5557 passing, tree clean. Oracle GREEN over the
+seventeen default generators - `partial` joined this slice - 6400/6400 at seed 20260912. `verbs` and
+the new `partial-sliced` are off the default list; run both explicitly.
 
-**What S30 landed.** All six arms of `CALL_REF`, `GROUP_CALL` and `GROUP_RETURN`, plus
-`push_groups`/`pop_groups`, which also completes `push_repeats`/`pop_repeats`'s last six call sites.
-41 skips removed, 60 tests delivered, no `needs:recursion` left. `ByteStack.PushNode` now carries
-upstream's `NULL` as index -1. `GROUP_CALL` reassigns `node` rather than calling the matcher, so a
-10,000-deep `(?R)` costs heap, not .NET stack.
+**What S31 landed.** All 82 `needs:partial` tests, and the seam was three lines: `do_match`'s
+fallback was already ported and correct, and only `NewMatch` treated `RE_ERROR_PARTIAL` as an error.
+Two real engine defects came out of the wave, not the suite - `TryMatch` swallowing a PARTIAL, and
+`LAZY_REPEAT_ONE`'s default arm never asking `partial_side`. **Scope correction: `finditer` does take
+`partial`** (the slice file said otherwise), so `Matches` gained it; `findall` really does refuse it,
+so `Count` did not.
 
-**Two things a later slice should not re-derive.** Upstream's `group_call_guard_list` is **write-only**
-- six sites, no read - so it is now a permanent row in PORTMAP's "deliberately not ported" table
-rather than an open Phase 4 hole; only the fuzzy-guard allocation is still owed, by Phase 5. And
-`Match.GroupAt` used to drop the capture list of any group with `Current < 0`; upstream keeps
-`current` and `count` apart, and a group call is the first construct that makes them disagree.
+**Three divergence families are pinned and parked**, each with a test in
+`Gaps/Engine/PartialMatchingTests.cs` marked to invert: upstream's unported `search_start` prefilter
+answering a partial of its own (~1 row in 2000, same mechanism as S29's `verbs`); a partial at the
+left edge of a **narrowed slice**, which the new non-default `partial-sliced` generator finds at 8
+rows in 2000; and a **bounded lazy repeat** losing its partial (`ba??x` on `baa`).
 
-**One divergence, and it is upstream's.** A `(?&name)` call inside a **lookbehind** matches here and
-fails upstream whenever anything else is in the sequence. Minimal:
-`regex.compile(r"(?(DEFINE)(?<a>a))(?<=(?&a))c").match("ac", pos=1)` is `None`, ours is `(1, 2)`.
-Upstream contradicts itself twice over it (its `search` and `match` disagree at one position; `c?`
-matches the `c` that `c` refuses). Ruled out: our parser, and the required-string prefilter. Pinned in
-`Gaps/Engine/GroupCallTests.cs`, sits with upstream issue 614 for Phase 6. **Nothing is drafted or
-filed upstream - that needs the owner's approval.** The `recursion` generator does not draw the shape.
+**Do not re-try the lazy-repeat fix without reading its test first.** S31 tried the obvious guard and
+the second blind pass measured it over 20,160 rows as 125 rows fixed and **219 introduced** - the
+repair needs upstream's specialised `*_REPEAT_ONE` arms, which are Phase 7's. The measurement is in
+the test comment and in `run-oracle.ps1`.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` before committing any engine slice. Controls:
-`python tools/run-controls.py --slices S30`. Delete `.scratch/control-waves/` after a generator
-change. S30-B needs 2400 rows to fire reliably - at 600 it caught nothing at one seed; the slice
-notes say why, and say to re-measure both controls after any widening.
+`python tools/run-controls.py --slices S31`. Delete `.scratch/control-waves/` after a generator
+change. S31-D and S31-E are **thin** - 0 to 4 rows over baseline in 2400 - and the closing notes say
+so rather than dress it up; widening the generator to reach those cells is worth a look.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 and S29 `failed` though both commits are
-real. The 108-test baseline gap is explained and closed (2026-09-12): 107 ported tests carry two
-identical `[Arguments]` rows, faithfully, so they run twice under one id; the baseline is a set. The
-ratchet now prints the distinct-id count beside the result count. Nothing was hidden: it reds on
-any failed result.
+real. The 108-test baseline gap is explained and closed (2026-09-12): ported tests carrying two
+identical `[Arguments]` rows run twice under one id, and the baseline is a set.

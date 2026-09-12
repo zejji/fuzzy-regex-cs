@@ -349,4 +349,70 @@ public sealed class IterationTests
         new FuzzyRegex("").Matches("", overlapped: true).Select(m => m.Index).Should().Equal(0);
         new FuzzyRegex("").Matches("abc", beginning: 1, length: 1).Select(m => m.Index).Should().Equal(1, 2);
     }
+
+    [Test]
+    public void A_scan_asked_for_a_partial_match_yields_it_last_and_then_stops()
+    {
+        // S31. The slice file said upstream's finditer takes no `partial` argument; it does
+        // (_main.py:351, pattern_scanner's kwlist at :21089), and the C says why the partial comes
+        // last: scanner_search_or_match yields the match for a PARTIAL status like any other
+        // (:20898), and the NEXT turn sees that status and ends the walk (:20886).
+        //
+        // Measured 2026-09-12 against regex 2026.7.19, .scratch/probe-finditer-partial.py:
+        //   finditer('a', 'a xa ya', partial=True) -> (0,1)F (3,4)F (6,7)F (7,7)T
+        //   finditer('ab', 'ab a ab a', partial=True) -> (0,2)F (5,7)F (8,9)T
+        //   finditer('abc', 'abc xab', partial=True) -> (0,3)F (5,7)T
+        Spans("a", "a xa ya").Should().Equal((0, 1, false), (3, 4, false), (6, 7, false), (7, 7, true));
+        Spans("ab", "ab a ab a").Should().Equal((0, 2, false), (5, 7, false), (8, 9, true));
+        Spans("abc", "abc xab").Should().Equal((0, 3, false), (5, 7, true));
+
+        // Without asking there is no partial, and the trailing prefix is simply not a match.
+        new FuzzyRegex("abc")
+            .Matches("abc xab")
+            .Select(m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 3));
+
+        // A reverse scan reports its partial at the LEFT end, and still last.
+        //   finditer('(?r)ab', 'b xab', partial=True) -> (3,5)F (0,1)T
+        Spans("(?r)ab", "b xab").Should().Equal((3, 5, false), (0, 1, true));
+
+        // Overlapped and partial together: the overlapped step still applies to the real matches.
+        //   finditer('ab', 'abab a', overlapped=True, partial=True) -> (0,2)F (2,4)F (5,6)T
+        new FuzzyRegex("ab")
+            .Matches("abab a", overlapped: true, partial: true)
+            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Should()
+            .Equal((0, 2, false), (2, 4, false), (5, 6, true));
+
+        // The partial is bounded by the SLICE, not by the subject - do_match forces text_pos to
+        // slice_end (:18179), so a narrowed scan reports a shorter partial and never reads past it.
+        //   compile('ab').finditer('xxaby', 0, 3, partial=True) -> (2,3)T
+        //   compile('ab').finditer('xxaby', 0, 4, partial=True) -> (2,4)F (4,4)T
+        //   compile('ab').finditer('xxaby',       partial=True) -> (2,4)F (5,5)T
+        new FuzzyRegex("ab")
+            .Matches("xxaby", beginning: 0, length: 3, partial: true)
+            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Should()
+            .Equal((2, 3, true));
+        new FuzzyRegex("ab")
+            .Matches("xxaby", beginning: 0, length: 4, partial: true)
+            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Should()
+            .Equal((2, 4, false), (4, 4, true));
+        Spans("ab", "xxaby").Should().Equal((2, 4, false), (5, 5, true));
+
+        // Count is NOT finditer: upstream's findall refuses `partial` outright ("unused keyword
+        // argument 'partial'", measured the same day), so the counting scan has no such argument
+        // and counts only complete matches.
+        new FuzzyRegex("abc")
+            .Count("abc xab")
+            .Should()
+            .Be(1);
+
+        static IEnumerable<(int Start, int End, bool Partial)> Spans(string pattern, string subject) =>
+            new FuzzyRegex(pattern)
+                .Matches(subject, partial: true)
+                .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch));
+    }
 }

@@ -49,7 +49,6 @@ public sealed class PartialMatchTests
     [Arguments("ab", "a", 1)]
     [Arguments("cats", "cat", 3)]
     [Arguments("abc\\w{3}", "abcde", 5)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#1-4,8-9")]
     public void A_subject_that_runs_out_early_is_a_partial_match(string pattern, string subject, int end)
     {
@@ -63,7 +62,6 @@ public sealed class PartialMatchTests
     [Test]
     [Arguments("abc\\w{3}", "abcdef", 6)]
     [Arguments("\\d{4}$", "1234", 4)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#6-7,10")]
     public void A_complete_match_is_still_reported_as_complete(string pattern, string subject, int end)
     {
@@ -77,19 +75,16 @@ public sealed class PartialMatchTests
     // "catch" diverges from "cats" at the fourth character, so there is nothing more text could
     // fix - not a partial match, no match at all.
     [Test]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#5")]
     public void A_subject_that_diverges_is_not_a_partial_match() =>
         new FuzzyRegex("cats").MatchAtStart("catch", partial: true).Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:partial - needs partial matching and named lists; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_partial#11-12")]
     public void A_named_list_entry_matched_in_full_is_a_complete_match() =>
         AssertPartial("\\L<words>", "post", _post, partial: false, end: 4);
 
     [Test]
-    [Skip("needs:partial - needs partial matching and named lists; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_partial#13-14")]
     public void A_prefix_of_a_named_list_entry_is_a_partial_match() =>
         AssertPartial("\\L<words>", "pos", _post, partial: true, end: 3);
@@ -97,13 +92,11 @@ public sealed class PartialMatchTests
     // (?f) full case-folding: "poﬆ" (three code units) folds to "post", so all four characters
     // of "POST" are consumed by the three-code-unit entry.
     [Test]
-    [Skip("needs:partial - needs partial matching, named lists and full case-folding; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_partial#15-16")]
     public void Full_case_folding_completes_a_named_list_match_of_a_different_length() =>
         AssertPartial("(?fi)\\L<words>", "POST", _postLigatureList, partial: false, end: 4);
 
     [Test]
-    [Skip("needs:partial - needs partial matching, named lists and full case-folding; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_partial#17-18")]
     public void Full_case_folding_still_reports_a_prefix_as_partial() =>
         AssertPartial("(?fi)\\L<words>", "POS", _postLigatureList, partial: true, end: 3);
@@ -111,7 +104,6 @@ public sealed class PartialMatchTests
     // The other direction does not match: "POS" is not a prefix of the folded "poﬆ" once the
     // ligature has been expanded, so there is no partial match either.
     [Test]
-    [Skip("needs:partial - needs partial matching, named lists and full case-folding; the engine has none of them yet")]
     [Property("Upstream", "RegexTests.test_partial#19")]
     public void A_folded_ligature_subject_does_not_match_a_shorter_entry() =>
         new FuzzyRegex("(?fi)\\L<words>", FuzzyRegexOptions.None, _pos)
@@ -125,7 +117,6 @@ public sealed class PartialMatchTests
     [Arguments("ab", 2)]
     [Arguments("ab4", 3)]
     [Arguments("a4", 2)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#20-23")]
     public void An_anchored_pattern_reports_every_viable_prefix_as_partial(string subject, int end)
     {
@@ -137,7 +128,6 @@ public sealed class PartialMatchTests
     }
 
     [Test]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#24")]
     public void An_anchored_pattern_completes_at_the_end_of_the_subject()
     {
@@ -151,7 +141,6 @@ public sealed class PartialMatchTests
     [Test]
     [Arguments("4a")]
     [Arguments("a44")]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_partial#25-26")]
     public void A_subject_that_can_never_complete_is_not_a_partial_match(string subject) =>
         new FuzzyRegex("[a-z]*4R$").MatchAtStart(subject, partial: true).Success.Should().BeFalse();

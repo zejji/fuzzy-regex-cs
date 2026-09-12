@@ -211,9 +211,10 @@ public sealed class Match : Group
     /// succeed or fail. Upstream <c>Match.partial</c>, set by matching with <c>partial=True</c>.
     /// </summary>
     /// <remarks>
-    /// Always <see langword="false"/> until Phase 4: the only way to get a partial match is to ask
-    /// for one, and every entry point refuses <c>partial: true</c> with a <c>needs:partial</c> seam.
-    /// The field is here rather than a constant so that Phase 4 has somewhere to put the answer.
+    /// Only ever true when the match was asked for with <c>partial: true</c>, and only when no
+    /// complete match existed there: <c>do_match</c> tries a normal match first and falls back to
+    /// the partial one (<c>upstream/src/_regex.c:18140-18162</c>). The scan entry points never set
+    /// it, because upstream's <c>finditer</c>/<c>findall</c> take no <c>partial</c> argument.
     /// </remarks>
     public bool PartialMatch { get; }
 
@@ -261,7 +262,7 @@ public sealed class Match : Group
     /// <remarks>
     /// The search resumes inside the same slice this match was found in, and under the same
     /// <c>overlapped</c> setting, so walking a subject with <see cref="NextMatch"/> gives the same
-    /// sequence as <see cref="FuzzyRegex.Matches(string, int, int, bool)"/> over it. A zero-width
+    /// sequence as <see cref="FuzzyRegex.Matches(string, int, int, bool, bool)"/> over it. A zero-width
     /// match is not allowed to repeat at the same position, which is upstream's
     /// <c>must_advance</c> - see <c>MatchState.AdvancePastMatch</c>, the one place that rule lives.
     /// <para>

@@ -285,6 +285,56 @@ def _record_row(regex, row: dict) -> dict:
     if operation in LIMIT_OPERATIONS:
         recorded["count"] = int(row.get("count", 0))
 
+    # Part of the QUESTION, not of the answer: the same pattern and subject give different results
+    # with it and without it, so it is recorded on the row and the consumer reads it back. Only the
+    # three single-match operations take it - upstream's findall refuses it outright ("unused keyword
+    # argument 'partial'", measured 2026-09-12) and this recorder has no finditer-partial row shape.
+    partial = bool(row.get("partial", False))
+    if partial:
+        if operation not in OPERATIONS:
+            raise SystemExit(
+                f"operation {operation!r} cannot be asked with partial=True (pattern {pattern!r}); "
+                f"only {OPERATIONS} take it."
+            )
+        recorded["partial"] = True
+
+    # The slice, also part of the question. Absent means the whole subject, which is what every
+    # generator before S31 asks. It matters to partial matching more than to anything else: half of
+    # upstream's partial arms are bounded by `slice_start`/`slice_end` and half by
+    # `text_start`/`text_end`, and the two are only distinguishable once the slice is narrower than
+    # the subject. Raised by the S31 blind review, which found `(?r)a(bc)*` over `'abc'[1:1]` -
+    # a partial upstream, no match here - on an axis no generator could reach.
+    pos = row.get("pos")
+    endpos = row.get("endpos")
+    if pos is not None or endpos is not None:
+        if operation not in OPERATIONS:
+            raise SystemExit(
+                f"operation {operation!r} carries no pos/endpos in this recorder (pattern "
+                f"{pattern!r}); only {OPERATIONS} do."
+            )
+        pos = 0 if pos is None else int(pos)
+        endpos = len(subject) if endpos is None else int(endpos)
+
+        # A negative index is upstream's slice convention, not an error: `regex` counts it back from
+        # the end, so `search('abc', 0, -1)` searches [0, 2) and `search('bca', -3, 3)` searches all
+        # of it (measured 2026-09-12). Clamping one to zero recorded a slice upstream was never
+        # asked about, which is a divergence invented by the recorder. Raised by the S31 second
+        # blind pass. Resolved here, once, so the recorded pair and the consumer agree with what
+        # Python was actually handed below.
+        length = len(subject)
+        pos = max(0, min(pos + length if pos < 0 else pos, length))
+        endpos = max(0, min(endpos + length if endpos < 0 else endpos, length))
+
+        # Recorded in UTF-16, like every other index in a row: upstream's pos/endpos are codepoint
+        # indices, and handing the consumer those would narrow OUR slice somewhere else entirely on
+        # an astral subject - a fake divergence about encoding rather than a real one about
+        # partial matching. The untranslated pair goes in beside them, unread, for the same reason
+        # `codepointSpan` does: it makes the translation visible in the file rather than trusted.
+        slice_offsets = _utf16_offsets(subject)
+        recorded["pos"] = slice_offsets[pos]
+        recorded["endpos"] = slice_offsets[endpos]
+        recorded["codepointSlice"] = [pos, endpos]
+
     def failed(e: Exception, while_matching: bool) -> dict:
         """The recorded answer when upstream raised.
 
@@ -359,8 +409,13 @@ def _record_row(regex, row: dict) -> dict:
             }
         return recorded
 
+    # Pattern.match/search/fullmatch take (string, pos, endpos, concurrent, partial, timeout), so
+    # the slice goes positionally and `partial` by keyword.
+    kwargs = {"partial": True} if partial else {}
+    args = (subject,) if pos is None else (subject, pos, endpos)
+
     try:
-        match = getattr(compiled, operation)(subject)
+        match = getattr(compiled, operation)(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
         return failed(e, while_matching=True)
 
@@ -404,6 +459,10 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
         # Match.LastGroupName report.
         "lastIndex": -1 if match.lastindex is None else match.lastindex,
         "lastGroup": match.lastgroup,
+        # Not derivable from the span either: a partial match and a complete match of the same text
+        # are the same span and different answers. Always present, and always False on a row that
+        # did not ask for a partial, so every generator's rows now also assert "not partial".
+        "partial": bool(match.partial),
     }
 
 
@@ -442,6 +501,8 @@ GENERATORS = (
     "conditionals",
     "verbs",
     "recursion",
+    "partial",
+    "partial-sliced",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -3182,6 +3243,132 @@ def _generate_recursion(rng: random.Random, count: int):
         yield row
 
 
+# How often a `partial` row keeps the whole subject rather than cutting it. An uncut row is where a
+# COMPLETE match exists and a longer partial one would too, which is the case do_match's fallback
+# has to get right: it tries a normal match first (:18140-18162) and only falls back when that
+# fails, so an uncut row must never come back partial.
+PARTIAL_UNCUT_PROBABILITY = 0.25
+
+# How often a `partial` row is asked WITHOUT partial=True. The same pattern and the same cut subject
+# through both doors: the flag is the only difference, so a row pair pins that it is the flag and
+# not the shape that produced the answer.
+PARTIAL_ASKED_PROBABILITY = 0.75
+
+
+def _generate_partial(rng: random.Random, count: int, sliced: bool = False):
+    """S31's generator: the S16-S25 constructs, over a subject cut short, under ``partial=True``.
+
+    The pattern comes from ``_interaction_pattern`` rather than from a grammar of its own, because
+    "every construct the engine has, with the subject cut short" is exactly `interactions`' pattern
+    pool asked a different question - and a second grammar would drift from the first at every
+    later slice. What this generator owns is the SUBJECT: it is built whole, the pattern is composed
+    against the whole of it so the row can match at all, and only then is it cut.
+
+    The cut is at the END for a forward pattern and at the START for a ``(?r)`` one, because that is
+    where each runs out of text: ``state_init`` sets ``partial_side`` to LEFT when the pattern is
+    reversed (``upstream/src/_regex.c:18627``) and ``do_match`` forces ``text_pos`` to
+    ``slice_start`` rather than ``slice_end`` for it (``:18175-18180``). Cutting a reversed pattern's
+    subject at the end would test the side it does not use.
+
+    Only ``search``, ``match`` and ``fullmatch``: ``findall`` refuses ``partial`` outright and this
+    recorder has no ``finditer``-with-partial row shape. The scanner's own partial behaviour is
+    pinned by measurement in ``tests/FuzzyRegex.Tests/Gaps/Engine/IterationTests.cs`` instead.
+
+    Measured by `python tools/record-oracle.py --generator partial --count 600 --seed 31`, after the
+    last change to this generator: 196 rows answer with a match and 403 with none, and 1 is rejected
+    by upstream. 458 rows ask for a partial and 142 do not; of the 196 matches, **119 are partial
+    matches and 77 are complete ones** - the complete ones are the fallback's own test, since a row
+    that could match completely must never come back partial. 286 rows are reversed, so the LEFT
+    partial side is drawn on nearly half, and 91 have an empty subject after the cut. Each of the
+    three operations is recorded exactly 200 times, because the operation is cycled by row index
+    rather than drawn.
+
+    Re-take from scratch after any widening: adding one entry to any table this reads shifts the
+    whole RNG stream, so a figure measured before it describes a wave this generator no longer
+    produces.
+    """
+    for i in range(count):
+        alphabet = rng.choice(INTERACTION_SUBJECT_ALPHABETS)
+        length = rng.randrange(1, MAX_INTERACTION_SUBJECT_LENGTH + 1)
+
+        if rng.random() < INTERACTION_DOUBLED_SUBJECT_PROBABILITY:
+            subject = ""
+            while len(subject) < length:
+                subject += rng.choice(alphabet) * 2
+            subject = subject[:length]
+        else:
+            subject = "".join(rng.choice(alphabet) for _ in range(length))
+
+        for _ in range(rng.randrange(3)):
+            at = rng.randrange(len(subject) + 1)
+            subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
+
+        version1 = rng.random() < INTERACTION_VERSION1_PROBABILITY
+        # Composed against the WHOLE subject, then the subject is cut - so the pattern is one that
+        # had a chance of matching the full text, which is what makes a prefix of it a candidate
+        # for a partial match rather than a guaranteed miss.
+        pattern, _groups, _names = _interaction_pattern(rng, subject, version1)
+
+        flags = 0
+        if version1:
+            flags |= VERSION1
+        if rng.random() < INTERACTION_IGNORECASE_PROBABILITY:
+            flags |= IGNORECASE
+            if rng.random() < INTERACTION_FULLCASE_PROBABILITY:
+                flags |= FULLCASE
+        if rng.random() < INTERACTION_MULTILINE_PROBABILITY:
+            flags |= MULTILINE
+        # The same exclusion `interactions` makes: upstream does not agree with itself about a cased
+        # property under ASCII, so such a row is a guaranteed divergence that says nothing here.
+        if rng.random() < INTERACTION_ASCII_PROBABILITY and not re.search(r"\\[pP]\{|\[\[:", pattern):
+            flags |= ASCII
+
+        reverse = rng.random() < INTERACTION_REVERSE_PROBABILITY
+        if reverse:
+            pattern = "(?r)" + pattern
+
+        # Every prefix length from 0 to full, drawn uniformly, with the uncut length also reachable
+        # by its own probability so the "a complete match exists" case is not left to chance on a
+        # long subject. Sliced by codepoint, so an astral character is never cut in half - a cut
+        # through a surrogate pair would ask upstream and this port different questions about
+        # UTF-16 rather than about partial matching.
+        if rng.random() < PARTIAL_UNCUT_PROBABILITY:
+            cut = subject
+        else:
+            keep = rng.randrange(len(subject) + 1)
+            # The reversed pattern reads right to left and runs out of text at the LEFT end, so its
+            # subject keeps the TAIL and loses the head.
+            cut = subject[len(subject) - keep :] if reverse else subject[:keep]
+
+        row = {
+            "generator": "partial-sliced" if sliced else "partial",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": cut,
+            "operation": OPERATIONS[i % len(OPERATIONS)],
+        }
+        if rng.random() < PARTIAL_ASKED_PROBABILITY:
+            row["partial"] = True
+
+        # `partial-sliced` only: a narrowed slice, which is the OTHER way a partial match can run
+        # out of text. Half of upstream's partial arms are bounded by slice_start/slice_end and
+        # half by text_start/text_end - compare try_match_STRING (:7396, slice_end) with the STRING
+        # opcode's own arm in basic_match (text_end) - and the two agree exactly as long as the
+        # slice is the whole subject. Raised by the S31 blind review, and left as its own generator
+        # because this port diverges on it: see the Generator note in tools/run-oracle.ps1.
+        #
+        # Drawn by codepoint index; `_record_row` translates to UTF-16, so a slice edge never falls
+        # inside a surrogate pair.
+        if sliced and cut:
+            lo = rng.randrange(len(cut) + 1)
+            hi = rng.randrange(lo, len(cut) + 1)
+            row["pos"] = lo
+            row["endpos"] = hi
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -3246,6 +3433,14 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "recursion":
         yield from _generate_recursion(rng, count)
+        return
+
+    if name == "partial":
+        yield from _generate_partial(rng, count)
+        return
+
+    if name == "partial-sliced":
+        yield from _generate_partial(rng, count, sliced=True)
         return
 
     dotted = name == "literal-dot"

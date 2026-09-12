@@ -53,8 +53,16 @@ internal static class Iteration
     /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
     /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Upstream's <c>partial</c>, which the scanner takes (<c>:21089</c>).</param>
     /// <returns>The matches.</returns>
-    internal static List<Match> FindAll(FuzzyRegex regex, string input, int start, int end, bool overlapped)
+    internal static List<Match> FindAll(
+        FuzzyRegex regex,
+        string input,
+        int start,
+        int end,
+        bool overlapped,
+        bool partial
+    )
     {
         List<Match> matches = [];
 
@@ -67,8 +75,9 @@ internal static class Iteration
             start,
             end,
             overlapped,
+            partial,
             visibleCaptures: true,
-            onMatch: state => matches.Add(regex.NewMatch(state, input, MatchStatus.Success))
+            onMatch: (state, status) => matches.Add(regex.NewMatch(state, input, status))
         );
 
         return matches;
@@ -85,8 +94,13 @@ internal static class Iteration
     /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="overlapped">Whether matches may overlap.</param>
     /// <returns>The number of matches.</returns>
+    /// <remarks>
+    /// No <c>partial</c> argument, deliberately: this counts what <c>findall</c> returns, and
+    /// <c>findall</c> refuses one - <c>regex.findall('abc', 'xab', partial=True)</c> raises
+    /// <c>ValueError: unused keyword argument 'partial'</c> (measured 2026-09-12, regex 2026.7.19).
+    /// </remarks>
     internal static int Count(FuzzyRegex regex, string input, int start, int end, bool overlapped) =>
-        Scan(regex, input, start, end, overlapped, visibleCaptures: false, onMatch: null);
+        Scan(regex, input, start, end, overlapped, partial: false, visibleCaptures: false, onMatch: null);
 
     /// <summary>
     /// The scan itself: <c>scanner_search_or_match</c> (<c>upstream/src/_regex.c</c> line 20874)
@@ -98,8 +112,9 @@ internal static class Iteration
     /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
     /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Whether to report a trailing partial match.</param>
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
-    /// <param name="onMatch">Called once per match, with the state holding it.</param>
+    /// <param name="onMatch">Called once per match, with the state holding it and its status.</param>
     /// <returns>How many matches there were.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The scan as a whole ran out of time. Upstream times the scan, not each match, and one state
@@ -111,8 +126,9 @@ internal static class Iteration
         int start,
         int end,
         bool overlapped,
+        bool partial,
         bool visibleCaptures,
-        Action<MatchState>? onMatch
+        Action<MatchState, int>? onMatch
     )
     {
         using var state = MatchState.Create(
@@ -121,7 +137,7 @@ internal static class Iteration
             start,
             end,
             overlapped,
-            partial: false,
+            partial: partial,
             visibleCaptures: visibleCaptures,
             matchAll: false,
             timeout: regex.TimeoutTicks
@@ -140,13 +156,21 @@ internal static class Iteration
                 throw Timeout(regex, input);
             }
 
-            if (status != MatchStatus.Success)
+            // scanner_search_or_match builds a match for PARTIAL exactly as it does for SUCCESS
+            // (:20898) and only ends the walk on the NEXT turn, where it reads the status it kept
+            // (:20886). So a partial is yielded, and it is always the last thing yielded.
+            if (status is not (MatchStatus.Success or MatchStatus.Partial))
             {
                 break;
             }
 
             count++;
-            onMatch?.Invoke(state);
+            onMatch?.Invoke(state, status);
+
+            if (status == MatchStatus.Partial)
+            {
+                break;
+            }
 
             // The overlapped step is one CODEPOINT from where the match started, because upstream
             // indexes the subject by codepoint. Measured 2026-09-01: regex.finditer('..',

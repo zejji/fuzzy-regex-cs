@@ -1,0 +1,382 @@
+using AwesomeAssertions;
+
+namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
+
+/// <summary>
+/// What <c>partial: true</c> does that the ported suite does not pin: which end of the subject the
+/// partial sits at, that the slice and not the subject bounds it, what the groups of a partial match
+/// report, that a complete match always wins the fallback, and upstream issue 367.
+/// </summary>
+/// <remarks>
+/// Every expected value here was measured against <c>regex</c> 2026.7.19 on 2026-09-12 and is quoted
+/// beside the assertion. None of it is derivable from upstream's C by reading: <c>do_match</c> forces
+/// <c>text_pos</c> to one end of the slice for a partial (<c>upstream/src/_regex.c:18175-18180</c>),
+/// but which end, and what <c>match_pos</c> then holds, is the engine's answer rather than that
+/// line's.
+/// </remarks>
+public sealed class PartialMatchingTests
+{
+    [Test]
+    public void A_partial_match_keeps_the_groups_that_had_already_closed()
+    {
+        // regex.compile('(a)(b)(c)').match('ab', partial=True)
+        //   -> span (0,2), partial True, groups [(0,1), (1,2), (-1,-1)], lastindex 2
+        Match m = new FuzzyRegex("(a)(b)(c)").MatchAtStart("ab", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 2));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 1));
+        (m.Groups[2].Index, m.Groups[2].Length).Should().Be((1, 1));
+        m.Groups[3].Success.Should().BeFalse();
+        m.LastGroupNumber.Should().Be(2);
+
+        // The same pattern one character shorter: only group 1 closed.
+        //   -> span (0,1), partial True, groups [(0,1), (-1,-1), (-1,-1)], lastindex 1
+        Match shorter = new FuzzyRegex("(a)(b)(c)").MatchAtStart("a", partial: true);
+
+        shorter.PartialMatch.Should().BeTrue();
+        (shorter.Index, shorter.Index + shorter.Length).Should().Be((0, 1));
+        shorter.Groups[2].Success.Should().BeFalse();
+        shorter.LastGroupNumber.Should().Be(1);
+
+        // An alternation that took its second branch reports that branch's group, not the first.
+        //   regex.compile('(a)|(b)c').match('b', partial=True)
+        //     -> span (0,1), partial True, groups [(-1,-1), (0,1)], lastindex 2
+        Match branch = new FuzzyRegex("(a)|(b)c").MatchAtStart("b", partial: true);
+
+        branch.PartialMatch.Should().BeTrue();
+        branch.Groups[1].Success.Should().BeFalse();
+        (branch.Groups[2].Index, branch.Groups[2].Length).Should().Be((0, 1));
+        branch.LastGroupNumber.Should().Be(2);
+    }
+
+    [Test]
+    public void A_repetition_that_could_legally_stop_reports_the_complete_match_and_its_last_capture()
+    {
+        // regex.compile('(ab)+').match('aba', partial=True)
+        //   -> span (0,2), partial FALSE, groups [(0,2)], lastindex 1, captures ['ab']
+        // The trailing 'a' is not a partial match, because the repetition had already reached a
+        // point where it could stop - the normal match succeeds, so the fallback never runs.
+        Match m = new FuzzyRegex("(ab)+").MatchAtStart("aba", partial: true);
+
+        m.PartialMatch.Should().BeFalse();
+        (m.Index, m.Index + m.Length).Should().Be((0, 2));
+        m.Groups[1].Captures.Select(c => c.Value).Should().Equal("ab");
+    }
+
+    [Test]
+    public void The_slice_and_not_the_subject_bounds_a_partial_match()
+    {
+        // do_match sets text_pos to slice_end for a forward partial (:18179), so narrowing the
+        // slice shortens the partial and the engine never reads the text beyond it.
+        //   compile('abc').match('abcd', pos=0, endpos=2) -> (0,2) partial True
+        //   compile('abc').match('abcd', pos=0, endpos=4) -> (0,3) partial False
+        //   compile('abc').match('xabcd', pos=1, endpos=3) -> (1,3) partial True
+        Match clipped = new FuzzyRegex("abc").MatchAtStart("abcd", beginning: 0, length: 2, partial: true);
+
+        clipped.PartialMatch.Should().BeTrue();
+        (clipped.Index, clipped.Index + clipped.Length).Should().Be((0, 2));
+
+        Match whole = new FuzzyRegex("abc").MatchAtStart("abcd", beginning: 0, length: 4, partial: true);
+
+        whole.PartialMatch.Should().BeFalse();
+        (whole.Index, whole.Index + whole.Length).Should().Be((0, 3));
+
+        Match offset = new FuzzyRegex("abc").MatchAtStart("xabcd", beginning: 1, length: 2, partial: true);
+
+        offset.PartialMatch.Should().BeTrue();
+        (offset.Index, offset.Index + offset.Length).Should().Be((1, 3));
+    }
+
+    [Test]
+    public void A_reverse_partial_match_sits_at_the_left_end_of_the_slice()
+    {
+        // state_init sets partial_side to LEFT when the pattern is reversed (MatchState.cs:381),
+        // and do_match forces text_pos to slice_START rather than slice_end (:18177).
+        //   compile('(?r)abc').match('bc', partial=True)   -> (0,2) partial True
+        //   compile('(?r)abc').search('xbc', partial=True) -> (0,0) partial True
+        //   compile('(?r)abc').search('abcd', pos=0, endpos=2, partial=True) -> (0,0) partial True
+        Match m = new FuzzyRegex("(?r)abc").MatchAtStart("bc", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 2));
+
+        // 'xbc' cannot be extended on the left into 'abc' - the 'x' is in the way - so the partial
+        // is the zero-width one at the start of the slice, not (1, 3).
+        Match blocked = new FuzzyRegex("(?r)abc").Match("xbc", partial: true);
+
+        blocked.PartialMatch.Should().BeTrue();
+        (blocked.Index, blocked.Index + blocked.Length).Should().Be((0, 0));
+
+        Match clipped = new FuzzyRegex("(?r)abc").Match("abcd", beginning: 0, length: 2, partial: true);
+
+        clipped.PartialMatch.Should().BeTrue();
+        (clipped.Index, clipped.Index + clipped.Length).Should().Be((0, 0));
+
+        // A reverse partial still reports the groups that closed, and reports them in the reverse
+        // walk's order: compile('(?r)(a)(b)').search('b', partial=True)
+        //   -> (0,1) partial True, groups [(-1,-1), (0,1)], lastindex 2
+        Match grouped = new FuzzyRegex("(?r)(a)(b)").Match("b", partial: true);
+
+        grouped.PartialMatch.Should().BeTrue();
+        (grouped.Index, grouped.Index + grouped.Length).Should().Be((0, 1));
+        grouped.Groups[1].Success.Should().BeFalse();
+        (grouped.Groups[2].Index, grouped.Groups[2].Length).Should().Be((0, 1));
+        grouped.LastGroupNumber.Should().Be(2);
+    }
+
+    [Test]
+    public void A_complete_match_always_beats_a_longer_partial_one()
+    {
+        // do_match runs a normal match FIRST with partial_side forced to none and only falls back
+        // when that fails (:18140-18162). So an alternation whose short branch already matches is
+        // never reported as partial, however much more text the long branch would take.
+        //   compile('ab|abcd').match('ab', partial=True)    -> (0,2) partial False
+        //   compile('ab|abcd').match('abc', partial=True)   -> (0,2) partial False
+        //   compile('ab|abcd').fullmatch('ab', partial=True) -> (0,2) partial False
+        var pattern = new FuzzyRegex("ab|abcd");
+
+        pattern.MatchAtStart("ab", partial: true).PartialMatch.Should().BeFalse();
+        pattern.MatchAtStart("abc", partial: true).PartialMatch.Should().BeFalse();
+        pattern.FullMatch("ab", partial: true).PartialMatch.Should().BeFalse();
+        (pattern.MatchAtStart("abc", partial: true).Index, pattern.MatchAtStart("abc", partial: true).Length)
+            .Should()
+            .Be((0, 2));
+    }
+
+    [Test]
+    public void Search_reports_the_partial_where_the_candidate_started_not_at_position_zero()
+    {
+        // compile('ab\\w+').search('xxab', partial=True) -> (2,4) partial True, where match() and
+        // fullmatch() on 'ab' both give (0,2) partial True. The partial's START is match_pos, which
+        // the search left where the candidate began; only its END is forced to the slice edge.
+        var pattern = new FuzzyRegex(@"ab\w+");
+
+        Match searched = pattern.Match("xxab", partial: true);
+
+        searched.PartialMatch.Should().BeTrue();
+        (searched.Index, searched.Index + searched.Length).Should().Be((2, 4));
+
+        pattern.MatchAtStart("ab", partial: true).Index.Should().Be(0);
+        pattern.FullMatch("ab", partial: true).PartialMatch.Should().BeTrue();
+    }
+
+    [Test]
+    public void Jointly_unsatisfiable_lookaheads_still_report_a_partial_match_as_upstream_does()
+    {
+        // Upstream issue 367 ("second even prime"): no continuation of the subject can satisfy both
+        // lookaheads, so a partial match here is a true positive that can never become a real one.
+        // Ported faithfully and pinned, not fixed - the Phase 6 upstream sweep owns it
+        // (docs/plan/2026-08-31-upstream-issue-triage.md, row 367).
+        //
+        // Measured 2026-09-12, .scratch/probe-issue367.py:
+        //   compile('(?=ab)(?=cd)').match('a', partial=True)  -> (0,1) partial True
+        //   compile('(?=ab)(?=cd)').match('', partial=True)   -> (0,0) partial True
+        //   compile('(?=ab)(?=cd)').match('a')                -> None
+        //   compile(r'(?=\d*[02468]$)(?=\d*[13579]$)\d+').match('1234', partial=True) -> (0,4) True
+        var impossible = new FuzzyRegex("(?=ab)(?=cd)");
+
+        Match m = impossible.MatchAtStart("a", partial: true);
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+
+        Match empty = impossible.MatchAtStart("", partial: true);
+        empty.PartialMatch.Should().BeTrue();
+        (empty.Index, empty.Index + empty.Length).Should().Be((0, 0));
+
+        // Without asking for a partial there is no match at all, which is the correct answer.
+        impossible.MatchAtStart("a").Success.Should().BeFalse();
+
+        Match evenPrime = new FuzzyRegex(@"(?=\d*[02468]$)(?=\d*[13579]$)\d+").MatchAtStart("1234", partial: true);
+        evenPrime.PartialMatch.Should().BeTrue();
+        (evenPrime.Index, evenPrime.Index + evenPrime.Length).Should().Be((0, 4));
+    }
+
+    [Test]
+    public void A_partial_raised_inside_a_lazy_repeat_leaves_the_enclosing_group_as_it_was()
+    {
+        // The S31 oracle wave's first finding, seed 31, rows 214 and 518, minimised. A lazy repeat
+        // inside a capture group runs out of text while extending: upstream stops inside the repeat
+        // and the group keeps whatever it had, where this port entered the tail, re-closed the group
+        // and reported it as the whole match. The fix is in Matcher.TryMatch - see its remarks.
+        //
+        // Measured 2026-09-12, .scratch/min-214.py:
+        //   compile(r'(\D*?)z').search('a', partial=True)   -> (0,1) partial True, group 1 (-1,-1)
+        //   compile(r'(?r)z(a*?)').search('a', partial=True) -> (0,1) partial True, group 1 (-1,-1)
+        //   compile(r'(?r)x(a??)b').search('b', partial=True) -> (0,1) partial True, group 1 (0,0)
+        Match lazy = new FuzzyRegex(@"(\D*?)z").Match("a", partial: true);
+
+        lazy.PartialMatch.Should().BeTrue();
+        (lazy.Index, lazy.Index + lazy.Length).Should().Be((0, 1));
+        lazy.Groups[1].Success.Should().BeFalse();
+        lazy.LastGroupNumber.Should().Be(-1);
+
+        Match reversed = new FuzzyRegex(@"(?r)z(a*?)").Match("a", partial: true);
+
+        reversed.PartialMatch.Should().BeTrue();
+        reversed.Groups[1].Success.Should().BeFalse();
+
+        // The lazy quantifier that takes zero FIRST does close its group, and keeps it: the partial
+        // arrives after the group closed rather than while the repeat was extending.
+        Match zeroFirst = new FuzzyRegex(@"(?r)x(a??)b").Match("b", partial: true);
+
+        zeroFirst.PartialMatch.Should().BeTrue();
+        (zeroFirst.Groups[1].Index, zeroFirst.Groups[1].Length).Should().Be((0, 0));
+    }
+
+    [Test]
+    public void A_lazy_repeat_that_cannot_extend_at_all_is_still_a_partial_match()
+    {
+        // The wave's second finding, seed 7, row 581, minimised. '[^a-f]' matches the first four
+        // characters of '__AAb' and refuses the 'b', so the repeat cannot reach the six the tail
+        // would need. Upstream answers a partial anyway, because its specialised tail arms ask
+        // partial_side BEFORE trying to extend; this port asked MatchOne first, was refused, and
+        // reported no match at all. The fix is Matcher.IsTailPartial - see its remarks.
+        //
+        // Measured 2026-09-12, .scratch/bisect7.jsonl through tools/run-oracle.ps1:
+        //   compile(r'([^a-f]{3,}?)x').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
+        //   compile(r'([^a-f]{3,}?)_').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
+        //   compile(r'(.{3,}?)x').match('abcde', partial=True)      -> (0,5) partial True, 1 unset
+        foreach (string pattern in new[] { @"([^a-f]{3,}?)x", @"([^a-f]{3,}?)_", @"([^a-f]{3,}?)_\1" })
+        {
+            Match m = new FuzzyRegex(pattern).MatchAtStart("__AAb", partial: true);
+
+            m.PartialMatch.Should().BeTrue(pattern);
+            (m.Index, m.Index + m.Length).Should().Be((0, 5), pattern);
+            m.Groups[1].Success.Should().BeFalse(pattern);
+        }
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_bounded_lazy_repeat_that_reaches_its_maximum_loses_its_partial_here()
+    {
+        // Raised by the S31 blind review and left for a slice of its own, after S31 tried a fix and
+        // measured it as a net loss. The bug is real: 'a??' steps to its maximum of one, the tail
+        // 'x' fails against the second 'a', the subject has run out, and upstream answers a partial
+        // where this port answers none.
+        //
+        //   compile('ba??x').match('baa', partial=True)        -> (0,3) partial True; ours: None
+        //   compile('ba{0,2}?x').match('baaa', partial=True)   -> (0,4) partial True; ours: None
+        //   compile('(?r)xa??b').match('aab', partial=True)    -> (0,3) partial True; ours: None
+        //   compile('(?r)x(a??)b').search('aab', partial=True) -> (0,3) partial True; ours: (0,0)
+        //
+        // WHY IT IS NOT FIXED HERE, recorded so the next attempt does not repeat it. The obvious
+        // repair - ask IsTailPartial once more before the loop's 'pos == limit' break, where
+        // upstream's specialised arms return to the top and ask partial_side before their own limit
+        // check (:16545-16549) - fixes these four and breaks a larger set, because those arms also
+        // CAP the limit per tail op ('min(limit, slice_end - 1)' for a CHARACTER tail, :16543) and
+        // so never reach the position the added guard fires at. Measured by the second blind pass
+        // over 20,160 targeted rows: 125 rows fixed, 219 introduced, among them
+        //
+        //   compile('.{0,2}?x').match('baa', partial=True)  -> None upstream, (0,3) partial with it
+        //   compile('a??x').search('baa', partial=True)     -> (2,3) upstream, (1,3) with it
+        //
+        // So this cannot be repaired by adding guards to the default arm: it needs upstream's
+        // specialised LAZY_REPEAT_ONE arms, which are the Phase 7 optimisation the S31 slice file
+        // holds out of scope. See docs/PORTMAP.md's row for that sub-switch and DECISIONS
+        // 2026-09-12. When those arms land, this test inverts: expect (0,3), (0,4), (0,3), (0,3).
+        foreach (
+            (string pattern, string subject) in new[] { ("ba??x", "baa"), ("ba{0,2}?x", "baaa"), ("(?r)xa??b", "aab") }
+        )
+        {
+            new FuzzyRegex(pattern)
+                .MatchAtStart(subject, partial: true)
+                .Success.Should()
+                .BeFalse($"upstream answers a partial covering all of {subject} for {pattern}");
+        }
+
+        // The reverse form is the "wrong end" case: a zero-width partial at (0, 0) where upstream
+        // covers the whole subject.
+        Match searched = new FuzzyRegex("(?r)x(a??)b").Match("aab", partial: true);
+
+        searched.PartialMatch.Should().BeTrue();
+        (searched.Index, searched.Index + searched.Length).Should().Be((0, 0), "upstream answers (0, 3)");
+
+        // The scan inherits it: regex.compile('ba??x').finditer('abab', partial=True) is
+        // [((1, 4), True)] upstream.
+        new FuzzyRegex("ba??x")
+            .Matches("abab", partial: true)
+            .Select(m => (m.Index, m.Index + m.Length, m.PartialMatch))
+            .Should()
+            .Equal((3, 4, true));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reverse_search_for_a_boundary_at_the_end_of_an_empty_subject_finds_no_partial_here()
+    {
+        // The wave's third finding, and the only one S31 did not fix: it is upstream's `search_start`
+        // prefilter (upstream/src/_regex.c:8385), which this port does not implement and Phase 7
+        // owns. Every `search_start_*` arm can report RE_ERROR_PARTIAL of its own (:8662-:8960); the
+        // slow path this port runs has no such arm, and upstream's slow path does not either - which
+        // is why upstream's own two doors disagree at the same position:
+        //
+        //   compile(r'(?r)\b$').search('', partial=True)    -> (0, 0), partial True
+        //   compile(r'(?r)\b$').match('', partial=True)     -> None
+        //   compile(r'(?r)\b$').fullmatch('', partial=True) -> None
+        //
+        // Measured 2026-09-12, .scratch/probe-searchstart2.py. The patterns `(?r)\m$`, `(?r)a\b$`
+        // and `(?r)([abz]{1})\b$` all behave the same way, and `(?r)$` - no boundary, so no such
+        // start test - agrees on all three doors. Same mechanism as S29's four `verbs` rows: see
+        // the Generator note in tools/run-oracle.ps1, and DECISIONS 2026-09-12. When `search_start`
+        // lands, this test inverts, and should then expect Success and a partial at (0, 0).
+        var pattern = new FuzzyRegex(@"(?r)\b$");
+
+        pattern.Match("", partial: true).Success.Should().BeFalse("search_start is not ported");
+        pattern.MatchAtStart("", partial: true).Success.Should().BeFalse("upstream agrees here");
+        pattern.FullMatch("", partial: true).Success.Should().BeFalse("upstream agrees here");
+
+        // Without the boundary there is no start test for the prefilter to run, and all three doors
+        // agree with upstream on a complete zero-width match.
+        Match anchored = new FuzzyRegex("(?r)$").Match("", partial: true);
+
+        anchored.Success.Should().BeTrue();
+        anchored.PartialMatch.Should().BeFalse();
+        (anchored.Index, anchored.Length).Should().Be((0, 0));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reverse_partial_at_the_left_edge_of_a_narrowed_slice_is_not_found_here()
+    {
+        // Raised by the S31 blind review and left for a slice of its own. Half of upstream's partial
+        // arms are bounded by slice_start/slice_end and half by text_start/text_end - compare
+        // try_match_STRING (upstream/src/_regex.c:7396, slice_end) with the STRING opcode's own arm
+        // in basic_match (text_end) - and the two agree exactly as long as the slice IS the whole
+        // subject. Narrow it and they part company; `Matcher.TryMatch` consults only the
+        // one-character tests, so the slice_start family is never asked here.
+        //
+        // Measured 2026-09-12, .scratch/review-f2.py:
+        //   compile(r'(?r)a(bc)*').match('abc', 1, 1, partial=True) -> ((1, 1), partial)
+        //   compile(r'(?r)ab|abcd').match('ab', 1, 2, partial=True) -> ((1, 2), partial)
+        //   compile(r'(?r)a(bc)*').finditer('abab', 1, 4, partial=True) -> [((2,3), False), ((1,1), True)]
+        //
+        // The oracle generator that finds the family is `partial-sliced`, deliberately NOT in the
+        // default list: 8 rows in 2000 at seed 31, every one reversed. See the Generator note in
+        // tools/run-oracle.ps1 and DECISIONS 2026-09-12. When the family is fixed, this test
+        // inverts: expect a partial at (1, 1) and at (1, 2).
+        new FuzzyRegex("(?r)a(bc)*")
+            .MatchAtStart("abc", beginning: 1, length: 0, partial: true)
+            .Success.Should()
+            .BeFalse("upstream answers a partial at (1, 1) and this port does not");
+        new FuzzyRegex("(?r)ab|abcd")
+            .MatchAtStart("ab", beginning: 1, length: 1, partial: true)
+            .Success.Should()
+            .BeFalse("upstream answers a partial at (1, 2) and this port does not");
+
+        // The scan inherits it: upstream's finditer yields the complete match and then the partial,
+        // where this port yields only the complete one.
+        new FuzzyRegex("(?r)a(bc)*")
+            .Matches("abab", beginning: 1, length: 3, partial: true)
+            .Select(m => (m.Index, m.Length, m.PartialMatch))
+            .Should()
+            .Equal((2, 1, false));
+
+        // Unnarrowed, the same patterns agree with upstream - which is what confines the family.
+        new FuzzyRegex("(?r)ab|abcd")
+            .MatchAtStart("b", partial: true)
+            .PartialMatch.Should()
+            .BeTrue();
+    }
+}

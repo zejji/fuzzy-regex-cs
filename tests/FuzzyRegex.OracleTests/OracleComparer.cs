@@ -155,12 +155,30 @@ internal static class OracleComparer
                 return new SplitOutcome(compiled.Split(row.Subject, OurLimit(row.Count)));
             }
 
+            // Upstream's (pos, endpos) as this surface's (beginning, length). Both absent means the
+            // whole subject, which this surface spells as a length of -1.
+            //
+            // Clamped at zero, and that is not cosmetic: -1 is this surface's "no limit" sentinel,
+            // so an endpos below pos - which the recorder records as it was asked, and which
+            // upstream answers by matching nothing - would otherwise become a search over the whole
+            // rest of the subject and be filed as a divergence in this port. Raised by the S31
+            // second blind pass, with `{"pattern": "c", "subject": "abc", "pos": 2, "endpos": 1}`:
+            // upstream answers None and this port answered (2, 3).
+            //
+            // Each end is read on its own, so a row carrying only one of the pair still narrows the
+            // slice at that end. The same pass found `endpos` without `pos` being dropped entirely.
+            int beginning = row.Pos ?? 0;
+            int length =
+                row.Pos is null && row.EndPos is null
+                    ? -1
+                    : Math.Max(0, (row.EndPos ?? row.Subject.Length) - beginning);
+
             Match match = row.Operation switch
             {
-                "search" => compiled.Match(row.Subject),
-                "match" => compiled.MatchAtStart(row.Subject),
+                "search" => compiled.Match(row.Subject, beginning, length, row.Partial),
+                "match" => compiled.MatchAtStart(row.Subject, beginning, length, row.Partial),
                 // The operation is validated when the row is read, so there is no other case.
-                _ => compiled.FullMatch(row.Subject),
+                _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial),
             };
 
             return Describe(match);
@@ -287,6 +305,6 @@ internal static class OracleComparer
             );
         }
 
-        return new MatchOutcome(described, match.LastGroupNumber, match.LastGroupName);
+        return new MatchOutcome(described, match.LastGroupNumber, match.LastGroupName, match.PartialMatch);
     }
 }

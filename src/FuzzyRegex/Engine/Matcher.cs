@@ -2472,16 +2472,134 @@ internal static class Matcher
     /// meant to fix was not caused by this at all - see DECISIONS 2026-08-31. It measurably fixed
     /// nothing, and Phase 7 is where an optimisation gets made behind a benchmark.
     /// </para>
+    /// <para>
+    /// <b>S31 found the one way the reduction is NOT transparent, and restored exactly that.</b>
+    /// Reporting <c>FAILURE</c> as <c>SUCCESS</c> costs a wasted branch and nothing else, because
+    /// the dispatch loop tests the same node a moment later and backtracks straight out. Reporting
+    /// <c>PARTIAL</c> as <c>SUCCESS</c> is a different answer: every caller below treats a negative
+    /// status as "stop here and report it", so upstream stops INSIDE the branch or repeat, where
+    /// this port carried on, entered it, and let the opcode raise the partial one step later - by
+    /// which time an enclosing group had closed again. Found by the S31 oracle wave, seed 31, rows
+    /// 214 and 518; minimised to <c>regex.search(r'(\D*?)z', 'a', partial=True)</c>, where upstream
+    /// leaves group 1 unset and this port had it as (0,1). So the test node is consulted, and only
+    /// a partial answer is propagated; <c>FAILURE</c> still reads as <c>SUCCESS</c> and the fast
+    /// path is still Phase 7's. Nothing outside partial matching can change, because
+    /// <see cref="TryMatchOne"/> and its siblings answer <c>PARTIAL</c> only when
+    /// <c>partial_side</c> is set, which no ordinary match sets.
+    /// </para>
     /// </remarks>
+    /// <param name="state">The match state.</param>
     /// <param name="next">The exit to test.</param>
     /// <param name="textPos">The position to test at.</param>
     /// <param name="nextPosition">Where to continue from.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    private static int TryMatch(NextNode next, int textPos, out Position nextPosition)
+    private static int TryMatch(MatchState state, NextNode next, int textPos, out Position nextPosition)
     {
         nextPosition = new Position(next.Node!, textPos);
-        return MatchStatus.Success;
+
+        // Upstream's own first line: a fuzzy test node is not consulted at all (:7678).
+        Node? test = next.Test;
+        if (test is null || (test.Status & NodeStatus.Fuzzy) != 0 || !IsOneCharacterTest(test.Op))
+        {
+            return MatchStatus.Success;
+        }
+
+        int status = MatchOne(state, test, textPos);
+
+        return status == MatchStatus.Partial ? status : MatchStatus.Success;
     }
+
+    /// <summary>
+    /// Whether a <c>LAZY_REPEAT_ONE</c> backtrack has run out of text for its tail before it can
+    /// extend the repeat, which upstream answers as a partial match from inside the repeat.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream spells this once per specialised tail arm of that backtrack switch rather than once:
+    /// the four <c>CHARACTER</c> arms at <c>upstream/src/_regex.c</c> <c>:16546</c>, <c>:16583</c>,
+    /// <c>:16621</c> and <c>:16659</c>, and the six <c>STRING</c> arms at <c>:16699</c>,
+    /// <c>:16754</c>, <c>:16809</c>, <c>:16868</c>, <c>:16925</c> and <c>:16982</c>. Those arms are
+    /// Phase 7 optimisations this port does not have - the slice file keeps
+    /// <c>partial_string_match_ign</c> and its callers out on exactly that ground - so the ten
+    /// guards are collected here and asked from the default arm instead. Upstream's own default arm
+    /// (<c>:17024</c>) has no guard, which is why one cannot be added unconditionally: a tail op
+    /// upstream leaves to the default arm must keep reaching its own opcode's partial arm later.
+    /// </para>
+    /// <para>
+    /// <c>text_end</c> and <c>text_start</c>, not <c>slice_end</c> and <c>slice_start</c>: the
+    /// guards ask whether the SUBJECT has run out, where a narrowed slice ends the repeat by its own
+    /// <c>limit</c>. A character tail is about to test the character one step on, so it guards a
+    /// step further out than a string tail, which guards at <paramref name="pos"/> itself; upstream's
+    /// <c>pos + 1</c> and <c>pos - 1</c> are codepoint steps, hence
+    /// <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The repeat's tail test node.</param>
+    /// <param name="pos">Where the repeat has reached.</param>
+    /// <returns><see langword="true"/> if the answer is a partial match.</returns>
+    private static bool IsTailPartial(MatchState state, Node test, int pos) =>
+        test.Op switch
+        {
+            Opcode.Character or Opcode.CharacterIgn => state.NextPos(pos) >= state.TextEnd
+                && state.PartialSide == MatchState.PartialRight,
+            Opcode.CharacterRev or Opcode.CharacterIgnRev => state.PrevPos(pos) <= state.TextStart
+                && state.PartialSide == MatchState.PartialLeft,
+            Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos >= state.TextEnd
+                && state.PartialSide == MatchState.PartialRight,
+            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => pos <= state.TextStart
+                && state.PartialSide == MatchState.PartialLeft,
+            _ => false,
+        };
+
+    /// <summary>
+    /// Whether <see cref="MatchOne"/> has an arm for this opcode, which is upstream's question of
+    /// whether <c>try_match</c> has a <c>try_match_*</c> for it rather than its default arm.
+    /// </summary>
+    /// <param name="op">The test node's opcode.</param>
+    /// <returns><see langword="true"/> if it is a one-character test.</returns>
+    /// <remarks>
+    /// Asked before the call rather than caught after it, because <see cref="MatchOne"/>'s default
+    /// arm throws the S07 seam: a test node it has no arm for is a construct a later slice delivers,
+    /// and upstream's <c>try_match</c> hands exactly those to its own default arm (<c>:7843</c>),
+    /// which reports success without consuming anything.
+    /// </remarks>
+    private static bool IsOneCharacterTest(Opcode op) =>
+        op
+            is Opcode.Any
+                or Opcode.AnyAll
+                or Opcode.AnyU
+                or Opcode.AnyRev
+                or Opcode.AnyAllRev
+                or Opcode.AnyURev
+                or Opcode.Character
+                or Opcode.CharacterIgn
+                or Opcode.Property
+                or Opcode.PropertyIgn
+                or Opcode.Range
+                or Opcode.RangeIgn
+                or Opcode.SetDiff
+                or Opcode.SetDiffIgn
+                or Opcode.SetInter
+                or Opcode.SetInterIgn
+                or Opcode.SetSymDiff
+                or Opcode.SetSymDiffIgn
+                or Opcode.SetUnion
+                or Opcode.SetUnionIgn
+                or Opcode.CharacterRev
+                or Opcode.CharacterIgnRev
+                or Opcode.PropertyRev
+                or Opcode.PropertyIgnRev
+                or Opcode.RangeRev
+                or Opcode.RangeIgnRev
+                or Opcode.SetDiffRev
+                or Opcode.SetDiffIgnRev
+                or Opcode.SetInterRev
+                or Opcode.SetInterIgnRev
+                or Opcode.SetSymDiffRev
+                or Opcode.SetSymDiffIgnRev
+                or Opcode.SetUnionRev
+                or Opcode.SetUnionIgnRev;
 
     /// <summary>
     /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266) less the
@@ -2947,7 +3065,7 @@ internal static class Matcher
                 }
                 case Opcode.Branch: // 2-way branch.
                 {
-                    status = TryMatch(node.Next1, state.TextPos, out Position nextPosition);
+                    status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
                     if (status < 0)
                     {
                         return status;
@@ -3085,7 +3203,7 @@ internal static class Matcher
 
                     if (tryBody)
                     {
-                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
                             // Unreachable until Phase 7 gives 'try_match' its test-node arm back,
@@ -3118,7 +3236,7 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
                         if (tailStatus < 0)
                         {
                             return tailStatus;
@@ -3246,7 +3364,7 @@ internal static class Matcher
                         // Upstream's END_GREEDY_REPEAT turns a PARTIAL here into a FAILURE when the
                         // minimum has been reached and the text has run out (:12575); this case does
                         // not, and the asymmetry is upstream's own.
-                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
                             return bodyStatus;
@@ -3270,7 +3388,7 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
                         if (tailStatus < 0)
                         {
                             return tailStatus;
@@ -3632,7 +3750,7 @@ internal static class Matcher
 
                     if (tryBody)
                     {
-                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
                             return bodyStatus;
@@ -3654,7 +3772,7 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
                         if (tailStatus < 0)
                         {
                             return tailStatus;
@@ -3996,7 +4114,7 @@ internal static class Matcher
 
                     if (tryBody)
                     {
-                        bodyStatus = TryMatch(node.Next1, state.TextPos, out nextBodyPosition);
+                        bodyStatus = TryMatch(state, node.Next1, state.TextPos, out nextBodyPosition);
                         if (bodyStatus < 0)
                         {
                             return bodyStatus;
@@ -4018,7 +4136,7 @@ internal static class Matcher
 
                     if (tryTail)
                     {
-                        tailStatus = TryMatch(node.Next2, state.TextPos, out nextTailPosition);
+                        tailStatus = TryMatch(state, node.Next2, state.TextPos, out nextTailPosition);
                         if (tailStatus < 0)
                         {
                             return tailStatus;
@@ -5710,7 +5828,7 @@ internal static class Matcher
                     {
                         pos = Step(state, pos, -step);
 
-                        status = TryMatch(node.Next1, pos, out _);
+                        status = TryMatch(state, node.Next1, pos, out _);
                         if (status < 0)
                         {
                             return status;
@@ -5828,6 +5946,21 @@ internal static class Matcher
 
                     while (true)
                     {
+                        // ...plus the one guard those arms carry that is behaviour and not
+                        // optimisation. Every specialised arm asks partial_side at the TOP of its
+                        // loop, before it tries to extend the repeat at all (:16546, :16583,
+                        // :16621, :16659 for the four CHARACTER tails; :16699, :16754, :16809,
+                        // :16868, :16925, :16982 for the six STRING ones), and the default arm has
+                        // no such check. The gap is only visible when the repeat CANNOT extend: for
+                        // `regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)` upstream answers
+                        // a partial at (0,5) from here, while this port asked MatchOne first, was
+                        // refused by the 'b', broke out of the loop and reported no match at all.
+                        // Found by the S31 oracle wave, seed 7, row 581.
+                        if (IsTailPartial(state, test, pos))
+                        {
+                            return MatchStatus.Partial;
+                        }
+
                         status = MatchOne(state, repeated, pos);
                         if (status < 0)
                         {
@@ -5841,13 +5974,29 @@ internal static class Matcher
 
                         pos = Step(state, pos, step);
 
-                        status = TryMatch(node.Next1, pos, out _);
+                        // The tail's REAL answer, not TryMatch's transparent success. This is the
+                        // one call site where the reduction described on TryMatch is not
+                        // transparent even for a FAILURE, because the loop's exit condition is
+                        // exactly this status: a tail that reports success when it cannot match
+                        // ends the walk at the first position instead of carrying on to the next
+                        // one, where the guard above would have answered PARTIAL. Upstream's own
+                        // default arm calls try_match, which does test the node (:17037), and its
+                        // specialised arms compare the tail character inline (:16561) - so both
+                        // arms of upstream's switch get the real answer here and only this port did
+                        // not. Found by the S31 blind review: `regex.match('ba??x', 'baa',
+                        // partial=True)` is (0,3) partial upstream and was no match here.
+                        //
+                        // 'nextPosition' is discarded at this call site, so nothing depends on
+                        // upstream's fast-path rule that a successful try_match consumes the
+                        // character it tested - which is why asking the predicate here does not
+                        // reinstate the Phase 7 fast path S19 measured and reverted.
+                        status = TryMatch(state, node.Next1, pos, out _);
+
                         if (status < 0)
                         {
                             // Upstream returns RE_ERROR_PARTIAL here rather than 'status', where the
                             // GREEDY_REPEAT_ONE arm above returns 'status' (:17040 against :16280).
-                            // Ported as written; unreachable either way until Phase 7 restores
-                            // try_match's test-node arm.
+                            // Ported as written.
                             return MatchStatus.Partial;
                         }
 

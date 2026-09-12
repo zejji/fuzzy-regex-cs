@@ -44,6 +44,61 @@
     generator - 'locate_required_string', see PREFILTER_FREE_GENERATORS in tools/record-oracle.py -
     which is a different mechanism and does not fix these four rows.
 
+    'partial' IS in the default list, and shares that same 'search_start' exposure at about one row
+    in two thousand. S31 kept it in on the measured rate rather than on principle: clean over the
+    6,800 rows of a default run at seed 20260912, clean over 600 at seed 31, and 1, 2 and 1 rows in
+    2,400 at seeds 31, 4242 and 7 - so a 300-row default run reds this way roughly one time in
+    seven. Those are the ONLY rows it finds; in particular it does not reach the bounded-lazy-repeat
+    family described at the end of this note, which was found by hand rather than by a wave. The shape is always the same and recognisable on sight: a SEARCH, for a pattern whose
+    leading end in its direction of travel is an anchor plus a word boundary, over a subject with
+    no word at that edge, where upstream answers a zero-width partial at the slice edge and this
+    port answers no match. Both directions; three of the four seen were '(?r)' and the fourth was
+    '^\b...$'. Minimised to
+
+        regex.compile(r'(?r)\b$').search('', partial=True)   # upstream: (0, 0) partial; ours: None
+
+    and pinned in tests/FuzzyRegex.Tests/Gaps/Engine/PartialMatchingTests.cs, which also records the
+    measurement that identifies the cause: upstream's own 'match' and 'fullmatch' answer None to
+    that same row, because 'search_start' is consulted on a search and nowhere else. Phase 7 owns
+    the fix, because porting 'search_start' is the fix - the same sentence as for 'verbs'. If a
+    later slice finds this hiding its own result, move 'partial' out of the list below; the reason
+    to leave it in is that it is the largest single generator of partial-match coverage there is.
+
+    'partial-sliced' is NOT in the default list, and S31 is the slice that left it out. It is the
+    'partial' generator with one thing added - a pos/endpos slice narrower than the subject - which
+    is the only way to tell upstream's two families of partial arm apart: half are bounded by
+    slice_start/slice_end and half by text_start/text_end, and they agree exactly as long as the
+    slice IS the subject. Compare try_match_STRING (upstream/src/_regex.c:7396, slice_end) with the
+    STRING opcode's own arm in basic_match (text_end).
+
+    It finds 8 rows in 2000 at seed 31, one coherent family: a REVERSED pattern whose partial is at
+    the LEFT edge of a narrowed slice. Six are upstream answering a zero-width partial at slice_start
+    where this port answers no match; two are the other way round, this port matching where upstream
+    does not (rows 756 and 1026). Every one is '(?r)'. Raised by the S31 blind review, which
+    minimised the first of them by hand:
+
+        regex.compile(r'(?r)a(bc)*').match('abc', 1, 1, partial=True)   # upstream: (1, 1) partial
+        regex.compile(r'(?r)ab|abcd').match('ab', 1, 2, partial=True)   # upstream: (1, 2) partial
+
+    Both are None here, and both are pinned in PartialMatchingTests.cs. This is a slice's worth of
+    work rather than a review fix - it spans the STRING test nodes, the boundary opcodes and at
+    least one over-match - so S31 recorded it and stopped. Run it explicitly:
+
+        tools/run-oracle.ps1 -Generator partial-sliced -Count 2000 -Seed 31
+
+    Put it in the list below once the family is fixed.
+
+    A THIRD family is known and NO generator here reaches it, so a green wave does not mean it is
+    gone. A bounded lazy repeat that reaches its maximum loses its partial:
+
+        regex.compile('ba??x').match('baa', partial=True)   # upstream: (0, 3) partial; ours: None
+
+    Pinned in PartialMatchingTests.cs with the measurement that matters most - S31 tried the obvious
+    fix (ask the partial guard once more before the loop's limit break) and the second blind pass
+    measured it over 20,160 targeted rows as 125 rows fixed and 219 introduced, because upstream's
+    specialised arms also CAP the limit per tail op and never reach that position. It needs those
+    arms, which are Phase 7's. Do not re-try the guard; read that test's comment first.
+
 .PARAMETER Seed
     The generator seed. Omitted, the recorder picks one at random and records it in the wave
     header, which is what makes a divergence reproducible.
@@ -65,7 +120,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial',
     [int]$Seed = -1,
     [int]$Count = 300,
     [string]$Rows,

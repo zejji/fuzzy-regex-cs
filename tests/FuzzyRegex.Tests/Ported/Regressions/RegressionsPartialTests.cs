@@ -10,7 +10,6 @@ public sealed class RegressionsPartialTests
 {
     // Hg issue 141: crash on a certain partial match.
     [Test]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#148-149")]
     public void Fullmatch_reports_the_span_and_partial_flag_when_a_repeated_group_leaves_the_subject_short()
     {
@@ -25,7 +24,6 @@ public sealed class RegressionsPartialTests
     [Arguments("OXRG", 3, 5)]
     [Arguments(".XRG", 3, 5)]
     [Arguments(".{1,3}XRG", 1, 5)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#150-152")]
     public void Search_reports_the_correct_span_for_a_partial_match_behind_a_wildcard_prefix(
         string pattern,
@@ -40,7 +38,6 @@ public sealed class RegressionsPartialTests
 
     // Hg issue 203: partial matching bug.
     [Test]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#239")]
     public void Search_reports_a_zero_length_partial_match_at_the_end_of_the_subject()
     {
@@ -53,7 +50,6 @@ public sealed class RegressionsPartialTests
     [Test]
     [Arguments("[a-z]+ [a-z]*?:")]
     [Arguments("(?r):[a-z]*? [a-z]+")]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#310-311")]
     public void Search_reports_the_whole_subject_as_a_partial_match_forwards_and_backwards(string pattern)
     {
@@ -86,7 +82,6 @@ public sealed class RegressionsPartialTests
     [Arguments("(?r)(?:ab)+?", "ab")]
     [Arguments("(?r)(?:ab)++", "ab")]
     [Arguments("(?r)(?:ab)++", "abab")]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#330-349")]
     public void Match_after_a_complete_repetition_of_ab_is_never_reported_as_partial(string pattern, string subject) =>
         new FuzzyRegex(pattern).MatchAtStart(subject, partial: true).PartialMatch.Should().BeFalse();
@@ -112,7 +107,6 @@ public sealed class RegressionsPartialTests
     [Arguments("(?r)a+", "a", false)]
     [Arguments("(?r)a+?", "a", false)]
     [Arguments("(?r)a++", "a", false)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#350-367")]
     public void Match_of_a_is_partial_only_when_at_least_one_more_a_is_still_required(
         string pattern,
@@ -122,7 +116,6 @@ public sealed class RegressionsPartialTests
 
     // Same Hg issue 299 report, over a compound repetition of whitespace/word/quote groups.
     [Test]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#368")]
     public void Match_of_a_repeated_word_group_on_a_full_word_is_not_partial() =>
         new FuzzyRegex(@"(?:\s*\w+'*)+").MatchAtStart("whatever", partial: true).PartialMatch.Should().BeFalse();
@@ -142,7 +135,6 @@ public sealed class RegressionsPartialTests
     [Arguments("(?i)[^/]*b/ccc", "b/cc", 0, 4)]
     [Arguments("(?i)[^/]*b/xyz", "b/xy", 0, 4)]
     [Arguments("(?i)[^/]*b/xyz", "b/yz", null, null)]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#449-458")]
     public void Match_of_a_negated_class_prefix_before_a_literal_tail_only_partially_matches_a_true_prefix(
         string pattern,
@@ -174,7 +166,6 @@ public sealed class RegressionsPartialTests
     [Arguments("<thinking>xyz abc foo")]
     [Arguments("<thinking>xyz abc foo ")]
     [Arguments("<thinking>xyz abc foo bar")]
-    [Skip("needs:partial - the engine cannot report a partial match yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#459-466")]
     public void Match_of_a_non_greedy_thinking_tag_matches_at_every_prefix_length(string subject) =>
         new FuzzyRegex("<thinking>.*?</thinking>").MatchAtStart(subject, partial: true).Success.Should().BeTrue();
