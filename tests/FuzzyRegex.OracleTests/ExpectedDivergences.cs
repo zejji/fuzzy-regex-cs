@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
@@ -100,6 +101,14 @@ internal static class ExpectedDivergences
 {
     /// <summary>Upstream's <c>REVERSE</c> flag bit, which is <c>regex.R</c>.</summary>
     private const int _reverse = 0x400;
+
+    /// <summary>
+    /// The one row of <c>enhancematch-ranks-by-cost</c>, hand-built and recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-09-13. No wave has drawn this family -
+    /// see the entry's own reason for why, and why the row is the whole of its strictness.
+    /// </summary>
+    private const string _costRankedRow =
+        """{"generator": "fuzzy", "pattern": "(?e)(?:x|xyq){1i+9s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}}""";
 
     /// <summary>
     /// The rows of the bounded-lazy-repeat partial family, recorded by
@@ -952,6 +961,54 @@ internal static class ExpectedDivergences
                 _partialRetryReversed.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
+        new(
+            Id: "enhancematch-ranks-by-cost",
+            Reason: "PORT DELIBERATELY DIFFERENT, by owner decision rather than by a verdict about "
+                + "who is right about an edge case (DECISIONS 2026-09-12). `ENHANCEMATCH` re-runs a "
+                + "fuzzy match inside its own span with a tighter budget until the fit stops "
+                + "improving, and upstream ranks those runs by error COUNT alone - `better = "
+                + "state->total_errors < fewest_errors`, upstream/src/_regex.c:17930, and it never "
+                + "consults `total_cost` (:9649). That is upstream's open issue 470. This port ranks "
+                + "by cost, ties by fewer errors, then earliest, through Matcher.IsBetterFuzzyMatch. "
+                + "`BESTMATCH` is a seam until S42 and is to call that helper rather than spell the "
+                + "rule again.\n"
+                + "WITH UNIT COSTS THE TWO RULES AGREE, which is why no ported test changes and why "
+                + "this predicate insists on a cost equation whose coefficients are not all equal: "
+                + "cost is then a multiple of the error count and the orderings cannot differ. The "
+                + "example row is `(?e)(?:x|xyq){1i+9s+9d<=20}` over 'xyz'. The first run takes the "
+                + "'x' branch with two insertions - two errors costing 1 each - and the second, held "
+                + "to one error, takes 'xyq' with one substitution costing 9. Upstream keeps the "
+                + "substitution (1 < 2); this port keeps the insertions (2 < 9). Measured on regex "
+                + "2026.7.19, tools/probes/upstream-enhancematch.py.\n"
+                + "NARROW ON THE DIFFERENCE, not just on the flag. The two answers must agree on "
+                + "everything except which errors were spent, and this port's must be CHEAPER while "
+                + "using AT LEAST AS MANY errors. That direction is forced: upstream keeps the last "
+                + "run of the improvement chain, which is the one with fewest errors, and this port "
+                + "walks the same chain and keeps the cheapest run on it.\n"
+                + "IT DOES NOT COVER THE WHOLE FAMILY, AND THAT IS DELIBERATE. A cheaper match can "
+                + "also be a match of a DIFFERENT SPAN, and then the `sub`, `split` and `finditer` "
+                + "counts that follow from it differ too. Those rows are REPORTED rather than "
+                + "classified, because 'this port answered a different span' is also exactly what a "
+                + "real engine defect looks like, and no predicate separates the two from the row "
+                + "alone. Measured on a 2500-row wave of `(?e)` alternation bodies with non-unit cost "
+                + "equations (S41's blind review, seed 777): 43 rows of the family, 12 of them "
+                + "same-span and classified here, 31 span-different and reported, and NONE where this "
+                + "port's answer is dearer than upstream's or uses fewer errors. Widening this entry "
+                + "to swallow the other 31 would buy a green wave with the one property that makes "
+                + "the list worth keeping.\n"
+                + "NO COMMITTED GENERATOR DRAWS IT, said out loud: the fuzzy generator builds a "
+                + "section by concatenating atoms and never by alternation, so the improvement loop "
+                + "rarely has two candidates of different shape to choose between - 435 rows carrying "
+                + "both `(?e)` and a non-unit cost equation across three 2000-row seeds produced "
+                + "none. The example row is therefore what keeps this entry honest, exactly as "
+                + "Every_expected_divergence_still_diverges intends. Adding an alternation body shape "
+                + "would make waves draw the family, and would make the 31 red; deciding what to do "
+                + "about them is S42's, which is where `(?b)` and issue 470's own alternation arrive.",
+            PinnedBy: "FuzzyEnhanceMatchTests.Cost_ranking_keeps_the_cheaper_match_where_upstream_"
+                + "takes_the_one_with_fewer_errors",
+            Example: _costRankedRow,
+            Applies: static (row, ours) => IsCostRankedDivergence(row, ours)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -1409,6 +1466,147 @@ internal static class ExpectedDivergences
             (NoMatchOutcome, MatchOutcome) => true,
             _ => false,
         };
+
+    /// <summary>
+    /// Whether a divergence is <c>enhancematch-ranks-by-cost</c>: an <c>(?e)</c> row whose cost
+    /// equation can separate the two rankings at all, where the two answers differ in nothing but
+    /// which errors were spent, and this port spent cheaper ones without spending fewer.
+    /// </summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if the divergence belongs to that family.</returns>
+    private static bool IsCostRankedDivergence(OracleRow row, IOracleOutcome ours)
+    {
+        if (!row.Pattern.Contains("(?e)", StringComparison.Ordinal) || !TryReadCosts(row.Pattern, out long[]? costs))
+        {
+            return false;
+        }
+
+        return (row.Expected, ours) switch
+        {
+            (MatchOutcome theirs, MatchOutcome mine) => IsCheaperSameMatch(theirs, mine, costs),
+            (MatchesOutcome theirScan, MatchesOutcome ourScan) => theirScan.Matches.Count == ourScan.Matches.Count
+                && theirScan.Matches.Count > 0
+                && theirScan
+                    .Matches.Select((match, i) => (Theirs: match, Mine: ourScan.Matches[i]))
+                    .All(pair =>
+                        string.Equals(pair.Theirs.Describe(), pair.Mine.Describe(), StringComparison.Ordinal)
+                        || IsCheaperSameMatch(pair.Theirs, pair.Mine, costs)
+                    ),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Whether two matches say the same thing except for the errors they spent, and this port's cost
+    /// less while numbering at least as many.
+    /// </summary>
+    /// <param name="theirs">Upstream's match.</param>
+    /// <param name="mine">This port's match.</param>
+    /// <param name="costs">The per-error costs, in <c>SUB</c>, <c>INS</c>, <c>DEL</c> order.</param>
+    /// <returns><see langword="true"/> if that is the whole of the difference.</returns>
+    private static bool IsCheaperSameMatch(MatchOutcome theirs, MatchOutcome mine, long[] costs)
+    {
+        if (
+            theirs.Fuzzy is null
+            || mine.Fuzzy is null
+            || !string.Equals(
+                (theirs with { Fuzzy = null }).Describe(),
+                (mine with { Fuzzy = null }).Describe(),
+                StringComparison.Ordinal
+            )
+        )
+        {
+            return false;
+        }
+
+        long theirCost = Cost(theirs.Fuzzy, costs);
+        long myCost = Cost(mine.Fuzzy, costs);
+        int theirErrors = theirs.Fuzzy.Substitutions + theirs.Fuzzy.Insertions + theirs.Fuzzy.Deletions;
+        int myErrors = mine.Fuzzy.Substitutions + mine.Fuzzy.Insertions + mine.Fuzzy.Deletions;
+
+        return myCost < theirCost && myErrors >= theirErrors;
+    }
+
+    /// <summary>What a match's errors cost under a cost equation.</summary>
+    /// <param name="fuzzy">The errors.</param>
+    /// <param name="costs">The per-error costs, in <c>SUB</c>, <c>INS</c>, <c>DEL</c> order.</param>
+    /// <returns>The total.</returns>
+    private static long Cost(OracleFuzzy fuzzy, long[] costs) =>
+        (fuzzy.Substitutions * costs[0]) + (fuzzy.Insertions * costs[1]) + (fuzzy.Deletions * costs[2]);
+
+    /// <summary>
+    /// Reads the one cost equation a pattern declares, if it declares exactly one that could
+    /// separate a cost ranking from an error-count ranking.
+    /// </summary>
+    /// <remarks>
+    /// A cost coefficient is a run of digits immediately followed by <c>s</c>, <c>i</c> or <c>d</c>
+    /// and then by <c>+</c> or <c>&lt;</c>, which is what tells <c>{2i+1d+1s&lt;=2}</c> apart from
+    /// <c>{s&lt;=1,i&lt;=1,d&lt;=1}</c> - the second sets per-kind CAPS and declares no costs at all.
+    /// Anything else - no equation, two of them because the sections nest, or coefficients that are
+    /// all equal so that cost is a multiple of the error count - returns <see langword="false"/>, and
+    /// the divergence is reported rather than classified.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="costs">The costs, in <c>SUB</c>, <c>INS</c>, <c>DEL</c> order.</param>
+    /// <returns><see langword="true"/> if exactly one separating equation was found.</returns>
+    private static bool TryReadCosts(string pattern, [NotNullWhen(true)] out long[]? costs)
+    {
+        costs = null;
+
+        long[] found = [-1, -1, -1];
+
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            if (!char.IsAsciiDigit(pattern[i]) || (i > 0 && char.IsAsciiDigit(pattern[i - 1])))
+            {
+                continue;
+            }
+
+            int end = i;
+            while (end < pattern.Length && char.IsAsciiDigit(pattern[end]))
+            {
+                end++;
+            }
+
+            if (end + 1 >= pattern.Length || (pattern[end + 1] != '+' && pattern[end + 1] != '<'))
+            {
+                continue;
+            }
+
+            int kind = pattern[end] switch
+            {
+                's' => 0,
+                'i' => 1,
+                'd' => 2,
+                _ => -1,
+            };
+
+            if (kind < 0)
+            {
+                continue;
+            }
+
+            if (
+                found[kind] >= 0
+                || !long.TryParse(pattern.AsSpan(i, end - i), CultureInfo.InvariantCulture, out long value)
+            )
+            {
+                // A second equation, from a nested section, or a coefficient too big to be one.
+                return false;
+            }
+
+            found[kind] = value;
+        }
+
+        if (found[0] < 0 || found[1] < 0 || found[2] < 0 || (found[0] == found[1] && found[1] == found[2]))
+        {
+            return false;
+        }
+
+        costs = found;
+        return true;
+    }
 
     /// <summary>Whether the pattern calls a group by name, which is the defect's precondition.</summary>
     /// <param name="pattern">The pattern.</param>

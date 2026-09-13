@@ -4285,6 +4285,12 @@ FUZZY_EDIT_COUNT_WEIGHTS = (3, 6, 4, 2)
 # the FUZZY/END_FUZZY stack traffic is unobservable, because the outer counts are always zero.
 FUZZY_NESTING_PROBABILITY = 0.2
 
+# How often a row carries `(?e)`, which routes it through do_enhanced_fuzzy_match's improvement loop
+# instead of do_simple_fuzzy_match. A third, for the reason FUZZY_TEST_PROBABILITY is a third: high
+# enough that every body shape draws it several hundred times in a 2000-row wave, low enough that
+# the plain spine S38 and S39 ported keeps the coverage it had. S42 adds `(?b)` beside it.
+FUZZY_ENHANCE_PROBABILITY = 0.35
+
 
 def _fuzzy_constraint(rng: random.Random, constraints: tuple[str, ...], split: bool) -> str:
     """One constraint, sometimes carrying a `{...:test}` - S40's FUZZY_EXT rather than FUZZY.
@@ -4401,8 +4407,11 @@ def _generate_fuzzy(rng: random.Random, count: int):
     carry a `{...:test}`, so the row compiles to FUZZY_EXT and the error has to pass
     `fuzzy_ext_match` before it is spent. See FUZZY_TESTS for which tests and why those.
 
-    `(?e)` and `(?b)` are still excluded - S41 and S42 - because a generator that drew them now
-    would file their seams as `unsupported` rows.
+    S41 widens it once more: about a third of the rows carry `(?e)`, so the row goes through
+    `do_enhanced_fuzzy_match` (upstream/src/_regex.c:17862) - the improvement loop - rather than
+    `do_simple_fuzzy_match`. The draw is independent of everything else here, so every body shape
+    the generator makes gets it. `(?b)` is still excluded - S42 - because a generator that drew it
+    now would file its seam as `unsupported` rows.
     """
     for i in range(count):
         alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
@@ -4513,6 +4522,11 @@ def _generate_fuzzy(rng: random.Random, count: int):
             # STRING_FLD and REF_GROUP_FLD: full case folding, where one character on one side can
             # answer for up to three on the other and an error can land INSIDE a folding.
             pattern = "(?fi)" + pattern
+
+        if rng.random() < FUZZY_ENHANCE_PROBABILITY:
+            # ENHANCEMATCH: find a match, then re-run inside its own span with a tighter budget
+            # until the fit stops improving. Outermost, so it reads as a flag on the whole pattern.
+            pattern = "(?e)" + pattern
 
         row = {
             "generator": "fuzzy",

@@ -255,7 +255,8 @@ internal static class NodeStatus
 
 /// <summary>
 /// Where each fuzzy constraint sits in a <c>FUZZY</c> node's values. Port of the
-/// <c>RE_FUZZY_VAL_*</c> defines (<c>upstream/src/_regex.c</c> lines 176-200).
+/// <c>RE_FUZZY_VAL_*</c> defines (<c>upstream/src/_regex.c</c> lines 176-200), plus
+/// <c>RE_MAX_ERRORS</c> from the line after them.
 /// </summary>
 /// <remarks>
 /// Value 0 is the fuzzy section's index, so the constraints start at 1. The four error types are
@@ -309,6 +310,12 @@ internal static class FuzzyValue
 
     /// <summary>Upstream <c>RE_FUZZY_VAL_MAX_ERR</c>.</summary>
     internal const int MaxErr = MaxBase + Err;
+
+    /// <summary>
+    /// Upstream <c>RE_MAX_ERRORS</c> (<c>upstream/src/_regex.c</c> line 203): the error count at
+    /// which <c>ENHANCEMATCH</c> stops tightening its budget by one between runs.
+    /// </summary>
+    internal const long MaxErrorsLimit = 10;
 
     /// <summary>Upstream <c>RE_FUZZY_VAL_COST_BASE</c>.</summary>
     internal const int CostBase = 9;

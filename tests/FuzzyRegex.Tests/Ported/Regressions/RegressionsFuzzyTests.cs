@@ -209,7 +209,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 306: Fuzzy match parameters not respecting quantifier scope.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#371-372")]
     [Arguments("dogfood", 0, 0, 0)]
     [Arguments("dogfoot", 1, 0, 0)]
@@ -269,7 +268,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#383-384")]
     public void Enhancematch_mode_reports_the_same_missing_letter_as_a_single_deletion()
     {
@@ -337,16 +335,21 @@ public sealed class RegressionsFuzzyTests
 
     // Upstream asserts the same counts under (?e) and (?b), so these four rows are the same
     // behaviour asked of the two ranking modes rather than of plain fuzzy matching. They were split
-    // out of the method above in S40; the tag says which capability they wait on, which is what
-    // S41 and S42 deliver.
+    // out of the method above in S40, and split again by mode in S41 - the two halves land in
+    // different slices, and a '(?e)' row must not stay skipped to keep its '(?b)' sibling company.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#90-91, #93-94")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#90, #93")]
     [Arguments(@"(?e)(?:cats|cat){e<=1}")]
-    [Arguments(@"(?b)(?:cats|cat){e<=1}")]
     [Arguments(@"(?e)(?:cat){e<=1}")]
+    public void A_single_substitution_is_reported_the_same_way_in_enhancematch_mode(string pattern) =>
+        FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#91, #94")]
+    [Arguments(@"(?b)(?:cats|cat){e<=1}")]
     [Arguments(@"(?b)(?:cat){e<=1}")]
-    public void A_single_substitution_is_reported_the_same_way_in_the_ranking_modes(string pattern) =>
+    public void A_single_substitution_is_reported_the_same_way_in_bestmatch_mode(string pattern) =>
         FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     [Test]
@@ -355,12 +358,15 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
 
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#96-97")]
-    [Arguments(@"(?e)(?:cats){e<=2}")]
-    [Arguments(@"(?b)(?:cats){e<=2}")]
-    public void One_letter_gap_in_a_ranking_mode_is_one_insertion_alone(string pattern) =>
-        FuzzyRegex.MatchAtStart("c ats", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    [Property("Upstream", "RegexTests.test_hg_bugs#96")]
+    public void One_letter_gap_in_enhancematch_mode_is_one_insertion_alone() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#97")]
+    public void One_letter_gap_in_bestmatch_mode_is_one_insertion_alone() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#98")]
@@ -368,12 +374,15 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c a ts", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#99-100")]
-    [Arguments(@"(?e)(?:cats){e<=2}")]
-    [Arguments(@"(?b)(?:cats){e<=2}")]
-    public void Two_letter_gaps_are_reported_as_two_insertions_in_the_ranking_modes(string pattern) =>
-        FuzzyRegex.MatchAtStart("c a ts", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+    [Property("Upstream", "RegexTests.test_hg_bugs#99")]
+    public void Two_letter_gaps_are_reported_as_two_insertions_in_enhancematch_mode() =>
+        FuzzyRegex.MatchAtStart("c a ts", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#100")]
+    public void Two_letter_gaps_are_reported_as_two_insertions_in_bestmatch_mode() =>
+        FuzzyRegex.MatchAtStart("c a ts", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#101")]
@@ -381,16 +390,18 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#102-103")]
-    [Arguments(@"(?e)(?:cats){e<=1}")]
-    [Arguments(@"(?b)(?:cats){e<=1}")]
-    public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_the_ranking_modes(string pattern) =>
-        FuzzyRegex.MatchAtStart("c ats", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    [Property("Upstream", "RegexTests.test_hg_bugs#102")]
+    public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_enhancematch_mode() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#103")]
+    public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_bestmatch_mode() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     // Git issue 370: Confusions about Fuzzy matching behavior.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#387-391")]
     [Arguments(@"(?e)(?:^(\$ )?\d{1,3}(,\d{3})*(\.\d{2})$){e}", "$ 10,112.111.12", 6, 0, 5)]
     [Arguments(@"(?e)(?:^(\$ )?\d{1,3}(,\d{3})*(\.\d{2})$){s<=1}", "$ 10,112.111.12", 1, 0, 0)]
@@ -410,7 +421,6 @@ public sealed class RegressionsFuzzyTests
             .Be(new FuzzyCounts(substitutions, insertions, deletions));
 
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#392-393")]
     [Arguments(@"(?e)(?:0?,0(?:,0)?){s<=1,d<=1}")]
     [Arguments(@"(?e)(?:0??,0(?:,0)?){s<=1,d<=1}")]
@@ -427,11 +437,10 @@ public sealed class RegressionsFuzzyTests
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(0, 3, 0));
 
-    // ---- needs:fuzzy-enhancematch ----
+    // ---- ENHANCEMATCH (delivered by S41) ----
 
     // Hg issue 201: ENHANCEMATCH crashes interpreter.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#238")]
     public void Enhancematch_does_not_crash_on_overlapping_alternation_groups()
     {
@@ -552,7 +561,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 371: Specifying character set when fuzzy-matching allows characters not in the set.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#394")]
     public void Fuzzy_character_restriction_rejects_digits_outside_the_allowed_set() =>
         FuzzyRegex

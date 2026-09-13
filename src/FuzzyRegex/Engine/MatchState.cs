@@ -245,6 +245,30 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>total_errors</c>.</summary>
     internal long TotalErrors;
 
+    /// <summary>
+    /// What the errors in <see cref="TotalErrors"/> cost under the fuzzy section that used them.
+    /// <b>This port's own field: upstream has no running total of the cost.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream computes <c>total_cost</c> (<c>upstream/src/_regex.c</c> line 9649) on demand inside
+    /// the per-error constraint checks, which always have a section in hand. The ranking modes need
+    /// it once the match is over, when the section has been popped and there is nothing left to ask -
+    /// so it is recorded here, at exactly the two places <see cref="TotalErrors"/> is recorded
+    /// (<c>:12484</c> and <c>:15561</c>, both <c>END_FUZZY</c>).
+    /// </para>
+    /// <para>
+    /// <b>With nested sections this conflates their cost equations, deliberately.</b> Once
+    /// <c>END_FUZZY</c> has merged an inner section's counts into the outer ones the two are not
+    /// separable again, and upstream's own <c>any_error_permitted</c> then applies the outer
+    /// section's equation to the merged counts for the rest of the match. This field follows the same
+    /// rule the other way round - the merged counts under the section just closed - so a pattern with
+    /// one fuzzy section, which is every case where cost ranking differs from error ranking, is
+    /// exact.
+    /// </para>
+    /// </remarks>
+    internal long TotalCost;
+
     /// <summary>Upstream <c>fewest_errors</c>.</summary>
     internal long FewestErrors;
 
@@ -611,6 +635,7 @@ internal sealed class MatchState : IDisposable
         }
 
         TotalErrors = 0;
+        TotalCost = 0;
         FoundMatch = false;
         CaptureChange = 0;
         Iterations = 0;

@@ -37,7 +37,6 @@ public sealed class FuzzyCountsTests
     // can run. They are the point of upstream's block - ENHANCEMATCH is what drives the reported
     // distance to zero - and so they wait on the capability that does it.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Arguments("(?e)(?:cats|cat){e<=1}", "cat", 0, 0, 0)]
     [Arguments("(?e)(?:cat|cats){e<=1}", "cats", 0, 0, 0)]
     [Property("Upstream", "RegexTests.test_fuzzy#74, #76")]
@@ -58,7 +57,6 @@ public sealed class FuzzyCountsTests
     // Upstream's comment is "Incorrect fuzzy changes" - the assertion pins the behaviour that
     // was fixed, not a bug.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#78")]
     public void A_fuzzy_match_reports_where_it_spent_each_error()
     {

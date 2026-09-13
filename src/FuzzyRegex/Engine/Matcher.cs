@@ -2081,21 +2081,8 @@ internal static class Matcher
         state.MatchPos = state.BestMatchPos;
         state.TextPos = state.BestTextPos;
 
-        // NOT PORTED: the 'fuzzy_counts' copy (:11575), which is Phase 5's.
-        GroupData[] best = state.BestMatchGroups!;
-
-        for (int g = 0; g < state.Groups.Length; g++)
-        {
-            GroupData group = state.Groups[g];
-            GroupData bestGroup = best[g];
-
-            group.Count = bestGroup.Count;
-            group.Current = bestGroup.Current;
-
-            // The saved count can never exceed the array this group already had when it was saved,
-            // and a captures array only ever grows, so upstream's unchecked memcpy is safe here too.
-            bestGroup.Captures.AsSpan(0, bestGroup.Count).CopyTo(group.Captures);
-        }
+        // NOT PORTED: the 'fuzzy_counts' copy (:11575), still open at S41. See 'SaveBestMatch'.
+        RestoreGroups(state, state.BestMatchGroups!);
     }
 
     /// <summary>
@@ -3146,6 +3133,37 @@ internal static class Matcher
             MatchState.PartialRight when textPos > state.TextEnd => MatchStatus.Partial,
             _ => MatchStatus.Failure,
         };
+
+    /// <summary>
+    /// Upstream <c>save_fuzzy_changes</c> (line 9899): takes a copy of the errors the current match
+    /// used, so that a later, worse run can be undone.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>capacity</c> doubling and its <c>safe_realloc</c> (<c>:9901-9920</c>) are the
+    /// manual-memory half and have no counterpart here. The saved list is reused across the runs of
+    /// one <c>ENHANCEMATCH</c> or <c>BESTMATCH</c> loop exactly as upstream's buffer is.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="bestChanges">The list to save into.</param>
+    private static void SaveFuzzyChanges(MatchState state, List<FuzzyChange> bestChanges)
+    {
+        bestChanges.Clear();
+        bestChanges.AddRange(state.FuzzyChanges);
+    }
+
+    /// <summary>Upstream <c>restore_fuzzy_changes</c> (line 9930).</summary>
+    /// <remarks>
+    /// Upstream's <c>Py_MEMCPY</c> writes into <c>state-&gt;fuzzy_changes.items</c> without checking
+    /// that it is long enough. It is safe there only because the saved list came out of that same
+    /// buffer, which only ever grows; here the question does not arise.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="bestChanges">The list to restore from.</param>
+    private static void RestoreFuzzyChanges(MatchState state, List<FuzzyChange> bestChanges)
+    {
+        state.FuzzyChanges.Clear();
+        state.FuzzyChanges.AddRange(bestChanges);
+    }
 
     /// <summary>
     /// Upstream <c>fuzzy_ext_match</c> (line 9938): the <c>{...:test}</c> constraint, which says
@@ -5076,6 +5094,11 @@ internal static class Matcher
 
                     // Is the total number of errors OK?
                     state.TotalErrors = TotalErrors(totalCounts);
+
+                    // This port's own line: what those errors cost, under the section just closed.
+                    // See 'MatchState.TotalCost' for why it is recorded here and what it means when
+                    // sections nest. Upstream has no equivalent.
+                    state.TotalCost = TotalCost(totalCounts, state.FuzzyNode!);
 
                     if (state.TotalErrors > state.MaxErrors)
                     {
@@ -7871,6 +7894,11 @@ internal static class Matcher
                             ++state.FuzzyCounts[FuzzyValue.Ins];
                             state.TotalErrors = TotalErrors(state.FuzzyCounts);
 
+                            // This port's own line - see the matching one in the END_FUZZY case
+                            // above. The section that used these errors is the inner one just
+                            // popped, which is the node the trailing insertion was tried against.
+                            state.TotalCost = TotalCost(state.FuzzyCounts, innerNode);
+
                             node = node.Next1.Node!;
                             goto advance;
                         }
@@ -8732,6 +8760,68 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Upstream <c>save_captures</c> (<c>upstream/src/_regex.c</c> line 17403): snapshots every
+    /// group, so that a fuzzy ranking mode can put the best run's captures back at the end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's whole function past the two <c>Py_MEMCPY</c>s is allocation: it reuses the buffer
+    /// the previous save returned and grows a group's capture array only when it has to
+    /// (<c>:17413-17440</c>). <see cref="GroupData.CopyGroups"/> already produces a snapshot holding
+    /// exactly the live spans, so this is the same shape as <see cref="SaveBestMatch"/> and reusing
+    /// the storage across runs is a Phase 7 question rather than a correctness one.
+    /// </para>
+    /// <para>
+    /// NOT PORTED: <c>discard_groups</c> (<c>:17500</c>), which is upstream's <c>free</c> for the same
+    /// snapshot and has nothing to do on a garbage-collected heap. Dropping the reference is the
+    /// whole of it, so the call site says so in a comment rather than calling an empty method.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The snapshot.</returns>
+    private static GroupData[] SaveCaptures(MatchState state) =>
+        GroupData.CopyGroups(state.Groups, state.Groups.Length);
+
+    /// <summary>
+    /// Upstream <c>restore_groups</c> (<c>upstream/src/_regex.c</c> line 17468), less its
+    /// <c>re_dealloc</c> half.
+    /// </summary>
+    /// <remarks>
+    /// The spans are copied into the live <see cref="GroupData"/> objects rather than the array being
+    /// swapped, exactly as upstream's <c>Py_MEMCPY</c> does: a group's captures array is grown in
+    /// place elsewhere, so the identity of these objects is what the rest of the match holds.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="saved">The snapshot to put back.</param>
+    private static void RestoreGroups(MatchState state, GroupData[] saved)
+    {
+        for (int g = 0; g < state.Groups.Length; g++)
+        {
+            GroupData group = state.Groups[g];
+            GroupData savedGroup = saved[g];
+
+            group.Count = savedGroup.Count;
+            group.Current = savedGroup.Current;
+
+            // The saved count can never exceed the array this group already had when it was saved,
+            // and a captures array only ever grows, so upstream's unchecked memcpy is safe here too.
+            savedGroup.Captures.AsSpan(0, savedGroup.Count).CopyTo(group.Captures);
+        }
+    }
+
+    /// <summary>Upstream <c>save_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 17520).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="fuzzyCounts">Where to save them.</param>
+    private static void SaveFuzzyCounts(MatchState state, Span<long> fuzzyCounts) =>
+        state.FuzzyCounts.CopyTo(fuzzyCounts);
+
+    /// <summary>Upstream <c>restore_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 17526).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="fuzzyCounts">Where to restore them from.</param>
+    private static void RestoreFuzzyCounts(MatchState state, ReadOnlySpan<long> fuzzyCounts) =>
+        fuzzyCounts.CopyTo(state.FuzzyCounts);
+
+    /// <summary>
     /// Upstream <c>do_exact_match</c> (<c>upstream/src/_regex.c</c> line 18064).
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -8792,6 +8882,272 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether one run of a fuzzy ranking mode beat the best run so far. <b>This port's own rule, and
+    /// a deliberate divergence from upstream.</b> <c>ENHANCEMATCH</c> is its only caller today;
+    /// <c>BESTMATCH</c> is a seam until S42 and is to call this rather than spell the rule again, so
+    /// that the two modes cannot drift apart.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Lowest cost wins; ties go to the fewer errors; ties on both go to the run found first, which
+    /// is what returning <see langword="false"/> for "no better" gives.
+    /// </para>
+    /// <para>
+    /// Upstream ranks by error COUNT alone - <c>better = state-&gt;total_errors &lt; fewest_errors</c>
+    /// (<c>:17930</c>) and the same test at <c>:17647</c> - and never consults <c>total_cost</c>,
+    /// which is upstream's open issue 470: <c>(?b)(voices){1i+1d+2s&lt;=2}</c> over
+    /// <c>voixes voicees</c> answers with the cost-2 substitution rather than the cost-1 insertion,
+    /// because both are one error. Releases up to 2015.09.28 ranked by cost
+    /// (<c>state-&gt;max_cost = state-&gt;total_cost - 1</c>) and the 2015.11.5 rework replaced
+    /// <c>max_cost</c> with <c>max_errors</c> throughout, so the count rule is a regression rather
+    /// than a design. Owner decision, DECISIONS 2026-09-12.
+    /// </para>
+    /// <para>
+    /// <b>With unit costs the two rules agree</b>, which is why no ported test changes: a cost
+    /// equation is the only place they can differ, and those cases are pinned by gap tests and by a
+    /// strict <c>ExpectedDivergences</c> entry.
+    /// </para>
+    /// </remarks>
+    /// <param name="cost">This run's cost.</param>
+    /// <param name="errors">This run's error count.</param>
+    /// <param name="bestCost">The best cost so far.</param>
+    /// <param name="bestErrors">The error count of the run that produced it.</param>
+    /// <returns><see langword="true"/> if this run is the better one.</returns>
+    private static bool IsBetterFuzzyMatch(long cost, long errors, long bestCost, long bestErrors) =>
+        cost != bestCost ? cost < bestCost : errors < bestErrors;
+
+    /// <summary>
+    /// Upstream <c>do_enhanced_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17862): find a
+    /// fuzzy match, then keep re-running inside its own span with a tighter error budget until the
+    /// fit stops improving.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The <c>same_match</c> check is deliberately not live code here, because it is not live
+    /// upstream either.</b> Upstream computes it and then overrides it to <c>FALSE</c> on the very
+    /// next line (<c>:17942-17944</c>), so the <c>same_span_of_group</c> loop beneath it never runs
+    /// and the early exit at <c>:17966</c> reduces to <c>total_errors == 0</c>:
+    /// </para>
+    /// <code>
+    /// same_match = state->match_pos == best_match_pos &amp;&amp;
+    ///   state->text_pos == best_text_pos;
+    /// same_match = FALSE;
+    ///
+    /// if (best_groups) {
+    ///     size_t g;
+    ///
+    ///     /* Did we get the same match as the best so far? */
+    ///     for (g = 0; same_match &amp;&amp; g &lt; pattern->public_group_count;
+    ///       g++)
+    ///         same_match = same_span_of_group(&amp;state->groups[g],
+    ///           &amp;best_groups[g]);
+    /// }
+    /// </code>
+    /// <para>
+    /// It is deliberate, not a slip: the 2014.12.24 and 2015.09.28 releases had the check live
+    /// (<c>if (same) break;</c>) in one combined best/enhanced loop, and 2015.11.5 - the issue 165
+    /// "Performance / hung search" rework that split that loop into <c>do_simple</c>,
+    /// <c>do_enhanced</c> and <c>do_best</c> - introduced <c>same_match</c> already overridden.
+    /// DECISIONS 2026-09-12; <c>same_span_of_group</c> (<c>:11646</c>) is in PORTMAP's
+    /// deliberately-not-ported table.
+    /// </para>
+    /// <para>
+    /// <b>S41 measured it rather than reasoning about it, and the measurement is stronger than the
+    /// argument was.</b> The check was ported behind a switch and three 2000-row <c>fuzzy</c> waves
+    /// were replayed both ways. Honouring it saves 0.076, 0.075 and 0.063 <c>BasicMatch</c> runs per
+    /// enhanced match - about 5% of 1.42 - which is well inside the "one extra run" the argument
+    /// allowed. But it is <b>not</b> only an earlier exit: it changes the answer on 18, 15 and 14
+    /// rows of 2000, and on every one of them the override's answer is upstream's, because the wave
+    /// is green at all three seeds with the override in place. Some of the changed answers lose a
+    /// perfect match outright - <c>(?e)(?:\d+b+?){2i+1d+1s&lt;=2}</c> over <c>1bb</c> is an exact
+    /// match at (0, 2) with the override and a one-substitution match at (0, 3) without it. The
+    /// figures are a lower bound on the divergence: the experiment guarded the check with
+    /// "a previous best exists", which upstream's dead code does not, and that can only make it fire
+    /// less often.
+    /// </para>
+    /// <para>
+    /// NOT PORTED: <c>if (state->max_errors == PY_SSIZE_T_MAX) state->max_errors = 0;</c>
+    /// (<c>:17985-17986</c>). It is unreachable. The only path that reaches it has just set
+    /// <c>max_errors</c> from <c>total_errors</c> at <c>:17969</c>, which is an error count of a match
+    /// that has been found and so is never <c>PY_SSIZE_T_MAX</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether to search rather than anchor at the start position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoEnhancedFuzzyMatch(MatchState state, bool search)
+    {
+        Span<long> bestFuzzyCounts = stackalloc long[FuzzyValue.Count];
+        List<FuzzyChange> bestFuzzyChanges = [];
+
+        // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length. Upstream
+        // measures 'available' ONCE, against the slice the caller asked for, and never recomputes it
+        // as the loop narrows the slice - so the early-out below, which goes live from the second run
+        // whenever the first run found exactly one error, tests a stale width. That is upstream's
+        // behaviour and it is safe in the direction that matters: a stale 'available' is never
+        // smaller than the narrowed slice's, so the early-out can only fail to fire.
+        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+
+        // The maximum permitted cost.
+        state.MaxErrors = long.MaxValue;
+        long fewestErrors = long.MaxValue;
+
+        // Upstream has neither of these: its 'fewest_errors' does this job as well as its own, and
+        // splitting the two is what this port changes. See the two tests inside the loop, and
+        // 'IsBetterFuzzyMatch'.
+        long lowestCost = long.MaxValue;
+        long lowestCostErrors = long.MaxValue;
+
+        GroupData[]? bestGroups = null;
+
+        state.BestMatchPos = state.TextPos;
+        state.BestTextPos = state.Reverse ? state.SliceStart : state.SliceEnd;
+
+        int bestMatchPos = state.TextPos;
+        int bestTextPos = 0;
+        bool mustAdvance = state.MustAdvance;
+
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+
+        int status;
+
+        while (true)
+        {
+            // If there's a better match, it won't start earlier in the string than the current best
+            // match, so there's no need to start earlier than that match.
+            state.MustAdvance = mustAdvance;
+
+            // Initialise the state.
+            state.InitMatch();
+
+            status = MatchStatus.Success;
+            if (
+                state.MaxErrors == 0
+                && state.PartialSide == MatchState.PartialNone
+                && (available < state.MinWidth || (available == 0 && state.MustAdvance))
+            )
+            {
+                // An exact match, and partial matches not permitted.
+                status = MatchStatus.Failure;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                status = BasicMatch(state, search);
+            }
+
+            // Has an error occurred, or is it a partial match?
+            if (status != MatchStatus.Success)
+            {
+                break;
+            }
+
+            // UPSTREAM'S TEST, UNCHANGED, AND IT IS THE LOOP'S TERMINATION RATHER THAN ITS RANKING.
+            // 'better' at ':17930' does two jobs at once, and separating them is the whole of what
+            // this port changes. It decides whether to keep the run - and it decides whether to go
+            // round again, which is what 'else break' at ':17972' is.
+            //
+            // The second job is not optional and it is not a ranking question. 'max_errors' below
+            // holds the next run to FEWER errors than this one, so a run that succeeds has always
+            // improved on the error count and this test is all but always true - it is false only
+            // where the count could not be tightened, at ':17970'. Replacing it with a cost
+            // comparison therefore does not re-rank the chain, it CUTS the chain at the first run
+            // that costs more, and the cheapest run can be further down.
+            //
+            // Measured, and it is why this is not one 'if'. S41's blind review found
+            // 'fullmatch("(?e)(?:x|xyq){1i+9s+9d<=20}", "yzxyz")', where cutting the chain early
+            // kept a run worse than upstream's answer on the cost this port claims to rank by AND
+            // on the error count upstream ranks by. Merging the two tests again diverges on 54 rows
+            // of the 2500 that 'tools/probes/enhancematch-cost-rows.py' writes at seed 777, against
+            // 31 here; that probe's own header has the figures and how to re-run them.
+            if (state.TotalErrors >= fewestErrors)
+            {
+                // The fit has stopped improving, so there is nothing further down the chain.
+                break;
+            }
+
+            fewestErrors = state.TotalErrors;
+            state.MaxErrors = fewestErrors;
+
+            // AND THE RANKING, which is the other job, over the chain this port now walks to the
+            // end. Upstream keeps the last run, because fewest errors is its definition of best;
+            // this port keeps the cheapest, ties by fewer errors, then earliest. So this port's
+            // answer is never dearer than upstream's and never uses fewer errors than it.
+            if (IsBetterFuzzyMatch(state.TotalCost, state.TotalErrors, lowestCost, lowestCostErrors))
+            {
+                lowestCost = state.TotalCost;
+                lowestCostErrors = state.TotalErrors;
+
+                SaveFuzzyCounts(state, bestFuzzyCounts);
+                SaveFuzzyChanges(state, bestFuzzyChanges);
+
+                // Save the best result so far.
+                bestGroups = SaveCaptures(state);
+
+                bestMatchPos = state.MatchPos;
+                bestTextPos = state.TextPos;
+            }
+
+            if (state.TotalErrors == 0)
+            {
+                break;
+            }
+
+            state.MaxErrors = state.TotalErrors;
+            if (state.MaxErrors < FuzzyValue.MaxErrorsLimit)
+            {
+                --state.MaxErrors;
+            }
+
+            if (state.Reverse)
+            {
+                state.SliceStart = state.TextPos;
+                state.SliceEnd = state.MatchPos;
+            }
+            else
+            {
+                state.SliceStart = state.MatchPos;
+                state.SliceEnd = state.TextPos;
+            }
+
+            state.TextPos = state.MatchPos;
+        }
+
+        if (status is < 0 and not MatchStatus.Partial)
+        {
+            return status;
+        }
+
+        // The slice goes back to what the caller asked for, so that a following scan step is taken
+        // against the subject rather than against the span this match narrowed to.
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+
+        if (bestGroups is not null)
+        {
+            // Upstream's true branch here is 'discard_groups' (:17500) alone: the last run WAS the
+            // best one and is already in the state, so there is nothing to put back and only the
+            // snapshot to free. Freeing it is going out of scope, so only the false branch is code.
+            if (status != MatchStatus.Success || state.TotalErrors != 0)
+            {
+                // Restore the previous best match.
+                status = MatchStatus.Success;
+
+                state.MatchPos = bestMatchPos;
+                state.TextPos = bestTextPos;
+
+                RestoreGroups(state, bestGroups);
+                RestoreFuzzyCounts(state, bestFuzzyCounts);
+            }
+
+            RestoreFuzzyChanges(state, bestFuzzyChanges);
+        }
+
+        return status;
+    }
+
+    /// <summary>
     /// Upstream <c>do_simple_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 18027): plain fuzzy
     /// matching, which takes the first match it finds rather than the best one.
     /// </summary>
@@ -8820,8 +9176,8 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): the <c>BESTMATCH</c> and
-    /// <c>ENHANCEMATCH</c> strategies are seams until S41 and S42.
+    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): the <c>BESTMATCH</c>
+    /// strategy is a seam until S42.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to search rather than anchor at the start position.</param>
@@ -8843,8 +9199,7 @@ internal static class Matcher
 
         if ((pattern.Flags & RegexFlags.EnhanceMatch) != 0)
         {
-            // Upstream do_enhanced_fuzzy_match (:17862).
-            throw Seam.For("fuzzy-enhancematch", "ENHANCEMATCH fuzzy matching is not implemented yet");
+            return DoEnhancedFuzzyMatch(state, search);
         }
 
         return DoSimpleFuzzyMatch(state, search);

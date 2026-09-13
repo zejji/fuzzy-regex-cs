@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 97.2%** (1911 of 1966 ported upstream tests passing).
+**Overall parity: 98.5%** (1936 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -28,7 +28,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Flags | 20 | 20 | 0 | 0 | 100.0% |
 | Format | 11 | 11 | 0 | 0 | 100.0% |
 | FullMatch | 12 | 12 | 0 | 0 | 100.0% |
-| Fuzzy | 112 | 99 | 13 | 0 | 88.4% |
+| Fuzzy | 112 | 107 | 5 | 0 | 95.5% |
 | Grapheme | 5 | 5 | 0 | 0 | 100.0% |
 | Groups | 65 | 65 | 0 | 0 | 100.0% |
 | Lookaround | 38 | 38 | 0 | 0 | 100.0% |
@@ -38,7 +38,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 16 | 0 | 0 | 100.0% |
 | Quantifiers | 53 | 53 | 0 | 0 | 100.0% |
 | Recursion | 32 | 32 | 0 | 0 | 100.0% |
-| Regressions | 464 | 422 | 42 | 0 | 90.9% |
+| Regressions | 464 | 439 | 25 | 0 | 94.6% |
 | Reverse | 37 | 37 | 0 | 0 | 100.0% |
 | Splitting | 24 | 24 | 0 | 0 | 100.0% |
 | Substitution | 88 | 88 | 0 | 0 | 100.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3841 | 3841 | 0 | 0 |
+| Gaps | 3848 | 3848 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,6 +61,5 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `fuzzy-enhancematch` | 30 |
-| `fuzzy-bestmatch` | 25 |
+| `fuzzy-bestmatch` | 30 |
 

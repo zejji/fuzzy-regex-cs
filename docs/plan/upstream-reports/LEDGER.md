@@ -688,6 +688,37 @@ re-runs it, and cases 4 and 5 of that probe are the two controls that isolate it
 So it needs BOTH the POSIX flag and a fuzzy section. `match` is not affected, only `search` (and
 `finditer`, which searches).
 
+**S41 narrowed the faulting access, 2026-09-13, and it makes `match` affected too.** The crash is in
+reading `Match.fuzzy_changes`, not in matching. Each of these runs in its own interpreter:
+
+```python
+>>> regex.match(r'(?p)(?:cat){e<=1}', 'caz').span()          # (0, 3)
+>>> regex.match(r'(?p)(?:cat){e<=1}', 'caz').fuzzy_counts    # (1, 0, 0)
+>>> regex.match(r'(?p)(?:cat){e<=1}', 'caz').fuzzy_changes   # Segmentation fault
+```
+
+One substitution counted and no substitution recorded. `match_fuzzy_changes` (`:20504`) walks
+`fuzzy_counts[i]` entries of the changes list, so a count of 1 over an empty list reads past the end
+- which is the over-read, and it needs no `search` to reach. The cause is the asymmetry this entry
+already names, seen from the other side: `save_best_match`/`restore_best_match` copy
+`best_fuzzy_counts` and there is **no `best_fuzzy_changes` beside it**, where
+`do_best_fuzzy_match` and `do_enhanced_fuzzy_match` each carry both. POSIX saves a match and then
+fails on purpose to look for a longer one, and the backtracking unrecords the changes; restoring the
+counts without the changes is what leaves the two contradicting each other. The probe's `search`
+spelling crashes for the same reason and not a different one.
+
+**So the fix upstream is one line of kind, not of code**: give `save_best_match` and
+`restore_best_match` the `best_changes_list` pair (`save_fuzzy_changes`/`restore_fuzzy_changes`,
+`:9899`, `:9930`) that the two fuzzy ranking modes already use. That upgrades this entry's
+"Proposed fix: unknown" below for the `fuzzy_changes` half; whether `search` has a second,
+independent fault on top is still unestablished, because a `search` that never reaches
+`fuzzy_changes` was not tried.
+
+**And it is why S41 did not port `best_fuzzy_counts` even though it ported the helpers.** Porting
+the counts copy alone would import exactly this contradiction into a memory-safe language, where it
+surfaces as a match reporting one substitution and no substitution positions rather than as a crash.
+S42 takes the pair together or neither.
+
 **Where it comes from, at the precision the evidence supports.** `save_best_match` (`:11493`) and
 `restore_best_match` (`:11565`) copy `state->best_fuzzy_counts` alongside the groups, and
 `check_posix_match` (`:11602`) is what drives them. `do_simple_fuzzy_match` (`:18027`) sets

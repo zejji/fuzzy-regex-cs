@@ -19,7 +19,6 @@ public sealed class FuzzyEnhanceMatchTests
 {
     // Unflagged sibling: #14, which settles on (7, 10).
     [Test]
-    [Skip("needs:fuzzy-enhancematch - the engine has no ENHANCEMATCH pass yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#15")]
     public void EnhanceMatch_tightens_a_match_found_under_per_kind_caps()
     {
@@ -32,7 +31,6 @@ public sealed class FuzzyEnhanceMatchTests
 
     // Unflagged sibling: #19, which settles on (0, 6).
     [Test]
-    [Skip("needs:fuzzy-enhancematch - the engine has no ENHANCEMATCH pass yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#20")]
     public void EnhanceMatch_shortens_an_unbounded_error_match()
     {
@@ -45,7 +43,6 @@ public sealed class FuzzyEnhanceMatchTests
 
     // Unflagged sibling: #48, whose group 1 collapses to the empty span (120, 120).
     [Test]
-    [Skip("needs:fuzzy-enhancematch - the engine has no ENHANCEMATCH pass yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#49")]
     public void EnhanceMatch_moves_the_inner_group_onto_the_text_it_should_have_matched()
     {
@@ -59,7 +56,6 @@ public sealed class FuzzyEnhanceMatchTests
     // Unflagged sibling: #52, which yields [" dog", "cot"] - the leading space is what
     // ENHANCEMATCH removes here.
     [Test]
-    [Skip("needs:fuzzy-enhancematch - needs ENHANCEMATCH and named lists; the engine has neither yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#53")]
     public void EnhanceMatch_trims_a_fuzzy_named_list_match()
     {
@@ -75,9 +71,6 @@ public sealed class FuzzyEnhanceMatchTests
 
     // Unflagged sibling: #54, which yields ["dog ", "cot"] - again a stray space.
     [Test]
-    [Skip(
-        "needs:fuzzy-enhancematch - needs ENHANCEMATCH, right-to-left search and named lists; the engine has none of them yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy#55")]
     public void EnhanceMatch_trims_a_fuzzy_named_list_match_searching_backwards()
     {
