@@ -73,11 +73,13 @@
     "measuring the wrong quantity, which is what this file already says of the slice caps. Twenty",
     "covers the rest of Phase 3 at ~1.5 sessions a slice without lifting it again mid-run.",
     "maxSlicesPerWeek stays 30 and now binds first: ten are spent, so twenty remain. The token",
-    "caps are untouched and remain the circuit breaker that works."
+    "caps are untouched and remain the circuit breaker that works.",
+    "maxSlicesPerDay 20 -> 30 and maxSlicesPerWeek 30 -> 60 on 2026-09-13, by owner decision: 33% of the weekly account allowance was unused with the renewal at 14:00 UK on 2026-09-14, and Phase 5 had spent 25 of the 30 weekly sessions in one day, so the weekly cap would have stopped Phase 6 after S45 with allowance to spare. The token caps are again untouched - they are the breaker that measures the machine rather than the plan.",
+    "sliceTimeoutMinutes 180 -> 240 on 2026-09-13: S42 and S43 each ran a sitting to 165 minutes and S43's second sitting to the wire. Safe to raise now because the kill is no longer the only backstop - the session hook tells the session its remaining time from 30 minutes out, the driver keeps a green checkpoint commit on a failed sitting, and the heartbeat alarm follows the sitting's deadline."
   ],
-  "maxSlicesPerDay": 20,
-  "maxSlicesPerWeek": 30,
+  "maxSlicesPerDay": 30,
+  "maxSlicesPerWeek": 60,
   "maxTokensPerDay": 6000000000,
   "maxTokensPerWeek": 35000000000,
-  "sliceTimeoutMinutes": 180
+  "sliceTimeoutMinutes": 240
 }

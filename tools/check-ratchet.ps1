@@ -50,7 +50,10 @@ if (-not $SkipTestRun) {
     # which ones, so the exit code is deliberately not treated as fatal.
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj') `
         --configuration $Configuration `
-        -- --report-trx --report-trx-filename results.trx
+        -- --report-trx --report-trx-filename results.trx --timeout 20m
+    # --timeout is Microsoft.Testing.Platform's global bound. Without it a hanging test host hangs
+    # the ratchet, and a hung ratchet hangs the driver's landing check - twelve minutes on
+    # 2026-09-13 before a human stopped it. The suite takes about 30 s; 20 m is generous.
 }
 
 # Exit, do not throw. A session that commits non-compiling code produces no report at all, and

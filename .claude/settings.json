@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "pwsh -NoProfile -File tools/session-hook.ps1", "timeout": 20 }
+        ]
+      }
+    ]
+  }
+}

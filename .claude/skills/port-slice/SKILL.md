@@ -230,6 +230,12 @@ rejects, all of which have already burned turns on real slices:
   A green commit that leaves the slice file in `docs/plan/slices/` is a **checkpoint**: the driver
   keeps it and starts a fresh session on the same slice (three checkpoints stop the driver). Use it
   only when the slice genuinely needs another sitting, and make STATE.md say exactly what is left.
+  **You will be told your deadline.** From 30 minutes before the driver's kill, every tool call
+  carries a `[driver deadline]` line with the minutes left; under 25, stop starting anything long
+  (a 6000-row wave, a control run, a blind review) and commit a checkpoint, reserving four minutes
+  for the pre-commit inspection. A `[message from the orchestrator]` line is an instruction from
+  the human's session: follow it. If the kill does land, the driver keeps your last GREEN commit
+  and stashes the rest, so commit early and often.
 
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in

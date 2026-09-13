@@ -121,6 +121,14 @@ After Phase 1, recalibrate: `docs/plan/slice-log.jsonl` will hold what each slic
 
 ## If you are orchestrating (running slices and checking them)
 
+- **Talking to a running slice session** (2026-09-13): write one message into
+  `.scratch/orchestrator-message.txt`; the PreToolUse hook (`tools/session-hook.ps1`, wired in
+  `.claude/settings.json`) injects it on the session's next tool call and renames the file
+  `.delivered`. The same hook tells the session its remaining minutes from 30 out, reading
+  `.scratch/session-deadline.txt`, which the driver writes per sitting. Both are silent unless
+  `FUZZY_SLICE_SESSION=1`, which only the driver sets. `tools/heartbeat.sh` prints `left=<n>m` from
+  the same file and alarms at 20.
+
 Short on purpose. Anything whose cost of forgetting is high belongs in a script that fails, not in
 this list.
 

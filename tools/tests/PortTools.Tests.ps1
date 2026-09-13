@@ -608,6 +608,45 @@ Describe 'Undo-FailedSlice' {
         }
     }
 
+    It 'keeps a green in-session commit and rolls back only the uncommitted remainder when asked' {
+        # S43's second sitting: a checkpoint commit, then dirty unfinished work, then a kill. The
+        # commit is green and must survive; only the dirty remainder is stashed.
+        $repo = script:New-ScratchRepo
+        try {
+            $before = (git -C $repo rev-parse HEAD).Trim()
+            'checkpoint' | Set-Content (Join-Path $repo 'src/checkpoint.txt')
+            git -C $repo add -A; git -C $repo commit --quiet -m 'checkpoint'
+            $checkpoint = (git -C $repo rev-parse HEAD).Trim()
+            'unfinished' | Set-Content (Join-Path $repo 'src/unfinished.txt')
+
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $before -SliceName 'S43' -KeepHeadIfGreen { $true }
+
+            (git -C $repo rev-parse HEAD).Trim() | Should -Be $checkpoint
+            $rescue.KeptHead | Should -Be $checkpoint
+            $rescue.AbandonedSha | Should -BeNullOrEmpty
+            Test-Path (Join-Path $repo 'src/unfinished.txt') | Should -BeFalse
+            git -C $repo stash list | Should -Match 'slice-rescue'
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
+    It 'still resets to the session start when the in-session commit is red' {
+        $repo = script:New-ScratchRepo
+        try {
+            $before = (git -C $repo rev-parse HEAD).Trim()
+            'broken' | Set-Content (Join-Path $repo 'src/broken.txt')
+            git -C $repo add -A; git -C $repo commit --quiet -m 'red commit'
+            $red = (git -C $repo rev-parse HEAD).Trim()
+
+            $rescue = Undo-FailedSlice -RepoRoot $repo -HeadBefore $before -SliceName 'S43' -KeepHeadIfGreen { $false }
+
+            (git -C $repo rev-parse HEAD).Trim() | Should -Be $before
+            $rescue.KeptHead | Should -BeNullOrEmpty
+            $rescue.AbandonedSha | Should -Be $red
+        }
+        finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
+    }
+
     It 'rescues uncommitted work into a stash instead of deleting it' {
         $repo = script:New-ScratchRepo
         try {

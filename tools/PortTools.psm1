@@ -694,7 +694,12 @@ function Undo-FailedSlice {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$HeadBefore,
-        [AllowEmptyString()][string]$SliceName = ''
+        [AllowEmptyString()][string]$SliceName = '',
+        # When given, runs AFTER the stash on the clean tree and, if it returns $true, the reset
+        # target becomes HEAD (the session's last commit) rather than $HeadBefore. This is what
+        # keeps a green checkpoint commit when the session then left dirty or unfinished work
+        # (S43 second sitting, 2026-09-13). A red HEAD still resets to $HeadBefore as before.
+        [scriptblock]$KeepHeadIfGreen
     )
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -713,15 +718,20 @@ function Undo-FailedSlice {
     }
 
     $headNow = (git -C $RepoRoot rev-parse HEAD).Trim()
-    $abandoned = if ($headNow -ne $HeadBefore) { $headNow } else { $null }
+    $resetTo = $HeadBefore
+    $kept = $null
+    if ($headNow -ne $HeadBefore -and $KeepHeadIfGreen) {
+        if (& $KeepHeadIfGreen) { $resetTo = $headNow; $kept = $headNow }
+    }
+    $abandoned = if ($headNow -ne $resetTo) { $headNow } else { $null }
 
-    git -C $RepoRoot reset --hard $HeadBefore | Out-Null
+    git -C $RepoRoot reset --hard $resetTo | Out-Null
     git -C $RepoRoot clean -fd docs src tests bench tools | Out-Null
 
     [pscustomobject]@{
         StashLabel   = $label
         BranchName   = $branch
-        AbandonedSha = $abandoned
+        AbandonedSha = $abandoned; KeptHead = $kept
     }
 }
 

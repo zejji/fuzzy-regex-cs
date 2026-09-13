@@ -124,6 +124,15 @@ function Invoke-SliceSession {
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
 
+        # The session hook (tools/session-hook.ps1, wired in .claude/settings.json) speaks only to
+        # sessions carrying this variable, and reads the deadline from the file written here, so
+        # an unattended session knows when the driver will kill it and can be sent a one-shot
+        # message through .scratch/orchestrator-message.txt. Added 2026-09-13 (DECISIONS).
+        $startInfo.Environment['FUZZY_SLICE_SESSION'] = '1'
+        $deadline = [datetimeoffset]::Now.AddMinutes($TimeoutMinutes)
+        New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.scratch') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repoRoot '.scratch/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
+        Remove-Item -LiteralPath (Join-Path $repoRoot '.scratch/orchestrator-message.txt.delivered') -Force -ErrorAction SilentlyContinue
         $arguments = @(
             '-p', '--model', $Model, '--output-format', 'json',
             '--permission-mode', 'acceptEdits', '--allowedTools'
@@ -406,7 +415,16 @@ while ($completed -lt $MaxSlices) {
 
     # Roll back before logging: the rollback restores tracked files to $headBefore, and a park
     # note written before it would be reverted by it.
-    $rescue = Undo-FailedSlice -RepoRoot $repoRoot -HeadBefore $headBefore -SliceName $slice.BaseName
+    # Roll back to the last GREEN commit the session made, not to where it started: a session that
+    # committed a green checkpoint and then left dirty work must keep the checkpoint. The ratchet
+    # is re-run on the clean HEAD after the stash to decide. Added 2026-09-13 (DECISIONS).
+    $rescue = Undo-FailedSlice -RepoRoot $repoRoot -HeadBefore $headBefore -SliceName $slice.BaseName -KeepHeadIfGreen {
+        & (Join-Path $PSScriptRoot 'check-ratchet.ps1') | Out-Host
+        $LASTEXITCODE -eq 0
+    }
+    if ($rescue.KeptHead) {
+        Write-Host "  kept the session's green commit $($rescue.KeptHead) - only the uncommitted remainder was rolled back" -ForegroundColor Yellow
+    }
     if ($rescue.BranchName) {
         Write-Host "  work rescued onto branch $($rescue.BranchName) - restore with: git stash apply $($rescue.BranchName)" -ForegroundColor DarkGray
     }
