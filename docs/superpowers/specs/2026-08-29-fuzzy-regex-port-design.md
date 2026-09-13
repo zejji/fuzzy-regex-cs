@@ -686,14 +686,26 @@ amended text is inline above; this list is the record of what changed and why.
     confirm at the Phase 4 review.
 
 16. **No known bug ships in this port, inherited or not** (sections 5 and 12; owner decision,
-    2026-09-12). Every bug identified with overwhelming evidence is fixed before 1.0. A divergence
-    from upstream is judged, not merely recorded: the documented definition of the feature, a
-    second engine run for real where one exists (PCRE2 for verbs and partial matching), and a blind
-    review. Where the port is wrong it is fixed test-first at once; where upstream is wrong the
-    port's answer is pinned as a permanent test and Phase 7's port of upstream's start
-    optimisations may not change it; where the port faithfully reproduces an upstream bug, that bug
-    is on Phase 6's fix list and does not reach 1.0. Phase 4 gained S33 to apply this to the
-    divergences S29, S31 and S32 had parked; the evidence is
+    2026-09-12, wording tightened 2026-09-13 at the owner's request). Every bug conclusively
+    identified is fixed before 1.0, whoever introduced it. A divergence between this port and
+    upstream is judged, never merely recorded, and the standard of evidence is the one Phase 4 and
+    Phase 5 actually used: the documented definition of the feature (upstream's docs and, where they
+    are silent, the definitions other engines publish); a real run of a second engine where the
+    construct exists there (PCRE2 and Perl for verbs, partial matching and lookaround; TRE and agrep
+    for weighted fuzzy costs); a survey of comparable libraries where upstream defines nothing;
+    upstream's own release history where a behaviour changed; a blind review that reproduces rather
+    than reasons; and an independent verifier that did not see the first verdict. Four outcomes,
+    and every judged divergence lands in exactly one:
+    (a) **the port is wrong** - fixed test-first in the slice that found it, or the next one;
+    (b) **upstream is wrong and the port is right** - the port's answer pinned as a permanent test,
+    which Phase 7's port of upstream's start optimisations may not change, plus a ledger entry;
+    (c) **both are wrong** because the port faithfully reproduces upstream's bug - fixed here, on
+    Phase 6's fix list at the latest, plus a ledger entry; "draft-if-theirs" never means "leave it";
+    (d) **strong but not conclusive** - a ledger entry stating what is known and what would settle
+    it, and the decision is the owner's; a slice neither fixes it silently nor drops it.
+    A bug upstream has that this port does not needs only (b)'s ledger entry. Nothing is filed
+    upstream until everything else in the plan is done (amendment 17). Phase 4 gained S33 to apply
+    this to the divergences S29, S31 and S32 had parked; the evidence is
     `docs/plan/2026-09-12-divergence-research.md`. Decided by the project owner.
 
 17. **Phase 6 opens with an upstream sync and a bug sweep, and Phase 7 is gated on them** (sections
@@ -750,3 +762,20 @@ amended text is inline above; this list is the record of what changed and why.
     just be logged. S40a takes all four plus the recorder timeout that `regex`'s own `timeout=`
     keyword makes small, and its exit gate is the 6000-row wave S40 could not run. Phase 5 becomes
     8 slices, S37-S43 plus S40a.
+
+20. **Phase 5 gains S40b, S40c and S40d, because S40a's exit gate at three seeds found fifteen
+    rows rather than four** (sections 8 and 12; S40a, 2026-09-13; written by the orchestrator
+    because S40a's second session believed the spec lived outside this repository - it is this
+    file). Run for the first time at three seeds, the 6000-row default wave gave 3 + 5 + 7
+    diverging rows; S40 had seen four because only seed 7 ever completed. S40a's two sittings fixed
+    the recorder's per-row timeout and one engine defect (a scanner carrying a slice a `(*SKIP)` had
+    moved into the next match, ledger entry 5's own proposed fix), found that two of its four items
+    rested on premises measurement overturned (the atomic-group hang is upstream's and already fixed
+    there; the change/count contradiction is upstream's and inherited), and triaged the fifteen into
+    three mechanisms: S40b, the partial pass inheriting a moved `slice_start` (a port defect, four
+    rows, and S37's pinned answer re-judged with it); S40c, a partial leaking through a group call
+    inside an opposite-direction lookaround (seven rows, which turned out to be the port's width
+    early-out counting UTF-16 code units); S40d, the reversed carried slice in shapes no tell reached
+    (two rows, and the gate itself). All three landed the same day. Phase 5 is eleven slices,
+    S37-S43 plus S40a-S40d, every addition verification rather than feature, as the ROADMAP's
+    Phase 5 note predicted.

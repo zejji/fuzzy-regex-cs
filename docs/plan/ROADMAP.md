@@ -156,9 +156,9 @@ none of this was scope creep and none of it was a feature - it is verification g
 finding real defects, which is the thing the Phase 5 budget note above said to expect.
 
 **S40a did not close in one session, and what it found changes the shape of the rest of Phase 5
-(2026-09-13). This paragraph is the ROADMAP half; the design spec needs the matching amendment 20,
-which is the owner's to write** - the spec is not in this repository, so a slice cannot edit it, and
-the repo rule is that a phase-plan change amends both.
+(2026-09-13). This paragraph is the ROADMAP half; the design spec's matching amendment 20 was written by the
+orchestrator on 2026-09-13** - the spec IS in this repository, at
+`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`, whatever the S40a session believed.
 
 S40a's exit gate was "the default wave green at three seeds at 6000 rows". Run for the first time,
 it gives **3 + 5 + 7 = 15 diverging rows**, not the four S40 recorded - S40 saw four because only
@@ -335,8 +335,14 @@ error-propagation PRs (615-618) that have nothing to port. Three slices, in this
    everything else in the plan is done** (owner decision, 2026-09-12); filing is the last step of
    Phase 8, each entry re-verified against the then-current release and approved by the owner first.
 3. **Our own findings**: every divergence the research documents and every gap test marked as an
-   upstream bug gets the same reproduce, fix-if-ours, draft-if-theirs treatment, so that the list of
-   known bugs - ours or inherited - is empty before Phase 7 touches the engine. **Ledger entry 7 - `İ` (U+0130) never
+   upstream bug is judged to the standard in spec amendment 16 - documented definition, a real run
+   of a second engine, a survey of comparable libraries where upstream defines nothing, release
+   history, a blind review and an independent verifier - and lands in one of its four outcomes:
+   the port is wrong, so it is fixed; upstream is wrong, so the port's answer is pinned and
+   ledgered; both are wrong, so **the port is fixed here even though the bug is inherited**, and
+   ledgered; or the evidence is strong but not conclusive, so it is ledgered and the owner decides.
+   The list of known bugs in this port - ours or inherited - is empty before Phase 7 touches the
+   engine. **Ledger entry 7 - `İ` (U+0130) never
    reaches the full case fold because upstream's expansion inventory is not lower-cased where the text
    it is sought in is - is the first item on this list** (S35, 2026-09-12): a port bug inherited from
    upstream, fixable only by changing the folding tables, so it is a slice of its own here.
