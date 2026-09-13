@@ -321,6 +321,28 @@ internal static class OracleComparer
             );
         }
 
-        return new MatchOutcome(described, match.LastGroupNumber, match.LastGroupName, match.PartialMatch);
+        FuzzyCounts counts = match.FuzzyCounts;
+        FuzzyChanges changes = match.FuzzyChanges;
+        var fuzzy = new OracleFuzzy(
+            counts.Substitutions,
+            counts.Insertions,
+            counts.Deletions,
+            changes.Substitutions,
+            changes.Insertions,
+            changes.Deletions
+        );
+
+        return new MatchOutcome(
+            described,
+            match.LastGroupNumber,
+            match.LastGroupName,
+            match.PartialMatch,
+            // A match that used no errors renders no fuzzy half at all, which is what the recorder
+            // writes for one too - so an exact match of a fuzzy pattern reads the same as a match of
+            // an exact one, and every wave recorded before S38 still compares.
+            fuzzy.IsExact
+                ? null
+                : fuzzy
+        );
     }
 }

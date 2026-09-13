@@ -533,7 +533,7 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
             "captures": [_to_index_length(offsets, s) for s in match.spans(number)],
         })
 
-    return {
+    described = {
         "groups": groups,
         # Neither is derivable from the groups: 'lastindex' is the group that *closed* last, so
         # regex.match('((a))', 'a').lastindex is 1 even though groups 1 and 2 both succeed with the
@@ -547,6 +547,28 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
         # did not ask for a partial, so every generator's rows now also assert "not partial".
         "partial": bool(match.partial),
     }
+
+    # The fuzzy half, appended only when the match actually used an error, so every row recorded
+    # before S38 - and every row of every generator that is not fuzzy - renders exactly as it did.
+    # The S31 `partial` precedent.
+    substitutions, insertions, deletions = match.fuzzy_counts
+    if substitutions or insertions or deletions:
+        sub_positions, ins_positions, del_positions = match.fuzzy_changes
+        described["fuzzyCounts"] = [substitutions, insertions, deletions]
+        described["fuzzyChanges"] = {
+            "substitutions": [_utf16_index(offsets, p) for p in sub_positions],
+            "insertions": [_utf16_index(offsets, p) for p in ins_positions],
+            # A deletion's position is NOT a position in the subject: match_fuzzy_changes
+            # (upstream/src/_regex.c:20535) adds one per deletion recorded before it, so what comes
+            # out is where the missing character would sit in a string with them all put back. Only
+            # the part before that shift is a real subject position, so the shift is undone, the
+            # position translated, and the shift re-applied - a deletion is one CHARACTER wide
+            # whether or not the characters around it are astral, and our engine counts it the same
+            # way.
+            "deletions": [_utf16_index(offsets, p - i) + i for i, p in enumerate(del_positions)],
+        }
+
+    return described
 
 
 def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict]:
@@ -667,6 +689,7 @@ GENERATORS = (
     "partial",
     "partial-sliced",
     "posix",
+    "fuzzy",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -3890,6 +3913,222 @@ def _generate_posix(rng: random.Random, count: int):
         yield row
 
 
+# --------------------------------------------------------------------------------------------
+# S38's generator: fuzzy matching over one-character and zero-width items
+# --------------------------------------------------------------------------------------------
+
+# The atoms a fuzzy section is built from. Every one is a single node that consumes exactly one
+# character - the S16-S20 one-character constructs - because S38 delivers only those: a fuzzy
+# STRING, backreference or *_REPEAT_ONE is S39's, and a generator that emits one produces
+# `unsupported` rows and tells nobody anything.
+#
+# NO TWO LITERALS ARE EVER ADJACENT in a generated pattern, and that is the whole reason these are
+# drawn one at a time with a separator rule below. `Sequence.pack_characters`
+# (upstream/regex/_regex_core.py:3526) packs a run of two or more `Character` items into one STRING
+# node, so `ab` inside a fuzzy section is a fuzzy string and not two fuzzy characters.
+FUZZY_ATOMS = (
+    "a",
+    "b",
+    "x",
+    "0",
+    ".",
+    "[ab]",
+    "[^a]",
+    "[a-f]",
+    "[^a-f]",
+    r"\w",
+    r"\W",
+    r"\d",
+    r"\s",
+    r"\p{L}",
+    r"\p{Nd}",
+)
+
+# Which of those are single literal characters, so the generator can refuse to put two in a row.
+FUZZY_LITERAL_ATOMS = frozenset({"a", "b", "x", "0"})
+
+# The zero-width assertions a fuzzy section may contain. They matter more here than anywhere else:
+# a zero-width item passes a step of 0 to `fuzzy_match_item` (upstream/src/_regex.c:10185), which
+# rules out deletion and substitution outright, so an insertion is the only error that can get past
+# a failing assertion - and it moves the position rather than the node.
+FUZZY_ZERO_WIDTH = ("^", "$", r"\b", r"\B", r"\A", r"\Z")
+
+# The constraints. Every shape upstream's `build_FUZZY` reads: a bare budget, a per-kind budget, a
+# mixture, a cost equation, and a minimum. `(?e)` and `(?b)` are EXCLUDED - S41 and S42 add them,
+# and a generator that drew them now would file their seams as `unsupported` rows.
+FUZZY_CONSTRAINTS = (
+    "{e<=1}",
+    "{e<=2}",
+    "{e<=3}",
+    "{s<=1}",
+    "{i<=1}",
+    "{d<=1}",
+    "{s<=2}",
+    "{i<=2}",
+    "{d<=2}",
+    "{e<=2,i<=1}",
+    "{e<=2,s<=1}",
+    "{s<=1,i<=1,d<=1}",
+    "{1i+2d+1s<=4}",
+    "{2i+1d+1s<=2}",
+    "{1i+1d+1s<=1}",
+    "{e<=3,1i+1d+2s<=3}",
+    "{1<=e<=2}",
+    "{e}",
+)
+
+# The alphabet a subject is drawn from. The astral band is here for the same reason it is in the
+# group generator: a change position reported in codepoints rather than UTF-16 code units has to
+# show up as a divergence from the first wave.
+FUZZY_SUBJECT_ALPHABETS = ("abx", "ab0 x", "abf\U0001f600\U0001d518")
+
+# How many atoms a fuzzy section holds. Three is the sweet spot: one atom cannot show an error in
+# the middle, and a long section against a short subject makes every row fail for the same
+# uninteresting reason.
+FUZZY_SECTION_ATOMS = (1, 2, 3, 4)
+FUZZY_SECTION_ATOM_WEIGHTS = (2, 6, 8, 4)
+
+# How many edits a subject is mutated by, starting from a string the section matches exactly. Zero
+# is in the list on purpose: an exact subject is the row that says the engine does not spend an
+# error it did not need.
+FUZZY_EDIT_COUNTS = (0, 1, 2, 3)
+FUZZY_EDIT_COUNT_WEIGHTS = (3, 6, 4, 2)
+
+# How often a section holds a second fuzzy section inside it. See the call site: without nesting,
+# the FUZZY/END_FUZZY stack traffic is unobservable, because the outer counts are always zero.
+FUZZY_NESTING_PROBABILITY = 0.2
+
+
+def _fuzzy_atom(rng: random.Random, previous: str | None) -> str:
+    """One atom, never a literal directly after another one - see FUZZY_ATOMS on why."""
+    atom = rng.choice(FUZZY_ATOMS)
+    while atom in FUZZY_LITERAL_ATOMS and previous in FUZZY_LITERAL_ATOMS:
+        atom = rng.choice(FUZZY_ATOMS)
+    return atom
+
+
+def _fuzzy_exact_subject(rng: random.Random, atoms: list[str], alphabet: str) -> str:
+    """A subject the section matches exactly, so a mutation of it needs a known number of errors."""
+    characters = []
+    for atom in atoms:
+        if atom in FUZZY_LITERAL_ATOMS:
+            characters.append(atom)
+        elif atom == ".":
+            characters.append(rng.choice("abx"))
+        elif atom == "[ab]":
+            characters.append(rng.choice("ab"))
+        elif atom == "[^a]":
+            characters.append(rng.choice("bx0"))
+        elif atom == "[a-f]":
+            characters.append(rng.choice("abcdef"))
+        elif atom == "[^a-f]":
+            characters.append(rng.choice("xyz0"))
+        elif atom in (r"\w", r"\p{L}"):
+            characters.append(rng.choice("abxQ"))
+        elif atom == r"\W":
+            characters.append(rng.choice(" -."))
+        elif atom in (r"\d", r"\p{Nd}"):
+            characters.append(rng.choice("0123456789"))
+        elif atom == r"\s":
+            characters.append(" ")
+        else:
+            characters.append(rng.choice(alphabet))
+    return "".join(characters)
+
+
+def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -> str:
+    """The subject with ``edits`` substitutions, insertions and deletions applied at random."""
+    for _ in range(edits):
+        kind = rng.choice(("sub", "ins", "del"))
+        if not subject:
+            kind = "ins"
+        position = rng.randrange(len(subject) + 1) if kind == "ins" else rng.randrange(len(subject))
+        if kind == "sub":
+            subject = subject[:position] + rng.choice(alphabet) + subject[position + 1 :]
+        elif kind == "ins":
+            subject = subject[:position] + rng.choice(alphabet) + subject[position:]
+        else:
+            subject = subject[:position] + subject[position + 1 :]
+    return subject
+
+
+def _generate_fuzzy(rng: random.Random, count: int):
+    """S38's generator: one fuzzy section of one-character and zero-width items.
+
+    The subject is built to match the section exactly and then mutated by zero to three edits, so a
+    matching row is the normal case rather than a lucky one - a wave that is nearly all `nomatch`
+    exercises the failure path and almost nothing else. The mutation is random rather than budgeted,
+    so plenty of rows overshoot their constraint and check the refusal too.
+    """
+    for i in range(count):
+        alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
+
+        atom_count = rng.choices(FUZZY_SECTION_ATOMS, weights=FUZZY_SECTION_ATOM_WEIGHTS)[0]
+        atoms: list[str] = []
+        previous: str | None = None
+        for _ in range(atom_count):
+            atom = _fuzzy_atom(rng, previous)
+            atoms.append(atom)
+            previous = atom
+
+        subject = _fuzzy_mutate(
+            rng,
+            _fuzzy_exact_subject(rng, atoms, alphabet),
+            rng.choices(FUZZY_EDIT_COUNTS, weights=FUZZY_EDIT_COUNT_WEIGHTS)[0],
+            alphabet,
+        )
+
+        # A zero-width assertion goes in a fifth of the sections, at one end or in the middle, which
+        # is the only way the step-of-0 arms of fuzzy_match_item are reached at all.
+        section = list(atoms)
+        if rng.random() < 0.2:
+            section.insert(rng.randrange(len(section) + 1), rng.choice(FUZZY_ZERO_WIDTH))
+
+        # A NESTED fuzzy section in a fifth of the rows, which is the only way the stack traffic
+        # round FUZZY and END_FUZZY is observable at all: with one section the outer counts are
+        # always (0, 0, 0) and the outer node is always null, so pushing and popping them cannot
+        # change an answer. Measured, not assumed - S38's control E, which drops the restore on the
+        # FUZZY backtrack arm, found nothing at either seed until this went in.
+        # The inner section starts at index 1 or later WHEREVER THERE IS ROOM, and that is the whole
+        # of why this control has teeth. An inner section at the start is entered before the outer
+        # one has spent anything, so the outer counts are (0, 0, 0) there and inheriting them is the
+        # same as clearing them. Measured: with the start drawn from 0, control E found nothing at
+        # either seed; hand-built rows whose first atom must be substituted diverged on 21 of 24.
+        if len(section) >= 2 and rng.random() < FUZZY_NESTING_PROBABILITY:
+            first = 1 if len(section) >= 3 else 0
+            start = rng.randrange(first, len(section) - 1)
+            end = rng.randrange(start + 1, len(section))
+            inner = "(?:" + "".join(section[start : end + 1]) + ")" + rng.choice(FUZZY_CONSTRAINTS)
+            section = section[:start] + [inner] + section[end + 1 :]
+
+        pattern = "(?:" + "".join(section) + ")" + rng.choice(FUZZY_CONSTRAINTS)
+
+        flags = 0
+        if rng.random() < 0.2:
+            # Reverse, which flips the step and so the position record_fuzzy writes: a change is
+            # recorded one character back ALONG THE DIRECTION OF TRAVEL, which forwards is before the
+            # character and backwards is after it.
+            pattern = "(?r)" + pattern
+
+        row = {
+            "generator": "fuzzy",
+            "pattern": pattern,
+            "flags": flags,
+            "namedLists": {},
+            "subject": subject,
+            "operation": ALL_OPERATIONS[i % len(ALL_OPERATIONS)],
+        }
+        if row["operation"] in SUB_OPERATIONS:
+            row["template"] = "<>"
+        if row["operation"] in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if row["operation"] in SUB_OPERATIONS else ITER_LIMITS)
+        if row["operation"] in OPERATIONS and rng.random() < 0.25:
+            # Partial matching, which is the only way check_fuzzy_partial (:9751) is reached.
+            row["partial"] = True
+
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -3962,6 +4201,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "partial-sliced":
         yield from _generate_partial(rng, count, sliced=True)
+        return
+
+    if name == "fuzzy":
+        yield from _generate_fuzzy(rng, count)
         return
 
     if name == "posix":

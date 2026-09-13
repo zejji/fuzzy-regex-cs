@@ -111,11 +111,12 @@ public sealed class Match : Group
     private readonly int _sliceStart;
     private readonly int _sliceEnd;
     private readonly bool _overlapped;
+    private readonly Engine.FuzzyChange[] _fuzzyChanges;
+    private FuzzyChanges? _splitChanges;
 
     /// <summary>
     /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738), whose
-    /// <c>fuzzy_counts</c>/<c>fuzzy_changes</c> half is Phase 5's and whose <c>pos</c>/<c>endpos</c>
-    /// fields nothing on this surface reports.
+    /// <c>pos</c>/<c>endpos</c> fields nothing on this surface reports.
     /// </summary>
     /// <param name="regex">The pattern that produced this match, for its group names.</param>
     /// <param name="subject">The subject matched against.</param>
@@ -135,6 +136,10 @@ public sealed class Match : Group
     /// <param name="lastIndex">The engine's <c>lastindex</c>.</param>
     /// <param name="lastGroup">The engine's <c>lastgroup</c>.</param>
     /// <param name="partial">Whether this is a partial match.</param>
+    /// <param name="fuzzyCounts">How many errors of each kind the match used.</param>
+    /// <param name="fuzzyChanges">
+    /// Every error the match used, in the order it was used, already copied out of the state.
+    /// </param>
     internal Match(
         FuzzyRegex regex,
         string subject,
@@ -147,7 +152,9 @@ public sealed class Match : Group
         bool overlapped,
         int lastIndex = -1,
         int lastGroup = -1,
-        bool partial = false
+        bool partial = false,
+        FuzzyCounts fuzzyCounts = default,
+        Engine.FuzzyChange[]? fuzzyChanges = null
     )
         : base(subject, start, end, success, "0")
     {
@@ -157,8 +164,10 @@ public sealed class Match : Group
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
         _overlapped = overlapped;
+        _fuzzyChanges = fuzzyChanges ?? [];
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
+        FuzzyCounts = fuzzyCounts;
     }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
@@ -220,16 +229,82 @@ public sealed class Match : Group
 
     /// <summary>
     /// How many errors of each kind the fuzzy match used. Zero throughout for an exact match.
-    /// Upstream <c>Match.fuzzy_counts</c>.
+    /// Upstream <c>Match.fuzzy_counts</c> (<c>match_fuzzy_counts</c>, <c>:20493</c>).
     /// </summary>
-    public FuzzyCounts FuzzyCounts =>
-        throw new NotImplementedException("needs:fuzzy-counts - fuzzy matching is not implemented yet");
+    public FuzzyCounts FuzzyCounts { get; }
 
     /// <summary>
-    /// Where the fuzzy match used each kind of error. Upstream <c>Match.fuzzy_changes</c>.
+    /// Where the fuzzy match used each kind of error. Upstream <c>Match.fuzzy_changes</c>
+    /// (<c>match_fuzzy_changes</c>, <c>:20504</c>).
     /// </summary>
-    public FuzzyChanges FuzzyChanges =>
-        throw new NotImplementedException("needs:fuzzy-changes - fuzzy matching is not implemented yet");
+    /// <remarks>
+    /// <para>
+    /// Positions are UTF-16 code unit indices into the subject, where upstream's are codepoint
+    /// indices; they are the engine's own positions and need no conversion, because the engine
+    /// counts in code units throughout.
+    /// </para>
+    /// <para>
+    /// A deletion's position is <b>not</b> a position in the subject. Upstream shifts each deletion
+    /// by the number of deletions recorded before it (<c>:20535-20537</c>), so what is reported is
+    /// where the missing character would sit in a string that had them all put back - which can be
+    /// past the end of the match, and past the end of the subject.
+    /// </para>
+    /// <para>
+    /// Cached, because upstream builds three fresh lists on every attribute read and a .NET property
+    /// that allocates on every get is a trap that a <c>foreach</c> over it falls into.
+    /// </para>
+    /// </remarks>
+    public FuzzyChanges FuzzyChanges => _splitChanges ??= SplitFuzzyChanges();
+
+    /// <summary>
+    /// Upstream <c>match_fuzzy_changes</c> (<c>upstream/src/_regex.c</c> line 20504): one list of
+    /// changes in the order they happened, split into three by kind.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only the first <c>Total</c> changes are reported</b>, and the state's list may hold more:
+    /// upstream's loop runs <c>for (i = 0; i &lt; count; i++)</c> where <c>count</c> is the sum of
+    /// the three <b>counts</b> (<c>:20522</c>), not the length of the list <c>pattern_new_match</c>
+    /// copied. A nested fuzzy section leaves the two out of step - the counts are recomputed at
+    /// <c>END_FUZZY</c> and the change list is not always unwound to match - and reading the whole
+    /// list instead put a change on three rows of the S38 wave that upstream does not report.
+    /// The bound is also a real one here where upstream has none: its <c>count</c> can exceed the
+    /// array it allocated, which is a read past the end.
+    /// </remarks>
+    /// <returns>The three lists.</returns>
+    private FuzzyChanges SplitFuzzyChanges()
+    {
+        List<int> substitutions = [];
+        List<int> insertions = [];
+        List<int> deletions = [];
+        int offset = 0;
+        int reported = Math.Min(FuzzyCounts.Total, _fuzzyChanges.Length);
+
+        for (int i = 0; i < reported; i++)
+        {
+            Engine.FuzzyChange change = _fuzzyChanges[i];
+
+            switch (change.Type)
+            {
+                case Engine.FuzzyValue.Sub:
+                    substitutions.Add(change.Pos);
+                    break;
+                case Engine.FuzzyValue.Ins:
+                    insertions.Add(change.Pos);
+                    break;
+                case Engine.FuzzyValue.Del:
+                    deletions.Add(change.Pos + offset);
+                    ++offset;
+                    break;
+                default:
+                    // Upstream's 'default: status = 0' (:20554): a change of no known kind is
+                    // dropped rather than reported. Unreachable - record_fuzzy is only ever called
+                    // with one of the three.
+                    break;
+            }
+        }
+
+        return new FuzzyChanges(substitutions, insertions, deletions);
+    }
 
     /// <summary>
     /// The number of the last group that took part in the match, or <c>-1</c> if no group did.

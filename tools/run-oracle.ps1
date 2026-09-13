@@ -185,7 +185,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

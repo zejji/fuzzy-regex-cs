@@ -635,3 +635,54 @@ piece removed - but a report that claimed the minimal form would be wrong.
 which is open work.
 
 **Related:** #614 (fixed, and does not cover this).
+
+# Added by S38, 2026-09-13
+
+## 9. A POSIX search of a fuzzy pattern crashes the C engine
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
+
+```python
+>>> import regex
+>>> regex.search(r'(?p)(?:[ab][bc]){e<=1}', 'ax')
+Segmentation fault
+```
+
+The process dies; there is no exception to catch. `python tools/probes/upstream-posix-fuzzy-crash.py`
+re-runs it, and cases 4 and 5 of that probe are the two controls that isolate it:
+
+```
+'(?:[ab][bc]){e<=1}' on 'ax'   -> ((0, 2), (1, 0, 0), ([1], [], []))   # no (?p): fine
+'(?p)(?:[ab][bc])'   on 'ab'   -> ((0, 2), (0, 0, 0), ([], [], []))    # no fuzzy: fine
+```
+
+So it needs BOTH the POSIX flag and a fuzzy section. `match` is not affected, only `search` (and
+`finditer`, which searches).
+
+**Where it comes from, at the precision the evidence supports.** `save_best_match` (`:11493`) and
+`restore_best_match` (`:11565`) copy `state->best_fuzzy_counts` alongside the groups, and
+`check_posix_match` (`:11602`) is what drives them. `do_simple_fuzzy_match` (`:18027`) sets
+`state->max_errors` to `PY_SSIZE_T_MAX` and does not touch the best-match fields that
+`do_exact_match` leaves alone too. Which of those is the faulting access has NOT been established -
+no debugger was attached and no ASAN build was made - so a report must either establish it or say
+it does not know. It is the same family as the four 2026 memory-safety fixes (issues 611-614) and
+plausibly the same fuzzing campaign would have found it.
+
+**What this port answers.** The row, without crashing. Its *counts* are not yet trustworthy there:
+`best_fuzzy_counts` is deliberately unported until S42, so a POSIX fuzzy match reports the counts of
+whichever attempt ran last rather than of the best one. That is a known gap with a slice against it,
+not a divergence - and it cannot be pinned as one either way, because upstream cannot be asked.
+Pinned only as "does not crash" by
+`FuzzyMatchingTests.A_POSIX_search_of_a_fuzzy_pattern_answers_where_upstream_crashes`.
+
+**Consequence for the oracle.** The `fuzzy` generator draws no `(?p)`, and must not until this is
+fixed upstream: a recorder row that kills the interpreter takes the whole wave with it. Noted here
+rather than only in the generator so the next slice that widens it knows why.
+
+**Proposed fix.** Unknown. Establishing it needs a debug build of the C extension, which this
+project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
+
+**Related:** issues 611-614, the 2026 memory-safety group.

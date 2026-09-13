@@ -243,8 +243,33 @@ internal static class OracleWave
             match.GetProperty("lastGroup").GetString(),
             // Optional and false by default, like 'whileMatching': every wave recorded before S31
             // means "not a partial match", and a hand-written minimisation row need not carry it.
-            match.TryGetProperty("partial", out JsonElement partial) && partial.GetBoolean()
+            match.TryGetProperty("partial", out JsonElement partial) && partial.GetBoolean(),
+            // Optional and absent by default for the same reason, since S38: a row with no fuzzy
+            // half used no errors.
+            ReadFuzzy(match)
         );
+
+    private static OracleFuzzy? ReadFuzzy(JsonElement match)
+    {
+        if (!match.TryGetProperty("fuzzyCounts", out JsonElement counts))
+        {
+            return null;
+        }
+
+        JsonElement changes = match.GetProperty("fuzzyChanges");
+
+        return new OracleFuzzy(
+            counts[0].GetInt32(),
+            counts[1].GetInt32(),
+            counts[2].GetInt32(),
+            ReadPositions(changes, "substitutions"),
+            ReadPositions(changes, "insertions"),
+            ReadPositions(changes, "deletions")
+        );
+    }
+
+    private static int[] ReadPositions(JsonElement changes, string name) =>
+        [.. changes.GetProperty(name).EnumerateArray().Select(static position => position.GetInt32())];
 
     private static OracleGroup ReadGroup(JsonElement group) =>
         new(
@@ -656,23 +681,68 @@ internal sealed record SplitOutcome(IReadOnlyList<string?> Parts) : IOracleOutco
 /// partial match can produce a true here, and the span alone does not carry it: a partial and a
 /// complete match of the same text are the same span and different answers.
 /// </param>
+/// <param name="Fuzzy">
+/// The errors the match used and where, or <see langword="null"/> when it used none. Not derivable
+/// from anything else on the row: two fuzzy matches of the same span can have spent different
+/// errors in different places, and the counts are the whole point of a fuzzy engine.
+/// </param>
 internal sealed record MatchOutcome(
     IReadOnlyList<OracleGroup> Groups,
     int LastIndex,
     string? LastGroup,
-    bool Partial = false
+    bool Partial = false,
+    OracleFuzzy? Fuzzy = null
 ) : IOracleOutcome
 {
     /// <inheritdoc />
     /// <remarks>
     /// The partial marker is appended only when it is set, so every row recorded before S31 - and
-    /// every row of every generator that does not ask for a partial - renders exactly as it did.
+    /// every row of every generator that does not ask for a partial - renders exactly as it did. The
+    /// fuzzy half follows the same rule for S38.
     /// </remarks>
     public string Describe() =>
         "match "
         + string.Join(" ", Groups.Select(static group => group.Describe()))
         + string.Create(CultureInfo.InvariantCulture, $" last={LastIndex}/{LastGroup ?? "-"}")
-        + (Partial ? " partial" : "");
+        + (Partial ? " partial" : "")
+        + (Fuzzy is null ? "" : " " + Fuzzy.Describe());
+}
+
+/// <summary>
+/// How many errors a fuzzy match used and where. Upstream <c>Match.fuzzy_counts</c> and
+/// <c>Match.fuzzy_changes</c>, in UTF-16 code units.
+/// </summary>
+/// <param name="Substitutions">How many characters were substituted.</param>
+/// <param name="Insertions">How many were inserted.</param>
+/// <param name="Deletions">How many were deleted.</param>
+/// <param name="SubstitutionPositions">Where each substitution was, in the order they were used.</param>
+/// <param name="InsertionPositions">Where each insertion was.</param>
+/// <param name="DeletionPositions">
+/// Where each deletion was, already shifted by one per earlier deletion - so these are positions in
+/// a string with the missing characters put back, and may be past the end of the match.
+/// </param>
+internal sealed record OracleFuzzy(
+    int Substitutions,
+    int Insertions,
+    int Deletions,
+    IReadOnlyList<int> SubstitutionPositions,
+    IReadOnlyList<int> InsertionPositions,
+    IReadOnlyList<int> DeletionPositions
+)
+{
+    /// <summary>Whether the match used no errors at all, which renders as nothing.</summary>
+    internal bool IsExact => Substitutions == 0 && Insertions == 0 && Deletions == 0;
+
+    /// <summary>The fuzzy half as one token of a <see cref="MatchOutcome"/>'s line.</summary>
+    /// <returns>The rendered counts and positions.</returns>
+    public string Describe() =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"fuzzy=({Substitutions},{Insertions},{Deletions})"
+                + $"[s:{string.Join(",", SubstitutionPositions)}]"
+                + $"[i:{string.Join(",", InsertionPositions)}]"
+                + $"[d:{string.Join(",", DeletionPositions)}]"
+        );
 }
 
 /// <summary>One group's result.</summary>

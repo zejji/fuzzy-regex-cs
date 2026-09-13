@@ -1107,5 +1107,95 @@
       4242,
       555
     ]
+  },
+  {
+    "id": "S38-A",
+    "name": "any-error-never-permitted",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool AnyErrorPermitted(MatchState state)",
+    "anchorNth": 1,
+    "before": "        List<uint> values = fuzzyNode.Values;\n\n        return TotalCost(fuzzyCounts, fuzzyNode) <= values[FuzzyValue.MaxCost]\n            && TotalErrors(fuzzyCounts) < state.MaxErrors;\n",
+    "after": "        return TotalCost(fuzzyCounts, fuzzyNode) < 0 && TotalErrors(fuzzyCounts) < state.MaxErrors;\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S38-B",
+    "name": "this-error-wrong-max-slot",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool ThisErrorPermitted(MatchState state, int fuzzyType)",
+    "anchorNth": 1,
+    "before": "        return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase + fuzzyType]\n",
+    "after": "        return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase]\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S38-C",
+    "name": "end-fuzzy-skips-constraints",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "                case Opcode.EndFuzzy: // End of fuzzy matching (:12448).",
+    "anchorNth": 1,
+    "before": "                    if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))\n                    {\n                        goto backtrack;\n                    }\n",
+    "after": "                    _ = FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors);\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S38-D",
+    "name": "retry-keeps-the-unrecorded-change",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int RetryFuzzyMatchItem(MatchState state, byte op, bool search, ref Node node, bool advance)",
+    "anchorNth": 1,
+    "before": "        state.UnrecordFuzzy();\n\n        /* bstack: node step text_pos fuzzy_type */\n",
+    "after": "        /* bstack: node step text_pos fuzzy_type */\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S38-E",
+    "name": "nested-section-inherits-the-outer-counts",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "                case Opcode.Fuzzy: // Fuzzy matching (:13132).",
+    "anchorNth": 1,
+    "before": "                    Array.Clear(state.FuzzyCounts);\n",
+    "after": "                    // Array.Clear(state.FuzzyCounts);\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S38-F",
+    "name": "change-position-steps-the-wrong-way",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int FuzzyChangePos(MatchState state, in FuzzyData data) =>",
+    "anchorNth": 1,
+    "before": "        data.FuzzyType == FuzzyValue.Del ? data.NewTextPos : Step(state, data.NewTextPos, -data.Step);\n",
+    "after": "        data.FuzzyType == FuzzyValue.Del ? data.NewTextPos : Step(state, data.NewTextPos, data.Step);\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
   }
 ]

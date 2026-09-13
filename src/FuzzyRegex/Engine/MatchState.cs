@@ -22,6 +22,22 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 internal readonly record struct GroupSpan(int Start, int End);
 
 /// <summary>
+/// One error a fuzzy match used. Port of <c>RE_FuzzyChange</c>
+/// (<c>upstream/src/_regex.c</c> lines 392-395).
+/// </summary>
+/// <remarks>
+/// <see cref="Pos"/> is a UTF-16 code unit index, like every other position in the engine; upstream's
+/// is a codepoint index. For a substitution or an insertion it is a real position in the subject; for
+/// a deletion it is where the missing character would have gone, which <c>match_fuzzy_changes</c>
+/// (<c>:20535</c>) then shifts by one per earlier deletion, so the reported value can be past the end
+/// of the match.
+/// </remarks>
+/// <param name="Type">Which error: <see cref="FuzzyValue.Sub"/>, <c>Ins</c> or <c>Del</c>.</param>
+/// <param name="Pos">Where it was used.</param>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct FuzzyChange(byte Type, int Pos);
+
+/// <summary>
 /// Everything one capture group has captured during this match. Port of <c>RE_GroupData</c>
 /// (<c>upstream/src/_regex.c</c> lines 329-334).
 /// </summary>
@@ -272,6 +288,35 @@ internal sealed class MatchState : IDisposable
     internal bool IsFuzzy;
 
     /// <summary>
+    /// Upstream <c>fuzzy_counts</c>: how many substitutions, insertions and deletions the fuzzy
+    /// section now being matched has used, indexed by <see cref="FuzzyValue.Sub"/>,
+    /// <see cref="FuzzyValue.Ins"/> and <see cref="FuzzyValue.Del"/>.
+    /// </summary>
+    /// <remarks>
+    /// The counts of an <b>enclosing</b> section are not in here: <c>FUZZY</c> pushes them onto
+    /// <see cref="Sstack"/> and zeroes these, and <c>END_FUZZY</c> adds the two together again.
+    /// </remarks>
+    internal readonly long[] FuzzyCounts = new long[FuzzyValue.Count];
+
+    /// <summary>
+    /// Upstream <c>fuzzy_node</c>: the <c>FUZZY</c> node whose constraints
+    /// <see cref="FuzzyCounts"/> is being tested against, or <see langword="null"/> outside any
+    /// fuzzy section.
+    /// </summary>
+    internal Node? FuzzyNode;
+
+    /// <summary>
+    /// Upstream <c>fuzzy_changes</c> (<c>RE_FuzzyChangesList</c>, <c>:397</c>): every error used so
+    /// far, in the order it was used.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="List{T}"/> rather than a hand-grown array: upstream's <c>capacity</c>/<c>count</c>
+    /// pair and its doubling from 64 (<c>record_fuzzy</c>, <c>:9775</c>) are what a <c>List</c> is,
+    /// and <c>unrecord_fuzzy</c> (<c>:9801</c>) is nothing but <c>--count</c>.
+    /// </remarks>
+    internal readonly List<FuzzyChange> FuzzyChanges = [];
+
+    /// <summary>
     /// Whether one character of <see cref="Text"/> is exactly one UTF-16 code unit, so that a
     /// character count and a code-unit offset are the same number - which is what upstream gets for
     /// free by indexing the subject by codepoint.
@@ -341,10 +386,14 @@ internal sealed class MatchState : IDisposable
         // branch-reset group's private number is larger than its public one and START_GROUP indexes
         // by the private one.
         //
-        // NOT PORTED: the fuzzy-guard allocation, whose contents belong to Phase 5, and the
-        // group-call-guard allocation, which S30 settled as never to be ported - upstream's
-        // 'group_call_guard_list' is written in five places and read in none, so it guards nothing.
-        // docs/PORTMAP.md's "deliberately not ported" table has the grep and the date.
+        // NOT PORTED, and both for the same reason: the fuzzy-guard allocation (:18515) and the
+        // group-call-guard allocation. Upstream's 'fuzzy_guards' is written in four places -
+        // allocated, memset, reset in 'reset_guards' (:3394) and freed - and read in NONE, exactly
+        // like 'group_call_guard_list', which S30 settled the same way. `grep -n fuzzy_guards
+        // upstream/src/_regex.c` on 2026-09-13 gives :508, :3394, :3395, :18310, :18515, :18517,
+        // :18519, :18565, :18568, :18646, :18724, :18725 - a declaration, two resets, and
+        // allocation and deallocation. Nothing consults a fuzzy guard to decide anything, so there
+        // is no behaviour to port. docs/PORTMAP.md's "deliberately not ported" table has both.
         var groups = new GroupData[pattern.TrueGroupCount];
         for (int g = 0; g < groups.Length; g++)
         {
@@ -536,7 +585,12 @@ internal sealed class MatchState : IDisposable
         ResetGuards();
 
         // Clear the counts and cost for matching.
-        // NOT PORTED: the fuzzy counts, node and change list (Phase 5).
+        if (IsFuzzy)
+        {
+            Array.Clear(FuzzyCounts);
+            FuzzyNode = null;
+            FuzzyChanges.Clear();
+        }
 
         TotalErrors = 0;
         FoundMatch = false;
@@ -574,6 +628,44 @@ internal sealed class MatchState : IDisposable
         }
     }
 
+    /// <summary>
+    /// Upstream <c>push_fuzzy_counts</c> (<c>upstream/src/_regex.c</c> line 2480), which pushes
+    /// nothing at all for a pattern that is not fuzzy - so the matching pop must be skipped too, and
+    /// every caller of both is a pair.
+    /// </summary>
+    /// <param name="stack">The stack to push onto.</param>
+    /// <param name="fuzzyCounts">The counts to push.</param>
+    internal void PushFuzzyCounts(ByteStack stack, ReadOnlySpan<long> fuzzyCounts)
+    {
+        if (!IsFuzzy)
+        {
+            return;
+        }
+
+        stack.PushBlock(MemoryMarshal.AsBytes(fuzzyCounts));
+    }
+
+    /// <summary>Upstream <c>pop_fuzzy_counts</c> (line 2652).</summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <param name="fuzzyCounts">Receives the counts, and is left alone for a non-fuzzy pattern.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopFuzzyCounts(ByteStack stack, Span<long> fuzzyCounts) =>
+        !IsFuzzy || stack.PopBlock(MemoryMarshal.AsBytes(fuzzyCounts));
+
+    /// <summary>Upstream <c>record_fuzzy</c> (line 9768), less its hand-grown array growth.</summary>
+    /// <param name="fuzzyType">Which error was used.</param>
+    /// <param name="textPos">Where it was used.</param>
+    internal void RecordFuzzy(int fuzzyType, int textPos) =>
+        FuzzyChanges.Add(new FuzzyChange((byte)fuzzyType, textPos));
+
+    /// <summary>Upstream <c>unrecord_fuzzy</c> (line 9801), which is <c>--count</c>.</summary>
+    /// <remarks>
+    /// Upstream decrements an unsigned <c>count</c>, so unrecording one change more than was ever
+    /// recorded wraps it to an enormous number and the engine then walks off the end of the list.
+    /// This throws instead, which is the same bug made visible rather than a second, quieter one.
+    /// </remarks>
+    internal void UnrecordFuzzy() => FuzzyChanges.RemoveAt(FuzzyChanges.Count - 1);
+
     /// <summary>Upstream <c>clear_groups</c> (<c>upstream/src/_regex.c</c> line 3369).</summary>
     /// <remarks>
     /// The capture arrays are kept and only the counts go to zero, exactly as upstream does: a
@@ -590,14 +682,13 @@ internal sealed class MatchState : IDisposable
 
     /// <summary>Upstream <c>reset_guards</c> (<c>upstream/src/_regex.c</c> line 3383).</summary>
     /// <remarks>
-    /// The fuzzy-section and group-call halves (<c>:3392-3400</c>) are not ported, for two different
-    /// reasons. The fuzzy half waits for Phase 5, and until then a pattern needing it throws at its
-    /// own opcode before anything could have written a guard. The group-call half is **never** to be
-    /// ported: S30 landed group calls without it, because upstream's
-    /// <c>group_call_guard_list</c> is written in five places and read in none - see the allocation
-    /// in <see cref="Create"/> and the "deliberately not ported" table in <c>docs/PORTMAP.md</c>,
-    /// which carries the grep and the date. Corrected at the Phase 4 close (S36); the line read
-    /// "no group-call guards until Phase 4" until then.
+    /// The fuzzy-section and group-call halves (<c>:3392-3400</c>) are <b>never</b> to be ported, and
+    /// now for the same reason. S30 landed group calls without the group-call half because upstream's
+    /// <c>group_call_guard_list</c> is written in five places and read in none; S38 found
+    /// <c>fuzzy_guards</c> to be exactly that shape too - allocated, cleared, reset here, freed, and
+    /// never consulted. Both greps and their dates are in <see cref="Create"/> and in the
+    /// "deliberately not ported" table in <c>docs/PORTMAP.md</c>. The fuzzy line read "waits for
+    /// Phase 5" until S38 measured it.
     /// </remarks>
     internal void ResetGuards()
     {

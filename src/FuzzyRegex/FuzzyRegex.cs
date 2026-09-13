@@ -445,7 +445,19 @@ public sealed class FuzzyRegex
             state.LastIndex,
             state.LastGroup,
             // Upstream `match->partial = status == RE_ERROR_PARTIAL` (:20774).
-            partial: status == Engine.MatchStatus.Partial
+            partial: status == Engine.MatchStatus.Partial,
+            // Upstream copies the counts only for a fuzzy pattern and zeroes them otherwise
+            // (:20755-20759), so an exact pattern reports (0, 0, 0) rather than whatever the state
+            // happens to hold.
+            fuzzyCounts: PatternObject.IsFuzzy
+                ? new FuzzyCounts(
+                    (int)state.FuzzyCounts[Engine.FuzzyValue.Sub],
+                    (int)state.FuzzyCounts[Engine.FuzzyValue.Ins],
+                    (int)state.FuzzyCounts[Engine.FuzzyValue.Del]
+                )
+                : default,
+            // Copied for the same reason the groups are: the state is reused by the next match.
+            fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null
         );
     }
 

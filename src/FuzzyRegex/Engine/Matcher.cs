@@ -8,6 +8,52 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// (<c>upstream/src/_regex.c</c> lines 103-122), reduced to the ones this port can produce: the rest
 /// describe CPython argument errors that our own signatures make unrepresentable.
 /// </summary>
+/// <summary>
+/// What one attempt at a fuzzy error is working on. Port of <c>RE_FuzzyData</c>
+/// (<c>upstream/src/_regex.c</c> lines 677-690), reduced to the fields the one-character and
+/// zero-width items use.
+/// </summary>
+/// <remarks>
+/// <para>
+/// NOT PORTED: <c>limit</c>. <c>fuzzy_match_item</c> writes it (<c>:10203</c>, <c>:10206</c>) and
+/// nothing anywhere reads it - <c>grep -n 'limit' upstream/src/_regex.c | grep 'data[.-]'</c> on
+/// 2026-09-13 gives those two lines and nothing else. The string, folded and group fields
+/// (<c>new_string_pos</c>, <c>new_folded_pos</c>, <c>folded_len</c>, <c>new_gfolded_pos</c>,
+/// <c>new_group_pos</c>) arrive with the string and backreference arms in S39, which is where they
+/// first have a reader.
+/// </para>
+/// <para>
+/// A struct passed by <c>ref</c>, because upstream passes <c>RE_FuzzyData*</c> and
+/// <c>next_fuzzy_match_item</c> writes back through it. At namespace scope rather than nested inside
+/// <see cref="Matcher"/>, which is where upstream declares it too.
+/// </para>
+/// </remarks>
+internal struct FuzzyData
+{
+    /// <summary>Upstream <c>new_node</c>: where matching carries on if this error is taken.</summary>
+    internal Node? NewNode;
+
+    /// <summary>Upstream <c>new_text_pos</c>, a UTF-16 code unit index.</summary>
+    internal int NewTextPos;
+
+    /// <summary>
+    /// Upstream <c>fuzzy_type</c>: which error is being tried, and after a successful call which one
+    /// was taken. An <c>int</c> rather than a byte because the retry loop starts it at
+    /// <c>fuzzy_type + 1</c>.
+    /// </summary>
+    internal int FuzzyType;
+
+    /// <summary>
+    /// Upstream <c>step</c>: which way the item travels, as a <b>character</b> step of <c>1</c>,
+    /// <c>-1</c> or <c>0</c>. Never used as an offset directly, because one character is one or two
+    /// code units here.
+    /// </summary>
+    internal sbyte Step;
+
+    /// <summary>Upstream <c>permit_insertion</c>.</summary>
+    internal bool PermitInsertion;
+}
+
 internal static class MatchStatus
 {
     /// <summary>Upstream <c>RE_ERROR_SUCCESS</c>.</summary>
@@ -2944,6 +2990,441 @@ internal static class Matcher
             _ => state.PrevPos(pos),
         };
 
+    /// <summary>Upstream <c>total_errors</c> (<c>upstream/src/_regex.c</c> line 9643).</summary>
+    /// <param name="fuzzyCounts">The counts.</param>
+    /// <returns>Their sum.</returns>
+    private static long TotalErrors(ReadOnlySpan<long> fuzzyCounts) =>
+        fuzzyCounts[FuzzyValue.Del] + fuzzyCounts[FuzzyValue.Ins] + fuzzyCounts[FuzzyValue.Sub];
+
+    /// <summary>Upstream <c>total_cost</c> (line 9649).</summary>
+    /// <param name="fuzzyCounts">The counts.</param>
+    /// <param name="fuzzyNode">The <c>FUZZY</c> node carrying the per-error costs.</param>
+    /// <returns>What those errors cost under that node's equation.</returns>
+    private static long TotalCost(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode)
+    {
+        List<uint> values = fuzzyNode.Values;
+
+        return (fuzzyCounts[FuzzyValue.Del] * values[FuzzyValue.DelCost])
+            + (fuzzyCounts[FuzzyValue.Ins] * values[FuzzyValue.InsCost])
+            + (fuzzyCounts[FuzzyValue.Sub] * values[FuzzyValue.SubCost]);
+    }
+
+    /// <summary>Upstream <c>any_error_permitted</c> (line 9660).</summary>
+    /// <param name="state">The match state, whose <c>fuzzy_node</c> is the section in force.</param>
+    /// <returns><see langword="true"/> if one more error of some kind could still fit.</returns>
+    private static bool AnyErrorPermitted(MatchState state)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+        Node fuzzyNode = state.FuzzyNode!;
+        List<uint> values = fuzzyNode.Values;
+
+        return TotalCost(fuzzyCounts, fuzzyNode) <= values[FuzzyValue.MaxCost]
+            && TotalErrors(fuzzyCounts) < state.MaxErrors;
+    }
+
+    /// <summary>Upstream <c>this_error_permitted</c> (line 9676).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="fuzzyType">The error being tried.</param>
+    /// <returns><see langword="true"/> if one more error of exactly that kind fits.</returns>
+    private static bool ThisErrorPermitted(MatchState state, int fuzzyType)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+        Node fuzzyNode = state.FuzzyNode!;
+        List<uint> values = fuzzyNode.Values;
+        long errorCount = TotalErrors(fuzzyCounts);
+        long cost = TotalCost(fuzzyCounts, fuzzyNode);
+
+        return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase + fuzzyType]
+            && errorCount < values[FuzzyValue.MaxErr]
+            && errorCount < state.MaxErrors
+            && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost];
+    }
+
+    /// <summary>Upstream <c>insertion_permitted</c> (line 9695).</summary>
+    /// <remarks>
+    /// Takes the node and the counts rather than reading them off the state, because
+    /// <c>END_FUZZY</c>'s backtrack arm asks the question of the <b>inner</b> section it has just
+    /// popped rather than of the one now in force.
+    /// </remarks>
+    /// <param name="state">The match state, for its <c>max_errors</c>.</param>
+    /// <param name="fuzzyNode">The section to ask about.</param>
+    /// <param name="fuzzyCounts">That section's counts.</param>
+    /// <returns><see langword="true"/> if one more insertion fits.</returns>
+    private static bool InsertionPermitted(MatchState state, Node fuzzyNode, ReadOnlySpan<long> fuzzyCounts)
+    {
+        List<uint> values = fuzzyNode.Values;
+        long errorCount = TotalErrors(fuzzyCounts);
+        long cost = TotalCost(fuzzyCounts, fuzzyNode);
+
+        return fuzzyCounts[FuzzyValue.Ins] < values[FuzzyValue.MaxIns]
+            && errorCount < values[FuzzyValue.MaxErr]
+            && cost + values[FuzzyValue.InsCost] <= values[FuzzyValue.MaxCost]
+            && errorCount < state.MaxErrors;
+    }
+
+    /// <summary>Upstream <c>fuzzy_within_constraints</c> (line 9712).</summary>
+    /// <remarks>
+    /// The only place a <c>min</c> is ever consulted: everything else in the fuzzy machinery asks
+    /// whether one more error fits, and this asks whether the section as a whole is now legal - which
+    /// is why <c>END_FUZZY</c> and not any single item is what calls it.
+    /// </remarks>
+    /// <param name="fuzzyCounts">The section's counts.</param>
+    /// <param name="fuzzyNode">The section.</param>
+    /// <param name="maxErrors">Upstream's <c>max_errors</c>.</param>
+    /// <returns><see langword="true"/> if the counts satisfy every constraint the section declares.</returns>
+    private static bool FuzzyWithinConstraints(ReadOnlySpan<long> fuzzyCounts, Node fuzzyNode, long maxErrors)
+    {
+        List<uint> values = fuzzyNode.Values;
+        long delCount = fuzzyCounts[FuzzyValue.Del];
+        long insCount = fuzzyCounts[FuzzyValue.Ins];
+        long subCount = fuzzyCounts[FuzzyValue.Sub];
+
+        if (delCount < values[FuzzyValue.MinDel] || delCount > values[FuzzyValue.MaxDel])
+        {
+            return false;
+        }
+
+        if (insCount < values[FuzzyValue.MinIns] || insCount > values[FuzzyValue.MaxIns])
+        {
+            return false;
+        }
+
+        if (subCount < values[FuzzyValue.MinSub] || subCount > values[FuzzyValue.MaxSub])
+        {
+            return false;
+        }
+
+        long errCount = delCount + insCount + subCount;
+
+        if (errCount < values[FuzzyValue.MinErr] || errCount > values[FuzzyValue.MaxErr])
+        {
+            return false;
+        }
+
+        if (errCount > maxErrors)
+        {
+            return false;
+        }
+
+        return TotalCost(fuzzyCounts, fuzzyNode) <= values[FuzzyValue.MaxCost];
+    }
+
+    /// <summary>Upstream <c>check_fuzzy_partial</c> (line 9751).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position the error would have moved to.</param>
+    /// <returns><see cref="MatchStatus.Partial"/> if the subject ran out, else failure.</returns>
+    private static int CheckFuzzyPartial(MatchState state, int textPos) =>
+        state.PartialSide switch
+        {
+            MatchState.PartialLeft when textPos < state.TextStart => MatchStatus.Partial,
+            MatchState.PartialRight when textPos > state.TextEnd => MatchStatus.Partial,
+            _ => MatchStatus.Failure,
+        };
+
+    /// <summary>
+    /// Upstream <c>fuzzy_ext_match</c> (line 9938): the <c>{...:test}</c> constraint, which says
+    /// which characters an error is allowed to touch.
+    /// </summary>
+    /// <remarks>
+    /// Only the two "there is nothing to test" arms are ported here. A plain <c>FUZZY</c> node has no
+    /// second branch, so this returns <see langword="true"/> for every pattern S38 delivers; only
+    /// <c>FUZZY_EXT</c>, which the parser emits for <c>{...:test}</c>, reaches the switch, and that is
+    /// S40's.
+    /// </remarks>
+    /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
+    /// <param name="pos">The position the error would touch.</param>
+    /// <returns><see langword="true"/> if the constraint allows it.</returns>
+    private static bool FuzzyExtMatch(Node? fuzzyNode, int pos)
+    {
+        _ = pos;
+
+        if (fuzzyNode?.Next2.Node is null)
+        {
+            return true;
+        }
+
+        throw Seam.For(Opcode.FuzzyExt);
+    }
+
+    /// <summary>Upstream <c>next_fuzzy_match_item</c> (line 10116).</summary>
+    /// <remarks>
+    /// Tries one kind of error. The caller walks <c>fuzzy_type</c> from <see cref="FuzzyValue.Sub"/>
+    /// upwards, so substitution is preferred to insertion and insertion to deletion.
+    /// <para>
+    /// Upstream's <c>is_string</c> parameter and the <c>data-&gt;new_string_pos += step</c> arms it
+    /// selects are not here: <c>fuzzy_match_string</c> is this function's only caller that passes
+    /// <see langword="true"/>, and that is S39's. Ported without them, an unread field would have to
+    /// be carried through the whole slice with nothing able to test it.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">What the attempt is working on; written back through.</param>
+    /// <param name="step">
+    /// The character step of the item, <c>0</c> for a zero-width one. Not the same as
+    /// <c>data.Step</c>: a zero-width item passes <c>0</c> here and carries <c>1</c> or <c>-1</c>
+    /// there, which is what lets an insertion move the position when nothing else can.
+    /// </param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int NextFuzzyMatchItem(MatchState state, ref FuzzyData data, sbyte step)
+    {
+        if (!ThisErrorPermitted(state, data.FuzzyType))
+        {
+            return MatchStatus.Failure;
+        }
+
+        data.NewTextPos = state.TextPos;
+
+        int newPos;
+
+        switch (data.FuzzyType)
+        {
+            case FuzzyValue.Del:
+                // Could a character at text_pos have been deleted?
+                if (step == 0)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                data.NewNode = data.NewNode!.Next1.Node;
+
+                return MatchStatus.Success;
+            case FuzzyValue.Ins:
+                // Could the character at text_pos have been inserted?
+                if (!data.PermitInsertion)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                // Upstream's 'new_text_pos + step'. A zero-width item has no step of its own, so it
+                // borrows the section's direction - which is the whole reason an insertion is the
+                // only error that can get past a failing assertion.
+                newPos = Step(state, data.NewTextPos, step == 0 ? data.Step : step);
+
+                if (state.SliceStart <= newPos && newPos <= state.SliceEnd)
+                {
+                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewTextPos = newPos;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, data.NewTextPos);
+            case FuzzyValue.Sub:
+                // Could the character at text_pos have been substituted?
+                if (step == 0)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                newPos = Step(state, data.NewTextPos, step);
+
+                if (state.SliceStart <= newPos && newPos <= state.SliceEnd)
+                {
+                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewTextPos = newPos;
+                    data.NewNode = data.NewNode!.Next1.Node;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, newPos);
+            default:
+                return MatchStatus.Failure;
+        }
+    }
+
+    /// <summary>
+    /// Where <c>record_fuzzy</c> is told an error happened. Upstream spells the same expression out
+    /// in <c>fuzzy_match_item</c> (<c>upstream/src/_regex.c</c> line 10245) and
+    /// <c>retry_fuzzy_match_item</c> (<c>:10329</c>).
+    /// </summary>
+    /// <remarks>
+    /// A deletion is recorded where the position still is, because a deletion does not move it;
+    /// anything else is recorded one character back along the direction of travel, which for a
+    /// reverse match is one character <em>forward</em> of the character that changed. Upstream writes
+    /// <c>new_text_pos - data.step</c>, which is a codepoint step and so is
+    /// <see cref="Step"/> here.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt that succeeded.</param>
+    /// <returns>The position to record.</returns>
+    private static int FuzzyChangePos(MatchState state, in FuzzyData data) =>
+        data.FuzzyType == FuzzyValue.Del ? data.NewTextPos : Step(state, data.NewTextPos, -data.Step);
+
+    /// <summary>Upstream <c>fuzzy_match_item</c> (line 10185): a first try at fuzzing one item.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">The item that failed; on success, where matching carries on.</param>
+    /// <param name="step">The item's character step, <c>0</c> for a zero-width one.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int FuzzyMatchItem(MatchState state, bool search, ref Node node, sbyte step)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        if (!AnyErrorPermitted(state))
+        {
+            return MatchStatus.Failure;
+        }
+
+        FuzzyData data = default;
+        data.NewNode = node;
+
+        // NOT PORTED: 'data.limit' (:10203, :10206), which nothing reads - see the remarks on
+        // FuzzyData.
+        if (step == 0)
+        {
+            data.Step = (node.Status & NodeStatus.Reverse) != 0 ? (sbyte)-1 : (sbyte)1;
+        }
+        else
+        {
+            data.Step = step;
+        }
+
+        // Permit insertion except initially when searching (it's better just to start searching one
+        // character later).
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+
+        int status = MatchStatus.Failure;
+
+        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchItem(state, ref data, step);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+
+        /* bstack: node step text_pos fuzzy_type op */
+
+        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        node = data.NewNode!;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>Upstream <c>retry_fuzzy_match_item</c> (line 10262): the next kind of error.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="op">The opcode whose frame is being retried, which goes back on the stack.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, where matching carries on.</param>
+    /// <param name="advance">
+    /// Whether the item consumes a character. <see langword="false"/> for a zero-width one, which is
+    /// how a step of <c>0</c> reaches <see cref="NextFuzzyMatchItem"/> again.
+    /// </param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int RetryFuzzyMatchItem(MatchState state, byte op, bool search, ref Node node, bool advance)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        state.UnrecordFuzzy();
+
+        /* bstack: node step text_pos fuzzy_type */
+
+        if (
+            !state.Bstack.PopUInt8(out byte poppedType)
+            || !state.Bstack.PopSize(out long poppedTextPos)
+            || !state.Bstack.PopInt8(out sbyte step)
+            || !state.Bstack.PopNode(state.Pattern, out Node? currNode)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)poppedTextPos;
+
+        FuzzyData data = default;
+        data.FuzzyType = poppedType;
+        data.NewNode = currNode;
+
+        // Upstream's 'data.step = step', where 'step' is what fuzzy_match_item PUSHED - so a
+        // zero-width item retries with a step of 0 here where its first attempt carried 1 or -1.
+        // That is upstream's behaviour, not an oversight in the port: an insertion on the retry of a
+        // zero-width item therefore does not move the position.
+        data.Step = step;
+
+        /* bstack: - */
+
+        // Upstream guards this with 'if (data.fuzzy_type >= 0)' on an RE_UINT8, which is always true.
+        --fuzzyCounts[data.FuzzyType];
+
+        // Permit insertion except initially when searching (it's better just to start searching one
+        // character later).
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+
+        step = advance ? data.Step : (sbyte)0;
+
+        int status = MatchStatus.Failure;
+
+        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchItem(state, ref data, step);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(currNode);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(op);
+
+        /* bstack: node step text_pos fuzzy_type op */
+
+        state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        node = data.NewNode!;
+
+        return MatchStatus.Success;
+    }
+
     /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
@@ -3003,6 +3484,15 @@ internal static class Matcher
         int gfoldedPos = 0;
         Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
         Span<uint> gfolded = stackalloc uint[UnicodeTables.MaxFolded];
+
+        // The three scratch buffers FUZZY and END_FUZZY need, allocated here for the same reason
+        // 'folded' is: a stackalloc inside either loop is not released until this method returns, so
+        // one per backtrack step grows the stack without bound (CA2014). That analyzer does not see
+        // a stackalloc nested inside a switch case, so this is the rule and not the tool.
+        Span<long> fuzzyOuterCounts = stackalloc long[FuzzyValue.Count];
+        Span<long> fuzzyTotalCounts = stackalloc long[FuzzyValue.Count];
+        Span<long> fuzzyInnerCounts = stackalloc long[FuzzyValue.Count];
+
         state.FewestErrors = state.MaxErrors;
 
         // 'do_search_start' and the required-string locator are Phase 7 prefilters, so the search
@@ -3026,7 +3516,18 @@ internal static class Matcher
          * pstack: bstack
          */
 
-        // NOT PORTED: clearing the fuzzy counts (Phase 5) and the pattern-call guard list (Phase 4).
+        // Clear the fuzzy counts (:11790-11792). Ordinarily invisible, because the FUZZY backtrack
+        // arm has already restored them by the time FAILURE jumps back here - but a verb that cuts
+        // the backtracking drops the fuzzy frames instead of unwinding them, and then the counts are
+        // still the abandoned attempt's. Found by S38's blind review, and pinned by
+        // FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one.
+        //
+        // NOT PORTED: the pattern-call guard list clear (:11797-11803), which S30 settled as
+        // write-only upstream - see docs/PORTMAP.md's "deliberately not ported" table.
+        if (state.IsFuzzy)
+        {
+            Array.Clear(state.FuzzyCounts);
+        }
 
         // Locate the required string, if there's one: deferred to Phase 7, so the start position
         // stands.
@@ -3115,7 +3616,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, 1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -3137,7 +3648,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, 1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -3159,7 +3680,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, 1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -3193,7 +3724,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, -1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -3203,15 +3744,13 @@ internal static class Matcher
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
                     PushCaptures(state, state.Bstack);
-
-                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
-                    // block on the stack is the same shape at both ends.
+                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Atomic);
                     state.Pstack.PushSize(state.Bstack.Count);
 
-                    /* bstack: captures capture_change sstack ATOMIC
+                    /* bstack: captures fuzzy_counts capture_change sstack ATOMIC
                      *
                      * pstack: bstack
                      */
@@ -3222,7 +3761,7 @@ internal static class Matcher
                 {
                     /* sstack: ...
                      *
-                     * bstack: captures capture_change sstack ATOMIC ...
+                     * bstack: captures fuzzy_counts capture_change sstack ATOMIC ...
                      *
                      * pstack: bstack
                      */
@@ -3244,7 +3783,7 @@ internal static class Matcher
                     state.Sstack.Count = (int)atomicSstackCount;
                     state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
 
-                    /* bstack: captures capture_change END_ATOMIC
+                    /* bstack: captures fuzzy_counts capture_change END_ATOMIC
                      *
                      * pstack: -
                      */
@@ -3264,9 +3803,7 @@ internal static class Matcher
                     // the stack - LOOKAROUND's optimisation is not repeated for CONDITIONAL.
                     PushCaptures(state, state.Bstack);
                     PushRepeats(state, state.Bstack);
-
-                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
-                    // block on the stack is the same shape at both ends.
+                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Conditional);
@@ -3274,7 +3811,7 @@ internal static class Matcher
 
                     /* sstack: node slice_start slice_end text_pos
                      *
-                     * bstack: captures repeats capture_change sstack CONDITIONAL
+                     * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL
                      *
                      * pstack: bstack
                      */
@@ -3291,7 +3828,7 @@ internal static class Matcher
                 {
                     /* sstack: node slice_start slice_end text_pos ...
                      *
-                     * bstack: captures repeats capture_change sstack CONDITIONAL ...
+                     * bstack: captures repeats fuzzy_counts capture_change sstack CONDITIONAL ...
                      *
                      * pstack: bstack
                      */
@@ -3326,7 +3863,7 @@ internal static class Matcher
 
                     /* sstack: -
                      *
-                     * bstack: captures repeats capture_change
+                     * bstack: captures repeats fuzzy_counts capture_change
                      *
                      * pstack: -
                      */
@@ -3337,7 +3874,7 @@ internal static class Matcher
                         // saved block stays on the stack for the backtrack case to undo.
                         state.Bstack.PushUInt8((byte)Opcode.EndConditional);
 
-                        /* bstack: captures repeats capture_change END_CONDITIONAL */
+                        /* bstack: captures repeats fuzzy_counts capture_change END_CONDITIONAL */
 
                         // Go to the 'true' branch.
                         node = node.Next1.Node!;
@@ -3353,8 +3890,11 @@ internal static class Matcher
 
                         state.CaptureChange = endCondCaptureChange;
 
-                        // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
-                        if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
+                        if (
+                            !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                            || !PopRepeats(state, state.Bstack)
+                            || !PopCaptures(state, state.Bstack)
+                        )
                         {
                             return MatchStatus.Illegal;
                         }
@@ -3474,6 +4014,71 @@ internal static class Matcher
                      * sstack: text_pos
                      *
                      * bstack: FALSE op
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
+                }
+                case Opcode.EndFuzzy: // End of fuzzy matching (:12448).
+                {
+                    Span<long> outerCounts = fuzzyOuterCounts;
+                    Span<long> totalCounts = fuzzyTotalCounts;
+
+                    /* sstack: outer_counts outer_node
+                     *
+                     * bstack: -
+                     */
+
+                    // Are the inner constraints OK? This is the one place a 'min' is consulted: an
+                    // item asks whether one more error fits, and only the end of the section can ask
+                    // whether the section as a whole is legal.
+                    if (!FuzzyWithinConstraints(state.FuzzyCounts, state.FuzzyNode!, state.MaxErrors))
+                    {
+                        goto backtrack;
+                    }
+
+                    if (
+                        !state.Sstack.PopNode(pattern, out Node? outerNode)
+                        || !state.PopFuzzyCounts(state.Sstack, outerCounts)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    /* sstack: - */
+
+                    // Add the inner counts to the outer counts.
+                    totalCounts[FuzzyValue.Sub] = outerCounts[FuzzyValue.Sub] + state.FuzzyCounts[FuzzyValue.Sub];
+                    totalCounts[FuzzyValue.Ins] = outerCounts[FuzzyValue.Ins] + state.FuzzyCounts[FuzzyValue.Ins];
+                    totalCounts[FuzzyValue.Del] = outerCounts[FuzzyValue.Del] + state.FuzzyCounts[FuzzyValue.Del];
+
+                    // Is the total number of errors OK?
+                    state.TotalErrors = TotalErrors(totalCounts);
+
+                    if (state.TotalErrors > state.MaxErrors)
+                    {
+                        state.PushFuzzyCounts(state.Sstack, outerCounts);
+                        state.Sstack.PushNode(outerNode);
+
+                        /* sstack: outer_counts outer_node */
+                        goto backtrack;
+                    }
+
+                    // Save the inner fuzzy info. The zero is the count of trailing insertions this
+                    // section has been asked to try, which the backtrack arm raises one at a time.
+                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
+                    state.Bstack.PushSize(0);
+                    state.Bstack.PushNode(state.FuzzyNode);
+                    state.Bstack.PushSize(state.TextPos);
+                    state.Bstack.PushNode(node);
+                    state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                    totalCounts.CopyTo(state.FuzzyCounts);
+                    state.FuzzyNode = outerNode;
+
+                    /* sstack: -
+                     *
+                     * bstack: inner_counts insertions inner_node text_pos end_fuzzy_node END_FUZZY
                      */
 
                     node = node.Next1.Node!;
@@ -3793,7 +4398,7 @@ internal static class Matcher
                 {
                     /* sstack: node slice_start slice_end text_pos ...
                      *
-                     * bstack: [captures TRUE | FALSE] capture_change sstack LOOKAROUND ...
+                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND ...
                      *
                      * pstack: bstack
                      */
@@ -3828,7 +4433,7 @@ internal static class Matcher
 
                     /* sstack: -
                      *
-                     * bstack: [captures TRUE | FALSE] capture_change
+                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
                      *
                      * pstack: -
                      */
@@ -3839,7 +4444,7 @@ internal static class Matcher
                         // stay visible; the block stays on the stack for the backtrack case to undo.
                         state.Bstack.PushUInt8((byte)Opcode.EndLookaround);
 
-                        /* bstack: [captures TRUE | FALSE] capture_change END_LOOKAROUND */
+                        /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change END_LOOKAROUND */
 
                         // Go to the 'true' branch.
                         node = node.Next1.Node!;
@@ -3855,7 +4460,11 @@ internal static class Matcher
 
                         state.CaptureChange = endLookCaptureChange;
 
-                        // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                        if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
                         if (!state.Bstack.PopBool(out bool endLookHasGroups))
                         {
                             return MatchStatus.Illegal;
@@ -3921,7 +4530,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, 1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -3962,7 +4581,17 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        status = FuzzyMatchItem(state, search, ref node, -1);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -4022,7 +4651,19 @@ internal static class Matcher
                     }
                     else if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        // A step of 0: a zero-width item consumes nothing, so it can be neither
+                        // deleted nor substituted, and an insertion is the only error left.
+                        status = FuzzyMatchItem(state, search, ref node, 0);
+
+                        if (status < 0)
+                        {
+                            return status;
+                        }
+
+                        if (status == MatchStatus.Failure)
+                        {
+                            goto backtrack;
+                        }
                     }
                     else
                     {
@@ -4032,6 +4673,26 @@ internal static class Matcher
                     break;
                 case Opcode.Failure: // Failure.
                     goto backtrack;
+                case Opcode.Fuzzy: // Fuzzy matching (:13132).
+                    // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
+                    // zero and END_FUZZY adds them back in, which is how an inner budget can be
+                    // tighter than the outer one without either being ignored.
+                    state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
+                    state.Sstack.PushNode(state.FuzzyNode);
+
+                    // Initialise the inner fuzzy info.
+                    Array.Clear(state.FuzzyCounts);
+                    state.FuzzyNode = node;
+
+                    state.Bstack.PushUInt8((byte)Opcode.Fuzzy);
+
+                    /* sstack: outer_counts outer_node
+                     *
+                     * bstack: FUZZY
+                     */
+
+                    node = node.Next1.Node!;
+                    break;
                 case Opcode.GreedyRepeat: // Greedy repeat.
                 {
                     // Repeat indexes are 0-based.
@@ -4593,9 +5254,7 @@ internal static class Matcher
                     }
 
                     state.Bstack.PushBool(lookHasGroups);
-
-                    // NOT PORTED: push_fuzzy_counts (Phase 5). The pop is left out to match, so the
-                    // block on the stack is the same shape at both ends.
+                    state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
                     state.Bstack.PushSize(state.CaptureChange);
                     state.Bstack.PushSize(state.Sstack.Count);
                     state.Bstack.PushUInt8((byte)Opcode.Lookaround);
@@ -4603,7 +5262,7 @@ internal static class Matcher
 
                     /* sstack: node slice_start slice_end text_pos
                      *
-                     * bstack: [captures TRUE | FALSE] capture_change sstack LOOKAROUND
+                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack LOOKAROUND
                      *
                      * pstack: bstack
                      */
@@ -5595,11 +6254,91 @@ internal static class Matcher
 
             switch ((Opcode)op)
             {
+                // Upstream's shared one-character block (:15210-15243): every one of these opcodes
+                // is on the backtracking stack for exactly one reason, which is that fuzzy_match_item
+                // put it there. 'advance: true' because the item consumes a character.
+                case Opcode.Any:
+                case Opcode.AnyAll:
+                case Opcode.AnyAllRev:
+                case Opcode.AnyRev:
+                case Opcode.AnyU:
+                case Opcode.AnyURev:
+                case Opcode.Character:
+                case Opcode.CharacterIgn:
+                case Opcode.CharacterIgnRev:
+                case Opcode.CharacterRev:
+                case Opcode.Property:
+                case Opcode.PropertyIgn:
+                case Opcode.PropertyIgnRev:
+                case Opcode.PropertyRev:
+                case Opcode.Range:
+                case Opcode.RangeIgn:
+                case Opcode.RangeIgnRev:
+                case Opcode.RangeRev:
+                case Opcode.SetDiff:
+                case Opcode.SetDiffIgn:
+                case Opcode.SetDiffIgnRev:
+                case Opcode.SetDiffRev:
+                case Opcode.SetInter:
+                case Opcode.SetInterIgn:
+                case Opcode.SetInterIgnRev:
+                case Opcode.SetInterRev:
+                case Opcode.SetSymDiff:
+                case Opcode.SetSymDiffIgn:
+                case Opcode.SetSymDiffIgnRev:
+                case Opcode.SetSymDiffRev:
+                case Opcode.SetUnion:
+                case Opcode.SetUnionIgn:
+                case Opcode.SetUnionIgnRev:
+                case Opcode.SetUnionRev:
+                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: true);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    break;
+                // Upstream's shared zero-width block (:15330-15344). 'advance: false', which is what
+                // puts a step of 0 back into next_fuzzy_match_item.
+                case Opcode.Boundary:
+                case Opcode.DefaultBoundary:
+                case Opcode.DefaultEndOfWord:
+                case Opcode.DefaultStartOfWord:
+                case Opcode.EndOfLine:
+                case Opcode.EndOfLineU:
+                case Opcode.EndOfString:
+                case Opcode.EndOfStringLine:
+                case Opcode.EndOfStringLineU:
+                case Opcode.EndOfWord:
+                case Opcode.GraphemeBoundary:
+                case Opcode.StartOfLine:
+                case Opcode.StartOfLineU:
+                case Opcode.StartOfString:
+                case Opcode.StartOfWord:
+                    status = RetryFuzzyMatchItem(state, op, search, ref node, advance: false);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    break;
                 case Opcode.Atomic: // Start of an atomic group.
                 {
                     /* sstack: ...
                      *
-                     * bstack: captures capture_change sstack
+                     * bstack: captures fuzzy_counts capture_change sstack
                      *
                      * pstack: bstack
                      */
@@ -5618,8 +6357,7 @@ internal static class Matcher
 
                     state.CaptureChange = atomicCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
-                    if (!PopCaptures(state, state.Bstack))
+                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -5628,7 +6366,7 @@ internal static class Matcher
                 }
                 case Opcode.EndAtomic: // End of an atomic group.
                 {
-                    /* bstack: captures capture_change */
+                    /* bstack: captures fuzzy_counts capture_change */
 
                     if (!state.Bstack.PopSize(out long endAtomicCaptureChange))
                     {
@@ -5637,8 +6375,7 @@ internal static class Matcher
 
                     state.CaptureChange = endAtomicCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
-                    if (!PopCaptures(state, state.Bstack))
+                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts) || !PopCaptures(state, state.Bstack))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -5700,8 +6437,11 @@ internal static class Matcher
 
                     state.CaptureChange = condCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
-                    if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
+                    if (
+                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                        || !PopRepeats(state, state.Bstack)
+                        || !PopCaptures(state, state.Bstack)
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -5724,12 +6464,103 @@ internal static class Matcher
 
                     state.CaptureChange = endCondCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
-                    if (!PopRepeats(state, state.Bstack) || !PopCaptures(state, state.Bstack))
+                    if (
+                        !state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts)
+                        || !PopRepeats(state, state.Bstack)
+                        || !PopCaptures(state, state.Bstack)
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
 
+                    break;
+                }
+                case Opcode.EndFuzzy: // End of fuzzy matching (:15488).
+                {
+                    Span<long> innerCounts = fuzzyInnerCounts;
+
+                    /* sstack: -
+                     *
+                     * bstack: inner_counts insertions inner_node text_pos end_fuzzy_node
+                     */
+
+                    if (
+                        !state.Bstack.PopNode(pattern, out Node? endFuzzyNode)
+                        || !state.Bstack.PopSize(out long endFuzzyTextPos)
+                        || !state.Bstack.PopNode(pattern, out Node? innerNode)
+                        || !state.Bstack.PopSize(out long insertions)
+                        || !state.PopFuzzyCounts(state.Bstack, innerCounts)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    node = endFuzzyNode!;
+                    state.TextPos = (int)endFuzzyTextPos;
+
+                    // Try one more insertion after the section. This is the only place a trailing
+                    // insertion can come from: every item inside the section has already been tried.
+                    if (
+                        InsertionPermitted(state, innerNode!, innerCounts)
+                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors
+                        && FuzzyExtMatch(innerNode, state.TextPos)
+                    )
+                    {
+                        bool endFuzzyReverse = (innerNode!.Status & NodeStatus.Reverse) != 0;
+                        int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
+
+                        if (state.TextPos != endFuzzyLimit)
+                        {
+                            state.RecordFuzzy(FuzzyValue.Ins, state.TextPos);
+                            ++innerCounts[FuzzyValue.Ins];
+
+                            state.TextPos = Step(state, state.TextPos, endFuzzyReverse ? -1 : 1);
+
+                            // Save the inner fuzzy info.
+                            state.PushFuzzyCounts(state.Bstack, innerCounts);
+                            state.Bstack.PushSize(insertions + 1);
+                            state.Bstack.PushNode(innerNode);
+                            state.Bstack.PushSize(state.TextPos);
+                            state.Bstack.PushNode(node);
+                            state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
+
+                            /* bstack: inner_counts insertions inner_node text_pos end_fuzzy_node
+                             * END_FUZZY
+                             */
+
+                            ++state.FuzzyCounts[FuzzyValue.Ins];
+                            state.TotalErrors = TotalErrors(state.FuzzyCounts);
+
+                            node = node.Next1.Node!;
+                            goto advance;
+                        }
+                    }
+
+                    // Subtract the inner counts from the outer counts.
+                    state.FuzzyCounts[FuzzyValue.Sub] -= innerCounts[FuzzyValue.Sub];
+                    state.FuzzyCounts[FuzzyValue.Ins] -= innerCounts[FuzzyValue.Ins];
+                    state.FuzzyCounts[FuzzyValue.Del] -= innerCounts[FuzzyValue.Del];
+
+                    // Save the outer fuzzy info.
+                    state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
+                    state.Sstack.PushNode(state.FuzzyNode);
+
+                    /* sstack: outer_counts outer_node
+                     *
+                     * bstack: -
+                     */
+
+                    innerCounts[FuzzyValue.Ins] -= insertions;
+
+                    while (insertions > 0)
+                    {
+                        state.UnrecordFuzzy();
+                        --insertions;
+                    }
+
+                    // Restore the inner fuzzy info.
+                    innerCounts.CopyTo(state.FuzzyCounts);
+                    state.FuzzyNode = innerNode;
                     break;
                 }
                 case Opcode.GroupCall: // Group call (:16354).
@@ -5933,7 +6764,7 @@ internal static class Matcher
                 }
                 case Opcode.EndLookaround: // End of a lookaround subpattern (:15650).
                 {
-                    /* bstack: [captures TRUE | FALSE] capture_change */
+                    /* bstack: [captures TRUE | FALSE] fuzzy_counts capture_change */
 
                     // The 'true' branch of a positive lookaround is being given up, so the captures
                     // its body made go with it. Leaving this out is invisible to any test that does
@@ -5945,7 +6776,11 @@ internal static class Matcher
 
                     state.CaptureChange = endLookCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
                     if (!state.Bstack.PopBool(out bool endLookHasGroups))
                     {
                         return MatchStatus.Illegal;
@@ -6037,6 +6872,23 @@ internal static class Matcher
                     state.Bstack.Reset();
                     state.Pstack.Reset();
                     goto start_match;
+                case Opcode.Fuzzy: // Fuzzy matching (:15752).
+                    /* sstack: outer_counts outer_node
+                     *
+                     * bstack: -
+                     */
+
+                    // Restore the outer fuzzy info.
+                    if (
+                        !state.Sstack.PopNode(pattern, out Node? outerFuzzyNode)
+                        || !state.PopFuzzyCounts(state.Sstack, state.FuzzyCounts)
+                    )
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    state.FuzzyNode = outerFuzzyNode;
+                    break;
                 // GREEDY_REPEAT (:15778) and LAZY_REPEAT (:15779), which upstream gives one body:
                 // the repeat failed, so the enclosing repeat's state goes back and the position it
                 // was entered at is guarded against the body being tried there again.
@@ -6374,7 +7226,7 @@ internal static class Matcher
                 {
                     /* sstack: node slice_start slice_end text_pos ...
                      *
-                     * bstack: [captures TRUE | FALSE] capture_change sstack
+                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change sstack
                      *
                      * pstack: bstack
                      */
@@ -6401,7 +7253,7 @@ internal static class Matcher
 
                     /* sstack: -
                      *
-                     * bstack: [captures TRUE | FALSE] capture_change
+                     * bstack: [captures TRUE | FALSE] fuzzy_counts capture_change
                      *
                      * pstack: -
                      */
@@ -6413,7 +7265,11 @@ internal static class Matcher
 
                     state.CaptureChange = lookCaptureChange;
 
-                    // NOT PORTED: pop_fuzzy_counts (Phase 5), matching the push.
+                    if (!state.PopFuzzyCounts(state.Bstack, state.FuzzyCounts))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
                     if (!state.Bstack.PopBool(out bool lookHasGroups))
                     {
                         return MatchStatus.Illegal;
@@ -6561,8 +7417,36 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): the fuzzy strategies
-    /// are seams until Phase 5.
+    /// Upstream <c>do_simple_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 18027): plain fuzzy
+    /// matching, which takes the first match it finds rather than the best one.
+    /// </summary>
+    /// <remarks>
+    /// NOT PORTED: upstream's <c>available</c> and the <c>max_errors == 0 &amp;&amp; partial_side ==
+    /// RE_PARTIAL_NONE</c> early-out below it (<c>:18028</c>, <c>:18048-18053</c>). The block is
+    /// copied from <c>do_exact_match</c>, where <c>max_errors</c> is <c>0</c> and it is live; here
+    /// the line above sets <c>max_errors</c> to <c>PY_SSIZE_T_MAX</c>, so the condition is false by
+    /// construction and <c>available</c> is computed and never read.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether to search rather than anchor at the start position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoSimpleFuzzyMatch(MatchState state, bool search)
+    {
+        // The maximum permitted cost.
+        state.MaxErrors = long.MaxValue;
+
+        state.BestMatchPos = state.TextPos;
+        state.BestTextPos = state.Reverse ? state.SliceStart : state.SliceEnd;
+
+        // Initialise the state.
+        state.InitMatch();
+
+        return BasicMatch(state, search);
+    }
+
+    /// <summary>
+    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): the <c>BESTMATCH</c> and
+    /// <c>ENHANCEMATCH</c> strategies are seams until S41 and S42.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to search rather than anchor at the start position.</param>
@@ -6588,8 +7472,7 @@ internal static class Matcher
             throw Seam.For("fuzzy-enhancematch", "ENHANCEMATCH fuzzy matching is not implemented yet");
         }
 
-        // Upstream do_simple_fuzzy_match (:18027).
-        throw Seam.For("fuzzy-matching", "fuzzy matching is not implemented yet");
+        return DoSimpleFuzzyMatch(state, search);
     }
 
     /// <summary>

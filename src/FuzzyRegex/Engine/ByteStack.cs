@@ -23,7 +23,7 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// </para>
 /// <para>
 /// Only the typed helpers the matcher actually pushes are here. The rest of upstream's set
-/// (<c>push_int8</c>, <c>push_code</c>, <c>push_int</c>) still arrives with its first caller;
+/// (<c>push_code</c>, <c>push_int</c>) still arrives with its first caller;
 /// <c>push_groups</c>, <c>push_captures</c> and <c>push_repeat_data</c> have theirs, and live on
 /// <see cref="Matcher"/> and <see cref="GuardList"/> rather than here because each walks the match
 /// state. <c>docs/PORTMAP.md</c> records them.
@@ -188,6 +188,20 @@ internal sealed class ByteStack : IDisposable
     /// <param name="item">Receives the value.</param>
     /// <returns><see langword="false"/> if the stack is empty.</returns>
     internal bool PopUInt8(out byte item) => Pop(out item);
+
+    /// <summary>Upstream <c>push_int8</c> (line 2434), whose first caller is the fuzzy step.</summary>
+    /// <param name="item">The value to push.</param>
+    internal void PushInt8(sbyte item) => Push((byte)item);
+
+    /// <summary>Upstream <c>pop_int8</c> (line 2606).</summary>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if the stack is empty.</returns>
+    internal bool PopInt8(out sbyte item)
+    {
+        bool ok = Pop(out byte value);
+        item = (sbyte)value;
+        return ok;
+    }
 
     /// <summary>Upstream <c>push_bool</c> (line 2446).</summary>
     /// <param name="item">The value to push.</param>
