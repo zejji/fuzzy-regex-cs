@@ -616,7 +616,7 @@ function Write-SliceLogEntry {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Slice,
-        [Parameter(Mandatory)][ValidateSet('completed', 'failed', 'parked', 'rate-limited')][string]$Outcome,
+        [Parameter(Mandatory)][ValidateSet('completed', 'checkpoint', 'failed', 'parked', 'rate-limited')][string]$Outcome,
         [long]$TotalTokens = 0,
         [AllowNull()][object]$Rescue
     )

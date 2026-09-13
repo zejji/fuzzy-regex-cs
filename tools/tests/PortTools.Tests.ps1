@@ -477,6 +477,13 @@ Describe 'Write-SliceLogEntry' {
         (Get-Content $path | ConvertFrom-Json).outcome | Should -Be 'rate-limited'
     }
 
+    It 'records a checkpoint - a green commit with the slice still pending - as its own outcome' {
+        $path = Join-Path $TestDrive 'slice-log-cp.jsonl'
+        Write-SliceLogEntry -Path $path -Slice 'S08' -Outcome 'checkpoint' -TotalTokens 42
+
+        (Get-Content $path | ConvertFrom-Json).outcome | Should -Be 'checkpoint'
+    }
+
     It 'records the rescue details, so rescued work can be found from the log alone' {
         $path = Join-Path $TestDrive 'slice-log-rescue.jsonl'
         $rescue = [pscustomobject]@{
