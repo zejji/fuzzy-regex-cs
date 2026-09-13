@@ -90,7 +90,7 @@ work and resets the tree to where you found it, so the next attempt starts from 
 reviewer has not reported yet, you are not finished - stay in the turn. This is not hypothetical:
 S07's first attempt reached a green ratchet, 495 passing tests and 410 matching corpus rows, then
 ended its turn to wait for a background reviewer and lost the lot (2026-08-30, 54.5M tokens; the
-rescue stash was added afterwards, in response to that failure).
+rescue stash was added afterwards, in response to that failure). The same rule covers every long command - a controls run, a 6000-row wave, a benchmark: run it as a blocking tool call with a timeout, or poll it with short bounded calls. S44's first sitting ended its turn to "continue when the controls complete" and was lost the same way (2026-09-13).
 
 Treat every finding as a hypothesis and reproduce it yourself before touching code. Roughly four
 in five candidate findings do not survive that gate, and acting on one that should have been

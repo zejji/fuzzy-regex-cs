@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -58,6 +60,12 @@ SUMMARY = re.compile(
     r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
 )
 CONSUME_TIMEOUT = 240
+# Written before a mutation is applied and deleted after the restore. A killed run (the driver's
+# sitting timeout, a closed terminal) never reaches the `finally` below, and the mutation stays in
+# the tree: S43 sitting 2 and S44 sitting 1 were both lost to S42-1B's left-over mutation, which
+# hangs the suite. The next run restores from this file first; check-ratchet.ps1 refuses to run
+# while it exists.
+MARKER = REPO / ".scratch" / "control-mutation.json"
 
 
 def load() -> list[dict]:
@@ -89,10 +97,24 @@ def resolve(control: dict) -> tuple[Path, str, int]:
     return path, text, found
 
 
+def restore_leftover() -> None:
+    """Undoes a mutation a killed run left behind, then removes the marker."""
+    if not MARKER.exists():
+        return
+    marker = json.loads(MARKER.read_text(encoding="utf-8"))
+    path = REPO / marker["file"]
+    path.write_text(marker["original"], encoding="utf-8", newline="\n")
+    MARKER.unlink()
+    print(f"restored {marker['file']}: control {marker['id']} was left applied by a killed run")
+
+
 def mutate(control: dict) -> tuple[Path, str]:
     """Applies the mutation and returns the file and its original text."""
     path, text, at = resolve(control)
     mutated = text[:at] + control["after"] + text[at + len(control["before"]) :]
+    MARKER.parent.mkdir(parents=True, exist_ok=True)
+    MARKER.write_text(json.dumps({"id": control["id"], "file": path.relative_to(REPO).as_posix(),
+                                  "original": text}), encoding="utf-8")
     path.write_text(mutated, encoding="utf-8", newline="\n")
     return path, text
 
@@ -119,6 +141,14 @@ def wave_for(generator: str, count: int, seed: int) -> Path:
     return path
 
 
+def kill_tree(proc: subprocess.Popen) -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)
+    else:
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=30)
+
+
 def consume(wave: Path) -> tuple[str, str]:
     """Runs the consumer against one wave and returns its summary line."""
     LIVE_WAVE.parent.mkdir(parents=True, exist_ok=True)
@@ -136,15 +166,20 @@ def consume(wave: Path) -> tuple[str, str]:
     # how a 240-second bound sat there for six minutes without firing (measured 2026-09-01).
     log = REPO / ".scratch" / "control-consume.log"
     with open(log, "w", encoding="utf-8") as handle:
+        # Popen + kill of the whole tree, not subprocess.run: run's timeout kills only `dotnet`
+        # and leaves the test host spinning on the mutation, holding the OracleTests DLL so no
+        # later build can replace it (two such orphans on 2026-09-13, killed by hand).
+        proc = subprocess.Popen(
+            ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
+             "--configuration", "Debug"],
+            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
         try:
-            subprocess.run(
-                ["dotnet", "test", "tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj",
-                 "--configuration", "Debug"],
-                cwd=REPO, stdout=handle, stderr=subprocess.STDOUT, check=False,
-                timeout=CONSUME_TIMEOUT,
-            )
+            proc.wait(timeout=CONSUME_TIMEOUT)
         except subprocess.TimeoutExpired:
-            return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s"
+            kill_tree(proc)
+            return "TIMEOUT", f"the consumer did not finish within {CONSUME_TIMEOUT}s (process tree killed)"
 
     if not REPORT.exists():
         tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:])
@@ -188,6 +223,7 @@ def main() -> int:
             control["seeds"] = control["seeds"][: args.seeds]
 
     if args.check:
+        restore_leftover()
         bad = 0
         for control in controls:
             try:
@@ -206,9 +242,15 @@ def main() -> int:
     if args.record_only:
         return 0
 
+    restore_leftover()
     for control in controls:
         started = time.time()
-        path, original = mutate(control)
+        try:
+            path, original = mutate(control)
+        except LookupError as e:
+            # One stale site must not abort the rest: S44 found the whole run stopping at S31-A.
+            print(f"{control['id']:8} {control['name']:34} NOT RESOLVED {e}")
+            continue
         try:
             fmt = run(["dotnet", "csharpier", "format", str(path)])
             if fmt.returncode != 0:
@@ -228,6 +270,7 @@ def main() -> int:
                 sys.stdout.flush()
         finally:
             path.write_text(original, encoding="utf-8", newline="\n")
+            MARKER.unlink(missing_ok=True)
         print(f"         ({time.time() - started:.0f}s, {path.name} restored)")
         sys.stdout.flush()
 

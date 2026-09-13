@@ -29,7 +29,12 @@ param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
     [switch]$UpdateBaseline,
     [switch]$AcceptRemovals,
-    [switch]$SkipTestRun
+    [switch]$SkipTestRun,
+    # Wall-clock bound on the test run, enforced from OUTSIDE the test host. The platform's own
+    # `--timeout` and the assembly [Timeout] proved useless against a CPU-bound engine loop with no
+    # cancellation check: a hung host ran 44 minutes past `--timeout 20m` on 2026-09-13 before a
+    # human killed it. The suite takes about 30 s.
+    [int]$TimeoutSeconds = 1200
 )
 
 Set-StrictMode -Version Latest
@@ -42,18 +47,29 @@ $trxPath = Join-Path $repoRoot 'TestResults/results.trx'
 $baselinePath = Join-Path $repoRoot 'tests/parity-baseline.json'
 $statusPath = Join-Path $repoRoot 'docs/STATUS.md'
 
+$controlMarker = Join-Path $repoRoot '.scratch/control-mutation.json'
+if (Test-Path -LiteralPath $controlMarker) {
+    Write-Host "Ratchet: RED - tools/run-controls.py left a control mutation applied ($controlMarker)." -ForegroundColor Red
+    Write-Host '  Run `python tools/run-controls.py --check` to restore the file, then re-run.' -ForegroundColor Yellow
+    exit 1
+}
+
 if (-not $SkipTestRun) {
     if (Test-Path -LiteralPath $trxPath) { Remove-Item -LiteralPath $trxPath -Force }
 
     Write-Host "Running tests ($Configuration)..." -ForegroundColor Cyan
     # A non-zero exit here just means tests failed; the ratchet still needs the report to say
     # which ones, so the exit code is deliberately not treated as fatal.
-    dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj') `
-        --configuration $Configuration `
-        -- --report-trx --report-trx-filename results.trx --timeout 20m
-    # --timeout is Microsoft.Testing.Platform's global bound. Without it a hanging test host hangs
-    # the ratchet, and a hung ratchet hangs the driver's landing check - twelve minutes on
-    # 2026-09-13 before a human stopped it. The suite takes about 30 s; 20 m is generous.
+    $proc = Start-Process -FilePath 'dotnet' -PassThru -NoNewWindow -ArgumentList @(
+        'test', (Join-Path $repoRoot 'tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj'),
+        '--configuration', $Configuration,
+        '--', '--report-trx', '--report-trx-filename', 'results.trx')
+    if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+        $proc.Kill($true)   # the whole tree: MSBuild nodes and the test host, not just `dotnet`
+        Write-Host "Ratchet: RED - the test run did not finish within $TimeoutSeconds s and was killed." -ForegroundColor Red
+        Write-Host '  A hung test is an engine loop: diff src/ against HEAD before re-running.' -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 # Exit, do not throw. A session that commits non-compiling code produces no report at all, and
