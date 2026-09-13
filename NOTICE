@@ -12,7 +12,7 @@ FuzzyRegex is a derivative work: a hand port to .NET of mrab-regex, the Python
 
   mrab-regex
   https://github.com/mrabarnett/mrab-regex
-  Tracked at commit 1760a20647f1c2ddcc025128407fe6f7edb905a1 (release 2026.8.12),
+  Tracked at commit 7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33 (release 2026.9.10),
   vendored read-only as the "upstream" git submodule.
   License expression: Apache-2.0 AND CNRI-Python
 

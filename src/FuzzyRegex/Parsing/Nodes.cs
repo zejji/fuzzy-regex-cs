@@ -3580,7 +3580,7 @@ internal sealed class LookAround : RegexBase
 
 /// <summary>
 /// A conditional on a lookaround, <c>(?(?=...)yes|no)</c>. Upstream
-/// <c>LookAroundConditional</c> (<c>upstream/regex/_regex_core.py</c> lines 3218-3301).
+/// <c>LookAroundConditional</c> (<c>upstream/regex/_regex_core.py</c> lines 3218-3300).
 /// </summary>
 internal sealed class LookAroundConditional : RegexBase
 {
@@ -3669,9 +3669,14 @@ internal sealed class LookAroundConditional : RegexBase
 
     /// <inheritdoc />
     /// <remarks>
-    /// Upstream's expression is <c>a and b or c</c>, which Python groups as <c>(a and b) or c</c>.
+    /// Upstream's expression WAS <c>a and b or c</c>, which Python groups as <c>(a and b) or c</c>,
+    /// so a conditional with an empty no-branch called itself empty whatever its test and
+    /// yes-branch were. That is issue 611, "Heap out-of-bounds write at compile time", fixed by
+    /// commit <c>1c90270</c> and released in 2026.8.30; the <c>or</c> arm is simply dropped.
+    /// Ported by S44. <c>BackrefAndConditionalTests</c> pins each of the four call sites that
+    /// consults this, with both versions' answers quoted.
     /// </remarks>
-    internal override bool IsEmpty() => (Subpattern.IsEmpty() && YesItem.IsEmpty()) || NoItem.IsEmpty();
+    internal override bool IsEmpty() => Subpattern.IsEmpty() && YesItem.IsEmpty();
 
     /// <inheritdoc />
     internal override long MaxWidth() => Math.Max(YesItem.MaxWidth(), NoItem.MaxWidth());

@@ -150,7 +150,8 @@ public sealed class GroupCallTests
         FuzzyRegex.Match("abcd", "(?(DEFINE)(?<ab>ab))(?<=(?&ab))cd").Success.Should().BeTrue();
     }
 
-    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    // NO LONGER DIVERGES: upstream agrees with this port from 2026.8.30, and S44 moved the pin to
+    // 2026.9.10. Kept as a plain regression test - see the closing note inside.
     [Test]
     public void A_group_called_from_a_lookahead_under_reverse_matches_forwards_here()
     {
@@ -172,12 +173,17 @@ public sealed class GroupCallTests
         // and a fixed-count body through the call is right too, which is what places the fault in
         // the repeat rather than in the lookahead: '(?r)(?<g>[ab]{2})(?=(?&g))b' records (2, 4).
         //
-        // ALREADY FIXED UPSTREAM, unlike the lookbehind case above, so there is nothing to report:
+        // ALREADY FIXED UPSTREAM, unlike the lookbehind case above, so there was nothing to report:
         // this is issue 614, `build_GROUP()` not propagating the match direction, fixed on
         // 2026-08-30 by commit 9398a6d - one line, `subargs.forward = forward;` - and released in
-        // 2026.8.30, which is past the version this oracle records against. The Phase 6 sync is
-        // where upstream stops diverging here, and the strict divergence list is what must notice:
-        // the oracle entry is `reverse-group-call-direction`.
+        // 2026.8.30.
+        //
+        // AND THE SYNC HAS NOW HAPPENED. S44 moved the pin to 2026.9.10, and the strict divergence
+        // list noticed exactly as it was built to: re-recording the oracle entry's example rows
+        // turned the (2, 1) above into (2, 5), so `group-call-direction` was DELETED. This port's
+        // answers below have not moved since S34 - upstream's came to meet them. The test stays,
+        // because a test that pins the right answer is worth having whoever else agrees with it;
+        // the version numbers quoted above are history now, not a live divergence.
         Match reversed = new FuzzyRegex("(?r)(?<g>[ab]+)(?=(?&g))b").Match("abbaa");
 
         (reversed.Index, reversed.Index + reversed.Length).Should().Be((0, 3));
@@ -211,8 +217,8 @@ public sealed class GroupCallTests
             .Equal((2, 3), (1, 2));
     }
 
-    // DIVERGES FROM UPSTREAM AT THE PIN ONLY, and this test pins OUR answer - which is also the
-    // answer regex 2026.9.10 gives.
+    // NO LONGER DIVERGES: it diverged at the old pin only, and S44's sync moved the pin to
+    // 2026.9.10, which gives this port's answer. Kept as a plain regression test.
     [Test]
     public void A_group_called_from_a_lookbehind_records_its_capture_inside_the_subject_here()
     {
@@ -226,6 +232,9 @@ public sealed class GroupCallTests
         //   # g1's captures are [(0, 1), (2, 1)] - a start PAST THE END of a one-character subject,
         //   # with an end before its own start
         //   # regex 2026.9.10 gives [(0, 1), (0, 1)], which is what this port has always given
+        //
+        // S44 pinned the oracle at 2026.9.10, so this row now AGREES and the divergence entry
+        // `group-call-direction` is gone. Re-recording the entry's example is what caught it.
         //
         // Two things came out of that one row. The first is this assertion. The second is that the
         // recorder could not write the row down at all - `_to_index_length` indexed a two-entry

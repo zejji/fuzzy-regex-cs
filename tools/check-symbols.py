@@ -83,8 +83,13 @@ PROSE_ACCOUNTED = {
     "match_ends", "match_get_group", "match_get_group_index", "match_get_group_slice",
     "match_getitem", "match_group", "match_length", "match_regs", "match_spans", "match_starts",
     "match_string", "pattern_copy", "pattern_dealloc", "pattern_deepcopy", "pattern_subf",
-    "pattern_subfn", "safe_dealloc", "scanner_iter", "scanner_iternext", "scanner_match",
+    "pattern_subfn", "safe_dealloc", "scanner_iter", "scanner_match",
     "scanner_search",
+    # `scanner_iternext` CAME OUT on 2026-09-13 (S44), and this is the pin working in the
+    # direction the module docstring says it must. It is now named outright, in the sync log's
+    # row for PRs 615-618 - which lists every function those PRs touch, `scanner_iternext`
+    # included, and says why none of them needs porting. Named is stronger than covered by a
+    # family row, so it no longer belongs here. The set is 37 from this date.
     # "GIL, locks and allocation (`re_alloc` ... `release_state_lock`)", 13: .NET has no GIL.
     "acquire_GIL", "release_GIL",
     # "Bytes support (`bytes1_char_at` ... `join_strings`)", 18: the three-by-three width-selected

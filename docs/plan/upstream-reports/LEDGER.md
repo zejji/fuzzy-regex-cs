@@ -16,6 +16,22 @@ entry below reproduces unchanged on the newest release except where an entry say
 614's fix changed only the reversed group-call span (entry 7's case G analogue: now `(3, 6)`, the
 port's answer) and did **not** fix the `(?<=(?&a))c` row S30 pinned.
 
+**S44 made 2026.9.10 the PIN on 2026-09-13**, so "the newest release" and "the version the oracle
+records against" are now the same thing, and that re-verification is no longer a separate act - the
+oracle itself performs it on every wave. Two consequences for this file:
+
+- **Entry 10 is CLOSED.** Its fix is in the pinned release and both of its clamps are now ported
+  here, so there is nothing outstanding on either side. It stays in the file as history.
+- Every other entry was re-checked the same day by re-recording all 42 divergence example rows
+  against the new pin: 37 reproduced byte for byte, 3 differed only by an `anchoredScan` field the
+  recorder did not write when they were first drawn, and the 2 that stopped diverging were issue
+  614's, which this ledger already recorded as fixed upstream. **No entry below changed status.**
+  In particular entry 5 is unaffected by the issue 613 clamps landing here, which is the thing
+  `ExpectedDivergences`'s header warned could be assumed and is not true.
+- **And the sync ADDED one: entry 15, a regression in 2026.9.10 itself**, caused by entry 10's own
+  fix. It is the first entry here that upstream did not have when the previous slice closed, and
+  the gate found it by re-running rather than by anyone looking for it.
+
 Original drafting notes: written by S33 and S34 out of `docs/plan/2026-09-12-divergence-research.md`
 against `regex` 2026.7.19 (submodule `1760a20647f1c2ddcc025128407fe6f7edb905a1`), Windows 11,
 CPython 3.13/3.14; PCRE2 10.47 via `tools/probes/pcre2-partial-and-skip.py`. Line numbers are
@@ -898,10 +914,12 @@ project has deliberately not set up (design spec amendment 7: releases and PyPI 
 
 # Added by S40a, 2026-09-13
 
-## 10. `(*SKIP)` inside an atomic group after an optional item loops for ever - ALREADY FIXED UPSTREAM
+## 10. `(*SKIP)` inside an atomic group after an optional item loops for ever - CLOSED
 
-**Status: nothing to file, and nothing to fix here.** Recorded so the next session does not
-re-derive it, and because it is the defect that forced the recorder's per-row deadline.
+**Status: CLOSED by S44 on 2026-09-13.** Fixed upstream in 2026.8.30, which is now the pinned
+release's ancestor, and both clamps are ported here. Nothing to file and nothing outstanding.
+Kept in full because it is the defect that forced the recorder's per-row deadline, and because
+the grid below is still the sweep that makes any claim about this shape mean anything.
 
 Found by S40 at 6000 rows a generator - `verbs` row 5944, seed 4242 - where it killed the whole wave
 silently: `tools/record-oracle.py` waited for ever, so no file was written at all, no error was
@@ -936,18 +954,25 @@ loop runs away. It is the only engine commit between `b77694a` and upstream's he
 construct at all - the rest of that window is `9398a6d` (group-call direction, entry 8's area) and
 the #615-#618 Python-API error-propagation PRs.
 
-**What this port answers, and the honest limit on it.** `None`, on the row and on all 1296 grid
-calls. But this port still carries the PRE-FIX arm - `Matcher.cs`'s `GreedyRepeatOne` backtrack has
-upstream's slice clamp and not the `pos` clamp - so "does not hang on these rows" is not "cannot
-hang", and the grid is what makes even the first claim worth anything: a grid that never reached
-the shape would give this port the same zero, and upstream's 70 is the proof that it does reach it.
-Pinned by
+**What this port answers, and what the honest limit on it WAS.** `None`, on the row and on all 1296
+grid calls. Until S44 this port still carried the PRE-FIX arm - `Matcher.cs`'s `GreedyRepeatOne`
+backtrack had upstream's slice clamp and not the `pos` clamp - so "does not hang on these rows" was
+not "cannot hang", and the grid is what made even the first claim worth anything: a grid that never
+reached the shape would give this port the same zero, and upstream's 70 is the proof that it does
+reach it. **S44 ported both clamps**, so the limit is gone; it changed none of the 1296 answers, and
+the grid is now re-runnable from tracked code with
+`python tools/probes/upstream-skip-in-atomic-hang.py --oracle-rows` piped into
+`pwsh -File tools/run-oracle.ps1 -Rows`. Pinned by
 `BacktrackingVerbTests.A_skip_inside_an_atomic_group_after_an_optional_item_answers_where_upstream_loops_for_ever`,
 whose assertions are bounded by a `MatchTimeout` so a regression fails one test instead of hanging
 the suite.
 
-**Where the two clamps get ported: the Phase 6 sync**, test-first, as ROADMAP and entry 5's note
-already say. This entry adds the reproduction they lacked.
+**The two clamps were ported by the Phase 6 sync, S44**, as ROADMAP and entry 5's note said they
+would be. What the slice measured, because "ported" and "changed something" are different claims:
+the branch the clamp guards IS reached - a probe throwing there was hit by this entry's own test,
+at `pos=2, limit=4, sliceStart=4` - and the unclamped retreat does go on to find a tail match below
+that limit, so the clamp is not decoration. It still moved no answer: the 1296-row grid agrees with
+2026.9.10 before and after, and so does the whole suite.
 
 **Consequence for the oracle, and the reason it stays true after the sync.** The recorder now gives
 every upstream call a ten-second deadline and records a row it misses as a `timeout` outcome the
@@ -1261,3 +1286,81 @@ about the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute
 position of every level.
 
 **Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.
+
+---
+
+# Added by S44, 2026-09-13
+
+## 15. `(*SKIP)` blocks the one repeat retreat a partial match needs - A REGRESSION IN 2026.9.10
+
+**Title:** Issue 613's retreat clamp loses a partial match that 2026.8.12 and PCRE2 both find
+
+**This one is new, and it is upstream's newest release that is wrong.** Every other entry in this
+file describes something upstream has had for a while. This appeared between 2026.8.12 and
+2026.9.10, and it is a side effect of the fix for issue 613.
+
+Found by S44's own sync gate rather than by a probe: moving the pin re-ran the three-seed 6000-row
+default wave against the new release, and exactly **one row of 378,000** changed answer - row 98050
+of seed 20260913, `partial` generator.
+
+**Reproduction**, minimised by hand from the wave's
+`\b([İ]+)\1(?:.{3}?(*SKIP)[^[\p{L}--[a-z]]]|\S)` over `'İİSsS'` (flags 266) to three ASCII
+characters and no flags:
+
+```python
+>>> import regex
+>>> regex.compile(r'(a+)\1x(*SKIP)b').search('aax', partial=True)
+# 2026.7.19 (== the 2026.8.12 pin, byte for byte under src/ and regex/):
+#   <regex.Match object; span=(0, 3), match='aax', partial=True>, group 1 == (0, 1)
+# 2026.9.10:
+#   <regex.Match object; span=(3, 3), match='', partial=True>,    group 1 unset
+```
+
+The lost match is plainly reachable. `(a+)` takes `'aa'`; `\1` cannot match `'aa'` at 2; the repeat
+**retreats** to `'a'`; `\1` matches `'a'` at 1; `'x'` matches at 2; and `'b'` runs off the end of
+the subject - which is what a partial match is.
+
+**Faulting function.** `basic_match`'s `RE_OP_GREEDY_REPEAT_ONE` backtrack arm, `_regex.c:15859`.
+Commit `b77694a` (issue 613) added `if (pos < limit) limit = pos;` and its reversed twin, so that
+the arm's equality-only stop is reachable when a `(*SKIP)` has raised `limit` above `pos`. That
+stops the runaway retreat it was written for - see entry 10 - and it also stops the single
+legitimate retreat step this match needs, because the clamp makes `pos == limit` true immediately
+and the arm gives up on the repeat entirely instead of retreating to a smaller count.
+
+**Why this port is right, four ways:**
+
+| evidence | answer |
+|---|---|
+| `(*PRUNE)` instead of `(*SKIP)` - same pruning, no bound moved | `(0, 3)` on **both** releases |
+| the verb deleted | `(0, 3)` on **both** releases |
+| **2026.9.10 on `'aaxb'`, where the match completes** | **`(0, 4)`, group 1 `(0, 1)` - the identical retreat, taken** |
+| PCRE2 10.47, run not read | `PARTIAL (0, 3)`, and `MATCH (0, 4) (0, 1)` on `'aaxb'` |
+
+The third row is on its own decisive: **2026.9.10 contradicts itself.** It takes the `a+` retreat
+to finish a complete match and refuses the same retreat to report a partial one, on the same
+pattern one character apart. The first two rows say the moved bound is the cause rather than the
+pattern's meaning, which is the argument entries 1, 3 and 5 rest on. The fourth puts a second
+engine on record.
+
+**Proposed fix.** Not "revert `b77694a`" - the runaway it fixes is real. The clamp is right about
+the walk and wrong about the outcome: when `pos` is already past `limit` the repeat cannot be
+retreated *within the current slice*, but the slice is only narrow because a `(*SKIP)` moved it in
+a previous pass. Upstream's `do_match` restores `text_pos` between the non-partial and partial
+passes (`:18161` at this file's commit, `:18170` at the 2026.9.10 pin - the PRs in the sync range
+moved it) and not `slice_start`/`slice_end`; restoring both, as this port does, removes the
+precondition and leaves `b77694a` doing only the job it was written for. That is a one-place change
+in `do_match` rather than a change to the arm the clamp is in.
+
+**What this port does.** Answers `(0, 3)` with group 1 at `(0, 1)`, which is 2026.7.19's answer and
+PCRE2's. It carries **both** of `b77694a`'s clamps - S44 ported them - and keeps the match anyway,
+because S40b already restores both slice bounds before the partial pass. So this port is not
+diverging by omitting upstream's fix; it has the fix and does not have the precondition.
+Pinned by `Gaps/Engine/PartialMatchingTests.A_skip_does_not_block_the_repeat_retreat_a_partial_needs`,
+with all four controls, and classified in the oracle as `skip-blocks-a-repeat-retreat-partial`.
+
+**Reproduce:** `python tools/probes/upstream-skip-blocks-a-repeat-retreat.py` and
+`... --pcre2`. Measured 2026-09-13, PCRE2 10.47 2025-10-21.
+
+**Related:** entry 10 (the fix that caused it), entries 1, 3 and 5 (the `(*SKIP)` bound-moving
+family), and `partial-retry-carried-slice-forward` (the same two-pass restore, seen from the port's
+side).

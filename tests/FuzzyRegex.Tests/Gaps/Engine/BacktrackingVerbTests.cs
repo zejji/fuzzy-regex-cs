@@ -589,7 +589,23 @@ public sealed class BacktrackingVerbTests
         // direction in the GREEDY_REPEAT_ONE backtrack arm - which is what stops the retreat loop
         // running away once a (*SKIP) has raised that limit above the position the retreat starts
         // from, leaving the arm's equality-only stop unreachable. There is nothing to file, ledger
-        // entry 10 records it, and the Phase 6 sync is where the two clamps are ported.
+        // entry 10 records it.
+        //
+        // S44 PORTED BOTH CLAMPS with the rest of the 2026.9.10 sync, and measured what they change
+        // here, because "ported faithfully" and "changes nothing" are different claims:
+        //
+        //   - the branch IS live. A probe throwing wherever the new clamp would fire was hit by
+        //     exactly one test in the 5,875 - this one - at pos=2, limit=4, sliceStart=4.
+        //   - the unclamped retreat DOES find a tail match below that limit (pos=1), so the clamp
+        //     is not merely bounding a walk that was already stopping on its own.
+        //   - and it still changes no ANSWER anywhere measured: the 1,296-call grid below agrees
+        //     with 2026.9.10 row for row BOTH before and after the clamps, and the full suite and
+        //     every oracle wave are unchanged by them.
+        //
+        // So the clamps are here for the reason upstream added them - an unbounded retreat that
+        // reads off the end of the buffer in C - and not because this port answered anything
+        // differently. A future sync that finds an answer moving on this shape should treat that
+        // as news rather than as this fix arriving late.
         //
         // The bounded timeout is the assertion. A regression into upstream's loop would otherwise
         // hang the whole suite instead of failing one test, which is the same reason
@@ -609,12 +625,20 @@ public sealed class BacktrackingVerbTests
         new FuzzyRegex(".?x(?:a(*SKIP)z)").Match("xzxa").Success.Should().BeFalse();
         new FuzzyRegex("x(?>a(*SKIP)z)").Match("xzxa").Success.Should().BeFalse();
 
-        // And the shape swept rather than sampled, because this port carries the PRE-FIX clamp:
-        // "it does not hang on one row" is not "it cannot hang". `tools/probes/
-        // upstream-skip-in-atomic-hang.py --grid` puts the identical 1296-call grid to upstream,
-        // where 2026.7.19 hangs on 70 of them and 2026.9.10 on none (measured 2026-09-13). The two
-        // rows below are the sharpest of those 70 - a bounded repeat rather than `.?`, which is
-        // where upstream's runaway is widest - and each is answered here in microseconds.
+        // And the shape swept rather than sampled: "it does not hang on one row" is not "it cannot
+        // hang". `tools/probes/upstream-skip-in-atomic-hang.py --grid` puts the identical
+        // 1296-call grid to upstream, where 2026.7.19 hangs on 70 of them and 2026.9.10 on none
+        // (measured 2026-09-13). The two rows below are the sharpest of those 70 - a bounded
+        // repeat rather than `.?`, which is where upstream's runaway is widest - and each is
+        // answered here in microseconds.
+        //
+        // THE WHOLE GRID IS RE-RUNNABLE against this port, which is what S40a could not leave
+        // behind (its grid script was scratch and is gone, so only the hang count survived):
+        //
+        //   python tools/probes/upstream-skip-in-atomic-hang.py --oracle-rows > .scratch/grid.jsonl
+        //   pwsh -File tools/run-oracle.ps1 -Rows .scratch/grid.jsonl
+        //
+        // S44 ran it either side of porting the clamps: agree 1296, diverge 0, both times.
         new FuzzyRegex(".{1,3}x(?>[ab](*SKIP)z)", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5))
             .Match("xzxa")
             .Success.Should()

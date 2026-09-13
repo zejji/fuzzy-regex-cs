@@ -2,29 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**PHASE 5 IS COMPLETE** (S43, `d5c2500`, 2026-09-13): ratchet GREEN at 5,869 tests, 5,869 passing,
-5,761 distinct ids, **0 skipped**; parity **100.0%**, 1,967 of 1,967 ported upstream tests. Default
-wave GREEN at three seeds, 6,000 rows a generator; `fuzzy` and `interactions` GREEN at 99991.
-Fuzzy matching works end to end; `(?e)` and `(?b)` rank by COST (owner decision, upstream issue 470).
-Phase 5 measured: 11 slices, 14 sessions (1.27), median 69.9M tokens.
+**S44 IS DONE** (sitting 2, 2026-09-13): the pin is **2026.9.10**, commit `7dd71c1`, byte-identity
+proven against the wheel raw and the sdist after line-ending folding. Issues 611, 612 and 613
+ported; 614 needed nothing. Ratchet GREEN at 5,877 tests, 5,877 passing, 0 skipped. The sync found
+a **regression in 2026.9.10 itself** - issue 613's clamp loses a partial match that 2026.8.12 and
+PCRE2 both find - pinned, ledgered as entry 15, not filed. Entry 10 CLOSED. Two blind passes, seven
+findings, all seven reproduced and fixed, none a port defect.
 
-**Phase 6 is AUTHORED - S44-S57, fourteen slices in `docs/plan/slices/` - and awaits the owner's
-review. S44 (upstream sync to 2026.9.10) is next.** Three slices need the orchestrator first, each
-says so under "Before launch": S44 the wheel into the oracle interpreter, S49 a `gh` snapshot of the
-tracker, S55 Stryker installed and S56 the overnight chunk queue run.
+**ORCHESTRATOR: two processes need killing before any oracle work runs again.**
+`FuzzyRegex.OracleTests` PIDs **34428** and **26696** - S42-1B's timed-out consumers, spinning since
+22:50 - hold `tests/FuzzyRegex.OracleTests/bin/Debug/net10.0/FuzzyRegex.dll`. Nothing else is
+blocked. Once they are gone, the seven controls S44 could not measure are one command:
+`python tools/run-controls.py --ids S42-1C,S42-2A,S42-2B,S42-2C,S42-2D,S42-2E,S42-2F --seeds 2`.
 
-**Before S44 launches, the process improvements agreed 2026-09-13 land as maintenance:** a
-deadline file per sitting; a hook injecting remaining time and orchestrator messages into the
-running session; rollback to the last green in-session commit rather than session start; the
-heartbeat alarm keyed to the sitting; a per-test `[Timeout]`; a bounded `check-ratchet.ps1` run.
+**Two sittings have now been lost to the same cause, and it is not a hand edit.** Control S42-1B
+mutates `DoBestFuzzyMatch`'s bound to `fewestErrors`, which HANGS rather than diverging;
+`run-controls.py` restores in a `finally` a kill never reaches, so a killed control run leaves it
+applied and the next suite run spins for ever. **A recovering session's first move is
+`git diff src/` read against `tools/controls.json`.** See DECISIONS 2026-09-13, four entries.
 
-**Blockers:** none. **Known bugs in this port**, all on Phase 6's fix list with a slice each:
-ledger 7 (S45); 12, 13, 9's port half (S46); 11, 14 (S47); 5's remaining door and any other shared
-entry (S48); whatever the issue sweep reproduces (S49, S50).
+**Next: S45** (full case fold of U+0130, ledger entry 7). Nothing in S44 blocks it, and S45 needs
+no oracle run to start. **S46-S48** then clear the remaining known bugs; **S49** needs a `gh`
+snapshot of the tracker from the orchestrator before it launches.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate). Controls:
-`python tools/run-controls.py --slices S37,...,S43 --seeds 2`. Upstream 2026.9.10 for probes:
-`.venvs/regex-2026.9.10`. Ledger: `docs/plan/upstream-reports/LEDGER.md`, 14 entries, nothing filed.
+**Blockers:** none for S45. **Known bugs in this port**, each with a slice: ledger 7 (S45); 12, 13,
+9's port half (S46); 11, 14 (S47); 5's remaining door (S48); the issue sweep (S49, S50).
+
+**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate) - blocked
+until the two PIDs die. Ledger: `docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed.
+
+**Owed maintenance, now three sittings' worth of evidence:** `run-controls.py` must restore on a
+kill, kill the consumer's process TREE on timeout, and report a broken control and carry on (six
+sites are broken - five unresolvable, S42-2G's mutant will not compile). PORTMAP's `_regex.c` line
+references are stale after the sync and need an owner decision first.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
-`origin/main` needs a push (nothing pushed since Phase 4's close).
+`origin/main` needs a push (nothing since Phase 4's close).

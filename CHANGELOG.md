@@ -63,6 +63,17 @@ module needs to know where this port deliberately behaves differently.
   tie-break to get there - an error-count budget cannot reach a cheaper match that spends the same
   number of errors - so it walks the slice twice, the first walk bounded by cost.
 
+### Changed
+
+- **Tracks mrab-regex 2026.9.10** (commit `7dd71c1`), up from 2026.8.12. Three of the four engine
+  and parser fixes in that range are ported - upstream issues 611, 612 and 613 - and the fourth,
+  issue 614, needed nothing here because this port was already right about it. The remaining
+  changelog entries in the range are CPython C-API error propagation and wheel-building, neither of
+  which has a counterpart in a managed port; `docs/PORTMAP.md` accounts for every entry.
+
+  The sync also found a **regression in 2026.9.10 itself**: issue 613's retreat clamp loses a
+  partial match that 2026.8.12 and PCRE2 10.47 both find. This port keeps the match, and pins it.
+
   One port defect fixed that no test could have caught, because upstream faults on every input that
   would show it: a POSIX fuzzy match reported the errors it had spent as zero, since the
   save/restore of the best match carried neither the counts nor the change list.

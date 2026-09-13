@@ -8406,16 +8406,38 @@ internal static class Matcher
                     state.GuardRepeat(index, pos, NodeStatus.Tail, true);
 
                     // A (*SKIP) might have changed the size of the slice.
+                    //
+                    // The second clamp in each direction is issue 613, commit b77694a, released in
+                    // 2026.8.30 and ported by S44. The clamp above can raise 'limit' PAST 'pos' -
+                    // a (*SKIP) that fired to the right of this repeat moves 'slice_start' above
+                    // the position the retreat starts from - and the stop below is an equality,
+                    // so once that happens the retreat walks away from its own limit instead of
+                    // reaching it. Upstream reads off the end of the buffer doing so; measured
+                    // 2026-09-13, upstream 2026.7.19 never returns on 70 of the 1,296 calls in
+                    // `tools/probes/upstream-skip-in-atomic-hang.py --grid` and 2026.9.10 on none.
                     if (step > 0)
                     {
                         if (limit < state.SliceStart)
                         {
                             limit = state.SliceStart;
                         }
+
+                        if (pos < limit)
+                        {
+                            limit = pos;
+                        }
                     }
-                    else if (limit > state.SliceEnd)
+                    else
                     {
-                        limit = state.SliceEnd;
+                        if (limit > state.SliceEnd)
+                        {
+                            limit = state.SliceEnd;
+                        }
+
+                        if (pos > limit)
+                        {
+                            limit = pos;
+                        }
                     }
 
                     if (pos == limit)
@@ -9719,6 +9741,17 @@ internal static class Matcher
 
             state.SliceStart = widenedStart;
             state.SliceEnd = widenedEnd;
+
+            // We've narrowed the slice. The required string position might now be outside it.
+            //
+            // Issue 612, commit 8244055, released 2026.8.30 and ported by S44. It is INERT in this
+            // port today and ported anyway: `ReqPos` is only ever assigned -1, at state creation,
+            // because `locate_required_string` and the `search_start` family are the Phase 7
+            // deferral this file's header records. Upstream's own symptom is a `count_one()` size
+            // underflow reading off the heap. The line is here so the Phase 7 slice that adds the
+            // locator inherits the fix instead of re-introducing the bug; if it is ever deleted as
+            // dead code, it has to come back with the locator.
+            state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;
             state.TextPos = entry.MatchPos;

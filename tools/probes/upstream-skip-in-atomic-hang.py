@@ -26,6 +26,7 @@ file. Ledger entry 10.
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 
@@ -68,7 +69,15 @@ GRID_SUBJECTS = ("xzxa", "xzxaa", "azxa", "aazz", "xaz", "zaxa", "aaaa", "xzxazz
 GRID_OPERATIONS = ("search", "match", "fullmatch")
 
 
-def grid() -> None:
+def grid(answers: bool = False) -> None:
+    """Sweep the grid. With `answers`, print one JSONL row per call instead of counting hangs.
+
+    S44 added the `--answers` mode. Counting hangs alone cannot tell this port's retreat clamp
+    from upstream's, because this port hangs on none of the grid either way; the ANSWERS can.
+    Nothing in the test suite pins them - the check is the oracle sweep `--oracle-rows` feeds,
+    described below, which compares all 1296 against the pinned upstream rather than against a
+    recorded expectation.
+    """
     ran = hangs = 0
     for repeat in GRID_REPEATS:
         for body in GRID_BODIES:
@@ -81,15 +90,62 @@ def grid() -> None:
                 for operation in GRID_OPERATIONS:
                     ran += 1
                     try:
-                        getattr(compiled, operation)(subject, timeout=TIMEOUT)
+                        match = getattr(compiled, operation)(subject, timeout=TIMEOUT)
                     except TimeoutError:
                         hangs += 1
-                        print(f"  TIMEOUT  {pattern:<26} {subject!r:<10} {operation}")
+                        if answers:
+                            print(json.dumps([pattern, subject, operation, "TIMEOUT"]))
+                        else:
+                            print(f"  TIMEOUT  {pattern:<26} {subject!r:<10} {operation}")
+                        continue
+                    if answers:
+                        span = None if match is None else list(match.span())
+                        print(json.dumps([pattern, subject, operation, span]))
 
-    print(f"  ran {ran} calls, {hangs} timed out")
+    if not answers:
+        print(f"  ran {ran} calls, {hangs} timed out")
+
+
+def oracle_rows() -> None:
+    """Print the grid as a `tools/record-oracle.py --rows` input, so the oracle judges it.
+
+    S44 added this. It is what makes the grid REPRODUCIBLE: S40a built the same grid in a
+    gitignored scratch script, which is gone, so only its hang count survived. With this mode
+    the whole sweep is two tracked commands -
+
+        python tools/probes/upstream-skip-in-atomic-hang.py --oracle-rows > .scratch/grid.jsonl
+        pwsh -File tools/run-oracle.ps1 -Rows .scratch/grid.jsonl
+
+    - and the second prints agree/diverge over all 1,296 against the pinned upstream.
+    """
+    for repeat in GRID_REPEATS:
+        for body in GRID_BODIES:
+            pattern = repeat + "x" + body
+            try:
+                regex.compile(pattern)
+            except regex.error:
+                continue
+            for subject in GRID_SUBJECTS:
+                for operation in GRID_OPERATIONS:
+                    print(json.dumps({
+                        "generator": "verbs",
+                        "pattern": pattern,
+                        "flags": 0,
+                        "namedLists": {},
+                        "subject": subject,
+                        "operation": operation,
+                    }))
 
 
 def main() -> None:
+    if "--oracle-rows" in sys.argv:
+        oracle_rows()
+        return
+
+    if "--answers" in sys.argv:
+        grid(answers=True)
+        return
+
     print("regex", regex.__version__)
     if "--grid" in sys.argv:
         grid()

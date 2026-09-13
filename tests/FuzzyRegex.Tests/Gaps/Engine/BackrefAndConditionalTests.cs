@@ -151,4 +151,124 @@ public sealed class BackrefAndConditionalTests
         // still get this right; one comparing only the high surrogate would not.
         FuzzyRegex.MatchAtStart("\U0001F600\U0001F601", @"(.)\1").Success.Should().BeFalse();
     }
+
+    // ---------------------------------------------------------------------------------------
+    // S44, the Phase 6 upstream sync. Issue 611, commit 1c90270, released 2026.8.30:
+    // `LookAroundConditional.is_empty()` read `a and b or c`, which Python groups as
+    // `(a and b) or c`, so a lookaround conditional with an EMPTY NO-BRANCH called itself empty
+    // whatever its test and yes-branch were. Upstream titles it "Heap out-of-bounds write at
+    // compile time"; in Python it surfaces as a dropped quantifier, a dropped conditional branch
+    // and, on the fourth case below, a MemoryError.
+    //
+    // Both sides of every assertion were measured on 2026-09-13 with
+    // `tools/probes/upstream-lookaround-conditional-is-empty.py`, run against 2026.7.19 (which is
+    // the old pin 2026.8.12 byte for byte under `src/` and `regex/`) and against 2026.9.10. The
+    // probe carries the four `_regex_core.py` call sites each case reaches.
+    // ---------------------------------------------------------------------------------------
+
+    [Test]
+    public void A_quantified_lookaround_conditional_with_an_empty_no_branch_keeps_its_quantifier()
+    {
+        // The conditional is NOT zero-width - its yes-branch matches 'b' - so `parse_quantifier`
+        // (upstream/regex/_regex_core.py:585) must keep the `*`. With the quantifier kept, zero
+        // repetitions match at 0.
+        //
+        // 2026.9.10: regex.search(r'(?(?=a)b|)*', 'ab').span() == (0, 0)
+        // 2026.7.19: (1, 1) - the quantifier was dropped, so position 0 could only try the
+        //            yes-branch, which needs a 'b' and finds an 'a'.
+        Match m = FuzzyRegex.Match("ab", "(?(?=a)b|)*");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 0));
+    }
+
+    [Test]
+    public void A_scan_of_a_quantified_lookaround_conditional_matches_at_every_position()
+    {
+        // The same defect across a whole scan.
+        //
+        // 2026.9.10: [m.span() for m in regex.finditer(r'(?(?=a)b|)*', 'aab')]
+        //            == [(0, 0), (1, 1), (2, 2), (3, 3)]
+        // 2026.7.19: [(2, 2), (3, 3)] - the two positions where the lookahead fails.
+        new FuzzyRegex("(?(?=a)b|)*")
+            .Matches("aab")
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 0), (1, 1), (2, 2), (3, 3));
+    }
+
+    [Test]
+    public void A_group_conditional_holding_a_lookaround_conditional_is_not_dropped()
+    {
+        // `parse_conditional` (:1045) returns an empty Sequence when BOTH branches are empty, so
+        // the wrong `is_empty()` deleted the whole conditional. Kept, the yes-branch runs: group 1
+        // matched, so at position 1 the inner test `(?=a)` succeeds and demands a 'b' that is not
+        // there.
+        //
+        // 2026.9.10: regex.search(r'(x)(?(1)(?(?=a)b|)|)', 'xa') is None
+        // 2026.7.19: (0, 1) - the conditional was gone, leaving just `(x)`.
+        FuzzyRegex.Match("xa", "(x)(?(1)(?(?=a)b|)|)").Success.Should().BeFalse();
+    }
+
+    [Test]
+    public void A_group_inside_a_dropped_conditional_branch_does_not_desync_the_group_count()
+    {
+        // The same shape with a CAPTURE inside the branch that was being dropped, which is the
+        // group-count desync upstream reports as a heap out-of-bounds WRITE. It reaches Python as
+        // an allocation failure rather than a wrong answer.
+        //
+        // 2026.9.10: [m.span() for m in regex.finditer(r'(x)(?(1)(?(?=a)(b)|)|)', 'xa')] == []
+        // 2026.7.19: MemoryError.
+        var pattern = new FuzzyRegex("(x)(?(1)(?(?=a)(b)|)|)");
+
+        pattern.Matches("xa").Should().BeEmpty();
+        pattern.GroupCount.Should().Be(2);
+    }
+
+    [Test]
+    public void A_positive_lookaround_holding_a_lookaround_conditional_does_not_collapse()
+    {
+        // `LookAround.optimise` (:3164) replaces a POSITIVE lookaround with its subpattern when the
+        // subpattern is empty, so the wrong `is_empty()` turned a zero-width test into a consuming
+        // one: `(?=X)a` became `Xa`.
+        //
+        // 2026.9.10: regex.search(r'(?=(?(?=)b|))a', 'abab') is None
+        // 2026.7.19: (1, 3) - 'ba', the collapsed pattern's match.
+        FuzzyRegex.Match("abab", "(?=(?(?=)b|))a").Success.Should().BeFalse();
+    }
+
+    [Test]
+    public void A_bounded_quantifier_on_a_lookaround_conditional_is_kept()
+    {
+        // :585 again with a bounded repeat, where dropping the quantifier changes the minimum count
+        // rather than just allowing zero.
+        //
+        // 2026.9.10: regex.search(r'(?(?=)b|){2,3}', 'b') is None - one 'b' cannot satisfy {2,3}.
+        // 2026.7.19: (0, 1) - the quantifier was dropped, so one 'b' was enough.
+        FuzzyRegex.Match("b", "(?(?=)b|){2,3}").Success.Should().BeFalse();
+    }
+
+    [Test]
+    public void An_atomic_group_holding_a_lookaround_conditional_keeps_its_atomicity()
+    {
+        // `Atomic.optimise` (:2085) returns the subpattern in place of the atomic group when the
+        // subpattern is empty, so the wrong `is_empty()` threw the ATOMICITY away: `(?>X)` became
+        // `X`, and a repeat inside it that upstream must not backtrack could backtrack again.
+        //
+        // The fourth call site, and the one the first six tests here did not reach - found by S44's
+        // blind review, not by the port. There is no quantifier on the atomic group, so `:585` is
+        // not involved and this is `:2085` alone.
+        //
+        // 2026.9.10: regex.search(r'(?>(?(?=b)b*|))b', 'bbb') is None - 'b*' takes all three 'b's
+        //            atomically and the trailing 'b' has nothing left.
+        // Pre-1c90270: (0, 3) - the collapsed 'b*' gives one back.
+        //
+        // Measured 2026-09-13, tools/probes/upstream-lookaround-conditional-is-empty.py. That
+        // "before" figure is the one measurement in this class taken by monkeypatching the old
+        // expression onto 2026.9.10 rather than by running 2026.7.19, which is not installed on
+        // this machine. The probe's docstring says so and shows all three rows.
+        FuzzyRegex.Match("bbb", "(?>(?(?=b)b*|))b").Success.Should().BeFalse();
+        FuzzyRegex.Match("bb", "(?>(?(?=b)b*|))b").Success.Should().BeFalse();
+        FuzzyRegex.Match("aaa", "(?>(?(?=a)a*|))a").Success.Should().BeFalse();
+    }
 }

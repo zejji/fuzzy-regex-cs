@@ -781,4 +781,70 @@ public sealed class PartialMatchingTests
             .Success.Should()
             .BeFalse();
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer - which is also upstream
+    // 2026.7.19's answer and PCRE2 10.47's.
+    [Test]
+    public void A_skip_does_not_block_the_repeat_retreat_a_partial_needs()
+    {
+        // S44, the Phase 6 sync, and the only row of 378,000 whose answer the sync changed: row
+        // 98050 of the 6000-row seed-20260913 wave, minimised by hand from
+        // `\b([İ]+)\1(?:.{3}?(*SKIP)[^[\p{L}--[a-z]]]|\S)` over 'İİSsS' to three ASCII characters.
+        //
+        //   regex.compile(r'(a+)\1x(*SKIP)b').search('aax', partial=True)
+        //   2026.7.19  -> (0, 3) partial, group 1 == (0, 1)      <- this port's answer
+        //   2026.9.10  -> (3, 3) partial, group 1 unset
+        //
+        // A REGRESSION UPSTREAM INTRODUCED, and it is issue 613's own fix doing it. Commit b77694a
+        // clamps the GREEDY_REPEAT_ONE retreat limit down to the current position, which stops the
+        // runaway retreat it was written for and also the single legitimate retreat step this match
+        // needs once the `(*SKIP)` has moved `slice_start` above the repeat. This port carries both
+        // clamps too - S44 ported them - and keeps the match because S40b restores the slice bounds
+        // before the partial pass, where upstream does not.
+        //
+        // The match is plainly reachable: `(a+)` takes 'aa', `\1` cannot match 'aa' at 2, the repeat
+        // retreats to 'a', `\1` matches 'a' at 1, 'x' matches at 2, and 'b' runs off the end of the
+        // subject - which is exactly what a partial match is.
+        //
+        // Measured 2026-09-13, tools/probes/upstream-skip-blocks-a-repeat-retreat.py. Ledger entry
+        // 15; oracle entry `skip-blocks-a-repeat-retreat-partial`. NOT filed - owner's rule.
+        Match partial = new FuzzyRegex(@"(a+)\1x(*SKIP)b").Match("aax", partial: true);
+
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((0, 3));
+        (partial.Groups[1].Index, partial.Groups[1].Length).Should().Be((0, 1));
+
+        // Control 1: `(*PRUNE)` prunes the same backtracking and moves no bound. BOTH upstream
+        // releases answer (0, 3) here, so the moved bound is the cause rather than the pattern's
+        // meaning - the argument every entry in this family rests on.
+        Match pruned = new FuzzyRegex(@"(a+)\1x(*PRUNE)b").Match("aax", partial: true);
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 3));
+        (pruned.Groups[1].Index, pruned.Groups[1].Length).Should().Be((0, 1));
+
+        // Control 2: no verb at all. Both releases answer (0, 3).
+        Match plain = new FuzzyRegex(@"(a+)\1xb").Match("aax", partial: true);
+
+        (plain.Index, plain.Length).Should().Be((0, 3));
+        (plain.Groups[1].Index, plain.Groups[1].Length).Should().Be((0, 1));
+
+        // Control 3, and the one that decides it: UPSTREAM 2026.9.10 CONTRADICTS ITSELF. Give the
+        // same pattern the 'b' it was waiting for and upstream answers the COMPLETE (0, 4) with
+        // group 1 at (0, 1) - which needs the identical `a+` retreat it just refused. An engine
+        // that takes the retreat to finish a match cannot consistently refuse it to report a
+        // partial one. PCRE2 10.47 answers MATCH (0, 4) (0, 1) here and PARTIAL (0, 3) above.
+        Match complete = new FuzzyRegex(@"(a+)\1x(*SKIP)b").Match("aaxb", partial: true);
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 4));
+        (complete.Groups[1].Index, complete.Groups[1].Length).Should().Be((0, 1));
+
+        // Control 4: a subject that cannot complete. Both releases and this port answer the
+        // zero-width partial at the end, so the divergence is not "any (*SKIP) partial row".
+        Match unreachable = new FuzzyRegex(@"(a+)\1x(*SKIP)b").Match("aaxyz", partial: true);
+
+        unreachable.PartialMatch.Should().BeTrue();
+        (unreachable.Index, unreachable.Length).Should().Be((5, 0));
+    }
 }

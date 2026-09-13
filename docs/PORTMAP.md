@@ -201,7 +201,7 @@ are `upstream/src/_regex.c` unless the row says otherwise.
 | `use_nodes`, `discard_unused_nodes` | `:23617`, `:23641` | `Optimiser.UseNodes`, `DiscardUnusedNodes` |
 | `mark_named_groups` | `:23672` | `Optimiser.MarkNamedGroups`. Upstream asks `PyDict_Contains(indexgroup, i + 1)`; `indexgroup` is `groupindex` inverted, so ours asks whether the number is a value of `GroupIndex` |
 | `can_test_past`, `set_test_node`, `set_test_nodes` | `:23697`-`:23805` | `Optimiser.CanTestPast`, `SetTestNode`, `SetTestNodes`. The marking is done now; the match loop's fast path that consults it is Phase 7 (DECISIONS 2026-08-31) |
-| `RE_CheckStack`, `RE_NodeStack` and their `_init`/`_fini`/`_push`/`_pop` | `:23188-23236`, `:23573-23616` | **Not ported as types.** Hand-rolled growable stacks of `PyMem_Realloc`'d arrays; `Stack<T>` is the same structure with the same push/pop order |
+| `RE_CheckStack`, `RE_NodeStack` and their `_init`/`_fini`/`_push`/`_pop` | `:23222-23272`, `:23635-23680` | **Not ported as types.** Hand-rolled growable stacks of `PyMem_Realloc`'d arrays; `Stack<T>` is the same structure with the same push/pop order |
 | `RE_ERROR_MEMORY` and every `if (!node) return RE_ERROR_MEMORY` | throughout the builders | **Not ported.** In .NET `new` throws, so there is nothing to guard |
 
 ### The matcher (`src/_regex.c`), S16
@@ -388,7 +388,7 @@ producing more than one result. All line references are `upstream/src/_regex.c`.
 | `pattern_findall`'s loop condition | `:22415` | `MatchState.IsInSlice`. It is what ends an overlapped scan: a step off either end of the slice leaves `TextPos` outside it, so no separate bounds check exists |
 | `state->version_0` | `:18482` | **Nothing to port.** The slice expected a V0/V1 difference in how a split treats a zero-width match. The field is written by `state_init` and read nowhere in the whole of `_regex.c`, exactly as S24 found for `pattern_subx`. Measured over four V0/V1 pairs, every one identical, and pinned in `Gaps/Engine/IterationTests.cs` so the next slice does not go hunting |
 | `state->visible_captures` | `:18307` | Set and never read, on both sides. Kept because `state_init`'s argument list is ported faithfully and a later release may read it |
-| `Scanner_Type`, `Splitter_Type`, `next_split_part`, `splitter_split`, `pattern_splitter`, `pattern_splititer` and their `copy`/`deepcopy` | `:20961`-`:21014`, `:21135`-`:21466` | **Not ported** as objects. The *iteration logic* is `Scan` and `Split`; the stateful public objects are the `regex.Scanner`/`splititer` rows in the table below, both deferred in S01. `next_split_part` is `pattern_split` re-expressed as a resumable state machine, and its own `index` walk emits the same sequence the eager loop does |
+| `Scanner_Type`, `Splitter_Type`, `next_split_part`, `splitter_split`, `pattern_splitter`, `pattern_splititer` and their `copy`/`deepcopy` | `:20987`-`:21040`, `:21161`-`:21498` | **Not ported** as objects. The *iteration logic* is `Scan` and `Split`; the stateful public objects are the `regex.Scanner`/`splititer` rows in the table below, both deferred in S01. `next_split_part` is `pattern_split` re-expressed as a resumable state machine, and its own `index` walk emits the same sequence the eager loop does |
 | `Match.next` | - | No upstream counterpart: `Match.NextMatch` is a `Regex`-shaped addition, ported as one turn of the scanner over a state rebuilt from the match (`Iteration.Next`). It carries the **slice**, not just the match end, because `pos` moves `slice_start` and a `\B` or a lookbehind at the resumption point would otherwise read a subject that starts there. One state per call, so a `NextMatch` walk is superlinear where `Matches` is flat - a marked `ponytail:` with the upgrade path, and measured: 209 seconds against 0.1 for 640,000 matches |
 
 ### Every `_regex.c` function, accounted for (S26, re-run by S36)
@@ -448,6 +448,37 @@ count, stated so a later sync does not
 read more into it than it says. It counts **definitions, not declarations**, so a prototype whose
 body is elsewhere is not double counted; and it counts *functions*, so the structs, macros and tables
 are covered only by the rows above that name them.
+
+## Upstream sync log
+
+One row per changelog entry, every entry accounted for. A sync that skips an entry silently is a
+sync nobody can trust afterwards, so "not applicable" carries its reason here rather than being
+left out.
+
+### 2026.8.12 -> 2026.9.10 (S44, 2026-09-13)
+
+Submodule at `7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33`, tag `2026.9.10`, which **is** upstream's
+head - `git -C upstream diff 2026.9.10..origin/hg` is empty, so there is no unreleased engine or
+parser fix to take ahead of the release. Byte-identity against PyPI proven the same day: the
+wheel's four `regex/*.py` files match `upstream/regex/` byte for byte with no normalisation at
+all, and the sdist's four `src/*` and four `regex/*.py` files match after line-ending
+normalisation only (the sdist ships LF, the wheel and our checkout CRLF).
+
+`_regex_unicode.c` and `_regex_unicode.h` are unchanged across the range, so no table needed
+regenerating - and `python tools/transliterate-unicode.py` was run anyway rather than assumed: all
+four hand-ported digests still match, 253 tables and 402,293 elements come out byte-identical to
+what is committed, and `UnicodeConstants.UnicodeVersion` stays **17.0.0**.
+
+| Changelog entry | Upstream change | Disposition |
+|---|---|---|
+| 2026.8.30, issue 611 - "Heap out-of-bounds write at compile time" | `_regex_core.py:3289-3290`, `LookAroundConditional.is_empty` drops its `or self.no_item.is_empty()` arm (commit `1c90270`) | **PORTED**, `Parsing/Nodes.cs`, `LookAroundConditional.IsEmpty`. Seven failing tests first, in `Gaps/Engine/BackrefAndConditionalTests.cs`, covering all four consulting call sites; both versions' answers measured with `tools/probes/upstream-lookaround-conditional-is-empty.py`. The seventh, `:2085` (`Atomic.optimise`), was added by the slice's blind review, which found the first six reached only three of the four sites |
+| 2026.8.30, issue 612 - `count_one()` size underflow through the stale required-string cache | `_regex.c:17830`, `do_best_fuzzy_match` sets `state->req_pos = -1` after narrowing the slice (commit `8244055`) | **PORTED AND INERT**, `Engine/Matcher.cs`, `DoBestFuzzyMatch`. `ReqPos` is only ever assigned -1 in this port, because `locate_required_string` and `search_start` are the Phase 7 deferral, so the line cannot change an answer today. Ported anyway so the Phase 7 slice inherits the fix instead of re-introducing the bug |
+| 2026.8.30, issue 613 - `(*SKIP)` inside an atomic group, plus an equality-only scan stop | `_regex.c:15863` and `_regex.c:15869`, `GREEDY_REPEAT_ONE`'s backtrack arm clamps `limit` down to `pos` in both directions (commit `b77694a`) | **PORTED**, `Engine/Matcher.cs`, the `GreedyRepeatOne` backtrack arm. Changes no answer in this port - the 1,296-call grid agrees with 2026.9.10 both before and after - but the branch is live: a probe throwing where the clamp fires was hit by `BacktrackingVerbTests.A_skip_inside_an_atomic_group_after_an_optional_item_answers_where_upstream_loops_for_ever`, and the unclamped retreat does find a tail match below the limit. Measurements recorded in that test |
+| 2026.8.30, issue 614 - `build_GROUP()` does not propagate the match direction | `_regex.c:24799`, in `build_GROUP` at `:24755`: `subargs.forward = forward;` (commit `9398a6d`) | **NOTHING TO PORT - this port was already right** (S30, S36). The sync's effect is on the oracle: re-recording turned both example rows of the `group-call-direction` divergence entry green, so the entry is DELETED and the two gap tests it pinned are kept as plain regression tests |
+| 2026.8.31, 2026.9.10 - "Fixed version." | `regex/_main.py`, `__version__` only | **NOT APPLICABLE.** No code change |
+| 2026.9.1 - "Updated cibuildwheel. Support Python 3.15." | `.github/`, `pyproject.toml` | **NOT APPLICABLE.** Upstream's wheel-building matrix. No `src/` or `regex/` change |
+| 2026.9.2, 2026.9.3 - cibuildwheel free-threading options | `.github/` | **NOT APPLICABLE.** Same reason |
+| 2026.9.9, PRs 615-618 - Python API error propagation | 178 of the range's 188 `_regex.c` lines, across `get_string`, `match_get_ends_by_index`, `match_get_captures_by_index`, `match_detach_string`, `scanner_search_or_match`, `scanner_iternext`, `decode_partial`, `pattern_scanner`, `index_to_integer`, `capture_str`, `pattern_search_or_match`, `CheckStack_push`/`_pop`, `add_repeat_guards`, `NodeStack_push`/`_pop`, `use_nodes`, `discard_unused_nodes`, `optimise_pattern` and `get_all_cases` | **NOT APPLICABLE.** Every hunk is CPython C-API bookkeeping: propagating a failed `PyList_SetItem`, returning `NULL` instead of swallowing an exception, `PyErr_NoMemory()` on a failed `re_alloc`. A managed port raises `OutOfMemoryException` and propagates exceptions by construction. **Checked hunk by hunk that no matching or compiling logic moved**, because four of these functions ARE ported (`add_repeat_guards`, `use_nodes`, `discard_unused_nodes`, `optimise_pattern`): the only non-mechanical change is `add_repeat_guards`'s return type going from `RE_STATUS_T` to `BOOL`, and its single caller discarded the return value before the change (`:23841` at `9398a6d`), so nothing read it |
 
 ## Deliberately not ported
 
