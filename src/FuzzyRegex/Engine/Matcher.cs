@@ -8905,6 +8905,8 @@ internal static class Matcher
         {
             int partialSide = state.PartialSide;
             int textPos = state.TextPos;
+            int sliceStart = state.SliceStart;
+            int sliceEnd = state.SliceEnd;
 
             // Try a normal match first.
             state.PartialSide = MatchState.PartialNone;
@@ -8917,34 +8919,57 @@ internal static class Matcher
             {
                 // Fall back to the partial match as originally requested.
                 //
-                // ONLY `text_pos` GOES BACK, which is upstream's line (`:18160`). RESTORING THE
-                // SLICE HERE TOO IS THE OBVIOUS NEXT STEP, IT IS PART-RIGHT, AND S40a MEASURED IT
-                // AND LEFT IT OUT - read this before spending the afternoon rediscovering it.
+                // THE SLICE GOES BACK WITH `text_pos`. Upstream restores `text_pos` alone (`:18160`)
+                // and this port restored `text_pos` alone until S40b, so read this before
+                // "restoring" the fidelity - the departure is deliberate and it is measured.
                 //
-                // The argument for it is sound as far as it goes. The two `DoMatch2` calls are two
-                // attempts at ONE match, so a `(*SKIP)` in the non-partial pass leaves `slice_start`
-                // moved for the partial pass, which then skips every start position below it and the
-                // search stops being LEFTMOST. That is a defect on this port's own answers, not a
-                // divergence: over `\b\D(*SKIP)z` and ' A' asked with `partial`, the search answers
-                // (2, 0) while this port's own `MatchAtStart(' A', 1, partial)` answers (1, 1) -
-                // and upstream answers (1, 1) as well. Row 97927 of the S40a seed-7 wave is that
-                // shape, and S37's permanent `A_skip_alternation_partial_starts_where_this_port_ran_
-                // out_of_text` turns out to be the same defect: this port answers (4, 0) there while
-                // its own matcher answers (2, 2) at an earlier position.
+                // These two `DoMatch2` calls are two attempts at ONE match. A `(*SKIP)` in the
+                // non-partial pass moves `slice_start` (`:14553`, or `slice_end` when the node is
+                // `RE_STATUS_REVERSE`, `:14551`) and nothing put it back, so the partial pass ran
+                // with a slice the caller never asked for and its search retry jumped every start
+                // position outside it. The answer then stopped being leftmost.
                 //
-                // Why it is not done here. Adding the two lines fixes row 97927 and INTRODUCES row
-                // 101560 - `(?r)\b(?:[^a-f](*SKIP)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})` over
-                // 'a\n' asked with `partial`, where upstream answers (0, 0) and this port then
-                // answers (0, 1) - because a reversed search is anchored by its END and restoring
-                // `slice_end` moves what every end-of-subject assertion means. It also turns S37's
-                // pinned answer red, which is a permanent judged divergence that a slice about four
-                // recorded rows has no business rewriting in passing. Net over 126,000 rows it is
-                // one divergence for another.
+                // What settles it is SELF-REFUTATION, not upstream: a search that reports a position
+                // its own anchored matcher beats is wrong whatever upstream says. Both directions,
+                // measured 2026-09-13 on regex 2026.7.19 by
+                // tools/probes/upstream-partial-retry-slice-restore.py:
                 //
-                // So the mechanism is known, the minimal reproduction is four characters, and the
-                // fix needs a slice of its own that can judge the reversed half and re-judge S37's
-                // row together. Recorded in S40a's closing notes and in STATE.md as the next slice.
+                //   \b\D(*SKIP)z            over ' A'   search (2, 0); own MatchAtStart(1) (1, 1)
+                //   (?r)\b(?:[^a-f](*SKIP)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})
+                //                           over 'a\n'  search (0, 0); own MatchAtStart(0, 1) (0, 1)
+                //
+                // Upstream agrees with the fixed answer on the forward row, where its `search_start`
+                // prefilter reaches the shape. ON THE REVERSED ROW UPSTREAM KEEPS THE DEFECT: its
+                // own `match(endpos=1, partial=True)` and its own verb-free search both answer
+                // (0, 1) and only its search with the verb answers (0, 0). `(*PRUNE)`, which prunes
+                // backtracking identically and moves NO bound, answers (0, 1) - which is what makes
+                // the bound move the cause rather than the pattern's meaning. So restoring BOTH ends
+                // is the evidenced choice, not the forward end only; S40a's note that restoring
+                // `slice_end` "introduces" a reversed row had the sign backwards, and that reading
+                // is superseded.
+                //
+                // RESTORING THE FORWARD END ONLY WAS MEASURED, AND ON THE GATE'S OWN SEEDS THE ORACLE
+                // CANNOT TELL IT FROM THIS. Over `partial,verbs` at 6000 rows it gives 1+2+2
+                // diverging rows at seeds 7, 4242 and 20260913 - exactly what this code gives. What
+                // moves there is the classification, not the count, because upstream shares the
+                // reversed defect and a port that shares it too simply AGREES. So do not re-derive
+                // this choice from the gate's divergence count; on those seeds it cannot answer.
+                //
+                // Two things do answer it. First, this port's own self-consistency, which is what
+                // `A_reversed_skip_does_not_move_the_slice_end_the_partial_pass_searches` and the
+                // `partial-retry-reversed-slice` staleness alarm pin. Second, A SEED THE GATE DOES
+                // NOT USE: at seed 31 the forward-only variant leaves 4 diverging rows where this
+                // leaves 3, and the row it fails to fix is
+                // `(?r)^(\p{Lu}{2}?){2,4}\1([^\p{L}])*(?:\d?(*SKIP)[\p{L}\p{N}]|[[:digit:]])` -
+                // reversed, so only the `slice_end` half reaches it, and restoring that half makes
+                // this port AGREE WITH UPSTREAM there. Measured 2026-09-13 on the committed code.
+                //
+                // Pinned by `PartialMatchingTests.A_skip_in_the_non_partial_pass_does_not_move_the_
+                // slice_the_partial_pass_searches` and `.A_reversed_skip_does_not_move_the_slice_
+                // end_the_partial_pass_searches`.
                 state.TextPos = textPos;
+                state.SliceStart = sliceStart;
+                state.SliceEnd = sliceEnd;
                 status = DoMatch2(state, search);
             }
         }

@@ -160,18 +160,28 @@ internal static class ExpectedDivergences
     /// </summary>
     /// <remarks>
     /// Rows 1, 2 and 4 are the answer upstream's own <c>match(pos, partial=True)</c> gives at the
-    /// position this port stopped at. <b>Row 3 is not, and that is why this arm lists rows.</b> It is
-    /// reversed, so <c>match</c> anchors at the end; sweeping <c>endpos</c> instead, upstream answers
-    /// (0, 1) partial and (0, 2) and (0, 3) complete, and never this port's zero-width partial at
-    /// (0, 0). What judges it is the verb: delete the <c>(*SKIP)</c>, or make it <c>(*PRUNE)</c>, and
-    /// upstream's own search answers (0, 0) partial - this port's answer.
+    /// LEFTMOST position that matches at all. <b>Row 3 is not, and that is why this arm lists
+    /// rows.</b> It is reversed, so <c>match</c> anchors at the end; sweeping <c>endpos</c> instead,
+    /// upstream answers (0, 1) partial and (0, 2) and (0, 3) complete, and never this port's
+    /// zero-width partial at (0, 0). What judges it is the verb: delete the <c>(*SKIP)</c>, or make
+    /// it <c>(*PRUNE)</c>, and upstream's own search answers (0, 0) partial - this port's answer.
+    /// <para>
+    /// <b>Rows 1 and 4 were re-judged by S40b</b>, which restored the slice bounds before the partial
+    /// retry in <c>Matcher.DoMatch</c>. They read (4, 0) and (5, 0) before: the positions the slice a
+    /// <c>(*SKIP)</c> had moved left reachable, each of them PAST an earlier position at which this
+    /// port's own matcher answered a partial. They now read (2, 2) and (3, 2), and both are
+    /// upstream's own anchored answer - codepoint (2, 4) on each row, which is UTF-16 (3, 5) on row
+    /// 4's astral subject. Measured 2026-09-13,
+    /// <c>tools/probes/upstream-partial-retry-slice-restore.py</c> and the <c>--rows</c> replay.
+    /// Rows 2 and 3 did not move, which is what says the restore reached only the carried slice.
+    /// </para>
     /// </remarks>
     private static readonly string[] _searchStartElsewhereOurs =
     [
-        "match 0:(4,0)[(4,0)] last=-1/- partial",
+        "match 0:(2,2)[(2,2)] last=-1/- partial",
         "match 0:(2,3)[(2,3)] 1:unset last=-1/- partial",
         "match 0:(0,0)[(0,0)] 1:unset last=-1/- partial",
-        "match 0:(5,0)[(5,0)] last=-1/- partial",
+        "match 0:(3,2)[(3,2)] last=-1/- partial",
     ];
 
     /// <summary>
@@ -181,6 +191,60 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _searchStartElsewhere = OracleWave
         .ParseRows(_searchStartElsewhereRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _searchStartElsewhereOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The three rows of <c>partial-retry-reversed-slice</c>, each copied out of
+    /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> on 2026-09-13 rather than retyped.
+    /// </summary>
+    /// <remarks>
+    /// Rows 101560 (seed 7), 96397 and 99556 (seed 20260913) of the gate, all on the
+    /// <c>partial</c> generator. <b>A ROW INDEX MEANS NOTHING WITHOUT THE COMMAND THAT DREW IT</b>,
+    /// because it counts across every generator in the run: these are
+    /// <c>pwsh -File tools/run-oracle.ps1 -Count 6000</c>, the full default generator list, which is
+    /// 126,000 rows a seed. The S40b blind review looked for them in a 12,000-row
+    /// <c>-Generator partial,verbs</c> wave, where the same three rows sit at 5560, 397 and 3556, and
+    /// reported the provenance as wrong; it is the wave that differs, not the rows. Nothing depends
+    /// on the index - the entry is keyed on the row's own question - so this is a pointer for a
+    /// reader, and it needs the command to be one.
+    /// <para>
+    /// <b>Two of the three come from one seed and seed 4242 draws none</b>, so the family is
+    /// evidenced at two seeds of the three - stated the way the S37 blind review's second pass
+    /// required of <see cref="_searchStartElsewhereRows"/>. All three are the same shape: reversed,
+    /// <c>partial</c>, a <c>(*SKIP)</c>, and upstream answering the zero-width partial at (0, 0) that
+    /// its own matcher beats at a higher <c>endpos</c>.
+    /// </para>
+    /// </remarks>
+    private const string _partialRetryReversedRows = """
+        {"generator": "partial", "pattern": "(?r)\\b(?:[^a-f](*SKIP)[\\p{L}\\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})", "flags": 8, "namedLists": {}, "subject": "a\n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "(?r)\\M(?:[^[\\p{L}--[a-z]]](*SKIP)[a-f]|[A-Z])", "flags": 16642, "namedLists": {}, "subject": "A𐐨", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "(?r)(?:[^a-f](*SKIP)\\S|[\\p{L}\\p{N}])(?(?<![\\w--[0-9]])[\\p{L}\\p{N}]|[\\w--[0-9]])", "flags": 256, "namedLists": {}, "subject": "𐐀_  ", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_partialRetryReversedRows"/>, in the same
+    /// order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Every one is upstream's OWN <c>match(0, endpos, partial=True)</c> answer at the highest
+    /// <c>endpos</c> that matches, which is the first anchor a reversed search tries and therefore
+    /// the answer it owes. In codepoints upstream gives (0, 1), (0, 1) and (0, 2); rows 2 and 3 have
+    /// astral subjects, so those are UTF-16 (0, 1) and (0, 3) here. Measured 2026-09-13,
+    /// <c>tools/probes/upstream-partial-retry-slice-restore.py</c>.
+    /// </remarks>
+    private static readonly string[] _partialRetryReversedOurs =
+    [
+        "match 0:(0,1)[(0,1)] 1:(1,0)[(1,0)] last=1/g1 partial",
+        "match 0:(0,1)[(0,1)] last=-1/- partial",
+        "match 0:(0,3)[(0,3)] last=-1/- partial",
+    ];
+
+    /// <summary>
+    /// <see cref="_partialRetryReversedRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _partialRetryReversed = OracleWave
+        .ParseRows(_partialRetryReversedRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _partialRetryReversedOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
@@ -252,10 +316,21 @@ internal static class ExpectedDivergences
                 + "shape: upstream's `search(partial=True)` is (0, 4) partial - the WHOLE subject, "
                 + "from the search start to the end of the text - and its own "
                 + "`match('a.Aa', 0, 4, partial=True)` over that very span is None. This port answers "
-                + "the zero-width partial at (4, 4), where `\\w` ran out of text, which is upstream's "
-                + "own `match(pos=4, partial=True)` answer. Delete the verb and upstream's search "
-                + "gives a COMPLETE match at (2, 3); make it `(*PRUNE)` and it gives this port's "
-                + "partial. Measured 2026-09-12, tools/probes/upstream-search-start-whole-region-partial.py.\n"
+                + "the partial at (2, 4), which is upstream's own `match(pos=2, partial=True)` "
+                + "answer and the leftmost position at which anything matches. Delete the verb and "
+                + "upstream's search gives a COMPLETE match at (2, 3); make it `(*PRUNE)`, which "
+                + "moves no bound, and it gives this port's partial. Measured 2026-09-12, "
+                + "tools/probes/upstream-search-start-whole-region-partial.py.\n"
+                + "NARROWED BY S40b, WHICH TOOK HALF OF THIS FAMILY BACK. Until S40b this port "
+                + "answered (4, 4) on the minimised row and the arm's rows 1 and 4 read (4, 0) and "
+                + "(5, 0). That was not the prefilter: it was this port's OWN defect, a `(*SKIP)` in "
+                + "the non-partial pass of a partial search leaving `slice_start` moved for the "
+                + "partial pass, so the retry skipped every start position below it. S40b restores "
+                + "both slice bounds with `text_pos` in `Matcher.DoMatch`, and both rows moved to "
+                + "upstream's own anchored answer. WHAT IS LEFT HERE IS THE PREFILTER ALONE - "
+                + "upstream reporting a span its own `match` denies - and a row whose only "
+                + "difference is WHERE this port started is now a defect to fix, not a row to "
+                + "classify. Measured 2026-09-13, tools/probes/upstream-partial-retry-slice-restore.py.\n"
                 + "THE NEW ARM IS KEYED ON ROWS, exactly as `bounded-lazy-repeat-partial` below is, "
                 + "and the first draft of it was not - which the S37 blind review killed with a "
                 + "reproduction. That draft asked only that upstream's partial span the whole "
@@ -268,8 +343,8 @@ internal static class ExpectedDivergences
                 + "arm lists the rows a probe has individually judged with the answer this port is "
                 + "judged to be right about, and widening it means judging another row.",
             PinnedBy: "PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_"
-                + "subject_finds_no_partial_here and .A_skip_alternation_partial_starts_where_this_"
-                + "port_ran_out_of_text",
+                + "subject_finds_no_partial_here and .A_skip_alternation_partial_starts_at_the_"
+                + "leftmost_position_that_matches",
             Example: """
             {"generator": "partial", "pattern": "(?r)\\b$", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
             {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
@@ -624,6 +699,42 @@ internal static class ExpectedDivergences
             Example: _boundedLazyRows,
             Applies: static (row, ours) =>
                 _boundedLazy.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "partial-retry-reversed-slice",
+            Reason: "Port right, and NEW IN S40b - this row diverges BECAUSE of that slice's fix, "
+                + "which is the honest way to say it. A `partial` search runs two passes over one "
+                + "match attempt (upstream do_match, upstream/src/_regex.c:18160): a non-partial one, "
+                + "then a partial one from the same `text_pos`. Upstream restores `text_pos` and "
+                + "nothing else, so a `(*SKIP)` that moved `slice_end` under `(?r)` (:14551) leaves "
+                + "it moved for the second pass, whose search retry then skips anchors outside it. "
+                + "S40b restores both slice bounds here; upstream still does not.\n"
+                + "WHAT JUDGES IT IS UPSTREAM CONTRADICTING ITSELF, not a preference. A reversed "
+                + "search is anchored by its END and tries the highest endpos first, so the answer it "
+                + "owes is the first anchor that matches. On all three rows upstream's search answers "
+                + "the zero-width partial at (0, 0) - the LAST anchor it would try - while its own "
+                + "match at a higher endpos answers what this port does. Measured 2026-09-13 on "
+                + "regex 2026.7.19, tools/probes/upstream-partial-retry-slice-restore.py, row 1 of "
+                + "three and the other two identical in shape:\n"
+                + "  search(partial=True)                   (0, 0) partial   <- upstream\n"
+                + "  match(endpos=1, partial=True)          (0, 1) partial   <- upstream's own matcher\n"
+                + "  verb deleted,     search(partial=True) (0, 1) partial\n"
+                + "  verb -> (*PRUNE), search(partial=True) (0, 1) partial\n"
+                + "`(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so "
+                + "the last line is what makes the bound move the cause rather than the pattern's "
+                + "meaning - the same argument `search-start-partial` above rests on. This port "
+                + "answers upstream's own matcher's answer on every row.\n"
+                + "KEYED ON ROWS, like `bounded-lazy-repeat-partial` and `search-start-partial`'s "
+                + "second arm above, and for the same reason: any predicate over 'upstream answered a "
+                + "shorter partial on a reversed verb row' also describes the defects this port might "
+                + "still have there, and this entry's own family is one this port had until S40b. "
+                + "Widening means judging another row with the probe and adding it, not loosening a "
+                + "condition. Phase 7 must not import upstream's answer here along with the prefilter.",
+            PinnedBy: "PartialMatchingTests.A_reversed_skip_does_not_move_the_slice_end_the_partial_" + "pass_searches",
+            Example: _partialRetryReversedRows,
+            Applies: static (row, ours) =>
+                _partialRetryReversed.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
     ];

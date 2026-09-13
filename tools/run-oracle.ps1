@@ -21,7 +21,7 @@
     Both had been held out because a handful of their rows diverge for a reason already judged, and
     holding a whole generator out for a few per cent of its rows trades all of its coverage for
     none. What replaced that is an accounted-for list,
-    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: seven named families, each with the reason,
+    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: nine named families, each with the reason,
     the engine that is right, the permanent test that pins this port's answer, and the minimised row
     it was found on. A row one of them accounts for is printed in the report as 'EXPECTED <id>' and
     tallied separately; every other divergence still reds the run.
@@ -31,7 +31,7 @@
     'Every_expected_divergence_still_diverges', which runs each entry's minimised row through the
     live engine on every oracle run and fails when one stops diverging.
 
-    The seven families, in short - plus the one S35 deleted, kept here because how it went is the
+    The nine families, in short - plus the one S35 deleted, kept here because how it went is the
     whole argument for the list being strict:
 
     'search-start-partial' - upstream's 'search_start' prefilter (upstream/src/_regex.c:8385) gives
@@ -143,6 +143,21 @@
     for a discriminator and found none that does not also swallow a genuine missed partial, so the
     entry lists the rows a probe has judged one at a time; widening it means judging another row,
     never loosening a condition.
+
+    'partial-retry-reversed-slice' - port right, added by S40b, and the only entry here whose rows
+    diverge BECAUSE of the slice that added it. A 'partial' search runs a non-partial pass and then a
+    partial one over one match attempt (do_match, upstream/src/_regex.c:18160); upstream restores
+    text_pos between them and nothing else, so a '(*SKIP)' that moved slice_end under '(?r)' (:14551)
+    is still moved for the second pass and its retry skips anchors. S40b restores both slice bounds;
+    upstream does not. A reversed search tries the highest endpos first, so:
+
+        pat = r'(?r)\b(?:[^a-f](*SKIP)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})'
+        regex.compile(pat).search('a\n', partial=True)     # upstream: (0, 0) partial; ours: (0, 1)
+        regex.compile(pat).match('a\n', 0, 1, partial=True)             # upstream: (0, 1) partial
+
+    Upstream's own matcher names this port's answer, and so does the same pattern with '(*PRUNE)',
+    which prunes identically and moves no bound. Keyed on ROWS for 'bounded-lazy-repeat-partial's
+    reason - three of them, at seeds 7 and 20260913 and none at 4242.
 
     The recorder also neutralises upstream's other start-position prefilter, 'locate_required_string',
     for 'verbs' and 'partial-sliced' - see PREFILTER_FREE_GENERATORS in tools/record-oracle.py. That

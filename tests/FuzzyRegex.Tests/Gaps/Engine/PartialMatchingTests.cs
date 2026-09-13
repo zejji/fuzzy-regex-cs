@@ -364,38 +364,60 @@ public sealed class PartialMatchingTests
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_skip_alternation_partial_starts_where_this_port_ran_out_of_text()
+    public void A_skip_alternation_partial_starts_at_the_leftmost_position_that_matches()
     {
-        // The same `search_start` prefilter as the test above, in its SECOND symptom, which S37 found
-        // at 6000 rows of the composed `interactions` wave - three rows, one at seed 4242 and two at
-        // 20260912, every one of them with a `(*SKIP)` in it. Here both engines report a partial and
-        // they report DIFFERENT ONES, so the row is not "upstream saw a partial and this port saw
-        // nothing".
+        // S37 found this at 6000 rows of the composed `interactions` wave - three rows, one at seed
+        // 4242 and two at 20260912, every one with a `(*SKIP)` - and judged it upstream's
+        // `search_start` prefilter alone, pinning this port's answer of (4, 0). S40b RE-JUDGED IT and
+        // flipped the assertion, because half of it was this port's own defect and S40a said so:
+        // the answer (4, 0) is the one the carried slice left reachable, and this port's own matcher
+        // finds a partial at 2. Both engines report a partial here and they report DIFFERENT ONES,
+        // so the row was never "upstream saw a partial and this port saw nothing".
         //
-        // Upstream's partial covers the whole subject, from the search start to the end of the text,
-        // and its own `match` over that very span denies it. This port answers the zero-width partial
-        // at the end, where `\w` ran out of text - which is upstream's own answer once it is asked at
-        // that position instead. All measured against regex 2026.7.19 on 2026-09-12 and unchanged
-        // against 2026.9.10, tools/probes/upstream-search-start-whole-region-partial.py:
+        // What changed is only this port's side. With the slice restored before the partial retry
+        // (Matcher.cs `DoMatch`) the search no longer skips positions 2 and 3, and it now answers
+        // the leftmost partial that exists - which is upstream's OWN answer at that position:
         //
         //   pat = regex.compile(r'(?:\w{2,}(*SKIP)\w|\w)\B')
         //   pat.search('a.Aa', partial=True)          -> (0, 4), partial True
-        //   pat.match('a.Aa', 0, 4, partial=True)     -> None
+        //   pat.match('a.Aa', 0, 4, partial=True)     -> None      <- upstream denies its own answer
+        //   pat.match('a.Aa', 2, partial=True)        -> (2, 4), partial True   <- and this is ours
         //   pat.match('a.Aa', 4, partial=True)        -> (4, 4), partial True
+        //
+        // So the residual divergence is upstream's prefilter and nothing else: its partial arms set
+        // `new_position->text_pos` to the end of the slice (`:8471`, `:8487`) while the match start
+        // stays where the SEARCH began, giving a span its own `match` refuses. Measured against
+        // regex 2026.7.19 on 2026-09-12, unchanged against 2026.9.10, re-measured 2026-09-13 by
+        // tools/probes/upstream-search-start-whole-region-partial.py and
+        // tools/probes/upstream-partial-retry-slice-restore.py.
         //
         // That the verb is what puts upstream on the prefilter's path is upstream's own statement
         // too: delete the `(*SKIP)` and its search answers a COMPLETE match at (2, 3); make it
-        // `(*PRUNE)`, which moves no bound, and it answers this port's partial.
+        // `(*PRUNE)`, which moves no bound, and it answers (2, 4) - this port's answer.
         //
-        // PERMANENT, on the same reasoning as the test above: a Phase 7 slice that ports
-        // `search_start` and turns this red has imported the prefilter's answers along with the
-        // prefilter. Classified as `search-start-partial` in
+        // PERMANENT: a Phase 7 slice that ports `search_start` and turns this red has imported the
+        // prefilter's answers along with the prefilter. Classified as `search-start-partial` in
         // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
-        Match partial = new FuzzyRegex(@"(?:\w{2,}(*SKIP)\w|\w)\B").Match("a.Aa", partial: true);
+        var skipped = new FuzzyRegex(@"(?:\w{2,}(*SKIP)\w|\w)\B");
+        Match partial = skipped.Match("a.Aa", partial: true);
 
         partial.Success.Should().BeTrue();
         partial.PartialMatch.Should().BeTrue();
-        (partial.Index, partial.Length).Should().Be((4, 0), "upstream answers (0, 4)");
+        (partial.Index, partial.Length).Should().Be((2, 2), "upstream answers (0, 4)");
+
+        // The leftmost check that S40b's fix is what this test now rests on: the search's answer is
+        // the first position at which this port's own anchored matcher answers anything at all.
+        foreach (int beginning in new[] { 0, 1 })
+        {
+            skipped
+                .MatchAtStart("a.Aa", beginning, partial: true)
+                .Success.Should()
+                .BeFalse($"nothing matches at {beginning}, so the search owes its answer at 2");
+        }
+
+        Match anchored = skipped.MatchAtStart("a.Aa", beginning: 2, partial: true);
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((2, 2), "upstream's own match(pos=2) answers this");
 
         // Without the verb there is a complete match, and both engines find it - which is what says
         // the divergence above belongs to the verb and the prefilter rather than to `\B`.
@@ -485,47 +507,97 @@ public sealed class PartialMatchingTests
         (atZero.Index, atZero.Length).Should().Be((0, 0));
     }
 
-    // PINS A KNOWN PORT DEFECT, deliberately, and the assertions below are the WRONG answers.
     [Test]
-    public void A_skip_in_the_non_partial_pass_moves_the_slice_and_the_partial_pass_is_no_longer_leftmost()
+    public void A_skip_in_the_non_partial_pass_does_not_move_the_slice_the_partial_pass_searches()
     {
-        // S40a, from row 97927 of a 6000-row seed-7 wave, minimised to four characters. Unlike every
-        // other divergence in this file this one is NOT judged in this port's favour: the search is
-        // not leftmost, and it contradicts this port's own matcher, which settles it without
-        // upstream. Upstream happens to agree with the matcher.
+        // S40a found this and pinned the WRONG answer deliberately; S40b fixed it and flipped the
+        // assertions. From row 97927 of a 6000-row seed-7 wave, minimised to four characters.
         //
-        //   search(r'\b\D(*SKIP)z', ' A', partial=True)      upstream (1, 1);  here (2, 0)
+        // A `partial` search runs two passes over one match attempt (upstream do_match, `:18160`):
+        // a non-partial one, then - only if that failed - a partial one from the same `text_pos`.
+        // Upstream restores `text_pos` and nothing else, so the `(*SKIP)`'s move of `slice_start`
+        // (`:14553`) to 2 was still in force for the second pass and its search retry jumped every
+        // start position below 2. This port now restores both slice bounds with `text_pos`.
+        //
+        //   search(r'\b\D(*SKIP)z', ' A', partial=True)      upstream (1, 1);  here (1, 1) since S40b
         //   this port's own MatchAtStart(' A', 1, partial)             (1, 1)
         //
-        // The mechanism is written out at the `state.TextPos = textPos` line in Matcher.cs's
-        // `DoMatch`: the non-partial pass runs first, its `(*SKIP)` moves `slice_start` to 2, and
-        // the partial pass then re-runs from 1 with that slice still in force, so the search retry
-        // jumps every start position below 2. Dropping any one of `\b`, `\D`, `(*SKIP)` or `partial`
-        // makes the two engines agree.
-        //
-        // WHY IT IS PINNED RATHER THAN FIXED. Restoring the slice alongside `text_pos` fixes this
-        // row and introduces another - a reversed partial search, where restoring `slice_end` moves
-        // what every end-of-subject assertion means - and turns
-        // `A_skip_alternation_partial_starts_where_this_port_ran_out_of_text` above red. That test
-        // is the SAME defect seen from S37: it pins (4, 0) where this port's own matcher answers
-        // (2, 2) at an earlier position, so S37's "port right" verdict on it needs re-judging too.
-        // The three belong in one slice that can weigh them together; S40a measured them and left
-        // the engine alone. THIS TEST GOES RED WHEN THAT SLICE LANDS, and that is the point of it.
+        // What settled it is the self-refutation rather than upstream: a search that reports a
+        // position its OWN anchored matcher beats is not leftmost. Upstream happens to agree here,
+        // because its `search_start` prefilter reaches this shape. On the reversed row below it does
+        // not, and there upstream keeps the defect while this port no longer has it.
+        // tools/probes/upstream-partial-retry-slice-restore.py, regex 2026.7.19, 2026-09-13.
         var skipped = new FuzzyRegex(@"\b\D(*SKIP)z");
 
         Match search = skipped.Match(" A", partial: true);
         search.PartialMatch.Should().BeTrue();
-        (search.Index, search.Length).Should().Be((2, 0), "the wrong answer, pinned until S40b fixes it");
+        (search.Index, search.Length).Should().Be((1, 1), "upstream answers (1, 1) too");
 
-        // The half that makes the line above a defect rather than a divergence: this port's own
-        // matcher finds the leftmost partial the search skipped, and that is upstream's answer too.
+        // The half that made it a defect rather than a divergence, and the check that keeps it one:
+        // the search's answer is the leftmost its own matcher can find.
         Match anchored = skipped.MatchAtStart(" A", beginning: 1, partial: true);
         anchored.PartialMatch.Should().BeTrue();
         (anchored.Index, anchored.Length).Should().Be((1, 1));
 
-        // The control: with the verb gone nothing moves the slice, and the search is leftmost again.
+        // The control: with the verb gone nothing moves the slice, and the answer is unchanged -
+        // which is what says the fix removed the verb's leftover reach and nothing else.
         Match noVerb = new FuzzyRegex(@"\b\Dz").Match(" A", partial: true);
         noVerb.PartialMatch.Should().BeTrue();
         (noVerb.Index, noVerb.Length).Should().Be((1, 1));
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reversed_skip_does_not_move_the_slice_end_the_partial_pass_searches()
+    {
+        // The other end of the fix above, and the row S40a recorded as the reason NOT to make it -
+        // "restoring `slice_end` moves what every end-of-subject assertion means". S40b measured the
+        // row instead of inheriting that reading, and it says the opposite: UPSTREAM HAS THIS DEFECT
+        // TOO, in reverse, where its `search_start` prefilter does not mask it.
+        //
+        // Under `(?r)` the verb moves `slice_end` rather than `slice_start` (`:14551`), and a
+        // reversed search is anchored by its END, so it tries endpos 2, then 1, then 0. The answer a
+        // leftmost-equivalent reversed search owes is the first of those that matches - endpos 1.
+        // Measured on regex 2026.7.19, 2026-09-13,
+        // tools/probes/upstream-partial-retry-slice-restore.py:
+        //
+        //   search(partial=True)                    (0, 0) partial   <- upstream, and this port before S40b
+        //   match(endpos=1, partial=True)           (0, 1) partial   <- upstream's own matcher
+        //   match(endpos=0, partial=True)           (0, 0) partial
+        //   verb deleted,     search(partial=True)  (0, 1) partial
+        //   verb -> (*PRUNE), search(partial=True)  (0, 1) partial
+        //
+        // The last two lines are what make it the verb's bound move and not the pattern's meaning:
+        // `(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, and it gives
+        // the endpos-1 answer. So upstream's own matcher and upstream's own verb-free search both
+        // name (0, 1), and only upstream's search with the verb answers (0, 0).
+        //
+        // PERMANENT, and judged in this port's favour: this port answers what upstream's matcher
+        // answers. Classified as `partial-retry-reversed-slice` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs, which holds THREE rows of this shape
+        // from the gate (`tools/run-oracle.ps1 -Count 6000`, 126,000 rows a seed) - this one at seed
+        // 7 row 101560, and two at seed 20260913. The row indices only mean anything against that
+        // exact command; the entry itself is keyed on each row's question, not on its index.
+        // The gate row carries MULTILINE (flags 0x8) and this test does not, because neither `^` nor
+        // `$` appears and the flag changes no answer here; the entry holds the row verbatim.
+        var skipped = new FuzzyRegex(@"(?r)\b(?:[^a-f](*SKIP)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})");
+
+        Match search = skipped.Match("a\n", partial: true);
+        search.PartialMatch.Should().BeTrue();
+        (search.Index, search.Length).Should().Be((0, 1), "upstream answers (0, 0), skipping endpos 1");
+
+        // The self-refutation, at the bound that actually moves a reversed anchor.
+        Match anchored = skipped.MatchAtStart("a\n", beginning: 0, length: 1, partial: true);
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((0, 1));
+
+        // The control, matching the probe's `(*PRUNE)` line: a verb that moves no bound was never
+        // affected, and both engines answer the same thing before and after S40b.
+        Match pruned = new FuzzyRegex(@"(?r)\b(?:[^a-f](*PRUNE)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})").Match(
+            "a\n",
+            partial: true
+        );
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 1));
     }
 }
