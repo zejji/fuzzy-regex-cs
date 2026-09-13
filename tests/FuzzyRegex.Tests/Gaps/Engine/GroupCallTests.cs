@@ -329,22 +329,28 @@ public sealed class GroupCallTests
         // (Upstream's indices are codepoints; U+10400 is one codepoint and two UTF-16 code units.)
         //
         // WHY NO VERDICT. There are two candidate defects here and S40a settled neither, so nothing
-        // below should be read as "port right". What it measured
-        // (.scratch is gone; `tools/probes/` has no entry for this yet - re-derive from the six
-        // lines below, which are the whole experiment):
+        // below should be read as "port right". The whole experiment is now a probe rather than a
+        // description - `python tools/probes/upstream-call-partial-leak.py`, and `--newer` for
+        // 2026.9.10 - and its twelve-case matrix says two things:
         //
         //  * UPSTREAM'S PARTIAL COMES FROM THE CALL, not from the subject. Write the call out as the
         //    thing it calls - `(?<=\U00010400)` for `(?<=(?P>g1))` - and upstream answers a COMPLETE
         //    match. Delete the lookaround and it answers a complete match. That is ledger entry 8's
-        //    signature: upstream contradicts itself between a call and its own inlined body.
-        //  * THIS PORT IS INCONSISTENT ACROSS ASTRALITY, which upstream is not. On an ASCII subject
-        //    this port reports upstream's partial; on the astral subject it does not. Upstream
-        //    reports it for both.
+        //    signature: upstream contradicts itself between a call and its own inlined body. It is
+        //    NOT issue 614: 2026.9.10, where that fix landed, answers every one of the twelve
+        //    identically (measured 2026-09-13).
+        //  * THIS PORT'S ODD ANSWER IS THE ASCII ONE, not the astral one, and S40a's first session
+        //    had this the wrong way round. Across the matrix this port answers "not partial" for
+        //    EVERY optional tail - inline, bare, reversed, astral - and "partial" for every required
+        //    one, on both widths. The exceptions are the two ASCII CALL rows, forward and reversed,
+        //    where it reports upstream's partial. So the astral answers are this port being
+        //    consistent with itself, and the question S40c has to answer is why those two leak.
         //
-        // So upstream is wrong about the call and this port is wrong about the astral subject, and
-        // which answer the ROW should have depends on which of those is fixed first. Settling it
-        // needs the call's direction handling and the end-of-text partial check looked at together,
-        // which is a slice of its own (S40b, with row 97927's leftmost-partial defect).
+        // Which answer the ROW should have depends on that: if the leak goes, the ASCII rows this
+        // port currently agrees on start diverging too, and the whole family becomes one entry
+        // saying "upstream leaks a partial through a call". Settling it needs the call's direction
+        // handling and the end-of-text partial check looked at together, which is a slice of its own
+        // (S40c; row 97927's leftmost-partial defect is S40b, a different mechanism).
         string astral = char.ConvertFromUtf32(0x10400);
 
         Match forward = new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?").Match(astral, partial: true);
@@ -381,6 +387,30 @@ public sealed class GroupCallTests
         new FuzzyRegex(@"(?P<g1>A)(?:(?<=(?P>g1))\w)?")
             .Match("A", partial: true)
             .PartialMatch.Should()
-            .BeTrue("this port agrees with upstream on ASCII and not on astral - the defect S40b owns");
+            .BeTrue("one of the two optional tails this port calls partial, and what S40c has to explain");
+
+        // Three, added by S40a's second session, and it is what makes the paragraph above a reading
+        // of the matrix rather than of two rows: this port's rule is OPTIONAL TAIL, NO PARTIAL and
+        // REQUIRED TAIL, PARTIAL, and it holds at both widths. Upstream agrees on every one of these
+        // four. So the ASCII call row is the outlier among this port's own answers, not the astral
+        // one - which is the opposite of what the first session recorded.
+        new FuzzyRegex("(?P<g1>" + astral + @")\w?")
+            .Match(astral, partial: true)
+            .PartialMatch.Should()
+            .BeFalse();
+        new FuzzyRegex("(?P<g1>" + astral + @")\w").Match(astral, partial: true).PartialMatch.Should().BeTrue();
+        new FuzzyRegex(@"(?P<g1>A)\w").Match("A", partial: true).PartialMatch.Should().BeTrue();
+        new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)")
+            .Match(astral, partial: true)
+            .PartialMatch.Should()
+            .BeTrue("a REQUIRED tail through the same call is partial on the astral subject too");
+
+        // And the SECOND leaking row, which S40a's own first write-up of this missed: the reversed
+        // call over an ASCII subject leaks the partial as well, so there are two of them and not one.
+        // Its astral twin, asserted above, does not.
+        new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?")
+            .FullMatch("a", partial: true)
+            .PartialMatch.Should()
+            .BeTrue("the other ASCII call row, and the reason S40c's question is about two rows");
     }
 }

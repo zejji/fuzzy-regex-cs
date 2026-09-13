@@ -82,3 +82,57 @@ for label, whole, shorter, inlined, subject, flags, overlapped in CASES:
         # The width of this answer is what proves the piece matched empty: were the conditional
         # taking its yes-branch, the repeat would have to consume.
         print(f'   inlined  {inlined!r}\n            {spans(inlined, subject, flags, overlapped)}')
+
+
+# S40a (2026-09-13), seed 20260913 row 93133, and the same family seen one row further on: this port
+# matched, reached the substitution's template and REFUSED it, where upstream lost the match and
+# never expanded a template at all. The report therefore shows an exception against a no-op
+# substitution, which looks like a crash in this port until the template is asked of upstream
+# separately - which is what this section does. `{1[2]}` names a third capture of a group that made
+# one, and upstream raises IndexError for it the moment it has a match to expand against.
+PAT_93133 = r'(?r)\b(?<g>[ab]+)(?=(?&g))'
+NOCALL_93133 = r'(?r)\b(?<g>[ab]+)'
+INLINED_93133 = r'(?r)\b(?<g>[ab]+)(?=[ab]+)'
+SUBJECT_93133 = 'ba)((a)((a'
+TEMPLATE_93133 = '{{{0[-1]}ab{1[2]}'
+
+
+def answer(label, call):
+    try:
+        print(f'   {label:<44} {call()!r}')
+    except Exception as e:  # noqa: BLE001 - the exception is the answer
+        print(f'   {label:<44} {type(e).__name__}: {e}')
+
+
+print('\n== seed 20260913 row 93133 - the lost match seen as an exception in the port')
+print(f'   subject {SUBJECT_93133!r} template {TEMPLATE_93133!r}')
+answer('the row as recorded', lambda: regex.subf(PAT_93133, TEMPLATE_93133, SUBJECT_93133))
+answer('does upstream match at all', lambda: regex.search(PAT_93133, SUBJECT_93133))
+answer('the called body written out', lambda: regex.search(INLINED_93133, SUBJECT_93133))
+answer('the lookahead deleted - it matches', lambda: regex.search(NOCALL_93133, SUBJECT_93133))
+answer('...and the SAME template then raises', lambda: regex.subf(NOCALL_93133, TEMPLATE_93133, SUBJECT_93133))
+answer('group 1 made this many captures', lambda: regex.search(NOCALL_93133, SUBJECT_93133).captures(1))
+
+# And the measurement that says the port's exception is upstream's own answer rather than a crash:
+# every index form a format field can take, over a pattern both engines match. The port's answers
+# are recorded beside upstream's - measured 2026-09-13 against
+# src/FuzzyRegex/bin/Debug/net10.0/FuzzyRegex.dll, and pinned by
+# tests/FuzzyRegex.Tests/Ported/Format/SubscriptedCapturesTests.cs for the forms it covers.
+OURS_BY_FIELD = {
+    '{0}': "'ab'",
+    '{0[0]}': "'ab'",
+    '{0[-1]}': "'ab'",
+    '{0[-2]}': 'rejected',
+    '{1[0]}': "'a'",
+    '{1[2]}': 'rejected',
+    '{2[-1]}': "'b'",
+}
+
+print('\n== every index form a format field can take, on (a)(b) over "ab"')
+print(f'   {"field":<10} {"upstream":<44} port')
+for field, ours in OURS_BY_FIELD.items():
+    try:
+        theirs = repr(regex.subf(r'(a)(b)', field, 'ab'))
+    except Exception as e:  # noqa: BLE001 - the exception is the answer
+        theirs = f'{type(e).__name__}: {e}'
+    print(f'   {field:<10} {theirs:<44} {ours}')

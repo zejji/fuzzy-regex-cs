@@ -133,6 +133,7 @@ internal static class ExpectedDivergences
         {"generator": "verbs", "pattern": "(?r)([^a]{2,4}(*SKIP)[a\\d])((?:[^\\d]++(*SKIP)\\s|\\ ))", "flags": 0, "namedLists": {}, "subject": "b0 0\n A", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}]}}
         {"generator": "verbs", "pattern": "(?r)(?:[a\\d]*(*SKIP)\\D|\\p{Nd})(?:[\\p{L}\\p{N}]{1,3}(*SKIP)\\S|.)((?>\\s+(*PRUNE)A))", "flags": 0, "namedLists": {}, "subject": "İİAAA AS", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 4]}]}}
         {"generator": "interactions", "pattern": "(?r)(?:\\D{1,1}(*SKIP)[\\p{ASCII}&&\\p{L}]|[[a-f]~~[d-k]])(?P<g1>.*)??(?P<g2>[A])(?:(?(2)(?<!(?&g2))\\p{Nd}))\\b", "flags": 264, "namedLists": {}, "subject": "A\r\nAAA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 5]}]}}
+        {"generator": "verbs", "pattern": "(?r)[[:digit:]]*(*SKIP)a$", "flags": 16394, "namedLists": {}, "subject": "\r\nAAa\r\naaa", "operation": "finditer", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [9, 10]}, {"groups": [{"number": 0, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [8, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [7, 8]}]}}
         """;
 
     /// <summary>
@@ -183,17 +184,18 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The five rows of <c>group-call-loses-the-match</c>, as <c>tools/record-oracle.py --rows</c>
-    /// wrote them on 2026-09-12, and all five because between them they are the four OUTCOME SHAPES
-    /// the defect appears in - an empty scan, a scan one match short, a substitution that replaced
-    /// nothing, and a split that split nothing.
+    /// The six rows of <c>group-call-loses-the-match</c>, as <c>tools/record-oracle.py --rows</c>
+    /// wrote them, and all six because between them they are the five OUTCOME SHAPES the defect
+    /// appears in - an empty scan, a scan one match short, a substitution that replaced nothing, a
+    /// split that split nothing, and a substitution this port answered with an exception.
     /// </summary>
     /// <remarks>
     /// Rows 4182 (seed 7), 4407 (seed 20260912), 5087 and 5773 (seed 4242) and 1624 (seed 99991) of a
-    /// 6000-row <c>interactions</c> wave, each as the wave drew it. The fifth arrived the way this
-    /// list is meant to work: <c>split</c> was deliberately left out of the predicate as a shape no
-    /// row had shown, the fourth seed drew one, the run went red rather than quietly classifying it,
-    /// and it was judged by the same probe as the other four. Minimisation was tried and is recorded in
+    /// 6000-row <c>interactions</c> wave, each as the wave drew it, and row 93133 (seed 20260913) of a
+    /// 6000-row <c>recursion</c> one, added by S40a. The fifth and sixth both arrived the way this
+    /// list is meant to work: the shape was deliberately left out of the predicate as one no row had
+    /// shown, a later seed drew one, the run went red rather than quietly classifying it,
+    /// and it was judged by the same probe as the others. Minimisation was tried and is recorded in
     /// the entry's own <see cref="ExpectedDivergence.Reason"/> as having failed: every shrink that
     /// kept upstream contradicting ITSELF lost the divergence, because this port reproduces
     /// upstream's answer on the short forms.
@@ -204,6 +206,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?r)\\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\\S)){3}(\\p{Nd}+?)?", "flags": 10, "namedLists": {}, "subject": "AA..0", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         {"generator": "interactions", "pattern": "(?r)^([[:alpha:]]+)(?P<g2>[😀])(?:(?(2)(?=(?P>g2))[^\\p{L}]))+?", "flags": 10, "namedLists": {}, "subject": "a😀\r", "operation": "subf", "template": "{g2}{{", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "a😀\r", "count": 0}}
         {"generator": "interactions", "pattern": "(?P<g1>[𐐀A]{2,2})(?:(?(1)(?<!(?P>g1))[^\\d]|[a-f]))?([abz]{0,2})$", "flags": 65536, "namedLists": {}, "subject": "𐐀𐐀A", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["𐐀𐐀A"]}}
+        {"generator": "recursion", "pattern": "(?r)\\b(?<g>[ab]+)(?=(?&g))", "flags": 0, "namedLists": {}, "subject": "ba)((a)((a", "operation": "subf", "template": "{{{0[-1]}ab{1[2]}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ba)((a)((a", "count": 0}}
         """;
 
     /// <summary>
@@ -445,7 +448,23 @@ internal static class ExpectedDivergences
                 + "recorded three matches where a run on the row alone gave one; it does not - "
                 + "`verbs` is recorded prefilter-free (tools/record-oracle.py) and the isolated run "
                 + "was not. Recompiled prefilter-free it gives the same three matches every time, so "
-                + "the recorder needs no per-row isolation. Ledger entry 5.",
+                + "the recorder needs no per-row isolation. Ledger entry 5.\n"
+                + "WIDENED BY S40a FROM OVERLAPPED TO EITHER SCAN, and the reason is this port rather "
+                + "than a new upstream shape: S40a stopped the scanner carrying a moved slice, so a "
+                + "PLAIN reversed `finditer` now ends where upstream keeps going too. It had agreed "
+                + "before by reproducing the bug. Seed 20260913 row 116766, `verbs`, prefilter-free: "
+                + "`regex.finditer(r'(?r)[[:digit:]]*(*SKIP)a$', '\\r\\nAAa\\r\\naaa', regex.M)` gives "
+                + "(9, 10), (8, 9) and (7, 8), and upstream's own `(?m)$` holds at 1, 6 and 10 alone - "
+                + "so the second and third matches need `$` where the subject has an 'a'. Making the "
+                + "verb `(*PRUNE)`, or deleting it, leaves (9, 10) by itself, which is this port's "
+                + "answer. Measured 2026-09-13, tools/probes/upstream-reversed-skip-scan-shapes.py.\n"
+                + "TWO ROWS OF THE SAME FAMILY ARE DELIBERATELY NOT COVERED and still red the wave, "
+                + "because neither tell reaches them and a predicate widened until it did would stop "
+                + "discriminating: a `sub` row, whose outcome carries no match positions to refute "
+                + "(seed 20260913 row 116388), and an overlapped row whose pattern has no `$` and no "
+                + "groups at all (seed 4242 row 117071), where the refutation needs upstream's own "
+                + "answer over a truncated subject. Both are measured in that probe and belong to "
+                + "S40d with the reversed `anchoredScan` the recorder refuses.",
             PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_"
                 + "upstreams_own_extra_matches_refute_themselves",
             Example: _reversedExtraMatchRows,
@@ -464,10 +483,15 @@ internal static class ExpectedDivergences
             // reversed `anchoredScan` tools/record-oracle.py refuses - moving `endpos` truncates the
             // subject and changes what `$` means, which is the very thing this entry is about.
             // Phase 6 oracle hardening.
+            //
+            // EITHER SCAN SHAPE since S40a, and the two tells are what carries the widening: the
+            // operation was never the thing doing the discriminating - the prefix comparison and the
+            // per-extra-match refutation are - and a plain reversed `finditer` carries the same
+            // moved slice as an overlapped one. Neither tell was loosened to let it in.
             Applies: static (row, ours) =>
                 row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
                 && IsReversed(row)
-                && string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal)
+                && row.Operation is "finditer" or "finditer-overlapped"
                 && row.Expected is MatchesOutcome theirScan
                 && ours is MatchesOutcome ourScan
                 && OnlyExtraMatchesTheRowItselfRefutes(row, theirScan, ourScan)
@@ -524,8 +548,9 @@ internal static class ExpectedDivergences
         ),
         new(
             Id: "group-call-loses-the-match",
-            Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (all five "
-                + "wave rows replayed against .venvs/regex-2026.9.10 on 2026-09-12, identical). "
+            Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (the first "
+                + "five wave rows replayed against .venvs/regex-2026.9.10 on 2026-09-12 and the "
+                + "sixth on 2026-09-13, identical every time). "
                 + "The same precondition as `group-call-direction` above - a group reached by a call "
                 + "from a lookaround running the other way round from the pattern - and a different "
                 + "symptom: upstream does not record a bad capture, it LOSES the match. This is the "
@@ -953,6 +978,27 @@ internal static class ExpectedDivergences
                     .Any(),
             (SubOutcome { Count: 0 } theirs, SubOutcome mine) => mine.Count > 0
                 && string.Equals(theirs.Text, row.Subject, StringComparison.Ordinal),
+            // The same substitution arm seen from one row further on: this port matched, reached the
+            // template, and REFUSED it. Upstream never got that far, because it lost the match, so
+            // the row's two answers are a no-op substitution and an exception.
+            //
+            // What makes it the same family rather than a crash in this port is measured, not
+            // assumed (tools/probes/upstream-group-call-loses-matches.py, its last section, 2026-09-13):
+            // upstream raises `IndexError: list index out of range` for the identical template the
+            // moment it has a match to expand it against - delete the call and
+            // `regex.subf(r'(?r)\b(?<g>[ab]+)', '{{{0[-1]}ab{1[2]}', 'ba)((a)((a')` raises - and
+            // `{1[2]}` names a third capture of a group that made one. So this port's answer IS
+            // upstream's answer to the template; the whole of the divergence is the lost match.
+            //
+            // Narrow on the exception type, and the hole is worth saying out loud: an
+            // ArgumentException thrown from the ENGINE rather than from the template would be
+            // classified here. It is bounded by the rest of the predicate - a substitution row whose
+            // pattern calls a group through an opposite-direction lookaround, where upstream
+            // replaced nothing - and by the arm above it, which is what a non-throwing port hits.
+            (
+                SubOutcome { Count: 0 } theirs,
+                ErrorOutcome { WhileMatching: true, Exception: nameof(ArgumentException) }
+            ) => string.Equals(theirs.Text, row.Subject, StringComparison.Ordinal),
             (SplitOutcome theirs, SplitOutcome mine) => theirs.Parts.Count == 1
                 && mine.Parts.Count > 1
                 && string.Equals(theirs.Parts[0], row.Subject, StringComparison.Ordinal),

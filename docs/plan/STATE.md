@@ -2,42 +2,41 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S40a, STILL OPEN after session 1. Launch: `pwsh -File tools/launch-slice.ps1 s40a`.
-Its file now carries a long "Session 1" section - **read that before re-planning it**, because two of
-its four items rested on premises that measurement overturned.
+**Current slice:** S40b is next, then S40c, S40d, S41, S42, S43.
+Launch: `pwsh -File tools/launch-slice.ps1 s40b`.
 
-**What landed:** the recorder per-row timeout (a hanging upstream row is now a recorded `timeout`
-outcome, not an unwritten wave - it fires for real at seed 4242); ledger entries **10** (the
-`(*SKIP)`-in-an-atomic hang, already fixed upstream by `b77694a`, this port never hung - 70 of 1296
-grid calls hang on 2026.7.19, 0 here) and **11** (a fuzzy match reporting changes that contradict its
-own counts - UPSTREAM'S, S38 had already pinned it, the one-line fix was measured and reverted);
-and one engine fix: **`DoMatch` now restores the slice at the start of every match**, which is the fix
-ledger entry 5 proposes for upstream. Seed-7 wave 4 divergences -> 3.
+**S40a is closed over two sessions.** Session 1 landed the recorder's per-row timeout, the
+per-match slice reset (ledger entry 5's own proposed fix), ledger entries 10 and 11 and six
+permanent tests; **it was rolled back only because the slice file was not moved to `done/`**, and
+this session recovered its commit `fae1dd8` by fast-forward and re-ran the ratchet on it.
+Session 2 triaged the gate's fifteen rows, classified two, and split the rest.
 
-**The exit gate is NOT met, and it is far bigger than S40a supposed.** 6000 rows a generator at three
-seeds gives **3 + 5 + 7 = 15 diverging rows**, not four; S40 saw four because only seed 7 ever
-completed. Eleven have never been triaged. **Row 93133 (`recursion`, `subf`) is a CRASH** -
-`ArgumentException: capture index out of range` out of `Substitution.ExpandField` where upstream
-answers `sub 0`. Both blind reviews confirmed none of the fifteen is caused by this session's diff.
+**The 6000-row three-seed gate is S40d's, and the thirteen rows left are three mechanisms:**
+four are the partial pass inheriting a slice a `(*SKIP)` moved (**S40b**, and its fix re-judges
+S37's pinned answer); seven are upstream leaking a partial through a group call in an
+opposite-direction lookaround (**S40c**); two are the reversed carried slice in shapes no
+`ExpectedDivergences` tell reaches (**S40d**). Each slice file carries its rows and its probes.
 
-**Do not re-try two things without reading why they were reverted**, both written out at the code:
-clearing the fuzzy change list in `basic_match`'s `start_match` (turns S38's two pinned rows red), and
-restoring the slice before the partial retry in `DoMatch` (fixes row 97927, introduces a reversed one,
-and turns S37's permanent pinned answer red - that answer is itself the same defect).
+**Two corrections session 2 made to session 1's own record**, both worth knowing before reading it:
+row 93133 is **not a crash** - the port's format-field handling matches upstream's on every index
+form and the divergence is upstream losing the match - and the call-partial family's odd answers
+are this port's **ASCII** rows, not its astral ones, with 2026.9.10 answering identically so issue
+614 is not involved. The superseding DECISIONS entries are dated 2026-09-13.
 
-**Blockers:** none technical. The remaining work wants splitting, and the split is an owner decision -
-S40a's closing section proposes four pieces, crash first.
+**Probes, not descriptions:** `tools/probes/upstream-call-partial-leak.py` (`--newer` for
+2026.9.10), `upstream-reversed-skip-scan-shapes.py`, `upstream-skip-in-atomic-hang.py`,
+`upstream-fuzzy-restart-leak.py`, and the last section of `upstream-group-call-loses-matches.py`.
 
-**Where the port stands:** ratchet GREEN, 5825 tests, 5770 passing, parity **97.2%**, baseline updated
-to 5662. 55 skipped, all `(?e)`/`(?b)`.
+**Where the port stands:** ratchet GREEN, 5825 tests, 5770 passing, parity **97.2%**, **29** areas at
+100% (S40's "30" was never what `docs/STATUS.md` says). 55 skipped, all `(?e)`/`(?b)` - S41's and
+S42's scope.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Rows per generator is **`-Count`**;
-`-Rows` is a path to a JSONL file and still re-records - use `-SkipRecord` to consume one. A 6000-row
-seed takes ~18s to record and ~8s to consume, so the whole gate is about two minutes.
+`-Rows` is a path to a JSONL file and still re-records - use `-SkipRecord` to consume one.
+**The gate is CHEAP** - measured 2026-09-13, 126,000 rows records in 17s and consumes in 6s, so
+`-Count 6000` at three seeds is about a minute in all. What costs is judging the rows it finds.
+**Delete `.scratch/control-waves/<generator>-<count>-<seed>.jsonl` after widening a generator.**
 
-**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`): nothing filed until
-everything else in the plan is done. Entries 10 and 11 are new; 11 is an INHERITED bug, so by the
-owner's 2026-09-12 rule it joins entry 7 on Phase 6's sweep list.
-
-**Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
-`origin/main` trails local and needs a push.
+**Still open for the owner:** the design spec's amendment 20 (the Phase 5 re-plan; ROADMAP carries
+the repo half); `slice-log.jsonl` marks S26 `failed` though its commit is real; `origin/main`
+trails local and needs a push.

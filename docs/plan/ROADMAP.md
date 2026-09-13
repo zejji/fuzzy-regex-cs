@@ -177,9 +177,40 @@ match, ledger entry 5's own proposed fix - plus the recorder's per-row timeout.
 
 So the honest read is that **Phase 5 needs at least three more slices than its eight**, and they are
 verification work rather than features, exactly as this file's own Phase 5 budget note predicted
-("its 5-8 counts fuzzy features, and the oracle will add slices to it"). S40a's closing section
-proposes the split, crash first, triage second, the partial-matching slice-carry family third, and
-the gate itself last. Budget them at Phase 4's measured 1.1 sessions per slice.
+("its 5-8 counts fuzzy features, and the oracle will add slices to it"). Budget them at Phase 4's
+measured 1.1 sessions per slice.
+
+**S40a's second session (2026-09-13) triaged the fifteen, and the split is now three slices with
+files rather than a proposal - S40b, S40c and S40d.** The fifteen are three mechanisms and not
+eleven unknowns:
+
+- **four rows are one port defect** (S40b): a `(*SKIP)` in the non-partial pass moves `slice_start`
+  and the partial pass inherits it, so the search is not leftmost. Its fix turns S37's permanent
+  pinned answer red - and that answer is the same defect, pinning a span this port's own matcher
+  beats - so the fix and two "wrong answer on purpose" tests are one judgement;
+- **seven rows are one question about this port** (S40c): upstream leaks a partial through a group
+  call inside an opposite-direction lookaround, on both widths and in 2026.9.10 as well, so it is
+  not issue 614; this port leaks it on an ASCII subject and not on an astral one, and every other
+  optional tail it answers consistently. Session 1 read that as an astral defect; the twelve-case
+  matrix in `tools/probes/upstream-call-partial-leak.py` says the ASCII row is the outlier;
+- **two rows are the reversed `(*SKIP)` carried slice in shapes no tell reaches** (S40d), which is
+  the reversed `anchoredScan` the recorder refuses, plus the gate itself.
+
+**And the "crash" was not one.** Row 93133's `ArgumentException` is what upstream raises for the
+same template the moment it has a match to expand it against - `{1[2]}` names a third capture of a
+group that made one, and upstream's `IndexError` is the identical answer - so the whole divergence
+is upstream losing the match, and the row is now classified under `group-call-loses-the-match`. The
+port's format-field handling was measured against upstream's on every index form, negative included,
+and agrees on all of them. Row 116766 is classified too, which is what widened
+`overlapped-skip-extra-match-reversed` past overlapped scans: S40a's own engine fix stopped this port
+reproducing the carried slice, so a plain reversed `finditer` now ends where upstream keeps going.
+**Thirteen rows are left and every one has a slice with its name on it** - re-measured on the
+committed code as 3 + 5 + 5, not inferred.
+
+One number this re-plan corrects, because it was load-bearing and nobody had measured it: **the
+6000-row three-seed gate takes about a minute**, 17 seconds to record 126,000 rows and 6 to consume
+them. The forty minutes S40 lost was the hanging row the recorder now times out, not the volume, and
+a draft of S40d that budgeted an hour a seed was corrected by its blind review.
 
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
