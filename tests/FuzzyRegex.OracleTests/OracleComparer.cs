@@ -73,6 +73,15 @@ internal static class OracleComparer
                 continue;
             }
 
+            // S43, on the same terms: upstream ran out of heap rather than out of time, and a row
+            // it could not answer is a row this port cannot be scored against. Not asked, for the
+            // same wall-clock reason - a BESTMATCH blowup costs this engine its whole RowTimeout too.
+            if (row.Expected is ResourceOutcome)
+            {
+                tally[OracleVerdict.Resource] = tally.GetValueOrDefault(OracleVerdict.Resource) + 1;
+                continue;
+            }
+
             IOracleOutcome? actual = engine(row);
             OracleVerdict verdict = Compare(row, actual);
 
@@ -235,6 +244,13 @@ internal static class OracleComparer
         if (row.Expected is TimeoutOutcome)
         {
             return OracleVerdict.Timeout;
+        }
+
+        // S43, and for the identical reason: upstream hit an interpreter limit, so it gave no
+        // answer that anything can agree or disagree with.
+        if (row.Expected is ResourceOutcome)
+        {
+            return OracleVerdict.Resource;
         }
 
         if (actual is null)

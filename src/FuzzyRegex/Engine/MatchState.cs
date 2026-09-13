@@ -230,6 +230,18 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     internal GroupData[]? BestMatchGroups;
 
+    /// <summary>
+    /// Upstream <c>best_fuzzy_counts</c> (<c>:11501</c>): the errors the best POSIX match so far
+    /// spent, saved beside its groups so that restoring the match restores what it cost.
+    /// </summary>
+    internal readonly long[] BestFuzzyCounts = new long[FuzzyValue.Count];
+
+    /// <summary>
+    /// The changes the best POSIX match so far made. <b>Upstream has no counterpart and that is the
+    /// point of it</b> - see <c>Matcher.SaveBestMatch</c>.
+    /// </summary>
+    internal readonly List<FuzzyChange> BestFuzzyChanges = [];
+
     /// <summary>Upstream <c>min_width</c>, a codepoint count.</summary>
     internal long MinWidth;
 

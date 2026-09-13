@@ -358,4 +358,64 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyChanges.Insertions.Should().BeEmpty();
         m.FuzzyChanges.Deletions.Should().BeEmpty();
     }
+
+    [Test]
+    public void Bestmatch_keeps_a_partial_that_upstreams_own_search_loses_beside_a_skip()
+    {
+        // UPSTREAM BUG, found by S43's composed `interactions` wave - five rows of a 6000-row
+        // three-seed default wave are this family. The judgement needs no second engine, and on
+        // THIS shape it takes the strongest form available: upstream contradicts itself on the same
+        // compiled pattern, flag still on.
+        //
+        //   regex.compile(r'(?b)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)').search('ab.', partial=True)
+        //     -> None
+        //   ...the same object....................................match('ab.', 2, partial=True)
+        //     -> (2, 3) partial
+        //
+        // A search that finds nothing where its own anchored match finds something is wrong however
+        // the ranking rule is defined: BESTMATCH chooses among the matches that exist, it does not
+        // remove them. THAT FORM DOES NOT HOLD ON ALL FIVE WAVE ROWS - on three of them upstream
+        // finds nothing from any door with the flag on, so only the weaker argument below applies
+        // to those; see the probe's docstring, which keeps the two apart. Said the weaker way,
+        // deleting `(?b)` gives upstream a match it refused with `(?b)` present - and THAT is the
+        // answer this port gives:
+        //
+        //   regex.compile(r'(?:ab){e<=1}(?:\S(*SKIP)\w|\W)').search('ab.', partial=True)
+        //     -> (0, 3) partial, counts (0, 0, 0)
+        //
+        // Four conditions, each necessary on this shape. The BESTMATCH flag, where `(?e)` in its
+        // place keeps the match. The fuzzy section. The backtracking verb. And the partial. The
+        // faulting function is `do_best_fuzzy_match` at upstream/src/_regex.c line 17584, though the
+        // exact line inside it is not pinned, and Phase 6's upstream report owns finishing that.
+        // Re-runnable as `python tools/probes/upstream-bestmatch-loses-a-partial.py`.
+        Match best = new FuzzyRegex(@"(?b)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)").Match("ab.", partial: true);
+
+        best.Success.Should().BeTrue("upstream's own anchored match finds this and its search does not");
+        (best.Index, best.Length).Should().Be((0, 3));
+        best.PartialMatch.Should().BeTrue();
+        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // The same pattern without `(?b)`, which upstream and this port agree on, and which is what
+        // makes the answer above upstream's own rather than this port's invention.
+        Match plain = new FuzzyRegex(@"(?:ab){e<=1}(?:\S(*SKIP)\w|\W)").Match("ab.", partial: true);
+
+        (plain.Index, plain.Length).Should().Be((0, 3));
+        plain.PartialMatch.Should().BeTrue();
+    }
+
+    [Test]
+    public void Bestmatch_without_the_verb_keeps_its_match_on_both_engines()
+    {
+        // The negative control for the test above, and the reason the entry names `(*SKIP)` as a
+        // condition rather than describing `(?b)` with partial matching in general. Upstream keeps
+        // this one:
+        //   regex.compile(r'(?b)(?:ab){e<=1}(?:\S\w|\W)').search('ab.', partial=True)
+        //     -> (0, 3), NOT partial, counts (0, 0, 0)
+        Match m = new FuzzyRegex(@"(?b)(?:ab){e<=1}(?:\S\w|\W)").Match("ab.", partial: true);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.PartialMatch.Should().BeFalse();
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
 }

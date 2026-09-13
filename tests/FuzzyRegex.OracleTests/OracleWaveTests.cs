@@ -290,6 +290,52 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_upstream_ran_out_of_memory_on_is_skipped_counted_and_never_put_to_this_port()
+    {
+        // S43's half of the same problem, reached by running out of heap rather than out of time.
+        // A repeat whose body can match empty, beside a fuzzy section, gives upstream nothing to
+        // make progress on and it allocates until MemoryError in a second or two. Measured
+        // 2026-09-13 on regex 2026.7.19, over 'bb.a\r.':
+        //   (?b)(?P<g1>\p{L}*)+?(?:ab){e<=1}  MemoryError 1.78s
+        //   (?e)(?P<g1>\p{L}*)+?(?:ab){e<=1}  MemoryError 1.76s
+        //       (?P<g1>\p{L}*)+?(?:ab){e<=1}  MemoryError 1.75s   <- no ranking flag at all
+        //       (?P<g1>\p{L}+)+?(?:ab){e<=1}  (0, 2)      0.00s   <- the body must consume
+        // The row below keeps the `(?b)` spelling because it is the one the wave drew, not because
+        // the flag causes it. Until S43 the recorder aborted the whole run on one of these, so a
+        // single unanswerable row threw away every other row of a six-seed wave.
+        OracleRow blown = OracleWave.ParseRows(
+            """
+            {"generator": "interactions", "pattern": "(?b)(?P<g1>\\p{L}*)+?(?:ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "bb.a\r.", "operation": "search", "codepointSpan": null, "outcome": {"kind": "resource", "exception": "MemoryError"}}
+            """
+        )[0];
+
+        blown.Expected.Should().BeOfType<ResourceOutcome>().Which.Exception.Should().Be("MemoryError");
+
+        // Both arms, exactly as for a timeout: upstream did not reject the pattern, so filing this
+        // as a divergence would fail the run on upstream's resource bug, and filing it as agreement
+        // would let a port that also blows up score as parity.
+        OracleComparer.Compare(blown, new NoMatchOutcome()).Should().Be(OracleVerdict.Resource);
+        OracleComparer.Compare(blown, actual: null).Should().Be(OracleVerdict.Resource);
+
+        var asked = new List<int>();
+        OracleRunSummary run = OracleComparer.RunWave(
+            [blown],
+            row =>
+            {
+                asked.Add(row.Number);
+                return new NoMatchOutcome();
+            }
+        );
+
+        asked.Should().BeEmpty("a row with no ground truth is asked of nothing");
+        run.Divergences.Should().BeEmpty();
+
+        // The whole tally, so a future edit cannot fold it back into `unsupported` and make an
+        // upstream blowup read as a gap in this port's coverage.
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Resource] = 1 });
+    }
+
+    [Test]
     public void A_wrong_lastindex_alone_is_reported_as_a_divergence()
     {
         // Added S18 with 'lastindex'/'lastgroup'. They are compared because nothing about the group

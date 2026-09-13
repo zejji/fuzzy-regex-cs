@@ -2064,7 +2064,22 @@ internal static class Matcher
     /// is a Phase 7 question, not a correctness one.
     /// </para>
     /// <para>
-    /// NOT PORTED: the <c>best_fuzzy_counts</c> copy (<c>:11501</c>), which is Phase 5's.
+    /// <b>The fuzzy half, and where this port deliberately does more than upstream (S43).</b>
+    /// Upstream copies <c>best_fuzzy_counts</c> here (<c>:11501</c>) and <c>fuzzy_counts</c> back in
+    /// <c>restore_best_match</c> (<c>:11575</c>), and copies the CHANGES neither way. A candidate
+    /// that loses therefore leaves its changes behind in the live list while the winner's counts are
+    /// put back over the top, so the match reports a count and a change list that contradict each
+    /// other - and in C the stale list is read through freed storage, which is why
+    /// <c>regex.compile(r'(?p)(?:abc){e&lt;=1}').match('axc').fuzzy_changes</c> faults the
+    /// interpreter with an access violation rather than answering. Measured 2026-09-13 against
+    /// <c>regex</c> 2026.7.19; <c>python tools/probes/upstream-posix-fuzzy-changes-crash.py</c>.
+    /// </para>
+    /// <para>
+    /// So BOTH are saved and restored here. Copying only the counts, as upstream does, would
+    /// reproduce the contradiction memory-safely and leave this port answering a match whose
+    /// <c>FuzzyChanges</c> belong to a candidate that lost - an inherited bug, which design spec
+    /// amendment 20 says is fixed here rather than carried. Ledger entry 9, closed;
+    /// Gaps/Engine/FuzzyPosixTests.cs pins the answers.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -2073,6 +2088,10 @@ internal static class Matcher
         state.BestMatchPos = state.MatchPos;
         state.BestTextPos = state.TextPos;
         state.FoundMatch = true;
+
+        state.FuzzyCounts.CopyTo(state.BestFuzzyCounts, 0);
+        state.BestFuzzyChanges.Clear();
+        state.BestFuzzyChanges.AddRange(state.FuzzyChanges);
 
         state.BestMatchGroups = GroupData.CopyGroups(state.Groups, state.Groups.Length);
     }
@@ -2097,7 +2116,12 @@ internal static class Matcher
         state.MatchPos = state.BestMatchPos;
         state.TextPos = state.BestTextPos;
 
-        // NOT PORTED: the 'fuzzy_counts' copy (:11575), still open at S41. See 'SaveBestMatch'.
+        // Upstream's `fuzzy_counts` copy (:11575), plus the CHANGES copy upstream does not have.
+        // Both, or the match reports errors it cannot account for. See 'SaveBestMatch'.
+        state.BestFuzzyCounts.CopyTo(state.FuzzyCounts, 0);
+        state.FuzzyChanges.Clear();
+        state.FuzzyChanges.AddRange(state.BestFuzzyChanges);
+
         RestoreGroups(state, state.BestMatchGroups!);
     }
 

@@ -2,35 +2,37 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** none. S42 is done and in `done/`. Next is **S43, the phase 5 close** -
-`pwsh -File tools/launch-slice.ps1 s43`. It is the last slice in the queue, so the driver stops
-after it and the owner authors phase 6.
+**Current slice: S43, the phase 5 close - CHECKPOINT after sitting 1.** The slice file is still in
+`docs/plan/slices/`. Ratchet GREEN at 5868 tests, 5868 passing, 5760 distinct ids, 0 skipped;
+baseline updated. `pwsh -File tools/launch-slice.ps1 s43` resumes it.
 
-**S42's second sitting landed the cost ranking for `BESTMATCH`.** Ratchet GREEN at 5854 tests, 5854
-passing, 5746 distinct ids, 0 skipped. Full default wave and the `fuzzy` wave both green at three
-seeds. `Matcher.DoBestFuzzyMatch` walks the slice twice - walk 0 bounded by the new
-`MatchState.MaxCost` finds the cheapest match, walk 1 is upstream's walk with that cost pinned - which
-is how "cheapest, then fewest errors, then earliest" gets expressed at all: one scalar budget cannot
-carry a lexicographic order. Gated on one fuzzy section and a weighted equation, both measured.
+**Sitting 1 composed fuzzy into `interactions` and the wave found three upstream bugs.** Three new
+piece kinds plus `(?e)`/`(?b)` at row level; named lists are emitted for the first time by any
+generator. `partial`/`partial-sliced` are proven byte-identical to HEAD (whole row stream, 21
+generators, 4 seeds), so their pinned answers are untouched.
 
-**Read the slice file's closing notes before S43.** Three things in them change what a later session
-should assume:
+**THE WAVE IS RED AND THAT IS THE FIRST THING TO FIX.** 7 rows of the 3-seed 6000-row default wave
+diverge, all `interactions`, **all seven judged, none yet in `ExpectedDivergences`**:
 
-1. **The first sitting's "real `ENHANCEMATCH` defect" was not one** - it is the cost divergence at a
-   different span, and its "proved not to be the ranking rule" measurement does not reproduce.
-2. **One ported test now asserts this port's answer**, `test_fuzzy#44`, with upstream's own engine
-   quoted beside it as proof the cheaper match is real. The first sitting recorded that none would.
-3. **Both blind passes found a real defect in code**, and both were HANGS rather than wrong answers -
-   a per-section quantity standing in for a whole-match one, twice. Anything that later ranks or
-   bounds a whole match must read the live `state.FuzzyCounts`, not the `END_FUZZY` snapshots.
+1. **Five are ledger 13, a new upstream bug** - seed 7 rows 74938, 77937; seed 4242 rows 76251,
+   76681; seed 20260913 row 76593. All carry `(?b)` + a fuzzy section + `(*SKIP)` + `partial`, all
+   recorded `nomatch`, port answers a partial. Port right. Needs a row-keyed entry.
+2. **Row 75821 is `group-call-loses-the-match`**, the existing entry - upstream finds 1 match, the
+   port 2; removing the call or the whole zero-width piece gives upstream both. Needs its judged row.
+3. **Row 77889 is `search-start-partial`'s second symptom** - upstream's search reports (0,2) partial
+   and its own `match` denies it at every start. Needs its judged row.
 
-**Owed, and not S42's:** ledger entry 12, a real inherited upstream bug found on the way (`(?b)` loses
-a match that plain fuzzy matching finds when the best fit needs two trailing insertions), with a
-proposed one-line fix - Phase 6's sweep. The second of S42's two fixes has had no blind pass of its own
-(three lines and a field, each pinned by a test that hangs without it); rule 4 wants one and rule 6
-says a third round inside one sitting is where iterating stops paying.
+S36's deferred question is answered: recording `interactions` prefilter-free changes **none** of the
+seven, so it is not `locate_required_string`.
 
-**Unchanged by S42:** seed 31 has three unjudged divergences on `partial,partial-sliced,interactions`
-at 6000 rows (rows 1075, 6943, 16545); `best_fuzzy_counts` in `SaveBestMatch`/`RestoreBestMatch` stays
-unported on purpose, both or neither, ledger 9. **For the owner:** spec amendment 20;
+**One real port defect found and FIXED**: `SaveBestMatch`/`RestoreBestMatch` now carry the fuzzy
+counts *and* the change list (ledger 9's port side, closed - upstream carries neither correctly, so
+this is amendment 20 rather than a faithful port). Before it, a POSIX fuzzy match reported the
+errors it spent as zero. No wave could ever have caught it: upstream faults rendering those rows.
+
+**Also landed:** a `resource` outcome so a MemoryError row is skipped and counted instead of killing
+the whole run; ledger entries 13 and 14; three committed probes under `tools/probes/`.
+
+**Still owed by S43:** the three classifications above, symbol accounting, the tag probe, the
+control re-runs, CHANGELOG, ROADMAP's measured rate, the Phase 6 handover. **For the owner:**
 `slice-log.jsonl` marks S26 `failed` though its commit is real; `origin/main` needs a push.

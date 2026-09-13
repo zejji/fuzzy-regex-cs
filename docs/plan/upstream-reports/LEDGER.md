@@ -688,6 +688,29 @@ re-runs it, and cases 4 and 5 of that probe are the two controls that isolate it
 So it needs BOTH the POSIX flag and a fuzzy section. `match` is not affected, only `search` (and
 `finditer`, which searches).
 
+**S43 SHARPENED THE CONDITION AND HALF OF THAT SENTENCE IS WRONG, 2026-09-13.** It is not "a fuzzy
+section" but **a fuzzy match that actually SPENT an error**, and `match` is affected exactly as
+`search` is. Fourteen rows, `python tools/probes/upstream-posix-fuzzy-changes-crash.py`: every row
+whose `fuzzy_counts` are `(0, 0, 0)` is safe and every row with a non-zero count faults, POSIX
+present - any error kind, with or without an alternation, inline `(?p)` or the flag.
+
+```
+'(?p)(?:abc){e<=1}' on 'axc'   span (0, 3) counts (1, 0, 0) | *** CRASH 0xC0000005 ***
+'(?p)(?:abc){d<=1}' on 'ac'    span (0, 2) counts (0, 0, 1) | *** CRASH 0xC0000005 ***
+'(?p)(?:abc){i<=1}' on 'abxc'  span (0, 4) counts (0, 1, 0) | *** CRASH 0xC0000005 ***
+'(?p)(?:abc){e<=1}' on 'abc'   span (0, 3) counts (0, 0, 0) | changes ((), (), ())     # safe
+'(?p)(?:aa|a){e<=1}' on 'aa'   span (0, 2) counts (0, 0, 0) | changes ((), (), ())     # safe
+'(?:abc){e<=1}'     on 'axc'   span (0, 3) counts (1, 0, 0) | changes ((1,), (), ())   # no POSIX
+```
+
+That matches the mechanism this entry already names exactly - a count with no change behind it -
+and it sharpens a report: the earlier "needs a fuzzy section" reads as though any POSIX fuzzy
+pattern is unsafe, and a maintainer who tried an exact-matching one would not reproduce it.
+
+The probe prints the span and the counts BEFORE touching the changes and flushes, which is why the
+faulting rows above still report them. Those are upstream's own values, and they are what makes this
+port's expected answers measured rather than derived.
+
 **S41 narrowed the faulting access, 2026-09-13, and it makes `match` affected too.** The crash is in
 reading `Match.fuzzy_changes`, not in matching. Each of these runs in its own interpreter:
 
@@ -719,6 +742,22 @@ the counts copy alone would import exactly this contradiction into a memory-safe
 surfaces as a match reporting one substitution and no substitution positions rather than as a crash.
 S42 takes the pair together or neither.
 
+**S43 TOOK THE PAIR, AND THE PORT SIDE OF THIS ENTRY IS CLOSED (2026-09-13).**
+`Matcher.SaveBestMatch` and `Matcher.RestoreBestMatch` now copy the fuzzy counts AND the change list
+both ways - `MatchState.BestFuzzyCounts` and `MatchState.BestFuzzyChanges`. Upstream copies only the
+counts, so a faithful port would have reproduced the contradiction memory-safely and answered a
+match whose changes belong to a candidate that lost; design spec amendment 20 says an inherited bug
+is fixed here rather than carried, so both are saved and both are restored.
+
+It was not a theoretical gap. Before the fix, `(?p)(?:abc){e<=1}` over 'axc' reported
+`(0, 3)` with counts `(0, 0, 0)` here - the substitution it had really spent erased by the POSIX
+restore - where upstream reports `(1, 0, 0)` for the same span. The two engines now agree on every
+row of the probe that upstream survives, and on `(?p)(?:a|aa){e<=1}` over 'aa' they agree on
+`(0, 2)` with one insertion. **No oracle wave could ever have caught this**, which is the part worth
+carrying into Phase 6: upstream dies rendering the changes of exactly the rows that would have shown
+it, so the comparison the oracle exists to make is unavailable for the whole family. It was found by
+hand, writing the pinned tests. Pinned by `Gaps/Engine/FuzzyPosixTests.cs`, six tests.
+
 **Where it comes from, at the precision the evidence supports.** `save_best_match` (`:11493`) and
 `restore_best_match` (`:11565`) copy `state->best_fuzzy_counts` alongside the groups, and
 `check_posix_match` (`:11602`) is what drives them. `do_simple_fuzzy_match` (`:18027`) sets
@@ -728,16 +767,20 @@ no debugger was attached and no ASAN build was made - so a report must either es
 it does not know. It is the same family as the four 2026 memory-safety fixes (issues 611-614) and
 plausibly the same fuzzing campaign would have found it.
 
-**What this port answers.** The row, without crashing. Its *counts* are not yet trustworthy there:
-`best_fuzzy_counts` is deliberately unported until S42, so a POSIX fuzzy match reports the counts of
-whichever attempt ran last rather than of the best one. That is a known gap with a slice against it,
-not a divergence - and it cannot be pinned as one either way, because upstream cannot be asked.
-Pinned only as "does not crash" by
-`FuzzyMatchingTests.A_POSIX_search_of_a_fuzzy_pattern_answers_where_upstream_crashes`.
+**What this port answers.** The row, without crashing, with the right span, the right counts and the
+right changes - see the S43 paragraph above. The earlier text here said the counts were "not yet
+trustworthy" and named a slice against it; that slice was S43 and the gap is closed. Pinned as
+"does not crash" by
+`FuzzyMatchingTests.A_POSIX_search_of_a_fuzzy_pattern_answers_where_upstream_crashes`, and as the
+actual answers by `Gaps/Engine/FuzzyPosixTests.cs`.
 
-**Consequence for the oracle.** The `fuzzy` generator draws no `(?p)`, and must not until this is
-fixed upstream: a recorder row that kills the interpreter takes the whole wave with it. Noted here
-rather than only in the generator so the next slice that widens it knows why.
+**Consequence for the oracle.** The `fuzzy` generator draws no `(?p)`, and **S43 made
+`interactions` suppress POSIX on any row carrying a fuzzy section** for the same reason: a recorder
+row that kills the interpreter takes the whole wave with it, and no `except` clause can see it.
+A narrower exclusion was considered and rejected - the faulting condition is a spent error, which
+depends on the subject rather than on the pattern, so nothing the generator can read off the pattern
+is a safe test. Neither must change until this is fixed upstream. Noted here rather than only in the
+generator so the next slice that widens either one knows why.
 
 **Proposed fix.** Unknown. Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
@@ -941,3 +984,152 @@ the example row for that entry uses substitutions.
 **Related:** entries 9 and 11, the other inherited fuzzy bugs the oracle cannot see, and Phase 6's
 inherited-bug sweep.
 
+
+# Added by S43, 2026-09-13
+
+## 13. `BESTMATCH` loses a partial match that the same pattern's own `match` still finds
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
+
+```python
+>>> import regex
+>>> p = regex.compile(r'(?b)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)')
+>>> p.search('ab.', partial=True)
+None
+>>> p.match('ab.', 2, partial=True)
+<regex.Match object; span=(2, 3), match='.', partial=True>
+```
+
+The same compiled pattern answers nothing from `search` and a partial from its own anchored `match`
+at a position inside the searched region. **The judgement needs no second engine**, and it rests on
+two arguments of different strength that a report must keep apart:
+
+* **The strong form, on this minimised shape and on two of the five wave rows** (76681 and 76593): a
+  search that finds nothing where its own `match` finds something is wrong however the ranking rule
+  is defined. On the other three wave rows - 74938, 77937 and 76251 - upstream with `(?b)` on finds
+  nothing from any door at any position, so this form does not apply to them. A first draft of this
+  entry claimed it for all five and a blind review disproved that; the correction is kept here
+  because the overclaim is exactly what would get a report dismissed.
+* **The weak form, on all five and on this shape**: deleting `(?b)` gives upstream a match it
+  refused with the flag present. `BESTMATCH` is documented as choosing the *best* match rather than
+  the first; it is not a filter that removes matches, so a flag that turns a match into no match is
+  upstream contradicting its own documentation.
+
+Two of the five are not `search` rows at all - 74938 is a `match` and 76251 a `fullmatch` - so the
+defect is not confined to the search loop.
+
+The weak form, shown:
+
+```python
+>>> regex.compile(r'(?:ab){e<=1}(?:\S(*SKIP)\w|\W)').search('ab.', partial=True)
+<regex.Match object; span=(0, 3), match='ab.', partial=True>
+```
+
+**Four conditions, each necessary on this shape** (`python tools/probes/upstream-bestmatch-loses-a-partial.py`):
+
+* `(?b)` - `(?e)` in its place keeps the match, so it is `do_best_fuzzy_match` and not the fuzzy
+  ranking modes in general;
+* a fuzzy section;
+* a `(*SKIP)` - the same pattern without the verb keeps its match under `(?b)`;
+* `partial=True`.
+
+Upstream's anchored walk under `(?b)` is also SHORTER than the same walk without it - on `'ab.'` the
+flag drops the partials at starts 0 and 1 and keeps 2 and 3 - so the loss is not only in the search
+loop.
+
+**Faulting mechanism: `do_best_fuzzy_match` (`:17584`).** The exact line inside it is NOT
+established, and a report must say so or establish it first. The shape of the function is
+suggestive - its retry sets `start_pos = state->match_pos` and tightens `state->max_errors`, and its
+loop guard is `state->slice_start <= start_pos && start_pos <= state->slice_end`, which a `(*SKIP)`
+moving `slice_start` can falsify - but that is a hypothesis with the right shape, not a measurement.
+No debugger was attached and no ASAN build was made, for the reason entry 9 gives.
+
+**Proposed fix.** Unknown, for the same reason.
+
+**What this port answers, and why it is right.** The partial upstream's own anchored `match` reports,
+and the same answer upstream gives once `(?b)` is removed. Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_partial_that_upstreams_own_search_loses_beside_a_skip`
+and its negative control
+`.Bestmatch_without_the_verb_keeps_its_match_on_both_engines`.
+
+**Found by S43's composed `interactions` wave**, at the Phase 5 close, in the first three-seed
+6000-row run that drew fuzzy beside Phases 3 and 4. Five rows of that wave are this family - seed 7
+rows 74938 (`match`) and 77937 (`search`), seed 4242 rows 76251 (`fullmatch`) and 76681 (`search`),
+seed 20260913 row 76593 (`search`) - and all five carry `(?b)`, a fuzzy section, a `(*SKIP)` and
+`partial=True`, and all five are recorded `nomatch`. **They are not yet classified in
+`ExpectedDivergences`, so the wave is RED on them**; doing that is S43's remaining work.
+
+**Related:** entry 12, the other `BESTMATCH` match-loss, which this port reproduces faithfully where
+it does not reproduce this one; entries 1 and 5 for `(*SKIP)`.
+
+## 14. A self-recursive call round a fuzzy section that can match empty exhausts memory
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
+
+```python
+>>> import regex
+>>> regex.search(r'(?:(?R)){e<=1}', 'ab')
+MemoryError                                   # in 0.48s
+>>> regex.search(r'(?:a(?R)?b){e<=1}', 'aabb')
+MemoryError                                   # in 0.87s, base case and all
+>>> regex.search(r'(?:a(?R)?b)', 'aabb')
+<regex.Match object; span=(0, 4), match='aabb'>   # the same recursion, no fuzzy section, 0.00s
+```
+
+**The rule, which accounts for most of what is measured.** A group that calls itself makes progress
+only if its body must consume something. A fuzzy section can match the empty string whenever its
+budget permits as many DELETIONS as the section has atoms, so a budget reaching n deletions of an
+n-atom section is the dangerous one; `{s<=n}` and `{i<=n}` never delete anything, whatever n is.
+Whole-pattern recursion is the degenerate case: `(?:(?R)){e<=1}` is a section whose only content is
+the recursion, so it matches empty at any budget.
+
+`python tools/probes/upstream-fuzzy-recursion-blowup.py`, on `(?P<g1>(?:Ab){C}(?&g1)?)` over 'AbAb'
+and `(?P<g1>(?:Abc){C}(?&g1)?)` over 'AbcAbc', covering every constraint the composed generator can
+draw:
+
+```
+atoms=2  MemoryError:  {e<=2}  {1<=e<=2}  {2i+1d+1s<=2}   (and {d<=2}, which it does not draw)
+         ok:           {e<=1} {s<=1} {i<=1} {d<=1} {e<=2,i<=1} {e<=2,s<=1}
+                       {s<=1,i<=1,d<=1} {1i+2d+1s<=3}
+atoms=3  ok: all eleven, and {e<=3} MemoryError
+```
+
+`{e<=2}` blows up on the two-atom shape and is safe on the three-atom one, which is what makes this
+a rule about the budget against the atom count rather than a list of unlucky constraints.
+`{2i+1d+1s<=2}` prices a deletion at 1 against a budget of 2 and so reaches two of them, while
+`{1i+2d+1s<=3}` prices one at 2 and reaches only one.
+
+**IT IS A PREDICTOR AND NOT A PROOF, and a report must say so.** Two of the eleven defeat it:
+`{e<=2,i<=1}` and `{e<=2,s<=1}` cap the total at two, cap no deletions, and are nevertheless safe in
+0.00s where the bare `{e<=2}` blows up. Why a compound constraint behaves differently has not been
+established - no mechanism was measured.
+
+**Faulting mechanism.** Not established beyond the rule above; it is upstream's known
+resource-blowup family (issues 551 and 554) reached by a new shape. A report should carry the table,
+which is the part that is new.
+
+**Proposed fix.** Unknown. The general answer is a progress check on a group call the way the repeat
+opcodes already guard a zero-width body, but whether that is where upstream would want it is not
+this project's call to make.
+
+**What this port does.** Reproduces it, safely. `InvalidOperationException: the regular expression
+engine's backtracking stack exceeded its 1GB limit`, in 0.24s to 0.92s on the `(?R)` shapes -
+the same non-termination, bounded, rather than an allocator that keeps asking. That is the right
+outcome for a faithful port of a resource bug, and it is pinned by
+`Gaps/Engine/FuzzyRecursionTests.cs`, six tests, including the controls that show which budgets
+terminate.
+
+**Consequence for the oracle.** `INTERACTION_FUZZY_WRAPPERS` does not draw a self-recursive call
+round a fuzzy section at all. A guard that forces progress was tried and is NOT sufficient:
+`(?P<g1>A(?:Ab){C}(?&g1)?)` is safe for every constraint in the table, and a 600-row wave of real
+drawn rows still raised MemoryError on four of them. Progress bounds the DEPTH and does nothing
+about the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute choice at every
+position of every level.
+
+**Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.

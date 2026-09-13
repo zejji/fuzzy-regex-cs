@@ -54,12 +54,18 @@ a handover.
 
 ## Done when
 
-- [ ] `interactions` composes fuzzy; the default wave green at three seeds, 6000 rows.
+- [x] `interactions` composes fuzzy. **Sitting 1.** Three piece kinds (`fuzzy`, `fuzzy-wrapped`,
+      `fuzzy-list`), `(?e)`/`(?b)` at the row level, named lists emitted for the first time by any
+      generator. `partial` and `partial-sliced` proven byte-identical to HEAD; every other generator
+      too. Re-measured docstring figures. **The wave is NOT green: 7 rows diverge, all judged, none
+      classified yet** - see STATE.md.
 - [ ] Symbol accounting committed as a tool and reproduced; zero `Seam.For` in `src/`.
 - [ ] Tag probe: zero skipped, or each remainder named.
-- [ ] Controls re-run and recorded; ledger complete; nothing filed.
+- [ ] Controls re-run and recorded; **ledger: entry 9 closed and sharpened, 13 and 14 added**
+      (sitting 1); nothing filed.
 - [ ] `CHANGELOG.md`, ROADMAP measured rate, STATE.md saying Phase 5 is complete, Phase 6
       handover written.
-- [ ] Ratchet GREEN, blind review (hunt: a composed generator whose fuzzy rows never actually
-      diverge from exact because the mutation budget is zero; a control that passes for the wrong
-      reason), commit.
+- [x] Ratchet GREEN and **two blind passes done, both acted on** (sitting 1). The hunt items were
+      both answered: the fuzzy rows do diverge from exact (103 of 156 matches charge an error over
+      2000 rows at seed 7), and the second pass killed an overclaimed judgement rather than a
+      control. Commit is a **checkpoint** - the slice stays here.

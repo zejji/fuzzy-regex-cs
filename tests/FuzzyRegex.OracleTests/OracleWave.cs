@@ -221,6 +221,9 @@ internal static class OracleWave
             "nomatch" => new NoMatchOutcome(),
             // S40a. No ground truth at all for this row: upstream never finished it.
             "timeout" => new TimeoutOutcome(outcome.GetProperty("seconds").GetDouble()),
+            // S43, and the same "no ground truth" case by a different route: upstream hit a limit
+            // of the interpreter rather than finishing or rejecting.
+            "resource" => new ResourceOutcome(outcome.GetProperty("exception").GetString()!),
             // 'whileMatching' is optional and defaults to false, which is what every wave recorded
             // before S24 means: until substitution landed, upstream's only recorded rejections came
             // out of regex.compile. A hand-written minimisation row need not carry it either.
@@ -325,6 +328,7 @@ internal static class OracleWave
                 + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
                 + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
                 + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
+                + $"resource {tally.GetValueOrDefault(OracleVerdict.Resource)}  "
                 + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
         );
 
@@ -611,6 +615,29 @@ internal sealed record TimeoutOutcome(double Seconds) : IOracleOutcome
     public string Describe() => string.Create(CultureInfo.InvariantCulture, $"timed out after {Seconds}s");
 }
 
+/// <summary>Upstream hit a limit of the interpreter - memory, stack or range - so it never answered.</summary>
+/// <remarks>
+/// <para>
+/// S43. The same "no ground truth" case as <see cref="TimeoutOutcome"/>, reached by running out of
+/// heap rather than out of time, and treated identically for the identical reason: upstream did not
+/// reject the pattern, so scoring this port's answer against it would call a port that answers
+/// diverging and a port that also blows up agreeing.
+/// </para>
+/// <para>
+/// The recorder used to abort the whole run on one of these. The composed fuzzy wave made them
+/// routine - a repeat whose body can match empty, beside a fuzzy section, gives upstream nothing to
+/// make progress on and it allocates until <c>MemoryError</c> in a second or two - and one
+/// unanswerable row should not destroy every other row of a six-seed run. It is upstream's 551/554
+/// resource-blowup family; see <c>exhausted</c> in <c>tools/record-oracle.py</c> for the measured
+/// rows, including the ones that show no ranking flag is involved.
+/// </para>
+/// </remarks>
+internal sealed record ResourceOutcome(string Exception) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() => $"upstream ran out of resources ({Exception})";
+}
+
 /// <summary>This port compiled the pattern, and cannot match yet.</summary>
 /// <remarks>
 /// Not the same as knowing nothing, which is why it is not simply <see langword="null"/>. The port
@@ -848,4 +875,11 @@ internal enum OracleVerdict
     /// anyone notices.
     /// </summary>
     Timeout,
+
+    /// <summary>
+    /// Upstream ran out of memory, stack or range, so there is nothing to compare against. Counted
+    /// beside <see cref="Timeout"/> and for the same reason: it is how anyone notices that a
+    /// generator has started drawing rows upstream cannot answer.
+    /// </summary>
+    Resource,
 }

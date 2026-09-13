@@ -115,8 +115,12 @@ RESERVED_NAMES = ("pattern", "flags", "ignore_unused", "cache_pattern")
 
 # Failures of the interpreter rather than judgements about the pattern: a larger recursion limit or
 # more memory would change the answer, so "upstream rejected this input" is not true of them and a
-# port that accepts the pattern is not thereby wrong. Recorded as an outcome they would be compared
+# port that accepts the pattern is not thereby wrong. Recorded as an `error` they would be compared
 # against whatever this port did, and any rejection at all would score as agreement.
+#
+# So they are recorded as `resource`, a kind of its own that the consumer skips and counts - see
+# `exhausted` in `_record_row` for why that replaced aborting the run, which is what S43 found one
+# MemoryError row doing to a whole six-seed wave.
 ENVIRONMENT_FAILURES = ("RecursionError", "MemoryError", "OverflowError")
 
 # Two alphabets, alternating row by row: one plain ASCII, one mixing BMP and astral characters so
@@ -420,11 +424,7 @@ def _record_row(regex, row: dict) -> dict:
         invalid-group-reference row a false divergence. Measured 2026-09-01.
         """
         if type(e).__name__ in ENVIRONMENT_FAILURES:
-            raise SystemExit(
-                f"upstream raised {type(e).__name__} on pattern {pattern!r} against subject "
-                f"{subject!r}. That is a limit of the interpreter, not a judgement about the "
-                "pattern, so it is not comparable and is not recorded."
-            ) from e
+            return exhausted(type(e).__name__)
         recorded["codepointSpan"] = None
         recorded["outcome"] = {
             "kind": "error",
@@ -434,6 +434,44 @@ def _record_row(regex, row: dict) -> dict:
             "message": e.msg if isinstance(e, regex.error) else str(e),
             "whileMatching": while_matching,
         }
+        return recorded
+
+    def exhausted(exception: str) -> dict:
+        """The recorded answer when upstream ran out of memory, stack or range.
+
+        THE SAME SHAPE AS ``timed_out`` AND FOR THE SAME REASON, which is why it is a kind of its own
+        rather than an ``error``. Upstream did not reject the pattern; it ran into a limit of the
+        interpreter, so a larger heap would change the answer and "upstream rejected this input" is
+        simply not true of the row. Filing it as a rejection would score a port that answers as
+        diverging and a port that also blows up as agreeing - both halves backwards, exactly as the
+        ``timeout`` docstring says. The consumer skips it the way it skips an unsupported row and
+        counts it separately, so a generator that starts drawing these shows up in the summary line.
+
+        UNTIL S43 THIS ABORTED THE WHOLE WAVE with a SystemExit, and the reasoning behind that was
+        only ever about not RECORDING the row as an outcome - never about aborting being necessary.
+        Aborting means one unanswerable row throws away every other row in the run, which is the same
+        failure S40a fixed for the hanging row by adding the deadline.
+
+        The composed fuzzy wave makes these routine rather than rare, and the cause is a REPEAT WHOSE
+        BODY CAN MATCH EMPTY sitting beside a fuzzy section - the same no-progress mechanism
+        INTERACTION_FUZZY_WRAPPERS describes for a self-recursive call. Measured 2026-09-13 on
+        'bb.a\\r.':
+
+            (?b)(?P<g1>\\p{L}*)+?(?:ab){e<=1}     MemoryError in 1.78s
+            (?e)(?P<g1>\\p{L}*)+?(?:ab){e<=1}     MemoryError in 1.76s
+                (?P<g1>\\p{L}*)+?(?:ab){e<=1}     MemoryError in 1.75s   <- no ranking flag at all
+                (?P<g1>\\p{L}+)+?(?:ab){e<=1}     (0, 2) in 0.00s        <- body must consume
+                (?P<g1>\\p{L}*)+?ab               None   in 0.00s        <- no fuzzy section
+
+        A FIRST DRAFT OF THIS DOCSTRING BLAMED `(?b)`, and its blind review killed that with the
+        middle three rows: `(?e)` and no flag at all blow up identically, so BESTMATCH is not the
+        cause and the wave would have carried a false attribution into three files. It is upstream's
+        551/554 resource-blowup family, which Phase 6 triages; it is not something a generator can
+        reliably avoid drawing, and it is not something one row should be able to destroy a six-seed
+        run over.
+        """
+        recorded["codepointSpan"] = None
+        recorded["outcome"] = {"kind": "resource", "exception": exception}
         return recorded
 
     def timed_out() -> dict:
@@ -2508,7 +2546,32 @@ INTERACTION_LINE_BREAKS = ("\n", "\r", "\r\n", "", " ")
 #   'verb-alt':    an alternation with a `(*PRUNE)` or a `(*SKIP)` in one branch, which is S29's
 #                  cell. A verb only shows where something AFTER it fails and the other branch has
 #                  to be tried, so it goes in as a two-branch unit rather than as a bare verb.
-INTERACTION_PIECES = (
+#   'fuzzy':       S43's headline cell, and the reason this generator was widened at the Phase 5
+#                  close: a FUZZY SECTION wrapped round the constructs above, sometimes with a
+#                  capture group inside it (so a substitution template reads a group an error landed
+#                  in) and sometimes with a second section nested inside carrying a different
+#                  constraint. Everything else about the row - `(?i)`, `(?fi)`, `(?r)`, `(?p)`,
+#                  `partial=True`, the operation and the template - already varies, so one piece
+#                  kind composes fuzzy with all of it.
+#   'fuzzy-wrapped': the other direction - a fuzzy section INSIDE one of Phase 4's containers: a
+#                  lookaround, an atomic group, a conditional branch, a verb alternation, or a
+#                  self-recursive called group. Emitted as a unit for the reason 'called-group' is:
+#                  left to chance across pieces the container and the section would rarely meet.
+#   'fuzzy-list':  `\L<name>{e<=1}`, which DECISIONS 2026-08-30 records as a distinct code path -
+#                  a named list lowers to BRANCH, so a fuzzy budget spent inside one is not the
+#                  same walk as one spent over a class. This is the ONLY generator that emits a
+#                  named list at all; `namedLists` was wired through the recorder and the consumer
+#                  from the start and nothing had used it since S13's compile corpus.
+#
+# TWO TABLES, and the split is load-bearing rather than tidy. `_generate_partial` builds its
+# patterns with this same function (see its docstring), and S43 must not change a single `partial`
+# or `partial-sliced` row: both carry pinned divergences, and `partial-sliced` is recorded
+# prefilter-free, so a reshuffled row stream would turn permanent answers red for a reason that has
+# nothing to do with what changed. So `partial` keeps drawing from the ten-piece table at its
+# original weights, which is byte-identical to what it drew before - `random.choices` consumes
+# exactly one `random()` call whatever the list length, and the plain table's cumulative weights are
+# unchanged - and `interactions` draws from the widened one.
+INTERACTION_PIECES_PLAIN = (
     "quant-group",
     "class",
     "backref",
@@ -2520,13 +2583,124 @@ INTERACTION_PIECES = (
     "called-group",
     "verb-alt",
 )
-INTERACTION_PIECE_WEIGHTS = (24, 12, 12, 9, 5, 9, 11, 18, 12, 8)
+INTERACTION_PIECE_WEIGHTS_PLAIN = (24, 12, 12, 9, 5, 9, 11, 18, 12, 8)
+
+INTERACTION_PIECES = INTERACTION_PIECES_PLAIN + ("fuzzy", "fuzzy-wrapped", "fuzzy-list")
+INTERACTION_PIECE_WEIGHTS = INTERACTION_PIECE_WEIGHTS_PLAIN + (22, 14, 6)
 
 # Wrapped round the whole pattern, so the anchors and the boundaries are asked about positions an
 # interior piece has reached rather than only about position 0.
 INTERACTION_AFFIXES = (("^", ""), ("", "$"), ("^", "$"), (r"\b", ""), ("", r"\b"), ("", ""), ("", ""))
 
 INTERACTION_BOUNDARIES = (r"\b", r"\B", r"\m", r"\M")
+
+# --------------------------------------------------------------------------------------------
+# S43: fuzzy composed into this generator
+# --------------------------------------------------------------------------------------------
+
+# The constraints a composed section may carry. BOUNDED ONLY - `{e}` is deliberately absent, for
+# the reason FUZZY_BOUNDED_CONSTRAINTS spells out at length: an unbounded error budget over a
+# multi-character item is upstream's 551/554 resource-blowup family, and EVERY piece this generator
+# emits is multi-character (a repeat, a backreference, a called group, an alternation).
+#
+# Two weighted equations are in the list on purpose rather than by oversight. They exercise the cost
+# machinery S42 ported, and `_has_weighted_cost` then suppresses `(?e)` and `(?b)` on that row, so
+# the ranking divergence DECISIONS 2026-09-12 records is never drawn here either - the same rule
+# `_generate_fuzzy` follows, applied to the same pattern text.
+INTERACTION_FUZZY_CONSTRAINTS = (
+    "{e<=1}",
+    "{e<=2}",
+    "{s<=1}",
+    "{i<=1}",
+    "{d<=1}",
+    "{e<=2,i<=1}",
+    "{e<=2,s<=1}",
+    "{s<=1,i<=1,d<=1}",
+    "{1<=e<=2}",
+    "{1i+2d+1s<=3}",
+    "{2i+1d+1s<=2}",
+)
+
+# The `{...:test}` forms, S40's FUZZY_EXT. A short list rather than FUZZY_TESTS' fifteen, because
+# these have to be chosen against INTERACTION_SUBJECT_ALPHABETS rather than against `_generate_fuzzy`'s
+# three bands: a test aimed at 'abx' both permits and refuses real edits there and is very nearly
+# vacuous here, where a subject is as likely to be 'ß', 'ﬁ' or an astral character as a letter.
+# `.` is kept for the reason FUZZY_TESTS keeps it - it compiles to ANY, has no arm in upstream's
+# `fuzzy_ext_match` switch (upstream/src/_regex.c:9938) and so constrains nothing.
+INTERACTION_FUZZY_TESTS = (r"\w", r"\W", r"\d", r"\s", r"\S", "[a-z]", "[^a-z]", "[A-Za-z_]", ".")
+
+# What a fuzzy section may be wrapped in.
+#
+# THE RULE THIS LIST OBEYS, measured rather than assumed: a SELF-RECURSIVE call whose body is a fuzzy
+# section that can match the EMPTY STRING allocates until upstream raises MemoryError, because
+# nothing makes the recursion progress. A section of n atoms can be emptied by n deletions, so a
+# budget that permits n of them is the dangerous one; `{s<=n}` and `{i<=n}` never delete anything,
+# whatever n is.
+#
+# EVERY ONE of the eleven constraints this generator can draw, measured 2026-09-13 on regex 2026.7.19
+# against `(?P<g1>(?:Ab){C}(?&g1)?)` over 'AbAb' and `(?P<g1>(?:Abc){C}(?&g1)?)` over 'AbcAbc':
+#
+#     atoms=2   MemoryError:  {e<=2}  {1<=e<=2}  {2i+1d+1s<=2}
+#               ok:           {e<=1} {s<=1} {i<=1} {d<=1} {e<=2,i<=1} {e<=2,s<=1}
+#                             {s<=1,i<=1,d<=1} {1i+2d+1s<=3}
+#     atoms=3   ok: all eleven
+#
+# The rule accounts for nine of the eleven. `{e<=2}` and `{1<=e<=2}` allow two deletions of a
+# two-atom section; `{2i+1d+1s<=2}` prices a deletion at 1 against a budget of 2, so it allows two
+# as well, while `{1i+2d+1s<=3}` prices one at 2 and allows only one. At three atoms none of them
+# reaches three deletions, which is why the same eleven are all safe there.
+#
+# IT DOES NOT ACCOUNT FOR `{e<=2,i<=1}` AND `{e<=2,s<=1}`, and that is stated rather than smoothed
+# over: both cap the total at two and neither caps deletions, so the rule predicts two deletions and
+# a blowup, and both are safe in 0.00s. Why a compound constraint behaves differently has NOT been
+# established - no mechanism was measured - so the rule is a good predictor and not a proof, and the
+# list below is justified by the table rather than by the rule.
+#
+# Whole-pattern recursion is the degenerate case - `(?:(?R)){e<=1}` is a section whose only content
+# is the recursion, so it matches empty at any budget - and `(?R)` and `(?0)` are therefore NOT in
+# the wrapper list and must not be. All five shapes in
+# tools/probes/upstream-fuzzy-recursion-blowup.py raise MemoryError in 0.48s to 0.97s, where the
+# identical recursion WITHOUT a fuzzy section answers (0, 4) in 0.00s.
+#
+# A SELF-RECURSIVE CALL IS NOT IN THIS LIST EITHER, and the reason is worth stating because a
+# cheap-looking fix for it was tried here and measured to fail. Forcing an atom that must consume
+# OUTSIDE the section - `(?P<g1>A(?:Ab){C}(?&g1)?)` - makes the recursion provably progress, and it
+# is safe across every constraint this generator can draw and both body shapes tried
+# (.scratch/probe-selfcall-guard.py, all 0.00s). It is still not enough on real drawn rows: with the
+# guard in place, a 600-row wave at seed 1 raised MemoryError on four of them, every one a guarded
+# self-recursive call with a fuzzy section inside. Progress bounds the DEPTH; it does nothing about
+# the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute choice at every
+# position of every level. So the shape is out, and recursion still composes with fuzzy in this
+# generator through the 'called-group' piece - a call to a group that has already closed, which is
+# not recursion and is measured safe.
+#
+# This port reproduces the blowup faithfully and safely, raising `InvalidOperationException: the
+# regular expression engine's backtracking stack exceeded its 1GB limit` in 0.24s to 0.92s on all
+# six `(?R)` shapes where upstream raises MemoryError. It is an inherited upstream bug of the
+# 551/554 resource-blowup family already on Phase 6's triage list, pinned in
+# Gaps/Engine/FuzzyRecursionTests.cs and entered on the ledger. It is NOT a wave shape: upstream
+# raising MemoryError is an ENVIRONMENT_FAILURE, which aborts the recorder by design.
+INTERACTION_FUZZY_WRAPPERS = ("look", "atomic", "cond", "verb")
+
+# How often a composed section carries a `{...:test}`, nests a second section with a different
+# constraint, or holds a capture group. The capture group is the one a substitution template can
+# read, which is the cell 'a template reading a fuzzy match's groups' names.
+INTERACTION_FUZZY_TEST_PROBABILITY = 0.3
+INTERACTION_FUZZY_NESTING_PROBABILITY = 0.3
+INTERACTION_FUZZY_GROUP_PROBABILITY = 0.35
+
+# How often a row carries `(?e)` or `(?b)`, drawn independently so a wave holds all four
+# combinations - and drawn ONLY on a row that actually has a fuzzy section, unlike the row-level
+# flags above. Both are no-ops without one, so putting them on every row would spend the draw on
+# rows where it cannot change an answer.
+INTERACTION_ENHANCE_PROBABILITY = 0.3
+INTERACTION_BESTMATCH_PROBABILITY = 0.3
+
+# The members of a `\L<name>` list. Two- and three-character runs, because a named list lowers to
+# BRANCH and a one-character member would make it a character class in all but name; drawn from the
+# subject's own alphabet at the call site so a row can match.
+INTERACTION_NAMED_LIST_SIZES = (2, 3, 4)
+INTERACTION_NAMED_LIST_MEMBER_LENGTHS = (1, 2, 2, 3)
 
 MAX_INTERACTION_SUBJECT_LENGTH = 7
 MAX_INTERACTION_PIECES = 3
@@ -2573,18 +2747,99 @@ def _interaction_subject_class(rng: random.Random, subject: str) -> str:
     return "[" + "".join(re.escape(c) for c in dict.fromkeys(members)) + "]"
 
 
-def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tuple[str, int, list[str]]:
+def _interaction_fuzzy_constraint(rng: random.Random) -> str:
+    """One bounded constraint, sometimes carrying a `{...:test}` - S40's FUZZY_EXT rather than FUZZY."""
+    constraint = rng.choice(INTERACTION_FUZZY_CONSTRAINTS)
+    if rng.random() >= INTERACTION_FUZZY_TEST_PROBABILITY:
+        return constraint
+    return constraint[:-1] + ":" + rng.choice(INTERACTION_FUZZY_TESTS) + "}"
+
+
+def _interaction_fuzzy_body(rng: random.Random, subject: str, atoms: tuple, group) -> str:
+    """What goes inside a fuzzy section: two or three atoms, sometimes one of them a capture group.
+
+    ``group`` is ``_interaction_pattern``'s own closure, so a group opened in here is numbered in
+    the same left-to-right sequence as every other group in the row and a template written
+    afterwards can refer to it. That is the whole of the 'a substitution template reading a fuzzy
+    match's groups' cell: the group is INSIDE the section, so an error charged against the section
+    can land in the text the template goes on to read.
+
+    A literal the subject actually holds goes in about a quarter of the time, for the reason
+    ``_interaction_subject_class`` exists - a section built only from table atoms often cannot match
+    the subject at all, and a fuzzy section that can never match within its budget tests the refusal
+    path and nothing else.
+    """
+    pieces = []
+    for _ in range(rng.randrange(2, 4)):
+        draw = rng.random()
+        if draw < 0.25:
+            candidates = [c for c in subject if c not in "\r\n"]
+            pieces.append(re.escape(rng.choice(candidates)) if candidates else "a")
+        elif draw < 0.25 + INTERACTION_FUZZY_GROUP_PROBABILITY:
+            pieces.append(group(rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.4 else "")))
+        else:
+            pieces.append(rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.4 else ""))
+
+    body = "".join(pieces)
+
+    # A SECOND SECTION NESTED INSIDE, with a constraint of its own. Without nesting the outer
+    # FUZZY/END_FUZZY counts are always (0, 0, 0), which is exactly the observation `_generate_fuzzy`
+    # records against its own FUZZY_NESTING_PROBABILITY: the stack traffic round the two opcodes
+    # cannot change an answer until something has already been spent when the inner section is
+    # entered. The inner section goes round the LAST piece rather than the first for the same reason
+    # that generator draws its start from index 1 - an inner section at the start inherits nothing.
+    if len(pieces) >= 2 and rng.random() < INTERACTION_FUZZY_NESTING_PROBABILITY:
+        body = "".join(pieces[:-1]) + "(?:" + pieces[-1] + ")" + _interaction_fuzzy_constraint(rng)
+
+    return body
+
+
+def _interaction_named_list(rng: random.Random, subject: str, alphabet: str) -> list[str]:
+    """The members of one `\\L<name>` list, biased towards runs the subject holds.
+
+    Half the members are cut out of the subject itself and half drawn from its alphabet. A list
+    drawn purely from the alphabet almost never matches a seven-character subject, and a list cut
+    purely from the subject would never exercise the branch that fails.
+    """
+    members = []
+    for _ in range(rng.choice(INTERACTION_NAMED_LIST_SIZES)):
+        length = rng.choice(INTERACTION_NAMED_LIST_MEMBER_LENGTHS)
+        usable = [c for c in subject if c not in "\r\n"]
+        if usable and rng.random() < 0.5:
+            at = rng.randrange(len(usable))
+            members.append("".join(usable[at : at + length]))
+        else:
+            members.append("".join(rng.choice(alphabet) for _ in range(length)))
+
+    # Never empty and never a duplicate: upstream keeps both, but an empty member makes the whole
+    # list match everywhere and a duplicate is the same branch twice, and neither says anything
+    # about a fuzzy budget spent inside the list.
+    return list(dict.fromkeys(m for m in members if m)) or ["a"]
+
+
+def _interaction_pattern(
+    rng: random.Random, subject: str, version1: bool, alphabet: str = "", allow_fuzzy: bool = False
+) -> tuple[str, int, list[str], dict, bool]:
     """One composed pattern, with the group inventory a substitution template needs.
 
     Built strictly left to right, as ``_backref_pattern`` is, so a group number is only handed out
     once the group that owns it has been emitted - a reference to a group defined later is legal
     upstream but is `backrefs`' own test, not this one's.
+
+    Returns the pattern, the group count, the group names, the named lists any `\\L<name>` piece
+    registered, and whether the row ended up with a fuzzy section - which is what decides whether
+    `(?e)` and `(?b)` are worth drawing for it.
+
+    ``allow_fuzzy`` is off by default so that ``_generate_partial``, the other caller, keeps the
+    patterns it drew before S43. See INTERACTION_PIECES_PLAIN.
     """
     atoms = INTERACTION_CLASS_ATOMS + INTERACTION_V1_CLASS_ATOMS if version1 else INTERACTION_CLASS_ATOMS
     counter = [0]
     names: list[str] = []
     defined: list[int] = []
     pieces: list[str] = []
+    named_lists: dict[str, list[str]] = {}
+    fuzzy = False
 
     def group(body: str, named: bool = False) -> str:
         counter[0] += 1
@@ -2601,7 +2856,11 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
     # a wave that cannot match tests the failure path and nothing else.
     wanted = rng.randrange(1, MAX_INTERACTION_PIECES + 1)
     for _ in range(wanted):
-        kind = rng.choices(INTERACTION_PIECES, weights=INTERACTION_PIECE_WEIGHTS)[0]
+        kind = (
+            rng.choices(INTERACTION_PIECES, weights=INTERACTION_PIECE_WEIGHTS)[0]
+            if allow_fuzzy
+            else rng.choices(INTERACTION_PIECES_PLAIN, weights=INTERACTION_PIECE_WEIGHTS_PLAIN)[0]
+        )
         if wanted == 1:
             kind = "group-then-ref"
         # 'cond' is no longer in this guard: since S36 half of its conditions are a LOOKAROUND rather
@@ -2659,6 +2918,43 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
             verb = rng.choice(("(*PRUNE)", "(*SKIP)"))
             left = rng.choice(atoms) + (_quantifier(rng) if rng.random() < 0.5 else "")
             pieces.append(f"(?:{left}{verb}{rng.choice(atoms)}|{rng.choice(atoms)})")
+        elif kind == "fuzzy":
+            # A fuzzy section wrapped ROUND the constructs above. Everything else about the row -
+            # the case flags, `(?r)`, `(?p)`, `partial=True`, the operation, the template - is drawn
+            # by the caller, so this one piece composes fuzzy with all of it.
+            fuzzy = True
+            body = _interaction_fuzzy_body(rng, subject, atoms, group)
+            pieces.append("(?:" + body + ")" + _interaction_fuzzy_constraint(rng))
+        elif kind == "fuzzy-wrapped":
+            # The other direction: a fuzzy section INSIDE one of Phase 4's containers. See
+            # INTERACTION_FUZZY_WRAPPERS on why `(?R)` is not one of them.
+            fuzzy = True
+            section = "(?:" + _interaction_fuzzy_body(rng, subject, atoms, group) + ")"
+            section += _interaction_fuzzy_constraint(rng)
+            wrapper = rng.choice(INTERACTION_FUZZY_WRAPPERS)
+            # A conditional needs a group to ask about, and on a first piece there is none yet.
+            # Re-routed to the atomic arm rather than to whatever the chain falls through to, so
+            # which arm absorbs the re-route is a decision here rather than an accident of ordering.
+            if wrapper == "cond" and not defined:
+                wrapper = "atomic"
+
+            if wrapper == "look":
+                pieces.append(rng.choice(LOOKAROUND_FORMS) + section + ")")
+            elif wrapper == "atomic":
+                pieces.append("(?>" + section + ")")
+            elif wrapper == "cond":
+                head = f"(?({rng.choice(defined)})"
+                pieces.append(f"{head}{section}|{rng.choice(atoms)})")
+            else:
+                verb = rng.choice(("(*PRUNE)", "(*SKIP)"))
+                pieces.append(f"(?:{section}{verb}{rng.choice(atoms)}|{rng.choice(atoms)})")
+        elif kind == "fuzzy-list":
+            # `\L<name>{e<=1}`: a named list lowers to BRANCH (upstream/regex/_regex_core.py:4069),
+            # so a budget spent inside one is a different walk from one spent over a class.
+            fuzzy = True
+            name = f"w{len(named_lists) + 1}"
+            named_lists[name] = _interaction_named_list(rng, subject, alphabet)
+            pieces.append(f"\\L<{name}>" + _interaction_fuzzy_constraint(rng))
         elif kind == "keep":
             pieces.append(r"\K")
         elif kind == "boundary":
@@ -2671,7 +2967,7 @@ def _interaction_pattern(rng: random.Random, subject: str, version1: bool) -> tu
             pieces.append(re.escape(rng.choice(candidates)) if candidates else "a")
 
     prefix, suffix = rng.choice(INTERACTION_AFFIXES)
-    return prefix + "".join(pieces) + suffix, counter[0], names
+    return prefix + "".join(pieces) + suffix, counter[0], names, named_lists, fuzzy
 
 
 def _generate_interactions(rng: random.Random, count: int):
@@ -2684,15 +2980,32 @@ def _generate_interactions(rng: random.Random, count: int):
     per-slice wave reaches; it found two things in its first three seeds, an upstream capture recorded
     outside the subject and a recorder that raised `IndexError` rather than write it down.
 
+    **Widened again at the Phase 5 close (S43) to compose FUZZY MATCHING with all of it.** Three new
+    pieces - `fuzzy`, `fuzzy-wrapped` and `fuzzy-list` - plus `(?e)` and `(?b)` at the row level.
+    Everything else about a row was already drawn, so one fuzzy piece composes a section with
+    `(?i)`, `(?fi)`, `(?r)`, `partial=True`, the operation and the substitution template at once.
+    Two shapes are deliberately NOT drawn and both are upstream bugs this slice found rather than
+    omissions: POSIX beside a fuzzy section (see the suppression below - reading `fuzzy_changes`
+    faults the interpreter) and a self-recursive call round one (see INTERACTION_FUZZY_WRAPPERS).
+
     Measured by `python tools/record-oracle.py --generator interactions --count 600 --seed 1`, after
-    the last change to this generator: 119 rows produce an answer - a match, a non-empty match list,
-    a split with more than one part or a substitution that replaced something - 469 produce none and
-    12 are rejected by upstream. 299 rows carry IGNORECASE, 142 FULLCASE, 283 MULTILINE, 230
-    VERSION1, 68 ASCII and 280 are reversed; 94 are POSIX (42 by flag, 52 as `(?p)`), 71 ask for a
-    partial match, and 190 have an astral subject. 379 hold a backreference, 210 a named group, 133 a
-    conditional (48 of them on a lookaround), 123 a lookaround, 81 a group call, 67 a backtracking
-    verb and 39 a `\\K`. Every one of the eight operations is recorded exactly 75 times, because the
-    operation is cycled by row index rather than drawn.
+    the last change to this generator: 138 rows produce an answer - a match, a non-empty match list,
+    a split with more than one part or a substitution that replaced something - 455 produce none and
+    7 are rejected by upstream. 306 rows carry IGNORECASE, 158 FULLCASE, 294 MULTILINE, 223
+    VERSION1, 67 ASCII and 245 are reversed; 58 are POSIX (26 by flag, 32 as `(?p)`), 57 ask for a
+    partial match, and 204 have an astral subject. 337 hold a backreference, 213 a named group, 102 a
+    conditional, 99 a lookaround, 57 a group call, 65 a backtracking verb and 18 a `\\K`.
+    183 hold a FUZZY SECTION - 70 of those a second section nested inside it with a different
+    constraint, 81 a `{...:test}` and 35 a `\\L<name>` named list - and 49 carry `(?e)`, 56 `(?b)`.
+    Every one of the eight operations is recorded exactly 75 times, because the operation is cycled
+    by row index rather than drawn.
+
+    **The fuzzy sections earn their place rather than decorating the pattern, and that is measured
+    too**, because a composed generator whose sections never actually spend an error would look
+    identical to this one from the outside. Over 2000 rows at seed 7: 699 rows carry a section, 156
+    of them produce a match, and 103 of those 156 charge at least one error - a match no exact
+    engine could have returned. The remaining 53 match at zero cost, which is the row that says the
+    engine does not spend an error it did not need.
 
     The answer rate is deliberately in line with `classes` and `backrefs` rather than higher: a
     composed pattern has more that must line up at once, and buying matches by shortening the
@@ -2729,7 +3042,9 @@ def _generate_interactions(rng: random.Random, count: int):
             subject = subject[:at] + rng.choice(INTERACTION_LINE_BREAKS) + subject[at:]
 
         version1 = rng.random() < INTERACTION_VERSION1_PROBABILITY
-        pattern, groups, names = _interaction_pattern(rng, subject, version1)
+        pattern, groups, names, named_lists, fuzzy = _interaction_pattern(
+            rng, subject, version1, alphabet, allow_fuzzy=True
+        )
 
         flags = 0
         if version1:
@@ -2749,8 +3064,42 @@ def _generate_interactions(rng: random.Random, count: int):
 
         # Half as the flag and half inline, exactly as `posix` writes it, because the two reach the
         # parser by different routes and a composed row is where a mis-scoped flag would show.
-        if rng.random() < INTERACTION_POSIX_PROBABILITY:
-            if rng.random() < INTERACTION_POSIX_INLINE_PROBABILITY:
+        #
+        # NEVER ON A FUZZY ROW, and that is an upstream CRASH rather than a preference. Reading
+        # `fuzzy_changes` on a POSIX fuzzy match kills the interpreter with an access violation
+        # (0xC0000005 on Windows, SIGSEGV under Git Bash), which takes the whole recorder with it -
+        # it is not an exception and no `except` clause can see it. The recorder reads that attribute
+        # for every match it records, so such a row cannot be recorded at all, at any wave size.
+        #
+        # Minimised to four necessary conditions (2026-09-13, .scratch/minimise-crash3.py, regex
+        # 2026.7.19); removing any one of them makes it safe:
+        #
+        #     regex.compile(r'(?p)(?:a|aa){e<=1}').match('aa').fuzzy_changes   # access violation
+        #       - POSIX:      without `(?p)` it answers ((), (), ())
+        #       - an alternation with a SHORTER branch before a longer one: 'a|aa' and 'a|ab' crash,
+        #         'ab|a' and 'a|b' do not, so it is leftmost-longest overriding the first branch
+        #       - a budget that permits an INSERTION: '{e<=1}' and '{i<=1}' crash, '{s<=1}' and
+        #         '{d<=1}' do not
+        #       - a subject long enough to take the longer branch: 'aa' crashes, 'a' does not
+        #
+        # `m.span()`, every `m.span(n)` and `m.fuzzy_counts` all answer correctly on the same match;
+        # only `fuzzy_changes` faults. THIS PORT IS RIGHT AND ANSWERS IT: (0, 2) with no errors
+        # spent and empty changes, which is leftmost-longest picking the longer branch for free. It
+        # is a new upstream memory-safety bug of the 611-614 fuzzing-campaign family, found by this
+        # generator, pinned in Gaps/Engine/FuzzyPosixTests.cs and entered on the ledger.
+        #
+        # The POSIX x fuzzy cell is therefore covered by those pinned tests and NOT by the wave. A
+        # narrower exclusion was considered - refuse only the alternation shape - and rejected: a
+        # named list lowers to exactly that shape (sorted by length, `_regex_core.py:4069`), so do
+        # conditionals and verb alternations, and any future widening would reintroduce the crash
+        # silently. The row-level rule cannot rot.
+        # Both draws happen before the suppression, never inside it, for the reason S42 records
+        # against FUZZY_BESTMATCH_PROBABILITY: a suppression that swallows a draw reshuffles the
+        # whole row stream and makes two waves incomparable.
+        posix = rng.random() < INTERACTION_POSIX_PROBABILITY
+        posix_inline = rng.random() < INTERACTION_POSIX_INLINE_PROBABILITY
+        if posix and not fuzzy:
+            if posix_inline:
                 pattern = "(?p)" + pattern
             else:
                 flags |= POSIX
@@ -2761,12 +3110,34 @@ def _generate_interactions(rng: random.Random, count: int):
         if reverse:
             pattern = "(?r)" + pattern
 
+        # ENHANCEMATCH and BESTMATCH, on the rows that have a fuzzy section for them to rank. Drawn
+        # independently, so a wave holds all four combinations, and `(?b)` goes in front so a row
+        # with both reads `(?b)(?e)` - the order `_generate_fuzzy` writes them in, and the one place
+        # a wrong dispatch (upstream/src/_regex.c:18107) is visible.
+        #
+        # DRAWN BEFORE THEY ARE SUPPRESSED, never inside the `if`, for the reason S42 records against
+        # FUZZY_BESTMATCH_PROBABILITY: changing which rows MAY carry a flag must not reshuffle the
+        # row stream, or two waves stop being comparable. `_has_weighted_cost` is the suppression -
+        # this port ranks by cost and upstream by error count, so a weighted equation under `(?e)` or
+        # `(?b)` is a divergence by construction (DECISIONS 2026-09-12) and teaches nothing.
+        enhance = rng.random() < INTERACTION_ENHANCE_PROBABILITY
+        bestmatch = rng.random() < INTERACTION_BESTMATCH_PROBABILITY
+
+        if not fuzzy or _has_weighted_cost(pattern):
+            enhance = False
+            bestmatch = False
+
+        if enhance:
+            pattern = "(?e)" + pattern
+        if bestmatch:
+            pattern = "(?b)" + pattern
+
         operation = ALL_OPERATIONS[i % len(ALL_OPERATIONS)]
         row = {
             "generator": "interactions",
             "pattern": pattern,
             "flags": flags,
-            "namedLists": {},
+            "namedLists": named_lists,
             "subject": subject,
             "operation": operation,
         }
@@ -3720,7 +4091,7 @@ def _generate_partial(rng: random.Random, count: int, sliced: bool = False):
         # Composed against the WHOLE subject, then the subject is cut - so the pattern is one that
         # had a chance of matching the full text, which is what makes a prefix of it a candidate
         # for a partial match rather than a guaranteed miss.
-        pattern, _groups, _names = _interaction_pattern(rng, subject, version1)
+        pattern, _groups, _names, _lists, _fuzzy = _interaction_pattern(rng, subject, version1)
 
         flags = 0
         if version1:
