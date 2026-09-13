@@ -132,6 +132,29 @@ latest. S41 (`ENHANCEMATCH`, 6 tests) and S42 (`BESTMATCH`, 18 tests) are the tw
 adding its flag to the generator; S43 closes the phase as S36 did. Budget at Phase 4's measured 1.1
 sessions per slice: 8 sessions, and the Phase 4 pattern says the wave will add one or two slices.
 
+**One correction to that authoring, made at S40 and recorded as design spec amendment 18
+(2026-09-13): the tags do not split the way the slices do.** S40 was written to deliver seven tags
+outright. With the `{...:test}` constraint ported, 31 test cases still tagged `fuzzy-matching`,
+`fuzzy-budget`, `fuzzy-counts` or `fuzzy-changes` failed, and every one of them failed at the
+`ENHANCEMATCH` or `BESTMATCH` seam rather than on an assertion - their patterns carry `(?e)`,
+`(?b)`, `(?be)` or `FuzzyRegexOptions.BestMatch`. They are now tagged for the capability they
+actually wait on, and eight mixed fan-out methods were split so a plain row is not skipped to keep a
+ranking-mode sibling company. **No slice moved and no scope changed**: S40 delivers the constraint,
+the three per-error-kind tags and every plain row of the other four, and the 55 skips left on the
+board are exactly S41's and S42's scope.
+
+**Phase 5 is 8 slices from S40's close, not 7 - S40a - and it is the Phase 4 pattern repeating
+exactly (design spec amendment 19, 2026-09-13).** S40's slice file asked for the default wave green
+at 6000 rows a generator, which is ten times anything run before, and it cannot finish: upstream
+never returns from `regex.search('.?x(?>a(*SKIP)z)', 'xzxa')` and the recorder has no per-row
+timeout. At seed 7, where the wave does complete, four rows diverge in `partial`, `partial-sliced`
+and `verbs` - **proven to be HEAD's**, by consuming the identical saved wave with HEAD's engine in a
+worktree. S40's blind review added a fourth: a fuzzy section inside a lookbehind reports
+`FuzzyChanges` that contradict its own `FuzzyCounts`, where plain `(?r)` does not. S40a takes all
+four and the recorder timeout, and its exit gate is the 6000-row wave. As with S33, S34 and S35,
+none of this was scope creep and none of it was a feature - it is verification getting stricter and
+finding real defects, which is the thing the Phase 5 budget note above said to expect.
+
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
 binds after two and a half busy days. Changing it is an owner decision, not a slice's.

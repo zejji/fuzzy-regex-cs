@@ -3991,6 +3991,19 @@ FUZZY_CASE_MODE_WEIGHTS = (5, 2, 3)
 FUZZY_BACKREF_PROBABILITY = 0.25
 FUZZY_BACKREF_ATOM = r"(?:\1)"
 
+# What the referenced group holds when the row is in `fold` mode, drawn instead of a plain string
+# atom about half the time. S40 added these, and the reason is a control that measured zero.
+#
+# `fuzzy_ext_match_group_fld` (upstream/src/_regex.c:10033) asks the character INSIDE the subject
+# character's folding, at `folded_pos`. That index is only ever non-zero when a subject character
+# folds to more than one - and the two sides have to run at different speeds for the comparison to
+# stop partway through a folding at all. With the group text drawn from FUZZY_STRING_ATOMS, which is
+# ASCII, both sides folded one-to-one, `folded_pos` was always 0, and S40's control E - which
+# replaces `folded_pos` with a literal 0 - found nothing at either of two seeds over 2000 rows.
+# With these, it fires. A control that a generator cannot make fail is not evidence of anything.
+FUZZY_BACKREF_FOLD_ATOMS = ("ßa", "ﬆx", "aß", "ﬀo", "ßß")
+FUZZY_BACKREF_FOLD_PROBABILITY = 0.5
+
 # The zero-width assertions a fuzzy section may contain. They matter more here than anywhere else:
 # a zero-width item passes a step of 0 to `fuzzy_match_item` (upstream/src/_regex.c:10185), which
 # rules out deletion and substitution outright, so an insertion is the only error that can get past
@@ -4033,6 +4046,70 @@ FUZZY_CONSTRAINTS = (
 # triage list), so the generator stays off the shape rather than the recorder learning to survive it.
 FUZZY_BOUNDED_CONSTRAINTS = tuple(c for c in FUZZY_CONSTRAINTS if c != "{e}")
 
+# Tests that SPLIT A FOLDING, and that is the whole of why they are a list of their own.
+#
+# `fuzzy_ext_match_group_fld` asks `folded_char_at(text_pos, folded_pos)` - the character INSIDE the
+# subject character's folding. A test can only tell that apart from `folded_char_at(text_pos, 0)` if
+# it answers differently for two characters of one folding. The foldings this generator produces are
+# 'ß' -> "ss", 'ﬀ' -> "ff", 'ﬆ' -> "st" and 'ﬁ' -> "fi", so "ss" and "ff" cannot be split at all and
+# the ones that can need a boundary between 's' and 't', or between 'f' and 'i'.
+#
+# Measured on 2026-09-13, and the numbers are why this list exists rather than two more entries in
+# FUZZY_TESTS. S40's control E replaces `folded_pos` with a literal 0 and read 0 divergences of 2000
+# at both seeds three times running: with the group side ASCII, with the group side folding, and
+# with these tests merely added to the pool. The wave held 81 rows folding on both sides and exactly
+# ONE of them drew a splitting test, because a uniform draw gives such a test 2 chances in 17.
+# Biasing the draw for that one shape - a fold-mode row with a backreference - is what gave the
+# control teeth.
+FUZZY_SPLIT_TESTS = ("[a-s]", "[a-f]", "s", "f", "[^t]", "[^i]")
+
+# How often a fold-mode row with a backreference draws from FUZZY_SPLIT_TESTS instead. Only that
+# shape: biasing every row would cost the CHARACTER, RANGE, PROPERTY and SET arms the spread they
+# have, to buy coverage those arms do not need.
+FUZZY_SPLIT_TEST_PROBABILITY = 0.6
+
+# The `{...:test}` constraint, S40: which subject characters an error is allowed to touch. Every
+# constraint shape above accepts one - measured, all 18 x these 15 parse - so the test is appended
+# to whichever shape the row drew rather than being a shape of its own.
+#
+# The list is one entry per arm of upstream's `fuzzy_ext_match` switch (upstream/src/_regex.c:9938),
+# plus the two shapes that have no arm:
+#   CHARACTER  'x', '0'            and negated, '[^x]', '[^0]' - a one-character class optimises to
+#                                  CHARACTER with node->match FALSE rather than to a set
+#   RANGE      '[a-z]', '[0-9]'
+#   PROPERTY   '\d', '\w', '\s', '\S'
+#   SET_UNION  '[0-9x]', '[abx]', '[^abx]', '[a-cx-z]' - disjoint pieces, so they cannot collapse
+#   (no arm)   '.', which compiles to ANY and therefore constrains nothing
+# SET_DIFF, SET_INTER and SET_SYM_DIFF are NOT here: the set-operator syntax needs `(?V1)`, which
+# this generator does not emit, so `{e<=1:[[a-z]--[aeiou]]}` is `error: expected }` in a V0 pattern.
+# Gaps/Engine/FuzzyTestConstraintTests.cs covers those three directly instead.
+# `(?i)x` is not here either: the grammar takes only a character set, so it is a parse error.
+#
+# The entries are chosen against FUZZY_SUBJECT_ALPHABETS ('abx', 'ab0 x', 'abf<astral>'), so a test
+# both permits and refuses real edits rather than being vacuous either way.
+FUZZY_TESTS = (
+    "x",
+    "0",
+    "[^x]",
+    "[^0]",
+    "[a-z]",
+    "[0-9]",
+    r"\d",
+    r"\w",
+    r"\s",
+    r"\S",
+    "[0-9x]",
+    "[abx]",
+    "[^abx]",
+    "[a-cx-z]",
+    ".",
+) + FUZZY_SPLIT_TESTS
+
+# How often a constraint carries a test. A third: high enough that a 2000-row wave holds several
+# hundred FUZZY_EXT rows in every body shape, low enough that the plain FUZZY spine S38 and S39
+# ported keeps the coverage it had.
+FUZZY_TEST_PROBABILITY = 0.35
+
 # The alphabet a subject is drawn from. The astral band is here for the same reason it is in the
 # group generator: a change position reported in codepoints rather than UTF-16 code units has to
 # show up as a divergence from the first wave.
@@ -4053,6 +4130,23 @@ FUZZY_EDIT_COUNT_WEIGHTS = (3, 6, 4, 2)
 # How often a section holds a second fuzzy section inside it. See the call site: without nesting,
 # the FUZZY/END_FUZZY stack traffic is unobservable, because the outer counts are always zero.
 FUZZY_NESTING_PROBABILITY = 0.2
+
+
+def _fuzzy_constraint(rng: random.Random, constraints: tuple[str, ...], split: bool) -> str:
+    """One constraint, sometimes carrying a `{...:test}` - S40's FUZZY_EXT rather than FUZZY.
+
+    `split` says the row folds on both sides, so a test that splits a folding is worth more than a
+    uniform draw from the whole pool. See FUZZY_SPLIT_TESTS for the measurement behind that.
+    """
+    constraint = rng.choice(constraints)
+
+    if rng.random() >= FUZZY_TEST_PROBABILITY:
+        return constraint
+
+    if split and rng.random() < FUZZY_SPLIT_TEST_PROBABILITY:
+        return constraint[:-1] + ":" + rng.choice(FUZZY_SPLIT_TESTS) + "}"
+
+    return constraint[:-1] + ":" + rng.choice(FUZZY_TESTS) + "}"
 
 
 def _fuzzy_atom(rng: random.Random, mode: str, allow_fold: bool) -> str:
@@ -4147,7 +4241,14 @@ def _generate_fuzzy(rng: random.Random, count: int):
     S39 widens it four ways, one per arm family the slice ports: multi-character literals (STRING),
     `(?i)` and `(?fi)` (STRING_IGN and STRING_FLD), a backreference (the REF_GROUP family), and
     repeat bodies next to a string, which is where a retry into `retry_fuzzy_match_string` comes
-    from. `(?e)`, `(?b)` and `{...:test}` are still excluded - S40, S41 and S42.
+    from.
+
+    S40 widens it once more: about a third of the constraints - inner section as well as outer -
+    carry a `{...:test}`, so the row compiles to FUZZY_EXT and the error has to pass
+    `fuzzy_ext_match` before it is spent. See FUZZY_TESTS for which tests and why those.
+
+    `(?e)` and `(?b)` are still excluded - S41 and S42 - because a generator that drew them now
+    would file their seams as `unsupported` rows.
     """
     for i in range(count):
         alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
@@ -4176,7 +4277,10 @@ def _generate_fuzzy(rng: random.Random, count: int):
         reverse = rng.random() < 0.2
         backref_text = ""
         if rng.random() < FUZZY_BACKREF_PROBABILITY:
-            backref_text = rng.choice(FUZZY_STRING_ATOMS)
+            if mode == "fold" and rng.random() < FUZZY_BACKREF_FOLD_PROBABILITY:
+                backref_text = rng.choice(FUZZY_BACKREF_FOLD_ATOMS)
+            else:
+                backref_text = rng.choice(FUZZY_STRING_ATOMS)
             # Wrapped, because a bare `\1` next to a literal digit parses as `\10` - group ten,
             # which does not exist, so the row is an `error` on both sides and tests nothing. Nine
             # rows of a 2000-row wave were exactly that before the wrapper went in.
@@ -4224,14 +4328,18 @@ def _generate_fuzzy(rng: random.Random, count: int):
         )
         constraints = FUZZY_BOUNDED_CONSTRAINTS if heavy else FUZZY_CONSTRAINTS
 
+        # Both sides of the group reference fold to more than one character, which is the only shape
+        # where WHICH character of a folding the test asks is observable at all.
+        split = mode == "fold" and bool(backref_text)
+
         if len(section) >= 2 and rng.random() < FUZZY_NESTING_PROBABILITY:
             first = 1 if len(section) >= 3 else 0
             start = rng.randrange(first, len(section) - 1)
             end = rng.randrange(start + 1, len(section))
-            inner = "(?:" + "".join(section[start : end + 1]) + ")" + rng.choice(constraints)
+            inner = "(?:" + "".join(section[start : end + 1]) + ")" + _fuzzy_constraint(rng, constraints, split)
             section = section[:start] + [inner] + section[end + 1 :]
 
-        pattern = "(?:" + "".join(section) + ")" + rng.choice(constraints)
+        pattern = "(?:" + "".join(section) + ")" + _fuzzy_constraint(rng, constraints, split)
 
         if backref_text:
             group = "(" + backref_text + ")"

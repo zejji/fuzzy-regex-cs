@@ -3152,24 +3152,63 @@ internal static class Matcher
     /// which characters an error is allowed to touch.
     /// </summary>
     /// <remarks>
-    /// Only the two "there is nothing to test" arms are ported here. A plain <c>FUZZY</c> node has no
-    /// second branch, so this returns <see langword="true"/> for every pattern S38 delivers; only
-    /// <c>FUZZY_EXT</c>, which the parser emits for <c>{...:test}</c>, reaches the switch, and that is
-    /// S40's.
+    /// <para>
+    /// A plain <c>FUZZY</c> node has no second branch, so this returns <see langword="true"/> for
+    /// every pattern without a constraint; only <c>FUZZY_EXT</c>, which the parser emits for
+    /// <c>{...:test}</c>, has a test node and reaches the switch.
+    /// </para>
+    /// <para>
+    /// <b>Upstream's switch has no <c>SET_*_REV</c> or <c>SET_*_IGN_REV</c> arm</b>, where it has
+    /// both forward set arms and the reversed CHARACTER, PROPERTY and RANGE ones. An opcode the
+    /// switch does not list falls off the end to <c>return TRUE</c>, so a reversed set test - and
+    /// any test that is not a character class at all, such as <c>.</c>, which compiles to ANY -
+    /// constrains nothing. That is upstream's behaviour, measured, not an omission here:
+    /// <c>tools/probes/upstream-fuzzy-ext-test.py</c>, and
+    /// <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c> pins it.
+    /// </para>
     /// </remarks>
+    /// <param name="state">The match state.</param>
     /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
     /// <param name="pos">The position the error would touch.</param>
     /// <returns><see langword="true"/> if the constraint allows it.</returns>
-    private static bool FuzzyExtMatch(Node? fuzzyNode, int pos)
+    private static bool FuzzyExtMatch(MatchState state, Node? fuzzyNode, int pos)
     {
-        _ = pos;
+        Node? testNode = fuzzyNode?.Next2.Node;
 
-        if (fuzzyNode?.Next2.Node is null)
+        if (testNode is null)
         {
             return true;
         }
 
-        throw Seam.For(Opcode.FuzzyExt);
+        // Upstream writes one case per opcode, each the same two lines with a different
+        // 'matches_*' call; 'MatchesOne' is that choice already pulled out, so the arms group by
+        // direction instead. The opcodes listed are exactly upstream's (:9949-10009).
+        return testNode.Op switch
+        {
+            Opcode.Character
+            or Opcode.CharacterIgn
+            or Opcode.Property
+            or Opcode.PropertyIgn
+            or Opcode.Range
+            or Opcode.RangeIgn
+            or Opcode.SetDiff
+            or Opcode.SetInter
+            or Opcode.SetSymDiff
+            or Opcode.SetUnion
+            or Opcode.SetDiffIgn
+            or Opcode.SetInterIgn
+            or Opcode.SetSymDiffIgn
+            or Opcode.SetUnionIgn => pos < state.SliceEnd
+                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)) == testNode.Match,
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.PropertyRev
+            or Opcode.PropertyIgnRev
+            or Opcode.RangeRev
+            or Opcode.RangeIgnRev => pos > state.SliceStart
+                && MatchesOne(state.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
+            _ => true,
+        };
     }
 
     /// <summary>Upstream <c>next_fuzzy_match_item</c> (line 10116).</summary>
@@ -3227,7 +3266,7 @@ internal static class Matcher
 
                 if (state.SliceStart <= newPos && newPos <= state.SliceEnd)
                 {
-                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3249,7 +3288,7 @@ internal static class Matcher
 
                 if (state.SliceStart <= newPos && newPos <= state.SliceEnd)
                 {
-                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3527,7 +3566,7 @@ internal static class Matcher
         if (
             state.TextPos == limit
             || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts)
-            || !FuzzyExtMatch(state.FuzzyNode, state.TextPos)
+            || !FuzzyExtMatch(state, state.FuzzyNode, state.TextPos)
         )
         {
             while (count > 0)
@@ -3780,7 +3819,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -3797,7 +3836,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4022,22 +4061,84 @@ internal static class Matcher
     /// asked of a character inside a folding rather than of a subject character.
     /// </summary>
     /// <remarks>
-    /// As with <see cref="FuzzyExtMatch"/>, only the "there is nothing to test" arm is ported here;
-    /// the switch, and the <c>folded_char_at</c> helper every one of its arms calls, are S40's.
+    /// <para>
+    /// The character the constraint sees is the one inside the subject character's folding, so every
+    /// arm goes through <see cref="FoldedCharAt"/> rather than reading the subject directly, and the
+    /// position it works from is <c>state-&gt;text_pos</c> rather than the caller's - the folded
+    /// position indexes into the folding, not into the subject.
+    /// </para>
+    /// <para>
+    /// <b>This switch is missing the <c>SET_*_IGN</c> arms that <see cref="FuzzyExtMatch"/> has</b>,
+    /// as well as the <c>SET_*_REV</c> ones neither has. Since the function runs only when both
+    /// sides are being full-case-folded - which needs <c>(?f)</c> with <c>(?i)</c> - every test node
+    /// reaching it is an <c>_IGN</c> one, so a set test here always falls off the end of the switch
+    /// to <see langword="true"/> and constrains nothing, where the same test forward would bite.
+    /// Measured, and pinned by <c>Gaps/Engine/FuzzyTestConstraintTests.cs</c>.
+    /// </para>
+    /// <para>
+    /// By the same argument the non-<c>_IGN</c> arms are unreachable: the fuzzy-test grammar accepts
+    /// only a character set, so <c>{e&lt;=1:(?-i:x)}</c> is a parse error and a test cannot opt out
+    /// of the enclosing <c>(?i)</c>. They are ported because upstream writes them.
+    /// </para>
     /// </remarks>
+    /// <param name="state">The match state.</param>
     /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
     /// <param name="foldedPos">The position in the folding the error would touch.</param>
     /// <returns><see langword="true"/> if the constraint allows it.</returns>
-    private static bool FuzzyExtMatchGroupFld(Node? fuzzyNode, int foldedPos)
+    private static bool FuzzyExtMatchGroupFld(MatchState state, Node? fuzzyNode, int foldedPos)
     {
-        _ = foldedPos;
+        Node? testNode = fuzzyNode?.Next2.Node;
 
-        if (fuzzyNode?.Next2.Node is null)
+        if (testNode is null)
         {
             return true;
         }
 
-        throw Seam.For(Opcode.FuzzyExt);
+        // The reversed arms read 'folded_char_at(text_pos - 1, folded_pos - 1)'. 'folded_pos - 1'
+        // cannot be negative: the only two callers reach here from the INS and SUB arms of
+        // 'NextFuzzyMatchGroupFld', both behind 'new_folded_pos + step >= 0', and a reversed test
+        // node means a step of -1, so 'folded_pos' is at least 1 by the time the arm runs.
+        return testNode.Op switch
+        {
+            Opcode.Character
+            or Opcode.CharacterIgn
+            or Opcode.Property
+            or Opcode.PropertyIgn
+            or Opcode.Range
+            or Opcode.RangeIgn
+            or Opcode.SetDiff
+            or Opcode.SetInter
+            or Opcode.SetSymDiff
+            or Opcode.SetUnion => state.TextPos < state.SliceEnd
+                && MatchesOne(state.Encoding, testNode, FoldedCharAt(state, state.TextPos, foldedPos))
+                    == testNode.Match,
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.PropertyRev
+            or Opcode.PropertyIgnRev
+            or Opcode.RangeRev
+            or Opcode.RangeIgnRev => state.TextPos > state.SliceStart
+                && MatchesOne(
+                    state.Encoding,
+                    testNode,
+                    FoldedCharAt(state, state.PrevPos(state.TextPos), foldedPos - 1)
+                ) == testNode.Match,
+            _ => true,
+        };
+    }
+
+    /// <summary>Upstream <c>folded_char_at</c> (line 10014).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">The subject position whose character is folded.</param>
+    /// <param name="foldedPos">Which character of the folding to return.</param>
+    /// <returns>That character.</returns>
+    private static uint FoldedCharAt(MatchState state, int pos, int foldedPos)
+    {
+        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+
+        _ = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+
+        return folded[foldedPos];
     }
 
     /// <summary>
@@ -4081,7 +4182,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4098,7 +4199,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -7718,7 +7819,7 @@ internal static class Matcher
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
                         && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors
-                        && FuzzyExtMatch(innerNode, state.TextPos)
+                        && FuzzyExtMatch(state, innerNode, state.TextPos)
                     )
                     {
                         bool endFuzzyReverse = (innerNode!.Status & NodeStatus.Reverse) != 0;

@@ -1287,5 +1287,85 @@
       7,
       20260913
     ]
+  },
+  {
+    "id": "S40-A",
+    "name": "set-test-constrains-nothing",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool FuzzyExtMatch(MatchState state, Node? fuzzyNode, int pos)",
+    "anchorNth": 1,
+    "before": "            or Opcode.SetDiffIgn\n            or Opcode.SetInterIgn\n            or Opcode.SetSymDiffIgn\n            or Opcode.SetUnionIgn => pos < state.SliceEnd\n",
+    "after": "            or Opcode.SetDiffIgn\n            or Opcode.SetInterIgn\n            or Opcode.SetSymDiffIgn => pos < state.SliceEnd\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      20260913,
+      555
+    ]
+  },
+  {
+    "id": "S40-B",
+    "name": "test-consulted-at-the-wrong-position",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "            case FuzzyValue.Sub:\n",
+    "anchorNth": 1,
+    "before": "                    if (!FuzzyExtMatch(state, state.FuzzyNode, data.NewTextPos))\n",
+    "after": "                    if (!FuzzyExtMatch(state, state.FuzzyNode, newPos))\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      20260913,
+      555
+    ]
+  },
+  {
+    "id": "S40-C",
+    "name": "reversed-test-reads-past-slice-start",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool FuzzyExtMatch(MatchState state, Node? fuzzyNode, int pos)",
+    "anchorNth": 1,
+    "before": "            or Opcode.RangeIgnRev => pos > state.SliceStart\n                && MatchesOne(state.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,\n",
+    "after": "            or Opcode.RangeIgnRev => pos < state.SliceEnd\n                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)) == testNode.Match,\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      20260913,
+      555
+    ]
+  },
+  {
+    "id": "S40-D",
+    "name": "test-ignores-node-match-negation",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool FuzzyExtMatch(MatchState state, Node? fuzzyNode, int pos)",
+    "anchorNth": 1,
+    "before": "            or Opcode.SetUnionIgn => pos < state.SliceEnd\n                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)) == testNode.Match,\n",
+    "after": "            or Opcode.SetUnionIgn => pos < state.SliceEnd\n                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)),\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      20260913,
+      555
+    ]
+  },
+  {
+    "id": "S40-E",
+    "name": "folded-test-asks-the-unfolded-character",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool FuzzyExtMatchGroupFld(MatchState state, Node? fuzzyNode, int foldedPos)",
+    "anchorNth": 1,
+    "before": "                && MatchesOne(state.Encoding, testNode, FoldedCharAt(state, state.TextPos, foldedPos))\n",
+    "after": "                && MatchesOne(state.Encoding, testNode, FoldedCharAt(state, state.TextPos, 0))\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      20260913,
+      555
+    ]
   }
 ]

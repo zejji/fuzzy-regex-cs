@@ -196,10 +196,10 @@ public sealed class RegressionsFuzzyTests
         m.Groups["end"].Value.Should().Be("GTCT");
     }
 
-    // ---- needs:fuzzy-budget ----
+    // ---- error budgets ----
 
     [Test]
-    [Skip("needs:fuzzy-budget - quantifier-scoped fuzzy error budgets not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#56")]
     public void An_error_range_with_a_lower_bound_forces_at_least_that_many_errors_into_the_match() =>
         FuzzyRegex
@@ -209,7 +209,7 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 306: Fuzzy match parameters not respecting quantifier scope.
     [Test]
-    [Skip("needs:fuzzy-budget - quantifier-scoped fuzzy error budgets not implemented yet")]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#371-372")]
     [Arguments("dogfood", 0, 0, 0)]
     [Arguments("dogfoot", 1, 0, 0)]
@@ -224,10 +224,10 @@ public sealed class RegressionsFuzzyTests
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(substitutions, insertions, deletions));
 
-    // ---- needs:fuzzy-changes ----
+    // ---- where the errors landed ----
 
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#369-370")]
     public void Bestmatch_on_a_long_dna_sequence_reports_the_single_insertion_position()
     {
@@ -241,7 +241,7 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 353: fuzzy changes negative indexes.
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet; '(?be)' is both flags")]
     [Property("Upstream", "RegexTests.test_hg_bugs#380")]
     public void Fuzzy_changes_reports_deletion_positions_when_the_match_starts_mid_pattern()
     {
@@ -257,7 +257,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 364: Contradictory values in fuzzy_counts and fuzzy_changes.
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#381-382")]
     public void Default_mode_reports_a_missing_letter_as_a_substitution_plus_a_deletion()
     {
@@ -270,7 +269,7 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#383-384")]
     public void Enhancematch_mode_reports_the_same_missing_letter_as_a_single_deletion()
     {
@@ -283,7 +282,7 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#385-386")]
     public void Bestmatch_inline_flag_reports_the_same_missing_letter_as_a_single_deletion()
     {
@@ -297,7 +296,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 433: disagreement between fuzzy_counts and fuzzy_changes.
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#421-422")]
     public void An_exact_dna_match_reports_no_errors_or_error_positions()
     {
@@ -310,7 +309,7 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-changes - fuzzy_changes (per-position error indices) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#423-424")]
     public void A_dna_match_with_two_substitutions_reports_their_positions()
     {
@@ -326,59 +325,72 @@ public sealed class RegressionsFuzzyTests
         m.FuzzyChanges.Deletions.Should().BeEmpty();
     }
 
-    // ---- needs:fuzzy-counts ----
+    // ---- how many errors of each kind ----
 
     // Hg issue 109: Edit distance of fuzzy match.
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#89-94")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#89, #92")]
     [Arguments(@"(?:cats|cat){e<=1}")]
-    [Arguments(@"(?e)(?:cats|cat){e<=1}")]
-    [Arguments(@"(?b)(?:cats|cat){e<=1}")]
     [Arguments(@"(?:cat){e<=1}")]
-    [Arguments(@"(?e)(?:cat){e<=1}")]
-    [Arguments(@"(?b)(?:cat){e<=1}")]
     public void A_single_substitution_is_reported_the_same_way_regardless_of_mode(string pattern) =>
         FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
+    // Upstream asserts the same counts under (?e) and (?b), so these four rows are the same
+    // behaviour asked of the two ranking modes rather than of plain fuzzy matching. They were split
+    // out of the method above in S40; the tag says which capability they wait on, which is what
+    // S41 and S42 deliver.
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#95-97")]
-    [Arguments(@"(?:cats){e<=2}", 1, 1, 0)]
-    [Arguments(@"(?e)(?:cats){e<=2}", 0, 1, 0)]
-    [Arguments(@"(?b)(?:cats){e<=2}", 0, 1, 0)]
-    public void One_letter_gap_scores_differently_between_default_and_enhanced_modes(
-        string pattern,
-        int substitutions,
-        int insertions,
-        int deletions
-    ) =>
-        FuzzyRegex
-            .MatchAtStart("c ats", pattern)
-            .FuzzyCounts.Should()
-            .Be(new FuzzyCounts(substitutions, insertions, deletions));
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#90-91, #93-94")]
+    [Arguments(@"(?e)(?:cats|cat){e<=1}")]
+    [Arguments(@"(?b)(?:cats|cat){e<=1}")]
+    [Arguments(@"(?e)(?:cat){e<=1}")]
+    [Arguments(@"(?b)(?:cat){e<=1}")]
+    public void A_single_substitution_is_reported_the_same_way_in_the_ranking_modes(string pattern) =>
+        FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#98-100")]
-    [Arguments(@"(?:cats){e<=2}")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#95")]
+    public void One_letter_gap_by_default_is_a_substitution_and_an_insertion() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#96-97")]
     [Arguments(@"(?e)(?:cats){e<=2}")]
     [Arguments(@"(?b)(?:cats){e<=2}")]
-    public void Two_letter_gaps_are_reported_as_two_insertions_regardless_of_mode(string pattern) =>
+    public void One_letter_gap_in_a_ranking_mode_is_one_insertion_alone(string pattern) =>
+        FuzzyRegex.MatchAtStart("c ats", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+    [Test]
+    [Property("Upstream", "RegexTests.test_hg_bugs#98")]
+    public void Two_letter_gaps_are_reported_as_two_insertions() =>
+        FuzzyRegex.MatchAtStart("c a ts", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#99-100")]
+    [Arguments(@"(?e)(?:cats){e<=2}")]
+    [Arguments(@"(?b)(?:cats){e<=2}")]
+    public void Two_letter_gaps_are_reported_as_two_insertions_in_the_ranking_modes(string pattern) =>
         FuzzyRegex.MatchAtStart("c a ts", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
-    [Property("Upstream", "RegexTests.test_hg_bugs#101-103")]
-    [Arguments(@"(?:cats){e<=1}")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#101")]
+    public void One_letter_gap_within_a_tight_budget_is_reported_as_one_insertion() =>
+        FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+
+    [Test]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH and BESTMATCH ranking are not implemented yet")]
+    [Property("Upstream", "RegexTests.test_hg_bugs#102-103")]
     [Arguments(@"(?e)(?:cats){e<=1}")]
     [Arguments(@"(?b)(?:cats){e<=1}")]
-    public void One_letter_gap_within_a_tight_budget_is_reported_as_one_insertion_regardless_of_mode(string pattern) =>
+    public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_the_ranking_modes(string pattern) =>
         FuzzyRegex.MatchAtStart("c ats", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     // Git issue 370: Confusions about Fuzzy matching behavior.
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#387-391")]
     [Arguments(@"(?e)(?:^(\$ )?\d{1,3}(,\d{3})*(\.\d{2})$){e}", "$ 10,112.111.12", 6, 0, 5)]
     [Arguments(@"(?e)(?:^(\$ )?\d{1,3}(,\d{3})*(\.\d{2})$){s<=1}", "$ 10,112.111.12", 1, 0, 0)]
@@ -398,7 +410,7 @@ public sealed class RegressionsFuzzyTests
             .Be(new FuzzyCounts(substitutions, insertions, deletions));
 
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#392-393")]
     [Arguments(@"(?e)(?:0?,0(?:,0)?){s<=1,d<=1}")]
     [Arguments(@"(?e)(?:0??,0(?:,0)?){s<=1,d<=1}")]
@@ -407,7 +419,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 403: Fuzzy matching with wrong distance (unnecessary substitutions).
     [Test]
-    [Skip("needs:fuzzy-counts - fuzzy_counts (edit-distance breakdown) not implemented yet")]
+    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#399")]
     public void Bestmatch_avoids_unnecessary_substitutions_when_deletions_explain_the_gap() =>
         FuzzyRegex
@@ -440,11 +452,10 @@ public sealed class RegressionsFuzzyTests
             .BeEquivalentTo(expected, static options => options.WithStrictOrdering());
     }
 
-    // ---- needs:fuzzy-matching ----
+    // ---- plain fuzzy matching ----
 
     // Hg issue 94: Python crashes when executing regex updates pattern.findall.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#62-63")]
     public void A_compiled_fuzzy_pattern_with_a_word_boundary_finds_no_match_in_ordinary_text()
     {
@@ -456,7 +467,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 147: Fuzzy match can return match points beyond buffer end.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#157-158")]
     [Arguments(@"(?i)(?:error){e}")]
     [Arguments(@"(?fi)(?:error){e}")]
@@ -492,7 +502,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 210: Fuzzy matching and Backreference.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#252-253")]
     [Arguments(@"(2)(?:\1{5}){e<=1}")]
     [Arguments(@"(\d)(?:\1{5}){e<=1}")]
@@ -506,7 +515,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 247: Unexpected result with fuzzy matching and lookahead expression.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#278-285")]
     [Arguments(@"(?:ESTONIA(?!\w)){e<=1}", "ESTONIAN WORKERS", "ESTONIAN")]
     [Arguments(@"(?:ESTONIA(?=\W)){e<=1}", "ESTONIAN WORKERS", "ESTONIAN")]
@@ -524,7 +532,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 248: Unexpected result with fuzzy matching and more than one non-greedy quantifier.
     [Test]
-    [Skip("needs:fuzzy-matching - fuzzy quantifiers ({e<=n}) not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#286-289")]
     [Arguments(@"(?:A.*B.*CDE){e<=2}")]
     [Arguments(@"(?:A.*B.*?CDE){e<=2}")]
@@ -533,11 +540,10 @@ public sealed class RegressionsFuzzyTests
     public void Fuzzy_matching_with_mixed_greedy_and_lazy_dot_star_still_spans_the_whole_match(string pattern) =>
         FuzzyRegex.Match("A B CYZ", pattern).Value.Should().Be("A B CYZ");
 
-    // ---- needs:fuzzy-matching (parsed since S13, not matchable yet) ----
+    // ---- the '{...:test}' constraint (parsed since S13, matched since S40) ----
 
     // Hg issue 338: specifying allowed characters when fuzzy-matching.
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#378-379")]
     [Arguments(@"(?:cat){e<=1:[u]}")]
     [Arguments(@"(?:cat){e<=1:u}")]
@@ -546,7 +552,7 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 371: Specifying character set when fuzzy-matching allows characters not in the set.
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
+    [Skip("needs:fuzzy-enhancematch - ENHANCEMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#394")]
     public void Fuzzy_character_restriction_rejects_digits_outside_the_allowed_set() =>
         FuzzyRegex
@@ -556,7 +562,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 394: Unexpected behaviour in fuzzy matching with limited character set with IGNORECASE flag.
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#397-398")]
     [Arguments(@"(\d+){i<=2:[ab]}")]
     [Arguments(@"(?i)(\d+){i<=2:[ab]}")]
@@ -565,7 +570,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 415: Fuzzy character restrictions don't apply to insertions at "right edge".
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#402-403")]
     public void Fuzzy_character_restriction_on_a_substitution_rejects_a_char_outside_the_set()
     {
@@ -574,7 +578,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#404-406")]
     public void Fuzzy_character_restriction_on_an_insertion_rejects_a_char_outside_the_set_and_reports_its_position()
     {
@@ -591,13 +594,11 @@ public sealed class RegressionsFuzzyTests
     [Test]
     // This one carries no ":set" restriction, unlike the rest of Git issue 415, so it is tagged
     // for the multi-constraint error budget it does need.
-    [Skip("needs:fuzzy-budget - multi-constraint error budgets ({i<=1,0<e<=1}) are not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#407")]
     public void A_captured_group_with_an_insertion_budget_and_a_nonzero_error_floor_still_matches() =>
         FuzzyRegex.MatchAtStart("tes5t", @"t(es){i<=1,0<e<=1}t").Value.Should().Be("tes5t");
 
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#408")]
     public void Fuzzy_character_restriction_combined_with_a_nonzero_error_floor_reports_the_insertion_position()
     {
@@ -610,7 +611,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 442: Fuzzy regex matching doesn't seem to test insertions correctly.
     [Test]
-    [Skip("needs:fuzzy-matching - the parser reads {e<=n:[set]} since S13; the engine has no FUZZY_EXT opcode yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#429-430")]
     [Arguments(FuzzyRegexOptions.None)]
     [Arguments(FuzzyRegexOptions.IgnoreCase)]

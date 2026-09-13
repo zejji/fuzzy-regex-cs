@@ -2,42 +2,43 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S40 is next - the `{...:test}` constraint (`fuzzy_ext_match`'s switch,
-`fuzzy_ext_match_group_fld`'s switch and `folded_char_at`, their only caller). Launch:
-`pwsh -File tools/launch-slice.ps1 s40`. S39 landed fuzzy strings, backreferences and the folded
-forms of both: **every one of the 27 `Seam.For(Opcode.Fuzzy)` sites is now gone**, and ordinary
-fuzzy patterns work. It delivers `fuzzy-substitution`, `fuzzy-insertion` and `fuzzy-deletion`.
+**Current slice:** S40a is next, then S41. Launch: `pwsh -File tools/launch-slice.ps1 s40a`.
+S40 landed the `{...:test}` constraint - `fuzzy_ext_match`, `folded_char_at` and
+`fuzzy_ext_match_group_fld` - so **every fuzzy seam except ENHANCEMATCH and BESTMATCH is gone**.
+Parity **91.1% -> 97.2%**, skips **174 -> 55**, and all 55 are S41's (30) and S42's (25).
 
-**Read this before S40.** With every `needs:fuzzy-*` skip removed, 76 of 139 tests pass and 63 fail,
-all 63 at a seam: 29 `BESTMATCH` (S42), 25 `ENHANCEMATCH` (S41), 9 `fuzzy_ext_match`'s switch (S40).
-So **S40's own share is 9 tests**, and the four plain tags it was meant to land -
-`fuzzy-matching` 24/31 methods, `fuzzy-budget` 9/11, `fuzzy-changes` 1/8, `fuzzy-counts` 0/8 - are
-mostly `(?e)`/`(?b)` rows and in practice follow S41 and S42. Re-read the phase plan before assuming
-S40 can deliver them.
+**S40a exists because S40's last verification item found four defects, none of them S40's**
+(design spec amendment 19). Do the recorder first; the other three are only measurable after it.
+1. **Upstream hangs**: `regex.search('.?x(?>a(*SKIP)z)', 'xzxa')` never returns on 2026.7.19. Needs
+   all three of a leading optional item, an atomic group, `(*SKIP)` inside. The recorder has no
+   per-row timeout, so one such row kills a whole wave silently - `regex` takes `timeout=`.
+2. **Four rows of the 6000-row wave diverge at seed 7** (`partial` 97927/98956, `partial-sliced`
+   103926, `verbs` 117679), **proven to be HEAD's** by consuming the same saved wave with HEAD's
+   engine in a worktree: HEAD gives the same four, with 1432 `unsupported` where this tree gives 0.
+3. **A fuzzy section in a lookbehind reports `FuzzyChanges` that contradict its own `FuzzyCounts`**:
+   `(?<=(?:[ab][cd]){e<=1})$` on 'axc' is `(1,0,0)` with a *deletion* at 1, upstream `subs=[2]`.
+   Plain `(?r)` is correct, so it is not the reversal. S38/S39 territory.
 
-**Two things S39 found that the next slices must not re-derive.** The fuzzy `*_REPEAT_ONE` loops
-(`:15881`, `:16500`) are **unreachable and deliberately not ported** - `sequence_matches_one` refuses
-a REPEAT_ONE with a fuzzy body, and outside a section the tail test is the never-fuzzy `FUZZY` node;
-639 REPEAT_ONE nodes in the corpus, none with a fuzzy test. And S35's `_fix_full_casefold`
-divergence is **reachable by a wave for the first time**: two expanding folds in one literal run
-(`(?fi)ßaß` against `'ssass'`) diverge, the manifest has no entry, and the `fuzzy`
-generator draws at most one expanding fold per section to stay off it. **Phase 6 decides whether
-`ExpectedDivergences` gets an entry.**
+**Two upstream asymmetries S40 ported as written, so nobody "fixes" them:** `fuzzy_ext_match` has
+no `SET_*_REV`/`SET_*_IGN_REV` arm and `fuzzy_ext_match_group_fld` has no `SET_*_IGN` arm, so those
+tests constrain nothing; `.` is a no-op everywhere. Measured, and pinned by
+`Gaps/Engine/FuzzyTestConstraintTests.cs`.
 
-**Blockers:** none.
+**A control can read zero because no *test* discriminates, not because the path is cold** - S40's
+control E, third failure mode after S38's and S39's. See its closing notes before trusting a zero.
 
-**Where the port stands:** ratchet GREEN, 5806 tests, 5632 passing, parity **91.1%**, 29 areas at
-100%. 174 skipped, all fuzzy.
+**Blockers:** none. S40's own scope is complete and green.
+
+**Where the port stands:** ratchet GREEN, 5821 tests, 5766 passing, parity **97.2%**, 30 areas at
+100%. 55 skipped, all `(?e)`/`(?b)`.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Rows per generator is **`-Count`**;
-`-Rows` is a path to a JSONL file. Controls: `python tools/run-controls.py --slices S39 --seeds 3`.
-**Delete `.scratch/control-waves/<generator>-<count>-<seed>.jsonl` after widening a generator** - the
-cache key does not know it changed, and S39's first control run measured S38's wave and read zero
-six times. Upstream 2026.9.10 for probes is in `.venvs/regex-2026.9.10` (git-ignored); the oracle
-runs the PATH python, regex 2026.7.19.
+`-Rows` is a path to a JSONL file and still re-records - use `-SkipRecord` to consume one.
+**Delete `.scratch/control-waves/<generator>-<count>-<seed>.jsonl` after widening a generator.**
+Controls: `python tools/run-controls.py --slices S40 --seeds 3`.
 
-**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`, nine entries): nothing
-filed until everything else in the plan is done. Entry 7 is on Phase 6's fix list.
+**Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`): nothing filed until
+everything else in the plan is done. Entry 7 and S40a's `(*SKIP)` hang are on Phase 6's list.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
 `origin/main` trails local and needs a push.

@@ -29,9 +29,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?r)(?:a){e<=1:[a-z]}", "ae", true)]
     [Arguments(@"(?:a){e<=1:[a-z]}", "a-", false)]
     [Arguments(@"(?r)(?:a){e<=1:[a-z]}", "a-", false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#1-8")]
     public void Fuzzy_literal_a_constrained_to_a_through_z_matches_only_when_the_edit_character_is_in_range(
         string pattern,
@@ -44,9 +41,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?r)(?:ab){e<=1:[a-z]}", "ae", true)]
     [Arguments(@"(?:ab){e<=1:[a-z]}", "a-", false)]
     [Arguments(@"(?r)(?:ab){e<=1:[a-z]}", "a-", false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#9-12")]
     public void Fuzzy_literal_ab_constrained_to_a_through_z_matches_only_when_the_edit_character_is_in_range(
         string pattern,
@@ -59,9 +53,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?r)\1{e<=1:[a-z]}(a)", "ea", true)]
     [Arguments(@"(a)\1{e<=1:[a-z]}", "a-", false)]
     [Arguments(@"(?r)\1{e<=1:[a-z]}(a)", "-a", false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#13-16")]
     public void Fuzzy_backreference_constrained_to_a_through_z_matches_only_when_the_edit_character_is_in_range(
         string pattern,
@@ -78,9 +69,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?fiu)(?:\N{LATIN SMALL LETTER SHARP S}){e<=1:[a-z]}", "s-", false)]
     [Arguments(@"(?firu)(?:\N{LATIN SMALL LETTER SHARP S}){e<=1:[a-z]}", "s-", false)]
     [Arguments(@"(?firu)(?:\N{LATIN SMALL LETTER SHARP S}){e<=1:[a-z]}", "-s", false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#17-24")]
     public void Fuzzy_sharp_s_literal_case_folds_to_ss_and_matches_only_within_the_a_through_z_constraint(
         string pattern,
@@ -97,9 +85,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?fiu)(\N{LATIN SMALL LETTER SHARP S})\1{e<=1:[a-z]}", "sss-", false)]
     [Arguments(@"(?firu)(\N{LATIN SMALL LETTER SHARP S})\1{e<=1:[a-z]}", "-s", false)]
     [Arguments(@"(?firu)(\N{LATIN SMALL LETTER SHARP S})\1{e<=1:[a-z]}", "s-", false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#25-32")]
     public void Fuzzy_backreference_to_a_captured_sharp_s_matches_only_within_the_a_through_z_constraint(
         string pattern,
@@ -116,9 +101,6 @@ public sealed class FuzzyExtendedSyntaxTests
     [Arguments(@"(?fiu)(ss)\1{e<=1:[a-z]}", _sharpS + "s-", false)]
     [Arguments(@"(?firu)(ss)\1{e<=1:[a-z]}", "s-" + _sharpS, false)]
     [Arguments(@"(?firu)(ss)\1{e<=1:[a-z]}", "-s" + _sharpS, false)]
-    [Skip(
-        "needs:fuzzy-matching - the parser reads fuzzy constraints since S13; the engine has no FUZZY/FUZZY_EXT opcode yet"
-    )]
     [Property("Upstream", "RegexTests.test_fuzzy_ext#33-40")]
     public void Fuzzy_backreference_to_a_literal_ss_group_folds_a_subject_sharp_s_within_the_constraint(
         string pattern,

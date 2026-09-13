@@ -19,13 +19,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Fuzzy;
 public sealed class FuzzyBudgetTests
 {
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#7")]
     public void A_cost_equation_that_permits_no_errors_rejects_an_inexact_match() =>
         FuzzyRegex.Match(FuzzyTestData.Molasses, "(znacnda){s<=1,e<=3,1i+1d<1}").Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#8")]
     public void Loosening_the_cost_equation_by_one_admits_the_match()
     {
@@ -37,7 +35,6 @@ public sealed class FuzzyBudgetTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#9")]
     public void A_cost_equation_alone_can_rule_out_every_position() =>
         FuzzyRegex.Match(FuzzyTestData.Molasses, "(ananda){1i+1d<2}").Success.Should().BeFalse();
@@ -48,7 +45,6 @@ public sealed class FuzzyBudgetTests
     [Arguments("(fuu){i<=3,d<=3,e<=5}", 0, 0)]
     [Arguments("(fuu){i<=2,d<=2,e<=5}", 7, 10)]
     [Arguments("(fuu){i<=3,d<=3,e}", 0, 0)]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#12,14,16")]
     public void Per_kind_caps_choose_the_match_position(string pattern, int start, int end)
     {
@@ -61,7 +57,6 @@ public sealed class FuzzyBudgetTests
 
     // At most two inserts or substitutions, and at most two errors in total.
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#24")]
     public void A_total_cap_bounds_the_per_kind_caps()
     {
@@ -75,7 +70,6 @@ public sealed class FuzzyBudgetTests
     // At most one insert, two deletes and three substitutions, where a delete costs two and a
     // substitution one, and the total cost must come to less than four.
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#43")]
     public void A_weighted_cost_equation_prices_deletes_above_substitutions()
     {
@@ -92,7 +86,6 @@ public sealed class FuzzyBudgetTests
     [Arguments("service detect", 14)]
     [Arguments("service detecti", 15)]
     [Arguments("in service detection", 20)]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#68-70,72")]
     public void A_two_sided_constraint_matches_when_there_is_at_least_one_error(string subject, int end)
     {
@@ -103,7 +96,6 @@ public sealed class FuzzyBudgetTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-budget - the engine has no fuzzy cost accounting yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#71")]
     public void A_two_sided_constraint_rejects_an_exact_match() =>
         FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}").Success.Should().BeFalse();

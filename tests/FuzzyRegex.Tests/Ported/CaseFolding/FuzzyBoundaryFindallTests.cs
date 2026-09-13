@@ -13,7 +13,6 @@ public sealed class FuzzyBoundaryFindallTests
     private const string _pattern = @"\m(?:word){e<=3}\M(?<!\m(?:word){e<=1}\M)";
 
     [Test]
-    [Skip("needs:fuzzy-matching - the engine has no fuzzy quantifiers yet")]
     [Property("Upstream", "RegexTests.test_case_folding#32")]
     public void V0_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
         FuzzyRegex
@@ -23,7 +22,6 @@ public sealed class FuzzyBoundaryFindallTests
             .Equal("word234", "word23");
 
     [Test]
-    [Skip("needs:fuzzy-matching - the engine has no fuzzy quantifiers yet")]
     [Property("Upstream", "RegexTests.test_case_folding#33")]
     public void V1_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
         FuzzyRegex

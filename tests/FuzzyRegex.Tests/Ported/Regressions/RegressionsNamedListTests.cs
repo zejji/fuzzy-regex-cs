@@ -158,7 +158,6 @@ public sealed class RegressionsNamedListTests
     // Git issue 525: segfault when fuzzy matching empty list.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#446")]
-    [Skip("needs:fuzzy-matching - the named list matches since S13; the fuzzy section around it waits for Phase 5")]
     public void Fuzzy_matching_an_empty_named_list_matches_the_empty_string_without_crashing()
     {
         var regex = new FuzzyRegex(

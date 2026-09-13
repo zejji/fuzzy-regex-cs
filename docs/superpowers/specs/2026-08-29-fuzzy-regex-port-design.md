@@ -705,3 +705,48 @@ amended text is inline above; this list is the record of what changed and why.
     their own issue as ground truth and recorded as such. Measured at the decision: 21 commits and
     five releases behind, all substantive fixes already on the inherited-bug list. Estimate 7-12
     becomes 9-14. Decided by the project owner.
+
+18. **A `needs:` tag names the capability a test waits on, not the feature the test is about, and
+    Phase 5's fuzzy tags are re-attributed accordingly** (sections 7 and 8; S40, 2026-09-13). Phase
+    5 was authored on the assumption that the nine `fuzzy-*` tags split cleanly along the same line
+    as its slices, so S40 - the last of the three plain-matching slices - was written to deliver
+    seven tags outright and to leave only `fuzzy-bestmatch` and `fuzzy-enhancematch` behind. That
+    assumption was wrong, and the evidence is mechanical rather than a matter of judgement. With the
+    `{...:test}` constraint ported, 31 test cases carrying `fuzzy-matching`, `fuzzy-budget`,
+    `fuzzy-counts` and `fuzzy-changes` still failed, and **every one of the 31 failed at the engine's
+    own `ENHANCEMATCH` or `BESTMATCH` seam, not on an assertion**: their patterns carry `(?e)`,
+    `(?b)`, `(?be)` or `FuzzyRegexOptions.BestMatch`. A test whose pattern asks for BESTMATCH waits
+    on BESTMATCH whatever upstream's test method is named after, so its tag is `fuzzy-bestmatch`.
+
+    S40 therefore delivers `fuzzy-insertion`, `fuzzy-deletion` and `fuzzy-substitution` (S39's, and
+    already skip-free), the constraint itself, and every plain row of the other four tags; the 31
+    ranking-mode cases move to the two tags that describe them. Eight upstream methods that mixed
+    plain and ranking rows in one `[Arguments]` fan-out were split, per the fan-out convention in
+    the `port-tests` skill, so a plain row is not skipped to keep a `(?e)` sibling company. The
+    board's remaining 55 skips are then exactly S41's and S42's scope, which is the number those
+    slices need.
+
+    **The general rule this settles:** when a red test is analysed to a seam that names a different
+    capability, correcting the tag is the faithful record, not a dodge - the slice rule against
+    retagging is against retagging *instead of* analysing. Analysing first is what makes the
+    difference, and the analysis is the seam's own exception message. Phase 5's slice count is
+    unchanged: nothing moved between slices, only between tags.
+
+19. **Phase 5 gains S40a, because the 6000-row default wave found three defects and cannot finish**
+    (sections 8 and 12; S40, 2026-09-13). S40's slice file asked for the default oracle wave green
+    at 6000 rows a generator - 126,000 rows a seed, ten times anything run before, since S37's 6000
+    was `interactions` alone and S39's default wave was 600 a generator. It does not finish.
+    **Upstream never returns from `regex.search('.?x(?>a(*SKIP)z)', 'xzxa')`** - an optional leading
+    item, an atomic group and `(*SKIP)` inside it, all three needed - so the recorder, which has no
+    per-row timeout, stops dead. At seed 7, where the wave does complete, four rows diverge in
+    `partial`, `partial-sliced` and `verbs`; **all four were proven to be HEAD's** by consuming the
+    identical saved wave with HEAD's engine in a worktree. A fourth defect came from S40's blind
+    review: a fuzzy section inside a lookbehind reports `FuzzyChanges` that contradict its own
+    `FuzzyCounts`, and plain `(?r)` does not, so it is not the reversal itself.
+
+    None is S40's doing and S40 fixed none of them, which is the S33/S34/S35 pattern named in
+    amendment 15's discussion and predicted by the ROADMAP's Phase 5 note: verification getting
+    stricter adds slices, and each addition finds a real defect. Amendment 16 is why they cannot
+    just be logged. S40a takes all four plus the recorder timeout that `regex`'s own `timeout=`
+    keyword makes small, and its exit gate is the 6000-row wave S40 could not run. Phase 5 becomes
+    8 slices, S37-S43 plus S40a.

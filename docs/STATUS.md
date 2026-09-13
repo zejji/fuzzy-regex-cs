@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 91.1%** (1792 of 1966 ported upstream tests passing).
+**Overall parity: 97.2%** (1911 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -21,14 +21,14 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Boundaries | 41 | 41 | 0 | 0 | 100.0% |
 | BranchReset | 21 | 21 | 0 | 0 | 100.0% |
 | Captures | 8 | 8 | 0 | 0 | 100.0% |
-| CaseFolding | 69 | 67 | 2 | 0 | 97.1% |
+| CaseFolding | 69 | 69 | 0 | 0 | 100.0% |
 | CharacterClasses | 52 | 52 | 0 | 0 | 100.0% |
 | Escapes | 103 | 103 | 0 | 0 | 100.0% |
 | FindAll | 27 | 27 | 0 | 0 | 100.0% |
 | Flags | 20 | 20 | 0 | 0 | 100.0% |
 | Format | 11 | 11 | 0 | 0 | 100.0% |
 | FullMatch | 12 | 12 | 0 | 0 | 100.0% |
-| Fuzzy | 112 | 16 | 96 | 0 | 14.3% |
+| Fuzzy | 112 | 99 | 13 | 0 | 88.4% |
 | Grapheme | 5 | 5 | 0 | 0 | 100.0% |
 | Groups | 65 | 65 | 0 | 0 | 100.0% |
 | Lookaround | 38 | 38 | 0 | 0 | 100.0% |
@@ -38,7 +38,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Possessive | 16 | 16 | 0 | 0 | 100.0% |
 | Quantifiers | 53 | 53 | 0 | 0 | 100.0% |
 | Recursion | 32 | 32 | 0 | 0 | 100.0% |
-| Regressions | 464 | 388 | 76 | 0 | 83.6% |
+| Regressions | 464 | 422 | 42 | 0 | 90.9% |
 | Reverse | 37 | 37 | 0 | 0 | 100.0% |
 | Splitting | 24 | 24 | 0 | 0 | 100.0% |
 | Substitution | 88 | 88 | 0 | 0 | 100.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3819 | 3819 | 0 | 0 |
+| Gaps | 3834 | 3834 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -61,10 +61,6 @@ What the next slice should deliver, biggest win first.
 
 | Capability | Tests it would enable |
 |---|---:|
-| `fuzzy-matching` | 97 |
-| `fuzzy-counts` | 28 |
-| `fuzzy-bestmatch` | 18 |
-| `fuzzy-budget` | 17 |
-| `fuzzy-changes` | 8 |
-| `fuzzy-enhancematch` | 6 |
+| `fuzzy-enhancematch` | 30 |
+| `fuzzy-bestmatch` | 25 |
 
