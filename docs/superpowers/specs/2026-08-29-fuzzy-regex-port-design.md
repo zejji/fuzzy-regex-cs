@@ -779,3 +779,21 @@ amended text is inline above; this list is the record of what changed and why.
     (two rows, and the gate itself). All three landed the same day. Phase 5 is eleven slices,
     S37-S43 plus S40a-S40d, every addition verification rather than feature, as the ROADMAP's
     Phase 5 note predicted.
+
+21. **Phase 5 closes at eleven slices against an estimate of 5-8, and the overrun is entirely the
+    oracle** (sections 8 and 12; S43, 2026-09-13). The seven authored slices delivered the whole of
+    the fuzzy feature set and landed as authored; the four additions - S40a, S40b, S40c, S40d - were
+    all a widened wave finding defects, and each found a real one. The ROADMAP's own Phase 5 budget
+    note called this before the phase began ("its 5-8 counts fuzzy features, and the oracle will add
+    slices to it"), so the estimate was wrong about scope rather than about the work: **an estimate
+    that counts features cannot bound a phase whose gate is a generator.** Phase 6 opens with the
+    upstream sync and the bug sweep and its own gate is oracle hardening, so read its 9-14 the same
+    way and expect the gate, not the features, to set the number.
+
+    The close itself made the point a fifth time. S43's exit gate asks for the default wave at three
+    seeds AND `fuzzy`/`interactions` at a fourth seed the phase had never used; the first three went
+    green after the seven judged rows were classified, and the fourth immediately produced three more
+    unjudged divergences - one of them the cleanest reproduction ledger entry 8 has ever had, which
+    overturned that entry's own written claim that no minimal form existed. **A seed the phase has
+    not used is worth more than more rows at a seed it has**, which is VERIFICATION rule 7a one level
+    up, and Phase 6's hardening slices should be scoped on that basis.

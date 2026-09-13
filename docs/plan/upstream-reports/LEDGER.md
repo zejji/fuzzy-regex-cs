@@ -463,6 +463,43 @@ The walk is a legitimate question for THIS pattern because it holds no `$`, `\Z`
 and classified by `ExpectedDivergences.overlapped-skip-missing-match-reversed`. Re-runnable:
 `python tools/probes/upstream-reversed-skip-scan-shapes.py`.
 
+**A FIFTH DOOR, added by S43 on 2026-09-13, and it is not a scanner at all - it is a single
+`search`.** Every symptom above carries the stale slice from one match of a scan into the next.
+This one carries it between the TWO PASSES of one match attempt. A `partial` request runs a
+non-partial pass and then, only if that fails, a partial one from the same `text_pos` (`do_match`,
+`:18160`); upstream restores `text_pos` and nothing else, so a bound the verb moved in the first
+pass is still moved in the second. That makes the report's scope wider than "overlapped scans" and
+is worth stating, because the proposed fix above - resetting the slice in `init_match`, or saving
+and restoring it around `do_match` - is what closes this door too.
+
+Found by the seed-99991 `fuzzy,interactions` wave, row 6897, and minimised to the one cut that held:
+
+```python
+>>> p = r'\b(?:(?:\ _(\W)){e<=1}(*SKIP)[A-Z]|[^a])(?:.?(?:(\w+?)){i<=1:.}){e<=2,s<=1:[^a-z]}\W'
+>>> m = regex.compile(p, regex.M).search('\U0001f600ß_ ', partial=True)
+>>> m.span(), m.fuzzy_counts, m.span(1)
+((1, 4), (0, 1, 0), (-1, -1))                      # an insertion, group 1 never reached
+>>> q = p.replace('(*SKIP)', '(*PRUNE)', 1)        # same pruning, NO bound moved
+>>> m = regex.compile(q, regex.M).search('\U0001f600ß_ ', partial=True)
+>>> m.span(), m.fuzzy_counts, m.span(1)
+((1, 4), (1, 0, 0), (3, 4))                        # a substitution, and the capture
+```
+
+**The two engines agree on the SPAN here**, which is what makes this symptom different from the four
+above and why it needs saying separately: forwards the moved bound is `slice_start` rather than
+`slice_end`, and what it costs is which ALTERNATIVE the second pass can still enter - so the
+difference surfaces as the error spent and the group captured, not as a span or a missing match.
+Deleting the verb gives the `(*PRUNE)` answer too, and asking the same three patterns WITHOUT
+`partial` gives `None` on all of them, which is the cleanest statement that the second pass is where
+this lives. The pattern carries a second verb, a `(*PRUNE)`, and deleting it changes nothing - a
+control this family has not had before.
+
+**Verified 2026-09-13** against `regex` 2026.7.19; pinned by
+`PartialMatchingTests.A_forward_skip_does_not_move_the_slice_start_the_partial_pass_searches` and
+classified by `ExpectedDivergences.partial-retry-carried-slice-forward`. The reversed twin of this
+same door is `ExpectedDivergences.partial-retry-reversed-slice`, found by S40b. Re-runnable:
+`python tools/probes/upstream-skip-carried-slice-forward.py`.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern
@@ -586,7 +623,7 @@ as divergences until they do.
 ## 8. A group call inside a lookaround that runs the other way loses the match, even on a path that never enters the call
 
 **Title:** A `(?&name)` call inside a lookaround of the opposite direction makes the whole pattern
-fail, where deleting the optional piece that holds it succeeds
+fail, where the same lookaround written out succeeds
 
 **Body:**
 
@@ -594,6 +631,63 @@ fail, where deleting the optional piece that holds it succeeds
 >>> import regex
 >>> regex.__version__
 '2026.7.19'
+>>> regex.search(r'(?P<g1>\w)(?<=(?&g1))\W', 'aa ')
+None
+>>> regex.search(r'(?P<g1>\w)(?<=\w)\W', 'aa ')
+<regex.Match object; span=(1, 3), match='a '>
+```
+
+Three items and a three-character subject, and the only difference between the two patterns is
+whether the lookbehind names the group or spells out the class that group contains. The second is
+what upstream should answer to both.
+
+**The isolation is complete** (`python tools/probes/upstream-group-call-loses-matches.py`, all over
+`'aaaa '` unless stated):
+
+| variant | upstream |
+|---|---|
+| `(?P<g1>\w)(?<=(?&g1))\W` | None |
+| `(?P<g1>\w)(?<=(?P>g1))\W` - the other call syntax | None |
+| `(?<=(?&g1))\W(?P<g1>\w)` - the call before the group | None |
+| `(?P<g1>\w)(?<=\w)\W` - the class written out | (3, 5) |
+| `(?P<g1>\w)(?<=[a-z])\W` - a different class that also matches | (3, 5) |
+| `(?P<g1>\w)(?=\W)\W` - a lookAHEAD, so the directions agree | (3, 5) |
+| `(?P<g1>\w)(?=(?&g1))\w` - a lookahead that CALLS, directions agreeing | (0, 2) |
+| `(?P<g1>\w)(?&g1)\W` - the call where it CONSUMES, no lookaround, **over `'aaa '`** | (1, 4) |
+
+So it is neither "a call" nor "a lookbehind" on its own: a call that consumes is fine, a lookbehind
+that does not call is fine, and a call inside a lookaround running the SAME way as the pattern is
+fine. It is a call inside a lookaround of the OPPOSITE direction, which is this entry's title.
+
+It is not a subject-length threshold either. Upstream answers None at every length tried while the
+inline copy matches at every one:
+
+| subject | `'a '` | `'aa '` | `'aaa '` | `'aaaa '` | `'aaaaa '` | `'aaaaaa '` | `'aaaaaaa '` |
+|---|---|---|---|---|---|---|---|
+| the call | None | None | None | None | None | None | None |
+| written out | (0, 2) | (1, 3) | (2, 4) | (3, 5) | (4, 6) | (5, 7) | (6, 8) |
+| **this port, the call** | **None** | (1, 3) | (2, 4) | (3, 5) | (4, 6) | (5, 7) | (6, 8) |
+
+**THE SUBJECT MUST BE THREE CHARACTERS, AND THE REASON IS A SECOND DEFECT SITTING ON TOP OF THIS
+ONE** - which is why the reproduction above uses `'aa '` and not the shorter `'a '`. At two
+characters this port answers None as well, and NOT because it shares this bug: a call counts towards
+`min_width` at the width of the group it calls even inside a zero-width lookaround, so `min_width`
+here is 3, and `do_exact_match`'s width early-out refuses a two-character subject before matching
+starts. That inflation is upstream's, this port reproduces it deliberately (S40c, and
+`GroupCallTests.A_group_call_counts_towards_min_width_even_inside_a_zero_width_lookaround`), and it
+MASKS this entry's defect at exactly one subject length. One more character separates them.
+
+A report should carry `'aa '` for that reason, and a reader who tries `'a '` and sees agreement has
+met the other defect rather than refuted this one.
+
+**It is not fixed by #614.** The minimal form and both call syntaxes answer identically on
+2026.9.10, the newest release, measured 2026-09-13.
+
+**How it shows in the wild**, and the shapes a wave draws it in - these were the whole of the
+reproduction until S43 minimised it, and they are kept because they are what the oracle actually
+meets:
+
+```python
 >>> pat = r'\b(?(?![\w\s])[[:digit:]])(\w)(?P<g2>[^\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*'
 >>> flags = regex.I | regex.M | regex.V1 | regex.F
 >>> [m.span() for m in regex.finditer(pat, 'İİ\nİİﬁﬁ ', flags, overlapped=True)]
@@ -644,23 +738,38 @@ S30 minimised by hand:
 >>> regex.compile(r'(?(DEFINE)(?<a>a))(?<=(?&a))c').match('ac', pos=1)   # None, on 2026.9.10 too
 ```
 
-**What this port answers.** The match, in every case - the one the shorter pattern finds. Pinned by
+**What this port answers.** The match - the one the shorter pattern finds - in every case except the
+two-character subject named above, where the unrelated `min_width` inflation refuses it on both
+engines. Pinned by
 `GroupCallTests.A_group_called_from_a_lookbehind_with_anything_after_it_matches_here_and_not_upstream`
-and `.A_zero_width_piece_holding_a_group_call_cannot_remove_a_match_here`, and classified in the
-oracle as `group-call-loses-the-match`.
+and `.A_zero_width_piece_holding_a_group_call_cannot_remove_a_match_here`, which asserts the mask as
+well as the divergence, and classified in the oracle as `group-call-loses-the-match`.
 
-**What is NOT established, and the report must say so.** Shrinking these rows while keeping upstream
-self-contradictory produces patterns on which *this port answers what upstream answers* -
-`(?P<g1>a)((?<!(?&g1)))*` over `'a'`, `(?r)(?P<g1>[A])((?(?=(?&g1))S))` over `'A'`. So "a call
-through an opposite-direction lookaround" is not on its own sufficient for the divergence, and what
-else the longer shapes supply is unknown. The reproduction above stands on its own - it needs no
-second engine, only upstream's answer to a pattern and to the same pattern with a zero-width-capable
-piece removed - but a report that claimed the minimal form would be wrong.
+**THE MINIMAL FORM IS ESTABLISHED, AND THIS PARAGRAPH USED TO SAY IT WAS NOT.** Until S43
+(2026-09-13) every known row of this family was wave-sized and resisted shrinking: the cuts that kept
+upstream self-contradictory produced patterns on which *this port answers what upstream answers* -
+`(?P<g1>a)((?<!(?&g1)))*` over `'a'`, `(?r)(?P<g1>[A])((?(?=(?&g1))S))` over `'A'` - so the entry
+recorded "a call through an opposite-direction lookaround is not on its own sufficient" and told a
+report not to claim a minimal form. **That reading was wrong, and it was wrong because every attempt
+had shrunk a row along the wrong axis.** Those rows all hold the call inside a *conditional* inside a
+*repeat*, and the cuts removed the repeat or the conditional - the pieces that made the surrounding
+match possible - rather than the call's own setting. Seed 99991's row 10201 arrived with the call in
+a bare lookbehind instead, and cutting *that* one went all the way down without ever losing the
+divergence: `(?P<g1>\w)(?<=(?&g1))\W`, three items.
 
-**Proposed fix.** Unknown, beyond "the same area as #614". Establishing it needs the minimal form,
-which is open work.
+**What is genuinely still open** is narrower, and one part of it was answered by being got wrong
+first. A draft of this paragraph claimed the minimal form diverged on `'a '`; it does not - both
+engines answer None there - and the pinned test failed on exactly that, which is how the
+`min_width` mask above was found rather than assumed. The remaining open question is why the OTHER
+earlier minimisations agreed: `(?P<g1>a)((?<!(?&g1)))*` is a NEGATIVE lookbehind whose body is the
+group, and this family's minimal form is a positive one; whether the negative form is a second,
+unaffected path, or the same defect masked the way `'a '` masks it, is not measured here.
 
-**Related:** #614 (fixed, and does not cover this).
+**Proposed fix.** Still not established, beyond "the same area as #614" - but the minimal form is now
+small enough to step through, which is what that needs, and a report can carry it.
+
+**Related:** #614 (fixed, and does not cover this); entry 5, whose own minimal form arrived the same
+way, from a later seed rather than from more cutting of an early row.
 
 # Added by S38, 2026-09-13
 
@@ -1007,16 +1116,34 @@ The same compiled pattern answers nothing from `search` and a partial from its o
 at a position inside the searched region. **The judgement needs no second engine**, and it rests on
 two arguments of different strength that a report must keep apart:
 
-* **The strong form, on this minimised shape and on two of the five wave rows** (76681 and 76593): a
-  search that finds nothing where its own `match` finds something is wrong however the ranking rule
-  is defined. On the other three wave rows - 74938, 77937 and 76251 - upstream with `(?b)` on finds
-  nothing from any door at any position, so this form does not apply to them. A first draft of this
-  entry claimed it for all five and a blind review disproved that; the correction is kept here
-  because the overclaim is exactly what would get a report dismissed.
+* **The strong form, on this minimised shape and on FOUR of the five wave rows**: a search that
+  finds nothing where its own anchored `match` finds something is wrong however the ranking rule is
+  defined. 76681 and 76593 answer by `pos`; 74938 and 77937 are `(?r)` and answer by `endpos`, which
+  is where a reversed pattern anchors - 74938 at endpos 1, 77937 at endpos 2, 4 and 5.
+
+  **This entry has stated that scope wrongly three times, and the sequence is worth keeping**: the
+  first draft claimed all five with no evidence; a blind review cut it to two; a second review found
+  that cut was an artefact of sweeping `pos` alone, because a reversed row has no `pos` answer to
+  find; and a third draft then over-corrected back to all five. The measurement is four. A report
+  that overclaims here is a report that gets dismissed, which is why the count is now carried beside
+  every statement of the argument rather than summarised once.
+
+  **The caveat that makes it four, and the report must carry it**: truncating a FORWARD pattern's
+  subject with `endpos` changes what a trailing `$`, `\Z` or lookahead means, so an endpos hit is a
+  contradiction only for a pattern that reads nothing at the end. Row 76251 is forward and its only
+  anchored answer is the degenerate empty slice at endpos 0, which this caveat disqualifies, so that
+  row rests on the weak form alone.
 * **The weak form, on all five and on this shape**: deleting `(?b)` gives upstream a match it
   refused with the flag present. `BESTMATCH` is documented as choosing the *best* match rather than
   the first; it is not a filter that removes matches, so a flag that turns a match into no match is
   upstream contradicting its own documentation.
+
+  **On four of the five that flagless answer is this port's answer in FULL - groups, counts and all
+  - and on row 77937 only the SPAN agrees.** Upstream flagless spends no errors and captures nothing
+  there, where this port answers the same (0, 7) span with `fuzzy=(1,1,1)` and group 2 set. So 77937
+  rests on "upstream refused a match it finds without the flag" and NOT on "upstream's flagless
+  answer is ours". The probe compared spans alone while this entry claimed whole answers; it now
+  prints the groups and the counts, so the claim and the measurement are the same thing.
 
 Two of the five are not `search` rows at all - 74938 is a `match` and 76251 a `fullmatch` - so the
 defect is not confined to the search loop.
@@ -1059,8 +1186,9 @@ and its negative control
 6000-row run that drew fuzzy beside Phases 3 and 4. Five rows of that wave are this family - seed 7
 rows 74938 (`match`) and 77937 (`search`), seed 4242 rows 76251 (`fullmatch`) and 76681 (`search`),
 seed 20260913 row 76593 (`search`) - and all five carry `(?b)`, a fuzzy section, a `(*SKIP)` and
-`partial=True`, and all five are recorded `nomatch`. **They are not yet classified in
-`ExpectedDivergences`, so the wave is RED on them**; doing that is S43's remaining work.
+`partial=True`, and all five are recorded `nomatch`. All five are now classified in
+`ExpectedDivergences` as `bestmatch-loses-a-partial`, keyed on the row and on this port's answer to
+it, and the default wave is green at 6000 rows at all three seeds.
 
 **Related:** entry 12, the other `BESTMATCH` match-loss, which this port reproduces faithfully where
 it does not reproduce this one; entries 1 and 5 for `(*SKIP)`.

@@ -136,3 +136,74 @@ for field, ours in OURS_BY_FIELD.items():
     except Exception as e:  # noqa: BLE001 - the exception is the answer
         theirs = f'{type(e).__name__}: {e}'
     print(f'   {field:<10} {theirs:<44} {ours}')
+
+# S43 (2026-09-13), seed 99991 row 10201 of a 6000-row `fuzzy,interactions` wave, and the strongest
+# reproduction this family has. Every row above needs a wave-sized pattern and resisted minimisation;
+# this one cuts to two constructs over a subject of repeated 'a's, and then loses the match at EVERY
+# subject length rather than at one, with no partial asked for anywhere. The lookbehind consumes
+# nothing, so it cannot remove a match - this family's argument without a zero-width REPEAT in it.
+#
+# The wave drew the row with partial=True, where upstream degrades the complete match to a PARTIAL
+# and leaves the trailing group unset rather than losing it outright; the last block below shows
+# that door beside this one.
+CALLED_10201 = r'(?P<g1>[[:alpha:]])(?:(?(1)(?<=(?&g1))[^\p{L}]|[A-Z]))([^\d]*)'
+INLINED_10201 = r'(?P<g1>[[:alpha:]])(?:(?(1)(?<=[[:alpha:]])[^\p{L}]|[A-Z]))([^\d]*)'
+
+
+def span_of(pattern, subject, **kwargs):
+    m = regex.compile(pattern).search(subject, timeout=10.0, **kwargs)
+    if m is None:
+        return 'None'
+    return f'{m.span()}{"P" if m.partial else ""}'
+
+
+print('\n== seed 99991 row 10201 - the call loses the match at every subject length')
+print(f'   {"subject":<12} {"upstream":<10} {"inlined":<10} call written out as the class it calls')
+for n in range(1, 7):
+    subject = 'a' * n + ' '
+    called = span_of(CALLED_10201, subject)
+    inlined = span_of(INLINED_10201, subject)
+    lost = '   <-- lost' if called == 'None' and inlined != 'None' else ''
+    print(f'   {subject!r:<12} {called:<10} {inlined:<10}{lost}')
+
+print('\n   the same row asked with partial=True, which is how the wave drew it')
+for n in (1, 4, 6):
+    subject = 'a' * n + ' '
+    partial = span_of(CALLED_10201, subject, partial=True)
+    print(f'   {subject!r:<12} {partial:<10} {span_of(INLINED_10201, subject):<10} degraded to a partial, group 2 unset')
+
+# ...and cutting row 10201 went all the way down, which no earlier row of this family did. THREE
+# ITEMS: a named group, a lookbehind that CALLS it, and one more item. The entry's "the minimal form
+# is not established" paragraph was written before this and is corrected there. Every earlier attempt
+# shrank a row that held the call inside a CONDITIONAL inside a REPEAT, and cut away the repeat or
+# the conditional - the pieces the surrounding match needed - rather than the call's own setting.
+MINIMAL = r'(?P<g1>\w)(?<=(?&g1))\W'
+
+print('\n== the minimal form, and the isolation - all over "aaaa " unless the row says otherwise')
+print(f'   {"upstream":<10} variant')
+for pattern, why in (
+    (MINIMAL, 'the call'),
+    (r'(?P<g1>\w)(?<=(?P>g1))\W', 'the other call syntax'),
+    (r'(?<=(?&g1))\W(?P<g1>\w)', 'the call BEFORE the group it calls'),
+    (r'(?P<g1>\w)(?<=\w)\W', 'the class written out - the answer upstream owes both'),
+    (r'(?P<g1>\w)(?<=[a-z])\W', 'a different class that also matches'),
+    (r'(?P<g1>\w)(?=\W)\W', 'a lookAHEAD instead, so the directions agree'),
+    (r'(?P<g1>\w)(?=(?&g1))\w', 'a lookahead that CALLS, directions agreeing'),
+):
+    print(f'   {span_of(pattern, "aaaa "):<10} {why}')
+print(f'   {span_of(r"(?P<g1>\w)(?&g1)\W", "aaa "):<10} the call where it CONSUMES, no lookaround   (over "aaa ")')
+
+print('\n   and it is no subject-length threshold - the call loses it at every length')
+print('   THE REPRODUCTION MUST USE THREE CHARACTERS, NOT TWO. At two this port answers None as')
+print('   well, and not because it shares this bug: a call counts towards min_width at the width')
+print('   of the group it calls even inside a zero-width lookaround, so min_width is 3 here and')
+print("   do_exact_match's width early-out refuses a two-character subject before matching starts.")
+print('   That inflation is upstream\'s, this port reproduces it deliberately (S40c), and it MASKS')
+print('   this entry at exactly one length. One more character separates the two.')
+print(f'   {"subject":<12} {"call":<10} {"written out":<12} this port, the call')
+OURS_BY_SUBJECT = {1: 'None', 2: '(1, 3)', 3: '(2, 4)', 4: '(3, 5)', 5: '(4, 6)', 6: '(5, 7)', 7: '(6, 8)'}
+for n in range(1, 8):
+    subject = 'a' * n + ' '
+    inline = span_of(r'(?P<g1>\w)(?<=\w)\W', subject)
+    masked = '   <-- masked, see above' if n == 1 else ''
+    print(f'   {subject!r:<12} {span_of(MINIMAL, subject):<10} {inline:<12} {OURS_BY_SUBJECT[n]}{masked}')

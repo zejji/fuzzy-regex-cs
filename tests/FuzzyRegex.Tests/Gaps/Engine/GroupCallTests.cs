@@ -313,6 +313,85 @@ public sealed class GroupCallTests
         // is (6, 2) here and the match it loses is the first astral character at (0, 2).
         // Upstream finds only the first of these.
         called.Select(static m => (m.Index, m.Length)).Should().Equal((6, 2), (0, 2));
+
+        // S43's row, row 10201 of a 6000-row seed-99991 `fuzzy,interactions` wave, and the STRONGEST
+        // reproduction this family has. Every row above needs a wave-sized pattern to show the
+        // defect and resists minimisation; this one minimises to two constructs and a subject of
+        // repeated 'a's, and then loses the match at EVERY subject length rather than at one.
+        // Measured 2026-09-13 on regex 2026.7.19, plain `search` with no partial asked for anywhere
+        // (tools/probes/upstream-group-call-loses-matches.py):
+        //
+        //   pat = r'(?P<g1>[[:alpha:]])(?:(?(1)(?<=(?&g1))[^\p{L}]|[A-Z]))([^\d]*)'
+        //   subject      'a '     'aa '    'aaa '   'aaaa '  'aaaaa ' 'aaaaaa '
+        //   upstream     None     None     None     None     None     None
+        //   inlined      (0, 2)   (1, 3)   (2, 4)   (3, 5)   (4, 6)   (5, 7)
+        //
+        // "inlined" is the same pattern with '(?&g1)' written out as the class it calls, which is
+        // semantically the same lookbehind. Six lengths, six lost matches, no exceptions. The
+        // lookbehind consumes nothing, so it cannot remove a match - this family's own argument, in
+        // its cleanest form and without a zero-width REPEAT to reason about.
+        //
+        // The WAVE drew the row with partial=True, where upstream degrades the complete match to a
+        // partial and leaves the trailing group unset instead of losing it outright. That shape is
+        // keyed individually in `ExpectedDivergences`; the non-partial form above is classified by
+        // the entry's own predicate, unaided, which is an independent check on this judgement.
+        MatchCollection plain = new FuzzyRegex(
+            @"(?P<g1>[[:alpha:]])(?:(?(1)(?<=(?&g1))[^\p{L}]|[A-Z]))([^\d]*)"
+        ).Matches("aaaa ");
+
+        plain.Select(static m => (m.Index, m.Length)).Should().Equal((3, 2));
+
+        // The trailing group captures empty at the end of the subject, which upstream's inline copy
+        // also reports and its call copy never reaches.
+        (plain[0].Groups[2].Success, plain[0].Groups[2].Index, plain[0].Groups[2].Length)
+            .Should()
+            .Be((true, 5, 0));
+
+        // AND CUTTING THAT ROW WENT ALL THE WAY DOWN, which no earlier row of this family did. Three
+        // items - a named group, a lookbehind that CALLS it, and one more item - and upstream still
+        // loses the match at every subject length from 'a ' to 'aaaaaaa '. The ledger entry's "the
+        // minimal form is not established" paragraph was written before this row existed and is
+        // corrected there: every earlier attempt shrank a row holding the call inside a CONDITIONAL
+        // inside a REPEAT, and cut away the repeat or the conditional - the pieces the surrounding
+        // match needed - rather than the call's own setting.
+        //
+        //   regex.search(r'(?P<g1>\w)(?<=(?&g1))\W', 'aa ')   ->  None
+        //   regex.search(r'(?P<g1>\w)(?<=\w)\W',     'aa ')   ->  (1, 3)     <- this port, both
+        //
+        // Measured 2026-09-13 on regex 2026.7.19 AND on 2026.9.10, the newest release, so issue
+        // 614's fix does not reach the minimal form either.
+        //
+        // THE SUBJECT IS THREE CHARACTERS AND NOT TWO, because a SECOND defect sits on top of this
+        // one at exactly one length. On 'a ' this port also answers None - not because it shares
+        // this bug, but because a call counts towards `min_width` at the width of the group it calls
+        // even inside a zero-width lookaround, so `min_width` is 3 here and `do_exact_match`'s width
+        // early-out refuses a two-character subject before matching starts. That inflation is
+        // upstream's, this port reproduces it deliberately, and the test below this one pins it.
+        // One more character separates the two. This test was first written with 'a ' and failed,
+        // which is how the mask was found rather than assumed.
+        Match minimal = new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W").Match("aa ");
+
+        minimal.Success.Should().BeTrue("upstream answers None to this and (1, 3) with the call written out");
+        (minimal.Index, minimal.Length).Should().Be((1, 2));
+
+        // The mask itself, stated as an assertion rather than as prose: one character shorter and
+        // both engines answer nothing, for the unrelated reason above.
+        new FuzzyRegex(@"(?P<g1>\w)(?<=(?&g1))\W")
+            .Match("a ")
+            .Success.Should()
+            .BeFalse();
+
+        // The isolation, in the two directions that matter. A call inside a lookaround running the
+        // SAME way as the pattern is unaffected on both engines, which is what makes the title's
+        // "opposite direction" the precondition rather than "a call" or "a lookaround". The subject
+        // is 'aaaa ' here because the lookahead has to have something to look at.
+        Match sameDirection = new FuzzyRegex(@"(?P<g1>\w)(?=(?&g1))\w").Match("aaaa ");
+        sameDirection.Success.Should().BeTrue();
+        (sameDirection.Index, sameDirection.Length).Should().Be((0, 2));
+
+        // And a call where it CONSUMES, with no lookaround at all: both engines agree.
+        Match consuming = new FuzzyRegex(@"(?P<g1>\w)(?&g1)\W").Match("aaa ");
+        (consuming.Index, consuming.Length).Should().Be((1, 3));
     }
 
     // NOT TESTED, deliberately: left recursion. '(?R)?b' against 'b' and '(?<x>(?&x)?a)' against

@@ -712,4 +712,73 @@ public sealed class PartialMatchingTests
         pruned.PartialMatch.Should().BeTrue();
         (pruned.Index, pruned.Length).Should().Be((0, 1));
     }
+
+    [Test]
+    public void A_forward_skip_does_not_move_the_slice_start_the_partial_pass_searches()
+    {
+        // The LEFT-TO-RIGHT half of the test above, found by S43's seed-99991 `fuzzy,interactions`
+        // wave (row 6897 of `tools/run-oracle.ps1 -Count 6000 -Generator fuzzy,interactions
+        // -Seeds 99991`). Same two passes, same unrestored bound, different cost - which is why the
+        // two have separate `ExpectedDivergences` entries rather than one, the way
+        // `overlapped-skip-stale-slice` and its `-reversed` twin already do.
+        //
+        // Forwards the verb moves `slice_start` rather than `slice_end` (`:14551`). That does not
+        // hide an anchor here: BOTH engines answer a partial at the same span, codepoints (1, 4).
+        // What the moved bound costs is which ALTERNATIVE the partial pass can still enter, and so
+        // which error is spent and which group captures. Measured on regex 2026.7.19, 2026-09-13,
+        // tools/probes/upstream-skip-carried-slice-forward.py:
+        //
+        //   as the wave drew it       (1,4) partial, insertion at 3, no captures   <- upstream
+        //   first verb -> (*PRUNE)    (1,4) partial, substitution at 1, (3,4)      <- this port
+        //   first verb deleted        (1,4) partial, substitution at 1, (3,4)      <- this port
+        //   no partial asked for      None on all three                            <- both engines
+        //
+        // `(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so the bound
+        // move is the cause and not the pattern's meaning. The last line is the other half of that:
+        // with no partial there is no second pass to carry a bound into, and the divergence is gone.
+        //
+        // The pattern here is the wave's row with its trailing alternation cut to `\W`, which is the
+        // one cut that held - every further shrink tried changed both engines' answers together and
+        // lost the divergence, so this is as small as it minimises. The cut also removed the row's
+        // SECOND verb, a `(*PRUNE)`, and the answers did not move: the divergence is the first
+        // verb's, not "a verb somewhere in the pattern".
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // `partial-retry-carried-slice-forward` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs. Spans below are UTF-16, because the
+        // subject opens with an astral character; the probe's are codepoints.
+        const string pattern = @"\b(?:(?:\ _(\W)){e<=1}(*SKIP)[A-Z]|[^a])(?:.?(?:(\w+?)){i<=1:.}){e<=2,s<=1:[^a-z]}\W";
+        const string subject = "\U0001F600ß_ ";
+
+        Match skipped = new FuzzyRegex(pattern, FuzzyRegexOptions.Multiline).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length).Should().Be((2, 3), "both engines agree on the span");
+        skipped
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(1, 0, 0), "upstream spends an insertion here, having lost the branch");
+        skipped.FuzzyChanges.Substitutions.Should().Equal(2);
+        (skipped.Groups[1].Index, skipped.Groups[1].Length)
+            .Should()
+            .Be((4, 1), "upstream leaves group 1 unset, never reaching the branch that fills it");
+
+        // The control, matching the probe's `(*PRUNE)` line: a verb that moves no bound leaves both
+        // engines saying what this port says with the `(*SKIP)`.
+        Match pruned = new FuzzyRegex(
+            pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal),
+            FuzzyRegexOptions.Multiline
+        ).Match(subject, partial: true);
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((2, 3));
+        pruned.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        (pruned.Groups[1].Index, pruned.Groups[1].Length).Should().Be((4, 1));
+
+        // And the other half: with no partial there is no second pass, so no bound is carried and
+        // both engines answer nothing.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Multiline)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+    }
 }

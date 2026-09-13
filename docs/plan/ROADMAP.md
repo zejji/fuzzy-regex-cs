@@ -216,6 +216,33 @@ One number the owner should revisit before Phase 3 runs unattended: `docs/plan/b
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
 binds after two and a half busy days. Changing it is an owner decision, not a slice's.
 
+**Phase 5's measured rate, recorded at its close (S43, 2026-09-13). Eleven slices, fourteen
+sessions: 1.27, the worst ratio since Phase 2's 1.35.** `docs/plan/slice-log.jsonl` has one `failed`
+entry (S40a's first attempt) and two `checkpoint` ones (S42 and S43) across S37-S43 - three sessions
+that did not close a slice, where Phase 4 had one and Phase 3 none. The ten completed slices before
+this one came to **702M tokens, a median of 69.9M**, spread from 17.9M (S40b, one engine fix) to
+127.7M (S42's second sitting, `BESTMATCH` ranking); the three non-closing sessions cost 83.0M, 80.6M
+and 78.3M, which is again about what a slice costs. So a Phase 5 slice was a third dearer than a
+Phase 4 one (median 50.9M) AND needed more attempts, and this time the two did not cancel: Phase 5
+is the most expensive phase so far by a clear margin.
+
+**Eleven slices against an estimate of 5-8, and the whole overrun is the oracle.** The seven
+authored slices - S37-S43 - delivered the entire fuzzy feature set and landed as authored. The four
+additions were S40a, S40b, S40c and S40d, every one of them a widened wave finding a defect, and
+every one of them finding a real one. **This file predicted it before the phase began** ("its 5-8
+counts fuzzy features, and the oracle will add slices to it"), so the estimate was wrong about what
+it was counting rather than about the work. Carry that into Phase 6, whose own gate is oracle
+hardening: an estimate that counts features cannot bound a phase whose gate is a generator, and 9-14
+should be read as the floor.
+
+**And read the seed count, not the row count, as the thing that finds defects.** S43's gate asks for
+the default wave at three seeds and `fuzzy`/`interactions` at a fourth the phase had never used. The
+three went green once the seven known rows were judged; the fourth produced three more divergences
+immediately, on a generator pair that had already been swept at 6000 rows three times. One of them
+gave ledger entry 8 a three-item reproduction and overturned that entry's own written claim that no
+minimal form existed. That is VERIFICATION rule 7a one level up, and it is the cheapest instrument
+this project has: a new seed costs about a minute.
+
 Fuzzy matching - the reason this port exists - is usable at the end of phase 5, about two thirds
 of the way through.
 

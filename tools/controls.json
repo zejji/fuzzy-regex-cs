@@ -1367,5 +1367,218 @@
       20260913,
       555
     ]
+  },
+  {
+    "id": "S41-A",
+    "name": "max-errors-not-tightened",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoEnhancedFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "            state.MaxErrors = state.TotalErrors;\n            if (state.MaxErrors < FuzzyValue.MaxErrorsLimit)\n            {\n                --state.MaxErrors;\n            }\n",
+    "after": "            state.MaxErrors = state.TotalErrors;\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S41-B",
+    "name": "slice-not-narrowed",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoEnhancedFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "            if (state.Reverse)\n            {\n                state.SliceStart = state.TextPos;\n                state.SliceEnd = state.MatchPos;\n            }\n            else\n            {\n                state.SliceStart = state.MatchPos;\n                state.SliceEnd = state.TextPos;\n            }\n\n",
+    "after": "",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S41-C",
+    "name": "best-groups-not-restored",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoEnhancedFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                RestoreGroups(state, bestGroups);\n",
+    "after": "",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S41-D",
+    "name": "ranking-reverted-to-error-count",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static bool IsBetterFuzzyMatch(long cost, long errors, long bestCost, long bestErrors) =>",
+    "anchorNth": 1,
+    "before": "        cost != bestCost ? cost < bestCost : errors < bestErrors;\n",
+    "after": "        cost >= 0 && bestCost >= 0 && errors < bestErrors;\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-1A",
+    "name": "best-list-not-cleared",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                    bestList.Clear();\n                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));\n\n                    bestChangesList.Clear();\n                    AddBestFuzzyChanges(state, bestChangesList);\n",
+    "after": "                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));\n\n                    AddBestFuzzyChanges(state, bestChangesList);\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      20260913
+    ]
+  },
+  {
+    "id": "S42-1B",
+    "name": "bound-not-lowered",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                    state.MaxErrors = fewestErrors - 1;\n",
+    "after": "                    state.MaxErrors = fewestErrors;\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      20260913
+    ]
+  },
+  {
+    "id": "S42-1C",
+    "name": "second-pass-steps-code-units",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                startPos = StepBy(state, startPos, 1, step);\n",
+    "after": "                startPos += step;\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      20260913
+    ]
+  },
+  {
+    "id": "S42-2A",
+    "name": "generator-suppression-off",
+    "file": "tools/record-oracle.py",
+    "anchor": "def _has_weighted_cost(pattern: str) -> bool:",
+    "anchorNth": 1,
+    "before": "    for match in _FUZZY_EQUATION.finditer(pattern):\n",
+    "after": "    return False\n\n    for match in _FUZZY_EQUATION.finditer(pattern):\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2B",
+    "name": "whole-match-cost-test-off",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "case Opcode.EndFuzzy: // End of fuzzy matching (:12448).",
+    "anchorNth": 1,
+    "before": "                    if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)\n",
+    "after": "                    if (state.TotalErrors > state.MaxErrors)\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2C",
+    "name": "rank-on-the-snapshot",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                if (rankByCost)\n                {\n                    // 'rankByCost' guarantees exactly one FUZZY section, so its node is the one that\n                    // prices every error in the match and 'SingleFuzzyNode' is it.\n                    runCost = TotalCost(state.FuzzyCounts, state.Pattern.SingleFuzzyNode!);\n                    runErrors = TotalErrors(state.FuzzyCounts);\n                }\n\n",
+    "after": "",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2D",
+    "name": "zero-cost-termination",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                if ((byCost ? runCost < lowestCost : runErrors < fewestErrors) || runErrors == 0)\n",
+    "after": "                if (byCost ? runCost < lowestCost : runErrors < fewestErrors)\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2E",
+    "name": "cost-bound-out-of-the-predicates",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static bool ThisErrorPermitted(MatchState state, int fuzzyType)",
+    "anchorNth": 1,
+    "before": "        return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase + fuzzyType]\n            && errorCount < values[FuzzyValue.MaxErr]\n            && errorCount < state.MaxErrors\n            && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost]\n            && cost + values[FuzzyValue.CostBase + fuzzyType] <= state.MaxCost;\n",
+    "after": "        return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase + fuzzyType]\n            && errorCount < values[FuzzyValue.MaxErr]\n            && errorCount < state.MaxErrors\n            && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost];\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2F",
+    "name": "cost-bound-out-of-any_error_permitted",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "private static bool AnyErrorPermitted(MatchState state)",
+    "anchorNth": 1,
+    "before": "        return cost <= values[FuzzyValue.MaxCost]\n            && TotalErrors(fuzzyCounts) < state.MaxErrors\n            && cost <= state.MaxCost;\n",
+    "after": "        return cost <= values[FuzzyValue.MaxCost]\n            && TotalErrors(fuzzyCounts) < state.MaxErrors;\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
+  },
+  {
+    "id": "S42-2G",
+    "name": "whole-match-cost-off-trailing-insertion-arm",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "case Opcode.EndFuzzy: // End of fuzzy matching (:15488).",
+    "anchorNth": 1,
+    "before": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors\n                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]\n                            <= state.MaxCost\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
+    "after": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
+    "generator": "fuzzy",
+    "count": 2000,
+    "seeds": [
+      7,
+      31
+    ]
   }
 ]

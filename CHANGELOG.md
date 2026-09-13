@@ -46,6 +46,26 @@ module needs to know where this port deliberately behaves differently.
   every phase close follows. Overall parity: **90.7%**, with 28 feature areas at 100%. What is left
   is Phase 5's, and it is the reason this port exists: fuzzy matching, `BESTMATCH` and
   `ENHANCEMATCH`.
+- Phase 5: **fuzzy matching - the reason this port exists.** `{e<=2}` and the whole constraint
+  grammar: per-error-kind budgets (`{i<=1,d<=2,s<=1}`), weighted cost equations
+  (`{2i+1d+1s<4}`), and the `{...:test}` form that restricts which characters an error may fall on.
+  Insertions, deletions and substitutions against single characters, literal strings,
+  backreferences and case-folded text, inside every repeat form and nested to any depth; the error
+  counts and the change positions a match reports; and the two ranking modes, `ENHANCEMATCH`
+  (`(?e)`) and `BESTMATCH` (`(?b)`). Overall parity: **100% of the ported suite, with nothing
+  skipped** - 5,869 tests, every `needs:` tag on the board delivered.
+
+  Two deliberate divergences, both the same owner decision and both recorded in the
+  intentional-divergence allowlist that 1.0's **Divergences from mrab-regex** section will be drawn
+  from: **`ENHANCEMATCH` and `BESTMATCH` rank by COST where upstream ranks by error count.** That is
+  upstream's open issue 470; with a unit cost equation the two rules agree, so the difference is
+  visible only where a pattern weights its error kinds differently. `BESTMATCH` needed more than a
+  tie-break to get there - an error-count budget cannot reach a cheaper match that spends the same
+  number of errors - so it walks the slice twice, the first walk bounded by cost.
+
+  One port defect fixed that no test could have caught, because upstream faults on every input that
+  would show it: a POSIX fuzzy match reported the errors it had spent as zero, since the
+  save/restore of the best match carried neither the counts nor the change list.
 
 ### Fixed
 
@@ -76,5 +96,25 @@ feature.
 - Full case folding sliced the unfolded characters with offsets taken from the folded text, which
   crashed on `(?r)^İﬁ` under `IGNORECASE|FULLCASE` and, worse, silently answered "no match" for
   `ﬁaﬁ` against `fiafi`. Two expansions in one run were needed, which is why one had always worked.
+
+Phase 5's four were all found by the oracle, three of them by widening it rather than by adding a
+feature, and none of them by a ported test.
+
+- A `(*SKIP)` moved the slice the engine searches, and nothing put it back: a scanner carried the
+  moved bound from one match of a scan into the next, so a later match could be found in a view of
+  the subject that excluded it. Upstream has this defect too and keeps it.
+- The same bound, carried the other way: a `partial` request runs a non-partial pass and then a
+  partial one, and a `(*SKIP)` in the first left the second searching a narrowed slice, which
+  skipped start positions below it. Both slice bounds are now restored between the passes. Upstream
+  restores only the text position, in both directions.
+- The width check that decides whether a partial retry happens at all counted UTF-16 code units
+  where it needed characters, so one astral character read as two: the non-partial pass ran and
+  succeeded where it should have been skipped, and the partial answer upstream gives was never
+  reached. A comment had argued the mismatch was harmless because over-counting can only fail to
+  take a shortcut - true of a plain match, and false of a partial one, where what the shortcut
+  suppresses is the fallback.
+- A POSIX fuzzy match reported the errors it had spent as zero, because saving and restoring the
+  best match so far carried neither the fuzzy counts nor the list of changes. Upstream carries
+  neither correctly either; this is fixed here rather than reproduced.
 
 [Unreleased]: https://github.com/zejji/fuzzy-regex-cs/commits/main

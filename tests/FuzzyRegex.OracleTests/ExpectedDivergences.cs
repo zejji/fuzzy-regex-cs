@@ -179,7 +179,14 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The four rows of <c>search-start-partial</c>'s second symptom - upstream's prefilter reports
+    /// <c>search-start-partial</c>'s FIRST arm - upstream reports a partial where this port reports
+    /// nothing at all - minimised by hand to a reversed boundary at the end of an empty subject.
+    /// </summary>
+    private const string _searchStartEmptyReverseRow =
+        """{"generator": "partial", "pattern": "(?r)\\b$", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}""";
+
+    /// <summary>
+    /// The five rows of <c>search-start-partial</c>'s second symptom - upstream's prefilter reports
     /// a partial covering the whole searched region, and this port reports its OWN partial somewhere
     /// else - as <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12.
     /// </summary>
@@ -188,12 +195,25 @@ internal static class ExpectedDivergences
     /// 4313 (seed 20260912) of a 6000-row <c>interactions</c> wave. <b>Two of the three come from
     /// one seed and seed 7 draws none</b>, so the family is evidenced at two seeds of the three, not
     /// at three - the S37 blind review's second pass corrected "one per seed" here.
+    /// <para>
+    /// <b>Row 5 is S43's, row 77889 of the seed-7 gate, and it is the row that finally gives the
+    /// family a seed-7 draw</b> - so the arm is now evidenced at all three default seeds. It is the
+    /// first of them to carry a FUZZY section, which is what S43's widening of <c>interactions</c>
+    /// put into the generator, and its judgement is the arm's cleanest: upstream's
+    /// <c>search(partial=True)</c> is (0, 2), the whole searched region, and its own
+    /// <c>match</c> answers None at every start. The pattern is reversed, so sweeping
+    /// <c>endpos</c> instead - which is where a reversed match anchors - upstream's own matcher
+    /// gives (0, 1) partial, this port's answer; and deleting the <c>(*SKIP)</c> or making it
+    /// <c>(*PRUNE)</c>, which moves no bound, gives upstream's own search (0, 1) too. Measured
+    /// 2026-09-13 on regex 2026.7.19.
+    /// </para>
     /// </remarks>
     private const string _searchStartElsewhereRows = """
         {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         {"generator": "interactions", "pattern": "\\b(?:.+(*SKIP)[^\\d]|\\p{Lu})([^[\\p{L}--[a-z]]])+(?(?=\\W)[\\w--[0-9]])", "flags": 16650, "namedLists": {}, "subject": "ﬃ\nﬃaa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         {"generator": "interactions", "pattern": "(?r)[a](\\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\\b", "flags": 16642, "namedLists": {}, "subject": "AA𝔘𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         {"generator": "interactions", "pattern": "\\m(?:[\\p{L}\\p{N}]{2,}(*SKIP)\\p{ASCII}|\\w)\\B", "flags": 264, "namedLists": {}, "subject": "a😀Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "interactions", "pattern": "(?r)^(?(?<![^\\p{L}])\\p{L}|[[:alpha:]])(?:\\.(\\S)){e<=2,i<=1}(?:[\\w--[0-9]](*SKIP)[^\\d]|[abz])", "flags": 256, "namedLists": {}, "subject": "\r.", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         """;
 
     /// <summary>
@@ -224,6 +244,9 @@ internal static class ExpectedDivergences
         "match 0:(2,3)[(2,3)] 1:unset last=-1/- partial",
         "match 0:(0,0)[(0,0)] 1:unset last=-1/- partial",
         "match 0:(3,2)[(3,2)] last=-1/- partial",
+        // Row 5, S43's. Upstream's own match at endpos 1, which is the first anchor a reversed
+        // search tries, and the answer its own search gives once the verb is gone.
+        "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial",
     ];
 
     /// <summary>
@@ -256,11 +279,26 @@ internal static class ExpectedDivergences
     /// <c>partial</c>, a <c>(*SKIP)</c>, and upstream answering the zero-width partial at (0, 0) that
     /// its own matcher beats at a higher <c>endpos</c>.
     /// </para>
+    /// <para>
+    /// <b>Row 4 is S43's, row 7329 of a 6000-row seed-99991 <c>fuzzy,interactions</c> wave, and it is
+    /// the first of this family to carry a FUZZY section - but it is ALSO the first on which the
+    /// entry's "upstream's own matcher answers what this port does" line is FALSE, so it is said
+    /// here rather than left to be assumed.</b> Upstream's search answers the zero-width (0, 0)
+    /// partial as the other three do, and its own anchored match gives (0, 1) at <c>endpos</c> 1 and
+    /// (0, 2) at 2 - but NOTHING at 3, where this port answers (0, 3). The moved bound reaches
+    /// upstream's anchored door too on this row, so the anchored sweep cannot judge it.
+    /// <b>What judges it is the <c>(*PRUNE)</c> control</b>, which is this entry's other argument and
+    /// the one that does not depend on the anchored sweep: spelling the verb <c>(*PRUNE)</c> - the
+    /// same backtracking pruning, no bound moved - gives upstream (0, 3) partial with one
+    /// substitution at 3, which is this port's answer to the code unit. Deleting the verb gives
+    /// upstream (0, 3) COMPLETE with the same substitution. Measured 2026-09-13 on regex 2026.7.19.
+    /// </para>
     /// </remarks>
     private const string _partialRetryReversedRows = """
         {"generator": "partial", "pattern": "(?r)\\b(?:[^a-f](*SKIP)[\\p{L}\\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})", "flags": 8, "namedLists": {}, "subject": "a\n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial", "pattern": "(?r)\\M(?:[^[\\p{L}--[a-z]]](*SKIP)[a-f]|[A-Z])", "flags": 16642, "namedLists": {}, "subject": "A𐐨", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial", "pattern": "(?r)(?:[^a-f](*SKIP)\\S|[\\p{L}\\p{N}])(?(?<![\\w--[0-9]])[\\p{L}\\p{N}]|[\\w--[0-9]])", "flags": 256, "namedLists": {}, "subject": "𐐀_  ", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "interactions", "pattern": "(?r)\\b(?:\\D(*SKIP)[\\p{L}\\p{N}]|[^a])(?:\\p{Ll}{0,2}?İ(?:\\p{Nd}){2i+1d+1s<=2}){1i+2d+1s<=3}", "flags": 0, "namedLists": {}, "subject": "ıİﬀ", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         """;
 
     /// <summary>
@@ -279,6 +317,9 @@ internal static class ExpectedDivergences
         "match 0:(0,1)[(0,1)] 1:(1,0)[(1,0)] last=1/g1 partial",
         "match 0:(0,1)[(0,1)] last=-1/- partial",
         "match 0:(0,3)[(0,3)] last=-1/- partial",
+        // Row 4. NOT upstream's anchored answer - see the remark above - but upstream's own answer
+        // to the same pattern with the verb spelled (*PRUNE), substitution and all.
+        "match 0:(0,3)[(0,3)] last=-1/- partial fuzzy=(1,0,0)[s:3][i:][d:]",
     ];
 
     /// <summary>
@@ -287,6 +328,43 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _partialRetryReversed = OracleWave
         .ParseRows(_partialRetryReversedRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _partialRetryReversedOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The one row of <c>partial-retry-carried-slice-forward</c> - the entry above's mechanism in a
+    /// pattern that runs LEFT TO RIGHT - copied out of
+    /// <c>TestResults/oracle/wave-99991.jsonl</c> on 2026-09-13 rather than retyped.
+    /// </summary>
+    /// <remarks>
+    /// Row 6897 of <c>pwsh -File tools/run-oracle.ps1 -Count 6000 -Generator fuzzy,interactions
+    /// -Seeds 99991</c>. One row, because one is all any wave has drawn: the forward half of this
+    /// mechanism needs a <c>(*SKIP)</c> whose moved <c>slice_start</c> changes which ALTERNATIVE the
+    /// partial pass can still enter, and that is a narrower accident than the reversed half, which
+    /// only needs the bound to hide an anchor.
+    /// </remarks>
+    private const string _partialRetryForwardRows = """
+        {"generator": "interactions", "pattern": "\\b(?:(?:\\ _(\\W)){e<=1}(*SKIP)[A-Z]|[^a])(?:.?(?:(\\w+?)){i<=1:.}){e<=2,s<=1:[^a-z]}(?:(?:[abz]([abz])){2i+1d+1s<=2}(*PRUNE)[\\w\\s]|\\W)", "flags": 8, "namedLists": {}, "subject": "😀ß_ ", "operation": "search", "partial": true, "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 3, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "searchOnlyPartial": false}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to <see cref="_partialRetryForwardRows"/>, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's own answer to the same row with the first verb spelled <c>(*PRUNE)</c>, and with it
+    /// deleted: both give the substitution at 1 and the capture at (3, 4) in codepoints, which is
+    /// UTF-16 (4, 1) on this astral subject. Measured 2026-09-13, the probe named in the entry.
+    /// </remarks>
+    private static readonly string[] _partialRetryForwardOurs =
+    [
+        "match 0:(2,3)[(2,3)] 1:(4,1)[(4,1)] 2:unset 3:unset last=1/- partial fuzzy=(1,0,0)[s:2][i:][d:]",
+    ];
+
+    /// <summary>
+    /// <see cref="_partialRetryForwardRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _partialRetryForward = OracleWave
+        .ParseRows(_partialRetryForwardRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _partialRetryForwardOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
@@ -340,8 +418,9 @@ internal static class ExpectedDivergences
     /// </summary>
     /// <remarks>
     /// <para>
-    /// One row so far, row 74396 of a 6000-row <c>interactions</c> wave at seed 20260913, added by
-    /// S40c. It is the family exactly - a call reached from a lookahead under <c>(?r)</c>, and a
+    /// Two rows: row 74396 of a 6000-row <c>interactions</c> wave at seed 20260913, added by
+    /// S40c, and row 75821 of the seed-7 one, added by S43. It is the family exactly - a call
+    /// reached from a lookahead under <c>(?r)</c>, and a
     /// <c>*</c> repeat holding it, so zero iterations is always available and the piece cannot remove
     /// a match - and upstream contradicts itself on it in the family's usual way. Measured 2026-09-13
     /// on regex 2026.7.19 with <c>finditer</c>, which says more than the <c>sub</c> the wave drew:
@@ -362,9 +441,43 @@ internal static class ExpectedDivergences
     /// often in a pattern of this shape. So the row is judged instead, and widening means judging
     /// another and adding it here.
     /// </para>
+    /// <para>
+    /// <b>Row 2 is S43's, row 75821 of the seed-7 gate, and it is the same shape under the OTHER
+    /// substitution operation</b> - a <c>subf</c> where upstream replaced once and this port twice,
+    /// so the predicate's "upstream replaced NOTHING" arm cannot reach it either. It is
+    /// <c>(?r)(?P&lt;g1&gt;\p{ASCII})(?:(?(1)(?=(?P&gt;g1))\d))*\b\b</c> over '\nﬀ\rﬀİİ', and
+    /// upstream contradicts itself on it three separate ways. With the piece present its own
+    /// <c>finditer</c> gives (2, 3) ALONE; delete the zero-width <c>(?:...)*</c>, or write the call
+    /// out as the class it calls, or delete the lookahead the call sits in, and upstream gives
+    /// (2, 3) AND (0, 1) - this port's answer. A <c>*</c> repeat can always take zero iterations, so
+    /// the piece cannot remove a match, and the call rather than the conditional is the cause,
+    /// because spelling the call out as its body restores the second match. Measured 2026-09-13 on
+    /// regex 2026.7.19.
+    /// </para>
+    /// <para>
+    /// <b>Row 3 is S43's, row 10201 of a 6000-row seed-99991 <c>fuzzy,interactions</c> wave, and it
+    /// carries the STRONGEST reproduction this family has.</b> The other rows need a wave-sized
+    /// pattern to show the defect; this one minimises to
+    /// <c>(?P&lt;g1&gt;[[:alpha:]])(?:(?(1)(?&lt;=(?&amp;g1))[^\p{L}]|[A-Z]))([^\d]*)</c>, and
+    /// upstream's PLAIN <c>search</c> - no partial asked for at all - answers None on 'a ', 'aa ',
+    /// 'aaa ', 'aaaa ', 'aaaaa ' and 'aaaaaa ', while the same pattern with the lookbehind written
+    /// out as the class it calls answers (0, 2), (1, 3), (2, 4), (3, 5), (4, 6) and (5, 7). Six
+    /// subject lengths, six lost matches, no exceptions. The lookbehind consumes nothing, so it
+    /// cannot remove a match, which is this family's own argument in its cleanest form. Measured
+    /// 2026-09-13 on regex 2026.7.19.
+    /// </para>
+    /// <para>
+    /// It is here rather than in the predicate for the predicate's own stated reason: upstream did
+    /// not lose the match outright on the row the WAVE drew, which asked with <c>partial=True</c> -
+    /// it degraded the complete match to a PARTIAL and left the trailing group unset, an outcome
+    /// shape <c>UpstreamFoundStrictlyLess</c> does not express. Widening it to reach a partial would
+    /// classify every real defect that reports a complete match where a partial is owed.
+    /// </para>
     /// </remarks>
     private const string _groupCallLostMatchJudgedRows = """
         {"generator": "interactions", "pattern": "(?r)\\b\\m(?P<g1>[𝔘a])(?:(?(1)(?=(?P>g1))\\p{L}))*[a]*", "flags": 256, "namedLists": {}, "subject": "𝔘𝔘\r\raa𐐨𐐨", "operation": "sub", "template": "\\1\\1\\1", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𝔘𝔘\r\raaa𐐨𐐨", "count": 1}}
+        {"generator": "interactions", "pattern": "(?r)(?P<g1>\\p{ASCII})(?:(?(1)(?=(?P>g1))\\d))*\\b\\b", "flags": 264, "namedLists": {}, "subject": "\nﬀ\rﬀİİ", "operation": "subf", "template": "{}{}", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\nﬀ\r\rﬀİİ", "count": 1}}
+        {"generator": "interactions", "pattern": "(?p)(?P<g1>[[:alpha:]])(?:(?(1)(?<=(?&g1))[^\\p{L}]|[A-Z]))([^\\d]*)", "flags": 16386, "namedLists": {}, "subject": "ﬁaıﬁ ", "operation": "search", "partial": true, "codepointSpan": [3, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 1, "success": true, "index": 3, "length": 1, "captures": [[3, 1], [3, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": true}, "searchOnlyPartial": false}
         """;
 
     /// <summary>
@@ -374,6 +487,10 @@ internal static class ExpectedDivergences
     private static readonly string[] _groupCallLostMatchJudgedOurs =
     [
         "sub 2 '\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\u000d\\u000daaa\\ud801\\udc28\\ud801\\udc28'",
+        "sub 2 '\\u000a\\u000a\\ufb00\\u000d\\u000d\\ufb00\\u0130\\u0130'",
+        // The COMPLETE match upstream degrades to a partial, trailing group and all - and the exact
+        // answer upstream's own inline copy of the lookbehind gives.
+        "match 0:(3,2)[(3,2)] 1:(3,1)[(3,1),(3,1)] 2:(5,0)[(5,0)] last=1/g1",
     ];
 
     /// <summary>
@@ -382,6 +499,73 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _groupCallLostMatchJudged = OracleWave
         .ParseRows(_groupCallLostMatchJudgedRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _groupCallLostMatchJudgedOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The five rows of <c>bestmatch-loses-a-partial</c>, each copied out of
+    /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> on 2026-09-13 rather than retyped.
+    /// </summary>
+    /// <remarks>
+    /// Rows 74938 and 77937 (seed 7), 76251 and 76681 (seed 4242) and 76593 (seed 20260913) of
+    /// <c>pwsh -File tools/run-oracle.ps1 -Count 6000</c>, the full default generator list at its
+    /// three default seeds, which is 126,000 rows a seed. <b>All three seeds draw one, which is the
+    /// first family to manage that</b>; they are the first divergences any wave has produced from
+    /// composing fuzzy with the Phase 3 and 4 constructs, which is what S43 widened
+    /// <c>interactions</c> to do.
+    /// <para>
+    /// All five carry the same four things - <c>(?b)</c>, a fuzzy section, a <c>(*SKIP)</c> and
+    /// <c>partial=True</c> - and all five are recorded <c>nomatch</c>. <b>Two are not
+    /// <c>search</c> rows at all</b>: 74938 is a <c>match</c> and 76251 a <c>fullmatch</c>, so the
+    /// defect is not confined to the search loop and a predicate keyed on the operation would be
+    /// wrong as well as wide.
+    /// </para>
+    /// </remarks>
+    private const string _bestmatchLostPartialRows = """
+        {"generator": "interactions", "pattern": "(?b)(?r)(?:[^\\d]+(*SKIP)\\p{L}|[^\\d])(?:(?:(\\p{Nd}{1})(?:(?P<g2>\\p{ASCII})){e<=2,i<=1}){s<=1,i<=1,d<=1}(*SKIP)\\p{L}|\\w)\\D", "flags": 16386, "namedLists": {}, "subject": " 𐐨 ", "operation": "match", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "interactions", "pattern": "(?b)(?r)^(\\d)(?:([^\\d]{3,4}?)a(?:[[:alpha:]]{2,3}?){e<=2,s<=1:[A-Za-z_]}){s<=1,i<=1,d<=1}(?:\\S*?(*SKIP)\\w|[^\\d])", "flags": 10, "namedLists": {}, "subject": "a\n𐐀\r\na𝔘", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "interactions", "pattern": "(?b)(?e)^(?:(?:AA){s<=1,i<=1,d<=1}(*SKIP)\\p{ASCII}|\\s)(?:(?:A([[a-z]--[aei]])(?:(\\D*)){e<=2,s<=1}){i<=1}(*SKIP)\\p{ASCII}|[A-Z])", "flags": 256, "namedLists": {}, "subject": "A", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "interactions", "pattern": "(?b)(?e)(?:a\\w){s<=1,i<=1,d<=1}(?:\\S(*SKIP)[\\p{L}\\p{N}]|\\W)", "flags": 8, "namedLists": {}, "subject": "\r\na𝔘\n", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "interactions", "pattern": "(?b)ﬁ(?:(?:(.)ﬁﬁ){s<=1:[^a-z]}(*SKIP)[A-Z]|\\p{ASCII})(?P<g2>[[:digit:]])?", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁﬁﬁßß\n ", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_bestmatchLostPartialRows"/>, in the same
+    /// order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Every SPAN is the one UPSTREAM ITSELF gives to the same row once the leading <c>(?b)</c> is
+    /// deleted and nothing else is changed: in codepoints (0, 3), (0, 7), (0, 1), (4, 5) and (8, 8),
+    /// which is what these UTF-16 renderings are on the three astral subjects.
+    /// <para>
+    /// <b>On four of the five that flagless answer is this port's answer in FULL - groups, counts
+    /// and all - and on row 77937 (the second) only the span agrees.</b> Upstream flagless spends no
+    /// errors and captures nothing there, where this port answers <c>fuzzy=(1,1,1)</c> with group 2
+    /// set. Row 77937 therefore rests on the weak form alone, and the entry's own
+    /// <see cref="ExpectedDivergence.Reason"/> says so. The blind review found this because the
+    /// probe compared spans while the prose claimed whole answers; it now prints groups and counts.
+    /// </para>
+    /// <para>
+    /// Measured row by row rather than described -
+    /// <c>python tools/probes/upstream-bestmatch-loses-a-partial.py</c>, whose second section
+    /// replays all five whole, each asked its own operation, and whose third sweeps both anchored
+    /// doors.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] _bestmatchLostPartialOurs =
+    [
+        "match 0:(0,4)[(0,4)] 1:unset 2:(0,1)[(0,1)] last=2/g2 partial",
+        "match 0:(0,9)[(0,9)] 1:unset 2:(0,4)[(0,4)] last=2/- partial fuzzy=(1,1,1)[s:6][i:5][d:4]",
+        "match 0:(0,1)[(0,1)] 1:unset 2:unset last=-1/- partial",
+        "match 0:(5,1)[(5,1)] last=-1/- partial fuzzy=(1,0,0)[s:0][i:][d:]",
+        "match 0:(8,0)[(8,0)] 1:unset 2:unset last=-1/- partial",
+    ];
+
+    /// <summary>
+    /// <see cref="_bestmatchLostPartialRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _bestmatchLostPartial = OracleWave
+        .ParseRows(_bestmatchLostPartialRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchLostPartialOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
@@ -471,13 +655,11 @@ internal static class ExpectedDivergences
             PinnedBy: "PartialMatchingTests.A_reverse_search_for_a_boundary_at_the_end_of_an_empty_"
                 + "subject_finds_no_partial_here and .A_skip_alternation_partial_starts_at_the_"
                 + "leftmost_position_that_matches",
-            Example: """
-            {"generator": "partial", "pattern": "(?r)\\b$", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
-            {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
-            {"generator": "interactions", "pattern": "\\b(?:.+(*SKIP)[^\\d]|\\p{Lu})([^[\\p{L}--[a-z]]])+(?(?=\\W)[\\w--[0-9]])", "flags": 16650, "namedLists": {}, "subject": "ﬃ\nﬃaa", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
-            {"generator": "interactions", "pattern": "(?r)[a](\\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\\b", "flags": 16642, "namedLists": {}, "subject": "AA𝔘𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
-            {"generator": "interactions", "pattern": "\\m(?:[\\p{L}\\p{N}]{2,}(*SKIP)\\p{ASCII}|\\w)\\B", "flags": 264, "namedLists": {}, "subject": "a😀Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
-            """,
+            // The first arm's own row, then the second arm's judged rows VERBATIM rather than
+            // retyped. They were a copy of `_searchStartElsewhereRows` until S43 added a fifth row
+            // and had to edit the same JSON in two places to keep the alarm honest - which is the
+            // drift this file spends three paragraphs warning about, reproduced inside one entry.
+            Example: _searchStartEmptyReverseRow + "\n" + _searchStartElsewhereRows,
             Applies: static (row, ours) =>
                 row.Partial
                 && string.Equals(row.Operation, "search", StringComparison.Ordinal)
@@ -981,6 +1163,50 @@ internal static class ExpectedDivergences
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
+            Id: "partial-retry-carried-slice-forward",
+            Reason: "Port right, and the entry above's mechanism in a pattern that runs LEFT TO "
+                + "RIGHT. Split by direction rather than widened, which is the convention this file "
+                + "already uses for `overlapped-skip-stale-slice` and its `-reversed` twin: the "
+                + "bound a `(*SKIP)` moves is `slice_start` forwards and `slice_end` under `(?r)` "
+                + "(upstream/src/_regex.c:14551), the symptoms differ accordingly, and one entry "
+                + "spanning both would have to state each half separately anyway.\n"
+                + "THE SAME TWO PASSES. A `partial` search runs a non-partial pass and then a "
+                + "partial one from the same `text_pos` (upstream do_match, :18160). Upstream "
+                + "restores `text_pos` and nothing else, so a bound the verb moved in the first pass "
+                + "is still moved in the second. S40b restores both bounds here; upstream does not.\n"
+                + "WHAT THE MOVED BOUND COSTS IS DIFFERENT THIS WAY ROUND, and it is worth saying "
+                + "because it is why the reversed entry's own argument does not transfer. The two "
+                + "engines agree on the SPAN - both answer a partial at codepoints (1, 4) - and "
+                + "differ in which ALTERNATIVE the partial pass could still enter, and therefore in "
+                + "which error was spent and which group captured. Upstream takes the `[^a]` branch "
+                + "and charges an insertion at 3, with every group unset. This port takes the branch "
+                + "the `(*SKIP)` sits in, charges a substitution at 1, and captures (3, 4).\n"
+                + "WHAT JUDGES IT IS THE `(*PRUNE)` CONTROL, the argument `search-start-partial` and "
+                + "`partial-retry-reversed-slice` both rest on, and here it is the whole of the "
+                + "evidence rather than a corroboration:\n"
+                + "  as the wave drew it        (1,4)P insertion at 3, no captures  <- upstream\n"
+                + "  first verb -> (*PRUNE)     (1,4)P substitution at 1, (3,4)     <- this port's\n"
+                + "  first verb deleted         (1,4)P substitution at 1, (3,4)     <- this port's\n"
+                + "  second verb (*PRUNE) gone  (1,4)P insertion at 3, no captures  <- unchanged\n"
+                + "`(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so "
+                + "the bound move is the cause rather than the pattern's meaning; and the last line "
+                + "says the OTHER verb in the pattern is not involved, which is a control this "
+                + "family has not had before. Measured 2026-09-13 on regex 2026.7.19, "
+                + "tools/probes/upstream-skip-carried-slice-forward.py.\n"
+                + "KEYED ON ITS ROW, like every sibling named above. No predicate over 'the two "
+                + "engines agree on the span and disagree on which error they spent' is safe here - "
+                + "that is also what a genuine fuzzy-path defect looks like, and this port has "
+                + "shipped one in Phase 5 already (S43's own SaveBestMatch fix, which reported the "
+                + "errors a POSIX fuzzy match spent as zero). Widening means judging another row "
+                + "with the probe and adding it. Phase 7 must not import upstream's answer here.",
+            PinnedBy: "PartialMatchingTests.A_forward_skip_does_not_move_the_slice_start_the_partial_"
+                + "pass_searches",
+            Example: _partialRetryForwardRows,
+            Applies: static (row, ours) =>
+                _partialRetryForward.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
             Id: "enhancematch-ranks-by-cost",
             Reason: "PORT DELIBERATELY DIFFERENT, by owner decision rather than by a verdict about "
                 + "who is right about an edge case (DECISIONS 2026-09-12). `ENHANCEMATCH` re-runs a "
@@ -1069,6 +1295,74 @@ internal static class ExpectedDivergences
                 + "answers_the_earlier_one",
             Example: _bestCostRankedRow,
             Applies: static (row, ours) => IsCostRankedDivergence(row, ours, "(?b)")
+        ),
+        new(
+            Id: "bestmatch-loses-a-partial",
+            Reason: "Upstream bug, ledger entry 13, found by S43's composed `interactions` wave at "
+                + "the Phase 5 close - the first three-seed 6000-row run to draw fuzzy beside the "
+                + "Phase 3 and 4 constructs. `(?b)` makes upstream lose a fuzzy PARTIAL that the "
+                + "same pattern without the flag still finds.\n"
+                + "THE JUDGEMENT NEEDS NO SECOND ENGINE, and it rests on two arguments of "
+                + "different strength which a report must keep apart. THE SCOPE OF THE STRONG ONE "
+                + "HAS BEEN STATED WRONG THREE TIMES - claimed for all five with no evidence, cut "
+                + "to two by a blind review that swept `pos` alone, over-corrected back to five - "
+                + "and the measurement says FOUR. Hence the scope beside each.\n"
+                + "  STRONG, on FOUR of the five: the SAME compiled pattern answers None from "
+                + "`search(partial=True)` and a partial from its own ANCHORED door. No reading of "
+                + "any ranking rule lets a search miss what its own anchored match finds. 76681 and "
+                + "76593 answer by `pos`; 74938 and 77937 are `(?r)` and answer by `endpos`, which "
+                + "is where a reversed pattern anchors - 74938 at endpos 1, 77937 at endpos 2, 4 "
+                + "and 5.\n"
+                + "  THE FIFTH IS 76251 AND IT DOES NOT COUNT. It is forward, and its only anchored "
+                + "answer is the degenerate empty slice at endpos 0. Truncating a FORWARD subject "
+                + "with `endpos` changes what a trailing `$`, `\\Z` or lookahead means, so an "
+                + "endpos hit argues only for a pattern that reads nothing at the end - it is the "
+                + "natural door for a `(?r)` row and a weak one for a forward row. 76251 therefore "
+                + "rests on the weak form alone, and the draft that said 'all five' was counting "
+                + "the empty slice its own caveat disqualifies.\n"
+                + "  WEAK, on all five and on the minimised shape: deleting `(?b)` gives upstream a "
+                + "match it refused with the flag present - codepoints (0, 3), (0, 7), (0, 1), "
+                + "(4, 5) and (8, 8). `BESTMATCH` is documented as choosing the BEST match rather "
+                + "than the first; it is not a filter that removes matches, so a flag that turns a "
+                + "match into no match is upstream contradicting its own documentation.\n"
+                + "  THOSE FLAGLESS ANSWERS ARE THIS PORT'S ANSWER IN FULL ON FOUR OF THE FIVE, AND "
+                + "ON 77937 ONLY THE SPAN AGREES. Upstream flagless spends no errors and captures "
+                + "nothing there; this port answers the same span with `fuzzy=(1,1,1)` and group 2 "
+                + "set. So 77937 rests on 'upstream refused a match it finds without the flag', and "
+                + "NOT on 'upstream's flagless answer is ours'. The first draft claimed the latter "
+                + "for all five because its probe compared `m.span()` alone while its prose claimed "
+                + "the whole answer; the probe now prints the groups and the counts.\n"
+                + "Minimised: `(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)` over 'ab.' - upstream's "
+                + "search is None and its own `match('ab.', 2, partial=True)` is (2, 3) partial. "
+                + "Four conditions, each necessary on that shape: `(?b)` (`(?e)` in its place keeps "
+                + "the match, so it is `do_best_fuzzy_match` and not fuzzy ranking at large), a "
+                + "fuzzy section, a `(*SKIP)` (the same pattern without the verb keeps its match "
+                + "under `(?b)`), and `partial=True`. Measured 2026-09-13 on regex 2026.7.19, "
+                + "tools/probes/upstream-bestmatch-loses-a-partial.py, whose second section replays "
+                + "all five wave rows whole, each asked its own operation.\n"
+                + "FAULTING MECHANISM: `do_best_fuzzy_match` (upstream/src/_regex.c:17584). THE "
+                + "EXACT LINE IS NOT ESTABLISHED and the report must say so or establish it first. "
+                + "The shape is suggestive - the retry sets `start_pos = state->match_pos` and "
+                + "tightens `state->max_errors`, and the loop guard `state->slice_start <= "
+                + "start_pos && start_pos <= state->slice_end` is one a `(*SKIP)` moving "
+                + "`slice_start` can falsify - but that is a hypothesis with the right shape, not a "
+                + "measurement. No debugger and no ASAN build, for the reason ledger entry 9 gives.\n"
+                + "KEYED ON ROWS, like `bounded-lazy-repeat-partial`, `partial-retry-reversed-slice` "
+                + "and `search-start-partial`'s second arm, and for their reason rather than for "
+                + "convenience. Every predicate over 'upstream answered nothing and this port "
+                + "answered a partial' also describes a port defect that INVENTS a partial, which is "
+                + "a defect this port has had twice in Phase 5 alone (S40b's carried slice, S43's "
+                + "own SaveBestMatch fix). The four tells are all in the pattern text, so a "
+                + "predicate over them would classify by syntax rather than by behaviour and would "
+                + "swallow the next real one. Widening means judging another row with the probe and "
+                + "adding it here, not loosening a condition.",
+            PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_partial_that_upstreams_own_search_"
+                + "loses_beside_a_skip and its negative control "
+                + ".Bestmatch_without_the_verb_keeps_its_match_on_both_engines",
+            Example: _bestmatchLostPartialRows,
+            Applies: static (row, ours) =>
+                _bestmatchLostPartial.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
     ];
 
