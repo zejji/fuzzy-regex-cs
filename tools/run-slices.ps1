@@ -75,7 +75,14 @@ $allowedTools = @(
     # Bash - and head/tail/grep are Bash-only, so each name goes on the side that has it.
     'Bash(head *)', 'Bash(tail *)', 'Bash(grep *)',
     'PowerShell(Select-Object *)', 'PowerShell(Select-String *)',
-    'PowerShell(Get-Content *)', 'PowerShell(Get-ChildItem *)'
+    'PowerShell(Get-Content *)', 'PowerShell(Get-ChildItem *)',
+
+    # Research tools, added 2026-09-14 after S45's first sitting stalled on all of them: the
+    # owner's evidence standard (spec amendment 16) requires the definitive document quoted and a
+    # real run of a second engine, so a session needs the web, a fetch into .scratch/, and perl.
+    # tasklist / Get-Process are read-only and let a session see an orphaned test host (S44).
+    'WebFetch', 'WebSearch', 'Bash(curl *)', 'Bash(perl *)',
+    'Bash(tasklist *)', 'PowerShell(Get-Process *)'
 )
 
 function Get-PendingSlice {
