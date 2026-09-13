@@ -289,6 +289,30 @@ public sealed class GroupCallTests
         ).Matches("AA..0", overlapped: true);
 
         reversed.Select(static m => (m.Index, m.Length)).Should().Equal((0, 1));
+
+        // S40c's third row of the same shape, row 74396 of a 6000-row `interactions` wave at seed
+        // 20260913. The wave drew it as a SUBSTITUTION, where the divergence reads as a count -
+        // upstream replaced once, this port twice - and `finditer` is what says why: the second
+        // replacement is a match upstream lost. The piece holding the call is a `*` repeat, so zero
+        // iterations is always available and it cannot remove a match; delete it, or write the call
+        // out as the class it calls, and upstream finds both. Measured 2026-09-13 on regex 2026.7.19.
+        //
+        //   (?r)\b\m(?P<g1>[𝔘a])(?:(?(1)(?=(?P>g1))\p{L}))*[a]*  over '𝔘𝔘\r\raa𐐨𐐨' (V1)
+        //     upstream                     (4, 6)
+        //     piece deleted, or inlined    (4, 6) AND (0, 1)   <- this port's answer either way
+        string mathematicalU = char.ConvertFromUtf32(0x1D518);
+        string deseretSmall = char.ConvertFromUtf32(0x10428);
+        string subject = mathematicalU + mathematicalU + "\r\raa" + deseretSmall + deseretSmall;
+
+        MatchCollection called = new FuzzyRegex(
+            @"(?r)\b\m(?P<g1>[" + mathematicalU + @"a])(?:(?(1)(?=(?P>g1))\p{L}))*[a]*",
+            FuzzyRegexOptions.Version1
+        ).Matches(subject);
+
+        // UTF-16: the two leading astral characters occupy 0..4, so upstream's (4, 6) in codepoints
+        // is (6, 2) here and the match it loses is the first astral character at (0, 2).
+        // Upstream finds only the first of these.
+        called.Select(static m => (m.Index, m.Length)).Should().Equal((6, 2), (0, 2));
     }
 
     // NOT TESTED, deliberately: left recursion. '(?R)?b' against 'b' and '(?<x>(?&x)?a)' against
@@ -305,112 +329,105 @@ public sealed class GroupCallTests
     // memory-hungry test already has a home, or give ByteStack an injectable limit so the same
     // assertion costs a kilobyte.
 
-    // DIVERGES FROM UPSTREAM, and the VERDICT IS OPEN - this test records measurements, not a
-    // judgement. Read the comment before citing it as evidence either way.
+    // AGREES WITH UPSTREAM. S40c closed the verdict S40a left open, and it went the other way from
+    // both of that slice's readings: there is no group-call defect here at all.
     [Test]
-    public void A_group_called_through_an_opposite_direction_lookaround_loses_upstreams_partial_only_on_an_astral_subject()
+    public void A_group_call_counts_towards_min_width_even_inside_a_zero_width_lookaround()
     {
         // S40a, rows 98956 (`partial`) and 103926 (`partial-sliced`) of a 6000-row seed-7 wave,
-        // minimised by hand. The same precondition as the two tests above and as ledger entry 8 - a
-        // group reached by a CALL from a lookaround running the other way round from the pattern -
-        // and a third symptom: upstream does not lose the match and does not record a bad capture,
-        // it reports the SAME span as a PARTIAL, and in the reversed case drops the group's
-        // participation with it.
+        // minimised by hand. It shares the two tests above's precondition - a group reached by a
+        // CALL from a lookaround running the other way round from the pattern - and for two sessions
+        // that was read as a third symptom of ledger entry 8. IT IS NOT. The call's direction is not
+        // involved, the lookaround is not involved, and upstream is right on every row.
         //
-        // Measured on regex 2026.7.19, and both need an ASTRAL subject - swap U+10400 for an ASCII
-        // letter and the two engines agree, which is what says the wrongly-directed call is walking
-        // off the end of the text rather than merely matching something else:
+        // WHAT IS ACTUALLY HAPPENING, traced through this port in S40c and then predicted and
+        // confirmed on upstream by tools/probes/upstream-min-width-partial-retry.py:
         //
-        //   search(r'(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?', '\U00010400', partial=True)
-        //     upstream (0, 1) g1 (0, 1) PARTIAL          here (0, 2) g1 (0, 2) complete
-        //   fullmatch(r'(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?', '\U00010400', partial=True)
-        //     upstream (0, 1) g1 UNSET  PARTIAL          here (0, 2) g1 (0, 2) complete
+        //  1. `min_width` counts a group CALL at the width of the group it calls, even when the call
+        //     sits inside a LOOKAROUND, which consumes nothing. So
+        //     `(?P<g1>A)(?:(?<=(?P>g1))\w)?` has min_width 2 where the same lookbehind written out
+        //     has 1. That is the only thing the call contributes, and this port reproduces it.
+        //  2. `do_match` answers a partial request in two passes, non-partial first, and
+        //     `do_exact_match`'s width early-out is guarded by `partial_side == RE_PARTIAL_NONE`
+        //     (`upstream/src/_regex.c:18069`), so it fires on the first pass only. A subject too
+        //     narrow for the inflated min_width therefore SKIPS the non-partial pass entirely, and
+        //     the partial pass answers instead.
         //
-        // (Upstream's indices are codepoints; U+10400 is one codepoint and two UTF-16 code units.)
+        // So upstream's extra PARTIAL is the min_width inflation showing through the two-pass
+        // structure, and it depends on how many characters are AVAILABLE rather than on the call
+        // being present: give the same pattern one more character and the partial goes away, widen
+        // the called group and the threshold moves by exactly the callee's width. Both measured, on
+        // 2026.7.19 and on 2026.9.10 alike.
         //
-        // WHY NO VERDICT. There are two candidate defects here and S40a settled neither, so nothing
-        // below should be read as "port right". The whole experiment is now a probe rather than a
-        // description - `python tools/probes/upstream-call-partial-leak.py`, and `--newer` for
-        // 2026.9.10 - and its twelve-case matrix says two things:
+        // THE PORT'S OWN DEFECT WAS ELSEWHERE, and S40a's "this port loses upstream's partial on an
+        // astral subject" was a true observation of it: `do_exact_match` counted `available` in
+        // UTF-16 code units, so one astral character read as two, the early-out did not fire, the
+        // non-partial pass ran and succeeded, and the retry never happened. Fixed in S40c and pinned
+        // by `PartialMatchingTests.The_width_early_out_that_skips_the_non_partial_pass_counts_
+        // characters_not_code_units`, which is where the mechanism lives. What is left here is the
+        // group call's half: that a call inside a zero-width lookaround still counts.
         //
-        //  * UPSTREAM'S PARTIAL COMES FROM THE CALL, not from the subject. Write the call out as the
-        //    thing it calls - `(?<=\U00010400)` for `(?<=(?P>g1))` - and upstream answers a COMPLETE
-        //    match. Delete the lookaround and it answers a complete match. That is ledger entry 8's
-        //    signature: upstream contradicts itself between a call and its own inlined body. It is
-        //    NOT issue 614: 2026.9.10, where that fix landed, answers every one of the twelve
-        //    identically (measured 2026-09-13).
-        //  * THIS PORT'S ODD ANSWER IS THE ASCII ONE, not the astral one, and S40a's first session
-        //    had this the wrong way round. Across the matrix this port answers "not partial" for
-        //    EVERY optional tail - inline, bare, reversed, astral - and "partial" for every required
-        //    one, on both widths. The exceptions are the two ASCII CALL rows, forward and reversed,
-        //    where it reports upstream's partial. So the astral answers are this port being
-        //    consistent with itself, and the question S40c has to answer is why those two leak.
-        //
-        // Which answer the ROW should have depends on that: if the leak goes, the ASCII rows this
-        // port currently agrees on start diverging too, and the whole family becomes one entry
-        // saying "upstream leaks a partial through a call". Settling it needs the call's direction
-        // handling and the end-of-text partial check looked at together, which is a slice of its own
-        // (S40c; row 97927's leftmost-partial defect is S40b, a different mechanism).
+        // What this replaced: S40a's `..._loses_upstreams_partial_only_on_an_astral_subject`, which
+        // asserted this port's astral answers and said in terms that it was measurements rather than
+        // a judgement. Every one of those assertions has flipped.
         string astral = char.ConvertFromUtf32(0x10400);
 
+        // The two wave rows, now agreeing. Upstream's spans are codepoints; U+10400 is one codepoint
+        // and two UTF-16 code units.
+        //
+        //   search(r'(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?', '\U00010400', partial=True)
+        //     upstream (0, 1) g1 (0, 1) PARTIAL          here (0, 2) g1 (0, 2) PARTIAL
+        //   fullmatch(r'(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?', '\U00010400', partial=True)
+        //     upstream (0, 1) g1 UNSET  PARTIAL          here (0, 2) g1 UNSET  PARTIAL
         Match forward = new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?").Match(astral, partial: true);
 
         forward.Success.Should().BeTrue();
         (forward.Index, forward.Length).Should().Be((0, 2));
-        forward.PartialMatch.Should().BeFalse("upstream answers partial here; the verdict is open");
+        forward.PartialMatch.Should().BeTrue("min_width is 2 and one character is available");
         forward.Groups["g1"].Success.Should().BeTrue();
 
         Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
 
         reversed.Success.Should().BeTrue();
         (reversed.Index, reversed.Length).Should().Be((0, 2));
-        reversed.PartialMatch.Should().BeFalse("upstream answers partial here too");
-        reversed.Groups["g1"].Success.Should().BeTrue("upstream drops g1 here and the match still spans the subject");
+        reversed.PartialMatch.Should().BeTrue("the same early-out, through a lookahead under (?r)");
+        reversed.Groups["g1"].Success.Should().BeFalse("upstream drops g1 when the partial pass answers");
 
-        // THE TWO CONTROLS, and they are what make the paragraph above measurements rather than a
-        // story. They point at different engines, which is exactly why there is no verdict.
-        //
-        // One: the call written out as its own body. Upstream drops its partial - `search(
-        // r'(?P<g1>\U00010400)(?:(?<=\U00010400)\w)?', '\U00010400', partial=True)` is
-        // partial=False - so upstream's partial belongs to the CALL. This port answers the same
-        // either way, which is what it should do if the call is semantics-preserving.
+        // THE CONTROL THAT ISOLATES THE CALL, and it is the one S40a read as evidence of a
+        // group-call defect. Write the call out as the body it calls and upstream's partial goes
+        // away - `search(r'(?P<g1>\U00010400)(?:(?<=\U00010400)\w)?', '\U00010400', partial=True)`
+        // is partial=False. That is not upstream contradicting itself between a call and its body:
+        // the inlined lookbehind is zero-width, so min_width drops from 2 to 1, one character is
+        // enough, and the early-out never fires. Same for the bare optional tail below.
         new FuzzyRegex("(?P<g1>" + astral + ")(?:(?<=" + astral + @")\w)?")
             .Match(astral, partial: true)
             .PartialMatch.Should()
-            .BeFalse();
+            .BeFalse("min_width is 1 with the lookbehind written out");
+        new FuzzyRegex("(?P<g1>" + astral + @")\w?").Match(astral, partial: true).PartialMatch.Should().BeFalse();
 
-        // Two, and this is the awkward one: on an ASCII subject THIS PORT REPORTS UPSTREAM'S
-        // PARTIAL. Upstream reports it for both subjects; this port only for the ASCII one. So the
-        // astral answer above is not this port applying a considered rule - it is this port
-        // answering two different things about the same pattern according to how wide a character
-        // is, which no reading of partial matching justifies.
+        // The ASCII spellings, which agreed all along and still do. They are here because they are
+        // what a regression would break first: the fix changed a character count, so the rows with
+        // no astral character in them must not move at all.
         new FuzzyRegex(@"(?P<g1>A)(?:(?<=(?P>g1))\w)?")
             .Match("A", partial: true)
             .PartialMatch.Should()
-            .BeTrue("one of the two optional tails this port calls partial, and what S40c has to explain");
+            .BeTrue();
+        new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?")
+            .FullMatch("a", partial: true)
+            .PartialMatch.Should()
+            .BeTrue();
 
-        // Three, added by S40a's second session, and it is what makes the paragraph above a reading
-        // of the matrix rather than of two rows: this port's rule is OPTIONAL TAIL, NO PARTIAL and
-        // REQUIRED TAIL, PARTIAL, and it holds at both widths. Upstream agrees on every one of these
-        // four. So the ASCII call row is the outlier among this port's own answers, not the astral
-        // one - which is the opposite of what the first session recorded.
-        new FuzzyRegex("(?P<g1>" + astral + @")\w?")
+        // A REQUIRED tail is a partial in both engines whatever min_width does, because the tail
+        // itself asks for a character past the end. These rows never depended on the early-out and
+        // are the other half of the regression guard.
+        new FuzzyRegex("(?P<g1>" + astral + @")\w")
             .Match(astral, partial: true)
             .PartialMatch.Should()
-            .BeFalse();
-        new FuzzyRegex("(?P<g1>" + astral + @")\w").Match(astral, partial: true).PartialMatch.Should().BeTrue();
+            .BeTrue();
         new FuzzyRegex(@"(?P<g1>A)\w").Match("A", partial: true).PartialMatch.Should().BeTrue();
         new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)")
             .Match(astral, partial: true)
             .PartialMatch.Should()
-            .BeTrue("a REQUIRED tail through the same call is partial on the astral subject too");
-
-        // And the SECOND leaking row, which S40a's own first write-up of this missed: the reversed
-        // call over an ASCII subject leaks the partial as well, so there are two of them and not one.
-        // Its astral twin, asserted above, does not.
-        new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?")
-            .FullMatch("a", partial: true)
-            .PartialMatch.Should()
-            .BeTrue("the other ASCII call row, and the reason S40c's question is about two rows");
+            .BeTrue();
     }
 }

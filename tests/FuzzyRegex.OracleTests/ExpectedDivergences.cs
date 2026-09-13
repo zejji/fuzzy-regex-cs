@@ -110,6 +110,7 @@ internal static class ExpectedDivergences
     private const string _boundedLazyRows = """
         {"generator": "partial", "pattern": "^([A-Z]??)__$", "flags": 0, "namedLists": {}, "subject": "__aA ", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial-sliced", "pattern": "(?r)A(.??)", "flags": 0, "namedLists": {}, "subject": "_\ufb03", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "^\\K([^a-f]??)(?P<g2>[\\ ])(?:(?(2)(?<!(?&g2))\\S|.))*$", "flags": 266, "namedLists": {}, "subject": " \r", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         """;
 
     /// <summary>
@@ -248,30 +249,99 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The six rows of <c>group-call-loses-the-match</c>, as <c>tools/record-oracle.py --rows</c>
-    /// wrote them, and all six because between them they are the five OUTCOME SHAPES the defect
-    /// appears in - an empty scan, a scan one match short, a substitution that replaced nothing, a
-    /// split that split nothing, and a substitution this port answered with an exception.
+    /// The five rows of <c>group-call-loses-the-match</c>, as <c>tools/record-oracle.py --rows</c>
+    /// wrote them, and all five because between them they are the OUTCOME SHAPES the defect appears
+    /// in - an empty scan, a scan one match short, a substitution that replaced nothing, and a
+    /// substitution this port answered with an exception.
     /// </summary>
     /// <remarks>
-    /// Rows 4182 (seed 7), 4407 (seed 20260912), 5087 and 5773 (seed 4242) and 1624 (seed 99991) of a
-    /// 6000-row <c>interactions</c> wave, each as the wave drew it, and row 93133 (seed 20260913) of a
-    /// 6000-row <c>recursion</c> one, added by S40a. The fifth and sixth both arrived the way this
-    /// list is meant to work: the shape was deliberately left out of the predicate as one no row had
-    /// shown, a later seed drew one, the run went red rather than quietly classifying it,
-    /// and it was judged by the same probe as the others. Minimisation was tried and is recorded in
-    /// the entry's own <see cref="ExpectedDivergence.Reason"/> as having failed: every shrink that
-    /// kept upstream contradicting ITSELF lost the divergence, because this port reproduces
-    /// upstream's answer on the short forms.
+    /// <para>
+    /// Rows 4182 (seed 7), 4407 (seed 20260912), and 5087 and 5773 (seed 4242) of a 6000-row
+    /// <c>interactions</c> wave, each as the wave drew it, and row 93133 (seed 20260913) of a 6000-row
+    /// <c>recursion</c> one, added by S40a. The last arrived the way this list is meant to work: the
+    /// shape was deliberately left out of the predicate as one no row had shown, a later seed drew
+    /// one, the run went red rather than quietly classifying it, and it was judged by the same probe
+    /// as the others. Minimisation was tried and is recorded in the entry's own
+    /// <see cref="ExpectedDivergence.Reason"/> as having failed: every shrink that kept upstream
+    /// contradicting ITSELF lost the divergence, because this port reproduces upstream's answer on
+    /// the short forms.
+    /// </para>
+    /// <para>
+    /// <b>S40c REMOVED THE SPLIT ROW, row 1624 of seed 99991, and its reason is worth keeping.</b> It
+    /// was <c>(?P&lt;g1&gt;[𐐀A]{2,2})(?:(?(1)(?&lt;!(?P&gt;g1))[^\d]|[a-f]))?([abz]{0,2})$</c> over
+    /// '𐐀𐐀A', and it stopped diverging when S40c made <c>do_exact_match</c>'s width early-out count
+    /// characters rather than UTF-16 code units. That row's divergence was never this family: the
+    /// subject is three characters, the call inside the lookbehind pushes <c>min_width</c> to four,
+    /// and upstream refuses the match on arithmetic before matching at all. This port had been
+    /// reading the two astral characters as four code units, so it skipped the early-out and found a
+    /// match upstream never looked for.
+    /// </para>
+    /// <para>
+    /// The family itself is untouched, and the same row proves it once the width is out of the way:
+    /// pad the subject to four characters or more and upstream STILL finds nothing while this port
+    /// finds the match, at every length tried up to seven. So only the example row goes, and with it
+    /// the <c>split</c> outcome shape - which the predicate still classifies, and which the next wave
+    /// to draw one will re-supply. Measured 2026-09-13 on regex 2026.7.19.
+    /// </para>
     /// </remarks>
     private const string _groupCallLostMatchRows = """
         {"generator": "interactions", "pattern": "(?P<g1>\\S)(?:(?(1)(?<!(?P>g1))[[:alpha:]]))??([a]{0,0})?\\2\\b", "flags": 0, "namedLists": {}, "subject": "aa𐐨𐐨A", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         {"generator": "interactions", "pattern": "\\b(?(?![\\w\\s])[[:digit:]])(\\w)(?P<g2>[^\\d]{3})(?:(?(2)(?<!(?&g2))[a-f]|[^a]))*", "flags": 16650, "namedLists": {}, "subject": "İİ\nİİﬁﬁ ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 3, "captures": [[1, 3], [1, 3]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 4]}]}}
         {"generator": "interactions", "pattern": "(?r)\\b(?P<g1>[A])(?:(?(1)(?=(?&g1))\\S)){3}(\\p{Nd}+?)?", "flags": 10, "namedLists": {}, "subject": "AA..0", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         {"generator": "interactions", "pattern": "(?r)^([[:alpha:]]+)(?P<g2>[😀])(?:(?(2)(?=(?P>g2))[^\\p{L}]))+?", "flags": 10, "namedLists": {}, "subject": "a😀\r", "operation": "subf", "template": "{g2}{{", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "a😀\r", "count": 0}}
-        {"generator": "interactions", "pattern": "(?P<g1>[𐐀A]{2,2})(?:(?(1)(?<!(?P>g1))[^\\d]|[a-f]))?([abz]{0,2})$", "flags": 65536, "namedLists": {}, "subject": "𐐀𐐀A", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["𐐀𐐀A"]}}
         {"generator": "recursion", "pattern": "(?r)\\b(?<g>[ab]+)(?=(?&g))", "flags": 0, "namedLists": {}, "subject": "ba)((a)((a", "operation": "subf", "template": "{{{0[-1]}ab{1[2]}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ba)((a)((a", "count": 0}}
         """;
+
+    /// <summary>
+    /// The rows of <c>group-call-loses-the-match</c> that the entry's PREDICATE does not reach, and
+    /// which are therefore judged one at a time and keyed on this port's answer - the discipline
+    /// <c>bounded-lazy-repeat-partial</c> uses, and for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One row so far, row 74396 of a 6000-row <c>interactions</c> wave at seed 20260913, added by
+    /// S40c. It is the family exactly - a call reached from a lookahead under <c>(?r)</c>, and a
+    /// <c>*</c> repeat holding it, so zero iterations is always available and the piece cannot remove
+    /// a match - and upstream contradicts itself on it in the family's usual way. Measured 2026-09-13
+    /// on regex 2026.7.19 with <c>finditer</c>, which says more than the <c>sub</c> the wave drew:
+    /// </para>
+    /// <para>
+    ///   <c>(?r)\b\m(?P&lt;g1&gt;[𝔘a])(?:(?(1)(?=(?P&gt;g1))\p{L}))*[a]*</c> over
+    ///   '𝔘𝔘\r\raa𐐨𐐨' gives upstream (4, 6) ALONE; delete the <c>(?:...)*</c> piece, or write the
+    ///   call out as the class it calls, and upstream gives (4, 6) AND (0, 1) - which is this port's
+    ///   answer. The substitution count the row records, 1 against this port's 2, is that missing
+    ///   match seen through the template.
+    /// </para>
+    /// <para>
+    /// WHY NOT WIDEN THE PREDICATE. Its substitution arm requires upstream to have replaced NOTHING,
+    /// because "upstream's output is the untouched subject" is checkable from the row and "upstream
+    /// replaced fewer times than we did" is not - a sub renders as one string, so there is no way to
+    /// ask whether upstream's replacements are a prefix of ours. Loosening it to
+    /// <c>theirs.Count &lt; mine.Count</c> would classify any port defect that substitutes once too
+    /// often in a pattern of this shape. So the row is judged instead, and widening means judging
+    /// another and adding it here.
+    /// </para>
+    /// </remarks>
+    private const string _groupCallLostMatchJudgedRows = """
+        {"generator": "interactions", "pattern": "(?r)\\b\\m(?P<g1>[𝔘a])(?:(?(1)(?=(?P>g1))\\p{L}))*[a]*", "flags": 256, "namedLists": {}, "subject": "𝔘𝔘\r\raa𐐨𐐨", "operation": "sub", "template": "\\1\\1\\1", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𝔘𝔘\r\raaa𐐨𐐨", "count": 1}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_groupCallLostMatchJudgedRows"/>, in the
+    /// same order, as the report renders it.
+    /// </summary>
+    private static readonly string[] _groupCallLostMatchJudgedOurs =
+    [
+        "sub 2 '\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\ud835\\udd18\\u000d\\u000daaa\\ud801\\udc28\\ud801\\udc28'",
+    ];
+
+    /// <summary>
+    /// <see cref="_groupCallLostMatchJudgedRows"/> by its question, mapped to this port's answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _groupCallLostMatchJudged = OracleWave
+        .ParseRows(_groupCallLostMatchJudgedRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _groupCallLostMatchJudgedOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
     /// This port's answer to each row of <see cref="_boundedLazyRows"/>, in the same order, as the
@@ -286,8 +356,23 @@ internal static class ExpectedDivergences
     /// <c>locate_required_string</c> switched off does upstream stretch the partial to (0, 2).
     /// Making the quantifier greedy removes the divergence from both rows, which is what says the
     /// lazy repeat is the cause (tools/probes/upstream-partial-prefilter-free.py, 2026-09-12).
+    /// <para>
+    /// Row 3 is row 98191 of a 6000-row <c>partial</c> wave at seed 20260913, added by S40c. It
+    /// arrived carrying the slice's own family - a group call inside an opposite-direction lookaround
+    /// - and does not belong to it: upstream answers the SAME (0, 2) partial with the call written
+    /// out as its body, with the piece holding it deleted, and with the <c>\K</c> removed, so none of
+    /// those is the cause. It minimises to <c>^([^a-f]??)([\ ])$</c> over ' \r', which is row 1's
+    /// shape with a different class, and it passes this family's own discriminator: spelling the
+    /// bounded repeat GREEDY removes the partial from upstream too. Measured 2026-09-13 on regex
+    /// 2026.7.19.
+    /// </para>
     /// </remarks>
-    private static readonly string[] _boundedLazyOurs = ["no match", "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial"];
+    private static readonly string[] _boundedLazyOurs =
+    [
+        "no match",
+        "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial",
+        "no match",
+    ];
 
     /// <summary>
     /// Every row of <see cref="_boundedLazyRows"/> by its question - pattern, flags, subject,
@@ -623,9 +708,9 @@ internal static class ExpectedDivergences
         ),
         new(
             Id: "group-call-loses-the-match",
-            Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (the first "
-                + "five wave rows replayed against .venvs/regex-2026.9.10 on 2026-09-12 and the "
-                + "sixth on 2026-09-13, identical every time). "
+            Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (the wave "
+                + "rows replayed against .venvs/regex-2026.9.10 on 2026-09-12 and 2026-09-13, "
+                + "identical every time). "
                 + "The same precondition as `group-call-direction` above - a group reached by a call "
                 + "from a lookaround running the other way round from the pattern - and a different "
                 + "symptom: upstream does not record a bad capture, it LOSES the match. This is the "
@@ -653,7 +738,13 @@ internal static class ExpectedDivergences
             PinnedBy: "GroupCallTests.A_group_called_from_a_lookbehind_with_anything_after_it_matches_"
                 + "here_and_not_upstream and .A_zero_width_piece_holding_a_group_call_cannot_remove_a_"
                 + "match_here",
-            Example: _groupCallLostMatchRows,
+            // The judged rows are Example rows TOO, and the blind review is what caught their being
+            // left out. A predicate cannot notice a port that has stopped diverging - the note below
+            // says so - but neither can a judged row that nothing replays: a stale
+            // _groupCallLostMatchJudgedOurs would have silently stopped classifying its row instead
+            // of reddening the run, which is the exact failure this list exists to prevent. Both
+            // sibling row-keyed entries make their judged rows the Example for this reason.
+            Example: _groupCallLostMatchRows + "\n" + _groupCallLostMatchJudgedRows,
             // Narrow on three counts. The pattern must call a group AND hold a lookaround running
             // the other way from itself, which is the defect's precondition rather than a symptom.
             // Upstream must have found STRICTLY LESS than this port. And everything upstream did
@@ -674,9 +765,18 @@ internal static class ExpectedDivergences
             // "group-call-direction: an entry must account for its own example row 1". A predicate
             // cannot notice a port that has stopped diverging; the example rows can, and do.
             Applies: static (row, ours) =>
-                HasGroupCall(row.Pattern)
-                && CallsThroughAnOppositeDirectionLookaround(row)
-                && UpstreamFoundStrictlyLess(row, ours)
+                (
+                    HasGroupCall(row.Pattern)
+                    && CallsThroughAnOppositeDirectionLookaround(row)
+                    && UpstreamFoundStrictlyLess(row, ours)
+                )
+                // ...plus the rows the predicate cannot reach, judged one at a time. See
+                // _groupCallLostMatchJudgedRows for why widening the predicate instead is the worse
+                // trade.
+                || (
+                    _groupCallLostMatchJudged.TryGetValue(Question(row), out string? judged)
+                    && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                )
         ),
         new(
             Id: "bounded-lazy-repeat-partial",

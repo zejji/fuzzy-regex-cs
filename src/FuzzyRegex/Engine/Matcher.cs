@@ -8739,11 +8739,32 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int DoExactMatch(MatchState state, bool search)
     {
-        // Upstream counts codepoints and this counts UTF-16 code units, of which there are never
-        // fewer, so this early-out stays sound: 'units < min_width' implies 'codepoints <
-        // min_width'. Where a surrogate pair makes the two differ, the engine simply does the work
-        // and fails in the dispatch loop instead - the same answer, and only for astral subjects.
-        int available = state.Reverse ? state.TextPos - state.SliceStart : state.SliceEnd - state.TextPos;
+        // CHARACTERS, NOT CODE UNITS, and S40c is the slice that proved the difference is visible.
+        // 'min_width' is a character count, this port's positions are UTF-16 indexes, and a code-unit
+        // subtraction over-counts by one per surrogate pair.
+        //
+        // The comment that stood here argued the mismatch was safe: over-counting can only make the
+        // early-out fail to fire, and "the engine simply does the work and fails in the dispatch loop
+        // instead - the same answer". That is true of a plain match and FALSE of a partial one. The
+        // early-out is guarded by 'partial_side == RE_PARTIAL_NONE' below, so it fires on the
+        // non-partial pass only, and DoMatch falls back to the partial pass exactly when the
+        // non-partial one FAILS. Skipping the early-out therefore does not reach the same answer by a
+        // slower road: the non-partial pass runs and SUCCEEDS, and the partial retry upstream would
+        // have performed never happens.
+        //
+        // Measured 2026-09-13. 'search(r"(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?", "\U00010400",
+        // partial=True)' is a PARTIAL upstream - one character available against a min_width of 2 -
+        // and was a complete match here, because 'available' read the astral character's two code
+        // units as two characters. The ASCII spelling of the same pattern was never affected and
+        // always agreed, which is what made the family look like a group-call defect for two slices.
+        // Pinned by 'PartialMatchingTests.The_width_early_out_that_skips_the_non_partial_pass_
+        // counts_characters_not_code_units'; upstream's own threshold is measured over three callee
+        // widths by tools/probes/upstream-min-width-partial-retry.py.
+        //
+        // CountBetween rounds outward, so a caller that slices into the middle of a surrogate pair
+        // still costs a whole character at that end. That is the old over-counting, surviving only
+        // for a bound upstream cannot express, and it keeps 'available == 0' meaning what it did.
+        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
 
         // The maximum permitted cost.
         state.MaxErrors = 0;

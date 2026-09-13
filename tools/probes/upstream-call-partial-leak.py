@@ -35,6 +35,29 @@
 # lose the partial on an astral subject" but "why does it leak one on an ASCII subject", and the
 # answer decides whether the wave rows are `port right, upstream leaks` - in which case the ASCII
 # rows start diverging once the leak goes - or something else entirely.
+#
+# ---------------------------------------------------------------------------------------------
+# S40c ANSWERED IT, AND THE ANSWER IS "IT IS NOT A LEAK". The two paragraphs above describe the
+# matrix correctly and read it wrongly, so they are kept and this is appended rather than replacing
+# them. The ASCII call rows were right all along and the two astral rows were this port's defect.
+#
+# `min_width` counts a group CALL at the width of the group it calls, even inside a LOOKAROUND,
+# which consumes nothing - so the call form's min_width is 2 where the inlined form's is 1. A
+# partial request runs a NON-PARTIAL pass first and falls back only if it fails, and
+# `do_exact_match`'s width early-out is guarded by `partial_side == RE_PARTIAL_NONE`, so it fires on
+# that first pass alone. One character available against a min_width of 2 therefore SKIPS the
+# non-partial pass, and the partial pass answers instead. Upstream's extra partial is that, and
+# nothing to do with the call's direction.
+#
+# This port counted `available` in UTF-16 code units, so one astral character read as two, the
+# early-out did not fire, the non-partial pass ran and SUCCEEDED, and the retry never happened.
+# Fixed in S40c; the two NO rows this matrix used to print are now `yes`.
+#
+# The threshold is measured over three callee widths, on 2026.7.19 and 2026.9.10, in
+# tools/probes/upstream-min-width-partial-retry.py - which is the file to read for the mechanism.
+# This one is still worth running: it is the wider matrix, and it is what shows that the inline,
+# bare and required-tail rows never moved.
+# ---------------------------------------------------------------------------------------------
 import sys
 from pathlib import Path
 
@@ -68,7 +91,7 @@ CASES = [
 # src/FuzzyRegex/bin/Debug. Printed beside upstream's so the matrix is readable in one run; it is a
 # recorded figure, not something this script asks the port for.
 OURS = {
-    'call, astral': False,
+    'call, astral': True,
     'call, ascii': True,
     'inline, astral': False,
     'inline, ascii': False,
@@ -76,7 +99,7 @@ OURS = {
     'bare optional tail, astral': False,
     'bare required tail, astral': True,
     'bare required tail, ascii': True,
-    'reversed call, astral': False,
+    'reversed call, astral': True,
     'reversed call, ascii': True,
     'reversed inline, astral': False,
     'call outside any lookaround, astral': False,

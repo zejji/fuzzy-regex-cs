@@ -66,8 +66,13 @@ internal static class Substitution
         // would be skipped where upstream takes it. Measured 2026-09-01:
         // `regex.subn('..', r'\g<bad>', '\U0001F600')` is `('\U0001f600', 0)` because 2 > 1, where
         // 2 > 2 is false and the template would be compiled and rejected. Found by S24's blind
-        // review. This is *not* the same comparison as `do_exact_match`'s width check
-        // (`Matcher.cs`), which may safely use code units because it only ever fails early.
+        // review.
+        //
+        // `do_exact_match`'s width check (`Matcher.cs`) is the same comparison and now counts
+        // characters too. It used code units until S40c, under the reading that a check which only
+        // ever fails early may safely over-count; that reading was wrong, because the check gates
+        // the NON-PARTIAL pass of a partial request and failing to fire suppresses the partial
+        // retry. See the comment there.
         if (!pattern.IsFuzzy && pattern.MinWidth > CodepointCount(input, start, end))
         {
             replacements = 0;
