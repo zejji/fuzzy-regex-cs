@@ -146,26 +146,170 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
-    public void Bestmatch_still_agrees_with_upstream_on_the_issue_470_example()
+    public void Bestmatch_answers_the_cheaper_match_where_upstream_answers_the_earlier_one()
     {
-        // 470 bestmatch: span=(0, 6) value='voixes' counts=(1, 0, 0) changes=([3], [], [])
+        // UPSTREAM ANSWERS (0, 6) 'voixes' AND THIS PORT ANSWERS (7, 14) 'voicees'. Upstream's own
+        // open issue 470, and the owner's decision that this port ranks by cost (DECISIONS
+        // 2026-09-12). Measured on regex 2026.7.19 by tools/probes/upstream-bestmatch-cost-ranking.py:
         //
-        // UPSTREAM'S ANSWER, AND THIS PORT'S, AND THE COST RULE SAYS IT SHOULD NOT BE. 'voixes' is
-        // one substitution costing 2; 'voicees' at (7, 14) is one insertion costing 1, so the
-        // cheaper match is the later one. Making the second pass rank by cost (see
-        // 'DoBestFuzzyMatch') cannot help, because 'voicees' never reaches the best list: the FIRST
-        // pass holds
-        // the next run to FEWER ERRORS than the one it has (':17675'), both are one error, so the
-        // search stops at 'voixes'. Reaching it needs a cost BOUND inside 'basic_match', which is
-        // what releases up to 2015.09.28 had and the 2015.11.5 issue 165 hang fix removed.
+        //   470 bestmatch: span=(0, 6) value='voixes' counts=(1, 0, 0) changes=([3], [], [])
         //
-        // This test exists so that change cannot land silently: it is the line that turns red when
-        // the bound goes in, and its replacement is the pinned divergence. S42's second sitting.
+        // 'voixes' is one substitution, which this pattern prices at 2; 'voicees' is one insertion,
+        // priced at 1. Both are ONE error, so upstream's error-count ranking cannot separate them
+        // and takes the earlier. The cost budget in 'Matcher.DoBestFuzzyMatch' walk 0 is what
+        // reaches the later, cheaper one - it holds the next run to a lower COST rather than to a
+        // lower error count, so 'voicees' is still in play where upstream has already stopped.
+        //
+        // The row is in the oracle's ExpectedDivergences as 'bestmatch-ranks-by-cost'.
         Match m = new FuzzyRegex("(?b)(voices){1i+1d+2s<=2}").Match("voixes voicees");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((7, 14));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+    }
+
+    [Test]
+    public void Bestmatch_and_upstream_agree_again_once_the_costs_are_equal()
+    {
+        // The control for the test above, and what confines the divergence to cost equations: the
+        // same pattern and subject with a unit cost equation answers what upstream answers.
+        // Measured the same day:
+        //
+        //   unit bestmatch: span=(0, 6) value='voixes' counts=(1, 0, 0)
+        Match m = new FuzzyRegex("(?b)(voices){1i+1d+1s<=2}").Match("voixes voicees");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 6));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section()
+    {
+        // A GROUP CALL ENTERS THE SAME FUZZY SECTION TWICE, and each entry starts from zero counts.
+        // The three constraint predicates bound the cost of the section currently open, so each
+        // entry passes a budget the two together break - and the cost recorded at 'END_FUZZY' is the
+        // accumulated one. Without the whole-match test at 'END_FUZZY' the first walk of
+        // 'DoBestFuzzyMatch' never sees a strictly cheaper run, 'start_pos' never advances, and this
+        // test HANGS rather than fails. Found by S42's blind review, 2026-09-13.
+        //
+        // Upstream, regex 2026.7.19, measured the same day:
+        //   regex.search(r'(?b)((?:a){1i+2d+1s<=1})(?1)', 'bb')
+        //     -> span=(0, 2) fuzzy_counts=(2, 0, 0)
+        Match m = new FuzzyRegex("(?b)((?:a){1i+2d+1s<=1})(?1)").Match("bb");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+
+        // The unit-cost control, which takes no cost walk at all and always answered.
+        Match unit = new FuzzyRegex("(?b)((?:a){1i+1d+1s<=1})(?1)").Match("bb");
+
+        unit.Success.Should().BeTrue();
+        unit.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_snapshot()
+    {
+        // 'MatchState.TotalCost' and 'TotalErrors' are snapshots written at 'END_FUZZY', and a match
+        // can succeed on a path whose last 'END_FUZZY' belongs to a branch that was backtracked out
+        // of - so both can be STALE where 'MatchState.FuzzyCounts', the counts reported to the
+        // caller, is live. Here the snapshot says four errors costing 4 and the live counts are one
+        // substitution and one deletion costing 2. Ranking on the stale number scores a genuinely
+        // cheaper run as equal, 'start_pos' never advances, and this test HANGS rather than fails.
+        //
+        // Found by S42's blind review of the fix for the group-call hang, 2026-09-13 - the second
+        // hang of the same shape and a different cause, which is why 'DoBestFuzzyMatch' now takes
+        // both numbers from the live counts whenever it is the one ranking.
+        //
+        // UPSTREAM ANSWERS (0, 2) WITH ONE SUBSTITUTION AND ONE DELETION, costing 3 + 1 = 4 under
+        // this equation; this port answers (1, 2) with two deletions, costing 2. regex 2026.7.19:
+        //   regex.search(r'(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)', 'bb')
+        //     -> span=(0, 2) fuzzy_counts=(1, 0, 1)
+        Match m = new FuzzyRegex("(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)").Match("bb");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((1, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+
+        // The unit-cost control: no cost walk, so upstream's answer, and it never hung.
+        Match unit = new FuzzyRegex("(?b)((?:abc){e<=2,1i+1d+1s<=4}(?1)?)").Match("bb");
+
+        unit.Success.Should().BeTrue();
+        (unit.Index, unit.Index + unit.Length).Should().Be((0, 2));
+        unit.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
+    }
+
+    [Test]
+    public void Bestmatch_loses_a_match_that_needs_two_trailing_insertions()
+    {
+        // AN INHERITED UPSTREAM BUG, REPRODUCED FAITHFULLY AND PINNED - ledger entry 12, found while
+        // choosing an ExpectedDivergences example row for 'bestmatch-ranks-by-cost' (S42, 2026-09-13).
+        // '(?b)' LOSES a match that plain fuzzy matching finds. Upstream, regex 2026.7.19:
+        //
+        //   regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')  ->  None
+        //   regex.fullmatch(r'(?:x){e<=3}',     'xyz')  ->  (0, 3) counts=(0, 2, 0)
+        //
+        // The mechanism is two lines meeting. END_FUZZY's backtrack arm is the only place a TRAILING
+        // insertion can come from, and it is guarded by 'total_errors(state->fuzzy_counts) +
+        // total_errors(inner_counts) < state->max_errors' (:15516) - which DOUBLE-COUNTS, because
+        // for a pattern with one fuzzy section the outer counts are the merged inner ones. So n
+        // trailing insertions need 'max_errors' above 2n-1 rather than above n-1. The first pass
+        // finds the two-insertion match with 'max_errors' at PY_SSIZE_T_MAX and records
+        // 'fewest_errors' as 2; the second pass then climbs 'max_errors' only to 2 (:17732) and the
+        // widened-slice fallback uses 2 as well (:17823), and at 2 the guard refuses the second
+        // insertion. Neither can re-find the match the first pass just found, so the whole call
+        // fails.
+        //
+        // This test asserts NO MATCH because that is what this port answers and what upstream
+        // answers. It is a bug on both sides, not a divergence, so the oracle cannot see it - which
+        // is the whole reason Phase 6 sweeps for inherited bugs separately.
+        new FuzzyRegex("(?b)(?:x){e<=3}")
+            .FullMatch("xyz")
+            .Success.Should()
+            .BeFalse();
+
+        // The control, and what says the match is really there to be lost.
+        Match plain = new FuzzyRegex("(?:x){e<=3}").FullMatch("xyz");
+
+        plain.Success.Should().BeTrue();
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+    }
+
+    [Test]
+    public void Bestmatch_terminates_when_an_error_kind_costs_nothing()
+    {
+        // A zero-priced error kind is the one shape that can drive walk 0's cost budget to -1 with
+        // errors still in the match, and the run after that is a PERFECT match whose cost is not
+        // strictly lower than the zero already recorded. Without the 'TotalErrors == 0' clause in
+        // 'DoBestFuzzyMatch' the walk re-finds it for ever, because 'start_pos' never advances.
+        //
+        // This test is a TERMINATION test first and an answer second: if the clause goes, it hangs
+        // rather than fails.
+        //
+        // The answer is also a cost divergence, for the same reason as the two tests above. Upstream,
+        // regex 2026.7.19 on 2026-09-13: (?b)(?:foo){i<=2,0i+2d+2s<=4} over 'xxfoxo' -> (2, 5) with
+        // one substitution, which this equation prices at 2. This port answers (2, 6) 'foxo' with one
+        // insertion, which it prices at nothing.
+        // THE SUBJECT NEEDS BOTH HALVES, and the first draft of this test had only one. A free
+        // insertion gets 'lowestCost' to 0 with an error still in the match, which is what drives the
+        // budget to -1; an EXACT match at or after that candidate is what then succeeds under it, at
+        // a cost that is not strictly lower than 0. 'xxfoxo' alone gives the first half only - the
+        // budget goes to -1 and the next run simply fails, so the walk ends either way and the test
+        // passed with the guard deleted. 'xxfoxofoo' has the exact 'foo' as well.
+        Match m = new FuzzyRegex("(?b)(?:foo){i<=2,0i+2d+2s<=4}").Match("xxfoxofoo");
+
+        m.Success.Should().BeTrue();
+        m.FuzzyCounts.Total.Should().Be(0);
+
+        // The half-subject, kept because it is what makes the paragraph above checkable.
+        Match half = new FuzzyRegex("(?b)(?:foo){i<=2,0i+2d+2s<=4}").Match("xxfoxo");
+
+        half.Success.Should().BeTrue();
+        (half.Index, half.Index + half.Length).Should().Be((2, 6));
+        half.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        half.FuzzyChanges.Insertions.Should().Equal(4);
     }
 
     [Test]

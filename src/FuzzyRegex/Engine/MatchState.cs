@@ -242,6 +242,37 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>max_errors</c>.</summary>
     internal long MaxErrors;
 
+    /// <summary>
+    /// The maximum permitted fuzzy COST for one run of <c>basic_match</c>, the way
+    /// <see cref="MaxErrors"/> is the maximum permitted error count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is upstream's own field, from before the rework</b>: <c>state-&gt;max_cost</c>,
+    /// <c>/* The maximum permitted fuzzy cost. */</c>, at line 579 of <c>_regex.c</c> in release
+    /// 2015.09.28, where <c>any_error_permitted</c> and <c>this_error_permitted</c> ended in
+    /// <c>state-&gt;total_cost &lt;= state-&gt;max_cost</c> and <c>state-&gt;total_cost +
+    /// values[RE_FUZZY_VAL_COST_BASE + fuzzy_type] &lt;= state-&gt;max_cost</c> (<c>:9923</c>,
+    /// <c>:9936</c>). The 2015.11.5 issue-165 hang fix replaced it with <c>max_errors</c> throughout,
+    /// and that is why upstream cannot honour its own cost equations when it ranks - open issue 470.
+    /// The owner's decision is that this port ranks by cost (DECISIONS 2026-09-12), so the bound
+    /// comes back.
+    /// </para>
+    /// <para>
+    /// <b>It is additive, not a replacement.</b> <see cref="MaxErrors"/> stays exactly as upstream
+    /// leaves it and every mode but <c>BESTMATCH</c> leaves this at <see cref="long.MaxValue"/>, so
+    /// the three predicates gain a conjunct that is true by construction and nothing outside
+    /// <c>Matcher.DoBestFuzzyMatch</c> changes behaviour at all. With unit costs the two bounds are
+    /// the same bound: <c>total_cost + 1 &lt;= max_cost</c> is <c>error_count &lt; max_errors</c>.
+    /// </para>
+    /// <para>
+    /// It goes negative, which upstream's <c>size_t</c> could not: the first pass sets it to one
+    /// below the cheapest run so far, and a cost equation may price an error kind at zero. Tests read
+    /// <c>&lt;= 0</c> rather than <c>== 0</c> for that reason.
+    /// </para>
+    /// </remarks>
+    internal long MaxCost;
+
     /// <summary>Upstream <c>total_errors</c>.</summary>
     internal long TotalErrors;
 

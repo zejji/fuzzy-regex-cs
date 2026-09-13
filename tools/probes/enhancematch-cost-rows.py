@@ -1,4 +1,4 @@
-"""Generates `(?e)` rows an ALTERNATION can improve, which the fuzzy generator cannot draw (S41).
+"""Generates `(?e)` and `(?b)` rows an ALTERNATION can improve, which no wave draws (S41, S42).
 
 The committed `fuzzy` generator builds a section by concatenating atoms, so the `ENHANCEMATCH`
 improvement loop almost never has two candidates of different shape to choose between and its chain
@@ -30,6 +30,45 @@ MANY of the 54 are strictly worse depends on how you score a `sub` or a `split` 
 line carries no counts at all, so no single number is quoted here: S41's two reviews scored 7 and 19
 of them by different rules and both are right about what they counted. The 54 is the figure to
 re-run against.
+
+S42 ADDED THE `(?b)` HALF AND THE FIGURES BELOW, and this probe is now the ONLY instrument that
+draws either cost-ranking family: `record-oracle.py`'s `_has_weighted_cost` deliberately refuses to
+put `(?e)` or `(?b)` on a row whose equation prices the three error kinds differently, because an
+oracle cannot judge a comparison the two engines are defined to answer differently. So the report
+this writes is read for the INVARIANT rather than for a green light. The invariant is that this
+port's answer is never DEARER than upstream's under the pattern's own equation.
+
+    python tools/probes/enhancematch-cost-rows.py .scratch/cost.jsonl 777
+    pwsh -File tools/run-oracle.ps1 -Rows .scratch/cost.jsonl
+    python .scratch/analyse-probe.py TestResults/oracle/report.txt   # scoring script, see below
+
+    committed code     agree 2216  expected 32  diverge 252
+      of the 252:      128 this port cheaper, 0 dearer, 3 equal cost, 9 no match at all,
+                       112 `sub`/`split` rows whose report line carries no counts to score
+    BESTMATCH's cost walk turned off (`FuzzyCount == 2` in Matcher.DoBestFuzzyMatch, which no
+    pattern satisfies with one section):
+                       agree 2475  expected  6  diverge  19 - 12 cheaper, 0 dearer, 0 lost,
+                       and every one of the 19 an `(?e)` row, which is what says the other 233
+                       are BESTMATCH's budget and nothing else
+
+The three EQUAL-COST rows are the then-earliest half of the owner's rule, not a defect: both
+engines spend the same errors at the same price and this port's match starts earlier - row 137,
+`(?b)(?:(?:ba+x|ab?)){5i+9s+1d<=4}` finditer over 'yzxyz', where upstream's second match is (4, 4)
+and this port's is (2, 2), both one deletion.
+
+THE NINE THAT MATCH NOTHING ARE AN INHERITED UPSTREAM BUG, ledger entry 12, and they are the honest
+price of this change. All nine are `fullmatch` rows whose cheapest fit needs TRAILING insertions,
+and upstream loses those under `(?b)` on its own: `regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')` is
+None where the same pattern without `(?b)` answers (0, 2, 0). The cost budget does not cause the bug,
+it steers more rows onto it. Pinned by
+Gaps/Engine/FuzzyBestMatchTests.Bestmatch_loses_a_match_that_needs_two_trailing_insertions.
+
+The scoring script is four lines of report parsing and is NOT committed, because the report format
+is the thing that would rot. It reads each `DIVERGE` block, takes the `<n>i+<n>s+<n>d` coefficients
+out of the pattern and the `fuzzy=(s,i,d)` triple out of each side's FIRST match, and compares the
+two costs. First match, not the sum over a scan: a scan's later matches start where its earlier ones
+ended, so summing compares two different decompositions and reports a cheaper first match as a
+dearer row (measured - it called 2 rows dearer that are not).
 
 `run-oracle.ps1 -Rows` records these against the real Python module, so they are ground truth like
 any other wave; they are simply not drawn at random.
@@ -63,9 +102,13 @@ for _ in range(2500):
         body = "(?:" + body + "|" + "".join(rng.choice(ATOMS) for _ in range(rng.randint(1, 3))) + ")"
 
     cs, ci, cd = equation()
-    pattern = "(?e)(?:" + body + "){%di+%ds+%dd<=%d}" % (ci, cs, cd, rng.choice([4, 6, 9, 12, 20, 30]))
+    # S42: half the rows carry `(?b)` instead of `(?e)`, so the one probe covers both cost-ranking
+    # families. They are the same decision reached by different code - `ENHANCEMATCH` moved its
+    # tie-break and `BESTMATCH` moved its BUDGET - so they fail differently and both want drawing.
+    flag = "(?b)" if rng.random() < 0.5 else "(?e)"
+    pattern = flag + "(?:" + body + "){%di+%ds+%dd<=%d}" % (ci, cs, cd, rng.choice([4, 6, 9, 12, 20, 30]))
     if rng.random() < 0.15:
-        pattern = "(?e)(?r)" + pattern[4:]
+        pattern = flag + "(?r)" + pattern[4:]
 
     operation = rng.choice(OPS)
     row = {

@@ -129,6 +129,34 @@ internal sealed class PatternObject
     /// <summary>Upstream <c>fuzzy_count</c>: how many fuzzy sections the pattern has.</summary>
     internal int FuzzyCount;
 
+    /// <summary>
+    /// Whether any fuzzy section prices the three error kinds differently. <b>This port's own field:
+    /// upstream has no equivalent, because nothing upstream ranks by cost.</b>
+    /// </summary>
+    /// <remarks>
+    /// Read by <c>Matcher.DoBestFuzzyMatch</c>, which walks the slice a second time to honour the
+    /// owner's cost ranking (DECISIONS 2026-09-12). Where every error costs the same, a section's
+    /// cost is a fixed multiple of its error count, so the cost ranking and upstream's error-count
+    /// ranking put matches in the same order and that extra walk cannot change the answer. Set in
+    /// <c>NodeCompiler.BuildFuzzy</c>, where the three costs are read off the bytecode.
+    /// </remarks>
+    internal bool HasWeightedFuzzyCosts;
+
+    /// <summary>
+    /// The pattern's first <c>FUZZY</c> node, which when <see cref="FuzzyCount"/> is 1 is its only
+    /// one. <b>This port's own field</b>, for the same consumer as <see cref="HasWeightedFuzzyCosts"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>Matcher.DoBestFuzzyMatch</c>'s cost walk has to price a finished match's errors, and by
+    /// then the section has been popped and <c>MatchState.FuzzyNode</c> is null - which is why
+    /// <c>MatchState.TotalCost</c> exists at all. But that field is a snapshot taken at
+    /// <c>END_FUZZY</c> and a match can succeed on a path whose last <c>END_FUZZY</c> belongs to a
+    /// branch that was backtracked out of, so it can be STALE where <c>MatchState.FuzzyCounts</c> -
+    /// the counts <c>FuzzyRegex</c> reports to the caller - is live. Holding the node lets the walk
+    /// price the live counts instead.
+    /// </remarks>
+    internal Node? SingleFuzzyNode;
+
     /// <summary>Upstream <c>req_offset</c>.</summary>
     internal long ReqOffset;
 

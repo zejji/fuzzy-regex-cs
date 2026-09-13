@@ -3039,6 +3039,12 @@ internal static class Matcher
     }
 
     /// <summary>Upstream <c>any_error_permitted</c> (line 9660).</summary>
+    /// <remarks>
+    /// The last conjunct is <see cref="MatchState.MaxCost"/>, which upstream carried here itself
+    /// until the 2015.11.5 rework: <c>state-&gt;total_cost &lt;= state-&gt;max_cost</c>,
+    /// <c>_regex.c:9923</c> in release 2015.09.28. It is <see cref="long.MaxValue"/> in every mode
+    /// but <c>BESTMATCH</c>.
+    /// </remarks>
     /// <param name="state">The match state, whose <c>fuzzy_node</c> is the section in force.</param>
     /// <returns><see langword="true"/> if one more error of some kind could still fit.</returns>
     private static bool AnyErrorPermitted(MatchState state)
@@ -3046,12 +3052,19 @@ internal static class Matcher
         long[] fuzzyCounts = state.FuzzyCounts;
         Node fuzzyNode = state.FuzzyNode!;
         List<uint> values = fuzzyNode.Values;
+        long cost = TotalCost(fuzzyCounts, fuzzyNode);
 
-        return TotalCost(fuzzyCounts, fuzzyNode) <= values[FuzzyValue.MaxCost]
-            && TotalErrors(fuzzyCounts) < state.MaxErrors;
+        return cost <= values[FuzzyValue.MaxCost]
+            && TotalErrors(fuzzyCounts) < state.MaxErrors
+            && cost <= state.MaxCost;
     }
 
     /// <summary>Upstream <c>this_error_permitted</c> (line 9676).</summary>
+    /// <remarks>
+    /// The last conjunct is <see cref="MatchState.MaxCost"/>, upstream's own until 2015.11.5:
+    /// <c>state-&gt;total_cost + values[RE_FUZZY_VAL_COST_BASE + fuzzy_type] &lt;=
+    /// state-&gt;max_cost</c>, <c>_regex.c:9936</c> in release 2015.09.28.
+    /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="fuzzyType">The error being tried.</param>
     /// <returns><see langword="true"/> if one more error of exactly that kind fits.</returns>
@@ -3066,7 +3079,8 @@ internal static class Matcher
         return fuzzyCounts[fuzzyType] < values[FuzzyValue.MaxBase + fuzzyType]
             && errorCount < values[FuzzyValue.MaxErr]
             && errorCount < state.MaxErrors
-            && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost];
+            && cost + values[FuzzyValue.CostBase + fuzzyType] <= values[FuzzyValue.MaxCost]
+            && cost + values[FuzzyValue.CostBase + fuzzyType] <= state.MaxCost;
     }
 
     /// <summary>Upstream <c>insertion_permitted</c> (line 9695).</summary>
@@ -3088,7 +3102,11 @@ internal static class Matcher
         return fuzzyCounts[FuzzyValue.Ins] < values[FuzzyValue.MaxIns]
             && errorCount < values[FuzzyValue.MaxErr]
             && cost + values[FuzzyValue.InsCost] <= values[FuzzyValue.MaxCost]
-            && errorCount < state.MaxErrors;
+            && errorCount < state.MaxErrors
+            // 2015.09.28 had no 'insertion_permitted' - it arrived with the same rework that removed
+            // 'max_cost' - so this conjunct is 'this_error_permitted' (':9936') applied to the kind
+            // of error this predicate is about.
+            && cost + values[FuzzyValue.InsCost] <= state.MaxCost;
     }
 
     /// <summary>Upstream <c>fuzzy_within_constraints</c> (line 9712).</summary>
@@ -5116,7 +5134,23 @@ internal static class Matcher
                     // sections nest. Upstream has no equivalent.
                     state.TotalCost = TotalCost(totalCounts, state.FuzzyNode!);
 
-                    if (state.TotalErrors > state.MaxErrors)
+                    // THE SECOND TEST IS THIS PORT'S, AND IT IS THE COST TWIN OF UPSTREAM'S OWN LINE.
+                    // The three constraint predicates bound the cost of the section CURRENTLY OPEN,
+                    // exactly as they bound its error count; what bounds the WHOLE MATCH is this
+                    // line, which upstream writes for the error count (':12486') and cannot write
+                    // for the cost because it has no running cost to write it about.
+                    //
+                    // Without it the cost budget is not a budget at all wherever one section is
+                    // entered more than once - a group call, a recursion, a repeat around the
+                    // section - because each entry starts from zero counts and passes the predicate
+                    // while the accumulated cost recorded above climbs past the budget. The first
+                    // walk of 'DoBestFuzzyMatch' then never sees a strictly cheaper run, 'start_pos'
+                    // never advances, and IT HANGS: '(?b)((?:a){1i+2d+1s<=1})(?1)' over 'bb' re-found
+                    // the same cost-2, two-substitution match under a cost-1 budget until it was
+                    // killed, where the unit-cost spelling of the same pattern answers in 80ms.
+                    // Found by S42's blind review, 2026-09-13; pinned by
+                    // 'Gaps.Engine.FuzzyBestMatchTests.Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section'.
+                    if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
                     {
                         state.PushFuzzyCounts(state.Sstack, outerCounts);
                         state.Sstack.PushNode(outerNode);
@@ -7879,13 +7913,34 @@ internal static class Matcher
 
                     // Try one more insertion after the section. This is the only place a trailing
                     // insertion can come from: every item inside the section has already been tried.
+                    // The third test is this port's, for the reason the second test at 'END_FUZZY'
+                    // spells out: 'InsertionPermitted' bounds the cost of the section it is handed,
+                    // and nothing here bounds the cost of the WHOLE MATCH, which is the quantity
+                    // 'DoBestFuzzyMatch' ranks by. It is upstream's second test with cost in place of
+                    // the error count, over 'state.FuzzyCounts' - the counts 'END_FUZZY' has already
+                    // merged - and it refuses only insertions the budget has already said are
+                    // unaffordable, so it cannot lose a match that fits.
+                    //
+                    // ponytail: NO TEST PINS THIS ONE, and it is kept anyway. Deleting it changes
+                    // nothing measurable - the 5854-test suite stays green, all three default-wave
+                    // seeds stay green, S42's blind review swept 1,425 weighted-cost '(?b)' rows
+                    // across two seeds and found no row it affects, and four hand-built
+                    // group-call-plus-trailing-insertion patterns behave identically with and
+                    // without it. What it defends is a HANG rather than a wrong answer: on
+                    // re-entering one section the merged live counts can outrun the per-entry bound
+                    // 'InsertionPermitted' applies, and walk 0 then sees a run it cannot improve on.
+                    // A hang costs an unattended slice where one comparison on a backtrack arm costs
+                    // nothing, so the asymmetry decides it. Upgrade path: if a case is ever
+                    // constructed, it becomes a test here and this note goes.
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
                         && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors
+                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
+                            <= state.MaxCost
                         && FuzzyExtMatch(state, innerNode, state.TextPos)
                     )
                     {
-                        bool endFuzzyReverse = (innerNode!.Status & NodeStatus.Reverse) != 0;
+                        bool endFuzzyReverse = (innerNode.Status & NodeStatus.Reverse) != 0;
                         int endFuzzyLimit = endFuzzyReverse ? state.SliceStart : state.SliceEnd;
 
                         if (state.TextPos != endFuzzyLimit)
@@ -8875,6 +8930,11 @@ internal static class Matcher
         // The maximum permitted cost.
         state.MaxErrors = 0;
 
+        // No cost bound: 'max_errors' of 0 already forbids every error, so the bound 'BESTMATCH'
+        // needs would be redundant here. Set all the same, because one state serves a whole scan and
+        // a previous 'BESTMATCH' call must not leave its bound behind.
+        state.MaxCost = long.MaxValue;
+
         // NOT PORTED: best_match_pos / best_text_pos, which only the POSIX and BESTMATCH paths read.
 
         // Initialise the state.
@@ -9006,6 +9066,7 @@ internal static class Matcher
 
         // The maximum permitted cost.
         state.MaxErrors = long.MaxValue;
+        state.MaxCost = long.MaxValue;
         long fewestErrors = long.MaxValue;
 
         // Upstream has neither of these: its 'fewest_errors' does this job as well as its own, and
@@ -9195,46 +9256,42 @@ internal static class Matcher
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two passes. The first walks <c>start_pos</c> across the slice with <see cref="MatchState.MaxErrors"/>
-    /// held one below the fewest seen so far, collecting every equal-best <c>(match_pos, text_pos)</c>
-    /// pair into the best list and its changes into the best changes list, and stopping at a perfect
-    /// match. The second, when the best is not perfect, revisits each entry at up to
-    /// <c>min(fewest_errors, RE_MAX_ERRORS)</c> offsets from its <c>match_pos</c> with
-    /// <see cref="MatchState.MaxErrors"/> climbing from 1, keeping the earliest lowest-cost result; if
-    /// nothing improves on the candidates, it re-runs entry 0 inside a slice widened by
-    /// <c>fewest_errors</c> at each end and copies the recorded changes back over it.
+    /// Two passes. The first walks <c>start_pos</c> across the slice with a budget held one below the
+    /// best seen so far, collecting every equal-best <c>(match_pos, text_pos)</c> pair into the best
+    /// list and its changes into the best changes list, and stopping at a perfect match. The second,
+    /// when the best is not perfect, revisits each entry at up to <c>min(fewest_errors,
+    /// RE_MAX_ERRORS)</c> offsets from its <c>match_pos</c> with <see cref="MatchState.MaxErrors"/>
+    /// climbing from 1, keeping the earliest lowest-error result; if nothing improves on the
+    /// candidates, it re-runs entry 0 inside a slice widened by <c>fewest_errors</c> at each end and
+    /// copies the recorded changes back over it.
     /// </para>
     /// <para>
-    /// <b>THIS RANKS BY ERROR COUNT, WHICH IS UPSTREAM'S RULE AND NOT THIS PORT'S.</b> The owner's
-    /// decision (DECISIONS 2026-09-12) is that fuzzy ranking goes by cost - see
-    /// <see cref="IsBetterFuzzyMatch"/>, which <c>ENHANCEMATCH</c> already uses, and upstream's open
-    /// issue 470. <c>BESTMATCH</c> does not use it yet, and S42's first sitting measured why rather
-    /// than leaving it to the next session to discover.
+    /// <b>THE BUDGET IS COST WHERE UPSTREAM'S IS ERROR COUNT, AND THAT IS THIS PORT'S ONE DELIBERATE
+    /// DIVERGENCE HERE</b> (owner decision, DECISIONS 2026-09-12; upstream's open issue 470).
+    /// Upstream's first pass is <c>state-&gt;max_errors = fewest_errors - 1</c> (<c>:17675</c>); this
+    /// port's is <see cref="MatchState.MaxCost"/> <c>= lowest_cost - 1</c>, which is what releases up
+    /// to 2015.09.28 had as <c>state-&gt;max_cost = state-&gt;total_cost - 1</c> (<c>_regex.c:16352</c>
+    /// in that release) before the 2015.11.5 issue-165 hang fix replaced cost with error count
+    /// throughout. With unit costs the two budgets are the same budget, so no ported test changes.
     /// </para>
     /// <para>
-    /// <b>The cost rule cannot be reached from the second pass alone.</b> Issue 470's own example is
-    /// the proof: <c>(?b)(voices){1i+1d+2s&lt;=2}</c> over <c>voixes voicees</c> should answer
-    /// <c>voicees</c> - one insertion costing 1 against one substitution costing 2 - and the second
-    /// pass never sees it, because the FIRST pass holds the next run to FEWER ERRORS than the one it
-    /// has (<c>:17675</c>), both candidates are one error, and the search stops at <c>voixes</c>.
-    /// Reaching it needs a cost BOUND inside <c>BasicMatch</c>, which is what releases up to
-    /// 2015.09.28 had (<c>state-&gt;max_cost = state-&gt;total_cost - 1</c>) and the 2015.11.5 issue
-    /// 165 hang fix replaced with <c>max_errors</c> throughout. That bound is its own change with its
-    /// own hang risk, and it is S42's second sitting.
+    /// <b>The bound has to be in the first pass, and the second pass then needs no ranking change at
+    /// all.</b> Issue 470's own example is why the first half is true:
+    /// <c>(?b)(voices){1i+1d+2s&lt;=2}</c> over <c>voixes voicees</c> must answer <c>voicees</c> - one
+    /// insertion costing 1 against one substitution costing 2 - and with an error-count budget the
+    /// second pass never sees it, because both candidates are one error and the search stops at
+    /// <c>voixes</c>. The second half is the cheaper half of the change: the first pass now hands the
+    /// second the CHEAPEST candidate, <see cref="MatchState.MaxCost"/> stays at that cost for the
+    /// whole second pass so no refinement can be dearer, and inside that cap upstream's own
+    /// fewest-errors-then-earliest rule IS the owner's rule of ties by fewer errors, then earliest. So the
+    /// second pass is upstream's, line for line, with one assignment in front of it.
     /// </para>
     /// <para>
-    /// <b>Layering the cost rule into the equal-count tie-break instead does not buy the decision and
-    /// does cost a red wave.</b> Measured 2026-09-13, with the tie-break reading "cheapest, then
-    /// upstream's earliest": the issue 470 example is unchanged - so the owner's rule is still not
-    /// honoured - and the <c>fuzzy</c> generator's default wave goes from 0 divergences to 3, 2 and 3
-    /// of 2000 rows at seeds 7, 4242 and 20260913. Every one of them is a CHEAPER match at a
-    /// DIFFERENT SPAN - in an overlapped scan it shows as a LOST match, 4 where upstream has 5 - which
-    /// is the family <c>ExpectedDivergences</c>' <c>enhancematch-ranks-by-cost</c>
-    /// entry deliberately reports rather than classifies, because it is also what a real engine
-    /// defect looks like. So the half-measure trades an unhonoured decision for a blind spot. The
-    /// whole change or none of it; this sitting ships none of it, and the gap test
-    /// <c>Bestmatch_still_agrees_with_upstream_on_the_issue_470_example</c> is what turns red when
-    /// the other sitting lands.
+    /// <b>What was tried and rejected first, because the shape of it is not obvious.</b> S42's first
+    /// sitting layered the cost rule into the second pass's equal-count tie-break and left the first
+    /// pass alone. Measured 2026-09-13: the issue 470 example was unchanged - the decision still not
+    /// honoured - and the <c>fuzzy</c> wave went from 0 divergences to 3, 2 and 3 of 2000 rows, every
+    /// one a cheaper match at a different span. The whole change or none of it.
     /// </para>
     /// <para>
     /// <b>Three places here count CHARACTERS where the position is a UTF-16 index</b>, because
@@ -9254,9 +9311,32 @@ internal static class Matcher
         long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
         int step = state.Reverse ? -1 : 1;
 
-        // The maximum permitted cost.
-        state.MaxErrors = long.MaxValue;
+        // WHICH BUDGET BOUNDS THE PASSES. Two conditions, one for soundness and one for waste.
+        //
+        // ONE FUZZY SECTION, because a cost is only a number the bound and the answer agree on while
+        // ONE equation prices every error in the match, and upstream's own 'fuzzy_count' is what says
+        // so. With a second FUZZY section an error made inside the inner one is priced at the inner
+        // rates while it is being made - which is what the constraint predicates check the bound
+        // against - and at the outer rates once 'END_FUZZY' merges the counts, which is what
+        // 'state->total_cost' then reports. The two numbers differ, so the budget never bites, and
+        // the walk does not merely mis-rank: 'start_pos' never advances, so IT HANGS. Measured
+        // 2026-09-13 - '(?b)(?:(?:b\W){e:0}){1i+2d+1s<=4}' over 'B-\U0001D518' re-found the same
+        // cost-4, two-error match under a cost-3 budget until it was killed.
+        //
+        // A WEIGHTED EQUATION, because otherwise the cost walk cannot change the answer and is pure
+        // cost. Where the three error kinds are priced the same, a match's cost is a fixed multiple
+        // of its error count and the two rankings agree row for row. Measured on the committed
+        // seed-7 fuzzy wave, 665 `(?b)` rows: taking the walk on every row is 1964 runs of
+        // 'BasicMatch' against upstream's 1600, +22.8%, for 462 matches either way; taking it only on
+        // weighted rows leaves that wave at upstream's 1600 exactly, because no row in it is
+        // weighted - `record-oracle.py` no longer pairs the two.
+        //
+        // Both conditions fall back to upstream's error-count budget, which is what those patterns
+        // would have had anyway, so neither can lose a match this port would otherwise find.
+        bool rankByCost = state.Pattern.FuzzyCount == 1 && state.Pattern.HasWeightedFuzzyCosts;
+
         long fewestErrors = long.MaxValue;
+        long lowestCost = long.MaxValue;
 
         state.BestTextPos = state.Reverse ? state.SliceStart : state.SliceEnd;
 
@@ -9267,75 +9347,185 @@ internal static class Matcher
         List<List<FuzzyChange>> bestChangesList = [];
 
         int status = MatchStatus.Failure;
+        int firstStartPos = state.TextPos;
+        int startPos;
 
-        // Search the text for the best match.
-        int startPos = state.TextPos;
-        while (state.SliceStart <= startPos && startPos <= state.SliceEnd)
+        // UPSTREAM HAS ONE WALK OVER THE SLICE AND THIS PORT HAS TWO, and the reason is arithmetic
+        // rather than taste. The owner's rule is lexicographic - cheapest, then fewest errors, then
+        // earliest - and a single scalar budget cannot express a lexicographic order: a budget that
+        // holds the next run to a strictly lower COST cannot also let an equal-cost run through to be
+        // judged on its error count, and one that holds it to strictly fewer ERRORS prunes the
+        // cheaper-but-equal-count match that is the whole of issue 470. So:
+        //
+        //   walk 0 - this port's - answers "what is the cheapest match in this slice?" and nothing
+        //            else. It keeps no candidates.
+        //   walk 1 - UPSTREAM'S WALK (':17612-17676'), unchanged, run with 'max_cost' pinned at that
+        //            answer, so every run it sees costs exactly the minimum and its own
+        //            fewest-errors rule is the owner's tie-break. It is the one that fills the best
+        //            list.
+        //
+        // Both terminate for upstream's reason: 'start_pos' does not advance, so each holds the next
+        // run to strictly better than the last on the quantity it bounds. For walk 0 that rests on
+        // the whole-match cost test at 'END_FUZZY' - see the comment there - and NOT on the three
+        // constraint predicates, which bound one section at a time and let a group call, a recursion
+        // or a repeat spend the budget twice over. Walk 0 is skipped when the cost budget is unsound
+        // (see 'rankByCost'), which leaves upstream's function exactly.
+        for (int walk = rankByCost ? 0 : 1; walk <= 1; ++walk)
         {
-            state.TextPos = startPos;
-            state.MustAdvance = mustAdvance;
+            bool byCost = walk == 0;
 
-            // Initialise the state.
-            state.InitMatch();
+            state.MaxErrors = long.MaxValue;
+            state.MaxCost = byCost ? long.MaxValue : lowestCost;
+            fewestErrors = long.MaxValue;
 
-            status = MatchStatus.Success;
-            if (
-                state.MaxErrors == 0
-                && state.PartialSide == MatchState.PartialNone
-                && (available < state.MinWidth || (available == 0 && state.MustAdvance))
-            )
+            bestList.Clear();
+            bestChangesList.Clear();
+
+            // Search the text for the best match.
+            startPos = firstStartPos;
+            while (state.SliceStart <= startPos && startPos <= state.SliceEnd)
             {
-                // An exact match, and partial matches not permitted.
-                status = MatchStatus.Failure;
-            }
+                state.TextPos = startPos;
+                state.MustAdvance = mustAdvance;
 
-            if (status == MatchStatus.Success)
-            {
-                status = BasicMatch(state, search);
-            }
+                // Initialise the state.
+                state.InitMatch();
 
-            // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a return
-            // here: its label frees the two lists and returns the status, and the lists are managed.
-            if (status < 0)
-            {
-                return status;
-            }
-
-            if (status == MatchStatus.Failure)
-            {
-                break;
-            }
-
-            // It was a successful match.
-            foundMatch = true;
-
-            if (state.TotalErrors < fewestErrors)
-            {
-                // This match was better than any of the previous ones.
-                fewestErrors = state.TotalErrors;
-
-                if (state.TotalErrors == 0)
+                status = MatchStatus.Success;
+                if (
+                    // Upstream tests 'max_errors == 0' because that is what it bounds the pass by;
+                    // release 2015.09.28 spelled the same guard over its cost budget as
+                    // 'state->max_cost == 0' (':16270'). It reads '<= 0' rather than '== 0' because a
+                    // cost equation may price an error kind at zero, and then the budget below goes
+                    // to -1 where upstream's 'size_t' could only wrap.
+                    (byCost ? state.MaxCost <= 0 : state.MaxErrors == 0)
+                    && state.PartialSide == MatchState.PartialNone
+                    && (available < state.MinWidth || (available == 0 && state.MustAdvance))
+                )
                 {
-                    // It was a perfect match.
+                    // An exact match, and partial matches not permitted.
+                    status = MatchStatus.Failure;
+                }
+
+                if (status == MatchStatus.Success)
+                {
+                    status = BasicMatch(state, search);
+                }
+
+                // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a
+                // return here: its label frees the two lists and returns the status, and the lists
+                // are managed.
+                if (status < 0)
+                {
+                    return status;
+                }
+
+                if (status == MatchStatus.Failure)
+                {
                     break;
                 }
 
-                // Forget all the previous worse matches and remember this one.
-                bestList.Clear();
-                bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+                // It was a successful match.
+                foundMatch = true;
 
-                bestChangesList.Clear();
-                AddBestFuzzyChanges(state, bestChangesList);
+                // WHAT THIS RUN COST AND HOW MANY ERRORS IT SPENT, taken from the LIVE counts rather
+                // than from 'state.TotalCost' and 'state.TotalErrors' whenever this port is ranking.
+                //
+                // Those two fields are snapshots written at 'END_FUZZY', and a match can succeed on a
+                // path whose last 'END_FUZZY' belongs to a branch that was backtracked out of - so
+                // they can be STALE, while 'state.FuzzyCounts' is the live count 'FuzzyRegex' hands
+                // the caller as 'Match.FuzzyCounts'. Ranking on a stale number does not merely
+                // mis-rank: a run that really is cheaper is scored as equal, 'start_pos' never
+                // advances, and walk 0 HANGS. Found by S42's blind review of the fix for the previous
+                // hang, 2026-09-13: '(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)' over 'bb' reported cost 4
+                // for a match whose live counts are one substitution and one deletion, costing 2.
+                //
+                // Walk 1 is upstream's walk and keeps upstream's fields, stale exactly where
+                // upstream's are, because its job is to answer what upstream answers.
+                long runCost = state.TotalCost;
+                long runErrors = state.TotalErrors;
+
+                if (rankByCost)
+                {
+                    // 'rankByCost' guarantees exactly one FUZZY section, so its node is the one that
+                    // prices every error in the match and 'SingleFuzzyNode' is it.
+                    runCost = TotalCost(state.FuzzyCounts, state.Pattern.SingleFuzzyNode!);
+                    runErrors = TotalErrors(state.FuzzyCounts);
+                }
+
+                // The 'runErrors == 0' clause is this port's, and it is what keeps walk 0 finite.
+                // A cost equation may price an error kind at zero, and then 'lowestCost' reaches 0
+                // with errors still in the match; the budget goes to -1, which forbids every error,
+                // and the run after it is a PERFECT match whose cost is not strictly lower than 0.
+                // Without the clause that match falls into the branch below, 'start_pos' does not
+                // advance, the budget does not change, and the walk re-finds it for ever. Upstream
+                // cannot reach the case: its budget is 'fewest_errors - 1' and it breaks at 0 errors,
+                // so it is never handed an equal-budget success. Held by
+                // 'Gaps.Engine.FuzzyBestMatchTests.Bestmatch_terminates_when_an_error_kind_costs_nothing'.
+                if ((byCost ? runCost < lowestCost : runErrors < fewestErrors) || runErrors == 0)
+                {
+                    // This match was better than any of the previous ones.
+                    lowestCost = byCost ? runCost : Math.Min(lowestCost, runCost);
+                    fewestErrors = runErrors;
+
+                    if (runErrors == 0)
+                    {
+                        // It was a perfect match. Upstream's test is 'fewest_errors == 0' and it
+                        // stays that: a perfect match is one with no errors, which costs nothing,
+                        // whereas a cost of zero can still have been bought with errors a zero-price
+                        // equation gave away, and the second pass must still run on those.
+                        break;
+                    }
+
+                    // Forget all the previous worse matches and remember this one.
+                    bestList.Clear();
+                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+
+                    bestChangesList.Clear();
+                    AddBestFuzzyChanges(state, bestChangesList);
+                }
+                else if (byCost ? runCost == lowestCost : runErrors == fewestErrors)
+                {
+                    // This match was as good as the previous matches. Remember this one.
+                    //
+                    // UNREACHABLE under either budget, and it is upstream's line (':17664') left
+                    // where upstream has it. The budget below holds the next run to STRICTLY better
+                    // than this one, so a run that succeeds has always improved and the first branch
+                    // always takes it; the best list therefore holds exactly one entry, upstream as
+                    // well as here.
+                    //
+                    // It was NOT unreachable while the cost budget bounded one section rather than
+                    // the whole match: that is the branch the group-call hang spun in, appending a
+                    // run of unchanged cost for ever. The whole-match test at 'END_FUZZY' is what
+                    // makes the sentence above true again, which is worth knowing before trusting
+                    // any "unreachable" claim in this function.
+                    bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+                    AddBestFuzzyChanges(state, bestChangesList);
+                }
+
+                startPos = state.MatchPos;
+
+                // The budget, and each walk's only guarantee of progress: 'start_pos' does not
+                // advance, so a run that is not held to strictly better than the last re-finds it for
+                // ever. Upstream: 'state->max_errors = fewest_errors - 1' (':17675'). Walk 0: release
+                // 2015.09.28's 'state->max_cost = state->total_cost - 1' (':16352').
+                if (byCost)
+                {
+                    state.MaxCost = lowestCost - 1;
+                }
+                else
+                {
+                    state.MaxErrors = fewestErrors - 1;
+                }
             }
-            else if (state.TotalErrors == fewestErrors)
+
+            if (!foundMatch || fewestErrors == 0)
             {
-                // This match was as good as the previous matches. Remember this one.
-                bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
-                AddBestFuzzyChanges(state, bestChangesList);
+                // Nothing matched at all, or walk 0 found a perfect match - and a perfect match is
+                // already the cheapest with the fewest errors, so there is nothing for walk 1 to
+                // settle.
+                break;
             }
-
-            startPos = state.MatchPos;
-            state.MaxErrors = fewestErrors - 1;
         }
 
         if (!foundMatch)
@@ -9355,6 +9545,19 @@ internal static class Matcher
         int sliceEnd = state.SliceEnd;
 
         long errorLimit = Math.Min(fewestErrors, FuzzyValue.MaxErrorsLimit);
+
+        // THE WHOLE OF THE COST RULE IN THE SECOND PASS, and the reason the rest of it is upstream's
+        // line for line. The first pass has just established that nothing in the slice matches for
+        // less than 'lowestCost', so holding every run of this pass to that cost means a refinement
+        // can never be dearer than the candidate it replaces - and inside the cap upstream's own
+        // "fewest errors, then earliest" is exactly the owner's rule of ties by fewer errors, then earliest.
+        // The climb below stays on 'max_errors', where 'RE_MAX_ERRORS' bounds it at ten; climbing a
+        // cost instead would be unbounded, because a cost equation may price an error in the
+        // thousands.
+        if (rankByCost)
+        {
+            state.MaxCost = lowestCost;
+        }
 
         Span<long> bestFuzzyCounts = stackalloc long[FuzzyValue.Count];
         List<FuzzyChange> bestFuzzyChanges = [];
@@ -9532,6 +9735,7 @@ internal static class Matcher
     {
         // The maximum permitted cost.
         state.MaxErrors = long.MaxValue;
+        state.MaxCost = long.MaxValue;
 
         state.BestMatchPos = state.TextPos;
         state.BestTextPos = state.Reverse ? state.SliceStart : state.SliceEnd;

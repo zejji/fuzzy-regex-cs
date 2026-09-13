@@ -114,6 +114,45 @@ public sealed class FuzzyEnhanceMatchTests
     }
 
     [Test]
+    public void Cost_ranking_keeps_the_cheaper_match_at_a_different_span_too()
+    {
+        // UPSTREAM ANSWERS (2, 4) WITH TWO DELETIONS AND THIS PORT ANSWERS (0, 4) WITH THREE
+        // SUBSTITUTIONS, and the port's is the cheaper: '1i+2d+1s<=4' prices two deletions at 4 and
+        // three substitutions at 3. Measured on regex 2026.7.19, 2026-09-13:
+        //
+        //   plain search('(?:\d\wba){1i+2d+1s<=4}', 'XX8QbaY'): span=(0, 4) counts=(3, 0, 0)
+        //   (?e)  search('(?e)(?:\d\wba){1i+2d+1s<=4}', 'XX8QbaY'): span=(2, 4) counts=(0, 0, 2)
+        //     changes=([], [], [4, 5])
+        //
+        // THIS ROW IS RECORDED BECAUSE IT WAS MISREAD AS A DEFECT. S42's first sitting handed it on
+        // as "a real ENHANCEMATCH defect that is NOT the cost divergence", on the strength of
+        // reverting 'IsBetterFuzzyMatch' to upstream's 'errors < bestErrors' and seeing the row
+        // still diverge. Re-run on 2026-09-13 with that same revert, the row AGREES and only the
+        // deliberate cost test fails, so the revert cannot have been in the build that was measured.
+        // It is the plain cost divergence at a DIFFERENT SPAN - the family DECISIONS 2026-09-13 says
+        // 'enhancematch-ranks-by-cost' deliberately reports rather than classifies, because widening
+        // the predicate to take it would also swallow what a real engine defect looks like.
+        Match m = new FuzzyRegex(@"(?e)(?:\d\wba){1i+2d+1s<=4}").Match("XX8QbaY");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(3, 0, 0));
+    }
+
+    [Test]
+    public void Cost_ranking_at_a_different_span_agrees_again_once_the_costs_are_equal()
+    {
+        // The control for the test above. Upstream, measured the same day:
+        //
+        //   (?e)search('(?e)(?:\d\wba){1i+1d+1s<=4}', 'XX8QbaY'): span=(2, 4) counts=(0, 0, 2)
+        Match m = new FuzzyRegex(@"(?e)(?:\d\wba){1i+1d+1s<=4}").Match("XX8QbaY");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((2, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+    }
+
+    [Test]
     public void Cost_ranking_keeps_the_cheaper_match_where_upstream_takes_the_one_with_fewer_errors()
     {
         // C plain fullmatch('(?:x|xyq){1i+9s+9d<=20}', 'xyz'): counts=(0, 2, 0) changes=([], [1, 2], [])

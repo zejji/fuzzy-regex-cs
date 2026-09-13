@@ -872,3 +872,72 @@ defect; it is the same defect as above, reached by a different door. Pinned by
 
 **Related:** entry 7, the other inherited bug on Phase 6's list.
 
+---
+
+## 12. `BESTMATCH` loses a match that plain fuzzy matching finds, when the best fit needs two trailing insertions
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
+
+```python
+>>> import regex
+>>> regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')
+None
+>>> regex.fullmatch(r'(?:x){e<=3}', 'xyz').fuzzy_counts
+(0, 2, 0)
+```
+
+`BESTMATCH` is documented as finding the *best* fuzzy match rather than the first. Here it finds
+none, while the same pattern without the flag matches the whole subject with two insertions. The
+budget is not the limit - `{i<=2}` and `{e<=3}` both fail, and `{e<=9}` fails too.
+
+**The boundary is exactly two**, which is what names the mechanism:
+
+```python
+>>> regex.fullmatch(r'(?b)(?:x){e<=1}', 'xy').fuzzy_counts   # one insertion: (0, 1, 0)
+>>> regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')               # two: None
+```
+
+**Faulting mechanism: `do_best_fuzzy_match` (`:17584`) meeting the trailing-insertion guard in
+`basic_match`'s `RE_OP_END_FUZZY` backtrack arm (`:15515-15517`).** That guard is
+
+```c
+if (insertion_permitted(state, inner_node, inner_counts) &&
+  total_errors(state->fuzzy_counts) + total_errors(inner_counts) <
+  state->max_errors && fuzzy_ext_match(state, inner_node, state->text_pos)) {
+```
+
+and it DOUBLE-COUNTS. For a pattern with a single fuzzy section, `END_FUZZY` has already merged the
+inner counts into `state->fuzzy_counts` (`:12473-12484`), so the two terms are the same errors added
+twice: *n* trailing insertions need `max_errors` above *2n-1* rather than above *n-1*.
+
+The first pass never sees it, because it runs with `max_errors` at `PY_SSIZE_T_MAX`; it finds the
+two-insertion match and records `fewest_errors = 2`. The second pass then climbs `max_errors` only
+from 1 to `min(fewest_errors, RE_MAX_ERRORS)` = 2 (`:17730-17733`), and the widened-slice fallback
+uses `fewest_errors` = 2 as well (`:17823`). At 2 the guard refuses the second insertion, so neither
+can re-find the match the first pass just found, and the whole call returns no match.
+
+**Proposed fix:** drop one of the two terms, so the guard reads
+`total_errors(state->fuzzy_counts) < state->max_errors`, matching every other `max_errors` test in
+the file (`any_error_permitted` `:9672`, `this_error_permitted` `:9690`, `insertion_permitted`
+`:9708`), each of which asks about ONE set of counts. `insertion_permitted` on the line above already
+applies the section's own limits to `inner_counts`, so nothing is lost.
+
+**This port reproduces it faithfully** - `Matcher` carries upstream's line unchanged - and pins the
+behaviour in
+`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_loses_a_match_that_needs_two_trailing_insertions`, which
+asserts NO match because that is what both engines answer. The oracle is blind to it for the reason
+the roadmap gives: a bug reproduced faithfully shows up as agreement.
+
+**Found by S42's second sitting, 2026-09-13**, while choosing an `ExpectedDivergences` example row
+for `bestmatch-ranks-by-cost`. The cost budget does not cause it and does widen its reach: on
+`tools/probes/enhancematch-cost-rows.py` at seed 777, nine of 2500 rows match nothing with the cost
+walk on and none do with it off, and all nine are `fullmatch` rows whose cheapest fit is
+insertion-heavy. That is the honest price of the ranking change until this is fixed, and it is why
+the example row for that entry uses substitutions.
+
+**Related:** entries 9 and 11, the other inherited fuzzy bugs the oracle cannot see, and Phase 6's
+inherited-bug sweep.
+

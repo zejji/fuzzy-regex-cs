@@ -472,6 +472,20 @@ internal static class NodeCompiler
         startNode.Values[FuzzyValue.SubCost] = args.At(12);
         startNode.Values[FuzzyValue.MaxCost] = args.At(13);
 
+        // THIS PORT'S OWN LINE, for 'Matcher.DoBestFuzzyMatch'. Upstream has no equivalent because
+        // nothing upstream ranks by cost. A section whose three costs are equal prices every error
+        // the same, so its cost is a fixed multiple of its error count and the two rankings order
+        // matches identically - which is what lets 'BESTMATCH' skip the extra walk over the slice
+        // that the cost budget needs. Measured on the committed seed-7 fuzzy wave, 665 `(?b)` rows:
+        // the walk costs 1964 runs of 'BasicMatch' against upstream's 1600 when it is taken for
+        // every row, and nothing at all when it is taken only for the rows it can change.
+        if (args.At(10) != args.At(11) || args.At(11) != args.At(12))
+        {
+            args.Pattern.HasWeightedFuzzyCosts = true;
+        }
+
+        args.Pattern.SingleFuzzyNode ??= startNode;
+
         args.Code += 14;
 
         CompileArgs subargs;

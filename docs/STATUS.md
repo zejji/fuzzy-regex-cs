@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 100.0%** (1966 of 1966 ported upstream tests passing).
+**Overall parity: 100.0%** (1967 of 1967 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -28,7 +28,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Flags | 20 | 20 | 0 | 0 | 100.0% |
 | Format | 11 | 11 | 0 | 0 | 100.0% |
 | FullMatch | 12 | 12 | 0 | 0 | 100.0% |
-| Fuzzy | 112 | 112 | 0 | 0 | 100.0% |
+| Fuzzy | 113 | 113 | 0 | 0 | 100.0% |
 | Grapheme | 5 | 5 | 0 | 0 | 100.0% |
 | Groups | 65 | 65 | 0 | 0 | 100.0% |
 | Lookaround | 38 | 38 | 0 | 0 | 100.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3859 | 3859 | 0 | 0 |
+| Gaps | 3866 | 3866 | 0 | 0 |
 
 ## Tests waiting on a capability
 

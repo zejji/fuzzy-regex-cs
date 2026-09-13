@@ -73,10 +73,13 @@ All line references are `upstream/src/_regex.c` unless marked.
 - [x] Tag delivered; counts in closing notes; every fuzzy tag now delivered, zero `needs:fuzzy-*`
       skips anywhere.
 - [x] `fuzzy` generator with `(?b)` green at three seeds.
-- [ ] PORTMAP rows 417 and 428 rewritten as ported; the cost ranking in the "where we diverge"
+- [x] PORTMAP rows 417 and 428 rewritten as ported; the cost ranking in the "where we diverge"
       table; ledger entry for 470 written, nothing filed; benchmark numbers in the closing notes.
-      *(PORTMAP done. The "where we diverge" row, the 470 ledger entry and the benchmark all belong
-      to the cost ranking, which is the second sitting.)*
+      *(All four done in the second sitting. One correction: issue 470 gets no LEDGER section,
+      because the ledger is for defects this port would report and 470 is the behaviour the owner
+      decided to diverge FROM - its evidence lives in DECISIONS 2026-09-12 and in the
+      `bestmatch-ranks-by-cost` entry instead. The second sitting did add a real ledger entry, 12,
+      for an inherited bug it found on the way.)*
 - [x] Ratchet GREEN, baseline updated, blind review (hunt: `start_pos = state->match_pos` versus
       `text_pos` after a match; `max_offset` computed from the wrong end under `(?r)`), commit.
 
@@ -220,3 +223,217 @@ and a measurement; and STATE.md at 42 lines against its own 30-line rule. **No d
 code either time.** That a whole review can come back as twelve false statements in prose is worth
 saying out loud: the line references in this repo are load-bearing, a future sync reads them, and
 none of them is checked by anything that runs.
+
+## Closing notes - second sitting, 2026-09-13 (the slice closes)
+
+**What landed.** `BESTMATCH` now ranks by COST, which is the half the first sitting owed. The change
+is not the one either the slice file or the first sitting expected, and the shape of it is the thing
+worth carrying forward.
+
+**The owner's rule is lexicographic and a single scalar budget cannot express a lexicographic order.**
+Ranking cheapest, then fewest errors, then earliest needs a budget that lets an equal-cost run through to be
+judged on its error count - and a budget that holds the next run to a strictly lower COST cannot, while
+one that holds it to strictly fewer ERRORS prunes the cheaper-but-equal-count match that is all of
+issue 470. So `Matcher.DoBestFuzzyMatch` walks the slice TWICE where upstream walks it once:
+
+* **walk 0**, this port's, bounded by `MatchState.MaxCost`, answers "what is the cheapest match in this
+  slice?" and keeps no candidates;
+* **walk 1** is UPSTREAM'S WALK (`:17612-17676`) unchanged, run with the cost pinned at that answer, so
+  its own fewest-errors-then-earliest rule IS the owner's tie-break. It fills the best list, and the
+  SECOND PASS is then upstream's line for line with one assignment in front of it.
+
+`MaxCost` and the conjuncts it adds to `AnyErrorPermitted`, `ThisErrorPermitted` and
+`InsertionPermitted` are release 2015.09.28's own lines (`:9923`, `:9936`, `:16352` in that release),
+which the 2015.11.5 issue-165 hang fix replaced with `max_errors` throughout. The source was fetched
+with `python -m pip download regex==2015.09.28 --no-binary :all:` and read, not reconstructed.
+
+**Walk 0 is gated on TWO conditions and both are load-bearing, not defensive.**
+`pattern.FuzzyCount == 1`, because with a second section an error is priced at the inner rates while it
+is made and at the outer rates once `END_FUZZY` merges the counts, so the budget never bites and the
+walk HANGS. `pattern.HasWeightedFuzzyCosts` (new, set in `NodeCompiler.BuildFuzzy`), because where the
+three kinds cost the same a match's cost is a fixed multiple of its error count and walk 0 provably
+cannot change the answer. **A term the equation omits costs NOTHING, not one** - so `2d+1s<4` is
+weighted, which is why upstream's own `test_fuzzy#44` diverges.
+
+**ONE PORTED TEST CHANGES, AND THE FIRST SITTING RECORDED THAT NONE WOULD.** `test_fuzzy#44`,
+`(?b)(foobar){i<=1,d<=2,s<=3,2d+1s<4}` over `FuzzyTestData.Scattered`, answers (34, 39) upstream and
+(26, 33) here. The first sitting's brute force ranked the candidates `finditer` returns, and those are
+already error-minimised per position, so the cost-2 match at (26, 33) was never in the set it ranked.
+**Upstream's own engine is the proof it is real**, per the never-weaken-a-test rule: tighten the
+equation to `2d+1s<3` and `regex.search` finds exactly (26, 33); tighten to `<2` and nothing matches,
+so cost 2 is the floor. The evidence is in the comment on the test.
+
+**THE FIRST SITTING'S "REAL ENHANCEMATCH DEFECT" IS NOT A DEFECT.** STATE.md made it this sitting's
+first job. `(?e)(?:\d\wba){1i+2d+1s<=4}` over `XX8QbaY` is the plain cost-ranking divergence at a
+different span: upstream spends two deletions costing 4, this port three substitutions costing 3. The
+first sitting said it was "proved not to be the ranking rule" by reverting `IsBetterFuzzyMatch` to
+`errors < bestErrors`; re-run with that same revert, **the row agrees** and only the deliberate cost
+test fails, so the revert cannot have been in the build that was measured. Pinned both ways now, as
+`Cost_ranking_keeps_the_cheaper_match_at_a_different_span_too` and its unit-cost control.
+
+**What to do about the 31, which the slice file left to this sitting.** They are now decided:
+`record-oracle.py` no longer pairs a weighted cost equation with `(?e)` or `(?b)`. A differential
+oracle cannot judge a comparison the two engines are DEFINED to answer differently, and classifying
+them cannot be made strict - `sub`, `subf` and `split` rows record a string and no per-match counts, so
+for two thirds of them the only available predicate is "the spans differ", which is also exactly what a
+real engine defect looks like. The coverage moves to `tools/probes/enhancematch-cost-rows.py`, extended
+to draw both flags, read for the INVARIANT rather than for a green light. Note that the new code is
+still exercised on every unit-cost row: it is the OUTCOME that is no longer drawn, not the code path.
+
+**Benchmark, which the slice asked for in runs of `BasicMatch`.** Scaffolding: an `Engine.Bench` class
+with `Runs`/`CostRule`, `++Bench.Runs` as the first line of `BasicMatch`, and `&& Bench.CostRule` on
+`rankByCost`; driven by a scratch test over every `(?b)` row of a recorded seed-7 `fuzzy` wave. All of
+it deleted before the commit.
+
+| corpus | count rule | cost rule | matched |
+|---|---:|---:|---|
+| 665 `(?b)` rows, generator as it was (weighted rows present) | 1600 | 1964 (+22.8%) | 462 either way |
+| the same, with walk 0 gated on a weighted equation | 1600 | 1694 (+5.9%) | 462 either way |
+| 527 `(?b)` rows, generator as COMMITTED (no weighted rows) | 1179 | 1179 (+0%) | 348 either way |
+
+So the slice's gate - "the cost rule must not cost more than the count rule" - holds exactly on the
+committed corpus, and the honest figure where the rules can actually differ is +5.9%. Wall clock was
+indistinguishable at 29-30 ms for the whole corpus either way. **The +22.8% row is why
+`HasWeightedFuzzyCosts` exists**; it was a measured regression, not a tidy-up.
+
+**An inherited upstream bug found on the way, LEDGER ENTRY 12.** `(?b)` loses a match that plain fuzzy
+matching finds when the best fit needs two TRAILING insertions:
+`regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')` is `None` where the same pattern without the flag answers
+`(0, 2, 0)`; one insertion is fine and two are not. The guard at `:15515-15517` double-counts, so *n*
+trailing insertions need `max_errors` above *2n-1*, and the second pass climbs only to `fewest_errors`.
+This port reproduces it faithfully and pins it. **The cost rule does not cause it and widens its
+reach**: 9 rows of the 2500-row probe match nothing with walk 0 on and none with it off, all of them
+`fullmatch` with insertion-heavy fits. That is the stated price until Phase 6 fixes it, and it is why
+the `bestmatch-ranks-by-cost` example row uses substitutions.
+
+## Gates
+
+- Ratchet GREEN, baseline updated: **5854 tests, 5854 passing, 5746 distinct ids**, 0 skipped.
+- The full default wave, 2000 rows a generator, three seeds (7, 4242, 20260913): **0 diverge** at each.
+- `fuzzy` generator alone, 2000 rows, the same three seeds: **0 diverge** at each.
+
+## Negative controls
+
+All re-run against the code and the generator being committed, after the last change. Seeds 7 and 31
+where a wave is involved; 31 is a seed this slice used nowhere else.
+
+> **Control A, `generator-suppression-off`:** in `tools/record-oracle.py`, `_has_weighted_cost`, insert
+> `return False` as the first line of the body so every row may carry `(?e)`/`(?b)` again. Wave:
+> `pwsh -File tools/run-oracle.ps1 -Generator fuzzy -Count 2000 -Seeds 7,31`.
+> Result: **RED at both - 3 divergences at seed 7, 4 at seed 31**, and every one of the seven is a
+> weighted equation under a ranking flag. That is the control for the suppression AND for the
+> `HasWeightedFuzzyCosts` gate: before the gate the same run gave 4 at seed 7, and the row it lost was
+> a unit-cost one that no longer takes the walk at all.
+
+> **Control B, `whole-match-cost-test-off`:** in `Matcher.cs`, the `Opcode.EndFuzzy` case, change
+> `if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)` back to
+> `if (state.TotalErrors > state.MaxErrors)`.
+> Result: **it HANGS**, which is a stronger answer than a count.
+> `timeout 90 dotnet run --project tests/FuzzyRegex.Tests -c Debug -- --treenode-filter
+> "/*/*/FuzzyBestMatchTests/Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section"` reports
+> `[slow] still running after 1m 00s` where it normally passes in milliseconds.
+
+> **Control C, `rank-on-the-snapshot`:** in `Matcher.cs`, `DoBestFuzzyMatch`, delete the
+> `if (rankByCost) { runCost = ...; runErrors = ...; }` block so the walk reads `state.TotalCost` and
+> `state.TotalErrors` again.
+> Result: **it HANGS**, on `Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_snapshot`,
+> same command shape as Control B.
+
+> **Control D, `zero-cost-termination`:** in `Matcher.cs`, `DoBestFuzzyMatch`, drop the
+> `|| runErrors == 0` clause from the improvement test, leaving
+> `if (byCost ? runCost < lowestCost : runErrors < fewestErrors)`.
+> Result: **it HANGS**, on `Bestmatch_terminates_when_an_error_kind_costs_nothing`.
+> **This control is recorded because its first version did NOT fire.** The subject was `xxfoxo`, which
+> gets `lowestCost` to 0 with an error in the match and no further exact match to succeed under the -1
+> budget, so the walk ended either way and the test passed with the clause deleted. `xxfoxofoo` has
+> both halves and hangs. A guard written from reasoning needs a control that actually reaches it.
+
+> **Control E, `cost-bound-out-of-the-predicates`:** in `Matcher.cs`, `ThisErrorPermitted`, delete the
+> final conjunct `&& cost + values[FuzzyValue.CostBase + fuzzyType] <= state.MaxCost`.
+> Result: **four tests HANG** -
+> `Bestmatch_answers_the_cheaper_match_where_upstream_answers_the_earlier_one`,
+> `BestMatch_applies_under_a_weighted_cost_equation`,
+> `BestMatch_under_a_unit_cost_equation_answers_what_upstream_answers` and
+> `Bestmatch_terminates_when_an_error_kind_costs_nothing`.
+> The third of those is how the "unit cost equation" control test was found to be nothing of the kind:
+> its equation was `1d+1s<4`, which prices insertions at zero and so IS weighted. It now reads
+> `1i+1d+1s<4`.
+
+> **Control F, `cost-bound-out-of-any_error_permitted` - A CONTROL THAT DOES NOT FIRE, recorded
+> because that is the finding.** Delete `&& cost <= state.MaxCost` from `AnyErrorPermitted` alone and
+> all 20 `*BestMatch*` tests still pass. That conjunct is a cheap pre-check; `ThisErrorPermitted` and
+> `InsertionPermitted` carry the bound that bites. It is kept because release 2015.09.28 has it
+> (`:9923`) and it prunes earlier, not because anything here depends on it.
+
+> **Control G, `whole-match-cost-off-the-trailing-insertion-arm` - ALSO DOES NOT FIRE.** Delete the
+> third conjunct from the `END_FUZZY` backtrack arm and nothing measurable changes: 5854/5854 green,
+> all three default-wave seeds green, and four hand-built group-call-plus-trailing-insertion patterns
+> answer identically (three of them blow the 1GB backtracking limit with and without it alike). S42's
+> second blind review swept 1,425 weighted-cost `(?b)` rows across two seeds and found no row it
+> affects either. It is kept anyway, with a `ponytail:` note on it saying so: what it defends is a
+> hang rather than a wrong answer, and a hang costs an unattended slice where one comparison on a
+> backtrack arm costs nothing.
+
+> **Measurement, not a control: the invariant sweep.** `python
+> tools/probes/enhancematch-cost-rows.py .scratch/cost.jsonl 777` then `pwsh -File
+> tools/run-oracle.ps1 -Rows .scratch/cost.jsonl`, scored by the four-line report parser the probe's
+> own docstring describes. Committed code: **agree 2216, expected 32, diverge 252** - of the 252, 128
+> this port cheaper, **0 dearer**, 3 equal cost and earlier, 9 no match at all (ledger 12), 112
+> `sub`/`split` rows carrying no counts to score. With walk 0 turned off (`FuzzyCount == 2`, which no
+> one-section pattern satisfies): **agree 2475, expected 6, diverge 19**, every one an `(?e)` row and
+> none lost - which is what says the other 233 are `BESTMATCH`'s budget and nothing else.
+
+## Review
+
+**Two blind passes, and BOTH found a real defect in code - the first time in this phase that a pass
+has.** Briefed per `docs/VERIFICATION.md`, Opus, told that the cost divergence itself is the change
+and not to report it, and told that defects here HANG rather than fail so a hang is a finding.
+
+**Pass 1, over the whole diff: one finding raised, one reproduced, one fixed.** The three constraint
+predicates bound the cost of the section currently OPEN, where release 2015.09.28's bound is on a
+RUNNING whole-match total it maintained at every error site. `FuzzyCount == 1` does not close the gap,
+because it stops two different sections nesting and not one section being entered twice - so a group
+call spends the budget twice and walk 0 never terminates. Reproduced here in one command:
+`(?b)((?:a){1i+2d+1s<=1})(?1)` over `bb` hung where the unit-cost spelling answered in 80 ms and
+upstream answered `(0, 2) (2, 0, 0)` instantly. The fix is upstream's own missing line rather than
+2015's running total: `END_FUZZY` already has `state->total_errors > state->max_errors` as the
+whole-match backstop (`:12486`), so the cost twin goes beside it. The pass also killed two comments of
+mine that were false in the same breath, both now corrected. Everything else it checked - the
+transcription of the second pass and the fallback, `MaxCost` leaking across calls, an empty
+`bestList`, the generator's RNG-stream parity, `At(10)/At(11)/At(12)` - it cleared with its own
+measurements.
+
+**Pass 2, over the fix delta only, which is VERIFICATION rule 4 and it earned its keep: one finding
+raised, one reproduced, one fixed.** The backstop is necessary and not sufficient, because
+`MatchState.TotalCost` and `TotalErrors` are SNAPSHOTS written at `END_FUZZY` and a match can succeed
+on a path whose last `END_FUZZY` belongs to a branch that was backtracked out of. Ranking on a stale
+number scores a genuinely cheaper run as equal and hangs the same way:
+`(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)` over `bb` reported cost 4 for a match whose live counts are one
+substitution and one deletion costing 2. The fix is the root cause rather than a third guard - when
+this port is the one ranking it reads the LIVE `state.FuzzyCounts`, which is what `FuzzyRegex` hands
+the caller as `Match.FuzzyCounts`, priced by the new `PatternObject.SingleFuzzyNode`. Pass 2 also
+verified the first fix's test really hangs without it, swept 1,425 weighted `(?b)` rows for false
+rejections and found none, and reported the unpinned conjunct that Control G above now records.
+
+**Both fixes are post-review changes to the engine, so by rule 4 they want a pass of their own; pass 2
+is that pass for the first fix, and the second fix has NOT had one.** It is three lines and a field,
+every one of them exercised by a test that hangs without it, and the alternative was a third review
+round inside one sitting, which rule 6 says is where iterating stops paying. Recorded here rather than
+quietly.
+
+**Neither pass found anything wrong with the two-walk structure itself**, which is the part that was
+invented rather than ported.
+
+## What the next slice should know
+
+- **S43 closes the phase.** Every fuzzy tag is delivered and the suite has no `[Skip]` anywhere.
+- **Two hangs in one sitting, both from the same confusion**: a per-section quantity standing in for a
+  whole-match one. Anything that later ranks, bounds or reports a whole match should read the live
+  counts, not the `END_FUZZY` snapshots - and should expect the difference to show as a HANG rather
+  than a wrong answer, which no ported test and no wave will catch.
+- **Ledger entry 12 is a real inherited bug with a proposed one-line fix**, and it currently costs
+  this port 9 rows in 2500 of the cost probe. It belongs to Phase 6's sweep.
+- The `(?e)` side has not had the same treatment. `ENHANCEMATCH` ranks by cost over upstream's chain
+  (S41) but its chain is still bounded by the error count, so a cheaper run with more errors is still
+  unreachable there in the way issue 470 describes for `(?b)`. Nothing measured says it matters; it is
+  named here because it is the obvious next question and nobody has asked it.

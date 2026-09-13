@@ -4315,6 +4315,49 @@ FUZZY_ENHANCE_PROBABILITY = 0.35
 # loop never runs, so a row carrying both is the one place a wrong dispatch order is visible.
 FUZZY_BESTMATCH_PROBABILITY = 0.35
 
+# Matches one cost equation inside a constraint: the `<n>i+<n>d+<n>s` term list, in any order.
+_FUZZY_COST_TERM = re.compile(r"(\d+)([ids])")
+_FUZZY_EQUATION = re.compile(r"\{[^{}]*?((?:\d+[ids]\+)*\d+[ids])\s*<=?\s*\d+")
+
+
+def _has_weighted_cost(pattern: str) -> bool:
+    """Whether any cost equation in `pattern` prices the three error kinds differently.
+
+    THIS IS WHAT DECIDES WHETHER A ROW MAY CARRY `(?e)` OR `(?b)`, and the reason is that a
+    differential oracle cannot judge a comparison the two engines are DEFINED to answer differently.
+    This port ranks fuzzy matches by cost and upstream ranks them by error count (owner decision,
+    DECISIONS 2026-09-12, upstream's open issue 470). With unit coefficients the two rules are the
+    same rule, so such a row is real ground truth and is drawn as before. With weighted ones every
+    row where the rules can disagree IS a divergence by construction, and reporting it teaches
+    nothing while turning the wave permanently red - measured 2026-09-13, 4 rows of 2000 at each of
+    seeds 7, 4242 and 20260913, every one of the twelve a weighted equation under `(?b)` and every
+    one of them this port answering more cheaply than upstream under the pattern's own equation.
+
+    Classifying them instead was considered and cannot be made strict. `sub`, `subf` and `split`
+    rows record a STRING and no per-match counts (see the row shape written below), so for those
+    there is no cost to compare and the only available predicate is "the spans differ" - which
+    DECISIONS 2026-09-13 refuses, because a different span is also exactly what a real engine defect
+    looks like and the list must never hide one.
+
+    What replaces the coverage: `tools/probes/enhancematch-cost-rows.py`, which draws this family on
+    purpose and is read for the invariant the port actually guarantees - its answer is never DEARER
+    than upstream's - plus the pinned rows in `Gaps/Engine/FuzzyBestMatchTests.cs`,
+    `Gaps/Engine/FuzzyEnhanceMatchTests.cs` and `Ported/Fuzzy/FuzzyBestMatchTests.cs`. Note that the
+    new code is still exercised here on every unit-cost row: `DoBestFuzzyMatch`'s cost walk runs for
+    those too and has to agree with upstream's single walk, so it is the OUTCOME that is not drawn,
+    not the code path.
+    """
+    for match in _FUZZY_EQUATION.finditer(pattern):
+        costs = {kind: int(value) for value, kind in _FUZZY_COST_TERM.findall(match.group(1))}
+
+        # A TERM THE EQUATION OMITS COSTS NOTHING, not one, so `2d+1s<4` prices insertions at zero
+        # and is weighted. Upstream's own `test_fuzzy#44` is that shape and this port answers it
+        # differently for exactly that reason - see Ported/Fuzzy/FuzzyBestMatchTests.cs.
+        if len({costs.get(kind, 0) for kind in "ids"}) > 1:
+            return True
+
+    return False
+
 
 def _fuzzy_constraint(rng: random.Random, constraints: tuple[str, ...], split: bool) -> str:
     """One constraint, sometimes carrying a `{...:test}` - S40's FUZZY_EXT rather than FUZZY.
@@ -4561,16 +4604,27 @@ def _generate_fuzzy(rng: random.Random, count: int):
             # answer for up to three on the other and an error can land INSIDE a folding.
             pattern = "(?fi)" + pattern
 
-        if rng.random() < FUZZY_ENHANCE_PROBABILITY:
-            # ENHANCEMATCH: find a match, then re-run inside its own span with a tighter budget
-            # until the fit stops improving. Outermost, so it reads as a flag on the whole pattern.
+        # ENHANCEMATCH: find a match, then re-run inside its own span with a tighter budget until the
+        # fit stops improving. BESTMATCH: search the whole slice for the match with the fewest errors
+        # rather than taking the first that fits, then re-examine the equal-best candidates. Drawn
+        # independently, and `(?b)` goes in front, so a row that has both reads `(?b)(?e)`; both are
+        # whole-pattern flags, so the order is presentation and the dispatch decides.
+        #
+        # BOTH ARE DRAWN BEFORE THEY ARE SUPPRESSED, never inside the `if`, so that changing which
+        # rows may carry a flag does not reshuffle the whole row stream and make two waves
+        # incomparable. See `_has_weighted_cost` for what the suppression is and why it is not a
+        # classification instead.
+        enhance = rng.random() < FUZZY_ENHANCE_PROBABILITY
+        bestmatch = rng.random() < FUZZY_BESTMATCH_PROBABILITY
+
+        if _has_weighted_cost(pattern):
+            enhance = False
+            bestmatch = False
+
+        if enhance:
             pattern = "(?e)" + pattern
 
-        if rng.random() < FUZZY_BESTMATCH_PROBABILITY:
-            # BESTMATCH: search the whole slice for the match with the fewest errors rather than
-            # taking the first that fits, then re-examine the equal-best candidates. Drawn after
-            # `(?e)` and put in front of it, so a row that has both reads `(?b)(?e)`; both are
-            # whole-pattern flags, so the order is presentation and the dispatch decides.
+        if bestmatch:
             pattern = "(?b)" + pattern
 
         row = {

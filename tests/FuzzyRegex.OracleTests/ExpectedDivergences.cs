@@ -111,6 +111,25 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?e)(?:x|xyq){1i+9s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}}""";
 
     /// <summary>
+    /// The one row of <c>bestmatch-ranks-by-cost</c>, the same shape as the row above under the other
+    /// flag, hand-built and recorded by <c>python tools/record-oracle.py --rows</c> on 2026-09-13.
+    /// It is a <c>fullmatch</c> on purpose: the span is then fixed by the operation, so the whole of
+    /// the difference between the two engines is which errors they spent, which is what this entry's
+    /// predicate can judge. No wave draws this family - see the entry's own reason.
+    /// <para>
+    /// The cheaper answer is two SUBSTITUTIONS rather than the insertions the <c>(?e)</c> row above
+    /// uses, and that is not a stylistic choice. Steering <c>BESTMATCH</c> onto a candidate whose
+    /// fit needs two TRAILING insertions walks into an inherited bug that loses the match outright -
+    /// <c>regex.fullmatch(r'(?b)(?:x){e&lt;=3}', 'xyz')</c> is <c>None</c> where the same pattern
+    /// without <c>(?b)</c> answers <c>(0, 2, 0)</c>, measured on regex 2026.7.19 - so an insertion
+    /// row would pin an unrelated defect instead of this entry's family. Ledger entry 12;
+    /// <c>Gaps.Engine.FuzzyBestMatchTests.Bestmatch_loses_a_match_that_needs_two_trailing_insertions</c>.
+    /// </para>
+    /// </summary>
+    private const string _bestCostRankedRow =
+        """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
+
+    /// <summary>
     /// The rows of the bounded-lazy-repeat partial family, recorded by
     /// <c>tools/record-oracle.py --rows</c>. This entry is keyed on the ROWS rather than on a
     /// predicate, which is why they live here as recorder output - see its own
@@ -970,8 +989,8 @@ internal static class ExpectedDivergences
                 + "state->total_errors < fewest_errors`, upstream/src/_regex.c:17930, and it never "
                 + "consults `total_cost` (:9649). That is upstream's open issue 470. This port ranks "
                 + "by cost, ties by fewer errors, then earliest, through Matcher.IsBetterFuzzyMatch. "
-                + "`BESTMATCH` is a seam until S42 and is to call that helper rather than spell the "
-                + "rule again.\n"
+                + "`BESTMATCH` reaches the same rule by a different route and has its own entry "
+                + "below, because its budget rather than its tie-break is what had to change.\n"
                 + "WITH UNIT COSTS THE TWO RULES AGREE, which is why no ported test changes and why "
                 + "this predicate insists on a cost equation whose coefficients are not all equal: "
                 + "cost is then a multiple of the error count and the orderings cannot differ. The "
@@ -996,18 +1015,60 @@ internal static class ExpectedDivergences
                 + "port's answer is dearer than upstream's or uses fewer errors. Widening this entry "
                 + "to swallow the other 31 would buy a green wave with the one property that makes "
                 + "the list worth keeping.\n"
-                + "NO COMMITTED GENERATOR DRAWS IT, said out loud: the fuzzy generator builds a "
-                + "section by concatenating atoms and never by alternation, so the improvement loop "
-                + "rarely has two candidates of different shape to choose between - 435 rows carrying "
-                + "both `(?e)` and a non-unit cost equation across three 2000-row seeds produced "
-                + "none. The example row is therefore what keeps this entry honest, exactly as "
-                + "Every_expected_divergence_still_diverges intends. Adding an alternation body shape "
-                + "would make waves draw the family, and would make the 31 red; deciding what to do "
-                + "about them is S42's, which is where `(?b)` and issue 470's own alternation arrive.",
+                + "NO COMMITTED GENERATOR DRAWS IT, AND S42 MADE THAT DELIBERATE RATHER THAN "
+                + "ACCIDENTAL. It used to be accidental: the fuzzy generator builds a section by "
+                + "concatenating atoms and never by alternation, so the improvement loop rarely had "
+                + "two candidates of different shape to choose between, and 435 rows carrying both "
+                + "`(?e)` and a non-unit cost equation across three 2000-row seeds produced none. "
+                + "Adding `(?b)` to the generator ended that - 4 rows of 2000 diverged at each of "
+                + "seeds 7, 4242 and 20260913, all twelve a weighted equation under a ranking flag, "
+                + "all twelve this port answering more cheaply, and eight of the twelve "
+                + "span-different and so unclassifiable. `record-oracle.py`'s `_has_weighted_cost` "
+                + "now refuses to put `(?e)` or `(?b)` on a row whose equation prices the three "
+                + "error kinds differently, because an oracle cannot judge a comparison the two "
+                + "engines are DEFINED to answer differently. The example row is what keeps this "
+                + "entry honest, exactly as Every_expected_divergence_still_diverges intends, and "
+                + "tools/probes/enhancematch-cost-rows.py is where the family is drawn on purpose.",
             PinnedBy: "FuzzyEnhanceMatchTests.Cost_ranking_keeps_the_cheaper_match_where_upstream_"
                 + "takes_the_one_with_fewer_errors",
             Example: _costRankedRow,
-            Applies: static (row, ours) => IsCostRankedDivergence(row, ours)
+            Applies: static (row, ours) => IsCostRankedDivergence(row, ours, "(?e)")
+        ),
+        new(
+            Id: "bestmatch-ranks-by-cost",
+            Reason: "PORT DELIBERATELY DIFFERENT, the same owner decision as "
+                + "`enhancematch-ranks-by-cost` above (DECISIONS 2026-09-12) reaching `BESTMATCH` in "
+                + "S42's second sitting. The two entries are separate because the CHANGE is not the "
+                + "same change. `ENHANCEMATCH` walks a chain of runs and only its tie-break moved. "
+                + "`BESTMATCH` searches the slice with a BUDGET, `state->max_errors = fewest_errors "
+                + "- 1` (upstream/src/_regex.c:17675), and an error-count budget cannot reach a "
+                + "cheaper match that spends the same number of errors - which is the whole of issue "
+                + "470. So the budget moved: Matcher.DoBestFuzzyMatch walks the slice twice, once "
+                + "bounded by COST to find the cheapest match there is, and then upstream's own walk "
+                + "with the cost pinned at that answer, which makes upstream's fewest-errors rule the "
+                + "owner's tie-break. The cost budget is release 2015.09.28's `state->max_cost = "
+                + "state->total_cost - 1`, which the 2015.11.5 issue-165 hang fix removed.\n"
+                + "WITH UNIT COSTS THE TWO RULES AGREE, so this predicate insists on a cost equation "
+                + "whose coefficients are not all equal, exactly as the entry above does. The example "
+                + "row is `(?b)(?:ab|xyc){9i+1s+9d<=20}` fullmatched against 'abc': upstream takes "
+                + "'ab' with one insertion costing 9 and this port takes 'xyc' with two "
+                + "substitutions costing 1 each. Measured on regex 2026.7.19, 2026-09-13.\n"
+                + "NARROW ON THE DIFFERENCE, on the same terms as the entry above: the two answers "
+                + "must agree on everything but which errors were spent, and this port's must be "
+                + "cheaper while spending at least as many. A `BESTMATCH` divergence at a DIFFERENT "
+                + "span is reported rather than classified, for the reason set out above - it is also "
+                + "what a real engine defect looks like - and `_has_weighted_cost` keeps waves off "
+                + "the family rather than the list being widened to swallow it.\n"
+                + "ONE PORTED TEST ASSERTS THIS PORT'S ANSWER BECAUSE OF THIS ENTRY, which is the "
+                + "thing to know before trusting S42's first sitting on it. `test_fuzzy#44`, "
+                + "`(?b)(foobar){i<=1,d<=2,s<=3,2d+1s<4}` over FuzzyTestData.Scattered, answers "
+                + "(34, 39) upstream and (26, 33) here, and upstream's own engine proves the cheaper "
+                + "match is real: tighten the equation to `2d+1s<3` and upstream finds exactly "
+                + "(26, 33). See the comment on the test.",
+            PinnedBy: "FuzzyBestMatchTests.Bestmatch_answers_the_cheaper_match_where_upstream_"
+                + "answers_the_earlier_one",
+            Example: _bestCostRankedRow,
+            Applies: static (row, ours) => IsCostRankedDivergence(row, ours, "(?b)")
         ),
     ];
 
@@ -1468,16 +1529,25 @@ internal static class ExpectedDivergences
         };
 
     /// <summary>
-    /// Whether a divergence is <c>enhancematch-ranks-by-cost</c>: an <c>(?e)</c> row whose cost
-    /// equation can separate the two rankings at all, where the two answers differ in nothing but
-    /// which errors were spent, and this port spent cheaper ones without spending fewer.
+    /// Whether a divergence is one of the two cost-ranking families: a row carrying the given
+    /// ranking flag, whose cost equation can separate the two rankings at all, where the two answers
+    /// differ in nothing but which errors were spent, and this port spent cheaper ones without
+    /// spending fewer.
     /// </summary>
+    /// <remarks>
+    /// The flag is a parameter rather than two copies of this method because the test is the same
+    /// test - the two entries differ in what had to change inside the engine, not in what the
+    /// divergence looks like from outside. A row carrying both flags reads as <c>BESTMATCH</c> to
+    /// the dispatch (<c>:18107</c>) and matches both entries here; <see cref="For"/> returns the
+    /// first, which is <c>enhancematch-ranks-by-cost</c>, and either is a true statement about it.
+    /// </remarks>
     /// <param name="row">The row, carrying upstream's answer.</param>
     /// <param name="ours">This port's answer.</param>
+    /// <param name="flag">The inline flag the family needs, <c>(?e)</c> or <c>(?b)</c>.</param>
     /// <returns><see langword="true"/> if the divergence belongs to that family.</returns>
-    private static bool IsCostRankedDivergence(OracleRow row, IOracleOutcome ours)
+    private static bool IsCostRankedDivergence(OracleRow row, IOracleOutcome ours, string flag)
     {
-        if (!row.Pattern.Contains("(?e)", StringComparison.Ordinal) || !TryReadCosts(row.Pattern, out long[]? costs))
+        if (!row.Pattern.Contains(flag, StringComparison.Ordinal) || !TryReadCosts(row.Pattern, out long[]? costs))
         {
             return false;
         }
