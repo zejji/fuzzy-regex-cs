@@ -1,4 +1,7 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
+using Fuzzy.Text.RegularExpressions.Parsing;
+using Fuzzy.Text.RegularExpressions.Tests.Gaps.CompileParity;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -252,4 +255,89 @@ public sealed class RepeatTests
 
         (m.Index + m.Length).Should().Be(240002);
     }
+
+    /// <summary>
+    /// The evidence behind S39's decision not to port either fuzzy <c>*_REPEAT_ONE</c> loop
+    /// (<c>upstream/src/_regex.c</c> lines 15881 and 16500): nothing can reach them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>sequence_matches_one</c> (<c>:24056</c>) refuses a <c>REPEAT_ONE</c> whose body node
+    /// carries <c>RE_STATUS_FUZZY</c>, and every one-character op it would accept comes from a
+    /// parser class that sets <c>FUZZY_OP</c> inside a section - so no <c>REPEAT_ONE</c> is ever
+    /// built inside one. Outside one, the node after it is <c>FUZZY</c> or <c>FUZZY_EXT</c>, which
+    /// <c>Fuzzy._compile</c> emits without that flag, and <c>can_test_past</c> (<c>:23697</c>) does
+    /// not walk past either.
+    /// </para>
+    /// <para>
+    /// This test is the guard on that argument rather than a restatement of it: if a future upstream
+    /// sync changes any of those three, it goes red and the two loops have to be ported after all.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void No_repeat_one_node_in_the_corpus_has_a_fuzzy_test_node()
+    {
+        List<string> withFuzzyTail = [];
+        int repeatOnes = 0;
+
+        foreach (CompileRow row in Corpus.Compiles())
+        {
+            PatternObject pattern = PatternObject.Compile(
+                PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
+            );
+
+            foreach (Node repeat in pattern.NodeList)
+            {
+                if (repeat.Op is not (Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne))
+                {
+                    continue;
+                }
+
+                ++repeatOnes;
+
+                if (repeat.Next1.Test is { } test && (test.Status & NodeStatus.Fuzzy) != 0)
+                {
+                    withFuzzyTail.Add($"{row.Pattern} -> {repeat.Op} tail {test.Op}");
+                }
+            }
+        }
+
+        // Measured 2026-09-13 over the 1,534 compile-parity patterns.
+        repeatOnes.Should().Be(639, "the corpus is fixed, so a change here means the optimiser moved");
+        withFuzzyTail.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The behaviour that made the test above worth writing: a fuzzy repeat answers, it just does
+    /// not answer from a <c>REPEAT_ONE</c>. Both of these were already green before S39, because the
+    /// tail is a one-character item that S38's <c>fuzzy_match_item</c> can substitute without the
+    /// repeat ever having to give a character back.
+    /// </summary>
+    [Test]
+    public void A_fuzzy_repeat_answers_without_a_repeat_one_node()
+    {
+        // greedy-one match('(?:a+x){e<=1}', 'aaay'): span=(0, 4) counts=(1, 0, 0) changes=([3], [], [])
+        Match greedy = new FuzzyRegex("(?:a+x){e<=1}").MatchAtStart("aaay");
+        (greedy.Index, greedy.Length).Should().Be((0, 4));
+        greedy.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        greedy.FuzzyChanges.Substitutions.Should().Equal(3);
+
+        // lazy-one match('(?:a+?x){e<=1}', 'aaay'): span=(0, 2) counts=(1, 0, 0) changes=([1], [], [])
+        Match lazy = new FuzzyRegex("(?:a+?x){e<=1}").MatchAtStart("aaay");
+        (lazy.Index, lazy.Length).Should().Be((0, 2));
+        lazy.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        lazy.FuzzyChanges.Substitutions.Should().Equal(1);
+
+        PatternObject compiled = PatternObject.Compile(
+            PatternCompiler.Compile("(?:a+x){e<=1}", 0, _noNamedLists, PatternCompiler.DefaultVersion)
+        );
+
+        compiled
+            .NodeList.Select(static node => node.Op)
+            .Should()
+            .Contain(Opcode.GreedyRepeat)
+            .And.NotContain(Opcode.GreedyRepeatOne, "sequence_matches_one refuses a fuzzy body");
+    }
+
+    private static readonly Dictionary<string, IReadOnlyList<string>> _noNamedLists = new(StringComparer.Ordinal);
 }

@@ -8,7 +8,7 @@
 
 Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 
-**Overall parity: 90.7%** (1783 of 1966 ported upstream tests passing).
+**Overall parity: 91.1%** (1792 of 1966 ported upstream tests passing).
 
 ## Ported upstream tests, by feature area
 
@@ -28,7 +28,7 @@ Parity against upstream commit `1760a20647f1c2ddcc025128407fe6f7edb905a1`.
 | Flags | 20 | 20 | 0 | 0 | 100.0% |
 | Format | 11 | 11 | 0 | 0 | 100.0% |
 | FullMatch | 12 | 12 | 0 | 0 | 100.0% |
-| Fuzzy | 112 | 7 | 105 | 0 | 6.3% |
+| Fuzzy | 112 | 16 | 96 | 0 | 14.3% |
 | Grapheme | 5 | 5 | 0 | 0 | 100.0% |
 | Groups | 65 | 65 | 0 | 0 | 100.0% |
 | Lookaround | 38 | 38 | 0 | 0 | 100.0% |
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3804 | 3804 | 0 | 0 |
+| Gaps | 3819 | 3819 | 0 | 0 |
 
 ## Tests waiting on a capability
 
@@ -67,7 +67,4 @@ What the next slice should deliver, biggest win first.
 | `fuzzy-budget` | 17 |
 | `fuzzy-changes` | 8 |
 | `fuzzy-enhancematch` | 6 |
-| `fuzzy-deletion` | 3 |
-| `fuzzy-insertion` | 3 |
-| `fuzzy-substitution` | 3 |
 

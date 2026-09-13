@@ -28,7 +28,6 @@ public sealed class FuzzyErrorKindTests
     [Arguments("xfoobar", 7)]
     [Arguments("foobarx", 7)]
     [Arguments("fooxbar", 7)]
-    [Skip("needs:fuzzy-insertion - the engine cannot spend an error on an insertion yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#29-31")]
     public void One_insertion_is_within_a_single_error_budget(string subject, int end) => AssertSpan(subject, end);
 
@@ -36,7 +35,6 @@ public sealed class FuzzyErrorKindTests
     [Arguments("foxbar", 6)]
     [Arguments("xoobar", 6)]
     [Arguments("foobax", 6)]
-    [Skip("needs:fuzzy-substitution - the engine cannot spend an error on a substitution yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#32-34")]
     public void One_substitution_is_within_a_single_error_budget(string subject, int end) => AssertSpan(subject, end);
 
@@ -44,7 +42,6 @@ public sealed class FuzzyErrorKindTests
     [Arguments("oobar", 5)]
     [Arguments("fobar", 5)]
     [Arguments("fooba", 5)]
-    [Skip("needs:fuzzy-deletion - the engine cannot spend an error on a deletion yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#35-37")]
     public void One_deletion_is_within_a_single_error_budget(string subject, int end) => AssertSpan(subject, end);
 

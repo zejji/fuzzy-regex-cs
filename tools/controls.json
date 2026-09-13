@@ -1197,5 +1197,95 @@
       7,
       31
     ]
+  },
+  {
+    "id": "S39-A",
+    "name": "fuzzy-insert-never-pushes",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void FuzzyInsert(MatchState state, sbyte step, Node? node)",
+    "anchorNth": 1,
+    "before": "        if (state.TextPos == limit || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts))\n",
+    "after": "        if (state.TextPos != limit || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts))\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
+  },
+  {
+    "id": "S39-B",
+    "name": "string-pos-not-restored-on-retry",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int RetryFuzzyMatchString(",
+    "anchorNth": 1,
+    "before": "        stringPos = (int)poppedStringPos;\n",
+    "after": "        _ = poppedStringPos;\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
+  },
+  {
+    "id": "S39-C",
+    "name": "fld-fuzzy-step-never-advances-text-pos",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "                case Opcode.StringFld: // A string, ignoring case.",
+    "anchorNth": 1,
+    "before": "                                if (foldedPos >= foldedLen && foldedLen > 0)\n",
+    "after": "                                if (foldedPos > foldedLen && foldedLen > 0)\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
+  },
+  {
+    "id": "S39-D",
+    "name": "fld-error-cannot-land-at-the-end-of-a-folding",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int NextFuzzyMatchStringFld(MatchState state, ref FuzzyData data)",
+    "anchorNth": 1,
+    "before": "                if (newPos >= 0 && newPos <= data.FoldedLen)\n",
+    "after": "                if (newPos >= 0 && newPos < data.FoldedLen)\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
+  },
+  {
+    "id": "S39-E",
+    "name": "group-fld-deletion-moves-the-subject-side",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int NextFuzzyMatchGroupFld(MatchState state, ref FuzzyData data)",
+    "anchorNth": 1,
+    "before": "                data.NewGfoldedPos += data.Step;\n",
+    "after": "                data.NewFoldedPos += data.Step;\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
+  },
+  {
+    "id": "S39-F",
+    "name": "string-error-recorded-where-it-ended-not-where-it-began",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int FuzzyMatchString(",
+    "anchorNth": 1,
+    "before": "        state.RecordFuzzy(data.FuzzyType, state.TextPos);\n",
+    "after": "        state.RecordFuzzy(data.FuzzyType, data.NewTextPos);\n",
+    "generator": "fuzzy",
+    "count": 600,
+    "seeds": [
+      7,
+      20260913
+    ]
   }
 ]

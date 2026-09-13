@@ -3944,8 +3944,52 @@ FUZZY_ATOMS = (
     r"\p{Nd}",
 )
 
-# Which of those are single literal characters, so the generator can refuse to put two in a row.
+# Which of those are single literal characters. S38 refused to put two in a row so that no STRING
+# node could be built; S39 delivers the fuzzy STRING arms, so the rule is gone and the set is kept
+# only to say what an atom's exact subject text is.
 FUZZY_LITERAL_ATOMS = frozenset({"a", "b", "x", "0"})
+
+# S39's widening, part one: multi-character literals, which `Sequence.pack_characters`
+# (upstream/regex/_regex_core.py:3526) packs into a STRING node. These reach `fuzzy_match_string`
+# (upstream/src/_regex.c:10431) and, once the whole string has matched, `fuzzy_insert` (:10346) -
+# the one place an insertion can be charged next to a string.
+FUZZY_STRING_ATOMS = ("ab", "ba", "abx", "fo", "oba", "a0", "x0b")
+
+# S39's widening, part two: repeat bodies. These do NOT reach the fuzzy *_REPEAT_ONE loops - a
+# repeat inside a fuzzy section is always a GREEDY_REPEAT, never a GREEDY_REPEAT_ONE, because
+# `sequence_matches_one` (:24056) refuses a fuzzy body. They are here because a repeat next to a
+# fuzzy string is where the backtracking into `retry_fuzzy_match_string` actually happens.
+FUZZY_REPEAT_ATOMS = {
+    "a+": ("a", 1),
+    "a*?": ("a", 0),
+    "b+?": ("b", 1),
+    "[ab]+": ("ab", 1),
+    "[ab]*?": ("ab", 0),
+    r"\d+": ("0123456789", 1),
+}
+
+# S39's widening, part three: literals whose full case folding is longer than one character, which
+# is the only way STRING_FLD's and REF_GROUP_FLD's fuzzy arms are reached. Drawn only under `(?fi)`,
+# because simple case folding does not make 'ss' match U+00DF.
+#
+# U+0130 is deliberately absent: it never reaches its full fold upstream either (ledger entry 7,
+# Phase 6's fix list), so drawing it would fill the wave with rows about a known inherited bug.
+FUZZY_FOLD_ATOMS = ("straße", "ﬆx", "ßa", "maße", "ﬀo")
+
+# How a section's case sensitivity is chosen. `plain` is STRING and REF_GROUP, `ign` is their _IGN
+# forms, `fold` their _FLD forms.
+FUZZY_CASE_MODES = ("plain", "ign", "fold")
+FUZZY_CASE_MODE_WEIGHTS = (5, 2, 3)
+
+# How often a section refers back to a capture group outside it, which is the only way the
+# REF_GROUP* fuzzy arms are reached at all.
+#
+# The fold weight above and this share one reason. `REF_GROUP_FLD` needs both at once, and at the
+# first weights tried - (6, 2, 2) and 0.18 - control S39-E, which moves the wrong side's folding on
+# a deletion, fired on 2 rows of 600 at one seed and 1 at another. A rule a generator reaches once
+# in six hundred is not measured, it is noticed.
+FUZZY_BACKREF_PROBABILITY = 0.25
+FUZZY_BACKREF_ATOM = r"(?:\1)"
 
 # The zero-width assertions a fuzzy section may contain. They matter more here than anywhere else:
 # a zero-width item passes a step of 0 to `fuzzy_match_item` (upstream/src/_regex.c:10185), which
@@ -3977,6 +4021,18 @@ FUZZY_CONSTRAINTS = (
     "{e}",
 )
 
+# The same list without the unbounded budget, used by any section holding a MULTI-CHARACTER item.
+# `{e}` puts no ceiling on the number of errors, so the search space is bounded only by the subject
+# - which is fine over S38's one-character atoms, where it was measured green at 6000 rows, and is
+# not fine once a string, a fold, a repeat or a backreference is in the section. Two measured on
+# regex 2026.7.19, 2026-09-13, both raising MemoryError and so killing the whole wave rather than
+# producing a comparable row:
+#   regex.sub(r'(abx)(?:\W[a-f](?:[ab]+\1){e}){s<=2}', '<>', 'abx.dabx')
+#   regex.split(r'(?fi)(?:straße\d\A){e}', 'sTrasßE0')
+# That is the same family as upstream issues 551 and 554 (resource blowups, already on Phase 6's
+# triage list), so the generator stays off the shape rather than the recorder learning to survive it.
+FUZZY_BOUNDED_CONSTRAINTS = tuple(c for c in FUZZY_CONSTRAINTS if c != "{e}")
+
 # The alphabet a subject is drawn from. The astral band is here for the same reason it is in the
 # group generator: a change position reported in codepoints rather than UTF-16 code units has to
 # show up as a divergence from the first wave.
@@ -3999,41 +4055,62 @@ FUZZY_EDIT_COUNT_WEIGHTS = (3, 6, 4, 2)
 FUZZY_NESTING_PROBABILITY = 0.2
 
 
-def _fuzzy_atom(rng: random.Random, previous: str | None) -> str:
-    """One atom, never a literal directly after another one - see FUZZY_ATOMS on why."""
-    atom = rng.choice(FUZZY_ATOMS)
-    while atom in FUZZY_LITERAL_ATOMS and previous in FUZZY_LITERAL_ATOMS:
-        atom = rng.choice(FUZZY_ATOMS)
-    return atom
+def _fuzzy_atom(rng: random.Random, mode: str, allow_fold: bool) -> str:
+    """One atom. S39 no longer refuses two literals in a row - see FUZZY_LITERAL_ATOMS on why."""
+    pool = FUZZY_ATOMS + FUZZY_STRING_ATOMS + tuple(FUZZY_REPEAT_ATOMS)
+    if mode == "fold" and allow_fold:
+        pool += FUZZY_FOLD_ATOMS
+    return rng.choice(pool)
 
 
-def _fuzzy_exact_subject(rng: random.Random, atoms: list[str], alphabet: str) -> str:
+def _fuzzy_atom_text(rng: random.Random, atom: str, alphabet: str) -> str:
+    """The text one atom matches exactly, for the atoms S39 added."""
+    if atom in FUZZY_REPEAT_ATOMS:
+        characters, minimum = FUZZY_REPEAT_ATOMS[atom]
+        return "".join(rng.choice(characters) for _ in range(rng.randint(minimum, minimum + 2)))
+    if atom in FUZZY_FOLD_ATOMS:
+        # The subject side carries the EXPANDED folding, which is what makes one subject character
+        # answer for several pattern characters (or the other way round for a ligature).
+        return atom.casefold()
+    if atom in FUZZY_STRING_ATOMS:
+        return atom
+    return _fuzzy_one_char_text(rng, atom, alphabet)
+
+
+def _fuzzy_recase(rng: random.Random, text: str) -> str:
+    """The same text with some characters upper-cased, for a section compiled under (?i) or (?fi)."""
+    return "".join(c.upper() if rng.random() < 0.5 else c for c in text)
+
+
+def _fuzzy_exact_subject(rng: random.Random, atoms: list[str], alphabet: str, mode: str) -> str:
     """A subject the section matches exactly, so a mutation of it needs a known number of errors."""
-    characters = []
-    for atom in atoms:
-        if atom in FUZZY_LITERAL_ATOMS:
-            characters.append(atom)
-        elif atom == ".":
-            characters.append(rng.choice("abx"))
-        elif atom == "[ab]":
-            characters.append(rng.choice("ab"))
-        elif atom == "[^a]":
-            characters.append(rng.choice("bx0"))
-        elif atom == "[a-f]":
-            characters.append(rng.choice("abcdef"))
-        elif atom == "[^a-f]":
-            characters.append(rng.choice("xyz0"))
-        elif atom in (r"\w", r"\p{L}"):
-            characters.append(rng.choice("abxQ"))
-        elif atom == r"\W":
-            characters.append(rng.choice(" -."))
-        elif atom in (r"\d", r"\p{Nd}"):
-            characters.append(rng.choice("0123456789"))
-        elif atom == r"\s":
-            characters.append(" ")
-        else:
-            characters.append(rng.choice(alphabet))
-    return "".join(characters)
+    text = "".join(_fuzzy_atom_text(rng, atom, alphabet) for atom in atoms)
+    return _fuzzy_recase(rng, text) if mode != "plain" else text
+
+
+def _fuzzy_one_char_text(rng: random.Random, atom: str, alphabet: str) -> str:
+    """S38's atoms: the one character each of them matches."""
+    if atom in FUZZY_LITERAL_ATOMS:
+        return atom
+    if atom == ".":
+        return rng.choice("abx")
+    if atom == "[ab]":
+        return rng.choice("ab")
+    if atom == "[^a]":
+        return rng.choice("bx0")
+    if atom == "[a-f]":
+        return rng.choice("abcdef")
+    if atom == "[^a-f]":
+        return rng.choice("xyz0")
+    if atom in (r"\w", r"\p{L}"):
+        return rng.choice("abxQ")
+    if atom == r"\W":
+        return rng.choice(" -.")
+    if atom in (r"\d", r"\p{Nd}"):
+        return rng.choice("0123456789")
+    if atom == r"\s":
+        return " "
+    return rng.choice(alphabet)
 
 
 def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -> str:
@@ -4042,7 +4119,14 @@ def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -
         kind = rng.choice(("sub", "ins", "del"))
         if not subject:
             kind = "ins"
-        position = rng.randrange(len(subject) + 1) if kind == "ins" else rng.randrange(len(subject))
+        if kind == "ins":
+            # One insertion in three goes on the END, because that is the only place `fuzzy_insert`
+            # (upstream/src/_regex.c:10346) can be charged: it runs after a string has matched in
+            # full, so a spare character anywhere earlier is a substitution or an inner insertion
+            # instead. At a uniform position control S39-A fired on 3 rows of 600 and then 1.
+            position = len(subject) if rng.random() < 0.33 else rng.randrange(len(subject) + 1)
+        else:
+            position = rng.randrange(len(subject))
         if kind == "sub":
             subject = subject[:position] + rng.choice(alphabet) + subject[position + 1 :]
         elif kind == "ins":
@@ -4053,30 +4137,68 @@ def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -
 
 
 def _generate_fuzzy(rng: random.Random, count: int):
-    """S38's generator: one fuzzy section of one-character and zero-width items.
+    """One fuzzy section, S38's one-character and zero-width items plus S39's multi-character ones.
 
     The subject is built to match the section exactly and then mutated by zero to three edits, so a
     matching row is the normal case rather than a lucky one - a wave that is nearly all `nomatch`
     exercises the failure path and almost nothing else. The mutation is random rather than budgeted,
     so plenty of rows overshoot their constraint and check the refusal too.
+
+    S39 widens it four ways, one per arm family the slice ports: multi-character literals (STRING),
+    `(?i)` and `(?fi)` (STRING_IGN and STRING_FLD), a backreference (the REF_GROUP family), and
+    repeat bodies next to a string, which is where a retry into `retry_fuzzy_match_string` comes
+    from. `(?e)`, `(?b)` and `{...:test}` are still excluded - S40, S41 and S42.
     """
     for i in range(count):
         alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
+        mode = rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
 
         atom_count = rng.choices(FUZZY_SECTION_ATOMS, weights=FUZZY_SECTION_ATOM_WEIGHTS)[0]
-        atoms: list[str] = []
-        previous: str | None = None
-        for _ in range(atom_count):
-            atom = _fuzzy_atom(rng, previous)
-            atoms.append(atom)
-            previous = atom
 
-        subject = _fuzzy_mutate(
+        # AT MOST ONE expanding fold per section, and that cap is a finding rather than caution.
+        # Two of them in one literal run is a COMPILE-time divergence this port already owns and
+        # S35 already decided: `Sequence._fix_full_casefold` (upstream/regex/_regex_core.py:3637)
+        # finds its chunks in the folded text and slices the unfolded run with those offsets, so the
+        # second expanding character loses its FULLIGNORECASE flag - `(?fi)ßaß` stops
+        # matching 'ssass' upstream, and this port matches it. Drawing the shape here would fill the
+        # wave with rows about a compiler difference both sides' own tests already pin, and would
+        # hide any real defect in the matcher arms this slice ports. Measured 2026-09-13: without
+        # the cap, 22 divergences over three 2000-row seeds and every one of them this family.
+        atoms = []
+        for _ in range(atom_count):
+            atom = _fuzzy_atom(rng, mode, allow_fold=not any(a in FUZZY_FOLD_ATOMS for a in atoms))
+            atoms.append(atom)
+
+        # A backreference to a group OUTSIDE the section: the capture has to be made before the
+        # section can refer to it, so the group goes in front of the section - or behind it under
+        # `(?r)`, where matching runs the other way. Its text is one of the string atoms, so what
+        # the reference has to match is a multi-character run and the REF_GROUP arms get real work.
+        reverse = rng.random() < 0.2
+        backref_text = ""
+        if rng.random() < FUZZY_BACKREF_PROBABILITY:
+            backref_text = rng.choice(FUZZY_STRING_ATOMS)
+            # Wrapped, because a bare `\1` next to a literal digit parses as `\10` - group ten,
+            # which does not exist, so the row is an `error` on both sides and tests nothing. Nine
+            # rows of a 2000-row wave were exactly that before the wrapper went in.
+            atoms[rng.randrange(len(atoms))] = FUZZY_BACKREF_ATOM
+
+        # `\1` stands for the captured text, so that is what its share of an exact subject is.
+        exact = _fuzzy_exact_subject(
             rng,
-            _fuzzy_exact_subject(rng, atoms, alphabet),
-            rng.choices(FUZZY_EDIT_COUNTS, weights=FUZZY_EDIT_COUNT_WEIGHTS)[0],
+            [backref_text if atom == FUZZY_BACKREF_ATOM else atom for atom in atoms],
             alphabet,
+            mode,
         )
+
+        # An edit under (?fi) has to be able to land a multi-character fold as well as take one
+        # away, so the characters it draws from include the ones whose folding is longer than one.
+        mutated = _fuzzy_mutate(
+            rng,
+            exact,
+            rng.choices(FUZZY_EDIT_COUNTS, weights=FUZZY_EDIT_COUNT_WEIGHTS)[0],
+            alphabet + "STßﬆ" if mode == "fold" else alphabet,
+        )
+        subject = mutated + backref_text if reverse else backref_text + mutated
 
         # A zero-width assertion goes in a fifth of the sections, at one end or in the middle, which
         # is the only way the step-of-0 arms of fuzzy_match_item are reached at all.
@@ -4094,21 +4216,41 @@ def _generate_fuzzy(rng: random.Random, count: int):
         # one has spent anything, so the outer counts are (0, 0, 0) there and inheriting them is the
         # same as clearing them. Measured: with the start drawn from 0, control E found nothing at
         # either seed; hand-built rows whose first atom must be substituted diverged on 21 of 24.
+        # An unbounded budget is safe over one-character atoms and is not safe over S39's - see
+        # FUZZY_BOUNDED_CONSTRAINTS.
+        heavy = bool(backref_text) or any(
+            atom in FUZZY_REPEAT_ATOMS or atom in FUZZY_STRING_ATOMS or atom in FUZZY_FOLD_ATOMS
+            for atom in atoms
+        )
+        constraints = FUZZY_BOUNDED_CONSTRAINTS if heavy else FUZZY_CONSTRAINTS
+
         if len(section) >= 2 and rng.random() < FUZZY_NESTING_PROBABILITY:
             first = 1 if len(section) >= 3 else 0
             start = rng.randrange(first, len(section) - 1)
             end = rng.randrange(start + 1, len(section))
-            inner = "(?:" + "".join(section[start : end + 1]) + ")" + rng.choice(FUZZY_CONSTRAINTS)
+            inner = "(?:" + "".join(section[start : end + 1]) + ")" + rng.choice(constraints)
             section = section[:start] + [inner] + section[end + 1 :]
 
-        pattern = "(?:" + "".join(section) + ")" + rng.choice(FUZZY_CONSTRAINTS)
+        pattern = "(?:" + "".join(section) + ")" + rng.choice(constraints)
+
+        if backref_text:
+            group = "(" + backref_text + ")"
+            pattern = pattern + group if reverse else group + pattern
 
         flags = 0
-        if rng.random() < 0.2:
+        if reverse:
             # Reverse, which flips the step and so the position record_fuzzy writes: a change is
             # recorded one character back ALONG THE DIRECTION OF TRAVEL, which forwards is before the
             # character and backwards is after it.
             pattern = "(?r)" + pattern
+
+        if mode == "ign":
+            # STRING_IGN and REF_GROUP_IGN: simple case folding, one character to one character.
+            pattern = "(?i)" + pattern
+        elif mode == "fold":
+            # STRING_FLD and REF_GROUP_FLD: full case folding, where one character on one side can
+            # answer for up to three on the other and an error can land INSIDE a folding.
+            pattern = "(?fi)" + pattern
 
         row = {
             "generator": "fuzzy",

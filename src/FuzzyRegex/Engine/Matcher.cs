@@ -52,6 +52,32 @@ internal struct FuzzyData
 
     /// <summary>Upstream <c>permit_insertion</c>.</summary>
     internal bool PermitInsertion;
+
+    /// <summary>
+    /// Upstream <c>new_string_pos</c>: how far into the item the comparison has got. For a
+    /// <c>STRING*</c> node that is an index into the node's values; for a <c>REF_GROUP*</c> node it
+    /// is a position in the subject, which is what <see cref="StringPosIsText"/> distinguishes.
+    /// </summary>
+    internal int NewStringPos;
+
+    /// <summary>
+    /// Not upstream's. In C a subject position and a values index are both codepoint counts, so
+    /// <c>data-&gt;new_string_pos += step</c> serves for either; here a subject position is a UTF-16
+    /// code unit index and has to move by <see cref="Matcher.Step"/> instead.
+    /// </summary>
+    internal bool StringPosIsText;
+
+    /// <summary>Upstream <c>new_folded_pos</c>: how far into the subject's folding it has got.</summary>
+    internal int NewFoldedPos;
+
+    /// <summary>Upstream <c>folded_len</c>: the length of that folding.</summary>
+    internal int FoldedLen;
+
+    /// <summary>
+    /// Upstream <c>new_gfolded_pos</c>: how far into the referenced group's own folding it has got.
+    /// Only <c>REF_GROUP_FLD</c> and <c>REF_GROUP_FLD_REV</c> have two foldings to keep apart.
+    /// </summary>
+    internal int NewGfoldedPos;
 }
 
 internal static class MatchStatus
@@ -3150,22 +3176,21 @@ internal static class Matcher
     /// <remarks>
     /// Tries one kind of error. The caller walks <c>fuzzy_type</c> from <see cref="FuzzyValue.Sub"/>
     /// upwards, so substitution is preferred to insertion and insertion to deletion.
-    /// <para>
-    /// Upstream's <c>is_string</c> parameter and the <c>data-&gt;new_string_pos += step</c> arms it
-    /// selects are not here: <c>fuzzy_match_string</c> is this function's only caller that passes
-    /// <see langword="true"/>, and that is S39's. Ported without them, an unread field would have to
-    /// be carried through the whole slice with nothing able to test it.
-    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="data">What the attempt is working on; written back through.</param>
+    /// <param name="isString">
+    /// Whether the caller is working through a multi-character item. A string moves
+    /// <c>string_pos</c> where a single item moves to the next node, because a string's characters
+    /// are one node between them.
+    /// </param>
     /// <param name="step">
     /// The character step of the item, <c>0</c> for a zero-width one. Not the same as
     /// <c>data.Step</c>: a zero-width item passes <c>0</c> here and carries <c>1</c> or <c>-1</c>
     /// there, which is what lets an insertion move the position when nothing else can.
     /// </param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    private static int NextFuzzyMatchItem(MatchState state, ref FuzzyData data, sbyte step)
+    private static int NextFuzzyMatchItem(MatchState state, ref FuzzyData data, bool isString, sbyte step)
     {
         if (!ThisErrorPermitted(state, data.FuzzyType))
         {
@@ -3185,7 +3210,7 @@ internal static class Matcher
                     return MatchStatus.Failure;
                 }
 
-                data.NewNode = data.NewNode!.Next1.Node;
+                AdvanceItem(state, ref data, isString, step);
 
                 return MatchStatus.Success;
             case FuzzyValue.Ins:
@@ -3230,7 +3255,7 @@ internal static class Matcher
                     }
 
                     data.NewTextPos = newPos;
-                    data.NewNode = data.NewNode!.Next1.Node;
+                    AdvanceItem(state, ref data, isString, step);
 
                     return MatchStatus.Success;
                 }
@@ -3239,6 +3264,27 @@ internal static class Matcher
             default:
                 return MatchStatus.Failure;
         }
+    }
+
+    /// <summary>
+    /// Upstream's <c>if (is_string) data-&gt;new_string_pos += step; else data-&gt;new_node =
+    /// data-&gt;new_node-&gt;next_1.node;</c>, written once because
+    /// <see cref="NextFuzzyMatchItem"/> has it twice (<c>upstream/src/_regex.c</c> lines 10131 and
+    /// 10170).
+    /// </summary>
+    /// <param name="state">The match state, for the subject's own code-unit stepping.</param>
+    /// <param name="data">The attempt being made.</param>
+    /// <param name="isString">Whether the caller is working through a multi-character item.</param>
+    /// <param name="step">The character step.</param>
+    private static void AdvanceItem(MatchState state, ref FuzzyData data, bool isString, sbyte step)
+    {
+        if (!isString)
+        {
+            data.NewNode = data.NewNode!.Next1.Node;
+            return;
+        }
+
+        data.NewStringPos = data.StringPosIsText ? Step(state, data.NewStringPos, step) : data.NewStringPos + step;
     }
 
     /// <summary>
@@ -3296,7 +3342,7 @@ internal static class Matcher
 
         for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
         {
-            status = NextFuzzyMatchItem(state, ref data, step);
+            status = NextFuzzyMatchItem(state, ref data, false, step);
 
             if (status < 0)
             {
@@ -3388,7 +3434,7 @@ internal static class Matcher
 
         for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
         {
-            status = NextFuzzyMatchItem(state, ref data, step);
+            status = NextFuzzyMatchItem(state, ref data, false, step);
 
             if (status < 0)
             {
@@ -3421,6 +3467,857 @@ internal static class Matcher
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// Upstream <c>fuzzy_insert</c> (line 10346): tries a fuzzy insertion of characters, initially
+    /// none, after a complete string.
+    /// </summary>
+    /// <remarks>
+    /// A string that matched exactly has nothing left to fuzz, so this is the only way an insertion
+    /// can be charged next to one. It records no error itself - it pushes a <c>FUZZY_INSERT</c>
+    /// frame with a count of zero, and each backtrack into that frame lengthens the insertion by one
+    /// character.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="step">Which way the string was travelling, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="node">Where matching carries on if the frame is never retried.</param>
+    private static void FuzzyInsert(MatchState state, sbyte step, Node? node)
+    {
+        int limit = step > 0 ? state.SliceEnd : state.SliceStart;
+
+        if (state.TextPos == limit || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts))
+        {
+            return;
+        }
+
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushSize(0);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushUInt8((byte)Opcode.FuzzyInsert);
+
+        /* bstack: step text_pos count node FUZZY_INSERT */
+    }
+
+    /// <summary>Upstream <c>retry_fuzzy_insert</c> (line 10372): one more inserted character.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">On success, where matching carries on.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int RetryFuzzyInsert(MatchState state, ref Node node)
+    {
+        /* bstack: step text_pos count node */
+
+        if (
+            !state.Bstack.PopNode(state.Pattern, out Node? currNode)
+            || !state.Bstack.PopSize(out long count)
+            || !state.Bstack.PopSize(out long poppedTextPos)
+            || !state.Bstack.PopInt8(out sbyte step)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)poppedTextPos;
+
+        int limit = step > 0 ? state.SliceEnd : state.SliceStart;
+
+        if (
+            state.TextPos == limit
+            || !InsertionPermitted(state, state.FuzzyNode!, state.FuzzyCounts)
+            || !FuzzyExtMatch(state.FuzzyNode, state.TextPos)
+        )
+        {
+            while (count > 0)
+            {
+                state.UnrecordFuzzy();
+                --state.FuzzyCounts[FuzzyValue.Ins];
+                --count;
+            }
+
+            return MatchStatus.Failure;
+        }
+
+        state.TextPos = Step(state, state.TextPos, step);
+        ++count;
+
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushSize(count);
+        state.Bstack.PushNode(currNode);
+        state.Bstack.PushUInt8((byte)Opcode.FuzzyInsert);
+
+        /* bstack: step text_pos count node FUZZY_INSERT */
+
+        state.RecordFuzzy(FuzzyValue.Ins, Step(state, state.TextPos, (sbyte)-step));
+
+        ++state.FuzzyCounts[FuzzyValue.Ins];
+        ++state.CaptureChange;
+
+        node = currNode!;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>Upstream <c>fuzzy_match_string</c> (line 10431): a first try at fuzzing a string.</summary>
+    /// <remarks>
+    /// Shared by the <c>STRING*</c> arms, where <paramref name="stringPos"/> indexes the node's own
+    /// values, and by the <c>REF_GROUP*</c> arms, where it is a position in the subject. Upstream
+    /// does not have to tell them apart; this port does, because only one of the two is measured in
+    /// UTF-16 code units.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">The item that failed, which goes on the backtracking stack.</param>
+    /// <param name="stringPos">How far into the item the comparison had got; moved on success.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="stringPosIsText">Whether <paramref name="stringPos"/> is a subject position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int FuzzyMatchString(
+        MatchState state,
+        bool search,
+        Node node,
+        ref int stringPos,
+        sbyte step,
+        bool stringPosIsText
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        if (!AnyErrorPermitted(state))
+        {
+            return MatchStatus.Failure;
+        }
+
+        FuzzyData data = default;
+        data.NewStringPos = stringPos;
+        data.StringPosIsText = stringPosIsText;
+        data.Step = step;
+
+        // Permit insertion except initially when searching (it's better just to start searching one
+        // character later).
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+
+        int status = MatchStatus.Failure;
+
+        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchItem(state, ref data, true, data.Step);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+
+        /* bstack: node step string_pos text_pos fuzzy_type op */
+
+        // Upstream records the position the comparison had reached, not 'new_text_pos - step' the
+        // way the single-item path does (:10483 against :10245): a string charges the error where it
+        // stopped, whatever kind of error it turned out to be.
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        stringPos = data.NewStringPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>Upstream <c>retry_fuzzy_match_string</c> (line 10499): the next kind of error.</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="op">The opcode whose frame is being retried, which goes back on the stack.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, where matching carries on.</param>
+    /// <param name="stringPos">Receives how far into the item the retry got to.</param>
+    /// <param name="stringPosIsText">Whether <paramref name="stringPos"/> is a subject position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int RetryFuzzyMatchString(
+        MatchState state,
+        byte op,
+        bool search,
+        ref Node node,
+        ref int stringPos,
+        bool stringPosIsText
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        state.UnrecordFuzzy();
+
+        /* bstack: node step string_pos text_pos fuzzy_type */
+
+        if (
+            !state.Bstack.PopUInt8(out byte poppedType)
+            || !state.Bstack.PopSize(out long poppedTextPos)
+            || !state.Bstack.PopSize(out long poppedStringPos)
+            || !state.Bstack.PopInt8(out sbyte step)
+            || !state.Bstack.PopNode(state.Pattern, out Node? newNode)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)poppedTextPos;
+        stringPos = (int)poppedStringPos;
+
+        FuzzyData data = default;
+        data.FuzzyType = poppedType;
+        data.Step = step;
+        data.NewStringPos = stringPos;
+        data.StringPosIsText = stringPosIsText;
+
+        --fuzzyCounts[data.FuzzyType];
+
+        // Permit insertion except initially when searching (it's better just to start searching one
+        // character later).
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+
+        int status = MatchStatus.Failure;
+
+        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchItem(state, ref data, true, data.Step);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(newNode);
+        state.Bstack.PushInt8(data.Step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(op);
+
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        /* bstack: node step string_pos text_pos fuzzy_type op */
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        node = newNode!;
+        stringPos = data.NewStringPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// Upstream <c>next_fuzzy_match_string_fld</c> (line 10580): one kind of error against a string
+    /// whose subject side is being full-case-folded.
+    /// </summary>
+    /// <remarks>
+    /// The difference from <see cref="NextFuzzyMatchItem"/> is that every position this moves is a
+    /// position in the <em>folding</em> of one subject character, not in the subject: one subject
+    /// character can answer for three pattern characters, so an error inside a folding must not move
+    /// <c>text_pos</c> at all. That is also why the deletion arm has no <c>step == 0</c> guard -
+    /// a string item always travels.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">What the attempt is working on; written back through.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int NextFuzzyMatchStringFld(MatchState state, ref FuzzyData data)
+    {
+        if (!ThisErrorPermitted(state, data.FuzzyType))
+        {
+            return MatchStatus.Failure;
+        }
+
+        data.NewTextPos = state.TextPos;
+
+        int newPos;
+
+        switch (data.FuzzyType)
+        {
+            case FuzzyValue.Del:
+                // Could a character at text_pos have been deleted?
+                data.NewStringPos += data.Step;
+
+                return MatchStatus.Success;
+            case FuzzyValue.Ins:
+                // Could the character at text_pos have been inserted?
+                if (!data.PermitInsertion)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                newPos = data.NewFoldedPos + data.Step;
+
+                if (newPos >= 0 && newPos <= data.FoldedLen)
+                {
+                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewFoldedPos = newPos;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, newPos);
+            case FuzzyValue.Sub:
+                // Could the character at text_pos have been substituted?
+                newPos = data.NewFoldedPos + data.Step;
+
+                if (newPos >= 0 && newPos <= data.FoldedLen)
+                {
+                    if (!FuzzyExtMatch(state.FuzzyNode, data.NewTextPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewFoldedPos = newPos;
+                    data.NewStringPos += data.Step;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, newPos);
+            default:
+                return MatchStatus.Failure;
+        }
+    }
+
+    /// <summary>
+    /// Upstream's "an insertion inside a folding is free" rule, spelled out four times
+    /// (<c>upstream/src/_regex.c</c> lines 10659-10665, 10761-10767, 10905-10911 and, in a different
+    /// shape, 11019).
+    /// </summary>
+    /// <remarks>
+    /// Once the comparison is part way through a subject character's folding, the search anchor has
+    /// already been left behind even though <c>text_pos</c> has not moved, so the "no insertion at
+    /// the anchor" rule stops applying.
+    /// </remarks>
+    /// <param name="data">The attempt being set up.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="atAnchor">Whether <c>text_pos</c> is still at the search anchor.</param>
+    /// <returns>Whether an insertion may be tried.</returns>
+    private static bool PermitInsertionInFold(in FuzzyData data, bool search, bool atAnchor)
+    {
+        if (!search || !atAnchor)
+        {
+            return true;
+        }
+
+        return data.Step > 0 ? data.NewFoldedPos != 0 : data.NewFoldedPos != data.FoldedLen;
+    }
+
+    /// <summary>
+    /// Upstream <c>fuzzy_match_string_fld</c> (line 10635): a first try at fuzzing a string whose
+    /// subject side is being full-case-folded.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">The item that failed, which goes on the backtracking stack.</param>
+    /// <param name="stringPos">How far into the node's values the comparison had got.</param>
+    /// <param name="foldedPos">How far into the subject character's folding it had got.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int FuzzyMatchStringFld(
+        MatchState state,
+        bool search,
+        Node node,
+        ref int stringPos,
+        ref int foldedPos,
+        int foldedLen,
+        sbyte step
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        if (!AnyErrorPermitted(state))
+        {
+            return MatchStatus.Failure;
+        }
+
+        FuzzyData data = default;
+        data.NewStringPos = stringPos;
+        data.NewFoldedPos = foldedPos;
+        data.FoldedLen = foldedLen;
+        data.Step = step;
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+
+        int status = MatchStatus.Failure;
+
+        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchStringFld(state, ref data);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+
+        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        stringPos = data.NewStringPos;
+        foldedPos = data.NewFoldedPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>Upstream <c>retry_fuzzy_match_string_fld</c> (line 10721).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="op">The opcode whose frame is being retried, which goes back on the stack.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, where matching carries on.</param>
+    /// <param name="stringPos">Receives how far into the node's values the retry got to.</param>
+    /// <param name="foldedPos">Receives how far into the folding the retry got to.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int RetryFuzzyMatchStringFld(
+        MatchState state,
+        byte op,
+        bool search,
+        ref Node node,
+        ref int stringPos,
+        ref int foldedPos
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        state.UnrecordFuzzy();
+
+        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type */
+
+        if (
+            !state.Bstack.PopUInt8(out byte poppedType)
+            || !state.Bstack.PopSize(out long poppedTextPos)
+            || !state.Bstack.PopSize(out long poppedFoldedLen)
+            || !state.Bstack.PopSize(out long poppedFoldedPos)
+            || !state.Bstack.PopSize(out long poppedStringPos)
+            || !state.Bstack.PopInt8(out sbyte step)
+            || !state.Bstack.PopNode(state.Pattern, out Node? newNode)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)poppedTextPos;
+        stringPos = (int)poppedStringPos;
+
+        int currFoldedPos = (int)poppedFoldedPos;
+
+        FuzzyData data = default;
+        data.FuzzyType = poppedType;
+        data.FoldedLen = (int)poppedFoldedLen;
+        data.Step = step;
+        data.NewStringPos = stringPos;
+        data.NewFoldedPos = currFoldedPos;
+
+        --fuzzyCounts[data.FuzzyType];
+
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+
+        int status = MatchStatus.Failure;
+
+        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchStringFld(state, ref data);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(newNode);
+        state.Bstack.PushInt8(data.Step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(currFoldedPos);
+        state.Bstack.PushSize(data.FoldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(op);
+
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        node = newNode!;
+        stringPos = data.NewStringPos;
+        foldedPos = data.NewFoldedPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
+    /// Upstream <c>fuzzy_ext_match_group_fld</c> (line 10033): the <c>{...:test}</c> constraint
+    /// asked of a character inside a folding rather than of a subject character.
+    /// </summary>
+    /// <remarks>
+    /// As with <see cref="FuzzyExtMatch"/>, only the "there is nothing to test" arm is ported here;
+    /// the switch, and the <c>folded_char_at</c> helper every one of its arms calls, are S40's.
+    /// </remarks>
+    /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
+    /// <param name="foldedPos">The position in the folding the error would touch.</param>
+    /// <returns><see langword="true"/> if the constraint allows it.</returns>
+    private static bool FuzzyExtMatchGroupFld(Node? fuzzyNode, int foldedPos)
+    {
+        _ = foldedPos;
+
+        if (fuzzyNode?.Next2.Node is null)
+        {
+            return true;
+        }
+
+        throw Seam.For(Opcode.FuzzyExt);
+    }
+
+    /// <summary>
+    /// Upstream <c>next_fuzzy_match_group_fld</c> (line 10824): one kind of error against a group
+    /// reference where <b>both</b> sides are being full-case-folded.
+    /// </summary>
+    /// <remarks>
+    /// Two foldings run at different speeds here, so an error moves the subject's
+    /// <c>folded_pos</c> and the group's <c>gfolded_pos</c> separately, and neither is a subject
+    /// position. A deletion moves only the group's side.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">What the attempt is working on; written back through.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int NextFuzzyMatchGroupFld(MatchState state, ref FuzzyData data)
+    {
+        if (!ThisErrorPermitted(state, data.FuzzyType))
+        {
+            return MatchStatus.Failure;
+        }
+
+        data.NewTextPos = state.TextPos;
+
+        int newPos;
+
+        switch (data.FuzzyType)
+        {
+            case FuzzyValue.Del:
+                // Could a character at text_pos have been deleted?
+                data.NewGfoldedPos += data.Step;
+
+                return MatchStatus.Success;
+            case FuzzyValue.Ins:
+                // Could the character at text_pos have been inserted?
+                if (!data.PermitInsertion)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                newPos = data.NewFoldedPos + data.Step;
+
+                if (newPos >= 0 && newPos <= data.FoldedLen)
+                {
+                    if (!FuzzyExtMatchGroupFld(state.FuzzyNode, data.NewFoldedPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewFoldedPos = newPos;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, newPos);
+            case FuzzyValue.Sub:
+                // Could the character at text_pos have been substituted?
+                newPos = data.NewFoldedPos + data.Step;
+
+                if (newPos >= 0 && newPos <= data.FoldedLen)
+                {
+                    if (!FuzzyExtMatchGroupFld(state.FuzzyNode, data.NewFoldedPos))
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    data.NewFoldedPos = newPos;
+                    data.NewGfoldedPos += data.Step;
+
+                    return MatchStatus.Success;
+                }
+
+                return CheckFuzzyPartial(state, newPos);
+            default:
+                return MatchStatus.Failure;
+        }
+    }
+
+    /// <summary>Upstream <c>fuzzy_match_group_fld</c> (line 10879).</summary>
+    /// <remarks>
+    /// Upstream's <c>new_group_pos</c> local is copied in from <c>*group_pos</c> and written back
+    /// out unchanged (<c>:10896</c> against <c>:10961</c>) - nothing in between touches it, because
+    /// <c>string_pos</c> moves only when <c>gfolded_pos</c> runs out, which the caller does. So the
+    /// group position is not a parameter here.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">The item that failed, which goes on the backtracking stack.</param>
+    /// <param name="foldedPos">How far into the subject character's folding the comparison had got.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="groupPos">The position in the referenced capture, pushed so a retry can restore it.</param>
+    /// <param name="gfoldedPos">How far into the group character's folding the comparison had got.</param>
+    /// <param name="gfoldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int FuzzyMatchGroupFld(
+        MatchState state,
+        bool search,
+        Node node,
+        ref int foldedPos,
+        int foldedLen,
+        int groupPos,
+        ref int gfoldedPos,
+        int gfoldedLen,
+        sbyte step
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        if (!AnyErrorPermitted(state))
+        {
+            return MatchStatus.Failure;
+        }
+
+        FuzzyData data = default;
+        data.NewFoldedPos = foldedPos;
+        data.FoldedLen = foldedLen;
+        data.NewGfoldedPos = gfoldedPos;
+        data.Step = step;
+        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+
+        int status = MatchStatus.Failure;
+
+        for (data.FuzzyType = 0; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchGroupFld(state, ref data);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(gfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(groupPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+
+        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+         * fuzzy_type op
+         */
+
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        foldedPos = data.NewFoldedPos;
+        gfoldedPos = data.NewGfoldedPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>Upstream <c>retry_fuzzy_match_group_fld</c> (line 10972).</summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="op">The opcode whose frame is being retried, which goes back on the stack.</param>
+    /// <param name="search">Whether this is a search rather than an anchored match.</param>
+    /// <param name="node">On success, where matching carries on.</param>
+    /// <param name="foldedPos">Receives how far into the subject's folding the retry got to.</param>
+    /// <param name="groupPos">Receives the restored position in the referenced capture.</param>
+    /// <param name="gfoldedPos">Receives how far into the group's folding the retry got to.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int RetryFuzzyMatchGroupFld(
+        MatchState state,
+        byte op,
+        bool search,
+        ref Node node,
+        ref int foldedPos,
+        ref int groupPos,
+        ref int gfoldedPos
+    )
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+
+        state.UnrecordFuzzy();
+
+        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+         * fuzzy_type
+         */
+
+        if (
+            !state.Bstack.PopUInt8(out byte poppedType)
+            || !state.Bstack.PopSize(out long poppedTextPos)
+            || !state.Bstack.PopSize(out long poppedFoldedLen)
+            || !state.Bstack.PopSize(out long poppedFoldedPos)
+            || !state.Bstack.PopSize(out long poppedGroupPos)
+            || !state.Bstack.PopSize(out long poppedGfoldedLen)
+            || !state.Bstack.PopSize(out long poppedGfoldedPos)
+            || !state.Bstack.PopInt8(out sbyte step)
+            || !state.Bstack.PopNode(state.Pattern, out Node? newNode)
+        )
+        {
+            return MatchStatus.Illegal;
+        }
+
+        state.TextPos = (int)poppedTextPos;
+
+        int newFoldedPos = (int)poppedFoldedPos;
+        int newGroupPos = (int)poppedGroupPos;
+        int gfoldedLen = (int)poppedGfoldedLen;
+        int newGfoldedPos = (int)poppedGfoldedPos;
+
+        FuzzyData data = default;
+        data.FuzzyType = poppedType;
+        data.FoldedLen = (int)poppedFoldedLen;
+        data.Step = step;
+        data.NewFoldedPos = newFoldedPos;
+        data.NewGfoldedPos = newGfoldedPos;
+
+        --fuzzyCounts[data.FuzzyType];
+
+        // Permit insertion except initially when searching. Upstream spells the folding half of the
+        // rule differently here from the three places PermitInsertionInFold covers (:11019): one
+        // '||' chain, and with no step test, so a reverse retry asks 'folded_pos != folded_len'
+        // where the first attempt would have asked 'folded_pos != 0'. Ported as written.
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || data.NewFoldedPos != data.FoldedLen;
+
+        int status = MatchStatus.Failure;
+
+        for (++data.FuzzyType; data.FuzzyType < FuzzyValue.Count; data.FuzzyType++)
+        {
+            status = NextFuzzyMatchGroupFld(state, ref data);
+
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                break;
+            }
+        }
+
+        if (status != MatchStatus.Success)
+        {
+            return MatchStatus.Failure;
+        }
+
+        state.Bstack.PushNode(newNode);
+        state.Bstack.PushInt8(data.Step);
+        state.Bstack.PushSize(newGfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(newGroupPos);
+        state.Bstack.PushSize(newFoldedPos);
+        state.Bstack.PushSize(data.FoldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8((byte)data.FuzzyType);
+        state.Bstack.PushUInt8(op);
+
+        state.RecordFuzzy(data.FuzzyType, state.TextPos);
+
+        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+         * fuzzy_type op
+         */
+
+        ++fuzzyCounts[data.FuzzyType];
+        ++state.CaptureChange;
+
+        state.TextPos = data.NewTextPos;
+        node = newNode!;
+        groupPos = newGroupPos;
+        foldedPos = data.NewFoldedPos;
+        gfoldedPos = data.NewGfoldedPos;
 
         return MatchStatus.Success;
     }
@@ -5351,7 +6248,20 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            // 'stringPos' is a position in the subject here, not an index into the
+                            // node's values, so the fuzzy walk has to step it in code units.
+                            status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5402,7 +6312,18 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5452,7 +6373,18 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            status = FuzzyMatchString(state, search, node, ref stringPos, -1, true);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5469,17 +6401,10 @@ internal static class Matcher
                 }
                 // REF_GROUP_FLD_REV (:14161). REF_GROUP_FLD with both foldings consumed from their
                 // last character back, so each side's position counts down from its length instead
-                // of up from zero.
-                //
-                // S1854 (useless assignment) is right about this port and wrong about the program
-                // being ported: walking down means only 'gfoldedPos' is ever read afterwards, so
-                // every store to 'gfoldedLen' before the loop's own is dead *here*. Upstream's
-                // reader is 'fuzzy_match_group_fld(..., gfolded_len, ...)', which is a throwing
-                // seam until Phase 5. Deleting the variable now would mean re-deriving it then, in
-                // the code where a transcription slip costs most, so it is kept and the rule is
-                // disapplied over this case alone - a genuine dead store anywhere else in this file
-                // still fails the build.
-#pragma warning disable S1854
+                // of up from zero. S22 and S23 disapplied S1854 over this case because every store to
+                // 'gfoldedLen' was dead until Phase 5 supplied its reader; S39 is that slice, and
+                // 'FuzzyMatchGroupFld(..., gfoldedLen, -1)' below reads it, so the disapplication is
+                // gone.
                 case Opcode.RefGroupFldRev: // Reference to a capture group, backwards, ignoring case.
                 {
                     // Did the group capture anything?
@@ -5503,8 +6428,8 @@ internal static class Matcher
                     }
                     else
                     {
-                        // Only Phase 5's fuzzy retry leaves 'stringPos' non-negative on the way in,
-                        // so nothing reaches this arm yet.
+                        // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
+                        // way in, so that is the one thing that reaches this arm.
                         foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
                         gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
                     }
@@ -5545,7 +6470,28 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            status = FuzzyMatchGroupFld(
+                                state,
+                                search,
+                                node,
+                                ref foldedPos,
+                                foldedLen,
+                                stringPos,
+                                ref gfoldedPos,
+                                gfoldedLen,
+                                -1
+                            );
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5576,7 +6522,6 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
-#pragma warning restore S1854
                 // REF_GROUP_FLD (:14060). The hard one: the captured text and the subject are both
                 // full-case-folded, and the two foldings need not be the same length, so each side
                 // has its own buffer and its own position and only advances when its buffer runs
@@ -5604,8 +6549,8 @@ internal static class Matcher
                     }
                     else
                     {
-                        // Only Phase 5's fuzzy retry leaves 'stringPos' non-negative on the way in,
-                        // so nothing reaches this arm yet.
+                        // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
+                        // way in, so that is the one thing that reaches this arm.
                         foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
                         gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
                     }
@@ -5646,7 +6591,28 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            status = FuzzyMatchGroupFld(
+                                state,
+                                search,
+                                node,
+                                ref foldedPos,
+                                foldedLen,
+                                stringPos,
+                                ref gfoldedPos,
+                                gfoldedLen,
+                                1
+                            );
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5716,7 +6682,18 @@ internal static class Matcher
                         }
                         else if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            status = FuzzyMatchString(state, search, node, ref stringPos, 1, true);
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
                         }
                         else
                         {
@@ -5793,7 +6770,18 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchString(state, search, node, ref stringPos, 1, false);
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
                             }
                             else
                             {
@@ -5805,7 +6793,7 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        FuzzyInsert(state, 1, node.Next1.Node);
                     }
 
                     stringPos = -1;
@@ -5889,7 +6877,31 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchStringFld(
+                                    state,
+                                    search,
+                                    node,
+                                    ref stringPos,
+                                    ref foldedPos,
+                                    foldedLen,
+                                    1
+                                );
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
+
+                                if (foldedPos >= foldedLen && foldedLen > 0)
+                                {
+                                    state.TextPos = state.NextPos(state.TextPos);
+                                }
                             }
                             else
                             {
@@ -5898,9 +6910,39 @@ internal static class Matcher
                             }
                         }
 
+                        // The pattern ran out part way through the subject character's folding, and
+                        // a fuzzy string is allowed to charge the leftovers as errors rather than
+                        // fail (:14855). Every other arm reaches its 'goto backtrack' below instead.
                         if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            while (foldedPos < foldedLen)
+                            {
+                                status = FuzzyMatchStringFld(
+                                    state,
+                                    search,
+                                    node,
+                                    ref stringPos,
+                                    ref foldedPos,
+                                    foldedLen,
+                                    1
+                                );
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
+
+                                if (foldedPos >= foldedLen && foldedLen > 0)
+                                {
+                                    state.TextPos = state.NextPos(state.TextPos);
+                                }
+                            }
                         }
 
                         stringPos = -1;
@@ -5952,7 +6994,18 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchString(state, search, node, ref stringPos, 1, false);
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
                             }
                             else
                             {
@@ -5964,7 +7017,7 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        FuzzyInsert(state, 1, node.Next1.Node);
                     }
 
                     stringPos = -1;
@@ -6008,7 +7061,18 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
                             }
                             else
                             {
@@ -6020,7 +7084,7 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        FuzzyInsert(state, -1, node.Next1.Node);
                     }
 
                     stringPos = -1;
@@ -6066,7 +7130,18 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchString(state, search, node, ref stringPos, -1, false);
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
                             }
                             else
                             {
@@ -6078,7 +7153,7 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Fuzzy) != 0)
                     {
-                        throw Seam.For(Opcode.Fuzzy);
+                        FuzzyInsert(state, -1, node.Next1.Node);
                     }
 
                     stringPos = -1;
@@ -6089,12 +7164,9 @@ internal static class Matcher
                 }
                 // STRING_FLD_REV (:14882). STRING_FLD with the subject's folding consumed from its
                 // last character back, so 'foldedPos' counts down from 'foldedLen' to zero and
-                // 'text_pos' retreats when it reaches zero.
-                //
-                // S1854 is disapplied over this case for the reason spelled out at REF_GROUP_FLD_REV
-                // above: upstream's reader of 'folded_len' here is
-                // 'fuzzy_match_string_fld(..., folded_len, -1)', a throwing seam until Phase 5.
-#pragma warning disable S1854
+                // 'text_pos' retreats when it reaches zero. S22's S1854 disapplication is gone for the
+                // same reason as REF_GROUP_FLD_REV's above: 'FuzzyMatchStringFld(..., foldedLen, -1)'
+                // is the reader it was waiting for.
                 case Opcode.StringFldRev: // A string, backwards, ignoring case.
                 {
                     int foldedLen;
@@ -6169,7 +7241,31 @@ internal static class Matcher
                             }
                             else if ((node.Status & NodeStatus.Fuzzy) != 0)
                             {
-                                throw Seam.For(Opcode.Fuzzy);
+                                status = FuzzyMatchStringFld(
+                                    state,
+                                    search,
+                                    node,
+                                    ref stringPos,
+                                    ref foldedPos,
+                                    foldedLen,
+                                    -1
+                                );
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
+
+                                if (foldedPos <= 0 && foldedLen > 0)
+                                {
+                                    state.TextPos = state.PrevPos(state.TextPos);
+                                }
                             }
                             else
                             {
@@ -6178,9 +7274,38 @@ internal static class Matcher
                             }
                         }
 
+                        // The pattern ran out part way through the subject character's folding
+                        // (:14962), the mirror of STRING_FLD's own loop.
                         if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            throw Seam.For(Opcode.Fuzzy);
+                            while (foldedPos > 0)
+                            {
+                                status = FuzzyMatchStringFld(
+                                    state,
+                                    search,
+                                    node,
+                                    ref stringPos,
+                                    ref foldedPos,
+                                    foldedLen,
+                                    -1
+                                );
+
+                                if (status < 0)
+                                {
+                                    return status;
+                                }
+
+                                if (status == MatchStatus.Failure)
+                                {
+                                    stringPos = -1;
+                                    goto backtrack;
+                                }
+
+                                if (foldedPos <= 0 && foldedLen > 0)
+                                {
+                                    state.TextPos = state.PrevPos(state.TextPos);
+                                }
+                            }
                         }
 
                         stringPos = -1;
@@ -6197,7 +7322,6 @@ internal static class Matcher
                     node = node.Next1.Node!;
                     break;
                 }
-#pragma warning restore S1854
                 case Opcode.Success: // Success.
                     // Must the match advance past its start?
                     if (state.TextPos == state.SearchAnchor && state.MustAdvance)
@@ -6333,6 +7457,97 @@ internal static class Matcher
                         goto advance;
                     }
 
+                    break;
+                // Upstream's shared string block (:17269-17290). The REF_GROUP rows pass a subject
+                // position where the STRING rows pass an index into the node's values, which is the
+                // one thing upstream does not have to say and this port does.
+                case Opcode.RefGroup:
+                case Opcode.RefGroupIgn:
+                case Opcode.RefGroupIgnRev:
+                case Opcode.RefGroupRev:
+                case Opcode.String:
+                case Opcode.StringIgn:
+                case Opcode.StringIgnRev:
+                case Opcode.StringRev:
+                {
+                    bool stringPosIsText =
+                        (Opcode)op
+                        is Opcode.RefGroup
+                            or Opcode.RefGroupIgn
+                            or Opcode.RefGroupIgnRev
+                            or Opcode.RefGroupRev;
+
+                    status = RetryFuzzyMatchString(state, op, search, ref node, ref stringPos, stringPosIsText);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    stringPos = -1;
+                    break;
+                }
+                // Upstream :17291-17306.
+                case Opcode.RefGroupFld:
+                case Opcode.RefGroupFldRev:
+                    status = RetryFuzzyMatchGroupFld(
+                        state,
+                        op,
+                        search,
+                        ref node,
+                        ref foldedPos,
+                        ref stringPos,
+                        ref gfoldedPos
+                    );
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    stringPos = -1;
+                    break;
+                // Upstream :17361-17376.
+                case Opcode.StringFld:
+                case Opcode.StringFldRev:
+                    status = RetryFuzzyMatchStringFld(state, op, search, ref node, ref stringPos, ref foldedPos);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    stringPos = -1;
+                    break;
+                case Opcode.FuzzyInsert: // One more inserted character after a string (:15766).
+                    status = RetryFuzzyInsert(state, ref node);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        goto advance;
+                    }
+
+                    stringPos = -1;
                     break;
                 case Opcode.Atomic: // Start of an atomic group.
                 {
@@ -6963,14 +8178,27 @@ internal static class Matcher
                         break;
                     }
 
-                    Node test = node.Next1.Test!;
-
-                    if ((test.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        // Upstream's fuzzy retreat loop (:15881).
-                        throw Seam.For(Opcode.Fuzzy);
-                    }
-
+                    // NOT PORTED: upstream's `test = node->next_1.test` and its
+                    // `if (test->status & RE_STATUS_FUZZY)` retreat loop
+                    // (:15881). Two separate reasons, and the first is that it would be the same
+                    // code: that loop is character for character upstream's own default arm below
+                    // (:16271), because `status != RE_ERROR_FAILURE` after the `status < 0` return is
+                    // `status == RE_ERROR_SUCCESS`. So a fuzzy tail already gets upstream's fuzzy
+                    // behaviour from the loop that is here.
+                    //
+                    // The second is that no pattern can reach it. `sequence_matches_one` (:24056)
+                    // refuses a REPEAT_ONE whose body node carries RE_STATUS_FUZZY, and every
+                    // one-character op in `node_matches_one_character` (:3433) is emitted by a
+                    // parser class that sets FUZZY_OP when compiled inside a section
+                    // (`_regex_core.py`: Any, Character, Property, Range, SetBase, SetUnion,
+                    // ZeroWidthBase) - so a REPEAT_ONE is never inside one. Outside one, the node
+                    // after it is FUZZY or FUZZY_EXT, which `Fuzzy._compile` (`:2839`) emits with
+                    // REVERSE_OP and never FUZZY_OP, and `can_test_past` (:23697) does not walk past
+                    // either. Measured 2026-09-13 over all 1,534 compile-parity patterns: 639
+                    // REPEAT_ONE nodes, none with a fuzzy test node. Pinned by
+                    // RepeatTests.No_repeat_one_node_in_the_corpus_has_a_fuzzy_test_node, which is
+                    // what fails if a future sync makes this branch reachable.
+                    //
                     // Upstream follows this with a switch on 'test->op' whose CHARACTER,
                     // CHARACTER_IGN, CHARACTER_IGN_REV, CHARACTER_REV, STRING, STRING_FLD,
                     // STRING_FLD_REV, STRING_IGN, STRING_IGN_REV and STRING_REV arms
@@ -7099,12 +8327,13 @@ internal static class Matcher
                     Node repeated = node.Next2.Node!;
                     Node test = node.Next1.Test!;
 
-                    if ((test.Status & NodeStatus.Fuzzy) != 0)
-                    {
-                        // Upstream's fuzzy advance loop (:16500).
-                        throw Seam.For(Opcode.Fuzzy);
-                    }
-
+                    // NOT PORTED: upstream's fuzzy advance loop (:16500), unreachable for the reason
+                    // set out in the GREEDY_REPEAT_ONE case above and pinned by the same test. It is
+                    // not quite its own default arm here - it lacks the partial-side guard the arm
+                    // below borrows from upstream's specialised cases, and it returns 'status' where
+                    // the default arm returns PARTIAL (:16515 against :17040) - so this one is a
+                    // deletion on the unreachability alone, not on sameness.
+                    //
                     // Only upstream's default arm (:17024) is ported, for the reasons given in the
                     // GREEDY_REPEAT_ONE case above. Upstream's 'skip_pos' goes with the string arms
                     // that are not ported - they are the only thing that sets it, so its
