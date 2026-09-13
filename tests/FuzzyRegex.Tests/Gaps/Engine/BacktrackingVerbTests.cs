@@ -429,6 +429,79 @@ public sealed class BacktrackingVerbTests
         (negated.Index, negated.Length).Should().Be((0, 2));
         negated.Groups[1].Value.Should().Be("a");
         negated.Groups[2].Success.Should().BeFalse("a negative lookaround that succeeds captured nothing");
+
+        // FIVE: neither tell exists - row 117071 of the 6000-row seed-4242 gate, added by S40d. The
+        // pattern has no '$' and no groups at all, so there is no trailing assertion to falsify and no
+        // capture to find outside its match. What refutes upstream is its OWN reversed search over the
+        // truncated subject, which is legitimate HERE and nowhere near it in general: the pattern holds
+        // no end-sensitive item, so moving `endpos` cannot change what anything in it means.
+        //
+        //   pat, S = r'(?r)\w{1,3}?(*SKIP).(?:\p{L}(*SKIP)){2,3}', '_ ___\U00010400\U00010400\U00010400'
+        //   upstream's scan  (3, 8) (3, 7) (3, 6)      # codepoints, prefilter-free
+        //   its own search(S, 0, 8)  (3, 8)            # the match this port also finds
+        //   its own search(S, 0, 7)  None              # for a match it reports as ending at 7
+        //   its own search(S, 0, 6)  None              # and at 6
+        //
+        // Making both verbs '(*PRUNE)' leaves upstream with (3, 8) alone; deleting them leaves (3, 8)
+        // and (3, 7). Measured 2026-09-13, tools/probes/upstream-reversed-skip-scan-shapes.py, and the
+        // walk itself is tools/probes/upstream-reversed-walk-step.py.
+        new FuzzyRegex(@"(?r)\w{1,3}?(*SKIP).(?:\p{L}(*SKIP)){2,3}", FuzzyRegexOptions.Multiline)
+            .Matches("_ ___\U00010400\U00010400\U00010400", overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((3, 8));
+
+        // SIX: the same family through a SUBSTITUTION - row 116388 of the 6000-row seed-20260913 gate,
+        // added by S40d. Upstream replaces three times and this port once. The '$' tell settles it once
+        // the spans are asked for separately: upstream replaces at codepoint (3, 4), (2, 3) and (1, 2),
+        // and '$' is true at the end of 'aa\U0001D518\U0001D518' and nowhere else, so two of the three
+        // need '$' where the subject has a character. Making the verb '(*PRUNE)' leaves upstream
+        // replacing once, at (3, 4), which is this port's answer.
+        string replaced = new FuzzyRegex(
+            "(?r)(?:\\d*?(*SKIP)\U0001D518|a)$",
+            FuzzyRegexOptions.Multiline | FuzzyRegexOptions.IgnoreCase
+        ).Replace("aa\U0001D518\U0001D518", "<\\t", -1, out int replacements);
+
+        replacements.Should().Be(1);
+        replaced.Should().Be("aa\U0001D518<\t");
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void An_overlapped_reversed_scan_of_a_skip_keeps_the_match_upstreams_own_stepwise_door_still_finds()
+    {
+        // The THIRD and last symptom of the reversed carried slice (ledger entry 5), found by S40d at
+        // seed 20260914 while re-running a control at a seed no slice had used - which is VERIFICATION
+        // rule 7a one level up. The two tests above have upstream inventing matches or moving spans;
+        // here the moved 'slice_end' is too SHORT, so upstream's next attempt runs in a view of the
+        // subject that cannot hold the match and its scan ends one match early.
+        //
+        //   pat, S = r'(?r)\p{Lu}*(*SKIP)B(?P<g1>(?:\D{2,4}(*SKIP)a|.))', 'B_\ra'
+        //   upstream's overlapped scan          (0, 4)                    # prefilter-free
+        //   both verbs made '(*PRUNE)'          (0, 4) (0, 2)             # no bound moves
+        //   both verbs deleted                  (0, 4) (0, 2)
+        //   its own search(S, 0, 4)             (0, 4)
+        //   its own search(S, 0, 3)             (0, 2)                    # the match its scan loses
+        //
+        // Measured 2026-09-13 against regex 2026.7.19,
+        // tools/probes/upstream-reversed-skip-scan-shapes.py.
+        //
+        // THIS PORT GIVES THE SAME ANSWER WITH THE VERBS DELETED, and that is the point rather than a
+        // weakness in the assertion - S40d's second blind review raised it, so here is what was
+        // measured. The port answers (0, 4) and (0, 2) for '(*SKIP)', for '(*PRUNE)' and for no verb
+        // at all, because a verb's moved slice does not survive into the next match here. What the
+        // assertion is a second alarm for is precisely that: delete `state.SliceEnd =
+        // state.InitialSliceEnd;` from Matcher.cs's per-match reset and this test fails (measured,
+        // `--treenode-filter` on this method alone: total 1, failed 1). The sibling that pins the
+        // other half - a verb still moving the slice for the rest of its OWN attempt - is
+        // `Skip_moves_the_slice_start_and_a_later_match_in_the_same_scan_sees_it`.
+        MatchCollection lost = new FuzzyRegex(@"(?r)\p{Lu}*(*SKIP)B(?P<g1>(?:\D{2,4}(*SKIP)a|.))").Matches(
+            "B_\ra",
+            overlapped: true
+        );
+
+        lost.Select(static m => (m.Index, m.Length)).Should().Equal((0, 4), (0, 2));
+        lost.Select(static m => (m.Groups["g1"].Index, m.Groups["g1"].Length)).Should().Equal((1, 3), (1, 1));
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.

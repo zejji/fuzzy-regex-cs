@@ -114,9 +114,9 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The four rows of <c>overlapped-skip-extra-match-reversed</c>, as
-    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12. All four are listed rather
-    /// than one, because the entry has two tells, the third row is the one whose ground truth was
+    /// The seven rows of <c>overlapped-skip-extra-match-reversed</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them. All seven are listed rather than one,
+    /// because the entry has four tells, the third row is the one whose ground truth was
     /// suspected of depending on call order - a claim the staleness alarm should keep re-testing -
     /// and the fourth is the one that pays for the negative-lookaround clause in
     /// <see cref="CarriesACaptureOutsideItself"/>.
@@ -127,7 +127,18 @@ internal static class ExpectedDivergences
     /// a shorter pattern loses the second <c>(*SKIP)</c> that makes the carry-over observable. Row 4
     /// is row 5543 of a 6000-row seed-7 <c>interactions</c> wave, added by S37 and also as the wave
     /// drew it: every cut tried removed the extra match rather than the noise, which is the same
-    /// reason rows 2 and 3 are here whole.
+    /// reason rows 2 and 3 are here whole. Row 5 is row 116766 of the 6000-row seed-20260913 gate,
+    /// added by S40a, and it is the row that widened the entry past <c>finditer-overlapped</c>.
+    /// <para>
+    /// <b>Rows 6 and 7 are S40d's, and each is the ONLY row of its tell</b> - row 117071 of the
+    /// seed-4242 gate for the walk, row 116388 of the seed-20260913 one for the substitution. Both
+    /// are as the wave drew them and both had to be RE-RECORDED to be listed at all, because each
+    /// carries a field the recorder did not write when the wave first drew it:
+    /// <c>anchoredScan</c> on row 6, which S40d stopped refusing for a reversed pattern that reads
+    /// nothing at the end of the subject, and <c>subMatches</c> on row 7, which S40d added. A row
+    /// listed here without its field would be reported rather than classified, and the staleness
+    /// alarm would go red on the entry's own example.
+    /// </para>
     /// </remarks>
     private const string _reversedExtraMatchRows = """
         {"generator": "verbs", "pattern": "(?r)(?:.{2}(*SKIP)A|x)$", "flags": 8, "namedLists": {}, "subject": "bxA", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
@@ -135,6 +146,8 @@ internal static class ExpectedDivergences
         {"generator": "verbs", "pattern": "(?r)(?:[a\\d]*(*SKIP)\\D|\\p{Nd})(?:[\\p{L}\\p{N}]{1,3}(*SKIP)\\S|.)((?>\\s+(*PRUNE)A))", "flags": 0, "namedLists": {}, "subject": "İİAAA AS", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [0, 4]}]}}
         {"generator": "interactions", "pattern": "(?r)(?:\\D{1,1}(*SKIP)[\\p{ASCII}&&\\p{L}]|[[a-f]~~[d-k]])(?P<g1>.*)??(?P<g2>[A])(?:(?(2)(?<!(?&g2))\\p{Nd}))\\b", "flags": 264, "namedLists": {}, "subject": "A\r\nAAA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [3, 5]}]}}
         {"generator": "verbs", "pattern": "(?r)[[:digit:]]*(*SKIP)a$", "flags": 16394, "namedLists": {}, "subject": "\r\nAAa\r\naaa", "operation": "finditer", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [9, 10]}, {"groups": [{"number": 0, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [8, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [7, 8]}]}}
+        {"generator": "verbs", "pattern": "(?r)\\w{1,3}?(*SKIP).(?:\\p{L}(*SKIP)){2,3}", "flags": 8, "namedLists": {}, "subject": "_ ___𐐀𐐀𐐀", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 8, "captures": [[3, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 8]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 7]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 6]}]}, "anchoredScan": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 8, "captures": [[3, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 8]}]}
+        {"generator": "verbs", "pattern": "(?r)(?:\\d*?(*SKIP)𝔘|a)$", "flags": 10, "namedLists": {}, "subject": "aa𝔘𝔘", "operation": "sub", "template": "<\\t", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "a<\t<\t<\t", "count": 3}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 4]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}
         """;
 
     /// <summary>
@@ -528,8 +541,15 @@ internal static class ExpectedDivergences
             // match spanning (1, 4) - a capture outside its own match, in a pattern with no
             // lookaround to justify one - where its own walk gives (1, 4), which is this port's
             // answer.
+            //
+            // FORWARD ONLY since S40d, and the guard is new rather than the scope: the recorder
+            // refused a reversed walk outright until then, so nothing reversed could reach this
+            // predicate. It can now, and a reversed carried slice is `slice_end` rather than
+            // `slice_start` and has its own two entries below - so the direction is checked here to
+            // keep an id naming the mechanism it actually is.
             Applies: static (row, ours) =>
-                row.AnchoredScan is { } anchored
+                !IsReversed(row)
+                && row.AnchoredScan is { } anchored
                 && !string.Equals(row.Expected.Describe(), anchored.Describe(), StringComparison.Ordinal)
                 && string.Equals(ours.Describe(), anchored.Describe(), StringComparison.Ordinal)
         ),
@@ -618,13 +638,29 @@ internal static class ExpectedDivergences
                 + "so the second and third matches need `$` where the subject has an 'a'. Making the "
                 + "verb `(*PRUNE)`, or deleting it, leaves (9, 10) by itself, which is this port's "
                 + "answer. Measured 2026-09-13, tools/probes/upstream-reversed-skip-scan-shapes.py.\n"
-                + "TWO ROWS OF THE SAME FAMILY ARE DELIBERATELY NOT COVERED and still red the wave, "
-                + "because neither tell reaches them and a predicate widened until it did would stop "
-                + "discriminating: a `sub` row, whose outcome carries no match positions to refute "
-                + "(seed 20260913 row 116388), and an overlapped row whose pattern has no `$` and no "
-                + "groups at all (seed 4242 row 117071), where the refutation needs upstream's own "
-                + "answer over a truncated subject. Both are measured in that probe and belong to "
-                + "S40d with the reversed `anchoredScan` the recorder refuses.",
+                + "THE LAST TWO ROWS OF THE FAMILY WERE CLASSIFIED BY S40d, and neither by widening a "
+                + "tell - each got the fact it was missing.\n"
+                + "THREE, the walk tell, for an overlapped row whose pattern has no `$` and no groups "
+                + "at all (seed 4242 row 117071): `(?r)\\w{1,3}?(*SKIP).(?:\\p{L}(*SKIP)){2,3}` over "
+                + "'_ ___\\U00010400\\U00010400\\U00010400', where upstream's scan reports codepoint "
+                + "(3, 8), (3, 7) and (3, 6). Neither tell above exists on it, so what refutes it is "
+                + "upstream's OWN reversed search over the truncated subject - `search(S, 0, 7)` and "
+                + "`search(S, 0, 6)` are both None for matches it reports as ending at 7 and at 6 - "
+                + "and that is legitimate HERE because the pattern holds no end-sensitive item for "
+                + "the truncation to change the meaning of. The recorder refused every reversed "
+                + "`anchoredScan` until S40d for exactly that reason; the refusal now reads the "
+                + "pattern rather than the direction, so this row carries its own refutation, one "
+                + "match against upstream's three, and the discriminator is the same whole-rendering "
+                + "equality `overlapped-skip-stale-slice` uses.\n"
+                + "FOUR, the `$` tell again, read on a `sub` row through the spans upstream replaced "
+                + "at (seed 20260913 row 116388): `(?r)(?:\\d*?(*SKIP)\\U0001D518|a)$` over "
+                + "'aa\\U0001D518\\U0001D518', where upstream replaces 3 times and this port once. A "
+                + "sub outcome is a string and a count, so the row carried no position for a tell to "
+                + "read; the recorder now records where a `(*SKIP)` substitution replaced, upstream's "
+                + "three spans are codepoint (3, 4), (2, 3) and (1, 2), and the two beyond this "
+                + "port's need `$` at 3 and at 2, where the subject has a character. Making the verb "
+                + "`(*PRUNE)` leaves the (3, 4) replacement alone, which is this port's answer.\n"
+                + "Both are measured in that probe.",
             PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_"
                 + "upstreams_own_extra_matches_refute_themselves",
             Example: _reversedExtraMatchRows,
@@ -639,22 +675,101 @@ internal static class ExpectedDivergences
             // because `CarriesACaptureOutsideItself` excludes the three constructs that can put a
             // capture there: a lookaround, and `\K`, which the S36 blind review found missing from
             // the list. Read that method's remarks before trusting this paragraph again.
-            // Closing it properly needs upstream's own answer to each extra match, which is the
-            // reversed `anchoredScan` tools/record-oracle.py refuses - moving `endpos` truncates the
-            // subject and changes what `$` means, which is the very thing this entry is about.
-            // Phase 6 oracle hardening.
+            // CLOSED, for the rows that carry a walk, by S40d's third tell below: upstream's own
+            // answer to each extra match is the reversed `anchoredScan` the recorder refused until
+            // then. It still does refuse it where the pattern reads the end of the subject - moving
+            // `endpos` truncates it and changes what `$` means, which is the very thing this entry
+            // is about - so the hole survives on exactly the rows whose FIRST tell is the `$` one.
             //
             // EITHER SCAN SHAPE since S40a, and the two tells are what carries the widening: the
             // operation was never the thing doing the discriminating - the prefix comparison and the
             // per-extra-match refutation are - and a plain reversed `finditer` carries the same
             // moved slice as an overlapped one. Neither tell was loosened to let it in.
+            //
+            // A SUBSTITUTION ARM since S40d, resting on the recorder's `subMatches`, and the hole in
+            // it said out loud: it compares COUNTS and not text, because a sub renders as one string
+            // and this port's own replacement spans are not in the row. A port defect that replaced
+            // the right number of times at the right places with a wrong expansion would be
+            // classified here. What bounds it is that such a defect is in `Substitution` rather than
+            // in the scan, so it would red every sub row of the `substitution` generator rather than
+            // the handful this entry's four other conditions let through.
             Applies: static (row, ours) =>
                 row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
                 && IsReversed(row)
-                && row.Operation is "finditer" or "finditer-overlapped"
-                && row.Expected is MatchesOutcome theirScan
-                && ours is MatchesOutcome ourScan
-                && OnlyExtraMatchesTheRowItselfRefutes(row, theirScan, ourScan)
+                && (
+                    (
+                        row.Operation is "finditer" or "finditer-overlapped"
+                        && row.Expected is MatchesOutcome theirScan
+                        && ours is MatchesOutcome ourScan
+                        && (
+                            OnlyExtraMatchesTheRowItselfRefutes(row, theirScan, ourScan)
+                            || UpstreamsOwnWalkIsThisPortsScan(row, theirScan, ourScan)
+                        )
+                    )
+                    || (
+                        row.Operation is "sub" or "subf"
+                        && row.Expected is SubOutcome theirSub
+                        && ours is SubOutcome ourSub
+                        && OnlyExtraReplacementsTheRowItselfRefutes(row, theirSub, ourSub)
+                    )
+                )
+        ),
+        new(
+            Id: "overlapped-skip-missing-match-reversed",
+            Reason: "Upstream bug, the same carried slice as the three entries above, and the THIRD "
+                + "and last symptom it takes: under `(?r)` a `(*SKIP)` moves `slice_end` "
+                + "(upstream/src/_regex.c:14545), nothing puts it back between the matches of one "
+                + "scan, and here the bound the verb left is too SHORT rather than too long - so "
+                + "upstream's next attempt runs in a view of the subject that cannot hold the match, "
+                + "and its scan ends one match early. Where "
+                + "`overlapped-skip-extra-match-reversed` has upstream reporting matches this port "
+                + "does not, this has upstream LOSING one this port finds. The three entries are "
+                + "disjoint by count: spans that moved with the counts equal, upstream longer, "
+                + "upstream shorter.\n"
+                + "FOUND AT A SEED NO SLICE HAD USED, which is VERIFICATION rule 7a doing its job "
+                + "one level up: S40d drew seed 20260914 to re-run a control and the `verbs` "
+                + "generator reddened on a row the three gate seeds never drew. It is not caused by "
+                + "anything S40d changed - the engine is untouched by that slice, and the row's own "
+                + "outcome is recorded before any second question is asked.\n"
+                + "WHAT JUDGES IT IS THE WALK, and nothing softer. Upstream's own reversed search "
+                + "asked one match at a time from a fresh state gives BOTH matches - "
+                + "`search(S, 0, 4)` is (0, 4) and `search(S, 0, 3)` is (0, 2), which is this port's "
+                + "answer - while its stateful scan reports (0, 4) alone. Making both verbs "
+                + "`(*PRUNE)`, which moves no bound, or deleting them, gives upstream both matches "
+                + "too. The walk is legitimate on this row because the pattern holds no `$`, no "
+                + "`\\Z`, no word boundary and no lookahead, so truncating the subject changes the "
+                + "meaning of nothing in it - the refusal in tools/record-oracle.py's "
+                + "`_reads_the_end_of_the_subject` is what decides that. Measured 2026-09-13 on "
+                + "regex 2026.7.19, `python tools/probes/upstream-reversed-skip-scan-shapes.py`. "
+                + "Ledger entry 5.",
+            PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_keeps_the_match_"
+                + "upstreams_own_stepwise_door_still_finds",
+            Example: """
+            {"generator": "verbs", "pattern": "(?r)\\p{Lu}*(*SKIP)B(?P<g1>(?:\\D{2,4}(*SKIP)a|.))", "flags": 0, "namedLists": {}, "subject": "B_\ra", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 4]}]}, "anchoredScan": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 4]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 2]}]}
+            """,
+            // Keyed on the walk alone, which is the same discriminator `overlapped-skip-stale-slice`
+            // uses on the forward side: upstream's stateful scanner must contradict upstream's own
+            // stepwise matcher, and this port must agree with the matcher rendering for rendering -
+            // every match, every group, every capture. A defect in this port's scan makes the second
+            // condition false and is reported.
+            //
+            // The count comparison is only what keeps the three reversed entries from overlapping.
+            // It is NOT the tell: a row where upstream is one short but the walk agrees with
+            // upstream rather than with this port is a row this port got wrong, and it is reported.
+            Applies: static (row, ours) =>
+                row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
+                && IsReversed(row)
+                // Overlapped alone, because that is the only shape the recorder writes a walk for -
+                // a non-overlapped step needs `must_advance` and no Python call carries it. The
+                // sibling above lists both operations because its `$` and capture tells read the row
+                // rather than a walk, and a plain reversed `finditer` carries the same moved slice.
+                && row.Operation is "finditer-overlapped"
+                && row.Expected is MatchesOutcome theirShortScan
+                && ours is MatchesOutcome ourLongerScan
+                && row.AnchoredScan is { } walked
+                && theirShortScan.Matches.Count < ourLongerScan.Matches.Count
+                && !string.Equals(theirShortScan.Describe(), walked.Describe(), StringComparison.Ordinal)
+                && string.Equals(ourLongerScan.Describe(), walked.Describe(), StringComparison.Ordinal)
         ),
         new(
             Id: "group-call-direction",
@@ -986,6 +1101,84 @@ internal static class ExpectedDivergences
         for (int m = ours.Matches.Count; m < upstream.Matches.Count; m++)
         {
             MatchOutcome extra = upstream.Matches[m];
+            if (!CarriesACaptureOutsideItself(row.Pattern, extra) && !EndsWhereATrailingDollarIsFalse(row, extra))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether upstream's own stepwise walk of the same scan is this port's answer to it, which
+    /// makes every match upstream's stateful scanner reports beyond this port's one that upstream
+    /// itself does not find from a fresh state.
+    /// </summary>
+    /// <param name="row">The row, for the recorded walk.</param>
+    /// <param name="upstream">Upstream's scan.</param>
+    /// <param name="ours">This port's scan.</param>
+    /// <returns><see langword="true"/> if upstream contradicts itself and this port agrees with it.</returns>
+    /// <remarks>
+    /// The same discriminator <c>overlapped-skip-stale-slice</c> uses, and for the same reason: the
+    /// walk is upstream's own single-shot door, so the entry demands that upstream's scanner
+    /// contradicts upstream's matcher AND that this port agrees with the matcher, rendering for
+    /// rendering. A defect in this port's scan makes the second condition false and is reported.
+    /// <para>
+    /// The extra count check is what keeps this arm to the EXTRA MATCH shape rather than the moved
+    /// span one, which <c>overlapped-skip-stale-slice-reversed</c> owns: a reversed row whose scans
+    /// are the same length and differ in a span falls to that entry instead.
+    /// </para>
+    /// </remarks>
+    private static bool UpstreamsOwnWalkIsThisPortsScan(OracleRow row, MatchesOutcome upstream, MatchesOutcome ours) =>
+        row.AnchoredScan is { } anchored
+        && upstream.Matches.Count > ours.Matches.Count
+        && !string.Equals(upstream.Describe(), anchored.Describe(), StringComparison.Ordinal)
+        && string.Equals(ours.Describe(), anchored.Describe(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether a substitution upstream made more times than this port did replaced, for every extra
+    /// time, at a span the row itself refutes - the same two tells
+    /// <see cref="OnlyExtraMatchesTheRowItselfRefutes"/> reads, at the spans the recorder's
+    /// <c>subMatches</c> carries.
+    /// </summary>
+    /// <param name="row">The row, for the pattern, the subject and the recorded spans.</param>
+    /// <param name="upstream">Upstream's substitution.</param>
+    /// <param name="ours">This port's substitution.</param>
+    /// <returns><see langword="true"/> if that is the whole of the difference.</returns>
+    /// <remarks>
+    /// The length check comes first and is not a formality: <c>subMatches</c> is a SECOND question
+    /// asked of upstream - the same scan through <c>finditer</c> rather than through <c>subn</c> -
+    /// so a row where the two answers disagree about how many times upstream replaced is a row this
+    /// entry has no business reading, and it is reported instead. It also caught a real defect on
+    /// the day it was written: the recorder truncated the list by the row's raw <c>count</c>, where
+    /// a NEGATIVE count means upstream replaces nothing rather than "all but the last".
+    /// <para>
+    /// <b>The window assumes this port's replacements are upstream's first <c>ours.Count</c>, and
+    /// they need not be</b> - S40d's blind review built one where they are not:
+    /// <c>(?r)(?:\d*?(*SKIP)b|a)$</c> over 'a\nbbb\na' has this port replacing at (6, 7), (4, 5) and
+    /// (0, 1) where upstream's first three are (6, 7), (4, 5) and (3, 4). What keeps that from
+    /// classifying a defect is the tell rather than the window: a span this port itself replaced at
+    /// ends where the trailing <c>$</c> IS true, so <see cref="EndsWhereATrailingDollarIsFalse"/>
+    /// refuses it and the row is reported. Ten such rows were built and run, and all ten were
+    /// reported (2026-09-13).
+    /// </para>
+    /// </remarks>
+    private static bool OnlyExtraReplacementsTheRowItselfRefutes(OracleRow row, SubOutcome upstream, SubOutcome ours)
+    {
+        if (row.SubMatches is not { } replacements || replacements.Matches.Count != upstream.Count)
+        {
+            return false;
+        }
+
+        if (ours.Count >= upstream.Count || ours.Count < 0)
+        {
+            return false;
+        }
+
+        for (int m = ours.Count; m < replacements.Matches.Count; m++)
+        {
+            MatchOutcome extra = replacements.Matches[m];
             if (!CarriesACaptureOutsideItself(row.Pattern, extra) && !EndsWhereATrailingDollarIsFalse(row, extra))
             {
                 return false;

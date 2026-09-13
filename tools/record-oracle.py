@@ -471,6 +471,45 @@ def _record_row(regex, row: dict) -> dict:
 
         recorded["codepointSpan"] = None
         recorded["outcome"] = {"kind": "sub", "text": text, "count": made}
+
+        # WHERE UPSTREAM REPLACED, for a `(*SKIP)` pattern only, and a SECOND FACT ABOUT UPSTREAM in
+        # the sense `anchoredScan` above is - recorded, never compared.
+        #
+        # A `sub` outcome is a string and a count, so a row that diverges on one carries no match
+        # positions for anything to refute. That is the whole reason seed 20260913's row 116388 could
+        # not be classified with the other rows of its family (S40c's handover, S40d's scope): the
+        # `$` tell `overlapped-skip-extra-match-reversed` reads needs a match END to read it at.
+        # `subn` walks the same scanner `finditer` does, so asking the scan separately gives the
+        # spans the substitution used - measured on that row, where upstream replaces 3 times and
+        # `finditer` gives exactly 3 spans (tools/probes/upstream-reversed-skip-scan-shapes.py).
+        #
+        # The consumer demands that this list is exactly as long as the recorded count before it
+        # reads anything from it, so a row where the two questions disagree is reported rather than
+        # classified.
+        if "(*SKIP)" in pattern:
+            try:
+                replaced_at = list(compiled.finditer(subject, timeout=ROW_TIMEOUT_SECONDS))
+            except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
+                return recorded
+
+            # Upstream's own limit semantics, which are not a plain slice: zero is NO LIMIT and a
+            # NEGATIVE count replaces nothing at all - `regex.subn('a(*SKIP)', 'X', 'aaa', count=-1)`
+            # is `('aaa', 0)` where `count=0` is `('XXX', 3)`. `SUB_COUNTS` draws -1, so slicing by
+            # the raw count would record every match but the last for a row upstream never touched.
+            # Found by S40d's blind review; eight rows of a 6000-row seed-7 `verbs` wave carried a
+            # non-empty list for a substitution that replaced nothing.
+            limit = recorded["count"]
+            if limit < 0:
+                replaced_at = []
+            elif limit > 0:
+                replaced_at = replaced_at[:limit]
+
+            offsets = _utf16_offsets(subject)
+            recorded["subMatches"] = [
+                dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0)))
+                for m in replaced_at
+            ]
+
         return recorded
 
     if operation in ITER_OPERATIONS:
@@ -503,17 +542,23 @@ def _record_row(regex, row: dict) -> dict:
                     for m in found
                 ],
             }
-            # OVERLAPPED AND FORWARD ONLY, and the two exclusions are not tidiness - each is a case
-            # where the walk below cannot ask upstream the same question the scanner asks, so a
-            # recorded answer would be a third opinion rather than a second one. See its docstring.
-            if overlapped and "(*SKIP)" in pattern and (compiled.flags & _REVERSE_FLAG) == 0:
+            # OVERLAPPED ONLY, and reversed only where the pattern reads nothing at the end of the
+            # subject - each exclusion is a case where the walk below cannot ask upstream the same
+            # question the scanner asks, so a recorded answer would be a third opinion rather than a
+            # second one. See its docstring.
+            reverse = (compiled.flags & _REVERSE_FLAG) != 0
+            if (
+                overlapped
+                and "(*SKIP)" in pattern
+                and not (reverse and _reads_the_end_of_the_subject(pattern))
+            ):
                 # None where a step ran out of its deadline, and then the key is left OFF the row
                 # entirely rather than written as a short walk. A truncated walk is not upstream's
                 # answer to the scan, and `overlapped-skip-stale-slice` demands the walk agree with
                 # this port match for match - so a short one would classify a row the entry has no
                 # business classifying. Absent means the entry does not apply and the row is
                 # reported, which is the direction that cannot hide a defect.
-                walk = _anchored_scan(compiled, subject, offsets)
+                walk = _anchored_scan(compiled, subject, offsets, reverse)
                 if walk is not None:
                     recorded["anchoredScan"] = walk
         return recorded
@@ -628,11 +673,12 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
     return described
 
 
-def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | None:
+def _anchored_scan(compiled, subject: str, offsets: list[int], reverse: bool = False) -> list[dict] | None:
     """The same overlapped scan, asked of upstream one match at a time from a fresh state each step.
 
     A SECOND FACT ABOUT UPSTREAM, never compared against anything, and recorded only for a
-    ``finditer`` row that is OVERLAPPED, FORWARD, and whose pattern contains ``(*SKIP)``. Only that
+    ``finditer`` row that is OVERLAPPED, whose pattern contains ``(*SKIP)``, and - if it is
+    reversed - which reads nothing at the end of the subject. Only that
     verb moves ``slice_start``/``slice_end`` mid-attempt (``upstream/src/_regex.c:14553``), and
     nothing puts them back: ``init_match`` (``:3404``), ``do_match`` (``:18121``) and
     ``scanner_search_or_match`` (``:20874``) all leave them alone, and the only other writer is
@@ -647,10 +693,13 @@ def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | N
     entry can demand that upstream's stateful scanner contradicts upstream's own matcher AND that
     this port agrees with the matcher.
 
-    WHY OVERLAPPED ONLY, AND WHY FORWARD ONLY. Both exclusions were found by S34's blind review,
-    which built a row the walk got wrong and showed the list absorbing an engine mutation because of
-    it. Neither is tidiness: in each case the public API cannot ask upstream the same question its
-    scanner asks, so a recorded answer would be a third opinion rather than a second one.
+    WHY OVERLAPPED ONLY, AND WHY A REVERSED ROW IS CONDITIONAL. Both exclusions were found by S34's
+    blind review, which built a row the walk got wrong and showed the list absorbing an engine
+    mutation because of it. Neither is tidiness: in each case the public API cannot ask upstream the
+    same question its scanner asks, so a recorded answer would be a third opinion rather than a
+    second one. S40d narrowed the second from "no reversed row" to "no reversed row whose pattern
+    reads the end of the subject", because that refusal was never about reversal - see
+    ``_reads_the_end_of_the_subject``.
 
     * **Non-overlapped needs ``must_advance``, and no Python call carries it.** After a zero-width
       match at *p* the scanner re-attempts AT *p* with ``must_advance`` set (``:20912``), which
@@ -667,6 +716,14 @@ def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | N
       end-of-text escape and both word-boundary escapes. Measured: a reversed word-boundary
       pattern over 'bab' gives (3,3) (0,0) from finditer and (3,3) (2,2) (1,1) from the same
       walk, because positions 1 and 2 are boundaries only in a truncated 'bab'.
+
+      **That is a property of the PATTERN, not of reversal, so S40d made the refusal read the
+      pattern.** A reversed pattern holding no such item is walked, and the step is upstream's own:
+      ``state->text_pos = state->match_pos - 1`` for a reversed overlapped scan
+      (``upstream/src/_regex.c:20903``), where ``match_pos`` is the end a reversed attempt anchors
+      at - so the next ``endpos`` is one before the last match's end. Measured 2026-09-13 on seven
+      shapes including a zero-width one, and on four that DO read the end and differ:
+      ``python tools/probes/upstream-reversed-walk-step.py``.
 
     WHAT WAS CHECKED AND DOES NOT MATTER, so the next reader does not re-derive it.
     ``search(subject, pos)`` sets ``slice_start`` to *pos* where the scanner leaves it at the
@@ -687,11 +744,18 @@ def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | N
     # One more step than there are positions is the most any correct walk can take, so a pattern
     # that somehow fails to advance stops here instead of hanging the recorder.
     limit = len(subject) + 2
-    pos = 0
+
+    # Forward the walk anchors its START and sweeps it up; reversed it anchors its END and sweeps
+    # that down. `pos` is whichever of the two this row moves.
+    pos = len(subject) if reverse else 0
 
     while 0 <= pos <= len(subject) and len(found) < limit:
         try:
-            match = compiled.search(subject, pos, timeout=ROW_TIMEOUT_SECONDS)
+            match = (
+                compiled.search(subject, 0, pos, timeout=ROW_TIMEOUT_SECONDS)
+                if reverse
+                else compiled.search(subject, pos, timeout=ROW_TIMEOUT_SECONDS)
+            )
         except TimeoutError:
             # The walk is unfinishable, so there is no walk. See the caller: the key is left off
             # the row rather than written short.
@@ -708,10 +772,37 @@ def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | N
         found.append(dict(_describe_match(compiled, match, offsets), codepointSpan=list(match.span(0))))
 
         # scanner_search_or_match's own overlapped step (:20903), which MatchState.AdvancePastMatch
-        # ports: one character past where the match STARTED.
-        pos = match.span(0)[0] + 1
+        # ports: `match_pos + step`, one character past where the ATTEMPT ANCHORED. Forward that is
+        # the match's start and the step is +1; reversed it is the match's end and the step is -1.
+        pos = match.span(0)[1] - 1 if reverse else match.span(0)[0] + 1
 
     return found
+
+
+# The zero-width items whose meaning changes when `endpos` truncates the subject, in the spellings a
+# pattern can carry them in. Upstream's POSITION_ESCAPES (upstream/regex/_regex_core.py:4635) minus
+# `\A`, which is bound by `text_start` rather than by the slice and which the walk does not move
+# anyway; plus `$` in all three of its opcodes; plus `\G` (`:1278`), whose anchor is the search's own
+# start; plus `\X`, whose expansion ends in a GraphemeBoundary that reads the character after it
+# (`:2924`); plus either lookahead, which reads past the position it sits at.
+_END_SENSITIVE_ITEMS = ("$", r"\Z", r"\z", r"\b", r"\B", r"\m", r"\M", r"\K", r"\G", r"\X", "(?=", "(?!")
+
+
+def _reads_the_end_of_the_subject(pattern: str) -> bool:
+    """Whether a pattern holds anything whose meaning a truncated subject would change.
+
+    The refusal `_anchored_scan` applies to a REVERSED row, and deliberately a crude textual one.
+    Every way it is crude refuses MORE than it has to and so can only cost a classification, never
+    buy a wrong one: `\\b` inside a character class is a backspace and `$` inside one is a literal,
+    and both are refused here; a doubled backslash before one of the letters makes it a literal
+    backslash and it is refused too.
+
+    Whitespace goes first for the reason `CarriesACaptureOutsideItself` strips it in
+    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs - under `(?x)` a construct can be spelt with
+    spaces inside it - and stripping can only ADD a refusal.
+    """
+    bare = "".join(pattern.split())
+    return any(item in bare for item in _END_SENSITIVE_ITEMS)
 
 
 def _canonical_named_lists(named_lists: dict) -> dict:

@@ -1,4 +1,6 @@
-# S40a (2026-09-13): the three reversed `(*SKIP)` rows that the per-match slice reset exposed.
+# S40a (2026-09-13): the three reversed `(*SKIP)` rows that the per-match slice reset exposed,
+# plus a FOURTH that S40d found at a seed no slice had used, where the same carried slice makes
+# upstream's scanner LOSE a match rather than invent one.
 #
 # A `(*SKIP)` moves `slice_start`/`slice_end` mid-attempt and upstream restores it nowhere (ledger
 # entry 5), so one scanner state carries the moved slice into its next match. S40a made this port
@@ -90,3 +92,25 @@ scan('the verbs deleted', P3.replace('(*SKIP)', ''), S3, F3, overlapped=True)
 for end in (8, 7, 6):
     print('   {:<44} {}'.format(f'its own search over [0, {end})', compile_free(P3, F3).search(S3, 0, end)))
 print('   this port answers [(3, 8)] alone - codepoints; the wave records UTF-16.')
+
+# ---------------------------------------------------------------------------------------------
+# THE SAME CARRY-OVER, LOSING A MATCH. Seed 20260914 row 3679, found by S40d while running a
+# control at a seed no slice had used. Upstream's scan reports ONE match where this port reports
+# two, which is the mirror of the shape above: the `slice_end` a `(*SKIP)` moved makes the next
+# attempt run in a view of the subject that is too short, so the scanner never finds a match its own
+# matcher finds at once. Neither of the row's other tells reaches it - the pattern has no `$`, and
+# the capture tell reads a match upstream reported rather than one it lost.
+# ---------------------------------------------------------------------------------------------
+P4, S4, F4 = r'(?r)\p{Lu}*(*SKIP)B(?P<g1>(?:\D{2,4}(*SKIP)a|.))', 'B_\ra', 0x400
+print(f'\n== row 3679  overlapped, upstream one match SHORT  subject {S4!r}')
+scan('as recorded (upstream)', P4, S4, F4, overlapped=True)
+scan('the verbs made (*PRUNE)', P4.replace('(*SKIP)', '(*PRUNE)'), S4, F4, overlapped=True)
+scan('the verbs deleted', P4.replace('(*SKIP)', ''), S4, F4, overlapped=True)
+end = len(S4)
+while 0 <= end <= len(S4):
+    match = compile_free(P4, F4).search(S4, 0, end)
+    print('   {:<44} {}'.format(f'its own search over [0, {end})', match and match.span()))
+    if match is None:
+        break
+    end = match.span()[1] - 1
+print('   this port answers [(0, 4), (0, 2)] - both of them, which is upstream\'s own stepwise answer.')

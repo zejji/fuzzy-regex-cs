@@ -192,21 +192,25 @@ internal static class OracleWave
             row.TryGetProperty("endpos", out JsonElement endpos) ? endpos.GetInt32() : null,
             row.TryGetProperty("searchOnlyPartial", out JsonElement searchOnly)
                 && searchOnly.ValueKind == JsonValueKind.True,
-            ReadAnchoredScan(row)
+            ReadMatchList(row, "anchoredScan"),
+            ReadMatchList(row, "subMatches")
         );
     }
 
     /// <summary>
-    /// The recorder's <c>anchoredScan</c>, or <see langword="null"/> when the row does not carry
-    /// one. It carries one only when it is an overlapped, forward <c>finditer</c> whose pattern
-    /// contains <c>(*SKIP)</c> - so a reversed row, a non-overlapped one, a <c>split</c> and every
-    /// row recorded before S34 all read as <see langword="null"/> here.
+    /// One of the recorder's second-fact match lists - <c>anchoredScan</c> or <c>subMatches</c> - or
+    /// <see langword="null"/> when the row does not carry that one. A row carries an
+    /// <c>anchoredScan</c> only when it is an overlapped <c>finditer</c> whose pattern contains
+    /// <c>(*SKIP)</c> and, if reversed, reads nothing at the end of the subject; it carries
+    /// <c>subMatches</c> only when it is a substitution whose pattern contains <c>(*SKIP)</c>. Every
+    /// other row, and every wave recorded before the field existed, reads as <see langword="null"/>.
     /// </summary>
     /// <param name="row">The row.</param>
-    /// <returns>The spans, or <see langword="null"/>.</returns>
-    private static MatchesOutcome? ReadAnchoredScan(JsonElement row) =>
-        row.TryGetProperty("anchoredScan", out JsonElement scan) && scan.ValueKind == JsonValueKind.Array
-            ? new MatchesOutcome([.. scan.EnumerateArray().Select(ReadMatch)])
+    /// <param name="name">The field.</param>
+    /// <returns>The matches, or <see langword="null"/>.</returns>
+    private static MatchesOutcome? ReadMatchList(JsonElement row, string name) =>
+        row.TryGetProperty(name, out JsonElement matches) && matches.ValueKind == JsonValueKind.Array
+            ? new MatchesOutcome([.. matches.EnumerateArray().Select(ReadMatch)])
             : null;
 
     private static IOracleOutcome ReadOutcome(JsonElement outcome)
@@ -525,18 +529,29 @@ internal sealed record OracleHeader(
 /// <see cref="ExpectedDivergences"/> reads it.
 /// </param>
 /// <param name="AnchoredScan">
-/// Recorded only on an OVERLAPPED, FORWARD <c>finditer</c> row whose pattern contains
-/// <c>(*SKIP)</c>: the same scan asked of upstream one match at a time, each step from a fresh
+/// Recorded only on an OVERLAPPED <c>finditer</c> row whose pattern contains <c>(*SKIP)</c>, and -
+/// if that row is reversed - whose pattern reads nothing at the end of the subject: the same scan
+/// asked of upstream one match at a time, each step from a fresh
 /// state, so that the slice a <c>(*SKIP)</c> moved cannot carry from one match into the next.
 /// Upstream's stateful scanner carries it - nothing in <c>init_match</c>, <c>do_match</c> or
 /// <c>scanner_search_or_match</c> puts the slice back - so a difference between this and the row's
 /// own answer is upstream contradicting its own matcher. Groups and all, not just the spans,
 /// because a stale slice shows in a capture as readily as in a whole-match span.
 /// <see langword="null"/> on every other row and on any wave recorded before S34. Never compared;
-/// only <see cref="ExpectedDivergences"/> reads it. <b>The two exclusions are load-bearing</b> - a
-/// non-overlapped step needs <c>must_advance</c> and a reversed one needs <c>endpos</c>, and
-/// neither can be asked through the public API without changing the question. The recorder's
-/// <c>_anchored_scan</c> docstring has the measurements.
+/// only <see cref="ExpectedDivergences"/> reads it. <b>Both exclusions are load-bearing</b> - a
+/// non-overlapped step needs <c>must_advance</c>, which no Python call carries, and a reversed one
+/// needs <c>endpos</c>, which truncates the subject and so changes what an end-of-subject assertion
+/// means. S40d narrowed the second to the patterns that actually hold such an assertion. The
+/// recorder's <c>_anchored_scan</c> docstring has the measurements.
+/// </param>
+/// <param name="SubMatches">
+/// Recorded only on a <c>sub</c> or <c>subf</c> row whose pattern contains <c>(*SKIP)</c>: the spans
+/// upstream replaced at, asked separately as a <c>finditer</c> because <c>subn</c> walks the same
+/// scanner. A substitution's outcome is a string and a count, so without this a diverging sub row
+/// carries no match positions for a tell to read - which is exactly why seed 20260913's row 116388
+/// could not be judged with the rest of its family until S40d. Groups and all, so the same two tells
+/// <see cref="ExpectedDivergences"/> reads on a scan apply unchanged. Never compared, and read only
+/// after its length is checked against the recorded replacement count.
 /// </param>
 internal sealed record OracleRow(
     int Number,
@@ -554,7 +569,8 @@ internal sealed record OracleRow(
     int? Pos = null,
     int? EndPos = null,
     bool SearchOnlyPartial = false,
-    MatchesOutcome? AnchoredScan = null
+    MatchesOutcome? AnchoredScan = null,
+    MatchesOutcome? SubMatches = null
 );
 
 /// <summary>What a matching operation answered.</summary>

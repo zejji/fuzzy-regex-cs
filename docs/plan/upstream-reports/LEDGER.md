@@ -437,6 +437,32 @@ pastes them into a plain interpreter will see fewer matches and conclude the rep
 `BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves`
 and classified by `ExpectedDivergences.overlapped-skip-extra-match-reversed`.
 
+**A fourth symptom, added by S40d on 2026-09-13, and the one that completes the set: the carried
+slice also LOSES a match.** Where the third symptom has the moved `slice_end` too far right, here it
+is too far left, so upstream's next attempt runs in a view of the subject that cannot hold the match
+and its scan stops one short. Found at seed 20260914, `verbs`, 6000 rows - a seed no slice had used.
+
+```python
+>>> p, s = r'(?r)\p{Lu}*(*SKIP)B(?P<g1>(?:\D{2,4}(*SKIP)a|.))', 'B_\ra'
+>>> [m.span() for m in regex.compile(p).finditer(s, overlapped=True)]   # prefilter-free
+[(0, 4)]
+>>> regex.compile(p).search(s, 0, 4), regex.compile(p).search(s, 0, 3)
+((0, 4), (0, 2))
+```
+
+Upstream's own reversed search, asked one match at a time from a fresh state, finds `(0, 2)` at
+`endpos` 3 - the very position its overlapped scan steps to next, since a reversed overlapped scan
+resumes at `match_pos - 1` (`:20903`). The controls isolate the verb again: both verbs made
+`(*PRUNE)`, and both deleted, give upstream `[(0, 4), (0, 2)]`.
+
+The walk is a legitimate question for THIS pattern because it holds no `$`, `\Z`, `\b`, `\B`, `\m`,
+`\M` or lookahead, so truncating the subject with `endpos` changes the meaning of nothing in it.
+
+**Verified 2026-09-13** against `regex` 2026.7.19; pinned by
+`BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_keeps_the_match_upstreams_own_stepwise_door_still_finds`
+and classified by `ExpectedDivergences.overlapped-skip-missing-match-reversed`. Re-runnable:
+`python tools/probes/upstream-reversed-skip-scan-shapes.py`.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern
