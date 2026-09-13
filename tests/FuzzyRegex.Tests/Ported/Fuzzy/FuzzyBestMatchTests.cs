@@ -21,7 +21,6 @@ public sealed class FuzzyBestMatchTests
     [Test]
     [Arguments("(?b)(fuu){i<=3,d<=3,e<=5}")]
     [Arguments("(?b)(fuu){i<=3,d<=3,e}")]
-    [Skip("needs:fuzzy-bestmatch - the engine has no BESTMATCH search yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#13,17")]
     public void BestMatch_prefers_a_real_match_over_the_empty_one_at_the_start(string pattern)
     {
@@ -34,7 +33,6 @@ public sealed class FuzzyBestMatchTests
 
     // Unflagged sibling: #19, which settles on (0, 6).
     [Test]
-    [Skip("needs:fuzzy-bestmatch - the engine has no BESTMATCH search yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#21")]
     public void BestMatch_finds_the_closest_occurrence_rather_than_the_leftmost()
     {
@@ -47,7 +45,6 @@ public sealed class FuzzyBestMatchTests
 
     // Unflagged sibling: #26, which settles on (0, 6).
     [Test]
-    [Skip("needs:fuzzy-bestmatch - the engine has no BESTMATCH search yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#27")]
     public void BestMatch_finds_the_closest_whole_word()
     {
@@ -60,7 +57,6 @@ public sealed class FuzzyBestMatchTests
 
     // Unflagged sibling: #43, which settles on (6, 13).
     [Test]
-    [Skip("needs:fuzzy-bestmatch - the engine has no BESTMATCH search yet")]
     [Property("Upstream", "RegexTests.test_fuzzy#44")]
     public void BestMatch_applies_under_a_weighted_cost_equation()
     {

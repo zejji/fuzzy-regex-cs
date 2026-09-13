@@ -80,6 +80,22 @@ internal struct FuzzyData
     internal int NewGfoldedPos;
 }
 
+/// <summary>
+/// Upstream <c>RE_BestEntry</c> (<c>upstream/src/_regex.c</c> line 692): one equal-best candidate a
+/// <c>BESTMATCH</c> search found, as the span it covered.
+/// </summary>
+/// <remarks>
+/// NOT PORTED, because <see cref="List{T}"/> already is them: <c>RE_BestList</c> (<c>:697</c>) and its
+/// <c>init_best_list</c>, <c>fini_best_list</c>, <c>clear_best_list</c> and <c>add_to_best_list</c>
+/// (<c>:17532-17583</c>), which are a hand-rolled growable array and the four calls that manage it.
+/// A collection expression, going out of scope, <see cref="List{T}.Clear"/> and
+/// <see cref="List{T}.Add"/> are the same four operations, and PORTMAP row 428 says so.
+/// </remarks>
+/// <param name="MatchPos">Where the candidate match started.</param>
+/// <param name="TextPos">Where it ended.</param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct BestEntry(int MatchPos, int TextPos);
+
 internal static class MatchStatus
 {
     /// <summary>Upstream <c>RE_ERROR_SUCCESS</c>.</summary>
@@ -9148,6 +9164,357 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Upstream <c>add_best_fuzzy_changes</c> (<c>upstream/src/_regex.c</c> line 9859): remembers the
+    /// errors one equal-best candidate used, beside the candidate itself in the best list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two lists are added to together and cleared together, so entry <c>i</c> of one always
+    /// describes entry <c>i</c> of the other; upstream relies on that when it copies
+    /// <c>lists[0]</c> back over the widened-slice re-run's changes.
+    /// </para>
+    /// <para>
+    /// NOT PORTED, because <see cref="List{T}"/> already is them: <c>init_best_changes_list</c>
+    /// (<c>:9822</c>), <c>fini_best_changes_list</c> (<c>:9848</c>) and
+    /// <c>clear_best_fuzzy_changes</c> (<c>:9831</c>), which are upstream's capacity bookkeeping and
+    /// its nested <c>safe_dealloc</c> over a list of lists. A collection expression is the first,
+    /// going out of scope is the second and <see cref="List{T}.Clear"/> is the third. The same
+    /// reasoning already applies to <c>init_fuzzy_changes_list</c> and its <c>fini</c> - see PORTMAP
+    /// row 417 - so this is the convention here rather than a new call.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="bestChangesList">The list of lists to add to.</param>
+    private static void AddBestFuzzyChanges(MatchState state, List<List<FuzzyChange>> bestChangesList) =>
+        bestChangesList.Add([.. state.FuzzyChanges]);
+
+    /// <summary>
+    /// Upstream <c>do_best_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 17584): search the whole
+    /// slice for the match with the fewest errors rather than taking the first that fits, then
+    /// re-examine the equal-best candidates for the earliest, lowest-cost fit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two passes. The first walks <c>start_pos</c> across the slice with <see cref="MatchState.MaxErrors"/>
+    /// held one below the fewest seen so far, collecting every equal-best <c>(match_pos, text_pos)</c>
+    /// pair into the best list and its changes into the best changes list, and stopping at a perfect
+    /// match. The second, when the best is not perfect, revisits each entry at up to
+    /// <c>min(fewest_errors, RE_MAX_ERRORS)</c> offsets from its <c>match_pos</c> with
+    /// <see cref="MatchState.MaxErrors"/> climbing from 1, keeping the earliest lowest-cost result; if
+    /// nothing improves on the candidates, it re-runs entry 0 inside a slice widened by
+    /// <c>fewest_errors</c> at each end and copies the recorded changes back over it.
+    /// </para>
+    /// <para>
+    /// <b>THIS RANKS BY ERROR COUNT, WHICH IS UPSTREAM'S RULE AND NOT THIS PORT'S.</b> The owner's
+    /// decision (DECISIONS 2026-09-12) is that fuzzy ranking goes by cost - see
+    /// <see cref="IsBetterFuzzyMatch"/>, which <c>ENHANCEMATCH</c> already uses, and upstream's open
+    /// issue 470. <c>BESTMATCH</c> does not use it yet, and S42's first sitting measured why rather
+    /// than leaving it to the next session to discover.
+    /// </para>
+    /// <para>
+    /// <b>The cost rule cannot be reached from the second pass alone.</b> Issue 470's own example is
+    /// the proof: <c>(?b)(voices){1i+1d+2s&lt;=2}</c> over <c>voixes voicees</c> should answer
+    /// <c>voicees</c> - one insertion costing 1 against one substitution costing 2 - and the second
+    /// pass never sees it, because the FIRST pass holds the next run to FEWER ERRORS than the one it
+    /// has (<c>:17675</c>), both candidates are one error, and the search stops at <c>voixes</c>.
+    /// Reaching it needs a cost BOUND inside <c>BasicMatch</c>, which is what releases up to
+    /// 2015.09.28 had (<c>state-&gt;max_cost = state-&gt;total_cost - 1</c>) and the 2015.11.5 issue
+    /// 165 hang fix replaced with <c>max_errors</c> throughout. That bound is its own change with its
+    /// own hang risk, and it is S42's second sitting.
+    /// </para>
+    /// <para>
+    /// <b>Layering the cost rule into the equal-count tie-break instead does not buy the decision and
+    /// does cost a red wave.</b> Measured 2026-09-13, with the tie-break reading "cheapest, then
+    /// upstream's earliest": the issue 470 example is unchanged - so the owner's rule is still not
+    /// honoured - and the <c>fuzzy</c> generator's default wave goes from 0 divergences to 3, 2 and 3
+    /// of 2000 rows at seeds 7, 4242 and 20260913. Every one of them is a CHEAPER match at a
+    /// DIFFERENT SPAN - in an overlapped scan it shows as a LOST match, 4 where upstream has 5 - which
+    /// is the family <c>ExpectedDivergences</c>' <c>enhancematch-ranks-by-cost</c>
+    /// entry deliberately reports rather than classifies, because it is also what a real engine
+    /// defect looks like. So the half-measure trades an unhonoured decision for a blind spot. The
+    /// whole change or none of it; this sitting ships none of it, and the gap test
+    /// <c>Bestmatch_still_agrees_with_upstream_on_the_issue_470_example</c> is what turns red when
+    /// the other sitting lands.
+    /// </para>
+    /// <para>
+    /// <b>Three places here count CHARACTERS where the position is a UTF-16 index</b>, because
+    /// upstream indexes the subject by codepoint and mixes these counts with error counts freely: the
+    /// second pass's offset from a candidate (<c>:17715</c>), its <c>start_pos += step</c>
+    /// (<c>:17776</c>), and the fallback's widening of the slice (<c>:17812-17821</c>). All three go
+    /// through <see cref="CountBetween"/> or <see cref="StepBy"/>. The middle one is not theoretical -
+    /// see the comment on it for the oracle row that split a surrogate pair in a <c>subf</c> result.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether to search rather than anchor at the start position.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int DoBestFuzzyMatch(MatchState state, bool search)
+    {
+        // CHARACTERS, NOT CODE UNITS, for the reason 'DoExactMatch' spells out at length.
+        long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+        int step = state.Reverse ? -1 : 1;
+
+        // The maximum permitted cost.
+        state.MaxErrors = long.MaxValue;
+        long fewestErrors = long.MaxValue;
+
+        state.BestTextPos = state.Reverse ? state.SliceStart : state.SliceEnd;
+
+        bool mustAdvance = state.MustAdvance;
+        bool foundMatch = false;
+
+        List<BestEntry> bestList = [];
+        List<List<FuzzyChange>> bestChangesList = [];
+
+        int status = MatchStatus.Failure;
+
+        // Search the text for the best match.
+        int startPos = state.TextPos;
+        while (state.SliceStart <= startPos && startPos <= state.SliceEnd)
+        {
+            state.TextPos = startPos;
+            state.MustAdvance = mustAdvance;
+
+            // Initialise the state.
+            state.InitMatch();
+
+            status = MatchStatus.Success;
+            if (
+                state.MaxErrors == 0
+                && state.PartialSide == MatchState.PartialNone
+                && (available < state.MinWidth || (available == 0 && state.MustAdvance))
+            )
+            {
+                // An exact match, and partial matches not permitted.
+                status = MatchStatus.Failure;
+            }
+
+            if (status == MatchStatus.Success)
+            {
+                status = BasicMatch(state, search);
+            }
+
+            // Has an error occurred, or is it a partial match? Upstream's 'goto error' is a return
+            // here: its label frees the two lists and returns the status, and the lists are managed.
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status == MatchStatus.Failure)
+            {
+                break;
+            }
+
+            // It was a successful match.
+            foundMatch = true;
+
+            if (state.TotalErrors < fewestErrors)
+            {
+                // This match was better than any of the previous ones.
+                fewestErrors = state.TotalErrors;
+
+                if (state.TotalErrors == 0)
+                {
+                    // It was a perfect match.
+                    break;
+                }
+
+                // Forget all the previous worse matches and remember this one.
+                bestList.Clear();
+                bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+
+                bestChangesList.Clear();
+                AddBestFuzzyChanges(state, bestChangesList);
+            }
+            else if (state.TotalErrors == fewestErrors)
+            {
+                // This match was as good as the previous matches. Remember this one.
+                bestList.Add(new BestEntry(state.MatchPos, state.TextPos));
+                AddBestFuzzyChanges(state, bestChangesList);
+            }
+
+            startPos = state.MatchPos;
+            state.MaxErrors = fewestErrors - 1;
+        }
+
+        if (!foundMatch)
+        {
+            return status;
+        }
+
+        // We found a match.
+        if (fewestErrors == 0)
+        {
+            state.FuzzyChanges.Clear();
+            return status;
+        }
+
+        // It doesn't look like a perfect match.
+        int sliceStart = state.SliceStart;
+        int sliceEnd = state.SliceEnd;
+
+        long errorLimit = Math.Min(fewestErrors, FuzzyValue.MaxErrorsLimit);
+
+        Span<long> bestFuzzyCounts = stackalloc long[FuzzyValue.Count];
+        List<FuzzyChange> bestFuzzyChanges = [];
+        GroupData[]? bestGroups = null;
+        int bestMatchPos = 0;
+        int bestTextPos = 0;
+
+        // Look again at the best of the matches that we've seen.
+        for (int i = 0; i < bestList.Count; i++)
+        {
+            // Look for the best fit at this position.
+            BestEntry entry = bestList[i];
+
+            long maxOffset;
+            if (search)
+            {
+                // CHARACTERS, NOT CODE UNITS: upstream's subtraction is over codepoint indexes, and
+                // this offset is compared against two error COUNTS on the next two lines.
+                maxOffset = CountBetween(state, entry.MatchPos, state.Reverse ? state.SliceStart : state.SliceEnd);
+
+                if (maxOffset > fewestErrors)
+                {
+                    maxOffset = fewestErrors;
+                }
+
+                if (maxOffset > errorLimit)
+                {
+                    maxOffset = errorLimit;
+                }
+            }
+            else
+            {
+                maxOffset = 0;
+            }
+
+            startPos = entry.MatchPos;
+            long offset = 0;
+
+            while (offset <= maxOffset)
+            {
+                state.MaxErrors = 1;
+
+                while (state.MaxErrors <= errorLimit)
+                {
+                    state.TextPos = startPos;
+                    state.InitMatch();
+                    status = BasicMatch(state, false);
+
+                    if (status < 0)
+                    {
+                        return status;
+                    }
+
+                    if (status == MatchStatus.Success)
+                    {
+                        bool better;
+
+                        if (state.TotalErrors < errorLimit || (i == 0 && offset == 0))
+                        {
+                            better = true;
+                        }
+                        else if (state.TotalErrors == errorLimit)
+                        {
+                            // The cost is as low as the current best, but is it earlier?
+                            better = state.Reverse ? state.MatchPos > bestMatchPos : state.MatchPos < bestMatchPos;
+                        }
+                        else
+                        {
+                            better = false;
+                        }
+
+                        if (better)
+                        {
+                            SaveFuzzyCounts(state, bestFuzzyCounts);
+                            SaveFuzzyChanges(state, bestFuzzyChanges);
+
+                            bestGroups = SaveCaptures(state);
+
+                            bestMatchPos = state.MatchPos;
+                            bestTextPos = state.TextPos;
+                            errorLimit = state.TotalErrors;
+                        }
+
+                        break;
+                    }
+
+                    ++state.MaxErrors;
+                }
+
+                // ONE CHARACTER, NOT ONE CODE UNIT, and this is the line the oracle caught. Upstream's
+                // 'start_pos += step' moves one codepoint because its indexes are codepoints; +-1 here
+                // lands INSIDE a surrogate pair, and the match that starts there splits the character.
+                // Found 2026-09-13, seed 7 row 1773 of the default 2000-row 'fuzzy' wave:
+                // 'subf' of '(?b)(?fi)(?:(?:b\W){e:0}){1i+2d+1s<=4}' over 'B-\U0001D518' with the
+                // template '<>' gave '<>\uD835<>' here against upstream's '<><>\U0001D518' - a lone
+                // high surrogate in the output. Pinned by Gaps.Engine.FuzzyBestMatchTests.
+                // A_bestmatch_second_pass_steps_whole_characters_not_code_units, at the row's full
+                // pattern - every smaller shape stops reaching the stepped position.
+                startPos = StepBy(state, startPos, 1, step);
+                ++offset;
+            }
+
+            if (status == MatchStatus.Success && state.TotalErrors == 0)
+            {
+                break;
+            }
+        }
+
+        if (bestGroups is not null)
+        {
+            status = MatchStatus.Success;
+            state.MatchPos = bestMatchPos;
+            state.TextPos = bestTextPos;
+
+            RestoreGroups(state, bestGroups);
+            RestoreFuzzyCounts(state, bestFuzzyCounts);
+            RestoreFuzzyChanges(state, bestFuzzyChanges);
+        }
+        else
+        {
+            // None of the "best" matches could be improved on, so pick the first. Look at only the
+            // part of the string around the match.
+            BestEntry entry = bestList[0];
+
+            // We'll expand the part that we're looking at to compensate for any matching errors that
+            // have occurred - CHARACTERS, NOT CODE UNITS, because 'fewest_errors' is a count of
+            // errors and these are UTF-16 indexes.
+            //
+            // Upstream's two branches are "step back 'fewest_errors', or stop at the caller's slice
+            // if there is not that much room" (':17812-17821'), and that is exactly what 'StepBy'
+            // does against 'state.SliceStart'/'state.SliceEnd' - so both are computed HERE, while the
+            // slice still holds what the caller asked for, and assigned afterwards.
+            int widenedStart = StepBy(state, state.Reverse ? entry.TextPos : entry.MatchPos, fewestErrors, -1);
+            int widenedEnd = StepBy(state, state.Reverse ? entry.MatchPos : entry.TextPos, fewestErrors, 1);
+
+            state.SliceStart = widenedStart;
+            state.SliceEnd = widenedEnd;
+
+            state.MaxErrors = fewestErrors;
+            state.TextPos = entry.MatchPos;
+            state.InitMatch();
+            status = BasicMatch(state, search);
+
+            if (status < 0)
+            {
+                state.SliceStart = sliceStart;
+                state.SliceEnd = sliceEnd;
+                return status;
+            }
+
+            RestoreFuzzyChanges(state, bestChangesList[0]);
+        }
+
+        state.SliceStart = sliceStart;
+        state.SliceEnd = sliceEnd;
+
+        return status;
+    }
+
+    /// <summary>
     /// Upstream <c>do_simple_fuzzy_match</c> (<c>upstream/src/_regex.c</c> line 18027): plain fuzzy
     /// matching, which takes the first match it finds rather than the best one.
     /// </summary>
@@ -9176,8 +9543,8 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): the <c>BESTMATCH</c>
-    /// strategy is a seam until S42.
+    /// Upstream <c>do_match_2</c> (<c>upstream/src/_regex.c</c> line 18099): which of the four match
+    /// strategies a pattern gets.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether to search rather than anchor at the start position.</param>
@@ -9193,8 +9560,7 @@ internal static class Matcher
 
         if ((pattern.Flags & RegexFlags.BestMatch) != 0)
         {
-            // Upstream do_best_fuzzy_match (:17584).
-            throw Seam.For("fuzzy-bestmatch", "BESTMATCH fuzzy matching is not implemented yet");
+            return DoBestFuzzyMatch(state, search);
         }
 
         if ((pattern.Flags & RegexFlags.EnhanceMatch) != 0)

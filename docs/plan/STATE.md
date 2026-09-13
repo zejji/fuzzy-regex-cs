@@ -2,36 +2,29 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S42 is next, then S43.
-Launch: `pwsh -File tools/launch-slice.ps1 s42`.
+**Current slice:** S42, SECOND SITTING - a checkpoint, not a failure. `pwsh -File tools/launch-slice.ps1 s42`, then S43.
 
-**S41 is closed: `ENHANCEMATCH` landed and `fuzzy-enhancematch` is delivered.** 25 test cases
-un-skipped, ratchet GREEN at 5835 tests / 5805 passing, 30 skips left and every one
-`fuzzy-bestmatch` - which is exactly S42's scope. The `fuzzy` generator now draws `(?e)` on a third
-of its rows: 0 diverge at three seeds, 2000 rows, and the full default wave is 0 diverge at three
-seeds, 42,000 rows a seed.
+**First sitting landed** `do_best_fuzzy_match` as `Matcher.DoBestFuzzyMatch`, line for line, with
+**upstream's error-count ranking**. Ratchet GREEN at 5846 tests, 5846 passing, **0 skipped - no
+`[Skip]` is left anywhere in the suite**. The `fuzzy` generator draws `(?b)`; that wave and the full
+default wave are green at three seeds. One real defect fixed: the second pass stepped one code unit
+where upstream steps one character. Closing notes and three re-run controls: in the slice file.
 
-**The blind review found a real defect and it is the thing to carry forward.** Upstream's `better`
-(`:17930`) decides BOTH whether to keep a run and whether to loop again. Replacing it wholesale with
-this port's cost comparison looks like a re-ranking and instead CUTS the improvement chain at the
-first run that costs more - the kept run was worse than upstream's on cost AND on error count. It is
-two tests now: upstream's for termination, `IsBetterFuzzyMatch` for what is saved. **S42 must not
-repeat the mistake in `do_best_fuzzy_match`**, which has the same shape at `:17647`.
+**(1) FIRST JOB: a real `ENHANCEMATCH` defect, and it is NOT the cost divergence.**
+`(?e)(?:\d\wba){1i+2d+1s<=4}` over `XX8QbaY`: upstream's `search` answers `(2, 4)` with two deletions,
+this port answers `(0, 4)` with three substitutions - the improvement loop did not improve at all. No
+astral character, no `(?b)`. **Proved not to be the ranking rule:** with `IsBetterFuzzyMatch` reverted
+to plain `errors < bestErrors` the row still diverges, and it reproduces against `HEAD`. The committed
+generator DOES draw it - twice at seed 7 once the row stream was perturbed - so today's green is luck.
 
-**Three things S42 inherits, none of them optional.** (1) `enhancematch-ranks-by-cost` classifies a
-cost divergence only when the match is otherwise the same; a cheaper match at a DIFFERENT span is
-reported, which is 31 rows against 12 on the probe wave and would go red the day a generator drew
-the family. `tools/probes/enhancematch-cost-rows.py` is committed so it can be. (2) `BESTMATCH` is
-to call `IsBetterFuzzyMatch`, not spell the rule again. (3) `best_fuzzy_counts` in
-`SaveBestMatch`/`RestoreBestMatch` is still unported ON PURPOSE: upstream has no
-`best_fuzzy_changes` beside it, so taking the counts alone imports the contradiction that segfaults
-upstream - `regex.match(r'(?p)(?:cat){e<=1}', 'caz').fuzzy_changes`, ledger entry 9, which S41
-amended with the narrowed cause. Both or neither.
+**(2) THEN the cost ranking for `BESTMATCH`, which needs a cost bound inside `basic_match`.** Not
+reachable from the second pass: the FIRST pass holds the next run to fewer ERRORS (`:17675`), so issue
+470's `voicees` never enters the best list. The bound is what releases up to 2015.09.28 had
+(`state->max_cost = state->total_cost - 1`) and the 2015.11.5 issue-165 **hang fix** removed. The
+equal-count tie-break alone was measured and rejected: 3, 2 and 3 divergences of 2000, every one a
+cheaper match at a different span, and 470 still wrong. Owed with it: the "where we diverge" PORTMAP row, the 470 ledger entry, the benchmark.
 
-**Still open, unchanged by S41:** seed 31 has three unjudged divergences on
-`partial,partial-sliced,interactions` at 6000 rows (rows 1075, 6943, 16545), present before S40a.
-The `$`-tell hole is narrowed, not closed.
-
-**Still open for the owner:** the design spec's amendment 20 (the Phase 5 re-plan; ROADMAP carries
-the repo half); `slice-log.jsonl` marks S26 `failed` though its commit is real; `origin/main` trails
-local and needs a push.
+**Unchanged by S42:** seed 31 has three unjudged divergences on `partial,partial-sliced,interactions`
+at 6000 rows (rows 1075, 6943, 16545); `best_fuzzy_counts` in `SaveBestMatch`/`RestoreBestMatch` stays
+unported on purpose, both or neither, ledger 9. **For the owner:** spec amendment 20; `slice-log.jsonl`
+marks S26 `failed` though its commit is real; `origin/main` needs a push.

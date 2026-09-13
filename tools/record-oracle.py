@@ -4165,8 +4165,8 @@ FUZZY_BACKREF_FOLD_PROBABILITY = 0.5
 FUZZY_ZERO_WIDTH = ("^", "$", r"\b", r"\B", r"\A", r"\Z")
 
 # The constraints. Every shape upstream's `build_FUZZY` reads: a bare budget, a per-kind budget, a
-# mixture, a cost equation, and a minimum. `(?e)` and `(?b)` are EXCLUDED - S41 and S42 add them,
-# and a generator that drew them now would file their seams as `unsupported` rows.
+# mixture, a cost equation, and a minimum. `(?e)` and `(?b)` are NOT here - they are whole-pattern
+# flags rather than constraints, and are prepended at the end of `_generate_fuzzy` (S41 and S42).
 FUZZY_CONSTRAINTS = (
     "{e<=1}",
     "{e<=2}",
@@ -4267,6 +4267,23 @@ FUZZY_TEST_PROBABILITY = 0.35
 # The alphabet a subject is drawn from. The astral band is here for the same reason it is in the
 # group generator: a change position reported in codepoints rather than UTF-16 code units has to
 # show up as a divergence from the first wave.
+#
+# S42 TRIED AND WITHDREW AN ALL-ASTRAL FOURTH BAND, and what it found is worth more than the band
+# would have been. The mixed band is three BMP characters to two astral ones, so a position the
+# engine steps by one code unit instead of one character only lands inside a surrogate pair some of
+# the time: S42's control C - do_best_fuzzy_match's second pass stepping '+= step' - fired on 1 row
+# of 2000 at seed 7 and on none at 4242 or 20260913. A fourth band of nothing but astral characters
+# lifted that to 1, 0 and 2, and to 3 of 5 seeds across 7, 4242, 20260913, 777 and 31; seed 4242
+# stayed green even at 6000 rows, so the limit is the shape rather than the rate - the stepped
+# position must land inside a pair AND an anchored match must succeed there and beat the candidate.
+#
+# It was withdrawn because it turned the wave red on a row that has NOTHING TO DO WITH S42:
+# '(?e)(?:\d\wba){1i+2d+1s<=4}', where upstream keeps 2 deletions costing 4 and this port keeps 3
+# substitutions costing 3, at a DIFFERENT SPAN. That is the deliberate cost-ranking divergence
+# (DECISIONS 2026-09-12) in the shape 'enhancematch-ranks-by-cost' reports rather than classifies,
+# and it needs no astral character at all - 'XX8QbaY' does it. Deciding how the divergence list
+# should hold that family is a ranking question and belongs beside the rest of them; changing which
+# subject a row draws would only move the day it fires. See STATE.md.
 FUZZY_SUBJECT_ALPHABETS = ("abx", "ab0 x", "abf\U0001f600\U0001d518")
 
 # How many atoms a fuzzy section holds. Three is the sweet spot: one atom cannot show an error in
@@ -4290,6 +4307,13 @@ FUZZY_NESTING_PROBABILITY = 0.2
 # enough that every body shape draws it several hundred times in a 2000-row wave, low enough that
 # the plain spine S38 and S39 ported keeps the coverage it had. S42 adds `(?b)` beside it.
 FUZZY_ENHANCE_PROBABILITY = 0.35
+
+# How often a row carries `(?b)`, which routes it through do_best_fuzzy_match instead - the two-pass
+# search for the match with the fewest errors rather than the first that fits. Drawn INDEPENDENTLY of
+# `(?e)`, so a wave holds all four combinations and about an eighth of it is `(?b)(?e)` together,
+# which is a third mode again: do_best_fuzzy_match wins the dispatch (:18107) and the improvement
+# loop never runs, so a row carrying both is the one place a wrong dispatch order is visible.
+FUZZY_BESTMATCH_PROBABILITY = 0.35
 
 
 def _fuzzy_constraint(rng: random.Random, constraints: tuple[str, ...], split: bool) -> str:
@@ -4410,10 +4434,24 @@ def _generate_fuzzy(rng: random.Random, count: int):
     S41 widens it once more: about a third of the rows carry `(?e)`, so the row goes through
     `do_enhanced_fuzzy_match` (upstream/src/_regex.c:17862) - the improvement loop - rather than
     `do_simple_fuzzy_match`. The draw is independent of everything else here, so every body shape
-    the generator makes gets it. `(?b)` is still excluded - S42 - because a generator that drew it
-    now would file its seam as `unsupported` rows.
+    the generator makes gets it.
+
+    S42 adds `(?b)` on the same terms, drawn independently again, so a wave holds all four
+    combinations of the two flags and every body shape draws each of them. See
+    FUZZY_BESTMATCH_PROBABILITY on why both together is worth its own eighth of the wave.
     """
     for i in range(count):
+        # A TRAP FOR WHOEVER ADDS A FOURTH BAND, left as a comment because S42 walked into it and
+        # backed out. The operation below is `ALL_OPERATIONS[i % 8]`, so an alphabet picked by
+        # `i % len(FUZZY_SUBJECT_ALPHABETS)` pairs with the operation only as well as the two lengths
+        # are coprime. Three bands and eight operations are coprime, so every pair occurs - by luck,
+        # not design. A fourth band makes gcd(4, 8) = 4 and LOCKS each operation to exactly one
+        # alphabet: `search`, `match`, `subf` and `finditer` then draw no astral subject at all, over
+        # any number of rows (measured 2026-09-13, seed 7, 2000 rows; found by S42's blind review).
+        # The fix is one character - index by `i // len(ALL_OPERATIONS)` instead, which makes the two
+        # round-robins exhaustive rather than accidental - but it reshuffles every fuzzy row, so it
+        # belongs with a band change and not on its own. See STATE.md: applying it uncovered a real
+        # ENHANCEMATCH defect that S42 was not the slice to fix.
         alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
         mode = rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
 
@@ -4527,6 +4565,13 @@ def _generate_fuzzy(rng: random.Random, count: int):
             # ENHANCEMATCH: find a match, then re-run inside its own span with a tighter budget
             # until the fit stops improving. Outermost, so it reads as a flag on the whole pattern.
             pattern = "(?e)" + pattern
+
+        if rng.random() < FUZZY_BESTMATCH_PROBABILITY:
+            # BESTMATCH: search the whole slice for the match with the fewest errors rather than
+            # taking the first that fits, then re-examine the equal-best candidates. Drawn after
+            # `(?e)` and put in front of it, so a row that has both reads `(?b)(?e)`; both are
+            # whole-pattern flags, so the order is presentation and the dispatch decides.
+            pattern = "(?b)" + pattern
 
         row = {
             "generator": "fuzzy",

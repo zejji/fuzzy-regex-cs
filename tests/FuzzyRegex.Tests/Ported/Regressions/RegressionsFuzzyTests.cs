@@ -71,7 +71,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 161: Unexpected fuzzy match results.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#210-211")]
     [Arguments("(abcdefgh){e}", 14)]
     [Arguments("(abcdefghi){e}", 15)]
@@ -85,7 +84,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 196: Fuzzy matching on repeated regex not working as expected.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#228-229")]
     [Arguments("xxxxxx", 6)]
     [Arguments("xxxxx", 5)]
@@ -98,13 +96,11 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#230")]
     public void Bestmatch_fails_when_too_few_repeats_remain_for_the_error_budget() =>
         FuzzyRegex.MatchAtStart("x", "(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#231-232")]
     [Arguments("xxxxxx", 6)]
     [Arguments("xxxxx", 5)]
@@ -120,14 +116,12 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#233")]
     public void Bestmatch_reverse_fails_when_too_few_repeats_remain_for_the_error_budget() =>
         FuzzyRegex.MatchAtStart("x", "(?r)(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
 
     // Hg issue 225: BESTMATCH in fuzzy match not working.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#265-266")]
     public void Bestmatch_with_insertion_and_deletion_finds_the_extra_char_span_and_reports_one_insertion()
     {
@@ -139,7 +133,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#267-268")]
     public void Bestmatch_with_substitution_insertion_and_deletion_finds_the_extra_char_span_and_reports_one_insertion()
     {
@@ -152,7 +145,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 226: Error matching at start of string.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#269-270")]
     public void Bestmatch_anchored_at_both_ends_spans_the_whole_noisy_prefix_as_insertions()
     {
@@ -165,7 +157,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 427: possible bug with BESTMATCH.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#417-418")]
     public void Bestmatch_on_a_dna_sequence_finds_the_named_groups_across_the_whole_string()
     {
@@ -181,7 +172,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH flag not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#419-420")]
     public void Enhancematch_on_the_same_dna_sequence_finds_the_same_named_groups()
     {
@@ -199,7 +189,6 @@ public sealed class RegressionsFuzzyTests
     // ---- error budgets ----
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#56")]
     public void An_error_range_with_a_lower_bound_forces_at_least_that_many_errors_into_the_match() =>
         FuzzyRegex
@@ -226,7 +215,6 @@ public sealed class RegressionsFuzzyTests
     // ---- where the errors landed ----
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#369-370")]
     public void Bestmatch_on_a_long_dna_sequence_reports_the_single_insertion_position()
     {
@@ -240,7 +228,6 @@ public sealed class RegressionsFuzzyTests
 
     // Hg issue 353: fuzzy changes negative indexes.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet; '(?be)' is both flags")]
     [Property("Upstream", "RegexTests.test_hg_bugs#380")]
     public void Fuzzy_changes_reports_deletion_positions_when_the_match_starts_mid_pattern()
     {
@@ -280,7 +267,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#385-386")]
     public void Bestmatch_inline_flag_reports_the_same_missing_letter_as_a_single_deletion()
     {
@@ -294,7 +280,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 433: disagreement between fuzzy_counts and fuzzy_changes.
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#421-422")]
     public void An_exact_dna_match_reports_no_errors_or_error_positions()
     {
@@ -307,7 +292,6 @@ public sealed class RegressionsFuzzyTests
     }
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#423-424")]
     public void A_dna_match_with_two_substitutions_reports_their_positions()
     {
@@ -345,7 +329,6 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#91, #94")]
     [Arguments(@"(?b)(?:cats|cat){e<=1}")]
     [Arguments(@"(?b)(?:cat){e<=1}")]
@@ -363,7 +346,6 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#97")]
     public void One_letter_gap_in_bestmatch_mode_is_one_insertion_alone() =>
         FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
@@ -379,7 +361,6 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c a ts", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#100")]
     public void Two_letter_gaps_are_reported_as_two_insertions_in_bestmatch_mode() =>
         FuzzyRegex.MatchAtStart("c a ts", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
@@ -395,7 +376,6 @@ public sealed class RegressionsFuzzyTests
         FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#103")]
     public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_bestmatch_mode() =>
         FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
@@ -429,7 +409,6 @@ public sealed class RegressionsFuzzyTests
 
     // Git issue 403: Fuzzy matching with wrong distance (unnecessary substitutions).
     [Test]
-    [Skip("needs:fuzzy-bestmatch - BESTMATCH ranking is not implemented yet")]
     [Property("Upstream", "RegexTests.test_hg_bugs#399")]
     public void Bestmatch_avoids_unnecessary_substitutions_when_deletions_explain_the_gap() =>
         FuzzyRegex
