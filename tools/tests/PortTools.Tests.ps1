@@ -546,11 +546,6 @@ Describe 'Get-SliceFailureReason' {
         Get-SliceFailureReason @facts | Should -Match 'dirty'
     }
 
-    It 'reports a slice file that was never moved to done/' {
-        $facts = $script:Landed.Clone(); $facts.SliceStillPending = $true
-        Get-SliceFailureReason @facts | Should -Match 'done/'
-    }
-
     It 'reports a red ratchet' {
         $facts = $script:Landed.Clone(); $facts.RatchetError = 'the parity ratchet is red'
         Get-SliceFailureReason @facts | Should -Be 'the parity ratchet is red'
@@ -562,6 +557,19 @@ Describe 'Get-SliceFailureReason' {
         $facts = $script:Landed.Clone()
         $facts.RatchetError = 'the parity ratchet could not run: Test report not found'
         Get-SliceFailureReason @facts | Should -Match 'could not run'
+    }
+
+    It 'reports a CHECKPOINT, not a failure, when a green committed session left its slice file pending' {
+        # S29 and S40a both ended a session with a green commit and the slice still open, meaning
+        # "more sessions needed"; the driver rolled both back and a recovery session had to fish
+        # the commit out of the reflog. A committed, clean, green tree is never thrown away.
+        $facts = $script:Landed.Clone(); $facts.SliceStillPending = $true
+        Get-SliceFailureReason @facts | Should -Be 'checkpoint'
+    }
+
+    It 'still fails a pending slice whose ratchet is red - a checkpoint must be green' {
+        $facts = $script:Landed.Clone(); $facts.SliceStillPending = $true; $facts.RatchetError = 'the parity ratchet is red'
+        Get-SliceFailureReason @facts | Should -Be 'the parity ratchet is red'
     }
 
     It 'names the most fundamental problem first when several hold at once' {

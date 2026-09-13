@@ -174,7 +174,10 @@ this list.
 1. **Parity ratchet in CI and in the driver:** no commit lands if any previously-passing test
    fails or the passing count drops. Regressions cannot accumulate silently.
 2. **Atomic slices:** a slice either ends committed-and-green or is rolled back/parked. The repo
-   never drifts into a half-done state.
+   never drifts into a half-done state. A green commit that leaves the slice file pending is a
+   **checkpoint** (added 2026-09-13 after S29 and S40a were each rolled back for exactly that and
+   needed a recovery session): the driver keeps the commit and runs a fresh session on the same
+   slice, and stops after three checkpoints without a landing.
 3. **Two-failure park rule:** a slice that fails twice stops the driver and waits for a human (or
    a Fable escalation session) instead of grinding and thrashing.
 4. **Derived status:** progress numbers come from the test suite via script, never from agent

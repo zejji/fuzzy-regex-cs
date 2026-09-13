@@ -227,6 +227,9 @@ rejects, all of which have already burned turns on real slices:
   not optional. If you are out of road - blocked, out of budget, or the slice is wrong - write
   the blocker into STATE.md and commit *that*, so the next session starts from a clean tree.
   Work left uncommitted is work the driver throws away.
+  A green commit that leaves the slice file in `docs/plan/slices/` is a **checkpoint**: the driver
+  keeps it and starts a fresh session on the same slice (three checkpoints stop the driver). Use it
+  only when the slice genuinely needs another sitting, and make STATE.md say exactly what is left.
 
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in

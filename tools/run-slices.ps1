@@ -322,6 +322,7 @@ $budget = $null
 $startingPhase = $null
 $completed = 0
 $consecutiveFailures = 0
+$checkpoints = 0
 
 while ($completed -lt $MaxSlices) {
     $slice = Get-PendingSlice
@@ -370,6 +371,22 @@ while ($completed -lt $MaxSlices) {
         $completed++
         $consecutiveFailures = 0
         Write-Host ("  done: {0} ({1:N0} tokens, `${2:N2})" -f $slice.BaseName, $session.TotalTokens, $session.CostUsd) -ForegroundColor Green
+        continue
+    }
+
+    # A green commit with the slice file still pending: the session needed more than one sitting
+    # and said so in STATE.md. Keep the commit, count nothing against the slice, and let the loop
+    # start a fresh session on the same slice. Bounded, so a slice that checkpoints without ever
+    # landing stops the driver rather than spending the whole daily budget on itself.
+    if ($failureReason -eq 'checkpoint') {
+        $checkpoints++
+        $consecutiveFailures = 0
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'checkpoint' -TotalTokens $session.TotalTokens
+        Write-Host ("  CHECKPOINT ({0} of 3): {1} committed green but is still open - a fresh session continues it ({2:N0} tokens)" -f $checkpoints, $slice.BaseName, $session.TotalTokens) -ForegroundColor Yellow
+        if ($checkpoints -ge 3) {
+            Write-Host "Stopping: $($slice.BaseName) has checkpointed three times without landing. Read its STATE.md notes and decide whether to split it." -ForegroundColor Red
+            break
+        }
         continue
     }
 

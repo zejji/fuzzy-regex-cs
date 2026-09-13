@@ -132,8 +132,10 @@ function Get-SliceFailureReason {
         of a broken tree.
 
         A slice landed only if ALL of these hold: the session made a commit, it left the working
-        tree clean, it moved its slice file to done/, and the parity ratchet is green. Checks are
-        ordered most-fundamental first so the reported reason is the useful one.
+        tree clean, the parity ratchet is green, and it moved its slice file to done/. Checks are
+        ordered most-fundamental first so the reported reason is the useful one. The first three
+        holding without the fourth is the literal verdict 'checkpoint' (see below), which is not a
+        failure: the commit is kept and the slice gets another session.
 
     .PARAMETER RatchetError
         Null when the ratchet is green. Otherwise the reason - which includes the ratchet failing
@@ -154,8 +156,12 @@ function Get-SliceFailureReason {
 
     if ($HeadAfter -eq $HeadBefore) { return 'no commit was made' }
     if (-not $IsClean) { return 'the working tree was left dirty' }
-    if ($SliceStillPending) { return 'the slice file was not moved to slices/done/' }
     if ($RatchetError) { return $RatchetError }
+    # A green, clean, committed tree with the slice still pending is a CHECKPOINT: the session
+    # ran out of road and said so in STATE.md, and the next session continues from its commit.
+    # S29 and S40a both ended this way and were rolled back as failures; each cost a recovery
+    # session. The caller treats the literal 'checkpoint' as "keep the commit, run again".
+    if ($SliceStillPending) { return 'checkpoint' }
 
     return $null
 }
