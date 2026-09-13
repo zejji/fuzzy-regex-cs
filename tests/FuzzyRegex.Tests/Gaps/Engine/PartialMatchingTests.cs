@@ -484,4 +484,48 @@ public sealed class PartialMatchingTests
         atZero.PartialMatch.Should().BeTrue();
         (atZero.Index, atZero.Length).Should().Be((0, 0));
     }
+
+    // PINS A KNOWN PORT DEFECT, deliberately, and the assertions below are the WRONG answers.
+    [Test]
+    public void A_skip_in_the_non_partial_pass_moves_the_slice_and_the_partial_pass_is_no_longer_leftmost()
+    {
+        // S40a, from row 97927 of a 6000-row seed-7 wave, minimised to four characters. Unlike every
+        // other divergence in this file this one is NOT judged in this port's favour: the search is
+        // not leftmost, and it contradicts this port's own matcher, which settles it without
+        // upstream. Upstream happens to agree with the matcher.
+        //
+        //   search(r'\b\D(*SKIP)z', ' A', partial=True)      upstream (1, 1);  here (2, 0)
+        //   this port's own MatchAtStart(' A', 1, partial)             (1, 1)
+        //
+        // The mechanism is written out at the `state.TextPos = textPos` line in Matcher.cs's
+        // `DoMatch`: the non-partial pass runs first, its `(*SKIP)` moves `slice_start` to 2, and
+        // the partial pass then re-runs from 1 with that slice still in force, so the search retry
+        // jumps every start position below 2. Dropping any one of `\b`, `\D`, `(*SKIP)` or `partial`
+        // makes the two engines agree.
+        //
+        // WHY IT IS PINNED RATHER THAN FIXED. Restoring the slice alongside `text_pos` fixes this
+        // row and introduces another - a reversed partial search, where restoring `slice_end` moves
+        // what every end-of-subject assertion means - and turns
+        // `A_skip_alternation_partial_starts_where_this_port_ran_out_of_text` above red. That test
+        // is the SAME defect seen from S37: it pins (4, 0) where this port's own matcher answers
+        // (2, 2) at an earlier position, so S37's "port right" verdict on it needs re-judging too.
+        // The three belong in one slice that can weigh them together; S40a measured them and left
+        // the engine alone. THIS TEST GOES RED WHEN THAT SLICE LANDS, and that is the point of it.
+        var skipped = new FuzzyRegex(@"\b\D(*SKIP)z");
+
+        Match search = skipped.Match(" A", partial: true);
+        search.PartialMatch.Should().BeTrue();
+        (search.Index, search.Length).Should().Be((2, 0), "the wrong answer, pinned until S40b fixes it");
+
+        // The half that makes the line above a defect rather than a divergence: this port's own
+        // matcher finds the leftmost partial the search skipped, and that is upstream's answer too.
+        Match anchored = skipped.MatchAtStart(" A", beginning: 1, partial: true);
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((1, 1));
+
+        // The control: with the verb gone nothing moves the slice, and the search is leftmost again.
+        Match noVerb = new FuzzyRegex(@"\b\Dz").Match(" A", partial: true);
+        noVerb.PartialMatch.Should().BeTrue();
+        (noVerb.Index, noVerb.Length).Should().Be((1, 1));
+    }
 }

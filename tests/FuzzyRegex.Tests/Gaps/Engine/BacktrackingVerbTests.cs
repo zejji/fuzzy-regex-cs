@@ -63,10 +63,11 @@ public sealed class BacktrackingVerbTests
     [Test]
     public void NextMatch_walks_the_same_sequence_as_a_scan_when_skip_has_moved_the_slice_start()
     {
-        // Match.NextMatch rebuilds a state from the *slice* the match was found in, so a moved
-        // slice start is carried into it - and it has to be, because the walk would otherwise stop
-        // at the third match where the scan does not. Same six spans as the test above. The walk is
-        // seeded from the collection, which is what hands NextMatch the overlapped setting.
+        // Match.NextMatch rebuilds a state from the *slice* the match was found in, and that slice
+        // is the one the CALLER asked for - `FuzzyRegex.NewMatch` records
+        // `InitialSliceStart`/`InitialSliceEnd`, not whatever a `(*SKIP)` left behind. Same six
+        // spans as the test above. The walk is seeded from the collection, which is what hands
+        // NextMatch the overlapped setting.
         MatchCollection collection = new FuzzyRegex("[A-Z]*(*SKIP)_").Matches("__BB__B", overlapped: true);
 
         List<(int Index, int Length)> walked = [];
@@ -76,6 +77,28 @@ public sealed class BacktrackingVerbTests
         }
 
         walked.Should().Equal((0, 1), (1, 1), (2, 3), (3, 2), (4, 1), (5, 1));
+
+        // A SECOND SHAPE, because the one above cannot tell the two slices apart and this one can.
+        // S40a's blind review found exactly that: when `DoMatch` began putting the slice back at the
+        // start of every match, `Matches` picked up the match at 3 and a `NextMatch` walk did not,
+        // because `NewMatch` was still handing the MOVED slice on and `MatchState.Create` then
+        // recorded it as the one to restore. The scan said (0,4) (1,3) (3,1) (4,0) and the walk said
+        // (0,4) (1,3) (4,0), which is the invariant in Match.NextMatch's own remarks broken on one
+        // path. Upstream's answer is the scan's: regex.finditer(r'\b(?:[^a](*SKIP))*', 'b\n\rS',
+        // overlapped=True) gives spans (0,4) (1,4) (3,4) (4,4).
+        var carried = new FuzzyRegex(@"\b(?:[^a](*SKIP))*");
+        MatchCollection scan = carried.Matches("b\n\rS", overlapped: true);
+
+        List<(int Index, int Length)> scanned = [.. scan.Select(static m => (m.Index, m.Length))];
+        scanned.Should().Equal((0, 4), (1, 3), (3, 1), (4, 0));
+
+        List<(int Index, int Length)> walkedAgain = [];
+        for (Match m = scan[0]; m.Success; m = m.NextMatch())
+        {
+            walkedAgain.Add((m.Index, m.Length));
+        }
+
+        walkedAgain.Should().Equal(scanned, "NextMatch and Matches must walk the same sequence");
     }
 
     [Test]
@@ -474,5 +497,58 @@ public sealed class BacktrackingVerbTests
             .Select(m => (m.Index, m.Index + m.Length))
             .Should()
             .Equal((0, 3), (1, 4), (2, 5), (3, 6), (4, 7), (5, 7));
+    }
+
+    [Test]
+    public void A_skip_inside_an_atomic_group_after_an_optional_item_answers_where_upstream_loops_for_ever()
+    {
+        // S40a. Found at 6000 rows a generator, `verbs` row 5944 at seed 4242, where it killed the
+        // whole wave silently - the recorder had no per-row deadline until this slice, so a row
+        // upstream never finishes meant no wave file at all. Minimised by hand from
+        // `[^a]?\U0001f600(?>[a\d]{1,3}(*SKIP)\p{Ll})` to four characters.
+        //
+        // Measured: regex.compile('.?x(?>a(*SKIP)z)').search('xzxa') never returns on 2026.7.19,
+        // and answers None on 2026.9.10.
+        //
+        // UPSTREAM'S BUG, AND UPSTREAM HAS ALREADY FIXED IT: commit b77694a, issue 613, "(*SKIP)
+        // inside an atomic group, plus an equality-only scan stop", released in 2026.8.30 - past
+        // the pin. It clamps the retreat limit down to the current position - one new line per
+        // direction in the GREEDY_REPEAT_ONE backtrack arm - which is what stops the retreat loop
+        // running away once a (*SKIP) has raised that limit above the position the retreat starts
+        // from, leaving the arm's equality-only stop unreachable. There is nothing to file, ledger
+        // entry 10 records it, and the Phase 6 sync is where the two clamps are ported.
+        //
+        // The bounded timeout is the assertion. A regression into upstream's loop would otherwise
+        // hang the whole suite instead of failing one test, which is the same reason
+        // OracleComparer.RowTimeout exists. Five seconds against a four-character subject.
+        var bounded = new FuzzyRegex(".?x(?>a(*SKIP)z)", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5));
+
+        bounded.Match("xzxa").Success.Should().BeFalse("2026.9.10 answers None and 2026.7.19 answers nothing at all");
+
+        // The three controls that isolate the shape, each of which upstream answers on BOTH
+        // versions: it needs all of a leading optional item, an atomic group, and (*SKIP) inside.
+        // They are here so a future reader can tell this test pins the hanging shape rather than
+        // "some pattern with a verb in it".
+        new FuzzyRegex(".?x(?>a(*PRUNE)z)")
+            .Match("xzxa")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex(".?x(?:a(*SKIP)z)").Match("xzxa").Success.Should().BeFalse();
+        new FuzzyRegex("x(?>a(*SKIP)z)").Match("xzxa").Success.Should().BeFalse();
+
+        // And the shape swept rather than sampled, because this port carries the PRE-FIX clamp:
+        // "it does not hang on one row" is not "it cannot hang". `tools/probes/
+        // upstream-skip-in-atomic-hang.py --grid` puts the identical 1296-call grid to upstream,
+        // where 2026.7.19 hangs on 70 of them and 2026.9.10 on none (measured 2026-09-13). The two
+        // rows below are the sharpest of those 70 - a bounded repeat rather than `.?`, which is
+        // where upstream's runaway is widest - and each is answered here in microseconds.
+        new FuzzyRegex(".{1,3}x(?>[ab](*SKIP)z)", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5))
+            .Match("xzxa")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex(".{1,3}x(?>a{1,2}(*SKIP)z)", FuzzyRegexOptions.None, TimeSpan.FromSeconds(5))
+            .Match("xzxaa")
+            .Success.Should()
+            .BeFalse();
     }
 }

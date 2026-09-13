@@ -152,6 +152,22 @@ internal sealed class MatchState : IDisposable
     internal int SliceEnd;
 
     /// <summary>
+    /// The slice as <see cref="Create"/> set it, which <see cref="Matcher.DoMatch"/> puts back at
+    /// the start of every match. Has no counterpart upstream.
+    /// </summary>
+    /// <remarks>
+    /// Added by S40a. <c>(*SKIP)</c> moves <see cref="SliceStart"/>/<see cref="SliceEnd"/>
+    /// mid-attempt and upstream restores them nowhere, so one scanner state carries the moved slice
+    /// from one match into the next - upstream's own bug, ledger entry 5, whose proposed fix is this
+    /// reset. The reasoning and the measurements are at the reset itself; this pair is only the
+    /// remembered value.
+    /// </remarks>
+    internal int InitialSliceStart;
+
+    /// <inheritdoc cref="InitialSliceStart" />
+    internal int InitialSliceEnd;
+
+    /// <summary>
     /// Upstream <c>text_start</c>. Always 0: upstream documents the bounds as an open start and a
     /// closed end, so <c>pos</c> moves <see cref="SliceStart"/> but not this, which is why
     /// <c>^</c> does not match at <c>pos</c>.
@@ -439,6 +455,8 @@ internal sealed class MatchState : IDisposable
 
         state.SliceStart = start;
         state.SliceEnd = end;
+        state.InitialSliceStart = start;
+        state.InitialSliceEnd = end;
 
         state.Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 

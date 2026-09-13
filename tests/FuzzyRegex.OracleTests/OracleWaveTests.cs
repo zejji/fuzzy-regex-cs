@@ -242,6 +242,54 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_upstream_never_finished_is_skipped_counted_and_never_put_to_this_port()
+    {
+        // S40a's half of the recorder deadline. Upstream can loop for ever on a row a generator
+        // drew - `regex.search('.?x(?>a(*SKIP)z)', 'xzxa')` on 2026.7.19 - and before the deadline
+        // existed one such row killed a whole 6000-row wave with no file written at all. The
+        // recorder now writes this shape instead.
+        OracleRow hung = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": ".?x(?>a(*SKIP)z)", "flags": 0, "namedLists": {}, "subject": "xzxa", "operation": "search", "codepointSpan": null, "outcome": {"kind": "timeout", "seconds": 10.0}}
+            """
+        )[0];
+
+        hung.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(10.0);
+
+        // Whatever this port answers, the verdict is the same: there is nothing to compare against.
+        // Both arms matter - filing it as a divergence would fail the run on upstream's bug, and
+        // filing it as agreement would let a port that also hangs score as parity.
+        OracleComparer.Compare(hung, new NoMatchOutcome()).Should().Be(OracleVerdict.Timeout);
+        OracleComparer.Compare(hung, actual: null).Should().Be(OracleVerdict.Timeout);
+
+        // And the engine is never asked, which is the part a verdict assertion cannot see: a wave
+        // carrying several of these would otherwise spend RowTimeout on each for no information.
+        var asked = new List<int>();
+        OracleRunSummary run = OracleComparer.RunWave(
+            [hung],
+            row =>
+            {
+                asked.Add(row.Number);
+                return new NoMatchOutcome();
+            }
+        );
+
+        asked.Should().BeEmpty("a row with no ground truth is asked of nothing");
+        run.Divergences.Should().BeEmpty();
+
+        // Counted under a verdict of its own rather than dropped, which is what puts it in the
+        // report's summary line: a generator that starts drawing rows upstream cannot answer has
+        // quietly stopped testing what it claims to, and this number is where that shows. Asserted
+        // as the WHOLE tally, so a future edit cannot fold it back into `unsupported` - which would
+        // make a hanging upstream row read as a gap in this port's coverage.
+        //
+        // `WriteReport` is deliberately not called here: it writes TestResults/oracle/report.txt,
+        // and clobbering the real wave's divergence report to check a substring of one line is the
+        // worse trade - the more so as TUnit runs these in parallel with the wave run itself.
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Timeout] = 1 });
+    }
+
+    [Test]
     public void A_wrong_lastindex_alone_is_reported_as_a_divergence()
     {
         // Added S18 with 'lastindex'/'lastgroup'. They are compared because nothing about the group

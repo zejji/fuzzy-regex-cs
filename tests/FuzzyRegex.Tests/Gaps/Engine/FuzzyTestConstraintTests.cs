@@ -210,8 +210,18 @@ public sealed class FuzzyTestConstraintTests
         // counts: `(?<=(?:[ab][cd]){e<=1})$` against 'axc' is `counts=(1, 0, 0) changes=([2], [], [])`
         // upstream and `(1, 0, 0)` with a *deletion* at 1 here. That bug predates the `{...:test}`
         // constraint - plain `(?r)(?:[ab][cd]){e<=1}` against 'axc' reports `[2]` correctly, and the
-        // patterns here have no test node at all - and it is recorded in S40's closing notes with
-        // its own slice. Strengthen these assertions when it is fixed, not before.
+        // patterns here have no test node at all.
+        //
+        // S40a ASKED FOR THESE ASSERTIONS TO BE STRENGTHENED AND THEY ARE STILL NOT, because what it
+        // found was not a port bug to fix. Upstream contradicts its own counts the same way -
+        // `search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab')` is `counts=(0,0,1)` with a
+        // SUBSTITUTION at 0 - and this port reproduces that faithfully; what differs on the rows
+        // above is only how many search attempts each engine makes, because `$` lets upstream's
+        // prefilter make one and this port has none until Phase 7. It is ledger entry 11, an
+        // inherited bug on Phase 6's sweep list, pinned meanwhile by
+        // `FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one`.
+        // Strengthen these when Phase 6 fixes the inherited bug - not before, and not by changing
+        // the engine here, which S40a measured and reverted.
 
         // char-rev-ok: counts=(1, 0, 0) changes=([2], [], [])
         // char-rev-no: counts=(0, 0, 1) changes=([], [], [2])

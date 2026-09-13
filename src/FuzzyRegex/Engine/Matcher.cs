@@ -4522,6 +4522,30 @@ internal static class Matcher
         //
         // NOT PORTED: the pattern-call guard list clear (:11797-11803), which S30 settled as
         // write-only upstream - see docs/PORTMAP.md's "deliberately not ported" table.
+        //
+        // THE CHANGE LIST IS DELIBERATELY *NOT* CLEARED HERE, and S40a tried it and reverted it, so
+        // read this before trying again. Upstream clears the counts and leaves the list, and the two
+        // therefore drift apart on a restart - `Match.FuzzyChanges` reports the first
+        // `FuzzyCounts.Total` entries, which is upstream's own `for (i = 0; i < count; i++)`
+        // (:20522), so a change left over from an abandoned attempt DISPLACES a real one. Upstream's
+        // own answers contradict its own counts because of it (.scratch is gone, but
+        // tools/probes/upstream-fuzzy-restart-leak.py re-runs it):
+        //
+        //   search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab') -> counts=(0,0,1) changes=([0],[],[])
+        //
+        // One deletion counted, a SUBSTITUTION reported. That is upstream's answer and this port's,
+        // and `A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`
+        // pins both rows - so clearing the list here turns that test red and makes the port diverge
+        // on rows it currently agrees on. It is an INHERITED defect, ledger entry 11, and Phase 6's
+        // sweep owns it because fixing it means deciding what the right answer is and accepting a
+        // permanent oracle divergence.
+        //
+        // What made it look like a port bug (S40's blind review) is that this port reaches the leak
+        // on shapes upstream does not: `(?<=(?:[ab][cd]){e<=1})$` over 'axc' makes ONE attempt
+        // upstream, because `$` has a `search_start_*` twin, and FOUR here, because the prefilter is
+        // Phase 7's. Pinned by
+        // FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one
+        // and classified in the oracle as `fuzzy-restart-change-leak`.
         if (state.IsFuzzy)
         {
             Array.Clear(state.FuzzyCounts);
@@ -8819,6 +8843,43 @@ internal static class Matcher
     {
         ArgumentNullException.ThrowIfNull(state);
 
+        // THE SLICE GOES BACK TO WHAT THE CALLER ASKED FOR, ONCE PER MATCH. Added by S40a, and it is
+        // a deliberate departure from upstream's code - upstream restores it nowhere - so read this
+        // before "restoring" the fidelity.
+        //
+        // `(*SKIP)` moves `slice_start`/`slice_end` mid-attempt (`:14553`) and nothing puts them
+        // back: `init_match` (`:3404`), `do_match` (`:18121`) and `scanner_search_or_match`
+        // (`:20874`) all leave them alone, and one state serves a whole scan. So the slice a verb
+        // moved in match *n* is still moved for match *n+1*, and the next match is answered against
+        // a subject it was never asked about. That is LEDGER ENTRY 5, where it is upstream's bug
+        // with this line as its proposed fix - "reset them in `init_match` alongside the guards".
+        //
+        // Why the port could not simply inherit it. With no `search_start` prefilter until Phase 7,
+        // this port reaches the carried slice on shapes upstream's optimiser skips past, and there
+        // it LOSES MATCHES rather than merely moving them. Measured on the S40a seed-7 wave, row
+        // 117679 minimised to four characters:
+        //
+        //   finditer(r'\b(?:[^a](*SKIP))*', 'b\n\rS', overlapped=True)
+        //     upstream     (0,4) (1,3) (3,1) (4,0)   - and its own fresh-state walk agrees
+        //     before this  (0,4) (1,3)       (4,0)   - and this port's own Match() at 3 gives (3,1)
+        //
+        // The attempt at 2 failed with `slice_start` left at 4 by the previous match's verb, and the
+        // failure arm below (`:15734`, and its port at the GreedyRepeatOne/search retry) then jumped
+        // the next start position UP to `slice_start`, skipping 3 entirely. Hide the start test from
+        // upstream's prefilter - `(?=\b)(?:[^a](*SKIP))*` - and upstream loses the same match, which
+        // is what proves the mechanism is shared and the prefilter is what masks it.
+        //
+        // The measurements that say this is safe, all on the commit that introduced it: the whole
+        // ported suite green (5825 tests), the 126,000-row seed-7 wave down from four divergences to
+        // three, and all 37 `ExpectedDivergences` rows still firing - including every
+        // `overlapped-skip-stale-slice` row, which is the family that would have gone quiet had this
+        // changed what a carried slice does WITHIN one match. It does not: the reset is once per
+        // match, so a verb still moves the slice for the rest of its own attempt, which is what
+        // `BacktrackingVerbTests.Skip_moves_the_slice_start_and_a_later_match_in_the_same_scan_sees_it`
+        // pins.
+        state.SliceStart = state.InitialSliceStart;
+        state.SliceEnd = state.InitialSliceEnd;
+
         // Is there enough to search?
         if (state.Reverse)
         {
@@ -8855,6 +8916,34 @@ internal static class Matcher
             if (status == MatchStatus.Failure)
             {
                 // Fall back to the partial match as originally requested.
+                //
+                // ONLY `text_pos` GOES BACK, which is upstream's line (`:18160`). RESTORING THE
+                // SLICE HERE TOO IS THE OBVIOUS NEXT STEP, IT IS PART-RIGHT, AND S40a MEASURED IT
+                // AND LEFT IT OUT - read this before spending the afternoon rediscovering it.
+                //
+                // The argument for it is sound as far as it goes. The two `DoMatch2` calls are two
+                // attempts at ONE match, so a `(*SKIP)` in the non-partial pass leaves `slice_start`
+                // moved for the partial pass, which then skips every start position below it and the
+                // search stops being LEFTMOST. That is a defect on this port's own answers, not a
+                // divergence: over `\b\D(*SKIP)z` and ' A' asked with `partial`, the search answers
+                // (2, 0) while this port's own `MatchAtStart(' A', 1, partial)` answers (1, 1) -
+                // and upstream answers (1, 1) as well. Row 97927 of the S40a seed-7 wave is that
+                // shape, and S37's permanent `A_skip_alternation_partial_starts_where_this_port_ran_
+                // out_of_text` turns out to be the same defect: this port answers (4, 0) there while
+                // its own matcher answers (2, 2) at an earlier position.
+                //
+                // Why it is not done here. Adding the two lines fixes row 97927 and INTRODUCES row
+                // 101560 - `(?r)\b(?:[^a-f](*SKIP)[\p{L}\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})` over
+                // 'a\n' asked with `partial`, where upstream answers (0, 0) and this port then
+                // answers (0, 1) - because a reversed search is anchored by its END and restoring
+                // `slice_end` moves what every end-of-subject assertion means. It also turns S37's
+                // pinned answer red, which is a permanent judged divergence that a slice about four
+                // recorded rows has no business rewriting in passing. Net over 126,000 rows it is
+                // one divergence for another.
+                //
+                // So the mechanism is known, the minimal reproduction is four characters, and the
+                // fix needs a slice of its own that can judge the reversed half and re-judge S37's
+                // row together. Recorded in S40a's closing notes and in STATE.md as the next slice.
                 state.TextPos = textPos;
                 status = DoMatch2(state, search);
             }

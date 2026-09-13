@@ -438,9 +438,17 @@ public sealed class FuzzyRegex
             // Copied, because the state's arrays are about to be disposed and are reused by the next
             // match: a Match sharing them would change under its owner (copy_groups, :20621).
             Engine.GroupData.CopyGroups(state.Groups, _compiled.GroupCount),
-            // The slice, not the match, because Match.NextMatch resumes inside it.
-            state.SliceStart,
-            state.SliceEnd,
+            // The slice, not the match, because Match.NextMatch resumes inside it - and the slice the
+            // CALLER asked for, not whatever a `(*SKIP)` left behind. `DoMatch` puts the slice back
+            // at the start of every match (see the reset there), so a scan is unaffected by a verb in
+            // the previous match; `NextMatch` rebuilds a state from these two values instead, so
+            // handing it the moved slice would make `MatchState.Create` record the MOVED slice as the
+            // one to restore and reintroduce the same defect on this one path. Found by S40a's blind
+            // review with a reproduction: `\b(?:[^a](*SKIP))*` over "b\n\rS" overlapped gave
+            // (0,4) (1,3) (3,1) (4,0) from `Matches` and (0,4) (1,3) (4,0) from a `NextMatch` walk,
+            // where Match's own remarks require the two to agree.
+            state.InitialSliceStart,
+            state.InitialSliceEnd,
             state.Overlapped,
             state.LastIndex,
             state.LastGroup,

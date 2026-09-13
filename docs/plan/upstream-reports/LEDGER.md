@@ -686,3 +686,132 @@ rather than only in the generator so the next slice that widens it knows why.
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
 
 **Related:** issues 611-614, the 2026 memory-safety group.
+
+# Added by S40a, 2026-09-13
+
+## 10. `(*SKIP)` inside an atomic group after an optional item loops for ever - ALREADY FIXED UPSTREAM
+
+**Status: nothing to file, and nothing to fix here.** Recorded so the next session does not
+re-derive it, and because it is the defect that forced the recorder's per-row deadline.
+
+Found by S40 at 6000 rows a generator - `verbs` row 5944, seed 4242 - where it killed the whole wave
+silently: `tools/record-oracle.py` waited for ever, so no file was written at all, no error was
+raised, and about forty minutes went on bisecting it by hand. Minimised to four characters:
+
+```python
+>>> import regex
+>>> regex.__version__
+'2026.7.19'
+>>> regex.compile('.?x(?>a(*SKIP)z)').search('xzxa')   # never returns
+```
+
+All three parts are needed. `(*PRUNE)` in place of `(*SKIP)`, a non-atomic `(?:...)`, and dropping
+the leading `.?` each answer `None` at once. The original row was
+`[^a]?\U0001f600(?>[a\d]{1,3}(*SKIP)\p{Ll})` on `'\U00010400\r_\U0001f600\xdf\U0001f600aA'`.
+
+**Upstream has already fixed it**, which is why this is a ledger note and not a report. Measured
+2026-09-13 with `tools/probes/upstream-skip-in-atomic-hang.py`:
+
+| release | the minimised row | the 1296-call grid (`--grid`) |
+|---|---|---|
+| 2026.7.19 (our pin's era) | never returns | 70 calls hang |
+| 2026.9.10 (newest) | `None` | 0 calls hang |
+| this port | `None`, in 17ms | 0 calls hang |
+
+The fix is commit `b77694a`, "Git issue 613: `(*SKIP)` inside an atomic group, plus an equality-only
+scan stop", released in 2026.8.30 - the same commit the note above entry 5 already flags. It adds
+one clamp per direction to the `GREEDY_REPEAT_ONE` backtrack arm (`:15859`), holding the retreat
+limit down to the current position. Without it a `(*SKIP)` that has moved `slice_start` above the
+position the retreat starts from leaves the arm's `pos == limit` stop unreachable, and the retreat
+loop runs away. It is the only engine commit between `b77694a` and upstream's head that touches this
+construct at all - the rest of that window is `9398a6d` (group-call direction, entry 8's area) and
+the #615-#618 Python-API error-propagation PRs.
+
+**What this port answers, and the honest limit on it.** `None`, on the row and on all 1296 grid
+calls. But this port still carries the PRE-FIX arm - `Matcher.cs`'s `GreedyRepeatOne` backtrack has
+upstream's slice clamp and not the `pos` clamp - so "does not hang on these rows" is not "cannot
+hang", and the grid is what makes even the first claim worth anything: a grid that never reached
+the shape would give this port the same zero, and upstream's 70 is the proof that it does reach it.
+Pinned by
+`BacktrackingVerbTests.A_skip_inside_an_atomic_group_after_an_optional_item_answers_where_upstream_loops_for_ever`,
+whose assertions are bounded by a `MatchTimeout` so a regression fails one test instead of hanging
+the suite.
+
+**Where the two clamps get ported: the Phase 6 sync**, test-first, as ROADMAP and entry 5's note
+already say. This entry adds the reproduction they lacked.
+
+**Consequence for the oracle, and the reason it stays true after the sync.** The recorder now gives
+every upstream call a ten-second deadline and records a row it misses as a `timeout` outcome the
+consumer skips and counts (S40a, DECISIONS 2026-09-13). That machinery is not this bug's workaround
+and does not retire with it: upstream had two other runaway shapes on the open tracker when this was
+written (issues 551 and 554), and a generative tester that one hanging row can silence is a tester
+that goes quiet without saying so.
+
+---
+
+## 11. A fuzzy match reports change positions that contradict its own change counts
+
+**Status: not filed, and INHERITED BY THIS PORT.** Upstream's answer contradicts itself, this port
+reproduces it faithfully, and the owner's rule (2026-09-12) is that an inherited bug is fixed here
+before 1.0 - so this is an item for Phase 6's inherited-bug sweep, alongside entry 7, and not a
+divergence to pin.
+
+**Reproduction**, `regex` 2026.7.19, measured 2026-09-13 and re-run unchanged on 2026.9.10
+(`python tools/probes/upstream-fuzzy-restart-leak.py`):
+
+```python
+>>> import regex
+>>> m = regex.search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab')
+>>> m.fuzzy_counts, m.fuzzy_changes
+((0, 0, 1), ([0], [], []))
+```
+
+One **deletion** counted, one **substitution** reported. The two attributes are documented as two
+views of the same errors, so whichever is right the pair cannot both be, and no caller can tell which
+to trust. `(?:[ab](*SKIP)[bc][wx]){e<=2}` over the same subject answers identically.
+
+**Where it comes from.** `basic_match`'s `start_match` clears the counts and not the change list:
+
+```c
+/* Clear the fuzzy counts. */
+if (state->is_fuzzy)
+    memset(state->fuzzy_counts, 0, sizeof(state->fuzzy_counts));
+```
+
+(`:11790-11792`.) `record_fuzzy` pushes onto `state->fuzzy_changes` at `items[count++]` (`:9793`) and
+`unrecord_fuzzy` pops (`:9802`), so the list is a stack - but a search attempt that is abandoned
+without unwinding, which is exactly what `(*PRUNE)` and `(*SKIP)` do when they cut the backtracking,
+leaves its entries on it. `match_fuzzy_changes` then reports the **first** `sum(fuzzy_counts)` entries
+(`:20522`), so a stale entry does not merely sit there unread: it **displaces** the change the winning
+attempt recorded. The counts survive because they are cleared; the list does not because it is not.
+
+**Proposed fix.** Clear the change list beside the counts at `:11791`, which is what the cleared
+counts already assert - a fresh attempt has used no errors, so it can have no changes. The one-line
+alternative, resetting `state->fuzzy_changes.count = 0` there, is the same edit in upstream's own
+idiom.
+
+**What this port answers, and why it is not fixed here yet.** The same, exactly - both rows are pinned
+by `FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`
+(S38). S40a made the one-line fix, measured it, and **reverted it**: clearing the list turns those two
+pinned rows red and makes this port diverge from upstream on rows it currently agrees on. Fixing an
+inherited bug is a decision about what the right answer is plus a permanent oracle divergence to
+carry, which is a slice of its own - the shape entry 7 already has.
+
+**A second symptom, and the reason this was found at all.** This port reaches the leak on shapes
+upstream's optimiser keeps it away from, because it has no start prefilter until Phase 7:
+
+```python
+>>> regex.search(r'(?<=(?:[ab][cd]){e<=1})$', 'axc').fuzzy_changes
+([2], [], [])          # this port: ([], [], [1])
+```
+
+`$` has a `search_start_*` twin, so upstream makes ONE attempt, at the end of the subject, and its
+first attempt is its winning one. This port attempts positions 0, 1, 2 and 3; the attempt at 1
+succeeds *inside the lookbehind*, records a deletion and then fails on the `$`. Replace the `$` with a
+literal and upstream walks every position too - and then the two engines agree again, because
+upstream's winning attempt is still its first. Found by S40's blind review, which read it as a port
+defect; it is the same defect as above, reached by a different door. Pinned by
+`FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one`.
+
+**Related:** entry 7, the other inherited bug on Phase 6's list.
+

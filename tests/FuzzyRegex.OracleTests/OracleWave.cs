@@ -215,6 +215,8 @@ internal static class OracleWave
         return kind switch
         {
             "nomatch" => new NoMatchOutcome(),
+            // S40a. No ground truth at all for this row: upstream never finished it.
+            "timeout" => new TimeoutOutcome(outcome.GetProperty("seconds").GetDouble()),
             // 'whileMatching' is optional and defaults to false, which is what every wave recorded
             // before S24 means: until substitution landed, upstream's only recorded rejections came
             // out of regex.compile. A hand-written minimisation row need not carry it either.
@@ -318,6 +320,7 @@ internal static class OracleWave
             $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
                 + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
                 + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
+                + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
                 + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
         );
 
@@ -569,6 +572,29 @@ internal sealed record NoMatchOutcome : IOracleOutcome
     public string Describe() => "no match";
 }
 
+/// <summary>Upstream ran out of its deadline on this row, so there is no ground truth for it.</summary>
+/// <param name="Seconds">The deadline upstream was given, which the recorder writes as a constant.</param>
+/// <remarks>
+/// <para>
+/// Recorded by <c>tools/record-oracle.py</c> from S40a on, and never produced by this port: it is a
+/// statement about upstream, not an answer either engine gave. Upstream can loop for ever on a row a
+/// generator drew - <c>regex.search('.?x(?&gt;a(*SKIP)z)', 'xzxa')</c> on 2026.7.19 is one - and
+/// before the deadline existed such a row killed the whole wave silently, with no file written at all.
+/// </para>
+/// <para>
+/// A kind of its own rather than an <see cref="ErrorOutcome"/>, because upstream did not reject the
+/// pattern: filing it as a rejection would score a port that answers as diverging and a port that
+/// also hangs as agreeing, which is both halves of the comparison backwards. The row is skipped the
+/// way an unsupported one is, and counted separately so a generator that starts drawing hanging
+/// shapes shows up in the summary line instead of going quiet.
+/// </para>
+/// </remarks>
+internal sealed record TimeoutOutcome(double Seconds) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() => string.Create(CultureInfo.InvariantCulture, $"timed out after {Seconds}s");
+}
+
 /// <summary>This port compiled the pattern, and cannot match yet.</summary>
 /// <remarks>
 /// Not the same as knowing nothing, which is why it is not simply <see langword="null"/>. The port
@@ -798,4 +824,12 @@ internal enum OracleVerdict
     /// always printed, with its id, so it is accounted for rather than hidden.
     /// </summary>
     Expected,
+
+    /// <summary>
+    /// Upstream ran out of its deadline, so there is nothing to compare against. Informational, and
+    /// counted in the summary line rather than dropped: a generator that starts drawing rows
+    /// upstream cannot answer has stopped testing what it claims to test, and the count is how
+    /// anyone notices.
+    /// </summary>
+    Timeout,
 }

@@ -155,6 +155,32 @@ four and the recorder timeout, and its exit gate is the 6000-row wave. As with S
 none of this was scope creep and none of it was a feature - it is verification getting stricter and
 finding real defects, which is the thing the Phase 5 budget note above said to expect.
 
+**S40a did not close in one session, and what it found changes the shape of the rest of Phase 5
+(2026-09-13). This paragraph is the ROADMAP half; the design spec needs the matching amendment 20,
+which is the owner's to write** - the spec is not in this repository, so a slice cannot edit it, and
+the repo rule is that a phase-plan change amends both.
+
+S40a's exit gate was "the default wave green at three seeds at 6000 rows". Run for the first time,
+it gives **3 + 5 + 7 = 15 diverging rows**, not the four S40 recorded - S40 saw four because only
+seed 7 ever completed, which is the same single-seed trap VERIFICATION rule 7a was written for, one
+level up. Eleven of the fifteen have never been triaged, and **one is a crash rather than a wrong
+answer**: row 93133 (`recursion`, `subf`) throws `ArgumentException: capture index out of range` out
+of `Substitution.ExpandField` where upstream answers `sub 0`. Two independent blind reviews confirmed
+none of the fifteen is caused by S40a's own changes.
+
+Two of S40a's four items also turned out to rest on premises measurement overturned: the
+`(*SKIP)`-in-an-atomic hang is upstream's and **already fixed upstream** (`b77694a`, released
+2026.8.30), and the fuzzy change/count contradiction is upstream's too and **inherited**, with S38's
+pinned rows proving this port reproduces it faithfully. Neither was a fix for S40a to make. What
+S40a did fix is one real engine defect - the scanner carrying a slice a `(*SKIP)` moved into the next
+match, ledger entry 5's own proposed fix - plus the recorder's per-row timeout.
+
+So the honest read is that **Phase 5 needs at least three more slices than its eight**, and they are
+verification work rather than features, exactly as this file's own Phase 5 budget note predicted
+("its 5-8 counts fuzzy features, and the oracle will add slices to it"). S40a's closing section
+proposes the split, crash first, triage second, the partial-matching slice-carry family third, and
+the gate itself last. Budget them at Phase 4's measured 1.1 sessions per slice.
+
 One number the owner should revisit before Phase 3 runs unattended: `docs/plan/budget.json` sets
 `maxSlicesPerDay` to 5 and `maxSlicesPerWeek` to 12, and its own note flags that the weekly cap now
 binds after two and a half busy days. Changing it is an owner decision, not a slice's.

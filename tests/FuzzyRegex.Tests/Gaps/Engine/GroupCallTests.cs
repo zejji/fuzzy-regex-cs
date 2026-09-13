@@ -304,4 +304,83 @@ public sealed class GroupCallTests
     // push. Upgrade path: assert it in the Phase 6 hardening pass, where a long-running,
     // memory-hungry test already has a home, or give ByteStack an injectable limit so the same
     // assertion costs a kilobyte.
+
+    // DIVERGES FROM UPSTREAM, and the VERDICT IS OPEN - this test records measurements, not a
+    // judgement. Read the comment before citing it as evidence either way.
+    [Test]
+    public void A_group_called_through_an_opposite_direction_lookaround_loses_upstreams_partial_only_on_an_astral_subject()
+    {
+        // S40a, rows 98956 (`partial`) and 103926 (`partial-sliced`) of a 6000-row seed-7 wave,
+        // minimised by hand. The same precondition as the two tests above and as ledger entry 8 - a
+        // group reached by a CALL from a lookaround running the other way round from the pattern -
+        // and a third symptom: upstream does not lose the match and does not record a bad capture,
+        // it reports the SAME span as a PARTIAL, and in the reversed case drops the group's
+        // participation with it.
+        //
+        // Measured on regex 2026.7.19, and both need an ASTRAL subject - swap U+10400 for an ASCII
+        // letter and the two engines agree, which is what says the wrongly-directed call is walking
+        // off the end of the text rather than merely matching something else:
+        //
+        //   search(r'(?P<g1>\U00010400)(?:(?<=(?P>g1))\w)?', '\U00010400', partial=True)
+        //     upstream (0, 1) g1 (0, 1) PARTIAL          here (0, 2) g1 (0, 2) complete
+        //   fullmatch(r'(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?', '\U00010400', partial=True)
+        //     upstream (0, 1) g1 UNSET  PARTIAL          here (0, 2) g1 (0, 2) complete
+        //
+        // (Upstream's indices are codepoints; U+10400 is one codepoint and two UTF-16 code units.)
+        //
+        // WHY NO VERDICT. There are two candidate defects here and S40a settled neither, so nothing
+        // below should be read as "port right". What it measured
+        // (.scratch is gone; `tools/probes/` has no entry for this yet - re-derive from the six
+        // lines below, which are the whole experiment):
+        //
+        //  * UPSTREAM'S PARTIAL COMES FROM THE CALL, not from the subject. Write the call out as the
+        //    thing it calls - `(?<=\U00010400)` for `(?<=(?P>g1))` - and upstream answers a COMPLETE
+        //    match. Delete the lookaround and it answers a complete match. That is ledger entry 8's
+        //    signature: upstream contradicts itself between a call and its own inlined body.
+        //  * THIS PORT IS INCONSISTENT ACROSS ASTRALITY, which upstream is not. On an ASCII subject
+        //    this port reports upstream's partial; on the astral subject it does not. Upstream
+        //    reports it for both.
+        //
+        // So upstream is wrong about the call and this port is wrong about the astral subject, and
+        // which answer the ROW should have depends on which of those is fixed first. Settling it
+        // needs the call's direction handling and the end-of-text partial check looked at together,
+        // which is a slice of its own (S40b, with row 97927's leftmost-partial defect).
+        string astral = char.ConvertFromUtf32(0x10400);
+
+        Match forward = new FuzzyRegex("(?P<g1>" + astral + @")(?:(?<=(?P>g1))\w)?").Match(astral, partial: true);
+
+        forward.Success.Should().BeTrue();
+        (forward.Index, forward.Length).Should().Be((0, 2));
+        forward.PartialMatch.Should().BeFalse("upstream answers partial here; the verdict is open");
+        forward.Groups["g1"].Success.Should().BeTrue();
+
+        Match reversed = new FuzzyRegex(@"(?r)(?P<g1>\w+)(?:(?!(?P>g1))\s)?").FullMatch(astral, partial: true);
+
+        reversed.Success.Should().BeTrue();
+        (reversed.Index, reversed.Length).Should().Be((0, 2));
+        reversed.PartialMatch.Should().BeFalse("upstream answers partial here too");
+        reversed.Groups["g1"].Success.Should().BeTrue("upstream drops g1 here and the match still spans the subject");
+
+        // THE TWO CONTROLS, and they are what make the paragraph above measurements rather than a
+        // story. They point at different engines, which is exactly why there is no verdict.
+        //
+        // One: the call written out as its own body. Upstream drops its partial - `search(
+        // r'(?P<g1>\U00010400)(?:(?<=\U00010400)\w)?', '\U00010400', partial=True)` is
+        // partial=False - so upstream's partial belongs to the CALL. This port answers the same
+        // either way, which is what it should do if the call is semantics-preserving.
+        new FuzzyRegex("(?P<g1>" + astral + ")(?:(?<=" + astral + @")\w)?")
+            .Match(astral, partial: true)
+            .PartialMatch.Should()
+            .BeFalse();
+
+        // Two, and this is the awkward one: on an ASCII subject THIS PORT REPORTS UPSTREAM'S
+        // PARTIAL. Upstream reports it for both subjects; this port only for the ASCII one. So the
+        // astral answer above is not this port applying a considered rule - it is this port
+        // answering two different things about the same pattern according to how wide a character
+        // is, which no reading of partial matching justifies.
+        new FuzzyRegex(@"(?P<g1>A)(?:(?<=(?P>g1))\w)?")
+            .Match("A", partial: true)
+            .PartialMatch.Should()
+            .BeTrue("this port agrees with upstream on ASCII and not on astral - the defect S40b owns");
+    }
 }

@@ -2,43 +2,42 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Current slice:** S40a is next, then S41. Launch: `pwsh -File tools/launch-slice.ps1 s40a`.
-S40 landed the `{...:test}` constraint - `fuzzy_ext_match`, `folded_char_at` and
-`fuzzy_ext_match_group_fld` - so **every fuzzy seam except ENHANCEMATCH and BESTMATCH is gone**.
-Parity **91.1% -> 97.2%**, skips **174 -> 55**, and all 55 are S41's (30) and S42's (25).
+**Current slice:** S40a, STILL OPEN after session 1. Launch: `pwsh -File tools/launch-slice.ps1 s40a`.
+Its file now carries a long "Session 1" section - **read that before re-planning it**, because two of
+its four items rested on premises that measurement overturned.
 
-**S40a exists because S40's last verification item found four defects, none of them S40's**
-(design spec amendment 19). Do the recorder first; the other three are only measurable after it.
-1. **Upstream hangs**: `regex.search('.?x(?>a(*SKIP)z)', 'xzxa')` never returns on 2026.7.19. Needs
-   all three of a leading optional item, an atomic group, `(*SKIP)` inside. The recorder has no
-   per-row timeout, so one such row kills a whole wave silently - `regex` takes `timeout=`.
-2. **Four rows of the 6000-row wave diverge at seed 7** (`partial` 97927/98956, `partial-sliced`
-   103926, `verbs` 117679), **proven to be HEAD's** by consuming the same saved wave with HEAD's
-   engine in a worktree: HEAD gives the same four, with 1432 `unsupported` where this tree gives 0.
-3. **A fuzzy section in a lookbehind reports `FuzzyChanges` that contradict its own `FuzzyCounts`**:
-   `(?<=(?:[ab][cd]){e<=1})$` on 'axc' is `(1,0,0)` with a *deletion* at 1, upstream `subs=[2]`.
-   Plain `(?r)` is correct, so it is not the reversal. S38/S39 territory.
+**What landed:** the recorder per-row timeout (a hanging upstream row is now a recorded `timeout`
+outcome, not an unwritten wave - it fires for real at seed 4242); ledger entries **10** (the
+`(*SKIP)`-in-an-atomic hang, already fixed upstream by `b77694a`, this port never hung - 70 of 1296
+grid calls hang on 2026.7.19, 0 here) and **11** (a fuzzy match reporting changes that contradict its
+own counts - UPSTREAM'S, S38 had already pinned it, the one-line fix was measured and reverted);
+and one engine fix: **`DoMatch` now restores the slice at the start of every match**, which is the fix
+ledger entry 5 proposes for upstream. Seed-7 wave 4 divergences -> 3.
 
-**Two upstream asymmetries S40 ported as written, so nobody "fixes" them:** `fuzzy_ext_match` has
-no `SET_*_REV`/`SET_*_IGN_REV` arm and `fuzzy_ext_match_group_fld` has no `SET_*_IGN` arm, so those
-tests constrain nothing; `.` is a no-op everywhere. Measured, and pinned by
-`Gaps/Engine/FuzzyTestConstraintTests.cs`.
+**The exit gate is NOT met, and it is far bigger than S40a supposed.** 6000 rows a generator at three
+seeds gives **3 + 5 + 7 = 15 diverging rows**, not four; S40 saw four because only seed 7 ever
+completed. Eleven have never been triaged. **Row 93133 (`recursion`, `subf`) is a CRASH** -
+`ArgumentException: capture index out of range` out of `Substitution.ExpandField` where upstream
+answers `sub 0`. Both blind reviews confirmed none of the fifteen is caused by this session's diff.
 
-**A control can read zero because no *test* discriminates, not because the path is cold** - S40's
-control E, third failure mode after S38's and S39's. See its closing notes before trusting a zero.
+**Do not re-try two things without reading why they were reverted**, both written out at the code:
+clearing the fuzzy change list in `basic_match`'s `start_match` (turns S38's two pinned rows red), and
+restoring the slice before the partial retry in `DoMatch` (fixes row 97927, introduces a reversed one,
+and turns S37's permanent pinned answer red - that answer is itself the same defect).
 
-**Blockers:** none. S40's own scope is complete and green.
+**Blockers:** none technical. The remaining work wants splitting, and the split is an owner decision -
+S40a's closing section proposes four pieces, crash first.
 
-**Where the port stands:** ratchet GREEN, 5821 tests, 5766 passing, parity **97.2%**, 30 areas at
-100%. 55 skipped, all `(?e)`/`(?b)`.
+**Where the port stands:** ratchet GREEN, 5825 tests, 5770 passing, parity **97.2%**, baseline updated
+to 5662. 55 skipped, all `(?e)`/`(?b)`.
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds). Rows per generator is **`-Count`**;
-`-Rows` is a path to a JSONL file and still re-records - use `-SkipRecord` to consume one.
-**Delete `.scratch/control-waves/<generator>-<count>-<seed>.jsonl` after widening a generator.**
-Controls: `python tools/run-controls.py --slices S40 --seeds 3`.
+`-Rows` is a path to a JSONL file and still re-records - use `-SkipRecord` to consume one. A 6000-row
+seed takes ~18s to record and ~8s to consume, so the whole gate is about two minutes.
 
 **Upstream is a ledger, not a queue** (`docs/plan/upstream-reports/LEDGER.md`): nothing filed until
-everything else in the plan is done. Entry 7 and S40a's `(*SKIP)` hang are on Phase 6's list.
+everything else in the plan is done. Entries 10 and 11 are new; 11 is an INHERITED bug, so by the
+owner's 2026-09-12 rule it joins entry 7 on Phase 6's sweep list.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
 `origin/main` trails local and needs a push.

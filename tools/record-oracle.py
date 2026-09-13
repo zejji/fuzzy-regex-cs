@@ -67,6 +67,28 @@ DEFAULT_OUTPUT = REPO_ROOT / "TestResults" / "oracle" / "wave.jsonl"
 # a session to chase down, so it fails the run. DECISIONS 2026-08-31, owner-approved.
 PYPI_FALLBACK_VERSION = "2026.7.19"
 
+# How long upstream gets to answer one row before the row is recorded as a timeout rather than as
+# an answer. S40a, added because upstream can loop for ever on a row a generator drew: at 6000 rows
+# a generator, `verbs` row 5944 at seed 4242 never returned, so the wave was never written at all -
+# no output, no error, no partial file, and forty minutes lost to bisecting it by hand.
+#
+# `regex` takes `timeout=` on every method this recorder calls and honours it inside the loop that
+# hangs (measured 2026-09-13, regex 2026.7.19, .scratch/probe-timeout.py):
+#
+#     >>> regex.compile('.?x(?>a(*SKIP)z)').search('xzxa', timeout=3)
+#     TimeoutError: regex timed out after 3.0s
+#
+# Ten seconds, to match `OracleComparer.RowTimeout` - the deadline the consumer gives THIS port for
+# the same row. Symmetry is the point: neither engine is allowed longer than the other to answer a
+# question, so a row recorded as a timeout is one no engine was going to answer.
+#
+# It is also what keeps the file deterministic. The recorded outcome carries this CONSTANT and never
+# an elapsed time, so two runs of the same seed stay byte-identical as long as the same rows hang -
+# which is why the deadline is generous rather than tight. A row that takes nine seconds and a row
+# that takes eleven would record differently from run to run, and a deadline anywhere near a
+# generator's real row times would make `--verify-determinism` flap.
+ROW_TIMEOUT_SECONDS = 10.0
+
 OPERATIONS = ("search", "match", "fullmatch")
 
 # S24's operations. A substitution row carries two more fields - `template` and `count` - and its
@@ -414,6 +436,23 @@ def _record_row(regex, row: dict) -> dict:
         }
         return recorded
 
+    def timed_out() -> dict:
+        """The recorded answer when upstream ran out of its deadline.
+
+        A KIND OF ITS OWN, not an ``error``. Upstream has no answer to compare against - it did not
+        reject the pattern, it simply never finished - so filing this as a rejection would score any
+        port that *does* answer as diverging, and a port that also hangs as agreeing. The consumer
+        skips the row the way it skips ``unsupported`` and counts it separately, so a generator that
+        starts drawing hanging shapes is visible in the summary line rather than silent.
+
+        Not dropped, either. A row a generator emits and nobody records is a shape that quietly
+        stops being tested, which is the failure S38's and S39's controls each hit from a different
+        direction.
+        """
+        recorded["codepointSpan"] = None
+        recorded["outcome"] = {"kind": "timeout", "seconds": ROW_TIMEOUT_SECONDS}
+        return recorded
+
     try:
         compiled = _compile_upstream(regex, recorded, pattern, flags, named_lists)
     except Exception as e:  # noqa: BLE001 - the exception *is* the recorded answer
@@ -422,7 +461,11 @@ def _record_row(regex, row: dict) -> dict:
     if operation in SUB_OPERATIONS:
         method = compiled.subn if operation == "sub" else compiled.subfn
         try:
-            text, made = method(recorded["template"], subject, count=recorded["count"])
+            text, made = method(
+                recorded["template"], subject, count=recorded["count"], timeout=ROW_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            return timed_out()
         except Exception as e:  # noqa: BLE001
             return failed(e, while_matching=True)
 
@@ -433,10 +476,12 @@ def _record_row(regex, row: dict) -> dict:
     if operation in ITER_OPERATIONS:
         try:
             if operation == "split":
-                parts = compiled.split(subject, maxsplit=recorded["count"])
+                parts = compiled.split(subject, maxsplit=recorded["count"], timeout=ROW_TIMEOUT_SECONDS)
             else:
                 overlapped = operation == "finditer-overlapped"
-                found = list(compiled.finditer(subject, overlapped=overlapped))
+                found = list(compiled.finditer(subject, overlapped=overlapped, timeout=ROW_TIMEOUT_SECONDS))
+        except TimeoutError:
+            return timed_out()
         except Exception as e:  # noqa: BLE001
             return failed(e, while_matching=True)
 
@@ -462,16 +507,28 @@ def _record_row(regex, row: dict) -> dict:
             # where the walk below cannot ask upstream the same question the scanner asks, so a
             # recorded answer would be a third opinion rather than a second one. See its docstring.
             if overlapped and "(*SKIP)" in pattern and (compiled.flags & _REVERSE_FLAG) == 0:
-                recorded["anchoredScan"] = _anchored_scan(compiled, subject, offsets)
+                # None where a step ran out of its deadline, and then the key is left OFF the row
+                # entirely rather than written as a short walk. A truncated walk is not upstream's
+                # answer to the scan, and `overlapped-skip-stale-slice` demands the walk agree with
+                # this port match for match - so a short one would classify a row the entry has no
+                # business classifying. Absent means the entry does not apply and the row is
+                # reported, which is the direction that cannot hide a defect.
+                walk = _anchored_scan(compiled, subject, offsets)
+                if walk is not None:
+                    recorded["anchoredScan"] = walk
         return recorded
 
     # Pattern.match/search/fullmatch take (string, pos, endpos, concurrent, partial, timeout), so
     # the slice goes positionally and `partial` by keyword.
-    kwargs = {"partial": True} if partial else {}
+    kwargs = {"timeout": ROW_TIMEOUT_SECONDS}
+    if partial:
+        kwargs["partial"] = True
     args = (subject,) if pos is None else (subject, pos, endpos)
 
     try:
         match = getattr(compiled, operation)(*args, **kwargs)
+    except TimeoutError:
+        return timed_out()
     except Exception as e:  # noqa: BLE001
         return failed(e, while_matching=True)
 
@@ -503,7 +560,7 @@ def _record_row(regex, row: dict) -> dict:
     if operation == "search" and partial and match.partial:
         start, end = match.span(0)
         try:
-            same = compiled.match(subject, start, end, partial=True)
+            same = compiled.match(subject, start, end, partial=True, timeout=ROW_TIMEOUT_SECONDS)
         except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
             recorded["searchOnlyPartial"] = False
         else:
@@ -571,7 +628,7 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
     return described
 
 
-def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict]:
+def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict] | None:
     """The same overlapped scan, asked of upstream one match at a time from a fresh state each step.
 
     A SECOND FACT ABOUT UPSTREAM, never compared against anything, and recorded only for a
@@ -633,7 +690,13 @@ def _anchored_scan(compiled, subject: str, offsets: list[int]) -> list[dict]:
     pos = 0
 
     while 0 <= pos <= len(subject) and len(found) < limit:
-        match = compiled.search(subject, pos)
+        try:
+            match = compiled.search(subject, pos, timeout=ROW_TIMEOUT_SECONDS)
+        except TimeoutError:
+            # The walk is unfinishable, so there is no walk. See the caller: the key is left off
+            # the row rather than written short.
+            return None
+
         if match is None:
             break
 

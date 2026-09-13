@@ -507,4 +507,80 @@ public sealed class FuzzyMatchingTests
         del.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
         del.FuzzyChanges.Deletions.Should().Equal(3);
     }
+
+    [Test]
+    public void A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one()
+    {
+        // S40a, out of S40's blind review, and the answer below is NOT the one that review expected.
+        // It reported that this port's FuzzyCounts and FuzzyChanges contradict each other here - one
+        // substitution counted, a deletion reported - and called that a defect on the row alone,
+        // before upstream is consulted. The contradiction is real. It is also UPSTREAM'S, inherited
+        // and already pinned two tests up by
+        // `A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`,
+        // whose recorded upstream answer is counts=(0,0,1) with a SUBSTITUTION at 0.
+        //
+        // The mechanism, and why the obvious fix is wrong, are written out beside the fuzzy-counts
+        // clear in Matcher.cs's `start_match`. In short: upstream clears the counts on a search
+        // restart and leaves the change list, `Match.FuzzyChanges` reports the first `Total` entries
+        // of that list, and so an abandoned attempt's change DISPLACES the winning attempt's.
+        // Clearing the list here - S40a tried it - turns those two `qab` rows red and makes this
+        // port diverge on rows it currently agrees with upstream on. Ledger entry 11; Phase 6's
+        // inherited-bug sweep owns the fix, because fixing it means deciding what the right answer
+        // is and accepting a permanent oracle divergence.
+        //
+        // WHY THE TWO ENGINES DIFFER ON THESE ROWS AND NOT ON THE CONTROLS BELOW, which is the whole
+        // finding: `$` has a `search_start_*` twin, so upstream makes ONE attempt at the end of the
+        // subject, reaches the winning attempt first and has nothing to leak. This port has no
+        // prefilter until Phase 7, so it attempts 0, 1, 2 and 3 - and the attempt at 1 succeeds
+        // inside the lookbehind, records a deletion, then fails on the `$`. Measured with
+        // `python tools/probes/upstream-fuzzy-restart-leak.py`:
+        //   search('(?<=(?:[ab][cd]){e<=1})$', 'axc') -> (3, 3) counts=(1, 0, 0) changes=([2], [], [])
+        //   search('(?<=(?:abc){e<=2})$',      'ac')  -> (2, 2) counts=(1, 0, 1) changes=([1], [], [0])
+        // Both reproduce unchanged on 2026.9.10. Classified in the oracle as
+        // `fuzzy-restart-change-leak`.
+        Match reversed = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})$").Match("axc");
+
+        reversed.Success.Should().BeTrue();
+        (reversed.Index, reversed.Length).Should().Be((3, 0));
+        reversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0), "the COUNTS are right on both engines");
+        // The deletion the attempt at position 1 left behind, reported in place of the substitution
+        // the winning attempt at 3 recorded.
+        reversed.FuzzyChanges.Deletions.Should().Equal(1);
+        reversed.FuzzyChanges.Substitutions.Should().BeEmpty();
+
+        Match twoErrors = new FuzzyRegex("(?<=(?:abc){e<=2})$").Match("ac");
+
+        twoErrors.Success.Should().BeTrue();
+        (twoErrors.Index, twoErrors.Length).Should().Be((2, 0));
+        twoErrors.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
+        twoErrors.FuzzyChanges.Deletions.Should().Equal(1, 2);
+
+        // THE CONTROLS, and they are what make the paragraph above a measurement rather than a
+        // story. Every one of these agrees with upstream, and each removes exactly one ingredient:
+        // the restart (a lookahead at a fixed position), the lookaround (the same fuzzy section
+        // reversed on its own), and the prefilterable tail (a literal `q`/`d` instead of `$`, which
+        // makes upstream walk every position too - and upstream then still agrees, because its
+        // winning attempt is its first).
+        Match plainReversed = new FuzzyRegex("(?r)(?:[ab][cd]){e<=1}").Match("axc");
+        plainReversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        plainReversed.FuzzyChanges.Substitutions.Should().Equal(2);
+
+        Match lookahead = new FuzzyRegex("^(?=(?:[ab][cd]){e<=1})").Match("axc");
+        lookahead.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        lookahead.FuzzyChanges.Substitutions.Should().Equal(1);
+
+        Match literalTail = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})q").Match("axcq");
+        literalTail.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        literalTail.FuzzyChanges.Substitutions.Should().Equal(2);
+
+        Match literalTailLonger = new FuzzyRegex("(?<=(?:ab){e<=1})d").Match("axqayd");
+        literalTailLonger.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        literalTailLonger.FuzzyChanges.Substitutions.Should().Equal(5);
+
+        // And with no lookaround at all, so the restart alone is not enough to leak: the failed
+        // attempt at 0 unwinds its own change through the FUZZY backtrack arm on the way out.
+        Match noLookaround = new FuzzyRegex("(?:ab){e<=1}d").Match("axbaxd");
+        noLookaround.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        noLookaround.FuzzyChanges.Substitutions.Should().Equal(4);
+    }
 }

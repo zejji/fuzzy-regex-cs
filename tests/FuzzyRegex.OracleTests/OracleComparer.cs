@@ -63,6 +63,16 @@ internal static class OracleComparer
         var expected = new List<string>();
         foreach (OracleRow row in rows)
         {
+            // Asked of nothing, not asked and discarded. Upstream never finished this row, so there
+            // is no answer to compare against - and putting the question to this port anyway would
+            // spend RowTimeout on a row whose verdict is already decided, which on a wave carrying
+            // several of them is minutes of wall clock for no information.
+            if (row.Expected is TimeoutOutcome)
+            {
+                tally[OracleVerdict.Timeout] = tally.GetValueOrDefault(OracleVerdict.Timeout) + 1;
+                continue;
+            }
+
             IOracleOutcome? actual = engine(row);
             OracleVerdict verdict = Compare(row, actual);
 
@@ -218,6 +228,14 @@ internal static class OracleComparer
     public static OracleVerdict Compare(OracleRow row, IOracleOutcome? actual)
     {
         ArgumentNullException.ThrowIfNull(row);
+
+        // First, and before anything is read off `actual`. Upstream gave no answer at all, so no
+        // answer this port gives can agree or disagree with it - including no answer, which would
+        // otherwise read as `Unsupported` and say something false about the port's coverage.
+        if (row.Expected is TimeoutOutcome)
+        {
+            return OracleVerdict.Timeout;
+        }
 
         if (actual is null)
         {
