@@ -376,6 +376,24 @@ error-propagation PRs (615-618) that have nothing to port. Three slices, in this
 
 The estimate moves from 7-12 to 9-14 for the two slices this adds beyond the sweep already planned.
 
+**Phase 6 as authored (2026-09-13) is 14 slices, S44-S57, against the 9-14 band read as amendment 21
+says: expect the gate, not the features, to set the number.** In order: S44 the upstream sync to
+2026.9.10 (submodule, wheel byte-identity, changelog delta, every `Example` re-recorded); S45-S48 the
+inherited-bug fixes from the ledger, grouped by mechanism rather than by entry - the dotted-I fold
+(entry 7), the `BESTMATCH` family (12, 13, 9's port half), the fuzzy consistency and resource pair
+(11, 14), and the verb/partial doors (5's remainder plus an inventory of every entry's final state);
+S49-S50 the issue sweep in two halves, live re-triage with a reproduction or written dismissal per
+issue, then the fixes; S51 per-call timeouts and `CancellationToken` (owner request, amendment 22),
+placed before optimisation because the poll is on the hot path; S52 oracle hardening scoped on seeds
+first (a sweep tool, all planes, long subjects, timeout rows); S53 the AOT dynamic gate; S54 benchmark
+baselines and the optimiser-trap pins; S55-S56 mutation testing as tooling-and-calibration then
+survivors, with the engine runs done detached overnight by the orchestrator between the two, in
+chunks sized from the calibration (owner decision 2026-09-13: many small runs, long wall time is
+acceptable where it improves the outcome); S57 the coverage backstop and the close. Three slices
+need the orchestrator to act before launch (S44 installs the wheel, S49 snapshots the tracker, S55
+installs Stryker and S56 needs the overnight queue run) because the driver cannot install or post;
+each file says so at the top. Budget at Phase 5's measured 1.27 sessions a slice: about 18 sessions.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 

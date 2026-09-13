@@ -2,39 +2,29 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**PHASE 5 IS COMPLETE. S43 closed it; `docs/plan/slices/` is empty, so the driver stops at the phase
-boundary and the owner authors Phase 6.** Ratchet GREEN at 5,869 tests, 5,869 passing, 5,761 distinct
-ids, **0 skipped**; baseline updated. **Overall parity 100.0%, 1,967 of 1,967 ported upstream tests.**
+**PHASE 5 IS COMPLETE** (S43, `d5c2500`, 2026-09-13): ratchet GREEN at 5,869 tests, 5,869 passing,
+5,761 distinct ids, **0 skipped**; parity **100.0%**, 1,967 of 1,967 ported upstream tests. Default
+wave GREEN at three seeds, 6,000 rows a generator; `fuzzy` and `interactions` GREEN at 99991.
+Fuzzy matching works end to end; `(?e)` and `(?b)` rank by COST (owner decision, upstream issue 470).
+Phase 5 measured: 11 slices, 14 sessions (1.27), median 69.9M tokens.
 
-**Fuzzy matching works** - the constraint grammar including weighted costs and `{...:test}`, errors
-against characters, strings, backrefs and folded text, the counts and change positions, and both
-ranking modes. Two deliberate divergences, one owner decision: `(?e)` and `(?b)` rank by COST where
-upstream ranks by error count (upstream issue 470).
+**Phase 6 is AUTHORED - S44-S57, fourteen slices in `docs/plan/slices/` - and awaits the owner's
+review. S44 (upstream sync to 2026.9.10) is next.** Three slices need the orchestrator first, each
+says so under "Before launch": S44 the wheel into the oracle interpreter, S49 a `gh` snapshot of the
+tracker, S55 Stryker installed and S56 the overnight chunk queue run.
 
-**The oracle is green at every seed the gate asks for.** Default list, 3 seeds, 6,000 rows a
-generator: GREEN. `fuzzy`+`interactions` at seed 99991, 6,000 rows: GREEN. Fourteen
-`ExpectedDivergences` entries, two of them new in S43.
+**Before S44 launches, the process improvements agreed 2026-09-13 land as maintenance:** a
+deadline file per sitting; a hook injecting remaining time and orchestrator messages into the
+running session; rollback to the last green in-session commit rather than session start; the
+heartbeat alarm keyed to the sitting; a per-test `[Timeout]`; a bounded `check-ratchet.ps1` run.
 
-**Sitting 2 classified the seven rows sitting 1 left, then the fourth seed drew three more** -
-`partial-retry-carried-slice-forward` (new entry, the forward twin of S40b's reversed one), a fourth
-`partial-retry-reversed-slice` row, and a `group-call-loses-the-match` row that **overturned ledger
-entry 8's written claim that no minimal form existed**. It is
-`(?P<g1>\w)(?<=(?&g1))\W` over `'aa '` - three items, and upstream loses the match at every subject
-length. The subject must be three characters: at two, S40c's `min_width` mask hides it on both
-engines. The pinned test was written with `'a '` first and FAILED, which is how that was found.
+**Blockers:** none. **Known bugs in this port**, all on Phase 6's fix list with a slice each:
+ledger 7 (S45); 12, 13, 9's port half (S46); 11, 14 (S47); 5's remaining door and any other shared
+entry (S48); whatever the issue sweep reproduces (S49, S50).
 
-**Phase 5's measured rate: 11 slices, 14 sessions (1.27), median 69.9M tokens, 702M for the ten
-completed slices before the close.** Authored as 7; the four additions (S40a-S40d) were all the
-oracle finding real defects. ROADMAP and design spec amendment 21 carry the reasoning.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate). Controls:
+`python tools/run-controls.py --slices S37,...,S43 --seeds 2`. Upstream 2026.9.10 for probes:
+`.venvs/regex-2026.9.10`. Ledger: `docs/plan/upstream-reports/LEDGER.md`, 14 entries, nothing filed.
 
-**Owed to Phase 6, in the S43 closing notes**: the sync procedure (newest RELEASE, re-record every
-`ExpectedDivergences.Example` or the staleness alarm goes quiet), the fix list in priority order
-(ledger 7 first), oracle hardening scoped on SEEDS not rows, the AOT gate, mutation testing.
-
-**Two known gaps, both in the closing notes.** S41's and S42's controls were prose-only and are now
-in `tools/controls.json` (14 added, 97 resolve); **5 controls are DEAD** - S31-A/B/C, S32-B, S38-A -
-their `before` text no longer appears in the source. `Seam.For` in `src/` is 4, not 0: all four are
-unreachable `default` arms, not unported capability.
-
-**For the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real; `origin/main` has
-had nothing pushed for the whole of Phase 5; `budget.json` caps still read 5/day and 12/week.
+**Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
+`origin/main` needs a push (nothing pushed since Phase 4's close).

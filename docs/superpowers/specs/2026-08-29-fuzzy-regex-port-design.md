@@ -797,3 +797,15 @@ amended text is inline above; this list is the record of what changed and why.
     overturned that entry's own written claim that no minimal form existed. **A seed the phase has
     not used is worth more than more rows at a seed it has**, which is VERIFICATION rule 7a one level
     up, and Phase 6's hardening slices should be scoped on that basis.
+
+22. **Every input-dependent method takes a per-call timeout, and `CancellationToken` support is
+    added where .NET precedent supports it** (sections 4 and 12; owner decision, 2026-09-13; Phase 6
+    slice S51). Upstream already takes a per-call `timeout=` on every match method (`_main.py:253-298`)
+    and the built-in `Regex` offers a constructor `matchTimeout` plus static overloads with one; this
+    port had only the constructor value and the engine's poll. The per-call overloads are parity,
+    not divergence. A `CancellationToken` is the one step past both, justified because fuzzy matching
+    is combinatorially worse than exact matching and the project's own tooling needed per-row
+    timeouts to survive a wave; its exact placement is decided in the slice from the Framework Design
+    Guidelines and recent first-party libraries, with the precedent quoted. Placed in Phase 6 rather
+    than after Phase 7 because the poll sits on the matcher's hot path and optimisation must measure
+    the final shape. Estimate 9-14 becomes 10-15. Decided by the project owner.
