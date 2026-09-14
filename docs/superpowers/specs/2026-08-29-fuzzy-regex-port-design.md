@@ -93,7 +93,7 @@ dedicated gap tests beyond the ported suite.
 `IsMatch`/`Match`/`Matches`/`Replace`/`Split`, static conveniences, `MatchTimeout`), `Match`/`Group`
 shapes likewise, plus mrab-only members: `Group.Captures` as full capture list, `Match.FuzzyCounts`
 (substitutions, insertions, deletions), partial-match support, options flags for `BestMatch`,
-`EnhanceMatch`, `Posix`, `Version0/Version1` semantics.
+`EnhanceMatch`, `Posix`, `Version0/Version1` semantics. **Default behaviour is `Version1` (amendment 24, 2026-09-14); `Version0` is the opt-in for `re`- and .NET-style set syntax and simple case-folding.**
 
 ## 5. Testing regimen
 
@@ -823,3 +823,16 @@ amended text is inline above; this list is the record of what changed and why.
     port has no such umbrella, while .NET callers meet concurrency by default. The tests are
     permanent and constrain Phase 7, where caches appear. Estimate 10-15 becomes 13-18 with S47b
     and S47c. Decided by the project owner.
+
+24. **Version 1 is the default behaviour (2026-09-14, owner decision).** Upstream defaults to
+    `VERSION0` only to stay compatible with Python `re`; this port has no such users. Measured on
+    regex 2026.9.10 before deciding: V0 already matches V1 on zero-width `split`/`sub` and on inline
+    flag scoping, so the live differences are exactly two - nested sets with set operations, and
+    full case-folding under `IGNORECASE` - and both are the behaviours upstream documents as better
+    and the reasons to choose this library over `System.Text.RegularExpressions`. The one loud edge
+    (`[` unescaped inside a set fails to compile under V1) gets an error message naming `Version0`.
+    The oracle keeps comparing under upstream's default by making the wave header's
+    `defaultVersion` explicit on the port side; the ported upstream tests pin `Version0` through one
+    helper because upstream's suite assumes it. Slice S50b, placed before S51 so timeouts,
+    thread-safety, oracle hardening and the benchmark baselines all exercise the shipped default.
+    Estimate 13-18 becomes 14-19.

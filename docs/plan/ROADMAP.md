@@ -413,6 +413,15 @@ slice that turns one of them red has introduced shared mutable state and removes
 widening an allowlist. Placed after S52 so the stress test can draw its subjects from the hardened
 waves. Estimate 10-15 becomes 13-18.
 
+**S50b makes Version 1 the default (owner decision 2026-09-14, spec amendment 24).** Measured first:
+on 2026.9.10 the only live V0/V1 differences are nested sets with set operations and full
+case-folding; zero-width handling and inline-flag scoping are already identical. Both differences
+are the better behaviour and the library's reason to exist, and the port has no `re` users to
+protect, so the compile-time default flips, the oracle states upstream's default explicitly per
+row, the ported suite pins `Version0` through one helper, and the one loud edge (`[` inside a set)
+gets an error that names `Version0`. Before S51 so every later slice tests and measures the shipped
+default. Estimate 13-18 becomes 14-19.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 
