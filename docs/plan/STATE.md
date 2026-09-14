@@ -2,43 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S48 IS CLOSED** (2026-09-14, one sitting). Suite 5,955, ratchet GREEN, default wave GREEN at three
-seeds. Next in the queue is **S48b**, authored by this slice; then S49.
+**S48b IS A CHECKPOINT, NOT CLOSED** (2026-09-14, sitting 1). The slice file stays in
+`docs/plan/slices/` and carries a full "Progress, sitting 1" section. Suite 5,959 (+4), ratchet
+GREEN, default wave GREEN at three seeds.
 
-**The slice's premise was stale.** Entry 5's "fifth door still inherited" was closed by S40b before
-S48 began. **There is a SIXTH door and this port shared it**: `do_best_fuzzy_match`'s walk guard
-(`:17625`) reads the LIVE slice, `init_match` never resets it, and `start_pos` is the candidate's own
-match start - so a `(*SKIP)` that consumed anything ends the `(?b)` walk on its first successful
-candidate. `(?b)(?:a(*SKIP)b){e<=1}` over `'axab'` gave a one-error match where the pattern's own
-`match(2)` finds a perfect one. Fixed in `DoBestFuzzyMatch` (restore per candidate, both passes) -
-**not in `InitMatch`, where the ledger's own proposed fix puts it, because `(?e)` and the widened
-fallback narrow the slice deliberately.**
+**All three scoped items are FIXED and each mechanism was measured, not hypothesised.** Ledger 9's
+port bug was ONE stale field: `RestoreBestMatch` restored `FuzzyCounts`/`FuzzyChanges` and left
+`TotalErrors`/`TotalCost` holding the LOSING candidate's, so the `(?e)` walk cut itself off with
+`3 >= 3` while holding the right two-error counts. Ledger 11 C and D took ONE edit, not nineteen:
+`PushFuzzyCounts` pushes the change list's LENGTH, `PopFuzzyCounts` truncates back to it, and the
+sites split eight **restore** / three **merge** by which buffer the pop writes into. **The ranking
+rule is untouched**, as the slice's guard requires.
 
-**The inventory is the slice's other half: 13 of the 15 ledger entries are closed.** The table is in
-the closing notes with a proof per row. Three items left, one mechanism seen three ways -
-**ledger 11 C and D, and ledger 9's POSIX+`(?e)` count bug, which is THIS PORT's and still
-reproduces** (`(0,5)` counts `(1,1,1)` with POSIX, `(0,1,1)` without). That is **S48b**, authored,
-with ROADMAP and spec amendment 25.
+**Two of the three items were one bug.** C came in two shapes - list too LONG (fixable by
+truncation) and too SHORT (not). The short one was ledger 9's stale totals, because it carries
+`(?b)` too. Truncation deliberately never GROWS the list.
 
-**S48-A fires ZERO** at four seeds over 24,000 `interactions` rows - mutated and unmutated identical
-- while the same fault moves upstream on 1,861 of 11,340 hand-built shapes. A measured generator gap,
-handed to S52. **S31-A/B/C repaired** (S40b had moved their text); they now fire 10-68 of 600.
+**TWO NEW UPSTREAM FINDINGS, both with upstream contradicting itself.** Ledger entry 16 (new): a
+POSIX overlapped scan of a BESTMATCH fuzzy pattern **drops its LONGEST match** - three other doors
+and upstream's own `fullmatch` at the same flags answer `(0,9)`, only POSIX+BESTMATCH starts at
+`(0,8)`. And entry 11 gains an **ATOMIC GROUP door** that S47's anchored `leakFreeFuzzy` cannot see,
+settled instead by upstream's own `(?>` -> `(?:` control.
 
-**Two blind passes: the first raised 4 and ALL 4 reproduced, the second raised 1 and it reproduced.**
-All fixed. The sharpest was a negative control with no `(?b)` in it, which never entered the function
-the slice changed - a control routed to the wrong door looks exactly like a control that passes.
+**WHAT IS LEFT, and it is the whole reason this is a checkpoint: the 6000-row three-seed gate is
+9+4+11 = 24 against S48's 6+4+9 = 19.** The five new rows were named by REPLAY through a worktree at
+HEAD, not by arithmetic (both baselines reproduce S48's figures exactly): seed 7 rows 73463, 73895,
+76983 and seed 20260914 rows 74033, 76101. **On all five this port answers what upstream's own
+control answers** - none is a regression. Classifying them needs a NEW recorded control per family,
+because neither existing discriminator reaches them (`leakFreeFuzzy` removes an earlier attempt's
+leak, not an atomic group's; `bestmatchFreeOutcome` needs a `(?b)`, and 76983 is `(?e)`+POSIX), then
+two `ExpectedDivergences` entries, then a re-run of the gate.
 
-**The independent verifier re-ran every number and returned two DIFFERENT and two COULD NOT RUN; all
-four are corrected in the notes, not kept.** A control table read off a truncated `tail` was one of
-them - read the whole output.
-
-**Untriaged (unchanged):** the 6000-row everything gate at 99991 RED at 4 of 126,000; the three-seed
-6000-row gate's 19, none of which can be this slice's (no diverging row carries BESTMATCH or an
-inline `(?b)`, and the change is reachable only through it); the promoted fold sweep's 30
-`fold_case(FULL)` mismatches, NOT measured.
-
-**Owed maintenance:** `FOLD_TURKIC`'s share of the `case-folding` rotation; **two** broken control
-sites left; S35-A and S29-A/D are thin (S35-A fires at 1 seed of 6 - numbers in S48's notes);
-PORTMAP's `_regex.c` line references stale after the sync; `record-oracle.py --self-check` exits 1 on
-a pre-S46 message. **Still open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main`
-needs a push.
+**Owed maintenance (unchanged from S48):** `FOLD_TURKIC`'s share of the `case-folding` rotation; two
+broken control sites; S35-A and S29-A/D are thin; PORTMAP's `_regex.c` line references stale after
+the sync; `record-oracle.py --self-check` exits 1 on a pre-S46 message. **Still open for the owner:**
+`slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push. **Housekeeping:** delete the
+`.claude/worktrees/s48b-baseline` worktree once the classification work no longer needs it.

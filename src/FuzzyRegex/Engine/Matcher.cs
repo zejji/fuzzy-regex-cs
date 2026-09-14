@@ -2093,6 +2093,11 @@ internal static class Matcher
         state.BestFuzzyChanges.Clear();
         state.BestFuzzyChanges.AddRange(state.FuzzyChanges);
 
+        // And the two running totals the ranking modes read, which upstream leaves stale - see
+        // 'RestoreBestMatch'.
+        state.BestTotalErrors = state.TotalErrors;
+        state.BestTotalCost = state.TotalCost;
+
         state.BestMatchGroups = GroupData.CopyGroups(state.Groups, state.Groups.Length);
     }
 
@@ -2121,6 +2126,24 @@ internal static class Matcher
         state.BestFuzzyCounts.CopyTo(state.FuzzyCounts, 0);
         state.FuzzyChanges.Clear();
         state.FuzzyChanges.AddRange(state.BestFuzzyChanges);
+
+        // AND THE TWO RUNNING TOTALS, WHICH UPSTREAM LEAVES STALE - ledger entry 9's remaining
+        // port-side bug, fixed here (S48b). 'restore_best_match' (:11565) copies 'fuzzy_counts' and
+        // not 'total_errors', so after a POSIX restore the counts describe the winning candidate and
+        // the running total still describes the last one to be tried and fail. That is invisible
+        // upstream wherever nothing reads 'total_errors' afterwards, and this port's ranking does:
+        // 'DoEnhancedFuzzyMatch' reads it to decide both whether to keep a run and whether to walk
+        // on, and 'TotalCost' beside it is this port's own field and so was never upstream's to
+        // leave stale.
+        //
+        // Measured before the fix, 2026-09-14, '(?e)(?r)(?:\w.){1<=e<=2:\w}(?:[^a-f]a\w)
+        // {s<=1,i<=1,d<=1}' fullmatching '+ aBA' under POSIX: the walk's second run restores counts
+        // (0,1,1) - two errors, and the right answer - while 'TotalErrors' still reads 3 from the
+        // candidate that lost, so 'TotalErrors >= fewestErrors' cuts the walk and the match keeps the
+        // first run's three errors for the same span. Without POSIX the same walk answers (0,1,1),
+        // which is what made it self-refuting rather than a ranking difference.
+        state.TotalErrors = state.BestTotalErrors;
+        state.TotalCost = state.BestTotalCost;
 
         RestoreGroups(state, state.BestMatchGroups!);
     }
@@ -5198,9 +5221,13 @@ internal static class Matcher
                         goto backtrack;
                     }
 
+                    // MERGING, not restoring: the section's own changes are part of the answer this
+                    // END_FUZZY is building, and taking the outer counts back off the stack must not
+                    // take them with it. This is the arm ledger entry 11 names as the one that has to
+                    // stay a merge. See 'MatchState.PopFuzzyCountsMerging'.
                     if (
                         !state.Sstack.PopNode(pattern, out Node? outerNode)
-                        || !state.PopFuzzyCounts(state.Sstack, outerCounts)
+                        || !state.PopFuzzyCountsMerging(state.Sstack, outerCounts, out _)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -8014,7 +8041,10 @@ internal static class Matcher
                         || !state.Bstack.PopSize(out long endFuzzyTextPos)
                         || !state.Bstack.PopNode(pattern, out Node? innerNode)
                         || !state.Bstack.PopSize(out long insertions)
-                        || !state.PopFuzzyCounts(state.Bstack, innerCounts)
+                        // MERGING, for the reason the forward END_FUZZY arm gives: the section's
+                        // changes outlive its counts coming off the stack, and the trailing-insertion
+                        // retry below goes on to ADD to them.
+                        || !state.PopFuzzyCountsMerging(state.Bstack, innerCounts, out _)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -8465,10 +8495,14 @@ internal static class Matcher
                      * bstack: -
                      */
 
-                    // Restore the outer fuzzy info.
+                    // Restore the outer fuzzy info. MERGING: backing out through FUZZY means every
+                    // item in the section has already backtracked and unwound its own change, so
+                    // there is nothing left to truncate - and the length on the stack here may have
+                    // been re-pushed by the END_FUZZY backtrack arm, which cannot know the one the
+                    // section was entered with.
                     if (
                         !state.Sstack.PopNode(pattern, out Node? outerFuzzyNode)
-                        || !state.PopFuzzyCounts(state.Sstack, state.FuzzyCounts)
+                        || !state.PopFuzzyCountsMerging(state.Sstack, state.FuzzyCounts, out _)
                     )
                     {
                         return MatchStatus.Illegal;

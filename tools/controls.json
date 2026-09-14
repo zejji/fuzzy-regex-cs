@@ -1694,5 +1694,35 @@
       31337,
       99991
     ]
+  },
+  {
+    "id": "S48b-A",
+    "name": "counts-restored-without-truncating-the-change-list",
+    "file": "src/FuzzyRegex/Engine/MatchState.cs",
+    "anchor": "    internal void TruncateFuzzyChanges(long changeCount)",
+    "anchorNth": 1,
+    "before": "        if (FuzzyChanges.Count > changeCount)\n",
+    "after": "        if (FuzzyChanges.Count < changeCount)\n",
+    "generator": "interactions",
+    "count": 6000,
+    "seeds": [
+      31337,
+      555
+    ]
+  },
+  {
+    "id": "S48b-B",
+    "name": "posix-restore-leaves-the-running-totals-stale",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void RestoreBestMatch(MatchState state)",
+    "anchorNth": 1,
+    "before": "        state.TotalErrors = state.BestTotalErrors;\n        state.TotalCost = state.BestTotalCost;\n\n",
+    "after": "",
+    "generator": "interactions",
+    "count": 6000,
+    "seeds": [
+      31337,
+      555
+    ]
   }
 ]

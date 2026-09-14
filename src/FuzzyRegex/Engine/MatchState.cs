@@ -288,6 +288,16 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal readonly List<FuzzyChange> BestFuzzyChanges = [];
 
+    /// <summary>
+    /// The running <see cref="TotalErrors"/> and <see cref="TotalCost"/> of the best POSIX match so
+    /// far. <b>Upstream has no counterpart to either, and the first of them is an inherited bug
+    /// rather than a missing feature</b> - see <c>Matcher.RestoreBestMatch</c>.
+    /// </summary>
+    internal long BestTotalErrors;
+
+    /// <inheritdoc cref="BestTotalErrors"/>
+    internal long BestTotalCost;
+
     /// <summary>Upstream <c>min_width</c>, a codepoint count.</summary>
     internal long MinWidth;
 
@@ -765,6 +775,15 @@ internal sealed class MatchState : IDisposable
     /// nothing at all for a pattern that is not fuzzy - so the matching pop must be skipped too, and
     /// every caller of both is a pair.
     /// </summary>
+    /// <remarks>
+    /// <b>The length of <see cref="FuzzyChanges"/> goes on the stack beside the counts, which
+    /// upstream does not do (S48b).</b> Upstream saves and restores the counts as a BLOCK and unwinds
+    /// the changes one item at a time (<c>record_fuzzy</c>/<c>unrecord_fuzzy</c>,
+    /// <c>:9768</c>/<c>:9801</c>), so any construct that throws a sub-attempt's backtracking away
+    /// wholesale - an atomic group, a lookaround, a conditional - puts the counts back and leaves the
+    /// sub-attempt's changes standing. That is ledger entry 11's defect class, and holding the two in
+    /// step needs the pop to know where the list stood at the push.
+    /// </remarks>
     /// <param name="stack">The stack to push onto.</param>
     /// <param name="fuzzyCounts">The counts to push.</param>
     internal void PushFuzzyCounts(ByteStack stack, ReadOnlySpan<long> fuzzyCounts)
@@ -775,14 +794,76 @@ internal sealed class MatchState : IDisposable
         }
 
         stack.PushBlock(MemoryMarshal.AsBytes(fuzzyCounts));
+        stack.PushSize(FuzzyChanges.Count);
     }
 
-    /// <summary>Upstream <c>pop_fuzzy_counts</c> (line 2652).</summary>
+    /// <summary>
+    /// Upstream <c>pop_fuzzy_counts</c> (line 2652), <b>restoring</b>: the counts and the change list
+    /// both go back to what they were at the matching push.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The truncation is this port's own and is the fix for ledger entry 11's mechanisms C and D. Use
+    /// <see cref="PopFuzzyCountsMerging"/> at the THREE sites whose semantics are "merge" instead:
+    /// both <c>END_FUZZY</c> arms, where the inner section's changes are part of the answer and must
+    /// survive the outer counts being taken off the stack, and the <c>FUZZY</c> backtrack arm, where
+    /// every item in the section has already unwound its own change so there is nothing left to
+    /// truncate.
+    /// </para>
+    /// <para>
+    /// <b>The eight restoring sites are the constructs that abandon a sub-attempt without
+    /// backtracking through it</b> - <c>ATOMIC</c>/<c>END_ATOMIC</c>,
+    /// <c>CONDITIONAL</c>/<c>END_CONDITIONAL</c> and <c>LOOKAROUND</c>/<c>END_LOOKAROUND</c>. A rough
+    /// rule is that a pop into a scratch span is a merge and a pop into <see cref="FuzzyCounts"/> is
+    /// a restore, <b>and the <c>FUZZY</c> backtrack arm is the exception that breaks it</b>: it
+    /// merges into <see cref="FuzzyCounts"/>. Read the site, not the buffer.
+    /// </para>
+    /// </remarks>
     /// <param name="stack">The stack to pop from.</param>
     /// <param name="fuzzyCounts">Receives the counts, and is left alone for a non-fuzzy pattern.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    internal bool PopFuzzyCounts(ByteStack stack, Span<long> fuzzyCounts) =>
-        !IsFuzzy || stack.PopBlock(MemoryMarshal.AsBytes(fuzzyCounts));
+    internal bool PopFuzzyCounts(ByteStack stack, Span<long> fuzzyCounts)
+    {
+        if (!PopFuzzyCountsMerging(stack, fuzzyCounts, out long changeCount))
+        {
+            return false;
+        }
+
+        TruncateFuzzyChanges(changeCount);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Upstream <c>pop_fuzzy_counts</c> (line 2652), <b>merging</b>: the counts go back and the change
+    /// list is left exactly as it stands.
+    /// </summary>
+    /// <param name="stack">The stack to pop from.</param>
+    /// <param name="fuzzyCounts">Receives the counts, and is left alone for a non-fuzzy pattern.</param>
+    /// <param name="changeCount">Receives the change-list length the push recorded.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopFuzzyCountsMerging(ByteStack stack, Span<long> fuzzyCounts, out long changeCount)
+    {
+        changeCount = 0;
+
+        return !IsFuzzy || (stack.PopSize(out changeCount) && stack.PopBlock(MemoryMarshal.AsBytes(fuzzyCounts)));
+    }
+
+    /// <summary>
+    /// Drops every change recorded since the list stood at <paramref name="changeCount"/> entries.
+    /// </summary>
+    /// <remarks>
+    /// Never grows the list: a restore whose sub-attempt unwound BELOW the push point has nothing to
+    /// put back, and quietly inventing entries would turn a contradiction into a wrong answer.
+    /// </remarks>
+    /// <param name="changeCount">The length the list stood at.</param>
+    internal void TruncateFuzzyChanges(long changeCount)
+    {
+        if (FuzzyChanges.Count > changeCount)
+        {
+            FuzzyChanges.RemoveRange((int)changeCount, FuzzyChanges.Count - (int)changeCount);
+        }
+    }
 
     /// <summary>Upstream <c>record_fuzzy</c> (line 9768), less its hand-grown array growth.</summary>
     /// <param name="fuzzyType">Which error was used.</param>

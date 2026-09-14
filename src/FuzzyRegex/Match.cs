@@ -295,10 +295,14 @@ public sealed class Match : Group
     /// </para>
     /// <para>
     /// The other door onto the same contradiction is a search restart: see the change-list clear in
-    /// <c>Matcher</c>'s <c>start_match</c>, which is the rest of the same fix. A third - the change
-    /// list desynchronising from the counts across <c>POSIX</c> and <c>BESTMATCH</c> candidates -
-    /// is NOT fixed here and is ledger entry 11's remaining half; it is why this tally is confined
-    /// to the partial exit rather than applied to every match.
+    /// <c>Matcher</c>'s <c>start_match</c>, which is the rest of the same fix. The third and fourth -
+    /// the change list desynchronising across <c>POSIX</c> and <c>BESTMATCH</c> candidates, and a
+    /// lookaround under <c>(?e)</c> - were ledger entry 11's remaining half and <b>are fixed by S48b</b>
+    /// (<c>MatchState.PopFuzzyCounts</c> truncates the change list to the length its matching push
+    /// recorded, and <c>Matcher.RestoreBestMatch</c> restores the running totals beside the counts).
+    /// <b>This tally nevertheless stays confined to the partial exit</b>, because that is not what it
+    /// was working around: on a partial match the state's counter provably is not the whole match's,
+    /// which is mechanism B and is a divergence in its own right.
     /// </para>
     /// </remarks>
     public FuzzyCounts FuzzyCounts { get; }
@@ -339,13 +343,15 @@ public sealed class Match : Group
     /// exceed the array it allocated, which is a read past the end.
     /// </para>
     /// <para>
-    /// It has nothing left to do wherever S47 put the two views back in step, because
-    /// <c>Total</c> is then the length of this list: on a partial match <see cref="FuzzyCounts"/>
-    /// is tallied from it, and on a complete match the state's counter is the whole match's. What
-    /// it still covers is ledger entry 11's unfixed half - the list desynchronising from the counts
-    /// across <c>POSIX</c> and <c>BESTMATCH</c> candidates, where it can hold a dozen entries for a
-    /// one-error match. Reporting the whole list there would turn an arbitrary answer into a
-    /// plainly wrong one, so the bound stays until that half is fixed.
+    /// <b>Since S48b closed ledger entry 11's last two mechanisms this bound is a no-op on every
+    /// path, and it is kept because it is upstream's line rather than because it is load-bearing.</b>
+    /// <c>Total</c> is now always the length of this list: on a partial match
+    /// <see cref="FuzzyCounts"/> is tallied from it, on a complete match the state's counter is the
+    /// whole match's, and the restore sites keep the two in step. Before S48b it was doing real
+    /// work - the list could hold a dozen entries for a one-error match across <c>POSIX</c> and
+    /// <c>BESTMATCH</c> candidates, and reporting the whole of it would have turned an arbitrary
+    /// answer into a plainly wrong one. Removing it now would be a divergence from upstream for no
+    /// gain, so it stays.
     /// </para>
     /// </remarks>
     /// <returns>The three lists.</returns>

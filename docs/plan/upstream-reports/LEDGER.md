@@ -1101,10 +1101,43 @@ where this port's own cost ranking lives (`DoEnhancedFuzzyMatch`, `IsBetterFuzzy
 that `RestoreBestMatch` puts back `FuzzyCounts` and `FuzzyChanges` but not `state.TotalErrors` or
 `state.TotalCost`, and this port's ranking - unlike upstream's, which keeps the last successful run -
 reads both. Upstream leaves `total_errors` stale too (`restore_best_match`, `:11565`), so the
-staleness is inherited and the cost field is not. **Open, unfixed, and RED in the `interactions`
-wave at seed 31337**; it is a port bug, so it gets no `ExpectedDivergences` entry.
+staleness is inherited and the cost field is not.
 
-**Proposed fix.** Unknown. Establishing it needs a debug build of the C extension, which this
+**S48b PROVED THAT HYPOTHESIS AND CLOSED IT, 2026-09-14; THE PORT SIDE OF THIS ENTRY IS NOW WHOLLY
+CLOSED.** The mechanism was established by instrumenting the enhanced walk rather than argued, and
+these are the walk's own numbers, one line per run of `DoEnhancedFuzzyMatch`:
+
+```
+POSIX     run 1  TotalErrors=3 TotalCost=3  counts=(1,1,1)  errorsFromCounts=3  changes=3
+POSIX     run 2  TotalErrors=3 TotalCost=3  counts=(0,1,1)  errorsFromCounts=2  changes=2  <- stale
+no POSIX  run 1  TotalErrors=3 TotalCost=3  counts=(1,1,1)  errorsFromCounts=3  changes=3
+no POSIX  run 2  TotalErrors=2 TotalCost=2  counts=(0,1,1)  errorsFromCounts=2  changes=2
+```
+
+Run 2 under POSIX restores the RIGHT counts - `(0, 1, 1)`, two errors, which is upstream's answer -
+and reads `TotalErrors == 3` from the candidate that lost, because the POSIX `FAILURE` arm's
+`RestoreBestMatch` never touched it. `state.TotalErrors >= fewestErrors` is then `3 >= 3`, the walk
+breaks before keeping run 2, and the match reports run 1's three errors for the same span. Without
+POSIX the identical run reports 2, is kept, and answers `(0, 1, 1)`. **One stale field: the
+self-refutation was the walk ranking a restored candidate's counts against a discarded candidate's
+total.**
+
+**The fix is four lines and does NOT touch the ranking rule**, which is an owner decision (S41/S42)
+and which the slice's own guard forbids widening into: `SaveBestMatch` records `TotalErrors` and
+`TotalCost` into `BestTotalErrors`/`BestTotalCost`, and `RestoreBestMatch` puts them back beside the
+counts and the changes it already restored. `IsBetterFuzzyMatch` is unchanged.
+
+Re-measured on the committed code: `pwsh -File tools/probes/port-fuzzy-counts-and-changes.ps1` gives
+`(0, 5)` counts `(0, 1, 1)` changes `([], [4], [0])` with POSIX and without, and
+`python tools/probes/upstream-fuzzy-counts-and-changes.py` gives upstream `(0, 5)` counts `(0, 1, 1)`
+under POSIX and the same change positions `([], [4], [0])` without it - so the port now agrees with
+upstream on the counts and on every position. Pinned by `Gaps.Engine.FuzzyCountsAndChangesTests
+.A_posix_enhancematch_fullmatch_spends_no_more_errors_than_the_same_span_needs`, whose second
+assertion IS the self-refutation: the POSIX answer must equal the flagless one. Negative control
+**S48b-B**, `posix-restore-leaves-the-running-totals-stale`, takes the two lines out again.
+
+**Proposed fix, for the upstream half that remains** - the `fuzzy_changes` over-read. Unknown.
+Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
 
 **Related:** issues 611-614, the 2026 memory-safety group.
@@ -1182,7 +1215,8 @@ that goes quiet without saying so.
 
 ## 11. A fuzzy match reports change positions that contradict its own change counts
 
-**Status: not filed. TWO OF ITS FOUR MECHANISMS ARE FIXED HERE (S47, 2026-09-14); TWO ARE NOT.**
+**Status: not filed. ALL FOUR MECHANISMS ARE NOW FIXED HERE - A and B by S47, C and D by S48b
+(2026-09-14).** The table below keeps S47's wording for A and B; C and D are rewritten under it.
 Upstream's answer contradicts itself, this port reproduced it faithfully, and the owner's rule
 (2026-09-12) is that an inherited bug is fixed here before 1.0. S47 found that "the change list and
 the counts drift apart" is not one defect with two doors, as this entry said, but **one defect class
@@ -1194,8 +1228,8 @@ abandons a sub-attempt without backtracking through it.
 |---|---|---|---|
 | A | A search restart clears the counts and leaves the list (`start_match`, `:11790-11792`) | the list | FIXED |
 | B | A partial match returns from inside a nested section, so the counter holds the innermost section's errors alone | the counts | FIXED |
-| C | `POSIX` and `BESTMATCH` candidates leave the list polluted or empty against the saved counts | the list | NOT FIXED |
-| D | A lookaround under `(?e)` restores a counts block whose changes were unwound item-wise | one of them | NOT FIXED |
+| C | `POSIX` and `BESTMATCH` candidates leave the list polluted or empty against the saved counts | the list | FIXED (S48b) |
+| D | A lookaround under `(?e)` restores a counts block whose changes were unwound item-wise | one of them | FIXED (S48b) |
 
 **THE FLAGS ARE PART OF EACH REPRODUCTION** - every one below comes from a wave row, and none of
 them reproduces without its flag bits.
@@ -1214,14 +1248,61 @@ its first run, which is what that property is for. **Both engines agree on C and
 cannot see them; only the property can - and it cannot see C either, because a POSIX row has no
 positions to count on either side (entry 9), which is why C is written out here by hand.
 
-**Why C and D are not fixed here.** The fix for them is not local: it is to save and restore the
-change list wherever the counts are saved and restored - eight `PushFuzzyCounts` sites and eleven
-`PopFuzzyCounts` sites in `Matcher.cs`, each needing a judgement about whether the semantics are
-"restore" (truncate the list too) or "merge" (leave it alone, as `END_FUZZY`'s forward arm needs).
-That is a slice of its own. Until it lands, `Match.FuzzyCounts` is tallied from the change list ONLY
-on a partial match - where the counter provably is not the whole match's - and taken from the
-counter otherwise, which is what keeps C and D answering exactly what they answered before rather
-than turning an arbitrary answer into a plainly wrong one.
+**HOW S48b FIXED C AND D, 2026-09-14, AND WHAT IT COST.** The fix is the one this entry predicted -
+the change list is saved and restored wherever the counts are - and it turned out to need **one
+edit, not nineteen**. `PushFuzzyCounts` pushes the change list's LENGTH beside the counts block, and
+`PopFuzzyCounts` truncates the list back to it. The nineteen sites then reduce to a single
+judgement, made once per site and named in the code: eight pops are **restoring** (`ATOMIC` and
+`END_ATOMIC`, `CONDITIONAL` and `END_CONDITIONAL`, `LOOKAROUND` and `END_LOOKAROUND`) and take the
+truncation, and three are **merging** and keep a separate `PopFuzzyCountsMerging` that leaves the
+list alone - the two `END_FUZZY` arms, where the inner section's changes are part of the answer, and
+the `FUZZY` backtrack arm, where backing out of the section means every item in it has already
+unwound its own change.
+
+The truncation never GROWS the list: a restore whose sub-attempt unwound below the push point has
+nothing to put back, and inventing entries would turn a contradiction into a wrong answer.
+
+**Measured, before and after, on this entry's own rows** (`pwsh -File
+tools/probes/port-fuzzy-counts-and-changes.ps1`):
+
+```
+C worst, match 2   before  (4,6) counts (0,0,1) changes sub[4]   <- a deletion counted, a substitution reported
+                   after   (4,6) counts (0,0,1) changes del[4]   <- agrees, and the span and counts did not move
+D                  before  (6,8) counts (1,0,0) changes del[7]   <- a substitution counted, a deletion reported
+                   after   (6,8) counts (1,0,0) changes sub[8]   <- agrees, and the span and counts did not move
+C twin, match 5    before  (0,4) counts (1,0,1) changes []       <- two errors counted, none reported
+                   after   see below: the truncation did not fix this one, the entry 9 fix did
+```
+
+**The rows have moved since they were recorded and the contradiction had not**: this entry wrote C's
+worst case up as a fourteen-entry list against counts of `(0, 0, 1)`, and on the committed code it
+was a one-entry list of the wrong KIND against the same counts. Both are the same desynchronisation;
+only the depth changed, because S47's own fixes had already drained most of the stale list.
+
+**C's twin was not the truncation's to fix, and that is the finding worth carrying.** Its list was
+too SHORT for its counts, and truncation can only shorten. What fixed it was entry 9's stale-totals
+fix, because the twin carries `(?b)` as well as `(?p)` and the `BESTMATCH` walk was ranking on the
+discarded candidate's totals. **Two of the three items in S48b's scope were one bug.**
+
+**And fixing it found a NEW upstream defect - see entry 16.** With the twin repaired this port
+answers a SEVENTH match, `(0, 9)`, that upstream's `POSIX`+`BESTMATCH` scan drops; upstream's own
+`fullmatch` at the identical flags answers `(0, 9)`, and so do its three other doors onto the same
+subject.
+
+**What remains, honestly stated.** On D the port and upstream now DISAGREE on the change list, and
+there is no upstream reference to settle it: upstream answers one substitution counted against one
+deletion reported on the anchored retry as well as on the search, so S47's leak-free question
+(`_leak_free_fuzzy`) cannot arbitrate it. The port's list agrees with the port's own counts, which
+is the only standard available. The position it reports, `sub@8`, sits one past the end of an
+eight-unit subject inside a reversed lookbehind; that is an observation, not a claim that it is
+right, and nothing in this slice established it.
+
+**The stopgap STAYED, with its justification changed.** `Match.FuzzyCounts` is still tallied from
+the change list only on a partial match - that is S47's fix for mechanism B, a deliberate divergence
+in its own right, and unrelated to C and D. `SplitFuzzyChanges`'s `Math.Min(FuzzyCounts.Total, ...)`
+bound also stays, but it is now upstream's own line (`for (i = 0; i < count; i++)`, `:20522`) and
+nothing else: with C and D fixed the two views agree on every path, so the bound is a no-op here
+rather than the thing holding an arbitrary answer down.
 
 **Reproduction**, `regex` 2026.7.19, measured 2026-09-13 and re-run unchanged on 2026.9.10
 (`python tools/probes/upstream-fuzzy-restart-leak.py`):
@@ -1860,3 +1941,64 @@ with all four controls, and classified in the oracle as `skip-blocks-a-repeat-re
 **Related:** entry 10 (the fix that caused it), entries 1, 3 and 5 (the `(*SKIP)` bound-moving
 family), and `partial-retry-carried-slice-forward` (the same two-pass restore, seen from the port's
 side).
+
+---
+
+# Added by S48b, 2026-09-14
+
+## 16. A `POSIX` overlapped scan of a `BESTMATCH` fuzzy pattern drops its LONGEST match
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Found while fixing entry 11's mechanism C**, not by a wave: once this port stopped desynchronising
+the counts from the change list, the twin row answered a seventh match that upstream does not, and
+checking which engine was wrong turned up upstream contradicting itself four ways.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-14
+(`python tools/probes/upstream-fuzzy-counts-and-changes.py`, the middle section). Flags 16642
+(`0x4102`, `FULLCASE | VERSION1 | IGNORECASE`); the subject is `'A\rA\xdf\xdf aaa'`, nine
+characters, no astral codepoint, so these indices are UTF-16 and codepoint indices alike:
+
+```python
+>>> import regex
+>>> base = r"(\w)(?:\s(?:([\p{L}\p{N}]{2,})){e<=2,s<=1}){1<=e<=2}"
+>>> subj = "A\rA\xdf\xdf aaa"
+>>> [(m.start(), m.end()) for m in regex.compile("(?b)(?r)(?p)" + base, 16642)
+...                                      .finditer(subj, overlapped=True)]
+[(0, 8), (0, 7), (0, 6), (0, 5), (0, 4), (0, 3)]          # no (0, 9)
+>>> [(m.start(), m.end()) for m in regex.compile("(?b)(?r)" + base, 16642)
+...                                      .finditer(subj, overlapped=True)]
+[(0, 9), (0, 8), (0, 7), (0, 6), (0, 5), (0, 4), (0, 3)]  # (0, 9) is there without (?p)
+>>> regex.compile("(?b)(?r)(?p)" + base, 16642).fullmatch(subj).span()
+(0, 9)                                                    # and upstream's own anchored door finds it
+```
+
+**Upstream contradicts itself four ways on one subject, which is the whole of the evidence.**
+`(0, 9)` - the whole subject, and the longest match there is - is answered by the scan with
+`BESTMATCH` and no `POSIX`, by the scan with `POSIX` and no `BESTMATCH`, by the scan with neither,
+and by `fullmatch` at the very flags the failing scan uses. Only `POSIX` **and** `BESTMATCH`
+together drop it. The counts agree everywhere it is answered: `(1, 0, 0)`, one substitution at 6.
+
+**Why it is a defect rather than a ranking choice.** `POSIX` is leftmost-**longest**. The single row
+the flag exists to guarantee is the longest match at the leftmost start, and that is the one row it
+removes here. No reading of the flag makes dropping `(0, 9)` while keeping `(0, 8)` the intended
+answer, and upstream's own documentation defines `POSIX` as "leftmost longest" with no exception for
+`BESTMATCH`.
+
+**Where it comes from, at the precision the evidence supports.** Not established to a line. The
+suspected area is the same desynchronisation family as entry 11: `check_posix_match` (`:11602`)
+compares only the LENGTH of a candidate and `restore_best_match` (`:11565`) puts back
+`fuzzy_counts` and neither `total_errors` nor the change list, while `do_best_fuzzy_match`
+(`:17584`) walks candidates against a budget derived from `total_errors`. This port reproduced the
+symptom until `SaveBestMatch`/`RestoreBestMatch` were given the two running totals (entry 9's
+port half, S48b), which is suggestive and is not proof about upstream's C. **A report must say it
+does not know.** The `/Od /Zi` MSVC build S47c installed is the instrument that could settle it and
+was not used here.
+
+**What this port answers.** `(0, 9)` at all four doors and at `fullmatch`, with counts `(1, 0, 0)`
+and the substitution at 6 - which is upstream's own answer on the three doors that give one.
+`pwsh -File tools/probes/port-fuzzy-counts-and-changes.ps1` prints both halves side by side.
+
+**Related:** entry 11 (mechanism C, the fix that exposed this), entry 9 (the stale running totals
+that this port shared), entry 12 and entry 13 (the other two ways `BESTMATCH` loses a candidate).
