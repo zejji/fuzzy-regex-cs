@@ -50,7 +50,7 @@ public sealed class RegressionsUnicodePropertyTests
     [Arguments(@"(?u)\p{Script_Extensions:Sylo}")]
     [Property("Upstream", "RegexTests.test_hg_bugs#312-317")]
     public void Script_and_script_extensions_spellings_all_match_a_shared_bengali_digit(string pattern) =>
-        FuzzyRegex.MatchAtStart(_bengaliDigitNine, pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(_bengaliDigitNine, pattern).Success.Should().BeTrue();
 
     // Hg issue #293: scx (Script Extensions) property currently matches incorrectly.
     [Test]
@@ -67,20 +67,20 @@ public sealed class RegressionsUnicodePropertyTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.MatchAtStart(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.MatchAtStart(subject, pattern).Success.Should().Be(expected);
 
     // Git issue 473: Emoji classified as letter.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#433")]
     public void Letter_or_titlecase_class_does_not_match_a_cat_face_emoji() =>
-        FuzzyRegex.MatchAtStart(_smilingCatFaceWithOpenMouth, @"^\p{LC}+$").Success.Should().BeFalse();
+        Upstream.MatchAtStart(_smilingCatFaceWithOpenMouth, @"^\p{LC}+$").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#434")]
     public void Other_symbol_class_matches_the_whole_cat_face_emoji_as_one_surrogate_pair()
     {
         // Upstream expects (0, 1) in codepoints; U+1F63A is a surrogate pair, so UTF-16 gives (0, 2).
-        Match m = FuzzyRegex.MatchAtStart(_smilingCatFaceWithOpenMouth, @"^\p{So}+$");
+        Match m = Upstream.MatchAtStart(_smilingCatFaceWithOpenMouth, @"^\p{So}+$");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(2);
@@ -90,21 +90,21 @@ public sealed class RegressionsUnicodePropertyTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#437")]
     public void HorizSpace_property_fullmatches_every_horizontal_space_character() =>
-        FuzzyRegex.FullMatch(_everyHorizontalSpaceCharacter, @"\p{HorizSpace}+").Success.Should().BeTrue();
+        Upstream.FullMatch(_everyHorizontalSpaceCharacter, @"\p{HorizSpace}+").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#438")]
     public void VertSpace_property_fullmatches_every_vertical_space_character() =>
-        FuzzyRegex.FullMatch(_everyVerticalSpaceCharacter, @"\p{VertSpace}+").Success.Should().BeTrue();
+        Upstream.FullMatch(_everyVerticalSpaceCharacter, @"\p{VertSpace}+").Success.Should().BeTrue();
 
     // Git issue 580: Regression in v2025.7.31: \P{L} no longer matches in simple patterns.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#495")]
     public void Optional_non_letter_followed_by_a_letter_matches_at_the_start_of_a_word() =>
-        FuzzyRegex.MatchAtStart("hello,", @"\A\P{L}?\p{L}").Success.Should().BeTrue();
+        Upstream.MatchAtStart("hello,", @"\A\P{L}?\p{L}").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#496")]
     public void Non_letter_runs_around_a_named_letter_group_fullmatch_the_whole_word() =>
-        FuzzyRegex.FullMatch("hello,", @"\A\P{L}*(?P<w>\p{L}+)\P{L}*\Z").Success.Should().BeTrue();
+        Upstream.FullMatch("hello,", @"\A\P{L}*(?P<w>\p{L}+)\P{L}*\Z").Success.Should().BeTrue();
 }

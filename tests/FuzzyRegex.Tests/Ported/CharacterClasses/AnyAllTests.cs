@@ -10,10 +10,10 @@ public sealed class AnyAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_anyall#1")]
     public void Dot_matches_a_newline_under_singleline() =>
-        FuzzyRegex.MatchAtStart("a\nb", "a.b", FuzzyRegexOptions.Singleline).Value.Should().Be("a\nb");
+        Upstream.MatchAtStart("a\nb", "a.b", FuzzyRegexOptions.Singleline).Value.Should().Be("a\nb");
 
     [Test]
     [Property("Upstream", "RegexTests.test_anyall#2")]
     public void Dot_star_matches_across_newlines_under_singleline() =>
-        FuzzyRegex.MatchAtStart("a\n\nb", "a.*b", FuzzyRegexOptions.Singleline).Value.Should().Be("a\n\nb");
+        Upstream.MatchAtStart("a\n\nb", "a.*b", FuzzyRegexOptions.Singleline).Value.Should().Be("a\n\nb");
 }

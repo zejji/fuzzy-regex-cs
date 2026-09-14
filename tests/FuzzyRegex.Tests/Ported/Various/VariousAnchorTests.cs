@@ -63,7 +63,7 @@ public sealed class VariousAnchorTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -101,5 +101,5 @@ public sealed class VariousAnchorTests
         "RegexTests.test_various#71,73,106-109,112-118,125,147,163-164,241,243,274,307,323-324,483,515,517"
     )]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

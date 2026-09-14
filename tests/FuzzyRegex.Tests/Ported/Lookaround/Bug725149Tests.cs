@@ -13,7 +13,7 @@ public sealed class Bug725149Tests
     [Property("Upstream", "RegexTests.test_bug_725149#1")]
     public void Repeated_group_with_positive_lookahead_leaves_the_inner_group_unset()
     {
-        Match m = FuzzyRegex.MatchAtStart("abb", "(a)(?:(?=(b)*)c)*");
+        Match m = Upstream.MatchAtStart("abb", "(a)(?:(?=(b)*)c)*");
 
         m.Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("a");
@@ -24,7 +24,7 @@ public sealed class Bug725149Tests
     [Property("Upstream", "RegexTests.test_bug_725149#2")]
     public void Repeated_group_with_negative_lookahead_leaves_the_inner_groups_unset()
     {
-        Match m = FuzzyRegex.MatchAtStart("abb", "(a)((?!(b)*))*");
+        Match m = Upstream.MatchAtStart("abb", "(a)((?!(b)*))*");
 
         m.Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("a");

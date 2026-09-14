@@ -14,7 +14,7 @@ public sealed class RegressionsReverseTests
     [Property("Upstream", "RegexTests.test_hg_bugs#222")]
     public void Forward_search_finds_the_alternation_match_at_its_only_position()
     {
-        Match m = FuzzyRegex.Match("111a222", "a|b");
+        Match m = Upstream.Match("111a222", "a|b");
 
         m.Index.Should().Be(3);
         m.Length.Should().Be(1);
@@ -24,7 +24,7 @@ public sealed class RegressionsReverseTests
     [Property("Upstream", "RegexTests.test_hg_bugs#223")]
     public void Inline_reverse_flag_finds_the_alternation_match_nearest_the_end()
     {
-        Match m = FuzzyRegex.Match("111a222", "(?r)a|b");
+        Match m = Upstream.Match("111a222", "(?r)a|b");
 
         m.Index.Should().Be(3);
         m.Length.Should().Be(1);

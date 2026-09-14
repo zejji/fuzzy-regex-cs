@@ -118,6 +118,36 @@ public sealed class FuzzyRegex
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
     )
+        : this(pattern, options, matchTimeout, namedLists, Parsing.PatternCompiler.DefaultVersion) { }
+
+    /// <summary>
+    /// Compiles a pattern against a chosen default version, for a caller that needs a version
+    /// other than <see cref="Parsing.PatternCompiler.DefaultVersion"/> without saying so in the
+    /// flags. Upstream's <c>DEFAULT_VERSION</c> is a module global its own test suite reads and
+    /// this port's is a compile-time constant, so the only way to ask for upstream's default is to
+    /// pass it - which is what the ported suite's <c>Upstream</c> helper does (S50b).
+    /// </summary>
+    /// <remarks>
+    /// Not a flag, deliberately. <c>Version0</c> in the flags and an inline <c>(?V1)</c> in the
+    /// pattern leave both version bits set, which upstream rejects as "VERSION0 and VERSION1 flags
+    /// are mutually incompatible"; a default is what a pattern falls back to when it names none, so
+    /// a pattern that names one still wins.
+    /// </remarks>
+    /// <param name="pattern">The pattern to compile.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="matchTimeout">How long a single matching operation may run.</param>
+    /// <param name="namedLists">Values for the pattern's <c>\L&lt;name&gt;</c> references.</param>
+    /// <param name="defaultVersion">
+    /// The version the pattern gets when neither the flags nor an inline <c>(?V0)</c> /
+    /// <c>(?V1)</c> pick one, as a <see cref="Parsing.RegexFlags"/> bit.
+    /// </param>
+    internal FuzzyRegex(
+        string pattern,
+        FuzzyRegexOptions options,
+        TimeSpan matchTimeout,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
+        int defaultVersion
+    )
     {
         // Argument validation is real and comes first: it is a trust boundary.
         ArgumentNullException.ThrowIfNull(pattern);
@@ -133,7 +163,12 @@ public sealed class FuzzyRegex
 
         Pattern = pattern;
         MatchTimeout = matchTimeout;
-        _compiled = Parsing.PatternCompiler.Compile(pattern, (int)options, ToCompilerNamedLists(namedLists));
+        _compiled = Parsing.PatternCompiler.Compile(
+            pattern,
+            (int)options,
+            ToCompilerNamedLists(namedLists),
+            defaultVersion
+        );
 
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
         // the last thing that can reject a pattern - it refuses code the parser was happy to emit

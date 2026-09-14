@@ -17,18 +17,18 @@ public sealed class MoreZeroWidthTests
     [Test]
     [Property("Upstream", "RegexTests.test_more_zerowidth#1")]
     public void Splitting_on_a_word_boundary_or_colon_run_keeps_the_empty_pieces() =>
-        FuzzyRegex.Split("a::bc", @"\b|:+").Should().Equal("", "a", "", "", "bc", "");
+        Upstream.Split("a::bc", @"\b|:+").Should().Equal("", "a", "", "", "bc", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_more_zerowidth#2")]
     public void Replacing_a_word_boundary_or_colon_run_inserts_a_dash_at_every_zero_width_position() =>
-        FuzzyRegex.Replace("a::bc", @"\b|:+", "-").Should().Be("-a---bc-");
+        Upstream.Replace("a::bc", @"\b|:+", "-").Should().Be("-a---bc-");
 
     [Test]
     [Property("Upstream", "RegexTests.test_more_zerowidth#3-4")]
     public void Matches_of_a_word_boundary_or_colon_run_have_the_expected_values_and_spans()
     {
-        Match[] matches = [.. FuzzyRegex.Matches("a::bc", @"\b|:+")];
+        Match[] matches = [.. Upstream.Matches("a::bc", @"\b|:+")];
 
         matches.Select(static m => m.Value).Should().Equal("", "", "::", "", "");
         matches
@@ -40,7 +40,7 @@ public sealed class MoreZeroWidthTests
     [Test]
     [Property("Upstream", "RegexTests.test_more_zerowidth#5")]
     public void Multiline_lazy_zero_width_whitespace_to_end_of_line_matches_at_each_blank_line_position() =>
-        FuzzyRegex
+        Upstream
             .Matches("foo\n\n\nbar", @"(?m)^\s*?$")
             .Select(static m => (m.Index, m.Index + m.Length))
             .Should()

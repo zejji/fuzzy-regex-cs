@@ -18,7 +18,7 @@ public sealed class Bug448951Tests
     [Property("Upstream", "RegexTests.test_bug_448951#1")]
     public void A_leading_optional_group_may_be_absent(string op)
     {
-        Match m = FuzzyRegex.MatchAtStart("z", $"((.{op}):)?z");
+        Match m = Upstream.MatchAtStart("z", $"((.{op}):)?z");
 
         m.Value.Should().Be("z");
         m.Groups[1].Success.Should().BeFalse();
@@ -32,7 +32,7 @@ public sealed class Bug448951Tests
     [Property("Upstream", "RegexTests.test_bug_448951#2")]
     public void A_leading_optional_group_captures_greedily_when_present(string op)
     {
-        Match m = FuzzyRegex.MatchAtStart("a:z", $"((.{op}):)?z");
+        Match m = Upstream.MatchAtStart("a:z", $"((.{op}):)?z");
 
         m.Value.Should().Be("a:z");
         m.Groups[1].Value.Should().Be("a:");

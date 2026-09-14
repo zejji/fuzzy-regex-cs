@@ -100,7 +100,7 @@ Three properties of it are load-bearing, and each is pinned by a test in `Oracle
 | `POSITIVE_OP`, `ZEROWIDTH_OP`, `FUZZY_OP`, `REVERSE_OP`, `REQUIRED_OP`, `ENCODING_OP_SHIFT` | `_regex_core.py:1924-1929` | `Parsing.NodeFlags` | S07 |
 | `_UnscopedFlagSet`, `ParseError`, `_FirstSetError` | `_regex_core.py:59-70` | `Parsing.UnscopedFlagSetException`, `ParseErrorException`, `FirstSetErrorException` | S07 |
 | `Source` | `_regex_core.py:4110-4354` | `Parsing.Source`. `match` is `MatchText` (`Match` is a public type in the parent namespace); `char_type` and the bytes branch are not ported | S07 |
-| `Info` | `_regex_core.py:4356-4419` | `Parsing.Info`. `char_type` not ported; `DEFAULT_VERSION` is a constructor argument rather than a module global | S07 |
+| `Info` | `_regex_core.py:4356-4419` | `Parsing.Info`. `char_type` not ported; `DEFAULT_VERSION` is a constructor argument rather than a module global, and **maps to a different constant**: `PatternCompiler.DefaultVersion` is `Version1` where `_main.py:443` sets `VERSION0` (S50b, spec amendment 24, `docs/DIVERGENCES.md`). Two consequences, both deliberate: `global_flags` is assigned BEFORE `DEFAULT_FLAGS` rather than after (`:4359-4361`), so the version a retry is seeded with is the one the pattern asked for (ledger 22) | S07, S50b |
 | `RegexBase` | `_regex_core.py:1941-2008` | `Parsing.RegexBase`. `_key` becomes `Equals`/`GetHashCode` per subclass; `positive`, `case_flags` and `zerowidth` become virtual properties | S07 |
 | `Any`, `AnyAll`, `AnyU` | `_regex_core.py:2040-2072` | `Parsing.Any`, `AnyAll`, `AnyU` | S07 |
 | `Character` | `_regex_core.py:2581-2653` | `Parsing.Character`. `folded` is an `int[]` of codepoints rather than a `str`, so `max_width` stays a codepoint count | S07 |

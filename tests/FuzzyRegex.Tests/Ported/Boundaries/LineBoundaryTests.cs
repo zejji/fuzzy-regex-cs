@@ -12,17 +12,17 @@ public sealed class LineBoundaryTests
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#1")]
     public void Dot_plus_findall_stops_at_a_bare_newline() =>
-        FuzzyRegex.Matches("Line 1\nLine 2\n", @".+").Select(static m => m.Value).Should().Equal("Line 1", "Line 2");
+        Upstream.Matches("Line 1\nLine 2\n", @".+").Select(static m => m.Value).Should().Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#2")]
     public void Dot_plus_findall_does_not_stop_at_a_bare_carriage_return() =>
-        FuzzyRegex.Matches("Line 1\rLine 2\r", @".+").Select(static m => m.Value).Should().Equal("Line 1\rLine 2\r");
+        Upstream.Matches("Line 1\rLine 2\r", @".+").Select(static m => m.Value).Should().Equal("Line 1\rLine 2\r");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#3")]
     public void Dot_plus_findall_stops_before_the_newline_in_a_crlf_pair() =>
-        FuzzyRegex
+        Upstream
             .Matches("Line 1\r\nLine 2\r\n", @".+")
             .Select(static m => m.Value)
             .Should()
@@ -31,25 +31,17 @@ public sealed class LineBoundaryTests
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#4")]
     public void Dot_plus_findall_with_word_flag_stops_at_a_bare_newline() =>
-        FuzzyRegex
-            .Matches("Line 1\nLine 2\n", @"(?w).+")
-            .Select(static m => m.Value)
-            .Should()
-            .Equal("Line 1", "Line 2");
+        Upstream.Matches("Line 1\nLine 2\n", @"(?w).+").Select(static m => m.Value).Should().Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#5")]
     public void Dot_plus_findall_with_word_flag_also_stops_at_a_bare_carriage_return() =>
-        FuzzyRegex
-            .Matches("Line 1\rLine 2\r", @"(?w).+")
-            .Select(static m => m.Value)
-            .Should()
-            .Equal("Line 1", "Line 2");
+        Upstream.Matches("Line 1\rLine 2\r", @"(?w).+").Select(static m => m.Value).Should().Equal("Line 1", "Line 2");
 
     [Test]
     [Property("Upstream", "RegexTests.test_line_boundary#6")]
     public void Dot_plus_findall_with_word_flag_stops_before_the_newline_in_a_crlf_pair() =>
-        FuzzyRegex
+        Upstream
             .Matches("Line 1\r\nLine 2\r\n", @"(?w).+")
             .Select(static m => m.Value)
             .Should()
@@ -62,7 +54,7 @@ public sealed class LineBoundaryTests
     [Property("Upstream", "RegexTests.test_line_boundary#7-9")]
     public void Caret_matches_only_at_the_very_start_of_the_subject(string subject, int? expectedStart)
     {
-        Match m = FuzzyRegex.Match(subject, @"^abc");
+        Match m = Upstream.Match(subject, @"^abc");
 
         m.Success.Should().Be(expectedStart is not null);
         if (expectedStart is not null)
@@ -78,7 +70,7 @@ public sealed class LineBoundaryTests
     [Property("Upstream", "RegexTests.test_line_boundary#10-12")]
     public void Caret_with_word_flag_still_matches_only_at_the_very_start(string subject, int? expectedStart)
     {
-        Match m = FuzzyRegex.Match(subject, @"(?w)^abc");
+        Match m = Upstream.Match(subject, @"(?w)^abc");
 
         m.Success.Should().Be(expectedStart is not null);
         if (expectedStart is not null)
@@ -94,7 +86,7 @@ public sealed class LineBoundaryTests
     [Property("Upstream", "RegexTests.test_line_boundary#13-15")]
     public void Dollar_matches_at_the_end_or_just_before_a_trailing_newline(string subject, int? expectedStart)
     {
-        Match m = FuzzyRegex.Match(subject, @"abc$");
+        Match m = Upstream.Match(subject, @"abc$");
 
         m.Success.Should().Be(expectedStart is not null);
         if (expectedStart is not null)
@@ -113,7 +105,7 @@ public sealed class LineBoundaryTests
         int expectedStart
     )
     {
-        Match m = FuzzyRegex.Match(subject, @"(?w)abc$");
+        Match m = Upstream.Match(subject, @"(?w)abc$");
 
         m.Success.Should().BeTrue();
         m.Index.Should().Be(expectedStart);
@@ -129,7 +121,7 @@ public sealed class LineBoundaryTests
         int? expectedStart
     )
     {
-        Match m = FuzzyRegex.Match(subject, @"(?m)^abc");
+        Match m = Upstream.Match(subject, @"(?m)^abc");
 
         m.Success.Should().Be(expectedStart is not null);
         if (expectedStart is not null)
@@ -145,7 +137,7 @@ public sealed class LineBoundaryTests
     [Property("Upstream", "RegexTests.test_line_boundary#22-24")]
     public void Multiline_caret_with_word_flag_also_matches_after_a_carriage_return(string subject, int expectedStart)
     {
-        Match m = FuzzyRegex.Match(subject, @"(?mw)^abc");
+        Match m = Upstream.Match(subject, @"(?mw)^abc");
 
         m.Success.Should().BeTrue();
         m.Index.Should().Be(expectedStart);
@@ -161,7 +153,7 @@ public sealed class LineBoundaryTests
         int? expectedStart
     )
     {
-        Match m = FuzzyRegex.Match(subject, @"(?m)abc$");
+        Match m = Upstream.Match(subject, @"(?m)abc$");
 
         m.Success.Should().Be(expectedStart is not null);
         if (expectedStart is not null)
@@ -177,7 +169,7 @@ public sealed class LineBoundaryTests
     [Property("Upstream", "RegexTests.test_line_boundary#28-30")]
     public void Multiline_dollar_with_word_flag_also_matches_before_a_carriage_return(string subject, int expectedStart)
     {
-        Match m = FuzzyRegex.Match(subject, @"(?mw)abc$");
+        Match m = Upstream.Match(subject, @"(?mw)abc$");
 
         m.Success.Should().BeTrue();
         m.Index.Should().Be(expectedStart);

@@ -24,8 +24,16 @@ public sealed class CorpusFixtureTests
         Corpus.Templates().Should().HaveCountGreaterThan(20);
         Corpus.RegexVersion.Should().NotBeNullOrWhiteSpace();
         Corpus.UpstreamCommit.Should().HaveLength(40);
+        // The version upstream resolved each row under, which CompileParityTests passes back in
+        // rather than using this port's own default. Since S50b those two differ on purpose
+        // (docs/DIVERGENCES.md), so pinning the RECORDED version is what keeps the corpus
+        // meaningful: a re-recording under a different DEFAULT_VERSION would silently change what
+        // 1,659 rows of expected bytecode mean.
         // Fully qualified: Tests.Gaps.Parsing exists too, and would otherwise win the lookup.
-        Corpus.DefaultVersion.Should().Be(RegularExpressions.Parsing.PatternCompiler.DefaultVersion);
+        Corpus.DefaultVersion.Should().Be((int)FuzzyRegexOptions.Version0);
+        RegularExpressions
+            .Parsing.PatternCompiler.DefaultVersion.Should()
+            .Be((int)FuzzyRegexOptions.Version1, "S50b made Version 1 this port's default");
     }
 
     [Test]

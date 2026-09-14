@@ -26,7 +26,7 @@ public sealed class RegressionsSubstitutionTests
         // which is invisible in source.
         string subject = "\u0905\u0928\u094d\u200d\u0928 \u0d28\u0d4d\u200d \u0915\u093f\u0928";
 
-        FuzzyRegex
+        Upstream
             .Replace(subject, @"(\w+)", "[\\1]")
             .Should()
             .Be("[\u0905\u0928\u094d\u200d\u0928] [\u0d28\u0d4d\u200d] [\u0915\u093f\u0928]");
@@ -36,33 +36,33 @@ public sealed class RegressionsSubstitutionTests
     [Property("Upstream", "RegexTests.test_hg_bugs#61")]
     public void Sub_with_an_evaluator_that_calls_Result_replaces_every_match() =>
         // Hg issue 91: match.expand is extremely slow. Check that the replacement cache works.
-        FuzzyRegex.Replace("a-b-c", "(-)", static m => m.Result("x")).Should().Be("axbxc");
+        Upstream.Replace("a-b-c", "(-)", static m => m.Result("x")).Should().Be("axbxc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#82")]
     public void Sub_with_V0_dot_star_replaces_the_whole_match_and_the_trailing_empty_match() =>
-        FuzzyRegex.Replace("test", "(?V0).*", "x").Should().Be("xx");
+        Upstream.Replace("test", "(?V0).*", "x").Should().Be("xx");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#84")]
     public void Sub_with_V1_dot_star_replaces_the_whole_match_and_the_trailing_empty_match() =>
-        FuzzyRegex.Replace("test", "(?V1).*", "x").Should().Be("xx");
+        Upstream.Replace("test", "(?V1).*", "x").Should().Be("xx");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#85")]
     public void Sub_with_V0_lazy_dot_star_replaces_every_empty_position_between_characters() =>
-        FuzzyRegex.Replace("test", "(?V0).*?", "|").Should().Be("|||||||||");
+        Upstream.Replace("test", "(?V0).*?", "|").Should().Be("|||||||||");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#87")]
     public void Sub_with_V1_lazy_dot_star_replaces_every_empty_position_between_characters() =>
-        FuzzyRegex.Replace("test", "(?V1).*?", "|").Should().Be("|||||||||");
+        Upstream.Replace("test", "(?V1).*?", "|").Should().Be("|||||||||");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#88")]
     public void Sub_with_a_negative_lookahead_and_dotall_inserts_a_divider_after_the_at_sign() =>
         // Hg issue 112: re: OK, but regex: SystemError.
-        FuzzyRegex
+        Upstream
             .Replace("@\n", @"^(@)\n(?!.*?@)(.*)", @"\1\n==========\n\2", FuzzyRegexOptions.Singleline)
             .Should()
             .Be("@\n==========\n");
@@ -72,49 +72,49 @@ public sealed class RegressionsSubstitutionTests
     public void Sub_with_a_whole_match_backreference_in_the_template_reproduces_the_match() =>
         // Hg issue 125: Reference to entire match (\g<0>) in Pattern.sub() doesn't work as of
         // 2014.09.22 release.
-        FuzzyRegex.Replace("x", "x", @"\g<0>").Should().Be("x");
+        Upstream.Replace("x", "x", @"\g<0>").Should().Be("x");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#144")]
     public void Sub_wraps_every_character_with_x_and_y() =>
         // Hg issue 140: Replace with REVERSE and groups has unexpected behavior.
-        FuzzyRegex.Replace("ab", "(.)", @"x\1y").Should().Be("xayxby");
+        Upstream.Replace("ab", "(.)", @"x\1y").Should().Be("xayxby");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#145")]
     public void Sub_wraps_every_character_with_x_and_y_when_matched_right_to_left() =>
-        FuzzyRegex.Replace("ab", "(?r)(.)", @"x\1y").Should().Be("xayxby");
+        Upstream.Replace("ab", "(?r)(.)", @"x\1y").Should().Be("xayxby");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#146")]
     public void Subf_wraps_every_character_with_x_and_y() =>
-        FuzzyRegex.ReplaceFormat("ab", "(.)", "x{1}y").Should().Be("xayxby");
+        Upstream.ReplaceFormat("ab", "(.)", "x{1}y").Should().Be("xayxby");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#147")]
     public void Subf_wraps_every_character_with_x_and_y_when_matched_right_to_left() =>
-        FuzzyRegex.ReplaceFormat("ab", "(?r)(.)", "x{1}y").Should().Be("xayxby");
+        Upstream.ReplaceFormat("ab", "(?r)(.)", "x{1}y").Should().Be("xayxby");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#425")]
     public void Sub_with_an_alternation_expands_the_matched_branch_and_the_unmatched_branch_to_empty() =>
         // Git issue 439: Unmatched groups: sub vs subf.
-        FuzzyRegex.Replace("test1", "(test1)|(test2)", @"matched: \1\2").Should().Be("matched: test1");
+        Upstream.Replace("test1", "(test1)|(test2)", @"matched: \1\2").Should().Be("matched: test1");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#426")]
     public void Subf_with_an_alternation_expands_the_matched_branch_and_the_unmatched_branch_to_empty() =>
-        FuzzyRegex.ReplaceFormat("test1", "(test1)|(test2)", "matched: {1}{2}").Should().Be("matched: test1");
+        Upstream.ReplaceFormat("test1", "(test1)|(test2)", "matched: {1}{2}").Should().Be("matched: test1");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#427")]
     public void Result_with_an_alternation_expands_the_matched_branch_and_the_unmatched_branch_to_empty() =>
-        FuzzyRegex.Match("matched: test1", "(test1)|(test2)").Result(@"matched: \1\2").Should().Be("matched: test1");
+        Upstream.Match("matched: test1", "(test1)|(test2)").Result(@"matched: \1\2").Should().Be("matched: test1");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#428")]
     public void ResultFormat_with_an_alternation_expands_the_matched_branch_and_the_unmatched_branch_to_empty() =>
-        FuzzyRegex
+        Upstream
             .Match("matched: test1", "(test1)|(test2)")
             .ResultFormat("matched: {1}{2}")
             .Should()

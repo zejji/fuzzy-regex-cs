@@ -27,7 +27,7 @@ public sealed class FuzzyCountsTests
         int deletions
     )
     {
-        Match m = FuzzyRegex.FullMatch(subject, pattern);
+        Match m = Upstream.FullMatch(subject, pattern);
 
         m.Success.Should().BeTrue();
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, deletions));
@@ -48,7 +48,7 @@ public sealed class FuzzyCountsTests
         int deletions
     )
     {
-        Match m = FuzzyRegex.FullMatch(subject, pattern);
+        Match m = Upstream.FullMatch(subject, pattern);
 
         m.Success.Should().BeTrue();
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, insertions, deletions));
@@ -60,7 +60,7 @@ public sealed class FuzzyCountsTests
     [Property("Upstream", "RegexTests.test_fuzzy#78")]
     public void A_fuzzy_match_reports_where_it_spent_each_error()
     {
-        Match m = FuzzyRegex.Match("ATTATTTATTTTTCATA", "(?e)(GTTTTCATTCCTCATA){i<=4,d<=4,s<=4,i+d+s<=8}");
+        Match m = Upstream.Match("ATTATTTATTTTTCATA", "(?e)(GTTTTCATTCCTCATA){i<=4,d<=4,s<=4,i+d+s<=8}");
 
         m.Success.Should().BeTrue();
         m.FuzzyChanges.Substitutions.Should().Equal(0, 6, 10, 11);

@@ -13,7 +13,7 @@ public sealed class RegressionsEscapeTests
     [Property("Upstream", "RegexTests.test_hg_bugs#13")]
     public void Escaped_space_under_verbose_mode_matches_a_literal_space()
     {
-        Match m = FuzzyRegex.MatchAtStart(" ", @"\ ", FuzzyRegexOptions.IgnorePatternWhitespace);
+        Match m = Upstream.MatchAtStart(" ", @"\ ", FuzzyRegexOptions.IgnorePatternWhitespace);
 
         m.Success.Should().BeTrue();
     }
@@ -23,7 +23,7 @@ public sealed class RegressionsEscapeTests
     [Property("Upstream", "RegexTests.test_hg_bugs#447")]
     public void Named_character_escape_matches_the_letter_it_names()
     {
-        Match m = new FuzzyRegex(@"\N{LATIN SMALL LETTER A}").MatchAtStart("a");
+        Match m = Upstream.Compile(@"\N{LATIN SMALL LETTER A}").MatchAtStart("a");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(1);
@@ -33,9 +33,9 @@ public sealed class RegressionsEscapeTests
     [Property("Upstream", "RegexTests.test_hg_bugs#448")]
     public void Named_character_escape_matches_the_letter_it_names_under_verbose_mode()
     {
-        Match m = new FuzzyRegex(@"\N{LATIN SMALL LETTER A}", FuzzyRegexOptions.IgnorePatternWhitespace).MatchAtStart(
-            "a"
-        );
+        Match m = Upstream
+            .Compile(@"\N{LATIN SMALL LETTER A}", FuzzyRegexOptions.IgnorePatternWhitespace)
+            .MatchAtStart("a");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(1);

@@ -78,7 +78,10 @@ public sealed class CaseFoldingTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, "(?i)" + pattern).Success.Should().Be(expected);
+    ) =>
+        // (?-f) because S50b made Version 1, and so full folding, this port's default; simple
+        // folding is what this grid is about, and the full grid is the next test down.
+        FuzzyRegex.FullMatch(subject, "(?i)(?-f)" + pattern).Success.Should().Be(expected);
 
     /// <summary>
     /// Full <c>(?fi)</c> matching over the same grid. Perl's <c>/i</c> folds fully and answers

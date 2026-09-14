@@ -11,7 +11,7 @@ public sealed class GrouprefTests
     [Property("Upstream", "RegexTests.test_re_groupref#1")]
     public void A_backreference_to_a_leading_optional_delimiter_requires_the_matching_close()
     {
-        Match m = FuzzyRegex.MatchAtStart("|a|", @"^(\|)?([^()]+)\1$");
+        Match m = Upstream.MatchAtStart("|a|", @"^(\|)?([^()]+)\1$");
 
         m.Value.Should().Be("|a|");
         m.Groups[1].Value.Should().Be("|");
@@ -22,7 +22,7 @@ public sealed class GrouprefTests
     [Property("Upstream", "RegexTests.test_re_groupref#2")]
     public void An_optional_backreference_may_be_absent_on_both_sides()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", @"^(\|)?([^()]+)\1?$");
+        Match m = Upstream.MatchAtStart("a", @"^(\|)?([^()]+)\1?$");
 
         m.Value.Should().Be("a");
         m.Groups[1].Success.Should().BeFalse();
@@ -34,13 +34,13 @@ public sealed class GrouprefTests
     [Arguments("|a")]
     [Property("Upstream", "RegexTests.test_re_groupref#3-4")]
     public void A_backreference_rejects_a_one_sided_delimiter(string subject) =>
-        FuzzyRegex.MatchAtStart(subject, @"^(\|)?([^()]+)\1$").Success.Should().BeFalse();
+        Upstream.MatchAtStart(subject, @"^(\|)?([^()]+)\1$").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_groupref#5")]
     public void A_backreference_to_the_taken_alternative_matches()
     {
-        Match m = FuzzyRegex.MatchAtStart("aa", @"^(?:(a)|c)(\1)$");
+        Match m = Upstream.MatchAtStart("aa", @"^(?:(a)|c)(\1)$");
 
         m.Value.Should().Be("aa");
         m.Groups[1].Value.Should().Be("a");
@@ -51,7 +51,7 @@ public sealed class GrouprefTests
     [Property("Upstream", "RegexTests.test_re_groupref#6")]
     public void An_optional_backreference_to_a_group_that_did_not_participate_may_be_absent()
     {
-        Match m = FuzzyRegex.MatchAtStart("c", @"^(?:(a)|c)(\1)?$");
+        Match m = Upstream.MatchAtStart("c", @"^(?:(a)|c)(\1)?$");
 
         m.Value.Should().Be("c");
         m.Groups[1].Success.Should().BeFalse();
@@ -63,7 +63,7 @@ public sealed class GrouprefTests
     [Property("Upstream", "RegexTests.test_re_groupref#7")]
     public void Findall_resolves_a_backreference_to_an_earlier_group()
     {
-        MatchCollection matches = FuzzyRegex.Matches(
+        MatchCollection matches = Upstream.Matches(
             "TEST, BEST; LEST ; Lest 123 Test, Best",
             @"(?i)(.{1,40}?),(.{1,40}?)(?:;)+(.{1,80}).{1,40}?\3(\ |;)+(.{1,80}?)\1"
         );

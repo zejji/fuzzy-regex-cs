@@ -1,5 +1,4 @@
 using AwesomeAssertions;
-using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
 
@@ -36,18 +35,69 @@ public sealed class OracleWaveTests
         {"generator": "rows", "pattern": "zz", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
+    /// <summary>
+    /// A row whose flags and pattern name no version resolves against the DEFAULT_VERSION the
+    /// RECORDER ran under, so this port has to compile it under that version and not under its own
+    /// default. Since S50b the two differ on purpose, and the pair below is where the difference
+    /// shows: version 1 folds fully, so it matches <c>ss</c> against <c>ß</c> and version 0 does
+    /// not. Without the header's version reaching the compile, this row diverges.
+    /// </summary>
+    [Test]
+    public void A_row_that_names_no_version_is_compiled_under_the_recorders_default()
+    {
+        const string recorded = """
+            {"generator": "rows", "pattern": "ss", "flags": 2, "namedLists": {}, "subject": "ß", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            """;
+
+        OracleRow upstreamDefault = OracleWave.ParseRows(recorded)[0] with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version0,
+        };
+        OracleComparer.Compare(upstreamDefault, OracleComparer.Run(upstreamDefault)).Should().Be(OracleVerdict.Agree);
+
+        // And the same row read as this port's own default is the divergence the pin prevents,
+        // which is what proves the version is doing the work rather than the row being easy.
+        OracleRow portDefault = upstreamDefault with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version1,
+        };
+        OracleComparer.Compare(portDefault, OracleComparer.Run(portDefault)).Should().Be(OracleVerdict.Diverge);
+    }
+
+    /// <summary>
+    /// And a divergence block names the version it was compiled under, so a reader of the report
+    /// never has to assume which of the two questions was asked.
+    /// </summary>
+    [Test]
+    public void A_divergence_block_names_the_version_the_row_was_compiled_under()
+    {
+        OracleRow row = OracleWave.ParseRows(_recordedRows)[0] with
+        {
+            DefaultVersion = (int)FuzzyRegexOptions.Version0,
+        };
+
+        OracleWave.Describe(row, new NoMatchOutcome()).Should().Contain("version=V0");
+        OracleWave
+            .Describe(row with { DefaultVersion = (int)FuzzyRegexOptions.Version1 }, new NoMatchOutcome())
+            .Should()
+            .Contain("version=V1");
+    }
+
     [Test]
     public void The_wave_agrees_with_upstream()
     {
         OracleWaveFile wave = OracleWave.Load();
 
-        // A pattern that names no version resolves against upstream's DEFAULT_VERSION, so a wave
-        // recorded under a different default is asking a different question from the one this
-        // port answers.
+        // A pattern that names no version resolves against upstream's DEFAULT_VERSION, and since
+        // S50b that is NOT this port's own default - so every row is compiled under the version the
+        // recorder ran under (OracleWave.Load stamps it onto each row) rather than under ours. What
+        // has to hold is that the recorder stated a version at all, and one we can honour.
+        // A wave whose DEFAULT_VERSION we cannot read is a wave we cannot compare against.
         wave.Header.DefaultVersion.Should()
-            .Be(
-                PatternCompiler.DefaultVersion,
-                "the wave must be recorded under the default version this port compiles with"
+            .BeOneOf((int)FuzzyRegexOptions.Version0, (int)FuzzyRegexOptions.Version1);
+        wave.Rows.Should()
+            .AllSatisfy(row =>
+                row.DefaultVersion.Should().Be(wave.Header.DefaultVersion, "Load stamps the header onto every row")
             );
         wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
 

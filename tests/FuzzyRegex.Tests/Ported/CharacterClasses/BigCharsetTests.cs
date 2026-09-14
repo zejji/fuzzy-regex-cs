@@ -13,7 +13,7 @@ public sealed class BigCharsetTests
     [Test]
     [Property("Upstream", "RegexTests.test_bigcharset#1-2")]
     public void Set_of_two_high_codepoints_captures_the_matching_one() =>
-        FuzzyRegex.MatchAtStart("∢", "([∢∣])").Groups[1].Value.Should().Be("∢");
+        Upstream.MatchAtStart("∢", "([∢∣])").Groups[1].Value.Should().Be("∢");
 
     [Test]
     [Property("Upstream", "RegexTests.test_bigcharset#3")]
@@ -21,7 +21,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, ".").Select(static m => m.Value));
+        string joined = string.Concat(Upstream.Matches(subject, ".").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }
@@ -32,7 +32,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, "[eèéêëēěė]").Select(static m => m.Value));
+        string joined = string.Concat(Upstream.Matches(subject, "[eèéêëēěė]").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }
@@ -43,7 +43,7 @@ public sealed class BigCharsetTests
     {
         const string subject = "eèéêëēěė";
 
-        string joined = string.Concat(FuzzyRegex.Matches(subject, "e|è|é|ê|ë|ē|ě|ė").Select(static m => m.Value));
+        string joined = string.Concat(Upstream.Matches(subject, "e|è|é|ê|ë|ē|ě|ė").Select(static m => m.Value));
 
         joined.Should().Be(subject);
     }

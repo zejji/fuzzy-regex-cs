@@ -10,13 +10,13 @@ public sealed class MatchGroupsTests
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#1")]
     public void A_pattern_with_no_groups_reports_only_the_whole_match() =>
-        FuzzyRegex.MatchAtStart("a", "a").Value.Should().Be("a");
+        Upstream.MatchAtStart("a", "a").Value.Should().Be("a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#2")]
     public void A_single_group_participates_in_the_whole_tuple()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", "(a)");
+        Match m = Upstream.MatchAtStart("a", "(a)");
 
         m.Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("a");
@@ -24,18 +24,18 @@ public sealed class MatchGroupsTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#3")]
-    public void Indexing_group_zero_is_the_whole_match() => FuzzyRegex.MatchAtStart("a", "(a)").Value.Should().Be("a");
+    public void Indexing_group_zero_is_the_whole_match() => Upstream.MatchAtStart("a", "(a)").Value.Should().Be("a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#4")]
     public void Indexing_group_one_is_its_capture() =>
-        FuzzyRegex.MatchAtStart("a", "(a)").Groups[1].Value.Should().Be("a");
+        Upstream.MatchAtStart("a", "(a)").Groups[1].Value.Should().Be("a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_match#5")]
     public void Requesting_the_same_group_twice_returns_it_twice()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", "(a)");
+        Match m = Upstream.MatchAtStart("a", "(a)");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("a");
@@ -62,7 +62,7 @@ public sealed class MatchGroupsTests
         string? group4
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, "((a)|(b))(c)?");
+        Match m = Upstream.MatchAtStart(subject, "((a)|(b))(c)?");
 
         m.Value.Should().Be(whole);
         m.Groups[1].Value.Should().Be(group1);
@@ -90,7 +90,7 @@ public sealed class MatchGroupsTests
     [Property("Upstream", "RegexTests.test_re_match#11-14")]
     public void Group_accessor_forms_agree_for_a_single_capturing_group()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", "(a)");
+        Match m = Upstream.MatchAtStart("a", "(a)");
 
         m.Value.Should().Be("a"); // m.group()
         m.Value.Should().Be("a"); // m.group(0)
@@ -103,7 +103,7 @@ public sealed class MatchGroupsTests
     [Property("Upstream", "RegexTests.test_re_match#15")]
     public void Multiple_numbered_groups_can_be_requested_together()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
+        Match m = Upstream.MatchAtStart("a", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Success.Should().BeFalse();
@@ -114,7 +114,7 @@ public sealed class MatchGroupsTests
     [Property("Upstream", "RegexTests.test_re_match#16")]
     public void Multiple_named_groups_can_be_requested_together()
     {
-        Match m = FuzzyRegex.MatchAtStart("b", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
+        Match m = Upstream.MatchAtStart("b", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
 
         m.Groups["a1"].Success.Should().BeFalse();
         m.Groups["b2"].Value.Should().Be("b");
@@ -125,7 +125,7 @@ public sealed class MatchGroupsTests
     [Property("Upstream", "RegexTests.test_re_match#17")]
     public void Numbered_and_named_group_requests_can_be_mixed()
     {
-        Match m = FuzzyRegex.MatchAtStart("ac", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
+        Match m = Upstream.MatchAtStart("ac", "(?:(?P<a1>a)|(?P<b2>b))(?P<c3>c)?");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups["b2"].Success.Should().BeFalse();

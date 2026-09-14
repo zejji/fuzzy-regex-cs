@@ -76,7 +76,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments("(abcdefghi){e}", 15)]
     public void Bestmatch_picks_the_best_scoring_span_over_a_noisy_prefix(string pattern, int end)
     {
-        Match m = FuzzyRegex.Match("******abcdefghijklmnopqrtuvwxyz", pattern, FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.Match("******abcdefghijklmnopqrtuvwxyz", pattern, FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(6);
         (m.Index + m.Length).Should().Be(end);
@@ -89,7 +89,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments("xxxxx", 5)]
     public void Bestmatch_with_a_one_error_budget_matches_a_repeated_literal_short_of_the_count(string subject, int end)
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, "(x{6}){e<=1}", FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.MatchAtStart(subject, "(x{6}){e<=1}", FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(end);
@@ -98,7 +98,7 @@ public sealed class RegressionsFuzzyTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#230")]
     public void Bestmatch_fails_when_too_few_repeats_remain_for_the_error_budget() =>
-        FuzzyRegex.MatchAtStart("x", "(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
+        Upstream.MatchAtStart("x", "(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#231-232")]
@@ -109,7 +109,7 @@ public sealed class RegressionsFuzzyTests
         int end
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, "(?r)(x{6}){e<=1}", FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.MatchAtStart(subject, "(?r)(x{6}){e<=1}", FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(end);
@@ -118,14 +118,14 @@ public sealed class RegressionsFuzzyTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#233")]
     public void Bestmatch_reverse_fails_when_too_few_repeats_remain_for_the_error_budget() =>
-        FuzzyRegex.MatchAtStart("x", "(?r)(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
+        Upstream.MatchAtStart("x", "(?r)(x{6}){e<=1}", FuzzyRegexOptions.BestMatch).Success.Should().BeFalse();
 
     // Hg issue 225: BESTMATCH in fuzzy match not working.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#265-266")]
     public void Bestmatch_with_insertion_and_deletion_finds_the_extra_char_span_and_reports_one_insertion()
     {
-        Match m = FuzzyRegex.Match("12234", "(^1234$){i,d}", FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.Match("12234", "(^1234$){i,d}", FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(5);
@@ -136,7 +136,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#267-268")]
     public void Bestmatch_with_substitution_insertion_and_deletion_finds_the_extra_char_span_and_reports_one_insertion()
     {
-        Match m = FuzzyRegex.Match("12234", "(^1234$){s,i,d}", FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.Match("12234", "(^1234$){s,i,d}", FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(5);
@@ -148,7 +148,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#269-270")]
     public void Bestmatch_anchored_at_both_ends_spans_the_whole_noisy_prefix_as_insertions()
     {
-        Match m = FuzzyRegex.Match("xxxxxxxx123", "(^123$){s,i,d}", FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.Match("xxxxxxxx123", "(^123$){s,i,d}", FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(11);
@@ -160,7 +160,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#417-418")]
     public void Bestmatch_on_a_dna_sequence_finds_the_named_groups_across_the_whole_string()
     {
-        Match m = FuzzyRegex.MatchAtStart(_gitIssue427Sequence, _gitIssue427Pattern, FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.MatchAtStart(_gitIssue427Sequence, _gitIssue427Pattern, FuzzyRegexOptions.BestMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(50);
@@ -175,7 +175,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#419-420")]
     public void Enhancematch_on_the_same_dna_sequence_finds_the_same_named_groups()
     {
-        Match m = FuzzyRegex.MatchAtStart(_gitIssue427Sequence, _gitIssue427Pattern, FuzzyRegexOptions.EnhanceMatch);
+        Match m = Upstream.MatchAtStart(_gitIssue427Sequence, _gitIssue427Pattern, FuzzyRegexOptions.EnhanceMatch);
 
         m.Index.Should().Be(0);
         (m.Index + m.Length).Should().Be(50);
@@ -191,7 +191,7 @@ public sealed class RegressionsFuzzyTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#56")]
     public void An_error_range_with_a_lower_bound_forces_at_least_that_many_errors_into_the_match() =>
-        FuzzyRegex
+        Upstream
             .Match(_hgIssue82Sequence, _hgIssue82FuzzyPattern, FuzzyRegexOptions.BestMatch)
             .Value.Should()
             .Be("tCAGCCTCCCATTCAGAATATACATCC");
@@ -207,7 +207,7 @@ public sealed class RegressionsFuzzyTests
         int insertions,
         int deletions
     ) =>
-        FuzzyRegex
+        Upstream
             .Match(subject, @"(?e)(dogf(((oo){e<1})|((00){e<1}))d){e<2}")
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(substitutions, insertions, deletions));
@@ -218,7 +218,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#369-370")]
     public void Bestmatch_on_a_long_dna_sequence_reports_the_single_insertion_position()
     {
-        Match m = FuzzyRegex.Match(_hgIssue300Sequence, _hgIssue300FuzzyPattern, FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.Match(_hgIssue300Sequence, _hgIssue300FuzzyPattern, FuzzyRegexOptions.BestMatch);
 
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
         m.FuzzyChanges.Substitutions.Should().BeEmpty();
@@ -231,7 +231,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#380")]
     public void Fuzzy_changes_reports_deletion_positions_when_the_match_starts_mid_pattern()
     {
-        Match m = FuzzyRegex.Match(
+        Match m = Upstream.Match(
             "TTCCCCGCGCCAGCGGGGATAAACCG",
             @"(?be)(AGTGTTCCCCGCGCCAGCGGGGATAAACCG){s<=5,i<=5,d<=5,s+i+d<=10}"
         );
@@ -246,7 +246,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#381-382")]
     public void Default_mode_reports_a_missing_letter_as_a_substitution_plus_a_deletion()
     {
-        Match m = FuzzyRegex.MatchAtStart("c", @"(?:bc){e}");
+        Match m = Upstream.MatchAtStart("c", @"(?:bc){e}");
 
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
         m.FuzzyChanges.Substitutions.Should().Equal(0);
@@ -258,7 +258,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#383-384")]
     public void Enhancematch_mode_reports_the_same_missing_letter_as_a_single_deletion()
     {
-        Match m = FuzzyRegex.MatchAtStart("c", @"(?e)(?:bc){e}");
+        Match m = Upstream.MatchAtStart("c", @"(?e)(?:bc){e}");
 
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
         m.FuzzyChanges.Substitutions.Should().BeEmpty();
@@ -270,7 +270,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#385-386")]
     public void Bestmatch_inline_flag_reports_the_same_missing_letter_as_a_single_deletion()
     {
-        Match m = FuzzyRegex.MatchAtStart("c", @"(?b)(?:bc){e}");
+        Match m = Upstream.MatchAtStart("c", @"(?b)(?:bc){e}");
 
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
         m.FuzzyChanges.Substitutions.Should().BeEmpty();
@@ -283,7 +283,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#421-422")]
     public void An_exact_dna_match_reports_no_errors_or_error_positions()
     {
-        Match m = FuzzyRegex.MatchAtStart(_gitIssue433ExactSequence, _gitIssue433Pattern, FuzzyRegexOptions.BestMatch);
+        Match m = Upstream.MatchAtStart(_gitIssue433ExactSequence, _gitIssue433Pattern, FuzzyRegexOptions.BestMatch);
 
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
         m.FuzzyChanges.Substitutions.Should().BeEmpty();
@@ -295,7 +295,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#423-424")]
     public void A_dna_match_with_two_substitutions_reports_their_positions()
     {
-        Match m = FuzzyRegex.MatchAtStart(
+        Match m = Upstream.MatchAtStart(
             _gitIssue433SubstitutedSequence,
             _gitIssue433Pattern,
             FuzzyRegexOptions.BestMatch
@@ -315,7 +315,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?:cats|cat){e<=1}")]
     [Arguments(@"(?:cat){e<=1}")]
     public void A_single_substitution_is_reported_the_same_way_regardless_of_mode(string pattern) =>
-        FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        Upstream.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     // Upstream asserts the same counts under (?e) and (?b), so these four rows are the same
     // behaviour asked of the two ranking modes rather than of plain fuzzy matching. They were split
@@ -326,59 +326,59 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?e)(?:cats|cat){e<=1}")]
     [Arguments(@"(?e)(?:cat){e<=1}")]
     public void A_single_substitution_is_reported_the_same_way_in_enhancematch_mode(string pattern) =>
-        FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        Upstream.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#91, #94")]
     [Arguments(@"(?b)(?:cats|cat){e<=1}")]
     [Arguments(@"(?b)(?:cat){e<=1}")]
     public void A_single_substitution_is_reported_the_same_way_in_bestmatch_mode(string pattern) =>
-        FuzzyRegex.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        Upstream.MatchAtStart("caz", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#95")]
     public void One_letter_gap_by_default_is_a_substitution_and_an_insertion() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#96")]
     public void One_letter_gap_in_enhancematch_mode_is_one_insertion_alone() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#97")]
     public void One_letter_gap_in_bestmatch_mode_is_one_insertion_alone() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#98")]
     public void Two_letter_gaps_are_reported_as_two_insertions() =>
-        FuzzyRegex.MatchAtStart("c a ts", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+        Upstream.MatchAtStart("c a ts", @"(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#99")]
     public void Two_letter_gaps_are_reported_as_two_insertions_in_enhancematch_mode() =>
-        FuzzyRegex.MatchAtStart("c a ts", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+        Upstream.MatchAtStart("c a ts", @"(?e)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#100")]
     public void Two_letter_gaps_are_reported_as_two_insertions_in_bestmatch_mode() =>
-        FuzzyRegex.MatchAtStart("c a ts", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+        Upstream.MatchAtStart("c a ts", @"(?b)(?:cats){e<=2}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#101")]
     public void One_letter_gap_within_a_tight_budget_is_reported_as_one_insertion() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#102")]
     public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_enhancematch_mode() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?e)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?e)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#103")]
     public void One_letter_gap_within_a_tight_budget_is_one_insertion_in_bestmatch_mode() =>
-        FuzzyRegex.MatchAtStart("c ats", @"(?b)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        Upstream.MatchAtStart("c ats", @"(?b)(?:cats){e<=1}").FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
 
     // Git issue 370: Confusions about Fuzzy matching behavior.
     [Test]
@@ -395,7 +395,7 @@ public sealed class RegressionsFuzzyTests
         int insertions,
         int deletions
     ) =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart(subject, pattern)
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(substitutions, insertions, deletions));
@@ -405,13 +405,13 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?e)(?:0?,0(?:,0)?){s<=1,d<=1}")]
     [Arguments(@"(?e)(?:0??,0(?:,0)?){s<=1,d<=1}")]
     public void An_optional_leading_zero_lazy_or_greedy_still_reports_one_substitution(string pattern) =>
-        FuzzyRegex.FullMatch(",0;0", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        Upstream.FullMatch(",0;0", pattern).FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
 
     // Git issue 403: Fuzzy matching with wrong distance (unnecessary substitutions).
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#399")]
     public void Bestmatch_avoids_unnecessary_substitutions_when_deletions_explain_the_gap() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("terstin", @"^(test){e<=5}$", FuzzyRegexOptions.BestMatch)
             .FuzzyCounts.Should()
             .Be(new FuzzyCounts(0, 3, 0));
@@ -429,7 +429,7 @@ public sealed class RegressionsFuzzyTests
             ["lzy", "", "lzy", "hog", "hog", ""],
         ];
 
-        FuzzyRegex
+        Upstream
             .Matches(
                 "The quick borwn fax jumped over the lzy hog",
                 @"((brown)|(lazy)){1<=e<=3} ((dog)|(fox)){1<=e<=3}",
@@ -447,7 +447,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#62-63")]
     public void A_compiled_fuzzy_pattern_with_a_word_boundary_finds_no_match_in_ordinary_text()
     {
-        var rx = new FuzzyRegex(@"\bt(est){i<2}", FuzzyRegexOptions.Version1);
+        var rx = Upstream.Compile(@"\bt(est){i<2}", FuzzyRegexOptions.Version1);
 
         rx.Match("Some text").Success.Should().BeFalse();
         rx.Matches("Some text").Select(static m => m.Value).Should().BeEmpty();
@@ -459,7 +459,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?i)(?:error){e}")]
     [Arguments(@"(?fi)(?:error){e}")]
     public void Fuzzy_iteration_over_a_short_subject_does_not_read_past_the_end(string pattern) =>
-        FuzzyRegex
+        Upstream
             .Matches("regex failure", pattern)
             .Select(static m => (m.Index, End: m.Index + m.Length))
             .Should()
@@ -474,7 +474,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#236")]
     public void A_pattern_with_a_fuzzy_recursive_group_reference_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex("((?0)){e}");
+        Action act = static () => _ = Upstream.Compile("((?0)){e}");
         act.Should().NotThrow();
     }
 
@@ -484,7 +484,7 @@ public sealed class RegressionsFuzzyTests
     [Property("Upstream", "RegexTests.test_hg_bugs#237")]
     public void A_pattern_starting_with_a_literal_nul_before_a_fuzzy_recursive_reference_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex("\x00?(?0){e}");
+        Action act = static () => _ = Upstream.Compile("\x00?(?0){e}");
         act.Should().NotThrow();
     }
 
@@ -495,7 +495,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(\d)(?:\1{5}){e<=1}")]
     public void Fuzzy_matching_honours_a_backreference_to_an_earlier_group(string pattern)
     {
-        Match m = FuzzyRegex.Match("3222212", pattern);
+        Match m = Upstream.Match("3222212", pattern);
 
         m.Index.Should().Be(1);
         (m.Index + m.Length).Should().Be(7);
@@ -516,7 +516,7 @@ public sealed class RegressionsFuzzyTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     // Hg issue 248: Unexpected result with fuzzy matching and more than one non-greedy quantifier.
     [Test]
@@ -526,7 +526,7 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?:A.*?B.*CDE){e<=2}")]
     [Arguments(@"(?:A.*?B.*?CDE){e<=2}")]
     public void Fuzzy_matching_with_mixed_greedy_and_lazy_dot_star_still_spans_the_whole_match(string pattern) =>
-        FuzzyRegex.Match("A B CYZ", pattern).Value.Should().Be("A B CYZ");
+        Upstream.Match("A B CYZ", pattern).Value.Should().Be("A B CYZ");
 
     // ---- the '{...:test}' constraint (parsed since S13, matched since S40) ----
 
@@ -536,13 +536,13 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(?:cat){e<=1:[u]}")]
     [Arguments(@"(?:cat){e<=1:u}")]
     public void Fuzzy_character_restriction_accepts_bracketed_or_bare_character_syntax(string pattern) =>
-        FuzzyRegex.MatchAtStart("cut", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart("cut", pattern).Success.Should().BeTrue();
 
     // Git issue 371: Specifying character set when fuzzy-matching allows characters not in the set.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#394")]
     public void Fuzzy_character_restriction_rejects_digits_outside_the_allowed_set() =>
-        FuzzyRegex
+        Upstream
             .Match("cat dog starting at 00:01132.000. hello world", @"\b(?e)(?:\d{6,20}){i<=5:[\-\\\/]}\b")
             .Success.Should()
             .BeFalse();
@@ -553,29 +553,29 @@ public sealed class RegressionsFuzzyTests
     [Arguments(@"(\d+){i<=2:[ab]}")]
     [Arguments(@"(?i)(\d+){i<=2:[ab]}")]
     public void Fuzzy_character_restriction_stops_digit_runs_from_absorbing_non_digit_non_set_letters(string pattern) =>
-        FuzzyRegex.Matches("123X4Y5", pattern).Select(static m => m.Value).Should().Equal("123", "4", "5");
+        Upstream.Matches("123X4Y5", pattern).Select(static m => m.Value).Should().Equal("123", "4", "5");
 
     // Git issue 415: Fuzzy character restrictions don't apply to insertions at "right edge".
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#402-403")]
     public void Fuzzy_character_restriction_on_a_substitution_rejects_a_char_outside_the_set()
     {
-        FuzzyRegex.MatchAtStart("te5t", @"t(?:es){s<=1:\d}t").Value.Should().Be("te5t");
-        FuzzyRegex.MatchAtStart("tezt", @"t(?:es){s<=1:\d}t").Success.Should().BeFalse();
+        Upstream.MatchAtStart("te5t", @"t(?:es){s<=1:\d}t").Value.Should().Be("te5t");
+        Upstream.MatchAtStart("tezt", @"t(?:es){s<=1:\d}t").Success.Should().BeFalse();
     }
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#404-406")]
     public void Fuzzy_character_restriction_on_an_insertion_rejects_a_char_outside_the_set_and_reports_its_position()
     {
-        Match matched = FuzzyRegex.MatchAtStart("tes5t", @"t(?:es){i<=1:\d}t");
+        Match matched = Upstream.MatchAtStart("tes5t", @"t(?:es){i<=1:\d}t");
 
         matched.Value.Should().Be("tes5t");
         matched.FuzzyChanges.Substitutions.Should().BeEmpty();
         matched.FuzzyChanges.Insertions.Should().Equal(3);
         matched.FuzzyChanges.Deletions.Should().BeEmpty();
 
-        FuzzyRegex.MatchAtStart("teszt", @"t(?:es){i<=1:\d}t").Success.Should().BeFalse();
+        Upstream.MatchAtStart("teszt", @"t(?:es){i<=1:\d}t").Success.Should().BeFalse();
     }
 
     [Test]
@@ -583,13 +583,13 @@ public sealed class RegressionsFuzzyTests
     // for the multi-constraint error budget it does need.
     [Property("Upstream", "RegexTests.test_hg_bugs#407")]
     public void A_captured_group_with_an_insertion_budget_and_a_nonzero_error_floor_still_matches() =>
-        FuzzyRegex.MatchAtStart("tes5t", @"t(es){i<=1,0<e<=1}t").Value.Should().Be("tes5t");
+        Upstream.MatchAtStart("tes5t", @"t(es){i<=1,0<e<=1}t").Value.Should().Be("tes5t");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#408")]
     public void Fuzzy_character_restriction_combined_with_a_nonzero_error_floor_reports_the_insertion_position()
     {
-        Match m = FuzzyRegex.MatchAtStart("tes5t", @"t(?:es){i<=1,0<e<=1:\d}t");
+        Match m = Upstream.MatchAtStart("tes5t", @"t(?:es){i<=1,0<e<=1:\d}t");
 
         m.FuzzyChanges.Substitutions.Should().BeEmpty();
         m.FuzzyChanges.Insertions.Should().Equal(3);
@@ -603,5 +603,5 @@ public sealed class RegressionsFuzzyTests
     [Arguments(FuzzyRegexOptions.IgnoreCase)]
     public void Fuzzy_insertion_restricted_to_a_space_does_not_let_a_word_boundary_insert_a_letter(
         FuzzyRegexOptions options
-    ) => FuzzyRegex.Match("having", @"(?:\bha\b){i:[ ]}", options).Success.Should().BeFalse();
+    ) => Upstream.Match("having", @"(?:\bha\b){i:[ ]}", options).Success.Should().BeFalse();
 }

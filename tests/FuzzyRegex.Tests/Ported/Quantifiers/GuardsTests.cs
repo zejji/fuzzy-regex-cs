@@ -17,7 +17,7 @@ public sealed class GuardsTests
     [Property("Upstream", "RegexTests.test_guards#1")]
     public void A_bounded_repeat_of_a_group_stops_backtracking_at_the_last_successful_repetition()
     {
-        Match m = FuzzyRegex.Match("XY\nX Y\nX  Y\nXY\nXX AB:", @"(X.*?Y\s*){3}(X\s*)+AB:");
+        Match m = Upstream.Match("XY\nX Y\nX  Y\nXY\nXX AB:", @"(X.*?Y\s*){3}(X\s*)+AB:");
 
         (m.Index, m.Index + m.Length).Should().Be((3, 21));
         (m.Groups[1].Index, m.Groups[1].Index + m.Groups[1].Length).Should().Be((12, 15));
@@ -28,7 +28,7 @@ public sealed class GuardsTests
     [Property("Upstream", "RegexTests.test_guards#2")]
     public void An_unbounded_minimum_repeat_of_a_group_still_starts_at_the_earliest_possible_match()
     {
-        Match m = FuzzyRegex.Match("XY\nX Y\nX  Y\nXY\nXX AB:", @"(X.*?Y\s*){3,}(X\s*)+AB:");
+        Match m = Upstream.Match("XY\nX Y\nX  Y\nXY\nXX AB:", @"(X.*?Y\s*){3,}(X\s*)+AB:");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 21));
         (m.Groups[1].Index, m.Groups[1].Index + m.Groups[1].Length).Should().Be((12, 15));
@@ -39,7 +39,7 @@ public sealed class GuardsTests
     [Property("Upstream", "RegexTests.test_guards#3")]
     public void An_optional_group_that_does_not_participate_reports_no_success()
     {
-        Match m = FuzzyRegex.Match("9999XX", @"\d{4}(\s*\w)?\W*((?!\d)\w){2}");
+        Match m = Upstream.Match("9999XX", @"\d{4}(\s*\w)?\W*((?!\d)\w){2}");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 6));
         m.Groups[1].Success.Should().BeFalse();
@@ -50,7 +50,7 @@ public sealed class GuardsTests
     [Property("Upstream", "RegexTests.test_guards#4")]
     public void A_lazy_bounded_repeat_still_reaches_a_literal_that_only_appears_later()
     {
-        Match m = FuzzyRegex.Match("A\n1\nS\n1 (X", @"A\s*?.*?(\n+.*?\s*?){0,2}\(X");
+        Match m = Upstream.Match("A\n1\nS\n1 (X", @"A\s*?.*?(\n+.*?\s*?){0,2}\(X");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 10));
         (m.Groups[1].Index, m.Groups[1].Index + m.Groups[1].Length).Should().Be((5, 8));
@@ -62,7 +62,7 @@ public sealed class GuardsTests
     [Property("Upstream", "RegexTests.test_guards#5-6")]
     public void A_lazy_whitespace_repeat_before_a_colon_finds_the_second_occurrence(string subject, int start, int end)
     {
-        Match m = FuzzyRegex.Match(subject, @"Derde\s*:");
+        Match m = Upstream.Match(subject, @"Derde\s*:");
 
         (m.Index, m.Index + m.Length).Should().Be((start, end));
     }

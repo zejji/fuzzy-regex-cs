@@ -27,52 +27,52 @@ public sealed class ZeroWidthTests
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#1")]
     public void Split_on_a_word_boundary_yields_the_word_the_gap_and_empty_ends() =>
-        new FuzzyRegex(@"\b").Split("a b").Should().Equal("", "a", " ", "b", "");
+        Upstream.Compile(@"\b").Split("a b").Should().Equal("", "a", " ", "b", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#3")]
     public void Split_on_a_word_boundary_under_the_V1_flag_gives_the_same_pieces() =>
-        new FuzzyRegex(@"(?V1)\b").Split("a b").Should().Equal("", "a", " ", "b", "");
+        Upstream.Compile(@"(?V1)\b").Split("a b").Should().Equal("", "a", " ", "b", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#4,5")]
     public void Matches_value_for_start_anchor_or_word_run_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
+        Upstream.Matches("foo bar", @"^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#6,7")]
     public void Matches_value_for_start_anchor_or_word_run_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?r)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
+        Upstream.Matches("foo bar", @"(?r)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#8,9")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_forward() =>
-        FuzzyRegex.Matches("foo bar", @"(?V1)^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
+        Upstream.Matches("foo bar", @"(?V1)^|\w+").Select(static m => m.Value).Should().Equal("", "foo", "bar");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#10,11")]
     public void Matches_value_for_start_anchor_or_word_run_under_the_V1_flag_scans_backward() =>
-        FuzzyRegex.Matches("foo bar", @"(?rV1)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
+        Upstream.Matches("foo bar", @"(?rV1)^|\w+").Select(static m => m.Value).Should().Equal("bar", "foo", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#12")]
     public void Split_on_an_empty_pattern_yields_every_char_with_empty_ends() =>
-        new FuzzyRegex("").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
+        Upstream.Compile("").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#16")]
     public void Split_on_a_reversed_empty_pattern_yields_every_char_in_reverse_with_empty_ends() =>
-        new FuzzyRegex("(?r)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");
+        Upstream.Compile("(?r)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#20")]
     public void Split_on_an_empty_V1_pattern_yields_every_char_with_empty_ends() =>
-        new FuzzyRegex("(?V1)").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
+        Upstream.Compile("(?V1)").Split("xaxbxc").Should().Equal("", "x", "a", "x", "b", "x", "c", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_zerowidth#22")]
     public void Split_on_a_reversed_empty_V1_pattern_yields_every_char_in_reverse_with_empty_ends() =>
-        new FuzzyRegex("(?rV1)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");
+        Upstream.Compile("(?rV1)").Split("xaxbxc").Should().Equal("", "c", "x", "b", "x", "a", "x", "");
 
     // NOT PORTED: #2, #14, #15, #18, #19 - the pre-3.7 branch of each version guard.
     // NOT PORTED: #13, #17, #21, #23 - regex.splititer, deferred; Split covers the same pieces.

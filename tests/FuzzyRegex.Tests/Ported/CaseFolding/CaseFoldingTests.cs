@@ -24,7 +24,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#1")]
     public void Lower_ss_full_folds_to_upper_SS()
     {
-        Match m = FuzzyRegex.Match("SS", "(?fi)ss");
+        Match m = Upstream.Match("SS", "(?fi)ss");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -33,7 +33,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#2")]
     public void Upper_SS_full_folds_to_lower_ss()
     {
-        Match m = FuzzyRegex.Match("ss", "(?fi)SS");
+        Match m = Upstream.Match("ss", "(?fi)SS");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -42,7 +42,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#3")]
     public void Upper_SS_full_folds_to_sharp_s()
     {
-        Match m = FuzzyRegex.Match("ß", "(?fi)SS");
+        Match m = Upstream.Match("ß", "(?fi)SS");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -51,7 +51,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#4")]
     public void Sharp_s_pattern_full_folds_to_upper_SS()
     {
-        Match m = FuzzyRegex.Match("SS", @"(?fi)\N{LATIN SMALL LETTER SHARP S}");
+        Match m = Upstream.Match("SS", @"(?fi)\N{LATIN SMALL LETTER SHARP S}");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -60,7 +60,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#5")]
     public void Ligature_st_pattern_full_folds_to_ST()
     {
-        Match m = FuzzyRegex.Match("ST", @"(?fi)\N{LATIN SMALL LIGATURE ST}");
+        Match m = Upstream.Match("ST", @"(?fi)\N{LATIN SMALL LIGATURE ST}");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -69,7 +69,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#6")]
     public void Upper_ST_full_folds_to_ligature_st()
     {
-        Match m = FuzzyRegex.Match("ﬆ", "(?fi)ST");
+        Match m = Upstream.Match("ﬆ", "(?fi)ST");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -78,7 +78,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#7")]
     public void Upper_ST_full_folds_to_ligature_long_s_t()
     {
-        Match m = FuzzyRegex.Match("ﬅ", "(?fi)ST");
+        Match m = Upstream.Match("ﬅ", "(?fi)ST");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -87,7 +87,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#8")]
     public void Upper_SST_full_folds_to_sharp_s_plus_t()
     {
-        Match m = FuzzyRegex.Match("ßt", "(?fi)SST");
+        Match m = Upstream.Match("ßt", "(?fi)SST");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -96,7 +96,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#9")]
     public void Upper_SST_full_folds_to_s_plus_ligature_long_s_t()
     {
-        Match m = FuzzyRegex.Match("sﬅ", "(?fi)SST");
+        Match m = Upstream.Match("sﬅ", "(?fi)SST");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -106,7 +106,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#10,12")]
     public void Upper_SST_full_folds_to_s_plus_ligature_st()
     {
-        Match m = FuzzyRegex.Match("sﬆ", "(?fi)SST");
+        Match m = Upstream.Match("sﬆ", "(?fi)SST");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -115,7 +115,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#11")]
     public void Ligature_st_pattern_full_folds_within_upper_SST()
     {
-        Match m = FuzzyRegex.Match("SST", @"(?fi)\N{LATIN SMALL LIGATURE ST}");
+        Match m = Upstream.Match("SST", @"(?fi)\N{LATIN SMALL LIGATURE ST}");
 
         (m.Index, m.Index + m.Length).Should().Be((1, 3));
     }
@@ -124,7 +124,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#13")]
     public void Upper_FFI_full_folds_to_ligature_ffi()
     {
-        Match m = FuzzyRegex.Match("ﬃ", "(?fi)FFI");
+        Match m = Upstream.Match("ﬃ", "(?fi)FFI");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -133,7 +133,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#14")]
     public void Upper_FFI_full_folds_to_ligature_ff_plus_i()
     {
-        Match m = FuzzyRegex.Match("ﬀi", "(?fi)FFI");
+        Match m = Upstream.Match("ﬀi", "(?fi)FFI");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -142,7 +142,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#15")]
     public void Upper_FFI_full_folds_to_f_plus_ligature_fi()
     {
-        Match m = FuzzyRegex.Match("fﬁ", "(?fi)FFI");
+        Match m = Upstream.Match("fﬁ", "(?fi)FFI");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
     }
@@ -151,7 +151,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#16")]
     public void Ligature_ffi_pattern_full_folds_to_upper_FFI()
     {
-        Match m = FuzzyRegex.Match("FFI", @"(?fi)\N{LATIN SMALL LIGATURE FFI}");
+        Match m = Upstream.Match("FFI", @"(?fi)\N{LATIN SMALL LIGATURE FFI}");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 3));
     }
@@ -160,7 +160,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#17")]
     public void Ligature_ff_pattern_plus_i_full_folds_to_upper_FFI()
     {
-        Match m = FuzzyRegex.Match("FFI", @"(?fi)\N{LATIN SMALL LIGATURE FF}i");
+        Match m = Upstream.Match("FFI", @"(?fi)\N{LATIN SMALL LIGATURE FF}i");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 3));
     }
@@ -169,7 +169,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#18")]
     public void F_plus_ligature_fi_pattern_full_folds_to_upper_FFI()
     {
-        Match m = FuzzyRegex.Match("FFI", @"(?fi)f\N{LATIN SMALL LIGATURE FI}");
+        Match m = Upstream.Match("FFI", @"(?fi)f\N{LATIN SMALL LIGATURE FI}");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 3));
     }
@@ -188,50 +188,50 @@ public sealed class CaseFoldingTests
     [Arguments("ς", "ς")]
     [Property("Upstream", "RegexTests.test_case_folding#19")]
     public void Every_sigma_form_full_folds_to_every_other_sigma_form(string ch1, string ch2) =>
-        FuzzyRegex.MatchAtStart(ch2, "(?fi)" + ch1).Success.Should().BeTrue();
+        Upstream.MatchAtStart(ch2, "(?fi)" + ch1).Success.Should().BeTrue();
 
     // Upstream repeats several of these six (?iV1) checks verbatim later in the method (its own
     // assertions 26-29 and 31); folded into their first occurrence.
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#20,26")]
     public void V1_ignore_case_ff_matches_ligature_ff_then_fi() =>
-        FuzzyRegex.Match("ﬀﬁ", "(?iV1)ff").Success.Should().BeTrue();
+        Upstream.Match("ﬀﬁ", "(?iV1)ff").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#21")]
     public void V1_ignore_case_ff_matches_ligature_fi_then_ff() =>
-        FuzzyRegex.Match("ﬁﬀ", "(?iV1)ff").Success.Should().BeTrue();
+        Upstream.Match("ﬁﬀ", "(?iV1)ff").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#22,27")]
     public void V1_ignore_case_fi_matches_ligature_ff_then_fi() =>
-        FuzzyRegex.Match("ﬀﬁ", "(?iV1)fi").Success.Should().BeTrue();
+        Upstream.Match("ﬀﬁ", "(?iV1)fi").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#23")]
     public void V1_ignore_case_fi_matches_ligature_fi_then_ff() =>
-        FuzzyRegex.Match("ﬁﬀ", "(?iV1)fi").Success.Should().BeTrue();
+        Upstream.Match("ﬁﬀ", "(?iV1)fi").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#24,28")]
     public void V1_ignore_case_fffi_matches_ligature_ff_then_fi() =>
-        FuzzyRegex.Match("ﬀﬁ", "(?iV1)fffi").Success.Should().BeTrue();
+        Upstream.Match("ﬀﬁ", "(?iV1)fffi").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#25,29")]
     public void V1_ignore_case_f_plus_ligature_ffi_matches_ligature_ff_then_fi() =>
-        FuzzyRegex.Match("ﬀﬁ", "(?iV1)fﬃ").Success.Should().BeTrue();
+        Upstream.Match("ﬀﬁ", "(?iV1)fﬃ").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#30,31")]
     public void V1_ignore_case_f_plus_ligature_fi_matches_ligature_ff_then_i() =>
-        FuzzyRegex.Match("ﬀi", "(?iV1)fﬁ").Success.Should().BeTrue();
+        Upstream.Match("ﬀi", "(?iV1)fﬁ").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#34")]
     public void Ligature_ffi_full_folds_inside_a_longer_word()
     {
-        Match m = FuzzyRegex.Match("  affine  ", @"(?fi)a\N{LATIN SMALL LIGATURE FFI}ne");
+        Match m = Upstream.Match("  affine  ", @"(?fi)a\N{LATIN SMALL LIGATURE FFI}ne");
 
         (m.Index, m.Index + m.Length).Should().Be((2, 8));
     }
@@ -240,7 +240,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#35")]
     public void Ligature_ffi_full_folds_inside_an_alternation()
     {
-        Match m = FuzzyRegex.Match("  affine  ", @"(?fi)a(?:\N{LATIN SMALL LIGATURE FFI}|x)ne");
+        Match m = Upstream.Match("  affine  ", @"(?fi)a(?:\N{LATIN SMALL LIGATURE FFI}|x)ne");
 
         (m.Index, m.Index + m.Length).Should().Be((2, 8));
     }
@@ -249,7 +249,7 @@ public sealed class CaseFoldingTests
     [Property("Upstream", "RegexTests.test_case_folding#36")]
     public void Ligature_ffi_full_folds_inside_a_multi_char_alternation()
     {
-        Match m = FuzzyRegex.Match("  affine  ", @"(?fi)a(?:\N{LATIN SMALL LIGATURE FFI}|xy)ne");
+        Match m = Upstream.Match("  affine  ", @"(?fi)a(?:\N{LATIN SMALL LIGATURE FFI}|xy)ne");
 
         (m.Index, m.Index + m.Length).Should().Be((2, 8));
     }

@@ -44,9 +44,9 @@ public sealed class RegressionsCaseFoldingTests
     private static readonly string _postSubject =
         "POST, Post, post, po" + _longS + "t, po" + _ligatureSt + ", and po" + _ligatureLongSt;
 
-    private static readonly FuzzyRegex _xxxFullCase = new("xxx", FuzzyRegexOptions.FullCase);
+    private static readonly FuzzyRegex _xxxFullCase = Upstream.Compile("xxx", FuzzyRegexOptions.FullCase);
 
-    private static readonly FuzzyRegex _xxxFullCaseIgnoreCase = new(
+    private static readonly FuzzyRegex _xxxFullCaseIgnoreCase = Upstream.Compile(
         "xxx",
         FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase
     );
@@ -54,7 +54,7 @@ public sealed class RegressionsCaseFoldingTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#34")]
     public void First_alternative_wins_when_it_can_be_matched_without_expanding_a_ligature() =>
-        FuzzyRegex
+        Upstream
             .Matches(_postSubject, @"(?fi)pos|post")
             .Select(static m => m.Value)
             .Should()
@@ -63,7 +63,7 @@ public sealed class RegressionsCaseFoldingTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#35")]
     public void Longer_alternative_still_wins_when_tried_first() =>
-        FuzzyRegex
+        Upstream
             .Matches(_postSubject, @"(?fi)post|pos")
             .Select(static m => m.Value)
             .Should()
@@ -72,7 +72,7 @@ public sealed class RegressionsCaseFoldingTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#36")]
     public void Post_alternative_matches_even_when_the_other_branch_cannot() =>
-        FuzzyRegex
+        Upstream
             .Matches(_postSubject, @"(?fi)post|another")
             .Select(static m => m.Value)
             .Should()
@@ -113,7 +113,7 @@ public sealed class RegressionsCaseFoldingTests
     public void Full_case_backreference_matches_the_same_word_repeated_in_lowercase()
     {
         // Hg issue 194: .FULLCASE and Backreference.
-        Match m = FuzzyRegex.Match("<cli><cli>", @"(?if)<(CLI)><\1>");
+        Match m = Upstream.Match("<cli><cli>", @"(?if)<(CLI)><\1>");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 10));
     }
@@ -122,7 +122,7 @@ public sealed class RegressionsCaseFoldingTests
     [Property("Upstream", "RegexTests.test_hg_bugs#225")]
     public void Full_case_backreference_matches_the_word_repeated_in_a_different_case()
     {
-        Match m = FuzzyRegex.Match("<cli><clI>", @"(?if)<(CLI)><\1>");
+        Match m = Upstream.Match("<cli><clI>", @"(?if)<(CLI)><\1>");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 10));
     }
@@ -131,7 +131,7 @@ public sealed class RegressionsCaseFoldingTests
     [Property("Upstream", "RegexTests.test_hg_bugs#226")]
     public void Full_case_backreference_matches_right_to_left_with_the_word_repeated_in_a_different_case()
     {
-        Match m = FuzzyRegex.Match("<cli><clI>", @"(?ifr)<\1><(CLI)>");
+        Match m = Upstream.Match("<cli><clI>", @"(?ifr)<\1><(CLI)>");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 10));
     }
@@ -141,7 +141,7 @@ public sealed class RegressionsCaseFoldingTests
     public void Optional_leading_character_under_full_case_and_ignore_case_still_finds_the_later_match()
     {
         // Hg issue 227: Incorrect behavior for ? operator with UNICODE + IGNORECASE.
-        Match m = FuzzyRegex.Match("xxxxyz", "a?yz", FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase);
+        Match m = Upstream.Match("xxxxyz", "a?yz", FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase);
 
         (m.Index, m.Index + m.Length).Should().Be((4, 6));
     }
@@ -156,7 +156,7 @@ public sealed class RegressionsCaseFoldingTests
             + "gskola"
             + string.Concat(Enumerable.Repeat(" . Studie" + _aWithDiaeresis + "mnen", 7));
 
-        FuzzyRegex
+        Upstream
             .Match(subject, @"(?if)(H\N{LATIN SMALL LETTER O WITH DIAERESIS}gskolan?)[\\s\\S]*p")
             .Success.Should()
             .BeFalse();

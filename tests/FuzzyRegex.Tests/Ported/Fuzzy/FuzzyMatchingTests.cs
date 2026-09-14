@@ -25,7 +25,7 @@ public sealed class FuzzyMatchingTests
     [Arguments("(?:\\bnacnda){e<=2}")]
     [Property("Upstream", "RegexTests.test_fuzzy#10-11")]
     public void An_error_budget_finds_a_misspelled_word(string pattern) =>
-        FuzzyRegex.Match(FuzzyTestData.Molasses, pattern).Value.Should().Be("anaconda");
+        Upstream.Match(FuzzyTestData.Molasses, pattern).Value.Should().Be("anaconda");
 
     // No cost limit at all: {e} permits any number of errors.
     [Test]
@@ -41,7 +41,7 @@ public sealed class FuzzyMatchingTests
     [Test]
     [Property("Upstream", "RegexTests.test_fuzzy#23")]
     public void At_most_two_errors_rejects_a_subject_needing_three() =>
-        FuzzyRegex.Match("xirefoabzlfd", "(foobar){e<=2}").Success.Should().BeFalse();
+        Upstream.Match("xirefoabzlfd", "(foobar){e<=2}").Success.Should().BeFalse();
 
     // Find the best whole-word match for "foobar". Without (?b) the leftmost one wins; the
     // BESTMATCH sibling of #26 is #27.
@@ -67,7 +67,7 @@ public sealed class FuzzyMatchingTests
     [Arguments("foxbarx")]
     [Property("Upstream", "RegexTests.test_fuzzy#38-42")]
     public void A_subject_needing_two_errors_is_rejected_by_a_budget_of_one(string subject) =>
-        FuzzyRegex.Match(subject, "^(foobar){e<=1}$").Success.Should().BeFalse();
+        Upstream.Match(subject, "^(foobar){e<=1}$").Success.Should().BeFalse();
 
     // Partially fuzzy: only the inner group carries an error budget.
     [Test]
@@ -85,7 +85,7 @@ public sealed class FuzzyMatchingTests
     [Test]
     [Property("Upstream", "RegexTests.test_fuzzy#46")]
     public void An_error_outside_the_fuzzy_group_is_not_forgiven() =>
-        FuzzyRegex.Match("fobarzap", "foo(bar){e<=1}zap").Success.Should().BeFalse();
+        Upstream.Match("fobarzap", "foo(bar){e<=1}zap").Success.Should().BeFalse();
 
     // The ENHANCEMATCH sibling of #48 is #49, which pulls group 1 onto (93, 100).
     [Test]
@@ -126,7 +126,7 @@ public sealed class FuzzyMatchingTests
     [Property("Upstream", "RegexTests.test_fuzzy#63")]
     public void A_backreference_can_carry_an_error_budget()
     {
-        Match m = FuzzyRegex.Match("foo fou", "(\\w+) (\\1{e<=1})");
+        Match m = Upstream.Match("foo fou", "(\\w+) (\\1{e<=1})");
 
         m.Success.Should().BeTrue();
         m.Groups[1].Value.Should().Be("foo");
@@ -137,7 +137,7 @@ public sealed class FuzzyMatchingTests
     [Property("Upstream", "RegexTests.test_fuzzy#64")]
     public void A_forward_backreference_can_carry_an_error_budget_searching_backwards()
     {
-        Match m = FuzzyRegex.Match("foo fou", "(?r)(\\2{e<=1}) (\\w+)");
+        Match m = Upstream.Match("foo fou", "(?r)(\\2{e<=1}) (\\w+)");
 
         m.Success.Should().BeTrue();
         m.Groups[1].Value.Should().Be("foo");
@@ -151,14 +151,14 @@ public sealed class FuzzyMatchingTests
     [Arguments("(?:Q+){e}", "abc")]
     [Property("Upstream", "RegexTests.test_fuzzy#66-67")]
     public void An_unbounded_budget_matches_the_whole_subject_and_then_empty(string pattern, string subject) =>
-        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(subject, "");
+        Upstream.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(subject, "");
 
     // Fuzzy constraints are ignored when a branch is checked for a common prefix or suffix, so
     // the second branch's larger budget is the one that decides this.
     [Test]
     [Property("Upstream", "RegexTests.test_fuzzy#79")]
     public void A_branch_with_a_wider_budget_still_matches() =>
-        FuzzyRegex.MatchAtStart("FO", "(?:fo){e<=1}|(?:fo){e<=2}").Success.Should().BeTrue();
+        Upstream.MatchAtStart("FO", "(?:fo){e<=1}|(?:fo){e<=2}").Success.Should().BeTrue();
 
     private static void AssertSpans(
         string subject,
@@ -167,7 +167,7 @@ public sealed class FuzzyMatchingTests
         (int Start, int End) group1
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be(whole);
@@ -175,7 +175,7 @@ public sealed class FuzzyMatchingTests
     }
 
     private static void AssertMatches(string subject, string pattern, params string[] expected) =>
-        FuzzyRegex
+        Upstream
             .Matches(subject, pattern, FuzzyRegexOptions.None, FuzzyTestData.Words)
             .Select(static m => m.Value)
             .Should()

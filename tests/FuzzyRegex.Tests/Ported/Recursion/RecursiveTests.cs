@@ -33,7 +33,7 @@ public sealed class RecursiveTests
         string? expectedGroup2
     )
     {
-        Match m = FuzzyRegex.Match(subject, @"(\w)(?:(?R)|(\w?))\1");
+        Match m = Upstream.Match(subject, @"(\w)(?:(?R)|(\w?))\1");
 
         m.Value.Should().Be(expectedValue);
         m.Groups[1].Value.Should().Be(expectedGroup1);
@@ -50,7 +50,7 @@ public sealed class RecursiveTests
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#6")]
     public void Recursive_backreference_does_not_match_without_a_repeated_character() =>
-        FuzzyRegex.Match("dontmatchme", @"(\w)(?:(?R)|(\w?))\1").Success.Should().BeFalse();
+        Upstream.Match("dontmatchme", @"(\w)(?:(?R)|(\w?))\1").Success.Should().BeFalse();
 
     [Test]
     [Arguments("xx", "xx", "", "x")]
@@ -66,7 +66,7 @@ public sealed class RecursiveTests
         string expectedGroup2
     )
     {
-        Match m = FuzzyRegex.Match(subject, @"(?r)\2(?:(\w?)|(?R))(\w)");
+        Match m = Upstream.Match(subject, @"(?r)\2(?:(\w?)|(?R))(\w)");
 
         m.Value.Should().Be(expectedValue);
         if (expectedGroup1 is null)
@@ -83,13 +83,13 @@ public sealed class RecursiveTests
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#12")]
     public void Reversed_recursive_backreference_does_not_match_without_a_repeated_character() =>
-        FuzzyRegex.Match("dontmatchme", @"(?r)\2(?:(\w?)|(?R))(\w)").Success.Should().BeFalse();
+        Upstream.Match("dontmatchme", @"(?r)\2(?:(\w?)|(?R))(\w)").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#13")]
     public void Recursive_atomic_alternation_matches_balanced_parens_and_captures_the_last_run()
     {
-        Match m = FuzzyRegex.Match("(ab(cd)ef)", @"\(((?>[^()]+)|(?R))*\)");
+        Match m = Upstream.Match("(ab(cd)ef)", @"\(((?>[^()]+)|(?R))*\)");
 
         m.Value.Should().Be("(ab(cd)ef)");
         m.Groups[1].Value.Should().Be("ef");
@@ -98,7 +98,7 @@ public sealed class RecursiveTests
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#14")]
     public void Recursive_atomic_alternation_captures_every_repetition_of_group_one() =>
-        FuzzyRegex
+        Upstream
             .Match("(ab(cd)ef)", @"\(((?>[^()]+)|(?R))*\)")
             .Groups[1]
             .Captures.Select(static c => c.Value)
@@ -109,7 +109,7 @@ public sealed class RecursiveTests
     [Property("Upstream", "RegexTests.test_recursive#15")]
     public void Reversed_recursive_atomic_alternation_matches_balanced_parens_and_captures_the_first_run()
     {
-        Match m = FuzzyRegex.Match("(ab(cd)ef)", @"(?r)\(((?R)|(?>[^()]+))*\)");
+        Match m = Upstream.Match("(ab(cd)ef)", @"(?r)\(((?R)|(?>[^()]+))*\)");
 
         m.Value.Should().Be("(ab(cd)ef)");
         m.Groups[1].Value.Should().Be("ab");
@@ -118,7 +118,7 @@ public sealed class RecursiveTests
     [Test]
     [Property("Upstream", "RegexTests.test_recursive#16")]
     public void Reversed_recursive_atomic_alternation_captures_every_repetition_of_group_one_in_reverse() =>
-        FuzzyRegex
+        Upstream
             .Match("(ab(cd)ef)", @"(?r)\(((?R)|(?>[^()]+))*\)")
             .Groups[1]
             .Captures.Select(static c => c.Value)
@@ -129,7 +129,7 @@ public sealed class RecursiveTests
     [Property("Upstream", "RegexTests.test_recursive#17")]
     public void Recursive_alternation_matches_the_innermost_balanced_group_within_surrounding_text()
     {
-        Match m = FuzzyRegex.Match("some text (a(b(c)d)e) more text", @"\(([^()]+|(?R))*\)");
+        Match m = Upstream.Match("some text (a(b(c)d)e) more text", @"\(([^()]+|(?R))*\)");
 
         m.Value.Should().Be("(a(b(c)d)e)");
         m.Groups[1].Value.Should().Be("e");
@@ -139,7 +139,7 @@ public sealed class RecursiveTests
     [Property("Upstream", "RegexTests.test_recursive#18")]
     public void Reversed_recursive_alternation_matches_the_innermost_balanced_group_within_surrounding_text()
     {
-        Match m = FuzzyRegex.Match("some text (a(b(c)d)e) more text", @"(?r)\(((?R)|[^()]+)*\)");
+        Match m = Upstream.Match("some text (a(b(c)d)e) more text", @"(?r)\(((?R)|[^()]+)*\)");
 
         m.Value.Should().Be("(a(b(c)d)e)");
         m.Groups[1].Value.Should().Be("a");
@@ -149,7 +149,7 @@ public sealed class RecursiveTests
     [Property("Upstream", "RegexTests.test_recursive#19")]
     public void Recursive_numbered_group_reference_matches_nested_parens_in_a_function_call()
     {
-        Match m = FuzzyRegex.Match("foo(bar(baz)+baz(bop))", @"(foo(\(((?:(?>[^()]+)|(?2))*)\)))");
+        Match m = Upstream.Match("foo(bar(baz)+baz(bop))", @"(foo(\(((?:(?>[^()]+)|(?2))*)\)))");
 
         m.Value.Should().Be("foo(bar(baz)+baz(bop))");
         m.Groups[1].Value.Should().Be("foo(bar(baz)+baz(bop))");
@@ -161,7 +161,7 @@ public sealed class RecursiveTests
     [Property("Upstream", "RegexTests.test_recursive#20")]
     public void Reversed_recursive_numbered_group_reference_matches_nested_parens_in_a_function_call()
     {
-        Match m = FuzzyRegex.Match("foo(bar(baz)+baz(bop))", @"(?r)(foo(\(((?:(?2)|(?>[^()]+))*)\)))");
+        Match m = Upstream.Match("foo(bar(baz)+baz(bop))", @"(?r)(foo(\(((?:(?2)|(?>[^()]+))*)\)))");
 
         m.Value.Should().Be("foo(bar(baz)+baz(bop))");
         m.Groups[1].Value.Should().Be("foo(bar(baz)+baz(bop))");
@@ -184,7 +184,7 @@ public sealed class RecursiveTests
     [Arguments("<a><b><c></c></b></a>", true)]
     [Property("Upstream", "RegexTests.test_recursive#21-28,30-33")]
     public void Recursive_numbered_group_reference_checks_balanced_xml_like_tags(string subject, bool expected) =>
-        FuzzyRegex.Match(subject, _htmlLikeTagPattern).Success.Should().Be(expected);
+        Upstream.Match(subject, _htmlLikeTagPattern).Success.Should().Be(expected);
 
     private const string _htmlLikeTagPattern =
         @"^\s*(<\s*([a-zA-Z:]+)(?:\s*[a-zA-Z:]*\s*=\s*(?:'[^']*'|""[^""]*""))*\s*(/\s*)?>(?:[^<>]*|(?1))*(?(3)|<\s*/\s*\2\s*>))\s*$";

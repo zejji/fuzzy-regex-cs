@@ -10,7 +10,7 @@ public sealed class EscapeFunctionTests
 {
     [Test]
     [Property("Upstream", "RegexTests.test_re_escape#1")]
-    public void Escaping_the_empty_string_returns_the_empty_string() => FuzzyRegex.Escape("").Should().Be("");
+    public void Escaping_the_empty_string_returns_the_empty_string() => Upstream.Escape("").Should().Be("");
 
     // Upstream loops over all 256 code points 0-255, escaping each and checking it still matches
     // itself. Kept as a native loop rather than 256 [Arguments] rows - both assertions inside the
@@ -23,7 +23,7 @@ public sealed class EscapeFunctionTests
         for (int i = 0; i < 256; i++)
         {
             string ch = ((char)i).ToString();
-            Match m = FuzzyRegex.MatchAtStart(ch, FuzzyRegex.Escape(ch));
+            Match m = Upstream.MatchAtStart(ch, Upstream.Escape(ch));
 
             m.Success.Should().BeTrue();
             (m.Index, m.Index + m.Length).Should().Be((0, 1));
@@ -36,7 +36,7 @@ public sealed class EscapeFunctionTests
     {
         string p = string.Concat(Enumerable.Range(0, 256).Select(static i => (char)i));
 
-        var pat = new FuzzyRegex(FuzzyRegex.Escape(p));
+        var pat = Upstream.Compile(Upstream.Escape(p));
         Match m = pat.MatchAtStart(p);
 
         (m.Index, m.Index + m.Length).Should().Be((0, 256));
@@ -46,9 +46,9 @@ public sealed class EscapeFunctionTests
     [Property("Upstream", "RegexTests.test_bug_612074#1")]
     public void Escaping_a_character_for_use_inside_a_set_compiles()
     {
-        string pattern = "[" + FuzzyRegex.Escape("‹") + "]";
+        string pattern = "[" + Upstream.Escape("‹") + "]";
 
-        Action act = () => _ = new FuzzyRegex(pattern);
+        Action act = () => _ = Upstream.Compile(pattern);
 
         act.Should().NotThrow();
     }

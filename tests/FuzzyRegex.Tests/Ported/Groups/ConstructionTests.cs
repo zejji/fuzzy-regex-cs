@@ -16,7 +16,7 @@ public sealed class ConstructionTests
     [Property("Upstream", "RegexTests.test_bug_3629#1")]
     public void Constructing_a_conditional_referencing_a_named_group_does_not_throw()
     {
-        Action act = static () => _ = new FuzzyRegex("(?P<quote>)(?(quote))");
+        Action act = static () => _ = Upstream.Compile("(?P<quote>)(?(quote))");
 
         act.Should().NotThrow();
     }

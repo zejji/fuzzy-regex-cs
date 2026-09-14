@@ -36,7 +36,7 @@ public sealed class VariousEscapeTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -56,7 +56,7 @@ public sealed class VariousEscapeTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -68,7 +68,7 @@ public sealed class VariousEscapeTests
     [Property("Upstream", "RegexTests.test_various#494")]
     public void Search_with_groups_returns_the_expected_group_values()
     {
-        Match m = FuzzyRegex.Match(" testing!1972", "(\\s*)(\\S*)(\\s*)");
+        Match m = Upstream.Match(" testing!1972", "(\\s*)(\\S*)(\\s*)");
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, "3,2,1").Should().Equal("", "testing!1972", " ");
@@ -81,5 +81,5 @@ public sealed class VariousEscapeTests
     [Arguments("\\x00ff", "\u00FF")]
     [Property("Upstream", "RegexTests.test_various#31-34")]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

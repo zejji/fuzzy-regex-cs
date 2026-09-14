@@ -102,7 +102,14 @@ internal static class OracleWave
             header.GetProperty("waves").GetRawText()
         );
 
-        IReadOnlyList<OracleRow> rows = ParseRows(lines.Skip(1));
+        // The recorder states its DEFAULT_VERSION once, in the header; every row is resolved under
+        // it, and since S50b that is not this port's own default (docs/DIVERGENCES.md). Stamping it
+        // onto the rows here is what lets OracleComparer.Run compile each one under the version it
+        // was recorded under without every caller having to remember to thread the header through.
+        IReadOnlyList<OracleRow> rows =
+        [
+            .. ParseRows(lines.Skip(1)).Select(row => row with { DefaultVersion = parsed.DefaultVersion }),
+        ];
         int declared = header.GetProperty("rowCount").GetInt32();
         if (declared != rows.Count)
         {
@@ -407,7 +414,10 @@ internal static class OracleWave
             string.Create(
                 CultureInfo.InvariantCulture,
                 $"{(accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id)} row {row.Number} "
-                    + $"({row.Generator}) {row.Operation} flags=0x{row.Flags:x}"
+                    + $"({row.Generator}) {row.Operation} flags=0x{row.Flags:x} "
+                    // Which version a pattern naming none was resolved under, because since S50b
+                    // the recorder's default and this port's are different questions.
+                    + $"version={(row.DefaultVersion == (int)FuzzyRegexOptions.Version1 ? "V1" : "V0")}"
             )
         );
         block.AppendLine("  pattern  " + Printable(row.Pattern));
@@ -629,6 +639,14 @@ internal sealed record OracleHeader(
 /// <see langword="null"/> on every pattern without an atomic group and on any wave recorded before
 /// this slice. Never compared; only <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="DefaultVersion">
+/// The <c>DEFAULT_VERSION</c> the RECORDER resolved this row's pattern under, stamped onto every row
+/// by <see cref="OracleWave.Load"/> from the wave header. Part of the question: a pattern naming no
+/// version means different things under the two, so compiling it under THIS port's default - which
+/// S50b made <c>Version1</c> where upstream's front end sets <c>Version0</c> - would compare an
+/// answer to one question against an answer to another. Upstream's <c>Version0</c> is the default
+/// here so that a row built by hand in a test reads as upstream's recorder would have read it.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -650,7 +668,8 @@ internal sealed record OracleRow(
     IOracleOutcome? BestmatchFree = null,
     IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null,
     IOracleOutcome? PosixFree = null,
-    IOracleOutcome? AtomicFree = null
+    IOracleOutcome? AtomicFree = null,
+    int DefaultVersion = (int)FuzzyRegexOptions.Version0
 );
 
 /// <summary>What a matching operation answered.</summary>

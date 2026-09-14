@@ -10,5 +10,5 @@ public sealed class AtomicTests
     [Test]
     [Property("Upstream", "RegexTests.test_atomic#1")]
     public void Atomic_group_does_not_backtrack_into_the_star_it_wraps() =>
-        FuzzyRegex.Match("aa", "(?>a*)a").Success.Should().BeFalse();
+        Upstream.Match("aa", "(?>a*)a").Success.Should().BeFalse();
 }

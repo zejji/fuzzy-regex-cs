@@ -11,49 +11,37 @@ public sealed class IgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#1")]
     public void Literal_matches_case_insensitively() =>
-        FuzzyRegex.MatchAtStart("ABC", "abc", FuzzyRegexOptions.IgnoreCase).Value.Should().Be("ABC");
+        Upstream.MatchAtStart("ABC", "abc", FuzzyRegexOptions.IgnoreCase).Value.Should().Be("ABC");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#3")]
     public void Negated_set_star_captures_case_insensitively() =>
-        FuzzyRegex
-            .MatchAtStart("a bb", "(a\\s[^a]*)", FuzzyRegexOptions.IgnoreCase)
-            .Groups[1]
-            .Value.Should()
-            .Be("a bb");
+        Upstream.MatchAtStart("a bb", "(a\\s[^a]*)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a bb");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#4")]
     public void Set_captures_case_insensitively() =>
-        FuzzyRegex.MatchAtStart("a b", "(a\\s[abc])", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a b");
+        Upstream.MatchAtStart("a b", "(a\\s[abc])", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a b");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#5")]
     public void Set_star_captures_case_insensitively() =>
-        FuzzyRegex
-            .MatchAtStart("a bb", "(a\\s[abc]*)", FuzzyRegexOptions.IgnoreCase)
-            .Groups[1]
-            .Value.Should()
-            .Be("a bb");
+        Upstream.MatchAtStart("a bb", "(a\\s[abc]*)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a bb");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#6")]
     public void Backreference_matches_case_insensitively() =>
-        FuzzyRegex.MatchAtStart("a a", "((a)\\s\\2)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a a");
+        Upstream.MatchAtStart("a a", "((a)\\s\\2)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#7")]
     public void Backreference_star_matches_case_insensitively() =>
-        FuzzyRegex
-            .MatchAtStart("a aa", "((a)\\s\\2*)", FuzzyRegexOptions.IgnoreCase)
-            .Groups[1]
-            .Value.Should()
-            .Be("a aa");
+        Upstream.MatchAtStart("a aa", "((a)\\s\\2*)", FuzzyRegexOptions.IgnoreCase).Groups[1].Value.Should().Be("a aa");
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#8")]
     public void Alternation_with_backreference_captures_case_insensitively() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("a a", "((a)\\s(abc|a))", FuzzyRegexOptions.IgnoreCase)
             .Groups[1]
             .Value.Should()
@@ -62,7 +50,7 @@ public sealed class IgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#9")]
     public void Alternation_star_captures_case_insensitively() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("a aa", "((a)\\s(abc|a)*)", FuzzyRegexOptions.IgnoreCase)
             .Groups[1]
             .Value.Should()
@@ -74,7 +62,7 @@ public sealed class IgnoreCaseTests
     [Property("Upstream", "RegexTests.test_ignore_case#10")]
     public void Range_between_cases_matches_a_character_between_them()
     {
-        Match m = FuzzyRegex.MatchAtStart("_", "[Z-a]");
+        Match m = Upstream.MatchAtStart("_", "[Z-a]");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -83,7 +71,7 @@ public sealed class IgnoreCaseTests
     [Property("Upstream", "RegexTests.test_ignore_case#11")]
     public void Range_between_cases_is_unaffected_by_inline_ignore_case()
     {
-        Match m = FuzzyRegex.MatchAtStart("_", "(?i)[Z-a]");
+        Match m = Upstream.MatchAtStart("_", "(?i)[Z-a]");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 1));
     }
@@ -91,20 +79,20 @@ public sealed class IgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#12")]
     public void Inline_ignore_case_flag_matches_a_differently_cased_literal() =>
-        FuzzyRegex.MatchAtStart("nAo", "(?i)nao").Success.Should().BeTrue();
+        Upstream.MatchAtStart("nAo", "(?i)nao").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#13")]
     public void Inline_ignore_case_flag_matches_a_differently_cased_accented_literal() =>
-        FuzzyRegex.MatchAtStart("nÃo", "(?i)não").Success.Should().BeTrue();
+        Upstream.MatchAtStart("nÃo", "(?i)não").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#14")]
     public void Inline_ignore_case_flag_matches_a_fully_upper_cased_accented_literal() =>
-        FuzzyRegex.MatchAtStart("NÃO", "(?i)não").Success.Should().BeTrue();
+        Upstream.MatchAtStart("NÃO", "(?i)não").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_ignore_case#15")]
     public void Inline_ignore_case_flag_matches_long_s_against_s() =>
-        FuzzyRegex.MatchAtStart("ſ", "(?i)s").Success.Should().BeTrue();
+        Upstream.MatchAtStart("ſ", "(?i)s").Success.Should().BeTrue();
 }

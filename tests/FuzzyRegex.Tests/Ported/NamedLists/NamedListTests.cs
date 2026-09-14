@@ -44,21 +44,18 @@ public sealed class NamedListTests
     [Arguments("(?i)333\\L<bar>444", "333TWO444")]
     [Property("Upstream", "RegexTests.test_named_lists#1-2")]
     public void A_named_list_matches_any_of_its_entries(string pattern, string subject) =>
-        FuzzyRegex.MatchAtStart(subject, pattern, FuzzyRegexOptions.None, _bar).Value.Should().Be(subject);
+        Upstream.MatchAtStart(subject, pattern, FuzzyRegexOptions.None, _bar).Value.Should().Be(subject);
 
     [Test]
     [Property("Upstream", "RegexTests.test_named_lists#3")]
     public void A_named_list_does_not_match_a_word_outside_it() =>
-        FuzzyRegex
-            .MatchAtStart("333four444", "333\\L<bar>444", FuzzyRegexOptions.None, _bar)
-            .Success.Should()
-            .BeFalse();
+        Upstream.MatchAtStart("333four444", "333\\L<bar>444", FuzzyRegexOptions.None, _bar).Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_named_lists#7")]
     public void The_same_named_list_can_be_referenced_twice_and_quantified()
     {
-        Action act = static () => _ = new FuzzyRegex("3\\L<bar>4\\L<bar>+5", FuzzyRegexOptions.None, _bar);
+        Action act = static () => _ = Upstream.Compile("3\\L<bar>4\\L<bar>+5", FuzzyRegexOptions.None, _bar);
 
         act.Should().NotThrow();
     }
@@ -74,7 +71,7 @@ public sealed class NamedListTests
             ["options"] = ["good", "brilliant", "+s\\ol[i}d"],
         };
 
-        FuzzyRegex.Matches("solid QWERT", "^\\L<options>", FuzzyRegexOptions.None, options).Should().BeEmpty();
+        Upstream.Matches("solid QWERT", "^\\L<options>", FuzzyRegexOptions.None, options).Should().BeEmpty();
     }
 
     [Test]
@@ -86,7 +83,7 @@ public sealed class NamedListTests
             ["options"] = ["good", "brilliant", "+solid"],
         };
 
-        FuzzyRegex
+        Upstream
             .Matches("+solid QWERT", "^\\L<options>", FuzzyRegexOptions.None, options)
             .Select(static m => m.Value)
             .Should()
@@ -104,7 +101,7 @@ public sealed class NamedListTests
         {
             Dictionary<string, IReadOnlyCollection<string>> named = new(StringComparer.Ordinal) { ["words"] = words };
 
-            Match m = FuzzyRegex.MatchAtStart(_strasseLower, "(?fi)\\L<words>", FuzzyRegexOptions.None, named);
+            Match m = Upstream.MatchAtStart(_strasseLower, "(?fi)\\L<words>", FuzzyRegexOptions.None, named);
 
             m.Success.Should().BeTrue();
             (m.Index, m.Index + m.Length).Should().Be((0, 6));
@@ -121,7 +118,7 @@ public sealed class NamedListTests
             ["words"] = [_strasseLower],
         };
 
-        Match m = FuzzyRegex.MatchAtStart("STRASSE", "(?fi)\\L<words>", FuzzyRegexOptions.None, named);
+        Match m = Upstream.MatchAtStart("STRASSE", "(?fi)\\L<words>", FuzzyRegexOptions.None, named);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 7));
@@ -149,12 +146,12 @@ public sealed class NamedListTests
     {
         Dictionary<string, IReadOnlyCollection<string>> named = new(StringComparer.Ordinal) { ["words"] = ["kit"] };
 
-        Match plain = FuzzyRegex.Match("SKITS", "(?i)\\L<words>", FuzzyRegexOptions.None, named);
+        Match plain = Upstream.Match("SKITS", "(?i)\\L<words>", FuzzyRegexOptions.None, named);
 
         plain.Success.Should().BeTrue();
         (plain.Index, plain.Index + plain.Length).Should().Be((1, 4));
 
-        Match dotted = FuzzyRegex.Match(_skitsDotted, "(?i)\\L<words>", FuzzyRegexOptions.None, named);
+        Match dotted = Upstream.Match(_skitsDotted, "(?i)\\L<words>", FuzzyRegexOptions.None, named);
 
         dotted.Success.Should().BeFalse("U+0130 is alone in its case set under the default case data");
     }
@@ -165,7 +162,7 @@ public sealed class NamedListTests
     {
         Dictionary<string, IReadOnlyCollection<string>> named = new(StringComparer.Ordinal) { ["options"] = [] };
 
-        Match m = FuzzyRegex.Match("", "^\\L<options>$", FuzzyRegexOptions.None, named);
+        Match m = Upstream.Match("", "^\\L<options>$", FuzzyRegexOptions.None, named);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 0));

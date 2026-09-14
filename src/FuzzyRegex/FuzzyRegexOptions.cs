@@ -90,19 +90,47 @@ public enum FuzzyRegexOptions
 
     /// <summary>
     /// Use Unicode full case-folding when matching case-insensitively, so that (for example)
-    /// <c>ß</c> matches <c>SS</c>. Upstream <c>FULLCASE</c> / <c>F</c>.
+    /// <c>ß</c> matches <c>SS</c> and <c>ﬁ</c> matches <c>fi</c>. Upstream <c>FULLCASE</c> /
+    /// <c>F</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>Already on</b> under <see cref="Version1"/>, which is the default, so passing it changes
+    /// nothing unless you also pass <see cref="Version0"/>. To turn it off, pass
+    /// <see cref="Version0"/> or write <c>(?-f)</c> in the pattern. It does not turn
+    /// case-insensitive matching on by itself; it changes what <see cref="IgnoreCase"/> means.
+    /// </remarks>
     FullCase = 0x4000,
 
     /// <summary>
     /// Legacy behaviour, compatible with <c>System.Text.RegularExpressions</c> and Python's
-    /// <c>re</c>. Upstream <c>VERSION0</c> / <c>V0</c>.
+    /// <c>re</c>: simple case-folding, and an unescaped <c>[</c> inside a set is a literal.
+    /// Upstream <c>VERSION0</c> / <c>V0</c>, and upstream's own default.
     /// </summary>
+    /// <remarks>
+    /// Pass this to compile a pattern written for <c>Regex</c> or for <c>re</c> unchanged. The two
+    /// live differences from <see cref="Version1"/> are the ones named above; measured on
+    /// <c>regex</c> 2026.9.10 and .NET 10 (<c>tools/probes/upstream-version-defaults.py</c> and its
+    /// <c>.ps1</c> twin), the zero-width and inline-flag differences upstream's README also lists
+    /// no longer exist. There is a third, undocumented one: a backreference to a group that is
+    /// still open is a compile error here and is accepted under <see cref="Version1"/>.
+    /// </remarks>
     Version0 = 0x2000,
 
     /// <summary>
-    /// Enhanced behaviour: nested sets, set operations, and the other mrab-regex extensions.
-    /// Upstream <c>VERSION1</c> / <c>V1</c>. Not the default: upstream's effective <c>DEFAULT_VERSION</c> is <c>VERSION0</c> (set in <c>_main.py</c>), and so is this port's.
+    /// <b>The default.</b> Nested sets and set operations (<c>[[a-z]--[aeiou]]</c>), and full case
+    /// folding when matching case-insensitively. Upstream <c>VERSION1</c> / <c>V1</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>This is the one place this library deliberately does not follow mrab-regex's default.</b>
+    /// Upstream's front end sets <c>DEFAULT_VERSION = VERSION0</c> so that <c>regex</c> stays a
+    /// drop-in replacement for Python's <c>re</c>; this library has no such users to protect, and
+    /// the two behaviours version 1 adds are the reason to use it over
+    /// <c>System.Text.RegularExpressions</c>. See <c>docs/DIVERGENCES.md</c>.
+    /// <para>
+    /// The one pattern that changes meaning is an unescaped <c>[</c> inside a set: <c>[[]</c> is a
+    /// set containing <c>[</c> under <see cref="Version0"/> and an unterminated nested set here.
+    /// The parse error says so and names both ways out.
+    /// </para>
+    /// </remarks>
     Version1 = 0x100,
 }

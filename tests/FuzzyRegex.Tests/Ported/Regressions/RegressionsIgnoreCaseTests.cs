@@ -12,7 +12,7 @@ public sealed class RegressionsIgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#9")]
     public void Case_insensitive_search_with_V1_semantics_matches_a_literal_around_a_group() =>
-        FuzzyRegex
+        Upstream
             .Match("abcd", "a(bc)d", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
             .Value.Should()
             .Be("abcd");
@@ -21,7 +21,7 @@ public sealed class RegressionsIgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#10")]
     public void Case_insensitive_character_class_with_V1_semantics_matches_an_uppercase_hex_digit() =>
-        FuzzyRegex
+        Upstream
             .Match("E", @"([\da-f:]+)$", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
             .Value.Should()
             .Be("E");
@@ -29,7 +29,7 @@ public sealed class RegressionsIgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#11")]
     public void Case_insensitive_character_class_with_V1_semantics_matches_a_lowercase_hex_digit() =>
-        FuzzyRegex
+        Upstream
             .Match("e", @"([\da-f:]+)$", FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1)
             .Value.Should()
             .Be("e");
@@ -38,5 +38,5 @@ public sealed class RegressionsIgnoreCaseTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#45")]
     public void Case_insensitive_negated_class_does_not_match_the_negated_letters_case_variant() =>
-        FuzzyRegex.Match("A", "(?i)[^a]").Success.Should().BeFalse();
+        Upstream.Match("A", "(?i)[^a]").Success.Should().BeFalse();
 }

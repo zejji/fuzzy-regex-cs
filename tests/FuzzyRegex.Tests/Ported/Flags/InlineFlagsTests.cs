@@ -25,7 +25,7 @@ public sealed class InlineFlagsTests
     public void MatchAtStart_ignore_case_folds_A_with_dot_below(string pattern, string subject)
         // Upstream also passes regex.U; incidental for a str pattern, which is Unicode by default.
         =>
-        new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase).IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile(pattern, FuzzyRegexOptions.IgnoreCase).IsMatchAtStart(subject).Should().BeTrue();
 
     [Test]
     [Arguments(_upperAWithDotBelow, _lowerAWithDotBelow)]
@@ -34,7 +34,7 @@ public sealed class InlineFlagsTests
     public void MatchAtStart_inline_ignore_case_flag_folds_A_with_dot_below(string pattern, string subject)
         // Upstream also passes regex.U as a construct-time flag; incidental for a str pattern.
         =>
-        new FuzzyRegex("(?i)" + pattern).IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile("(?i)" + pattern).IsMatchAtStart(subject).Should().BeTrue();
 
     [Test]
     [Arguments(_upperAWithDotBelow, _lowerAWithDotBelow)]
@@ -44,15 +44,15 @@ public sealed class InlineFlagsTests
         // Upstream's inline "(?iu)"; u is incidental for a str pattern (Unicode by default), so
         // the inline flag group ported here is "(?i)".
         =>
-        new FuzzyRegex("(?i)" + pattern).IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile("(?i)" + pattern).IsMatchAtStart(subject).Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_inline_flags#7")]
     public void MatchAtStart_inline_ignore_case_flag_at_the_start_of_the_pattern_applies() =>
-        FuzzyRegex.MatchAtStart("A", "(?i)a").Success.Should().BeTrue();
+        Upstream.MatchAtStart("A", "(?i)a").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_inline_flags#8")]
     public void MatchAtStart_inline_ignore_case_flag_after_the_pattern_content_does_not_apply() =>
-        FuzzyRegex.MatchAtStart("A", "a(?i)").Success.Should().BeFalse();
+        Upstream.MatchAtStart("A", "a(?i)").Success.Should().BeFalse();
 }

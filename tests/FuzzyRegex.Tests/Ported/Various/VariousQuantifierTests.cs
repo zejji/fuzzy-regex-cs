@@ -99,7 +99,7 @@ public sealed class VariousQuantifierTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -120,5 +120,5 @@ public sealed class VariousQuantifierTests
     [Arguments("a.*c", "axyzd")]
     [Property("Upstream", "RegexTests.test_various#42-43,63-64,68,80,226-228,233,237,250")]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

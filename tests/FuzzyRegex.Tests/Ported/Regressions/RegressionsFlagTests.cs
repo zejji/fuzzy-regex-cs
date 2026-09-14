@@ -34,14 +34,14 @@ public sealed class RegressionsFlagTests
         string patternChar,
         string subject,
         bool expectedMatch
-    ) => FuzzyRegex.MatchAtStart(subject, flagPrefix + patternChar).Success.Should().Be(expectedMatch);
+    ) => Upstream.MatchAtStart(subject, flagPrefix + patternChar).Success.Should().Be(expectedMatch);
 
     // Git issue 467: Scoped inline flags 'a', 'u' and 'L' affect global flags.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#431")]
     public void Ascii_scoped_word_char_does_not_widen_the_unscoped_word_char_that_follows_it()
     {
-        Match m = FuzzyRegex.MatchAtStart("d" + _cyrillicZhe, @"(?a:\w)\w");
+        Match m = Upstream.MatchAtStart("d" + _cyrillicZhe, @"(?a:\w)\w");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(2);
@@ -51,7 +51,7 @@ public sealed class RegressionsFlagTests
     [Property("Upstream", "RegexTests.test_hg_bugs#432")]
     public void Ascii_scoped_word_char_followed_by_unicode_scoped_word_char_matches_both()
     {
-        Match m = FuzzyRegex.MatchAtStart("d" + _cyrillicZhe, @"(?a:\w)(?u:\w)");
+        Match m = Upstream.MatchAtStart("d" + _cyrillicZhe, @"(?a:\w)(?u:\w)");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(2);
@@ -61,18 +61,18 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#475")]
     public void Unscoped_digit_class_matches_a_fullwidth_digit() =>
-        FuzzyRegex.MatchAtStart(_fullwidthDigitNine, @"\d").Success.Should().BeTrue();
+        Upstream.MatchAtStart(_fullwidthDigitNine, @"\d").Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#476")]
     public void Ascii_scoped_digit_class_rejects_a_fullwidth_digit() =>
-        FuzzyRegex.MatchAtStart(_fullwidthDigitNine, @"(?a:\d)").Success.Should().BeFalse();
+        Upstream.MatchAtStart(_fullwidthDigitNine, @"(?a:\d)").Success.Should().BeFalse();
 
     // Git issue 575: Issues with ASCII/Unicode modifiers.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#477")]
     public void Unflagged_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
-        FuzzyRegex
+        Upstream
             .Matches("9" + _fullwidthDigitNine, @"\d")
             .Select(static m => m.Value)
             .Should()
@@ -81,7 +81,7 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#478")]
     public void Unicode_scoped_digit_class_matches_both_an_ascii_and_a_fullwidth_digit() =>
-        FuzzyRegex
+        Upstream
             .Matches("9" + _fullwidthDigitNine, @"(?u:\d)")
             .Select(static m => m.Value)
             .Should()
@@ -90,7 +90,7 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#479")]
     public void Ascii_scoped_digit_class_matches_only_the_ascii_digit() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a:\d)").Select(static m => m.Value).Should().Equal("9");
+        Upstream.Matches("9" + _fullwidthDigitNine, @"(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     // `FuzzyRegexOptions` has no `A`/`ASCII` or `U`/`UNICODE` member, so a Python `flags=regex.A`
     // or `flags=regex.U` argument is ported as a leading inline `(?a)`/`(?u)` prefix on the
@@ -100,7 +100,7 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#480")]
     public void Global_unicode_flag_prefix_leaves_the_digit_class_matching_both_digits() =>
-        FuzzyRegex
+        Upstream
             .Matches("9" + _fullwidthDigitNine, @"(?u)\d")
             .Select(static m => m.Value)
             .Should()
@@ -109,7 +109,7 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#481")]
     public void Global_unicode_flag_prefix_does_not_change_an_already_unicode_scoped_digit_class() =>
-        FuzzyRegex
+        Upstream
             .Matches("9" + _fullwidthDigitNine, @"(?u)(?u:\d)")
             .Select(static m => m.Value)
             .Should()
@@ -118,17 +118,17 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#482")]
     public void Global_unicode_flag_prefix_does_not_widen_an_ascii_scoped_digit_class() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?u)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
+        Upstream.Matches("9" + _fullwidthDigitNine, @"(?u)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#483")]
     public void Global_ascii_flag_prefix_narrows_the_digit_class_to_the_ascii_digit() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)\d").Select(static m => m.Value).Should().Equal("9");
+        Upstream.Matches("9" + _fullwidthDigitNine, @"(?a)\d").Select(static m => m.Value).Should().Equal("9");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#484")]
     public void Global_ascii_flag_prefix_does_not_narrow_a_unicode_scoped_digit_class() =>
-        FuzzyRegex
+        Upstream
             .Matches("9" + _fullwidthDigitNine, @"(?a)(?u:\d)")
             .Select(static m => m.Value)
             .Should()
@@ -137,7 +137,7 @@ public sealed class RegressionsFlagTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#485")]
     public void Global_ascii_flag_prefix_does_not_change_an_already_ascii_scoped_digit_class() =>
-        FuzzyRegex.Matches("9" + _fullwidthDigitNine, @"(?a)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
+        Upstream.Matches("9" + _fullwidthDigitNine, @"(?a)(?a:\d)").Select(static m => m.Value).Should().Equal("9");
 
     // Git issue 575, continued: \p{L} counts over every Latin-1 code point (0x00-0xFF) under the
     // cross product of an unscoped/(?a:...)/(?u:...) property and no/(?a)/(?u) global prefix.
@@ -157,18 +157,18 @@ public sealed class RegressionsFlagTests
     public void Letter_property_count_over_latin_1_depends_on_the_effective_ascii_or_unicode_scope(
         string pattern,
         int expectedCount
-    ) => FuzzyRegex.Matches(_latin1CodePoints, pattern).Count.Should().Be(expectedCount);
+    ) => Upstream.Matches(_latin1CodePoints, pattern).Count.Should().Be(expectedCount);
 
     // Hg issue 39: regex.search("((?i)blah)\s+\1", "blah BLAH") doesn't return None. Changed to
     // positional flags in regex 2023.12.23.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#17")]
     public void Positional_inline_case_fold_flag_does_not_apply_to_a_later_backreference() =>
-        FuzzyRegex.Match("blah BLAH", @"((?i)blah)\s+\1").Success.Should().BeFalse();
+        Upstream.Match("blah BLAH", @"((?i)blah)\s+\1").Success.Should().BeFalse();
 
     // Hg issue 46: regex.compile("a(?x: b c )d") causes "_regex_core.error: missing )".
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#26")]
     public void Scoped_verbose_flag_group_ignores_whitespace_inside_the_group_only() =>
-        FuzzyRegex.Match("abcd", "a(?x: b c )d").Value.Should().Be("abcd");
+        Upstream.Match("abcd", "a(?x: b c )d").Value.Should().Be("abcd");
 }

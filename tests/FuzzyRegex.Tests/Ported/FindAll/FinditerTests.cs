@@ -17,20 +17,20 @@ public sealed class FinditerTests
     [Test]
     [Property("Upstream", "RegexTests.test_finditer#1")]
     public void Matches_yields_whole_match_values_in_order() =>
-        FuzzyRegex.Matches("a:b::c:::d", ":+").Select(static m => m.Value).Should().Equal(":", "::", ":::");
+        Upstream.Matches("a:b::c:::d", ":+").Select(static m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_581080#1")]
     public void Matches_first_match_span()
     {
-        MatchCollection matches = FuzzyRegex.Matches("a b", @"\s");
+        MatchCollection matches = Upstream.Matches("a b", @"\s");
 
         (matches[0].Index, matches[0].Index + matches[0].Length).Should().Be((1, 2));
     }
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_581080#2")]
-    public void Matches_has_exactly_one_match() => FuzzyRegex.Matches("a b", @"\s").Count.Should().Be(1);
+    public void Matches_has_exactly_one_match() => Upstream.Matches("a b", @"\s").Count.Should().Be(1);
 
     // NOT PORTED: the pat.scanner("a b") half of test_bug_581080 (lines 873-875) - the Scanner
     // API is deliberately not ported (see docs/PORTMAP.md).
@@ -39,7 +39,7 @@ public sealed class FinditerTests
     [Property("Upstream", "RegexTests.test_bug_817234#1")]
     public void Matches_first_match_of_dot_star_spans_the_whole_subject()
     {
-        MatchCollection matches = FuzzyRegex.Matches("asdf", ".*");
+        MatchCollection matches = Upstream.Matches("asdf", ".*");
 
         (matches[0].Index, matches[0].Index + matches[0].Length).Should().Be((0, 4));
     }
@@ -48,12 +48,12 @@ public sealed class FinditerTests
     [Property("Upstream", "RegexTests.test_bug_817234#2")]
     public void Matches_second_match_of_dot_star_is_the_trailing_empty_match()
     {
-        MatchCollection matches = FuzzyRegex.Matches("asdf", ".*");
+        MatchCollection matches = Upstream.Matches("asdf", ".*");
 
         (matches[1].Index, matches[1].Index + matches[1].Length).Should().Be((4, 4));
     }
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_817234#3")]
-    public void Matches_has_exactly_two_matches_for_dot_star() => FuzzyRegex.Matches("asdf", ".*").Count.Should().Be(2);
+    public void Matches_has_exactly_two_matches_for_dot_star() => Upstream.Matches("asdf", ".*").Count.Should().Be(2);
 }

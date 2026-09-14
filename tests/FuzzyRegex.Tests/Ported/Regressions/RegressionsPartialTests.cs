@@ -13,7 +13,7 @@ public sealed class RegressionsPartialTests
     [Property("Upstream", "RegexTests.test_hg_bugs#148-149")]
     public void Fullmatch_reports_the_span_and_partial_flag_when_a_repeated_group_leaves_the_subject_short()
     {
-        Match m = new FuzzyRegex("(a)*abc").FullMatch("ab", partial: true);
+        Match m = Upstream.Compile("(a)*abc").FullMatch("ab", partial: true);
 
         (m.Index, m.Index + m.Length).Should().Be((0, 2));
         m.PartialMatch.Should().BeTrue();
@@ -31,7 +31,7 @@ public sealed class RegressionsPartialTests
         int end
     )
     {
-        Match m = new FuzzyRegex(pattern).Match("OOGOX", partial: true);
+        Match m = Upstream.Compile(pattern).Match("OOGOX", partial: true);
 
         (m.Index, m.Index + m.Length).Should().Be((start, end));
     }
@@ -41,7 +41,9 @@ public sealed class RegressionsPartialTests
     [Property("Upstream", "RegexTests.test_hg_bugs#239")]
     public void Search_reports_a_zero_length_partial_match_at_the_end_of_the_subject()
     {
-        Match m = new FuzzyRegex(@"\d\d\d-\d\d-\d\d\d\d").Match("My SSN is 999-89-76, but don't tell.", partial: true);
+        Match m = Upstream
+            .Compile(@"\d\d\d-\d\d-\d\d\d\d")
+            .Match("My SSN is 999-89-76, but don't tell.", partial: true);
 
         (m.Index, m.Index + m.Length).Should().Be((36, 36));
     }
@@ -53,7 +55,7 @@ public sealed class RegressionsPartialTests
     [Property("Upstream", "RegexTests.test_hg_bugs#310-311")]
     public void Search_reports_the_whole_subject_as_a_partial_match_forwards_and_backwards(string pattern)
     {
-        Match m = new FuzzyRegex(pattern).Match("foo bar", partial: true);
+        Match m = Upstream.Compile(pattern).Match("foo bar", partial: true);
 
         (m.Index, m.Index + m.Length).Should().Be((0, 7));
     }
@@ -84,7 +86,7 @@ public sealed class RegressionsPartialTests
     [Arguments("(?r)(?:ab)++", "abab")]
     [Property("Upstream", "RegexTests.test_hg_bugs#330-349")]
     public void Match_after_a_complete_repetition_of_ab_is_never_reported_as_partial(string pattern, string subject) =>
-        new FuzzyRegex(pattern).MatchAtStart(subject, partial: true).PartialMatch.Should().BeFalse();
+        Upstream.Compile(pattern).MatchAtStart(subject, partial: true).PartialMatch.Should().BeFalse();
 
     // Same Hg issue 299 report, over a single-character repetition: only a one-or-more quantifier,
     // greedy or not, is partial when no "a" is available to satisfy it.
@@ -112,13 +114,13 @@ public sealed class RegressionsPartialTests
         string pattern,
         string subject,
         bool expectedPartial
-    ) => new FuzzyRegex(pattern).MatchAtStart(subject, partial: true).PartialMatch.Should().Be(expectedPartial);
+    ) => Upstream.Compile(pattern).MatchAtStart(subject, partial: true).PartialMatch.Should().Be(expectedPartial);
 
     // Same Hg issue 299 report, over a compound repetition of whitespace/word/quote groups.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#368")]
     public void Match_of_a_repeated_word_group_on_a_full_word_is_not_partial() =>
-        new FuzzyRegex(@"(?:\s*\w+'*)+").MatchAtStart("whatever", partial: true).PartialMatch.Should().BeFalse();
+        Upstream.Compile(@"(?:\s*\w+'*)+").MatchAtStart("whatever", partial: true).PartialMatch.Should().BeFalse();
 
     // Git issue 539: bug: partial matching fails on a simple example. A negated class followed by
     // a literal tail only partially matches when the subject is a genuine prefix of the tail; a
@@ -143,7 +145,7 @@ public sealed class RegressionsPartialTests
         int? expectedLength
     )
     {
-        Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);
+        Match m = Upstream.Compile(pattern).MatchAtStart(subject, partial: true);
 
         if (expectedIndex is null)
         {
@@ -168,5 +170,5 @@ public sealed class RegressionsPartialTests
     [Arguments("<thinking>xyz abc foo bar")]
     [Property("Upstream", "RegexTests.test_hg_bugs#459-466")]
     public void Match_of_a_non_greedy_thinking_tag_matches_at_every_prefix_length(string subject) =>
-        new FuzzyRegex("<thinking>.*?</thinking>").MatchAtStart(subject, partial: true).Success.Should().BeTrue();
+        Upstream.Compile("<thinking>.*?</thinking>").MatchAtStart(subject, partial: true).Success.Should().BeTrue();
 }

@@ -16,23 +16,20 @@ public sealed class FormatTests
     [Test]
     [Property("Upstream", "RegexTests.test_format#1")]
     public void ReplaceFormat_reorders_groups_by_number() =>
-        FuzzyRegex.ReplaceFormat("foo bar", @"(\w+) (\w+)", "{0} => {2} {1}").Should().Be("foo bar => bar foo");
+        Upstream.ReplaceFormat("foo bar", @"(\w+) (\w+)", "{0} => {2} {1}").Should().Be("foo bar => bar foo");
 
     [Test]
     [Property("Upstream", "RegexTests.test_format#2")]
     public void ReplaceFormat_reorders_groups_by_name() =>
-        FuzzyRegex.ReplaceFormat("foo bar", @"(?<word1>\w+) (?<word2>\w+)", "{word2} {word1}").Should().Be("bar foo");
+        Upstream.ReplaceFormat("foo bar", @"(?<word1>\w+) (?<word2>\w+)", "{word2} {word1}").Should().Be("bar foo");
 
     [Test]
     [Property("Upstream", "RegexTests.test_format#3")]
     public void ReplaceFormat_reports_the_string_and_the_replacement_count_by_number()
     {
-        string result = new FuzzyRegex(@"(\w+) (\w+)").ReplaceFormat(
-            "foo bar",
-            "{0} => {2} {1}",
-            -1,
-            out int replacements
-        );
+        string result = Upstream
+            .Compile(@"(\w+) (\w+)")
+            .ReplaceFormat("foo bar", "{0} => {2} {1}", -1, out int replacements);
 
         result.Should().Be("foo bar => bar foo");
         replacements.Should().Be(1);
@@ -42,12 +39,9 @@ public sealed class FormatTests
     [Property("Upstream", "RegexTests.test_format#4")]
     public void ReplaceFormat_reports_the_string_and_the_replacement_count_by_name()
     {
-        string result = new FuzzyRegex(@"(?<word1>\w+) (?<word2>\w+)").ReplaceFormat(
-            "foo bar",
-            "{word2} {word1}",
-            -1,
-            out int replacements
-        );
+        string result = Upstream
+            .Compile(@"(?<word1>\w+) (?<word2>\w+)")
+            .ReplaceFormat("foo bar", "{word2} {word1}", -1, out int replacements);
 
         result.Should().Be("bar foo");
         replacements.Should().Be(1);
@@ -56,7 +50,7 @@ public sealed class FormatTests
     [Test]
     [Property("Upstream", "RegexTests.test_format#5")]
     public void ResultFormat_reorders_groups_by_number_from_an_existing_match() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("foo bar", @"(\w+) (\w+)")
             .ResultFormat("{0} => {2} {1}")
             .Should()

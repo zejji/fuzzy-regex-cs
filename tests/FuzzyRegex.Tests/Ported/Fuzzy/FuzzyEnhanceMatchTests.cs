@@ -22,7 +22,7 @@ public sealed class FuzzyEnhanceMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#15")]
     public void EnhanceMatch_tightens_a_match_found_under_per_kind_caps()
     {
-        Match m = FuzzyRegex.Match(FuzzyTestData.Anaconda, "(?e)(fuu){i<=2,d<=2,e<=5}");
+        Match m = Upstream.Match(FuzzyTestData.Anaconda, "(?e)(fuu){i<=2,d<=2,e<=5}");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((9, 10));
@@ -34,7 +34,7 @@ public sealed class FuzzyEnhanceMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#20")]
     public void EnhanceMatch_shortens_an_unbounded_error_match()
     {
-        Match m = FuzzyRegex.Match("xirefoabralfobarxie", "(?e)(foobar){e}");
+        Match m = Upstream.Match("xirefoabralfobarxie", "(?e)(foobar){e}");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 3));
@@ -46,7 +46,7 @@ public sealed class FuzzyEnhanceMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#49")]
     public void EnhanceMatch_moves_the_inner_group_onto_the_text_it_should_have_matched()
     {
-        Match m = FuzzyRegex.Match(FuzzyTestData.Hosts, "(?es)^.*(dot.org){e}.*$");
+        Match m = Upstream.Match(FuzzyTestData.Hosts, "(?es)^.*(dot.org){e}.*$");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, 120));
@@ -59,7 +59,7 @@ public sealed class FuzzyEnhanceMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#53")]
     public void EnhanceMatch_trims_a_fuzzy_named_list_match()
     {
-        MatchCollection matches = FuzzyRegex.Matches(
+        MatchCollection matches = Upstream.Matches(
             " book dog cot desk ",
             "(?e)\\b\\L<words>{e<=1}\\b",
             FuzzyRegexOptions.None,
@@ -74,7 +74,7 @@ public sealed class FuzzyEnhanceMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#55")]
     public void EnhanceMatch_trims_a_fuzzy_named_list_match_searching_backwards()
     {
-        MatchCollection matches = FuzzyRegex.Matches(
+        MatchCollection matches = Upstream.Matches(
             " book cot dog desk ",
             "(?er)\\b\\L<words>{e<=1}\\b",
             FuzzyRegexOptions.None,

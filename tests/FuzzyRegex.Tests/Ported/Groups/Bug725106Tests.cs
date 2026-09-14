@@ -26,7 +26,7 @@ public sealed class Bug725106Tests
         string? group2
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, pattern);
+        Match m = Upstream.MatchAtStart(subject, pattern);
 
         m.Value.Should().Be(whole);
         m.Groups[1].Value.Should().Be(group1);

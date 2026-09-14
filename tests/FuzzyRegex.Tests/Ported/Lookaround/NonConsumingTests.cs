@@ -22,5 +22,5 @@ public sealed class NonConsumingTests
     [Arguments(@"(a)(?!\s(abc|a))", "a b")]
     [Property("Upstream", "RegexTests.test_non_consuming#1-11")]
     public void Group_before_a_non_consuming_lookahead_captures_a(string pattern, string subject) =>
-        FuzzyRegex.MatchAtStart(subject, pattern).Groups[1].Value.Should().Be("a");
+        Upstream.MatchAtStart(subject, pattern).Groups[1].Value.Should().Be("a");
 }

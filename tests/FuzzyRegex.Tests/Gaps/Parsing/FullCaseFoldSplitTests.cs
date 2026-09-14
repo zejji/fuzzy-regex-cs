@@ -74,10 +74,16 @@ public sealed class FullCaseFoldSplitTests
     }
 
     /// <summary>The same literal without <c>FULLCASE</c> takes the cheaper simple-folding opcode.</summary>
+    /// <remarks>
+    /// <c>Version0</c> is how a caller gets "without <c>FULLCASE</c>" since S50b: version 1 is this
+    /// port's default and <c>DEFAULT_FLAGS</c> maps it to <c>FULLCASE</c>
+    /// (<c>upstream/regex/_regex_core.py</c> line 167), so <c>IgnoreCase</c> alone no longer means
+    /// simple folding. <c>(?-f)</c> is the other way to say it.
+    /// </remarks>
     [Test]
     public void The_same_literal_without_fullcase_uses_the_simple_fold_opcode()
     {
-        CompiledPattern compiled = Compile("fI", RegexFlags.IgnoreCase | RegexFlags.Unicode);
+        CompiledPattern compiled = Compile("fI", RegexFlags.IgnoreCase | RegexFlags.Unicode | RegexFlags.Version0);
 
         using (new AssertionScope())
         {

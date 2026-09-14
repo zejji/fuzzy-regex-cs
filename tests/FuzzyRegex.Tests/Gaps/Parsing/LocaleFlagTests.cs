@@ -52,6 +52,14 @@ public sealed class LocaleFlagTests
 
     private const int _localeVersion0 = RegexFlags.Locale | RegexFlags.Version0;
 
+    /// <summary>
+    /// Upstream's <c>DEFAULT_VERSION</c>, which is what every expected code listing below was
+    /// recorded under. This port's own default is <c>Version1</c> since S50b, and version 1 implies
+    /// <c>FULLCASE</c> - which would both change <c>compiled.Flags</c> and collapse
+    /// <c>(?Li)ab</c> onto <c>(?Lfi)ab</c>, losing a case rather than failing.
+    /// </summary>
+    private const int _upstreamDefaultVersion = RegexFlags.Version0;
+
     [Test]
     [Arguments(@"(?L)a", new uint[] { 12, 1, 97, 1 })]
     [Arguments(@"(?L)\w", new uint[] { 37, 1, 6291457, 1 })]
@@ -67,7 +75,7 @@ public sealed class LocaleFlagTests
         uint[] expectedCode
     )
     {
-        CompiledPattern compiled = PatternCompiler.Compile(pattern, 0, _noNamedLists, PatternCompiler.DefaultVersion);
+        CompiledPattern compiled = PatternCompiler.Compile(pattern, 0, _noNamedLists, _upstreamDefaultVersion);
 
         using (new AssertionScope())
         {
@@ -86,7 +94,7 @@ public sealed class LocaleFlagTests
         uint[] expectedCode
     )
     {
-        CompiledPattern compiled = PatternCompiler.Compile(pattern, 0, _noNamedLists, PatternCompiler.DefaultVersion);
+        CompiledPattern compiled = PatternCompiler.Compile(pattern, 0, _noNamedLists, _upstreamDefaultVersion);
 
         using (new AssertionScope())
         {
@@ -109,7 +117,7 @@ public sealed class LocaleFlagTests
     [Arguments(@"(?Lfi)ab")]
     public void A_case_insensitive_locale_run_stops_at_the_locale_seam(string pattern)
     {
-        Action compile = () => PatternCompiler.Compile(pattern, 0, _noNamedLists, PatternCompiler.DefaultVersion);
+        Action compile = () => PatternCompiler.Compile(pattern, 0, _noNamedLists, _upstreamDefaultVersion);
 
         compile.Should().Throw<NotImplementedException>().WithMessage("needs:locale-flag*");
     }

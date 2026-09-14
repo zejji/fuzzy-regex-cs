@@ -10,5 +10,5 @@ public sealed class Bug449964Tests
     [Test]
     [Property("Upstream", "RegexTests.test_bug_449964#1")]
     public void Replace_handles_a_group_reference_immediately_followed_by_another_escape() =>
-        FuzzyRegex.Replace("xx", "(?P<unk>x)", @"\g<1>\g<1>\b").Should().Be("xx\bxx\b");
+        Upstream.Replace("xx", "(?P<unk>x)", @"\g<1>\g<1>\b").Should().Be("xx\bxx\b");
 }

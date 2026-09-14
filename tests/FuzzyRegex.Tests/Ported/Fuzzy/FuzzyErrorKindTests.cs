@@ -47,7 +47,7 @@ public sealed class FuzzyErrorKindTests
 
     private static void AssertSpan(string subject, int end)
     {
-        Match m = FuzzyRegex.Match(subject, "^(foobar){e<=1}$");
+        Match m = Upstream.Match(subject, "^(foobar){e<=1}$");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((0, end));

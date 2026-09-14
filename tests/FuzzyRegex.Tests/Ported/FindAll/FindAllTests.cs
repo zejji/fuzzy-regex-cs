@@ -19,39 +19,39 @@ public sealed class FindAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#1")]
     public void Matches_is_empty_when_the_pattern_never_matches() =>
-        FuzzyRegex.Matches("abc", ":+").Select(static m => m.Value).Should().BeEmpty();
+        Upstream.Matches("abc", ":+").Select(static m => m.Value).Should().BeEmpty();
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#2")]
     public void Matches_value_is_the_whole_match_when_the_pattern_has_no_groups() =>
-        FuzzyRegex.Matches("a:b::c:::d", ":+").Select(static m => m.Value).Should().Equal(":", "::", ":::");
+        Upstream.Matches("a:b::c:::d", ":+").Select(static m => m.Value).Should().Equal(":", "::", ":::");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#3")]
     public void Matches_group_one_value_is_used_when_the_pattern_has_exactly_one_group() =>
-        FuzzyRegex.Matches("a:b::c:::d", "(:+)").Select(static m => m.Groups[1].Value).Should().Equal(":", "::", ":::");
+        Upstream.Matches("a:b::c:::d", "(:+)").Select(static m => m.Groups[1].Value).Should().Equal(":", "::", ":::");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#4")]
     public void Matches_group_one_value_for_a_two_group_pattern() =>
-        FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(static m => m.Groups[1].Value).Should().Equal(":", ":", ":");
+        Upstream.Matches("a:b::c:::d", "(:)(:*)").Select(static m => m.Groups[1].Value).Should().Equal(":", ":", ":");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#4")]
     public void Matches_group_two_value_for_a_two_group_pattern() =>
-        FuzzyRegex.Matches("a:b::c:::d", "(:)(:*)").Select(static m => m.Groups[2].Value).Should().Equal("", ":", "::");
+        Upstream.Matches("a:b::c:::d", "(:)(:*)").Select(static m => m.Groups[2].Value).Should().Equal("", ":", "::");
 
     [Test]
     [Arguments(@"\((?P<test>.{0,5}?TEST)\)")]
     [Arguments(@"\((?P<test>.{0,3}?TEST)\)")]
     [Property("Upstream", "RegexTests.test_re_findall#5-6")]
     public void Matches_group_one_value_for_a_lazy_named_group_before_TEST(string pattern) =>
-        FuzzyRegex.Matches("(MY TEST)", pattern).Select(static m => m.Groups[1].Value).Should().Equal("MY TEST");
+        Upstream.Matches("(MY TEST)", pattern).Select(static m => m.Groups[1].Value).Should().Equal("MY TEST");
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#7")]
     public void Matches_group_one_value_for_a_lazy_named_group_before_T() =>
-        FuzzyRegex
+        Upstream
             .Matches("(MY T)", @"\((?P<test>.{0,3}?T)\)")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -63,12 +63,12 @@ public sealed class FindAllTests
     [Arguments(@"[^a]{2,3}[A-Z]", "\n   S", "   S")]
     [Property("Upstream", "RegexTests.test_re_findall#8-10")]
     public void Matches_value_for_negated_character_class_repeats(string pattern, string subject, string expected) =>
-        FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(expected);
+        Upstream.Matches(subject, pattern).Select(static m => m.Value).Should().Equal(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#11")]
     public void Matches_group_one_value_for_a_group_repeated_one_or_two_times() =>
-        FuzzyRegex
+        Upstream
             .Matches("XYABCYPPQ\nQ DEF", @"X(Y[^Y]+?){1,2}( |Q)+DEF")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -77,7 +77,7 @@ public sealed class FindAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#11")]
     public void Matches_group_two_value_for_a_group_repeated_one_or_two_times() =>
-        FuzzyRegex
+        Upstream
             .Matches("XYABCYPPQ\nQ DEF", @"X(Y[^Y]+?){1,2}( |Q)+DEF")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -86,7 +86,7 @@ public sealed class FindAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#12")]
     public void Matches_group_one_value_for_an_optional_nested_repeated_group() =>
-        FuzzyRegex
+        Upstream
             .Matches("\nTest\nxyz\nxyz\nEnd", @"(\nTest(\n+.+?){0,2}?)?\n+End")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -95,7 +95,7 @@ public sealed class FindAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_re_findall#12")]
     public void Matches_group_two_value_for_an_optional_nested_repeated_group() =>
-        FuzzyRegex
+        Upstream
             .Matches("\nTest\nxyz\nxyz\nEnd", @"(\nTest(\n+.+?){0,2}?)?\n+End")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -104,7 +104,7 @@ public sealed class FindAllTests
     [Test]
     [Property("Upstream", "RegexTests.test_bug_117612#1")]
     public void Matches_group_one_value_for_a_nested_alternation_group() =>
-        FuzzyRegex.Matches("aba", "(a|(b))").Select(static m => m.Groups[1].Value).Should().Equal("a", "b", "a");
+        Upstream.Matches("aba", "(a|(b))").Select(static m => m.Groups[1].Value).Should().Equal("a", "b", "a");
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_117612#1")]
@@ -113,6 +113,6 @@ public sealed class FindAllTests
         // Upstream's findall substitutes '' for a group that did not participate in a match
         // (unlike Match.group(n), which is None there); this matches the built-in Regex's own
         // Group.Value, which is "" for an unsuccessful group.
-        FuzzyRegex.Matches("aba", "(a|(b))").Select(static m => m.Groups[2].Value).Should().Equal("", "b", "");
+        Upstream.Matches("aba", "(a|(b))").Select(static m => m.Groups[2].Value).Should().Equal("", "b", "");
     }
 }

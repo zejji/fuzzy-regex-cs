@@ -18,7 +18,7 @@ public sealed class RegressionsBasicMatchingTests
     [Property("Upstream", "RegexTests.test_hg_bugs#153")]
     public void Alternation_of_two_identical_branches_still_matches()
     {
-        Match m = FuzzyRegex.MatchAtStart("R", "R|R");
+        Match m = Upstream.MatchAtStart("R", "R|R");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(1);
@@ -29,7 +29,7 @@ public sealed class RegressionsBasicMatchingTests
     // Retagged in S16: the spine matches literals and '.', but '.*' is a repeat.
     [Property("Upstream", "RegexTests.test_hg_bugs#59")]
     public void Pattern_that_used_to_hang_fails_to_match_without_hanging() =>
-        FuzzyRegex.MatchAtStart("ababba", @".*a.*ba.*aa").Success.Should().BeFalse();
+        Upstream.MatchAtStart("ababba", @".*a.*ba.*aa").Success.Should().BeFalse();
 
     // Hg issue 139: Regular expression with multiple wildcards where first should match empty
     // string does not always work.
@@ -39,7 +39,7 @@ public sealed class RegressionsBasicMatchingTests
     [Property("Upstream", "RegexTests.test_hg_bugs#143")]
     public void First_wildcard_group_is_allowed_to_match_empty_so_the_second_can_reach_the_anchor()
     {
-        Match m = FuzzyRegex.Match("LtR", "([^L]*)([^R]*R)");
+        Match m = Upstream.Match("LtR", "([^L]*)([^R]*R)");
 
         m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("", "LtR");
     }
@@ -48,13 +48,13 @@ public sealed class RegressionsBasicMatchingTests
     // Retagged in S16: '[ ]*' is a repeated set.
     [Property("Upstream", "RegexTests.test_hg_bugs#411")]
     public void Trailing_space_in_the_pattern_that_is_absent_from_the_subject_fails_to_match() =>
-        new FuzzyRegex(@"[ ]* Name[ ]*\* ").Match("  Name *").Success.Should().BeFalse();
+        Upstream.Compile(@"[ ]* Name[ ]*\* ").Match("  Name *").Success.Should().BeFalse();
 
     [Test]
     // Retagged in S16: the pattern is an alternation, which the matcher has no BRANCH case for.
     [Property("Upstream", "RegexTests.test_hg_bugs#412")]
     public void Alternation_with_a_literal_dot_branch_does_not_falsely_match() =>
-        new FuzzyRegex(@"a|\.*pb\.py").Match(".geojs").Success.Should().BeFalse();
+        Upstream.Compile(@"a|\.*pb\.py").Match(".geojs").Success.Should().BeFalse();
 
     [Test]
     [Arguments("1 month ago", "1 month ago")]
@@ -64,7 +64,8 @@ public sealed class RegressionsBasicMatchingTests
     // Retagged in S16: the pattern opens with a lookbehind and closes with a lookahead.
     [Property("Upstream", "RegexTests.test_hg_bugs#413-416")]
     public void Relative_time_pattern_finds_the_rightmost_recognised_phrase(string subject, string expected) =>
-        new FuzzyRegex(_relativeTimePattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0)
+        Upstream
+            .Compile(_relativeTimePattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0)
             .Match(subject)
             .Value.Should()
             .Be(expected);
@@ -75,7 +76,7 @@ public sealed class RegressionsBasicMatchingTests
     [Property("Upstream", "RegexTests.test_hg_bugs#376")]
     public void Nested_lazy_star_groups_fully_match_without_exhausting_memory()
     {
-        Match m = FuzzyRegex.FullMatch("123", @"((\d)*?)*?");
+        Match m = Upstream.FullMatch("123", @"((\d)*?)*?");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(3);

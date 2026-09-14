@@ -25,13 +25,13 @@ public sealed class Issue18468Tests
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#23")]
     public void A_pattern_with_no_capturing_group_reports_only_group_zero() =>
-        FuzzyRegex.MatchAtStart("a", "a").Groups.Count.Should().Be(1);
+        Upstream.MatchAtStart("a", "a").Groups.Count.Should().Be(1);
 
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#24-27")]
     public void Group_accessor_forms_agree_for_a_single_capturing_group()
     {
-        Match m = FuzzyRegex.MatchAtStart("a", "(a)");
+        Match m = Upstream.MatchAtStart("a", "(a)");
 
         m.Groups[1].Value.Should().Be("a"); // .groups() == ('a',)
         m.Value.Should().Be("a"); // .group(0)

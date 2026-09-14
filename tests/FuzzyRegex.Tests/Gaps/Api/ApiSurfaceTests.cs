@@ -192,9 +192,15 @@ public sealed class ApiSurfaceTests
     public void Options_hides_the_upstream_flags_this_port_does_not_expose()
     {
         // upstream/regex/_main.py lines 570-574 OR UNICODE (0x20) into every str pattern's flags,
-        // and the version bit is always added, so the raw resolved flags for "a" are 0x2020 - a
-        // number with no name in FuzzyRegexOptions. What a caller sees is the version alone.
+        // and the version bit is always added, so the raw resolved flags for "a" are 0x4120 under
+        // this port's Version1 default: UNICODE is the 0x20 with no name in FuzzyRegexOptions, and
+        // what a caller sees is the version and the FullCase it implies.
         new FuzzyRegex("a")
+            .Options.Should()
+            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+
+        // The same masking under upstream's version, where the raw flags are 0x2020.
+        new FuzzyRegex("a", FuzzyRegexOptions.Version0)
             .Options.Should()
             .Be(FuzzyRegexOptions.Version0);
     }

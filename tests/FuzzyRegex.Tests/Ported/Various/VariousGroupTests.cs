@@ -40,7 +40,7 @@ public sealed class VariousGroupTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);

@@ -14,7 +14,7 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#18")]
     public void Conditional_with_an_empty_no_branch_still_matches_the_whole_run() =>
-        FuzzyRegex.Match("(abcd", @"(\()?[^()]+(?(1)\)|)").Value.Should().Be("abcd");
+        Upstream.Match("(abcd", @"(\()?[^()]+(?(1)\)|)").Value.Should().Be("abcd");
 
     // Hg issue 48: regex.search("(a(?(1)\\1)){4}", "a"*10, flags=regex.V1).group(0,1) returns
     // ('aaaaa', 'a') instead of ('aaaaaaaaaa', 'aaaa').
@@ -32,7 +32,7 @@ public sealed class RegressionsConditionalTests
         int group1End
     )
     {
-        Match m = FuzzyRegex.Match("aaaaaaaaaa", $@"(?V1)(a(?(1)\1)){{{repeatCount}}}");
+        Match m = Upstream.Match("aaaaaaaaaa", $@"(?V1)(a(?(1)\1)){{{repeatCount}}}");
 
         m.Index.Should().Be(matchStart);
         m.Length.Should().Be(matchEnd - matchStart);
@@ -46,13 +46,13 @@ public sealed class RegressionsConditionalTests
     // optional group it does need.
     [Property("Upstream", "RegexTests.test_hg_bugs#52")]
     public void Optional_non_capturing_group_still_matches_the_longer_alternative() =>
-        FuzzyRegex.Match("female", @"(?:fe)?male").Value.Should().Be("female");
+        Upstream.Match("female", @"(?:fe)?male").Value.Should().Be("female");
 
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#53")]
     public void Conditional_group_selects_the_matching_gender_specific_branch() =>
-        FuzzyRegex
+        Upstream
             .Matches("female: her dog; male: his cat. asdsasda", @"(fe)?male: h(?(1)(er)|(is)) (\w+)")
             .Select(static m => m.Value)
             .Should()
@@ -65,7 +65,7 @@ public sealed class RegressionsConditionalTests
     [Property("Upstream", "RegexTests.test_hg_bugs#112-113")]
     public void Nested_conditional_groups_reset_between_repeats_and_still_capture_empty_groups(string pattern)
     {
-        Match m = FuzzyRegex.MatchAtStart("a", pattern);
+        Match m = Upstream.MatchAtStart("a", pattern);
 
         m.Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("");
@@ -79,14 +79,14 @@ public sealed class RegressionsConditionalTests
     // 1]', where 35 is LOOKAROUND over an empty body (probed against regex 2026.7.19, 2026-08-31).
     [Property("Upstream", "RegexTests.test_hg_bugs#154")]
     public void Forced_fail_in_the_conditionals_yes_branch_makes_the_whole_match_fail() =>
-        FuzzyRegex.MatchAtStart("xy", @"(.)(?(1)(?!))").Success.Should().BeFalse();
+        Upstream.MatchAtStart("xy", @"(.)(?(1)(?!))").Success.Should().BeFalse();
 
     // Groups cleared after failure.
     [Test]
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_one_is_empty_on_every_match_because_it_never_participates() =>
-        FuzzyRegex
+        Upstream
             .Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -96,7 +96,7 @@ public sealed class RegressionsConditionalTests
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#155")]
     public void Findall_group_two_captures_each_digit_in_turn() =>
-        FuzzyRegex
+        Upstream
             .Matches("ax1y2z3b", @"(y)?(\d)(?(1)\b\B)")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -106,7 +106,7 @@ public sealed class RegressionsConditionalTests
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_also_leaves_group_one_empty() =>
-        FuzzyRegex
+        Upstream
             .Matches("ax1y2z3b", @"(y)?+(\d)(?(1)\b\B)")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -116,7 +116,7 @@ public sealed class RegressionsConditionalTests
     // S21 delivered the GROUP_EXISTS conditional; what is left is 'Matches', which is S25.
     [Property("Upstream", "RegexTests.test_hg_bugs#156")]
     public void Findall_with_a_possessive_optional_group_still_captures_each_digit() =>
-        FuzzyRegex
+        Upstream
             .Matches("ax1y2z3b", @"(y)?+(\d)(?(1)\b\B)")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -129,7 +129,7 @@ public sealed class RegressionsConditionalTests
     [Property("Upstream", "RegexTests.test_hg_bugs#212")]
     public void Non_conditional_lookahead_alternation_matches_the_whole_digit_run()
     {
-        Match m = FuzzyRegex.MatchAtStart("123abc", @"(?:(?=\d)\d+\b|\w+)");
+        Match m = Upstream.MatchAtStart("123abc", @"(?:(?=\d)\d+\b|\w+)");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(6);
@@ -138,13 +138,13 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#213")]
     public void Conditional_on_a_bare_lookahead_with_no_else_branch_does_not_match_without_a_boundary() =>
-        FuzzyRegex.MatchAtStart("123abc", @"(?(?=\d)\d+\b|\w+)").Success.Should().BeFalse();
+        Upstream.MatchAtStart("123abc", @"(?(?=\d)\d+\b|\w+)").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#214")]
     public void Conditional_choosing_between_two_lookbehind_predicates_matches_the_word_after_love()
     {
-        Match m = FuzzyRegex.Match("I love you", @"(?(?<=love\s)you|(?<=hate\s)her)");
+        Match m = Upstream.Match("I love you", @"(?(?<=love\s)you|(?<=hate\s)her)");
 
         m.Index.Should().Be(7);
         m.Length.Should().Be(3);
@@ -153,7 +153,7 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#215")]
     public void Findall_with_a_lookbehind_conditional_finds_both_the_loved_and_hated_targets() =>
-        FuzzyRegex
+        Upstream
             .Matches("I love you but I don't hate her either", @"(?(?<=love\s)you|(?<=hate\s)her)")
             .Select(static m => m.Value)
             .Should()
@@ -163,7 +163,7 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#263")]
     public void Conditional_lookahead_with_a_literal_bang_does_not_match_a_lone_bang() =>
-        FuzzyRegex.MatchAtStart("!", @"(?(?=.*\!.*)(?P<true>.*\!\w*\:.*)|(?P<false>.*))").Success.Should().BeFalse();
+        Upstream.MatchAtStart("!", @"(?(?=.*\!.*)(?P<true>.*\!\w*\:.*)|(?P<false>.*))").Success.Should().BeFalse();
 
     // Hg issue 251: Segfault with a particular expression.
     [Test]
@@ -180,7 +180,7 @@ public sealed class RegressionsConditionalTests
         int expectedLength
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Index.Should().Be(expectedIndex);
         m.Length.Should().Be(expectedLength);
@@ -190,13 +190,13 @@ public sealed class RegressionsConditionalTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#439")]
     public void Nested_conditional_with_lookbehind_and_a_negative_class_does_not_match_at_the_start() =>
-        FuzzyRegex.MatchAtStart("A", @"(?(?<=A)|(?(?![^B])C|D))").Success.Should().BeFalse();
+        Upstream.MatchAtStart("A", @"(?(?<=A)|(?(?![^B])C|D))").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#440")]
     public void Same_nested_conditional_matches_an_empty_span_after_the_A_via_search()
     {
-        Match m = FuzzyRegex.Match("A", @"(?(?<=A)|(?(?![^B])C|D))");
+        Match m = Upstream.Match("A", @"(?(?<=A)|(?(?![^B])C|D))");
 
         m.Index.Should().Be(1);
         m.Length.Should().Be(0);
@@ -214,7 +214,7 @@ public sealed class RegressionsConditionalTests
         int expectedLength
     )
     {
-        Match m = FuzzyRegex.MatchAtStart("ab", pattern);
+        Match m = Upstream.MatchAtStart("ab", pattern);
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(expectedLength);

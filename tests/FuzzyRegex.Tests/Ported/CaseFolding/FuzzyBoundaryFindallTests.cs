@@ -15,18 +15,10 @@ public sealed class FuzzyBoundaryFindallTests
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#32")]
     public void V0_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
-        FuzzyRegex
-            .Matches(_subject, "(?iV0)" + _pattern)
-            .Select(static m => m.Value)
-            .Should()
-            .Equal("word234", "word23");
+        Upstream.Matches(_subject, "(?iV0)" + _pattern).Select(static m => m.Value).Should().Equal("word234", "word23");
 
     [Test]
     [Property("Upstream", "RegexTests.test_case_folding#33")]
     public void V1_fuzzy_word_boundary_findall_skips_near_exact_matches() =>
-        FuzzyRegex
-            .Matches(_subject, "(?iV1)" + _pattern)
-            .Select(static m => m.Value)
-            .Should()
-            .Equal("word234", "word23");
+        Upstream.Matches(_subject, "(?iV1)" + _pattern).Select(static m => m.Value).Should().Equal("word234", "word23");
 }

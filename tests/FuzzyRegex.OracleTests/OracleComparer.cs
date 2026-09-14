@@ -146,7 +146,12 @@ internal static class OracleComparer
                     static entry => entry.Key,
                     static entry => (IReadOnlyCollection<string>)entry.Value,
                     StringComparer.Ordinal
-                )
+                ),
+                // The version the RECORDER resolved this row under, not this port's own default,
+                // which S50b made Version1. A default rather than a flag: a row whose pattern says
+                // (?V1) must still get version 1, and both bits at once is "VERSION0 and VERSION1
+                // flags are mutually incompatible".
+                row.DefaultVersion
             );
         }
         catch (NotImplementedException)

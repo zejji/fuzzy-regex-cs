@@ -37,7 +37,7 @@ public sealed class VariousInlineFlagTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -49,5 +49,5 @@ public sealed class VariousInlineFlagTests
     [Arguments(" (?x)foo ", "foo")]
     [Property("Upstream", "RegexTests.test_various#45,47,501")]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

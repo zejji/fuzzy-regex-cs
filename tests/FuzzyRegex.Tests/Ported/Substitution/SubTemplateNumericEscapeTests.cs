@@ -32,7 +32,7 @@ public sealed class SubTemplateNumericEscapeTests
     [Arguments(@"\777", "\x1FF")]
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#1-16")]
     public void Replace_expands_an_octal_numeric_escape(string replacement, string expected) =>
-        FuzzyRegex.Replace("x", "x", replacement).Should().Be(expected);
+        Upstream.Replace("x", "x", replacement).Should().Be(expected);
 
     // NOT PORTED: assertions #17-18 (lines 167-168) use bytes patterns, templates and subjects
     // (`b'x'`, `br'\400'`, `br'\777'`); this port is char-based only.
@@ -61,7 +61,7 @@ public sealed class SubTemplateNumericEscapeTests
     [Property("Upstream", "RegexTests.test_sub_template_numeric_escape#19-30")]
     public void Replace_with_an_invalid_numeric_group_reference_throws(string replacement)
     {
-        Action act = () => _ = FuzzyRegex.Replace("x", "x", replacement);
+        Action act = () => _ = Upstream.Replace("x", "x", replacement);
 
         act.Should().Throw<FuzzyRegexParseException>();
     }
@@ -76,5 +76,5 @@ public sealed class SubTemplateNumericEscapeTests
         string replacement,
         string subject,
         string expected
-    ) => FuzzyRegex.Replace(subject, pattern, replacement).Should().Be(expected);
+    ) => Upstream.Replace(subject, pattern, replacement).Should().Be(expected);
 }

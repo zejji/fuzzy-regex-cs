@@ -10,7 +10,7 @@ public sealed class SubscriptingMatchTests
 {
     [Test]
     [Property("Upstream", "RegexTests.test_subscripting_match#1")]
-    public void The_match_succeeds() => FuzzyRegex.MatchAtStart("xy", @"(?<a>\w)").Success.Should().BeTrue();
+    public void The_match_succeeds() => Upstream.MatchAtStart("xy", @"(?<a>\w)").Success.Should().BeTrue();
 
     // NOT PORTED: upstream's second assertion checks that `m[0] == m.group(0)` and
     // `m[1] == m.group(1)` - that Python's subscript operator agrees with its `.group()` method.
@@ -24,7 +24,7 @@ public sealed class SubscriptingMatchTests
     [Property("Upstream", "RegexTests.test_subscripting_match#5")]
     public void The_whole_tuple_is_the_match_and_its_single_named_group()
     {
-        Match m = FuzzyRegex.MatchAtStart("xy", @"(?<a>\w)");
+        Match m = Upstream.MatchAtStart("xy", @"(?<a>\w)");
 
         m.Value.Should().Be("x");
         m.Groups[1].Value.Should().Be("x");

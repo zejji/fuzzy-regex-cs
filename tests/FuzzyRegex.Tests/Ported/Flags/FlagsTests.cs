@@ -24,7 +24,7 @@ public sealed class FlagsTests
     // (upstream/regex/_regex_core.py lines 3939-3943).
     [Property("Upstream", "RegexTests.test_flags#1")]
     public void Compiling_with_each_flag_succeeds(FuzzyRegexOptions options) =>
-        new FuzzyRegex("^pattern$", options).Should().NotBeNull();
+        Upstream.Compile("^pattern$", options).Should().NotBeNull();
 
     // NOT PORTED: regex.L (LOCALE) is not surfaced on FuzzyRegexOptions, so that data point of
     // upstream's loop is dropped.

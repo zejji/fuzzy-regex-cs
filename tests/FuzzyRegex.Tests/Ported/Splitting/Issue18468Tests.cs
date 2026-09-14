@@ -31,17 +31,17 @@ public sealed class Issue18468Tests
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#7")]
     public void Split_on_a_literal_colon_keeps_empty_pieces() =>
-        FuzzyRegex.Split(":a:b::c", ":").Should().Equal("", "a", "b", "", "c");
+        Upstream.Split(":a:b::c", ":").Should().Equal("", "a", "b", "", "c");
 
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#8")]
     public void Split_on_a_star_quantifier_also_splits_on_the_empty_matches_between_characters() =>
-        FuzzyRegex.Split(":a:b::c", ":*").Should().Equal("", "", "a", "", "b", "", "c", "");
+        Upstream.Split(":a:b::c", ":*").Should().Equal("", "", "a", "", "b", "", "c", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#9")]
     public void Split_with_a_capturing_star_group_keeps_the_empty_captures_too() =>
-        FuzzyRegex
+        Upstream
             .Split(":a:b::c", "(:*)")
             .Should()
             .Equal("", ":", "", "", "a", ":", "", "", "b", "::", "", "", "c", "", "");

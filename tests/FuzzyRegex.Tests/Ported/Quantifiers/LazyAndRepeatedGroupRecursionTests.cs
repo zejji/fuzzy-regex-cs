@@ -19,7 +19,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = string.Concat(Enumerable.Repeat("ab", 10000)) + "cd";
 
-        Match m = FuzzyRegex.MatchAtStart(subject, ".*?c");
+        Match m = Upstream.MatchAtStart(subject, ".*?c");
 
         (m.Index + m.Length).Should().Be(20001);
     }
@@ -31,7 +31,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
         string subject =
             string.Concat(Enumerable.Repeat("ab", 5000)) + "c" + string.Concat(Enumerable.Repeat("ab", 5000)) + "cde";
 
-        Match m = FuzzyRegex.MatchAtStart(subject, ".*?cd");
+        Match m = Upstream.MatchAtStart(subject, ".*?cd");
 
         (m.Index + m.Length).Should().Be(20003);
     }
@@ -42,7 +42,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = string.Concat(Enumerable.Repeat("abc", 20000)) + "de";
 
-        Match m = FuzzyRegex.MatchAtStart(subject, ".*?cd");
+        Match m = Upstream.MatchAtStart(subject, ".*?cd");
 
         (m.Index + m.Length).Should().Be(60001);
     }
@@ -53,7 +53,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = string.Concat(Enumerable.Repeat("ab", 10000)) + "cd";
 
-        Match m = FuzzyRegex.Match(subject, "(a|b)*?c");
+        Match m = Upstream.Match(subject, "(a|b)*?c");
 
         (m.Index + m.Length).Should().Be(20001);
     }
@@ -64,7 +64,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = new('x', 50000);
 
-        FuzzyRegex.MatchAtStart(subject, "(x)*").Groups[1].Value.Should().Be("x");
+        Upstream.MatchAtStart(subject, "(x)*").Groups[1].Value.Should().Be("x");
     }
 
     [Test]
@@ -73,7 +73,7 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = new string('x', 50000) + "y";
 
-        FuzzyRegex.MatchAtStart(subject, "(x)*y").Groups[1].Value.Should().Be("x");
+        Upstream.MatchAtStart(subject, "(x)*y").Groups[1].Value.Should().Be("x");
     }
 
     [Test]
@@ -82,6 +82,6 @@ public sealed class LazyAndRepeatedGroupRecursionTests
     {
         string subject = new string('x', 50000) + "y";
 
-        FuzzyRegex.MatchAtStart(subject, "(x)*?y").Groups[1].Value.Should().Be("x");
+        Upstream.MatchAtStart(subject, "(x)*?y").Groups[1].Value.Should().Be("x");
     }
 }

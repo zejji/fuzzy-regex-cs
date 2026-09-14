@@ -21,11 +21,27 @@ internal sealed class Info
     internal Info(int flags, IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs, int defaultVersion)
     {
         DefaultVersion = defaultVersion;
-        flags |= RegexFlags.DefaultFlags(
-            (flags & RegexFlags.AllVersions) != 0 ? flags & RegexFlags.AllVersions : defaultVersion
-        );
-        Flags = flags;
+
+        // DIVERGES FROM UPSTREAM (S50b; ledger entry 22, docs/DIVERGENCES.md). Upstream assigns the
+        // same value to both (upstream/regex/_regex_core.py lines 4359-4361), so global_flags picks
+        // up whatever DEFAULT_FLAGS the default version implies. A leading global flag - a version
+        // is one - raises _UnscopedFlagSet and the pattern is parsed again seeded with
+        // global_flags, so on `(?V0)a` the first attempt's guess at the version leaks its implied
+        // flags into the attempt that knows better, and DEFAULT_FLAGS[VERSION0] is 0 and cannot
+        // take them off again. Measured on regex 2026.9.10: with DEFAULT_VERSION = VERSION1,
+        // compile('a', V0).flags is U|V0 and compile('(?V0)a').flags is F|U|V0 - the same version,
+        // folding two different ways (tools/probes/upstream-inline-v0-under-a-v1-default.py).
+        //
+        // Unreachable in upstream's own configuration, where DEFAULT_FLAGS[VERSION0] is 0 and there
+        // is nothing to leak; reachable here, because S50b made VERSION1 this port's default. So
+        // the version's implied defaults go into Flags and not into GlobalFlags. Under VERSION0
+        // this is bit-for-bit upstream's behaviour, which the compile-parity corpus holds it to.
         GlobalFlags = flags;
+        Flags =
+            flags
+            | RegexFlags.DefaultFlags(
+                (flags & RegexFlags.AllVersions) != 0 ? flags & RegexFlags.AllVersions : defaultVersion
+            );
         InlineLocale = false;
         Kwargs = kwargs;
     }

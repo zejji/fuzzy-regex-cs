@@ -30,7 +30,7 @@ public sealed class RegressionsGraphemeTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#142")]
     public void Grapheme_cluster_anchored_at_end_matches_the_final_degree_celsius_sign() =>
-        FuzzyRegex.Match("ab" + _degreeCelsius, @"\X$").Value.Should().Be(_degreeCelsius);
+        Upstream.Match("ab" + _degreeCelsius, @"\X$").Value.Should().Be(_degreeCelsius);
 
     // Hg issue 312: \X not matching graphemes with zero-width-joins.
     [Test]
@@ -42,6 +42,6 @@ public sealed class RegressionsGraphemeTests
         // text, so the value carries across unchanged.
         string subject = _man + _zwj + _woman + _zwj + _girl + _zwj + _boy;
 
-        FuzzyRegex.Matches(subject, @"\X").Select(static m => m.Value).Should().Equal(subject);
+        Upstream.Matches(subject, @"\X").Select(static m => m.Value).Should().Equal(subject);
     }
 }

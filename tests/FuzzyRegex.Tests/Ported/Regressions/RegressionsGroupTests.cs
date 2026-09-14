@@ -14,7 +14,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#326-327")]
     public void Subroutine_call_captures_every_iteration_but_group_reports_the_last()
     {
-        Match m = FuzzyRegex.FullMatch("abc", "(?P<x>.)*(?&x)");
+        Match m = Upstream.FullMatch("abc", "(?P<x>.)*(?&x)");
 
         m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
         m.Groups["x"].Value.Should().Be("b");
@@ -24,7 +24,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#328-329")]
     public void Three_groups_sharing_one_name_capture_all_three_and_group_reports_the_last()
     {
-        Match m = FuzzyRegex.FullMatch("abc", "(?P<x>.)(?P<x>.)(?P<x>.)");
+        Match m = Upstream.FullMatch("abc", "(?P<x>.)(?P<x>.)(?P<x>.)");
 
         m.Groups["x"].Captures.Select(static c => c.Value).Should().Equal("a", "b", "c");
         m.Groups["x"].Value.Should().Be("c");
@@ -37,7 +37,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#435-436")]
     public void All_captures_and_spans_of_a_repeated_group_are_available_via_groups_and_captures()
     {
-        Match m = FuzzyRegex.MatchAtStart("abc", @"(.)+");
+        Match m = Upstream.MatchAtStart("abc", @"(.)+");
         Group[] groups = [.. m.Groups];
 
         groups.Should().HaveCount(2);
@@ -54,7 +54,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#71")]
     public void Optional_group_around_an_uppercase_alternative_captures_the_whole_subject()
     {
-        Match m = FuzzyRegex.Match("WWWi", "^([^z]*(?:WWWi|W))?$");
+        Match m = Upstream.Match("WWWi", "^([^z]*(?:WWWi|W))?$");
 
         m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
@@ -63,7 +63,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#72")]
     public void Optional_group_around_a_lowercase_alternative_captures_the_whole_subject()
     {
-        Match m = FuzzyRegex.Match("WWWi", "^([^z]*(?:WWWi|w))?$");
+        Match m = Upstream.Match("WWWi", "^([^z]*(?:WWWi|w))?$");
 
         m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
@@ -72,7 +72,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#73")]
     public void Optional_group_with_a_lazy_star_still_captures_the_whole_subject()
     {
-        Match m = FuzzyRegex.Match("WWWi", "^([^z]*?(?:WWWi|W))?$");
+        Match m = Upstream.Match("WWWi", "^([^z]*?(?:WWWi|W))?$");
 
         m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
@@ -82,7 +82,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#264")]
     public void Alternation_picks_the_branch_that_captures_the_group()
     {
-        Match m = FuzzyRegex.MatchAtStart("easier", @"\w*(ea)\w*|\w*e(?!a)\w*");
+        Match m = Upstream.MatchAtStart("easier", @"\w*(ea)\w*|\w*e(?!a)\w*");
 
         m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("ea");
     }
@@ -92,7 +92,7 @@ public sealed class RegressionsGroupTests
     [Property("Upstream", "RegexTests.test_hg_bugs#60")]
     public void Two_groups_sharing_one_name_report_both_spans_inner_first()
     {
-        Match m = FuzzyRegex.MatchAtStart("ab", "(?<x>a(?<x>b))");
+        Match m = Upstream.MatchAtStart("ab", "(?<x>a(?<x>b))");
 
         // Upstream spans("x") is [(1, 2), (0, 2)] as (start, end). As (Index, Length) the inner
         // group captured "b", one character at index 1, and the outer captured "ab".

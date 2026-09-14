@@ -21,7 +21,7 @@ public sealed class Bug10328Tests
     [Property("Upstream", "RegexTests.test_bug_10328#1")]
     public void V0_replace_with_evaluator_tags_the_trailing_whitespace_and_missing_final_newline_groups()
     {
-        var re = new FuzzyRegex(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
+        var re = Upstream.Compile(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
         string result = re.Replace("foobar ", static m => "<" + m.LastGroupName + ">", -1, out int replacements);
 
@@ -33,7 +33,7 @@ public sealed class Bug10328Tests
     [Property("Upstream", "RegexTests.test_bug_10328#3")]
     public void V0_matches_the_trailing_whitespace_and_the_empty_missing_final_newline()
     {
-        var re = new FuzzyRegex(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
+        var re = Upstream.Compile(@"(?mV0)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
         re.Matches("foobar ").Select(static m => m.Value).Should().Equal(" ", "");
     }
@@ -42,7 +42,7 @@ public sealed class Bug10328Tests
     [Property("Upstream", "RegexTests.test_bug_10328#4")]
     public void V1_replace_with_evaluator_tags_the_trailing_whitespace_and_missing_final_newline_groups()
     {
-        var re = new FuzzyRegex(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
+        var re = Upstream.Compile(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
         string result = re.Replace("foobar ", static m => "<" + m.LastGroupName + ">", -1, out int replacements);
 
@@ -54,7 +54,7 @@ public sealed class Bug10328Tests
     [Property("Upstream", "RegexTests.test_bug_10328#5")]
     public void V1_matches_the_trailing_whitespace_and_the_empty_missing_final_newline()
     {
-        var re = new FuzzyRegex(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
+        var re = Upstream.Compile(@"(?mV1)(?P<trailing_ws>[ \t]+\r*$)|(?P<no_final_newline>(?<=[^\n])\Z)");
 
         re.Matches("foobar ").Select(static m => m.Value).Should().Equal(" ", "");
     }

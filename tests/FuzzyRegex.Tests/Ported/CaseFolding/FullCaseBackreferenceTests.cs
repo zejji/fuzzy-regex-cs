@@ -32,7 +32,7 @@ public sealed class FullCaseBackreferenceTests
     {
         foreach (string subject in new[] { " " + _strasseLower + " STRASSE ", " STRASSE " + _strasseLower + " " })
         {
-            Match m = FuzzyRegex.Match(subject, "(?fi)\\b(\\w+) +\\1\\b");
+            Match m = Upstream.Match(subject, "(?fi)\\b(\\w+) +\\1\\b");
 
             m.Success.Should().BeTrue();
             (m.Index, m.Index + m.Length).Should().Be((1, 15));

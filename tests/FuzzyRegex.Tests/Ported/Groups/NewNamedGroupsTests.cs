@@ -13,8 +13,8 @@ public sealed class NewNamedGroupsTests
     [Property("Upstream", "RegexTests.test_new_named_groups#1")]
     public void Both_named_group_spellings_match()
     {
-        Match m0 = FuzzyRegex.MatchAtStart("x", @"(?P<a>\w)");
-        Match m1 = FuzzyRegex.MatchAtStart("x", @"(?<a>\w)");
+        Match m0 = Upstream.MatchAtStart("x", @"(?P<a>\w)");
+        Match m1 = Upstream.MatchAtStart("x", @"(?<a>\w)");
 
         m0.Success.Should().BeTrue();
         m1.Success.Should().BeTrue();
@@ -24,8 +24,8 @@ public sealed class NewNamedGroupsTests
     [Property("Upstream", "RegexTests.test_new_named_groups#1")]
     public void Both_named_group_spellings_produce_the_same_tuple()
     {
-        Match m0 = FuzzyRegex.MatchAtStart("x", @"(?P<a>\w)");
-        Match m1 = FuzzyRegex.MatchAtStart("x", @"(?<a>\w)");
+        Match m0 = Upstream.MatchAtStart("x", @"(?P<a>\w)");
+        Match m1 = Upstream.MatchAtStart("x", @"(?<a>\w)");
 
         (m0.Value, m0.Groups[1].Value).Should().Be((m1.Value, m1.Groups[1].Value));
     }

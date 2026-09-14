@@ -24,7 +24,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\377")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#1")]
     public void Octal_escape_matches_the_character(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
 
     [Test]
     [Arguments(0, @"\0000")]
@@ -37,7 +37,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\3770")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#2")]
     public void Octal_escape_followed_by_a_literal_zero_matches_both(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint) + "0", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint) + "0", pattern).Success.Should().BeTrue();
 
     [Test]
     [Arguments(0, @"\0008")]
@@ -50,7 +50,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\3778")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#3")]
     public void Octal_escape_followed_by_a_literal_eight_matches_both(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint) + "8", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint) + "8", pattern).Success.Should().BeTrue();
 
     [Test]
     [Arguments(0, @"\x00")]
@@ -63,7 +63,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\xff")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#4")]
     public void Hex_escape_matches_the_character(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint).ToString(), pattern).Success.Should().BeTrue();
 
     [Test]
     [Arguments(0, @"\x000")]
@@ -76,7 +76,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\xff0")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#5")]
     public void Hex_escape_followed_by_a_literal_zero_matches_both(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint) + "0", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint) + "0", pattern).Success.Should().BeTrue();
 
     [Test]
     [Arguments(0, @"\x00z")]
@@ -89,7 +89,7 @@ public sealed class CharacterLiteralsTests
     [Arguments(255, @"\xffz")]
     [Property("Upstream", "RegexTests.test_sre_character_literals#6")]
     public void Hex_escape_followed_by_a_literal_z_matches_both(int codepoint, string pattern) =>
-        FuzzyRegex.MatchAtStart(((char)codepoint) + "z", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart(((char)codepoint) + "z", pattern).Success.Should().BeTrue();
 
     // Upstream asserts the error message matches self.INVALID_GROUP_REF; we do not assert message
     // text, per the port's own error-message conventions (not yet decided).
@@ -100,7 +100,7 @@ public sealed class CharacterLiteralsTests
     [Property("Upstream", "RegexTests.test_sre_character_literals#7")]
     public void Escape_with_no_matching_group_fails_to_compile()
     {
-        Action act = static () => FuzzyRegex.MatchAtStart("", @"\911");
+        Action act = static () => Upstream.MatchAtStart("", @"\911");
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

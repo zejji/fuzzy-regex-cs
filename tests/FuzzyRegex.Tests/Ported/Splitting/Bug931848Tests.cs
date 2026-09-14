@@ -20,6 +20,6 @@ public sealed class Bug931848Tests
     {
         string pattern = "[" + (char)0x002E + (char)0x3002 + (char)0xFF0E + (char)0xFF61 + "]";
 
-        new FuzzyRegex(pattern).Split("a.b.c").Should().Equal("a", "b", "c");
+        Upstream.Compile(pattern).Split("a.b.c").Should().Equal("a", "b", "c");
     }
 }

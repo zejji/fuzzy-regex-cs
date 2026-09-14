@@ -36,7 +36,7 @@ public sealed class RegressionsDefineTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#169")]
     public void Define_group_supplies_named_subroutines_referenced_later_in_the_pattern() =>
-        FuzzyRegex
+        Upstream
             .Match("5 elephants", @"(?(DEFINE)(?<quant>\d+)(?<item>\w+))(?&quant) (?&item)")
             .Value.Should()
             .Be("5 elephants");
@@ -44,12 +44,12 @@ public sealed class RegressionsDefineTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#170")]
     public void Group_called_only_from_inside_define_reports_no_group_value() =>
-        FuzzyRegex.Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))").Groups["routine"].Success.Should().BeFalse();
+        Upstream.Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))").Groups["routine"].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#171")]
     public void Group_called_only_from_inside_define_still_records_its_capture() =>
-        FuzzyRegex
+        Upstream
             .Match("a", @"(?&routine)(?(DEFINE)(?<routine>.))")
             .Groups["routine"]
             .Captures.Select(static c => c.Value)
@@ -61,7 +61,7 @@ public sealed class RegressionsDefineTests
     [Property("Upstream", "RegexTests.test_hg_bugs#209")]
     public void Define_group_referenced_via_a_negative_lookahead_leaves_group_1_unmatched_on_every_finditer_match()
     {
-        Match[] matches = [.. new FuzzyRegex(_hgIssue158Pattern).Matches(_hgIssue158Data)];
+        Match[] matches = [.. Upstream.Compile(_hgIssue158Pattern).Matches(_hgIssue158Data)];
 
         matches.Should().HaveCount(2);
 
@@ -80,12 +80,12 @@ public sealed class RegressionsDefineTests
     // the negative lookahead it does need rather than for the construct it is contrasted with.
     [Property("Upstream", "RegexTests.test_hg_bugs#272")]
     public void Negative_lookahead_run_without_define_finds_only_the_trailing_letters() =>
-        FuzzyRegex.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(static m => m.Value).Should().Equal("efgh");
+        Upstream.Matches("abcdefgh", @"(?:(?![a-d]).)+").Select(static m => m.Value).Should().Equal("efgh");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#273")]
     public void Same_negative_lookahead_wrapped_in_a_define_subroutine_finds_the_same_match() =>
-        FuzzyRegex
+        Upstream
             .Matches("abcdefgh", @"(?(DEFINE)(?P<mydef>(?:(?![a-d]).)))(?&mydef)+")
             .Select(static m => m.Value)
             .Should()
@@ -96,17 +96,17 @@ public sealed class RegressionsDefineTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#300")]
     public void Define_group_called_directly_reports_no_group_value() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups[1].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups[1].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#301")]
     public void Define_group_called_directly_reports_no_group_value_by_name() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups["func"].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?&func)").Groups["func"].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#302")]
     public void Define_group_called_directly_still_records_its_single_capture() =>
-        FuzzyRegex
+        Upstream
             .Match("abc", @"(?(DEFINE)(?<func>.))(?&func)")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
@@ -116,17 +116,17 @@ public sealed class RegressionsDefineTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#303")]
     public void Define_group_called_from_a_lookahead_reports_no_group_value() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups[1].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups[1].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#304")]
     public void Define_group_called_from_a_lookahead_reports_no_group_value_by_name() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups["func"].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))").Groups["func"].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#305")]
     public void Define_group_called_from_a_lookahead_still_records_its_single_capture() =>
-        FuzzyRegex
+        Upstream
             .Match("abc", @"(?(DEFINE)(?<func>.))(?=(?&func))")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
@@ -136,17 +136,17 @@ public sealed class RegressionsDefineTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#306")]
     public void Define_group_called_from_a_lookbehind_reports_no_group_value() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups[1].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups[1].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#307")]
     public void Define_group_called_from_a_lookbehind_reports_no_group_value_by_name() =>
-        FuzzyRegex.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups["func"].Success.Should().BeFalse();
+        Upstream.Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))").Groups["func"].Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#308")]
     public void Define_group_called_from_a_lookbehind_still_records_its_single_capture() =>
-        FuzzyRegex
+        Upstream
             .Match("abc", @"(?(DEFINE)(?<func>.)).(?<=(?&func))")
             .Groups["func"]
             .Captures.Select(static c => c.Value)
@@ -159,7 +159,7 @@ public sealed class RegressionsDefineTests
     [Property("Upstream", "RegexTests.test_hg_bugs#377")]
     public void Define_group_with_an_internal_alternative_records_captures_only_for_the_branch_that_matched()
     {
-        Match m = FuzzyRegex.Match(
+        Match m = Upstream.Match(
             "x right",
             @"(?(DEFINE)(?<mydef>(?<wrong>THIS_SHOULD_NOT_MATCHx?)|(?<right>right))).*(?<=(?&mydef).*)"
         );

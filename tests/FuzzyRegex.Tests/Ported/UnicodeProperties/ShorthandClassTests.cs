@@ -20,7 +20,7 @@ public sealed class ShorthandClassTests
     [Test]
     [Property("Upstream", "RegexTests.test_properties#4")]
     public void Word_matches_a_non_ASCII_letter_because_the_default_is_Unicode() =>
-        new FuzzyRegex(@"\w").IsMatchAtStart(_aGrave).Should().BeTrue();
+        Upstream.Compile(@"\w").IsMatchAtStart(_aGrave).Should().BeTrue();
 
     [Test]
     [Arguments(@"\d", "0")]
@@ -34,7 +34,7 @@ public sealed class ShorthandClassTests
     [Arguments(@"\w", "_")]
     [Property("Upstream", "RegexTests.test_properties#43-45, #52-54, #61-63")]
     public void Shorthand_class_matches_its_member(string pattern, string subject) =>
-        new FuzzyRegex(pattern).IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile(pattern).IsMatchAtStart(subject).Should().BeTrue();
 
     [Test]
     [Arguments(@"\d", "?")]
@@ -45,5 +45,5 @@ public sealed class ShorthandClassTests
     [Arguments(@"\W", "A")]
     [Property("Upstream", "RegexTests.test_properties#46-51")]
     public void Shorthand_class_does_not_match_a_non_member(string pattern, string subject) =>
-        new FuzzyRegex(pattern).IsMatchAtStart(subject).Should().BeFalse();
+        Upstream.Compile(pattern).IsMatchAtStart(subject).Should().BeFalse();
 }

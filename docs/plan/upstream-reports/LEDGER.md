@@ -2466,3 +2466,70 @@ forced by measurement rather than chosen:
 **The test now pins the inherited answer** in
 `Gaps/UpstreamIssues/InheritedIssueTests.cs`, together with the two `(\.+?)\1\b` rows the reverted
 attempt broke, so the next attempt has to keep them.
+
+## 22. `(?V0)` does not mean version 0 when `DEFAULT_VERSION` is `VERSION1` - FIXED HERE (S50b)
+
+**Title:** With `DEFAULT_VERSION = VERSION1`, an inline `(?V0)` keeps version 1's `FULLCASE`, so the
+same version folds two different ways depending on how it was asked for
+
+**Body:**
+
+```python
+>>> import regex, regex._main as _main, regex._regex_core as _core
+>>> regex.DEFAULT_VERSION = _main.DEFAULT_VERSION = _core.DEFAULT_VERSION = regex.VERSION1
+>>> _main._cache.clear()
+>>> regex.compile('a', regex.V0).flags & regex.FULLCASE      # the flag: version 0, simple folding
+0
+>>> regex.compile('(?V0)a').flags & regex.FULLCASE           # the inline spelling: full folding
+16384
+>>> bool(regex.compile('ss', regex.V0 | regex.I).match('ß'))
+False
+>>> bool(regex.compile('(?V0)(?i)ss').match('ß'))
+True
+```
+
+Version 0's documented behaviour is simple folding - upstream's own README, "Version 0 behaviour: the
+flag is off by default" - so the two lines above cannot both be right, and the pattern that *says*
+`(?V0)` is the one that is wrong.
+
+**Mechanism.** A version is a global flag (`GLOBAL_FLAGS`, `_regex_core.py:170-171`), so an inline one
+raises `_UnscopedFlagSet` and `_compile` parses the whole pattern a second time seeded with
+`info.global_flags` (`:1201-1206`, `_main.py:537-554`). But the FIRST attempt has already run
+`Info.__init__`:
+
+```python
+flags |= DEFAULT_FLAGS[(flags & _ALL_VERSIONS) or DEFAULT_VERSION]   # :4359
+self.flags = flags
+self.global_flags = flags                                            # :4361
+```
+
+`(?V0)` has not been read yet at that point, so the version resolves to the module default, and
+`DEFAULT_FLAGS[VERSION1]` is `FULLCASE` - which line 4361 then writes into `global_flags`, which
+seeds the attempt that does know the pattern asked for version 0. `DEFAULT_FLAGS[VERSION0]` is `0`
+and so has nothing to take it back off with. The same happens for a version named anywhere else in
+the pattern (`a(?V0)`), because the raise site is the flag, not its position.
+
+**Why it is latent upstream, and still a bug.** With the shipped `DEFAULT_VERSION = VERSION0` the
+first attempt contributes no default flags at all, so nothing can leak and the two spellings agree.
+Changing the global is a supported operation - the changelog carries "Hg issue 69: Changing
+DEFAULT_VERSION does not actually work. DEFAULT_VERSION isn't part of the public API, but changing it
+should now work as expected" - so this is a live defect in a configuration upstream says it supports.
+
+**Proposed fix (one line):** assign `global_flags` from the caller's flags, before the
+`DEFAULT_FLAGS` line rather than after:
+
+```python
+self.global_flags = flags
+flags |= DEFAULT_FLAGS[(flags & _ALL_VERSIONS) or DEFAULT_VERSION]
+self.flags = flags
+```
+
+The retry then re-derives the default flags from the version it actually resolved. Under
+`DEFAULT_VERSION = VERSION0` the two orderings are indistinguishable, so no existing behaviour moves.
+
+**Fixed here** in `Parsing.Info`'s constructor, because S50b made `Version1` this port's default
+(spec amendment 24) and shipping a `(?V0)` that does not mean version 0 is indefensible. Reproduction:
+`python tools/probes/upstream-inline-v0-under-a-v1-default.py`. Pinned by
+`Gaps/Parsing/DefaultVersionTests.cs`, whose `Version_0_means_simple_folding_however_it_is_asked_for`
+puts all three spellings side by side; all 1,659 compile-parity rows are unmoved, which is the
+evidence that the reordering is a no-op under version 0.

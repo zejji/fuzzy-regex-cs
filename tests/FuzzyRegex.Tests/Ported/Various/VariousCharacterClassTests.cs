@@ -59,7 +59,7 @@ public sealed class VariousCharacterClassTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -99,7 +99,7 @@ public sealed class VariousCharacterClassTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -141,7 +141,7 @@ public sealed class VariousCharacterClassTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -165,16 +165,16 @@ public sealed class VariousCharacterClassTests
     [Arguments("[k]", "ab")]
     [Property("Upstream", "RegexTests.test_various#27,81,83,98,100-101,156,171,251,253,264,266-267,316,335")]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 
     // Split out at S17, one row each: both reach an opcode the matcher does not have, and a throw
     // is not the same answer as "no match".
     [Test]
     [Property("Upstream", "RegexTests.test_various#197")]
-    public void Search_with_a_group_does_not_match() => FuzzyRegex.Match("abc", "([abc]*)x").Success.Should().BeFalse();
+    public void Search_with_a_group_does_not_match() => Upstream.Match("abc", "([abc]*)x").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_various#516")]
     public void Search_with_a_quantifier_does_not_match() =>
-        FuzzyRegex.Match("a>b", "a[^>]*?b").Success.Should().BeFalse();
+        Upstream.Match("a>b", "a[^>]*?b").Success.Should().BeFalse();
 }

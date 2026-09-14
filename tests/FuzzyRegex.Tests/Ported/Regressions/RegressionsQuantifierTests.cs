@@ -16,7 +16,7 @@ public sealed class RegressionsQuantifierTests
     {
         // Hg issue 37: regex.search("^(a){0,0}", "abc").group(0,1) returns ('a', 'a') instead of
         // ('', None).
-        Match m = FuzzyRegex.Match("abc", "^(a){0,0}");
+        Match m = Upstream.Match("abc", "^(a){0,0}");
 
         m.Value.Should().Be("");
         m.Groups[1].Success.Should().BeFalse();
@@ -35,7 +35,7 @@ public sealed class RegressionsQuantifierTests
     {
         // Hg issue 42: regex.search("(a*)*", "a", flags=regex.V1).span(1) returns (0, 1) instead
         // of (1, 1).
-        Group g = FuzzyRegex.Match(subject, "(a*)*").Groups[1];
+        Group g = Upstream.Match(subject, "(a*)*").Groups[1];
 
         (g.Index, g.Index + g.Length).Should().Be((expectedStart, expectedEnd));
     }
@@ -46,7 +46,7 @@ public sealed class RegressionsQuantifierTests
     {
         // Hg issue 44: regex.compile("(?=abc){3}abc") causes "_regex_core.error: nothing to
         // repeat".
-        Match m = FuzzyRegex.Match("abcabcabc", "(?=abc){3}abc");
+        Match m = Upstream.Match("abcabcabc", "(?=abc){3}abc");
 
         (m.Index, m.Index + m.Length).Should().Be((0, 3));
     }
@@ -63,7 +63,7 @@ public sealed class RegressionsQuantifierTests
     {
         // Hg issue 45: regex.compile("^(?:a(?:(?:))+)+") causes "_regex_core.error: nothing to
         // repeat".
-        Match m = FuzzyRegex.Match(subject, "^(?:a(?:(?:))+)+");
+        Match m = Upstream.Match(subject, "^(?:a(?:(?:))+)+");
 
         (m.Index, m.Index + m.Length).Should().Be((expectedStart, expectedEnd));
     }
@@ -73,7 +73,7 @@ public sealed class RegressionsQuantifierTests
     public void A_repeated_optional_empty_alternative_matches_without_running_out_of_memory()
     {
         // Hg issue 53: regex.search("(a|)+", "a") causes MemoryError.
-        Match m = FuzzyRegex.Match("a", "(a|)+");
+        Match m = Upstream.Match("a", "(a|)+");
 
         m.Value.Should().Be("a");
         m.Groups[1].Value.Should().Be("");
@@ -83,32 +83,32 @@ public sealed class RegressionsQuantifierTests
     [Property("Upstream", "RegexTests.test_hg_bugs#40")]
     public void A_repeated_optional_empty_alternative_before_a_digit_fails_without_running_out_of_memory() =>
         // Hg issue 54: regex.search("(a|)*\\d", "a"*80) causes MemoryError.
-        FuzzyRegex.Match(new string('a', 80), @"(a|)*\d").Success.Should().BeFalse();
+        Upstream.Match(new string('a', 80), @"(a|)*\d").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#41")]
     public void A_repeated_pair_of_optional_characters_fails_quickly_instead_of_taking_a_long_time() =>
         // Hg issue 55: regex.search("^(?:a?b?)*$", "ac") takes a very long time.
-        FuzzyRegex.Match("ac", "^(?:a?b?)*$").Success.Should().BeFalse();
+        Upstream.Match("ac", "^(?:a?b?)*$").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#44")]
     public void A_group_repeated_two_or_more_times_matches_two_repetitions_correctly() =>
         // Hg issue 60: regex.search("(q1|.)*(q2|.)*(x(a|bc)*y){2,}", "xayxay") returns None
         // incorrectly.
-        FuzzyRegex.Match("xayxay", "(q1|.)*(q2|.)*(x(a|bc)*y){2,}").Value.Should().Be("xayxay");
+        Upstream.Match("xayxay", "(q1|.)*(q2|.)*(x(a|bc)*y){2,}").Value.Should().Be("xayxay");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#57")]
     public void A_plus_quantifier_before_a_literal_slash_only_matches_the_line_containing_it() =>
         // Hg issue 83: slash handling in presence of a quantifier.
-        FuzzyRegex.Matches("cA/c\ncAb/c", "c..+/c").Select(static m => m.Value).Should().Equal("cAb/c");
+        Upstream.Matches("cA/c\ncAb/c", "c..+/c").Select(static m => m.Value).Should().Equal("cAb/c");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
     public void Group_repeated_one_to_three_times_captures_the_whole_run_for_each_repetition() =>
         // Hg issue 238: Not fully re backward compatible.
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -117,7 +117,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
     public void Group_repeated_one_to_three_times_captures_the_word_for_each_repetition() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -126,7 +126,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#274")]
     public void Group_repeated_one_to_three_times_captures_the_dots_for_each_repetition() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1,3}")
             .Select(static m => m.Groups[3].Value)
             .Should()
@@ -135,16 +135,12 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#275")]
     public void Group_repeated_exactly_three_times_never_matches_the_subject() =>
-        FuzzyRegex
-            .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){3}")
-            .Select(static m => m.Value)
-            .Should()
-            .BeEmpty();
+        Upstream.Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){3}").Select(static m => m.Value).Should().BeEmpty();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
     public void Group_repeated_exactly_two_times_captures_the_whole_run() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -153,7 +149,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
     public void Group_repeated_exactly_two_times_captures_the_word() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -162,7 +158,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#276")]
     public void Group_repeated_exactly_two_times_captures_the_dots() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){2}")
             .Select(static m => m.Groups[3].Value)
             .Should()
@@ -171,7 +167,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
     public void Group_repeated_exactly_once_captures_the_whole_run_for_each_match() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -180,7 +176,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
     public void Group_repeated_exactly_once_captures_the_word_for_each_match() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -189,7 +185,7 @@ public sealed class RegressionsQuantifierTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#277")]
     public void Group_repeated_exactly_once_captures_the_dots_for_each_match() =>
-        FuzzyRegex
+        Upstream
             .Matches(_quotedBugSubject, @"((\w{1,3})(\.{2,10})){1}")
             .Select(static m => m.Groups[3].Value)
             .Should()

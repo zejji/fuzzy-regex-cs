@@ -23,7 +23,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#33")]
     public void Full_case_folding_finds_every_casefold_variant_of_overlapping_keywords()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?fi)\L<keywords>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal)
@@ -45,7 +45,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#220")]
     public void Reverse_case_insensitive_named_list_matches_under_V0()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?irV0)\L<kw>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["kw"] = ["1"] }
@@ -60,7 +60,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#221")]
     public void Reverse_case_insensitive_named_list_matches_under_V1()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?irV1)\L<kw>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["kw"] = ["1"] }
@@ -76,7 +76,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#246")]
     public void Case_insensitive_named_list_matches_the_longer_overlapping_entry()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?i)\L<aa>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["121", "22"] }
@@ -89,7 +89,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#247")]
     public void Reverse_case_insensitive_named_list_matches_the_longer_overlapping_entry()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?ri)\L<aa>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["121", "22"] }
@@ -102,7 +102,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#248")]
     public void Full_case_folding_named_list_matches_the_longer_overlapping_entry()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?fi)\L<aa>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["121", "22"] }
@@ -115,7 +115,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#249")]
     public void Reverse_full_case_folding_named_list_matches_the_longer_overlapping_entry()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?fri)\L<aa>",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["121", "22"] }
@@ -129,7 +129,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#250")]
     public void Reverse_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?r)\1dog..(?<=(\L<aa>))$",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["bcb", "cc"] }
@@ -144,7 +144,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#251")]
     public void Reverse_case_insensitive_match_with_a_named_list_inside_a_lookbehind_backreference_finds_the_whole_span()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(?ir)\1dog..(?<=(\L<aa>))$",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["aa"] = ["bcb", "cc"] }
@@ -160,7 +160,7 @@ public sealed class RegressionsNamedListTests
     [Property("Upstream", "RegexTests.test_hg_bugs#446")]
     public void Fuzzy_matching_an_empty_named_list_matches_the_empty_string_without_crashing()
     {
-        var regex = new FuzzyRegex(
+        var regex = Upstream.Compile(
             @"(\L<foo>){e<=5}",
             FuzzyRegexOptions.None,
             new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["foo"] = [] }

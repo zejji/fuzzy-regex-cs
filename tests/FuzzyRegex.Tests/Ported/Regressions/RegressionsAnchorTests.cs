@@ -13,7 +13,7 @@ public sealed class RegressionsAnchorTests
     [Property("Upstream", "RegexTests.test_hg_bugs#43")]
     public void End_of_string_anchor_matches_after_a_trailing_newline()
     {
-        Match m = FuzzyRegex.Match("a\na\n", @"\Z");
+        Match m = Upstream.Match("a\na\n", @"\Z");
 
         m.Index.Should().Be(4);
         m.Length.Should().Be(0);

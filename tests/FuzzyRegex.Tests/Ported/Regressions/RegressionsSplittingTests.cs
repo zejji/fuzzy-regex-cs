@@ -12,10 +12,10 @@ public sealed class RegressionsSplittingTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#409")]
     public void Splitting_on_a_captured_day_or_week_alternation_keeps_the_whole_match_as_the_capture() =>
-        new FuzzyRegex(@"(\d+ week|\d+ days)").Split("7 days").Should().Equal("", "7 days", "");
+        Upstream.Compile(@"(\d+ week|\d+ days)").Split("7 days").Should().Equal("", "7 days", "");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#410")]
     public void Splitting_on_a_captured_day_or_week_alternation_keeps_the_whole_match_as_the_capture_for_a_two_digit_count() =>
-        new FuzzyRegex(@"(\d+ week|\d+ days)").Split("10 days").Should().Equal("", "10 days", "");
+        Upstream.Compile(@"(\d+ week|\d+ days)").Split("10 days").Should().Equal("", "10 days", "");
 }

@@ -24,7 +24,7 @@ public sealed class CommonPrefixTests
         string side = string.Concat(Enumerable.Repeat(lower + digits + upper, 4));
         string pattern = $"({side}|{side})";
 
-        Action construct = () => _ = new FuzzyRegex(pattern);
+        Action construct = () => _ = Upstream.Compile(pattern);
 
         construct.Should().NotThrow();
     }

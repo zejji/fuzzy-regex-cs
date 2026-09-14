@@ -69,7 +69,7 @@ public sealed class TurkicTests
         bool expectedMatch
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(ch2, "(?i)\\A" + ch1 + "\\Z");
+        Match m = Upstream.MatchAtStart(ch2, "(?i)\\A" + ch1 + "\\Z");
 
         m.Success.Should().Be(expectedMatch);
 

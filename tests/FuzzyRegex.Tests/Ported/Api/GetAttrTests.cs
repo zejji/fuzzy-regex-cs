@@ -17,7 +17,7 @@ public sealed class GetAttrTests
 {
     [Test]
     [Property("Upstream", "RegexTests.test_getattr#1")]
-    public void Pattern_returns_the_compiled_text() => new FuzzyRegex("(?i)(a)(b)").Pattern.Should().Be("(?i)(a)(b)");
+    public void Pattern_returns_the_compiled_text() => Upstream.Compile("(?i)(a)(b)").Pattern.Should().Be("(?i)(a)(b)");
 
     [Test]
     [Property("Upstream", "RegexTests.test_getattr#2")]
@@ -27,7 +27,8 @@ public sealed class GetAttrTests
         // default. regex.DEFAULT_VERSION resolves to VERSION0 (regex/_main.py:443), which is our
         // Version0 - verified against the local oracle 2026-08-29: hex(regex.DEFAULT_VERSION) is
         // 0x2000, the same bit as FuzzyRegexOptions.Version0.
-        new FuzzyRegex("(?i)(a)(b)")
+        Upstream
+            .Compile("(?i)(a)(b)")
             .Options.Should()
             .Be(FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0);
     }
@@ -37,7 +38,7 @@ public sealed class GetAttrTests
     [Test]
     [Property("Upstream", "RegexTests.test_getattr#4")]
     public void GroupNumbers_counts_the_capturing_groups() =>
-        (new FuzzyRegex("(?i)(a)(b)").GroupNumbers.Count - 1).Should().Be(2);
+        (Upstream.Compile("(?i)(a)(b)").GroupNumbers.Count - 1).Should().Be(2);
 
     [Test]
     [Property("Upstream", "RegexTests.test_getattr#5")]
@@ -45,16 +46,14 @@ public sealed class GetAttrTests
     {
         // Upstream's groupindex (name -> number, named groups only) is {} for this pattern; ours
         // lists every group by its number as text when none are named.
-        new FuzzyRegex("(?i)(a)(b)")
-            .GroupNames.Should()
-            .Equal("0", "1", "2");
+        Upstream.Compile("(?i)(a)(b)").GroupNames.Should().Equal("0", "1", "2");
     }
 
     [Test]
     [Property("Upstream", "RegexTests.test_getattr#6")]
     public void GroupNumberFromName_resolves_named_groups()
     {
-        FuzzyRegex pat = new("(?i)(?P<first>a)(?P<other>b)");
+        FuzzyRegex pat = Upstream.Compile("(?i)(?P<first>a)(?P<other>b)");
 
         pat.GroupNumberFromName("first").Should().Be(1);
         pat.GroupNumberFromName("other").Should().Be(2);
@@ -69,7 +68,7 @@ public sealed class GetAttrTests
     [Property("Upstream", "RegexTests.test_getattr#11-12")]
     public void Match_and_group_spans()
     {
-        Match m = FuzzyRegex.Match("abcdef", "b(c)");
+        Match m = Upstream.Match("abcdef", "b(c)");
 
         (m.Index, m.Index + m.Length).Should().Be((1, 3));
         (m.Groups[1].Index, m.Groups[1].Index + m.Groups[1].Length).Should().Be((2, 3));

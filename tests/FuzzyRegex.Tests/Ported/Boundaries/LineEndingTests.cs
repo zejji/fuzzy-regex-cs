@@ -15,7 +15,7 @@ public sealed class LineEndingTests
     {
         string subject = "\r\n\n\x0B\x0C\r\u0085\u2028\u2029";
 
-        FuzzyRegex
+        Upstream
             .Matches(subject, @"\R")
             .Select(static m => m.Value)
             .Should()

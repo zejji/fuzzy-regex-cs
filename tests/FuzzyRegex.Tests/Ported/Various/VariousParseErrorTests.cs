@@ -87,7 +87,7 @@ public sealed class VariousParseErrorTests
     )]
     public void Invalid_pattern_is_rejected(string pattern)
     {
-        Action act = () => _ = new FuzzyRegex(pattern);
+        Action act = () => _ = Upstream.Compile(pattern);
 
         act.Should().Throw<FuzzyRegexParseException>();
     }

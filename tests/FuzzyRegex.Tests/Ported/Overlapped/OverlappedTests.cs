@@ -17,12 +17,13 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#1,6")]
     public void Matches_value_for_two_char_runs_without_overlap() =>
-        FuzzyRegex.Matches("abcde", "..").Select(static m => m.Value).Should().Equal("ab", "cd");
+        Upstream.Matches("abcde", "..").Select(static m => m.Value).Should().Equal("ab", "cd");
 
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#2,7")]
     public void Matches_value_for_two_char_runs_with_overlap() =>
-        new FuzzyRegex("..")
+        Upstream
+            .Compile("..")
             .Matches("abcde", overlapped: true)
             .Select(static m => m.Value)
             .Should()
@@ -31,12 +32,13 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#3,8")]
     public void Matches_value_for_reversed_two_char_runs_without_overlap() =>
-        FuzzyRegex.Matches("abcde", "(?r)..").Select(static m => m.Value).Should().Equal("de", "bc");
+        Upstream.Matches("abcde", "(?r)..").Select(static m => m.Value).Should().Equal("de", "bc");
 
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#4,9")]
     public void Matches_value_for_reversed_two_char_runs_with_overlap() =>
-        new FuzzyRegex("(?r)..")
+        Upstream
+            .Compile("(?r)..")
             .Matches("abcde", overlapped: true)
             .Select(static m => m.Value)
             .Should()
@@ -45,7 +47,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_one_value_for_an_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(.)(-)(.)")
+        Upstream
+            .Compile("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -54,7 +57,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_two_value_for_an_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(.)(-)(.)")
+        Upstream
+            .Compile("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -63,7 +67,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#5,10")]
     public void Matches_group_three_value_for_an_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(.)(-)(.)")
+        Upstream
+            .Compile("(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[3].Value)
             .Should()
@@ -72,7 +77,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_one_value_for_a_reversed_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(?r)(.)(-)(.)")
+        Upstream
+            .Compile("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[1].Value)
             .Should()
@@ -81,7 +87,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_two_value_for_a_reversed_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(?r)(.)(-)(.)")
+        Upstream
+            .Compile("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[2].Value)
             .Should()
@@ -90,7 +97,8 @@ public sealed class OverlappedTests
     [Test]
     [Property("Upstream", "RegexTests.test_overlapped#11")]
     public void Matches_group_three_value_for_a_reversed_overlapped_three_group_pattern() =>
-        new FuzzyRegex("(?r)(.)(-)(.)")
+        Upstream
+            .Compile("(?r)(.)(-)(.)")
             .Matches("a-b-c", overlapped: true)
             .Select(static m => m.Groups[3].Value)
             .Should()

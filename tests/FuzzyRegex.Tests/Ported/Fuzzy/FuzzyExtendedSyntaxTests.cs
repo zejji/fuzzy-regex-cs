@@ -34,7 +34,7 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?:ab){e<=1:[a-z]}", "ae", true)]
@@ -46,7 +46,7 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 
     [Test]
     [Arguments(@"(a)\1{e<=1:[a-z]}", "ae", true)]
@@ -58,7 +58,7 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?fiu)(?:\N{LATIN SMALL LETTER SHARP S}){e<=1:[a-z]}", "ts", true)]
@@ -74,7 +74,7 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?fiu)(\N{LATIN SMALL LETTER SHARP S})\1{e<=1:[a-z]}", "ssst", true)]
@@ -90,7 +90,7 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?fiu)(ss)\1{e<=1:[a-z]}", _sharpS + "ts", true)]
@@ -106,5 +106,5 @@ public sealed class FuzzyExtendedSyntaxTests
         string pattern,
         string subject,
         bool expected
-    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected);
+    ) => Upstream.FullMatch(subject, pattern).Success.Should().Be(expected);
 }

@@ -41,7 +41,7 @@ public sealed class GraphemeTests
     [Property("Upstream", "RegexTests.test_grapheme#1")]
     public void Grapheme_cluster_matches_a_single_precomposed_a_with_grave()
     {
-        Match m = FuzzyRegex.MatchAtStart(_precomposedAWithGrave, @"\X");
+        Match m = Upstream.MatchAtStart(_precomposedAWithGrave, @"\X");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(1);
@@ -51,7 +51,7 @@ public sealed class GraphemeTests
     [Property("Upstream", "RegexTests.test_grapheme#2")]
     public void Grapheme_cluster_matches_a_base_letter_plus_combining_grave_as_one_unit()
     {
-        Match m = FuzzyRegex.MatchAtStart(_decomposedAWithGrave, @"\X");
+        Match m = Upstream.MatchAtStart(_decomposedAWithGrave, @"\X");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(2);
@@ -64,7 +64,7 @@ public sealed class GraphemeTests
         string subject =
             "a" + _precomposedAWithGrave + _decomposedAWithGrave + "e" + _precomposedEWithAcute + _decomposedEWithAcute;
 
-        FuzzyRegex
+        Upstream
             .Matches(subject, @"\X")
             .Select(static m => m.Value)
             .Should()
@@ -85,7 +85,7 @@ public sealed class GraphemeTests
         string subject =
             "a" + _precomposedAWithGrave + _decomposedAWithGrave + "e" + _precomposedEWithAcute + _decomposedEWithAcute;
 
-        FuzzyRegex
+        Upstream
             .Matches(subject, @"\X{3}")
             .Select(static m => m.Value)
             .Should()
@@ -101,7 +101,7 @@ public sealed class GraphemeTests
     {
         string subject = "\r\r\n" + _bareCombiningAcute + _decomposedCapitalAWithAcute;
 
-        FuzzyRegex
+        Upstream
             .Matches(subject, @"\X")
             .Select(static m => m.Value)
             .Should()

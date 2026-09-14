@@ -26,7 +26,7 @@ public sealed class RegressionsCharacterClassTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#46")]
     public void Case_insensitive_ascii_posix_class_does_not_match_the_kelvin_sign() =>
-        FuzzyRegex.Match(_kelvinSign, "(?i)[[:ascii:]]").Success.Should().BeFalse();
+        Upstream.Match(_kelvinSign, "(?i)[[:ascii:]]").Success.Should().BeFalse();
 
     // Hg issue 137: Posix character class :punct: does not seem to be supported. Posix
     // compatibility as recommended in https://www.unicode.org/reports/tr18/#Compatibility_Properties.
@@ -51,11 +51,9 @@ public sealed class RegressionsCharacterClassTests
         string propertyPattern
     )
     {
-        string posixMatches = string.Concat(
-            FuzzyRegex.Matches(_bmpCodePoints, posixPattern).Select(static m => m.Value)
-        );
+        string posixMatches = string.Concat(Upstream.Matches(_bmpCodePoints, posixPattern).Select(static m => m.Value));
         string propertyMatches = string.Concat(
-            FuzzyRegex.Matches(_bmpCodePoints, propertyPattern).Select(static m => m.Value)
+            Upstream.Matches(_bmpCodePoints, propertyPattern).Select(static m => m.Value)
         );
 
         posixMatches.Should().Be(propertyMatches);
@@ -66,7 +64,7 @@ public sealed class RegressionsCharacterClassTests
     [Property("Upstream", "RegexTests.test_hg_bugs#497")]
     public void Pattern_alternating_two_character_classes_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex(@"(\s|\S)");
+        Action act = static () => _ = Upstream.Compile(@"(\s|\S)");
 
         act.Should().NotThrow();
     }
@@ -76,7 +74,7 @@ public sealed class RegressionsCharacterClassTests
     [Property("Upstream", "RegexTests.test_hg_bugs#498")]
     public void Pattern_alternating_a_negated_and_a_positive_character_class_group_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex(@"(?:[\S\s]|[A-D][M-Z])");
+        Action act = static () => _ = Upstream.Compile(@"(?:[\S\s]|[A-D][M-Z])");
 
         act.Should().NotThrow();
     }
@@ -89,7 +87,7 @@ public sealed class RegressionsCharacterClassTests
     [Arguments(@"(?V1)[[bcde]--cd]")]
     [Arguments(@"(?V1)[bcde--cd]")]
     public void Nested_set_difference_syntax_excludes_the_subtracted_characters(string pattern) =>
-        FuzzyRegex.Matches("abcdef", pattern).Select(static m => m.Value).Should().Equal("b", "e");
+        Upstream.Matches("abcdef", pattern).Select(static m => m.Value).Should().Equal("b", "e");
 
     // Git issue 551: a single "-" inside a nested set is a literal character, only "--" performs
     // set difference, and the operand order of "--" matters.
@@ -105,5 +103,5 @@ public sealed class RegressionsCharacterClassTests
     public void Nested_set_operand_order_and_single_versus_double_dash_change_the_match(
         string pattern,
         bool expectedMatch
-    ) => FuzzyRegex.MatchAtStart("a", pattern).Success.Should().Be(expectedMatch);
+    ) => Upstream.MatchAtStart("a", pattern).Success.Should().Be(expectedMatch);
 }

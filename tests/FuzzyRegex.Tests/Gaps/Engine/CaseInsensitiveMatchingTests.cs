@@ -256,7 +256,11 @@ public sealed class CaseInsensitiveMatchingTests
         string subject,
         int expectedIndex,
         int expectedLength
-    ) => ShouldMatchUpstream(pattern, subject, expectedIndex, expectedLength);
+    ) =>
+        // (?V0) because S50b made Version 1 - and so FULLCASE - this port's default, while every
+        // row above quotes upstream's answer under its own VERSION0 default. The full-folding
+        // twin is the next test down, and it says (?f) for itself.
+        ShouldMatchUpstream("(?V0)" + pattern, subject, expectedIndex, expectedLength);
 
     /// <summary>
     /// <c>STRING_FLD</c> and <c>REF_GROUP_FLD</c>: full case folding, where one character on one

@@ -14,7 +14,7 @@ public sealed class GroupDictTests
     [Test]
     [Property("Upstream", "RegexTests.test_groupdict#1")]
     public void The_first_named_group_is_reachable_by_name() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("first second", "(?P<first>first) (?P<second>second)")
             .Groups["first"]
             .Value.Should()
@@ -23,7 +23,7 @@ public sealed class GroupDictTests
     [Test]
     [Property("Upstream", "RegexTests.test_groupdict#1")]
     public void The_second_named_group_is_reachable_by_name() =>
-        FuzzyRegex
+        Upstream
             .MatchAtStart("first second", "(?P<first>first) (?P<second>second)")
             .Groups["second"]
             .Value.Should()

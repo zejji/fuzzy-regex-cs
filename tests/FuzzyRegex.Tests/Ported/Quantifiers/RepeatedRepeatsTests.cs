@@ -12,7 +12,7 @@ public sealed class RepeatedRepeatsTests
     [Property("Upstream", "RegexTests.test_repeated_repeats#1")]
     public void Nested_plus_matches_the_whole_run()
     {
-        Match m = FuzzyRegex.Match("aaa", "(?:a+)+");
+        Match m = Upstream.Match("aaa", "(?:a+)+");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(3);
@@ -22,7 +22,7 @@ public sealed class RepeatedRepeatsTests
     [Property("Upstream", "RegexTests.test_repeated_repeats#2")]
     public void Nested_repeat_of_a_repeated_group_matches_the_whole_run()
     {
-        Match m = FuzzyRegex.Match("abcabc", "(?:(?:ab)+c)+");
+        Match m = Upstream.Match("abcabc", "(?:(?:ab)+c)+");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(6);
@@ -32,7 +32,7 @@ public sealed class RepeatedRepeatsTests
     [Property("Upstream", "RegexTests.test_repeated_repeats#3")]
     public void Nested_plus_with_a_bounded_outer_repeat_matches_the_whole_run()
     {
-        Match m = FuzzyRegex.Match("aaa", "(?:a+){2,}");
+        Match m = Upstream.Match("aaa", "(?:a+){2,}");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(3);

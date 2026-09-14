@@ -20,7 +20,7 @@ public sealed class BranchResetTests
         string? groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?:(a)|(b))(c)");
+        Match m = Upstream.MatchAtStart(subject, @"(?:(a)|(b))(c)");
 
         m.Groups[1].Success.Should().Be(groupA is not null);
         if (groupA is not null)
@@ -45,7 +45,7 @@ public sealed class BranchResetTests
         string? groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?:(?<a>a)|(?<b>b))(?<c>c)");
+        Match m = Upstream.MatchAtStart(subject, @"(?:(?<a>a)|(?<b>b))(?<c>c)");
 
         m.Groups[1].Success.Should().Be(groupA is not null);
         if (groupA is not null)
@@ -70,7 +70,7 @@ public sealed class BranchResetTests
         string? groupC
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?<a>a)(?:(?<b>b)|(?<c>c))(?<d>d)");
+        Match m = Upstream.MatchAtStart(subject, @"(?<a>a)(?:(?<b>b)|(?<c>c))(?<d>d)");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Success.Should().Be(groupB is not null);
@@ -96,7 +96,7 @@ public sealed class BranchResetTests
         string? groupC
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(a)(?:(b)|(c))(d)");
+        Match m = Upstream.MatchAtStart(subject, @"(a)(?:(b)|(c))(d)");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Success.Should().Be(groupB is not null);
@@ -116,7 +116,7 @@ public sealed class BranchResetTests
     [Property("Upstream", "RegexTests.test_branch_reset#9")]
     public void Branch_reset_merges_two_identical_unnamed_alternatives_into_one_group_number()
     {
-        Match m = FuzzyRegex.MatchAtStart("abd", @"(a)(?|(b)|(b))(d)");
+        Match m = Upstream.MatchAtStart("abd", @"(a)(?|(b)|(b))(d)");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Value.Should().Be("b");
@@ -133,7 +133,7 @@ public sealed class BranchResetTests
         string? groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?|(?<a>a)|(?<b>b))(c)");
+        Match m = Upstream.MatchAtStart(subject, @"(?|(?<a>a)|(?<b>b))(c)");
 
         m.Groups[1].Success.Should().Be(groupA is not null);
         if (groupA is not null)
@@ -156,7 +156,7 @@ public sealed class BranchResetTests
     [Property("Upstream", "RegexTests.test_branch_reset#12-13")]
     public void Branch_reset_with_the_same_name_in_both_alternatives_merges_to_one_group(string subject, string groupA)
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?|(?<a>a)|(?<a>b))(c)");
+        Match m = Upstream.MatchAtStart(subject, @"(?|(?<a>a)|(?<a>b))(c)");
 
         m.Groups[1].Value.Should().Be(groupA);
         m.Groups[2].Value.Should().Be("c");
@@ -172,7 +172,7 @@ public sealed class BranchResetTests
         string groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(?<b>c)(?<a>d))(e)");
+        Match m = Upstream.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(?<b>c)(?<a>d))(e)");
 
         m.Groups[1].Value.Should().Be(groupA);
         m.Groups[2].Value.Should().Be(groupB);
@@ -189,7 +189,7 @@ public sealed class BranchResetTests
         string groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(?<b>c)(d))(e)");
+        Match m = Upstream.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(?<b>c)(d))(e)");
 
         m.Groups[1].Value.Should().Be(groupA);
         m.Groups[2].Value.Should().Be(groupB);
@@ -206,7 +206,7 @@ public sealed class BranchResetTests
         string groupB
     )
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(c)(d))(e)");
+        Match m = Upstream.MatchAtStart(subject, @"(?|(?<a>a)(?<b>b)|(c)(d))(e)");
 
         m.Groups[1].Value.Should().Be(groupA);
         m.Groups[2].Value.Should().Be(groupB);
@@ -220,7 +220,7 @@ public sealed class BranchResetTests
     [Property("Upstream", "RegexTests.test_branch_reset#20-21")]
     public void Branch_reset_duplicate_name_group_reports_the_first_alternatives_single_capture()
     {
-        Match m = FuzzyRegex.MatchAtStart("abe", @"(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)");
+        Match m = Upstream.MatchAtStart("abe", @"(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)");
 
         m.Groups[1].Value.Should().Be("a");
         m.Groups[2].Value.Should().Be("b");
@@ -233,7 +233,7 @@ public sealed class BranchResetTests
     [Property("Upstream", "RegexTests.test_branch_reset#22-23")]
     public void Branch_reset_duplicate_name_group_reports_both_of_the_second_alternatives_captures()
     {
-        Match m = FuzzyRegex.MatchAtStart("cde", @"(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)");
+        Match m = Upstream.MatchAtStart("cde", @"(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)");
 
         m.Groups[1].Value.Should().Be("d");
         m.Groups[2].Success.Should().BeFalse();

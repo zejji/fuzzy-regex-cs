@@ -22,22 +22,22 @@ public sealed class WordClassTests
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#1")]
     public void Word_class_findall_matches_the_whole_devanagari_run() =>
-        FuzzyRegex.Matches(_subject, @"\w+").Select(static m => m.Value).Should().Equal(_hindi);
+        Upstream.Matches(_subject, @"\w+").Select(static m => m.Value).Should().Equal(_hindi);
 
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#2")]
     public void Non_word_class_findall_matches_the_surrounding_space_and_comma() =>
-        FuzzyRegex.Matches(_subject, @"\W+").Select(static m => m.Value).Should().Equal(" ", ",");
+        Upstream.Matches(_subject, @"\W+").Select(static m => m.Value).Should().Equal(" ", ",");
 
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#3")]
     public void Splitting_on_a_word_boundary_isolates_the_devanagari_run() =>
-        FuzzyRegex.Split(_subject, @"(?V1)\b").Should().Equal(" ", _hindi, ",");
+        Upstream.Split(_subject, @"(?V1)\b").Should().Equal(" ", _hindi, ",");
 
     [Test]
     [Property("Upstream", "RegexTests.test_word_class#4")]
     public void Splitting_on_a_non_word_boundary_splits_between_every_devanagari_character() =>
-        FuzzyRegex
+        Upstream
             .Split(_subject, @"(?V1)\B")
             .Should()
             .Equal("", $" {_ha}", $"{_vowelI}", $"{_na}", $"{_virama}", $"{_da}", $"{_vowelIi},", "");

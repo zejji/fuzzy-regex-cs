@@ -52,7 +52,7 @@ public sealed class PartialMatchTests
     [Property("Upstream", "RegexTests.test_partial#1-4,8-9")]
     public void A_subject_that_runs_out_early_is_a_partial_match(string pattern, string subject, int end)
     {
-        Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);
+        Match m = Upstream.Compile(pattern).MatchAtStart(subject, partial: true);
 
         m.Success.Should().BeTrue();
         m.PartialMatch.Should().BeTrue();
@@ -65,7 +65,7 @@ public sealed class PartialMatchTests
     [Property("Upstream", "RegexTests.test_partial#6-7,10")]
     public void A_complete_match_is_still_reported_as_complete(string pattern, string subject, int end)
     {
-        Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);
+        Match m = Upstream.Compile(pattern).MatchAtStart(subject, partial: true);
 
         m.Success.Should().BeTrue();
         m.PartialMatch.Should().BeFalse();
@@ -77,7 +77,7 @@ public sealed class PartialMatchTests
     [Test]
     [Property("Upstream", "RegexTests.test_partial#5")]
     public void A_subject_that_diverges_is_not_a_partial_match() =>
-        new FuzzyRegex("cats").MatchAtStart("catch", partial: true).Success.Should().BeFalse();
+        Upstream.Compile("cats").MatchAtStart("catch", partial: true).Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_partial#11-12")]
@@ -106,7 +106,8 @@ public sealed class PartialMatchTests
     [Test]
     [Property("Upstream", "RegexTests.test_partial#19")]
     public void A_folded_ligature_subject_does_not_match_a_shorter_entry() =>
-        new FuzzyRegex("(?fi)\\L<words>", FuzzyRegexOptions.None, _pos)
+        Upstream
+            .Compile("(?fi)\\L<words>", FuzzyRegexOptions.None, _pos)
             .MatchAtStart(_postLigature, partial: true)
             .Success.Should()
             .BeFalse();
@@ -120,7 +121,7 @@ public sealed class PartialMatchTests
     [Property("Upstream", "RegexTests.test_partial#20-23")]
     public void An_anchored_pattern_reports_every_viable_prefix_as_partial(string subject, int end)
     {
-        Match m = new FuzzyRegex("[a-z]*4R$").MatchAtStart(subject, partial: true);
+        Match m = Upstream.Compile("[a-z]*4R$").MatchAtStart(subject, partial: true);
 
         m.Success.Should().BeTrue();
         m.PartialMatch.Should().BeTrue();
@@ -131,7 +132,7 @@ public sealed class PartialMatchTests
     [Property("Upstream", "RegexTests.test_partial#24")]
     public void An_anchored_pattern_completes_at_the_end_of_the_subject()
     {
-        Match m = new FuzzyRegex("[a-z]*4R$").MatchAtStart("a4R", partial: true);
+        Match m = Upstream.Compile("[a-z]*4R$").MatchAtStart("a4R", partial: true);
 
         m.Success.Should().BeTrue();
         m.PartialMatch.Should().BeFalse();
@@ -143,7 +144,7 @@ public sealed class PartialMatchTests
     [Arguments("a44")]
     [Property("Upstream", "RegexTests.test_partial#25-26")]
     public void A_subject_that_can_never_complete_is_not_a_partial_match(string subject) =>
-        new FuzzyRegex("[a-z]*4R$").MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+        Upstream.Compile("[a-z]*4R$").MatchAtStart(subject, partial: true).Success.Should().BeFalse();
 
     private static void AssertPartial(
         string pattern,
@@ -153,7 +154,7 @@ public sealed class PartialMatchTests
         int end
     )
     {
-        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, namedLists).MatchAtStart(subject, partial: true);
+        Match m = Upstream.Compile(pattern, FuzzyRegexOptions.None, namedLists).MatchAtStart(subject, partial: true);
 
         m.Success.Should().BeTrue();
         m.PartialMatch.Should().Be(partial);

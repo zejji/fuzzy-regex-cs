@@ -23,7 +23,7 @@ public sealed class RegressionsParseErrorTests
     [Property("Upstream", "RegexTests.test_hg_bugs#42")]
     public void Undefined_character_name_reports_its_position()
     {
-        Action act = static () => _ = new FuzzyRegex(@"\N{1}");
+        Action act = static () => _ = Upstream.Compile(@"\N{1}");
 
         var error = act.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("undefined character name");
@@ -39,7 +39,7 @@ public sealed class RegressionsParseErrorTests
     [Property("Upstream", "RegexTests.test_hg_bugs#55")]
     public void Trailing_backslash_in_a_replacement_string_reports_its_position()
     {
-        Action act = static () => FuzzyRegex.Replace("x", "x", "\\");
+        Action act = static () => Upstream.Replace("x", "x", "\\");
 
         var error = act.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("bad escape (end of pattern)");
@@ -63,7 +63,7 @@ public sealed class RegressionsParseErrorTests
     [Property("Upstream", "RegexTests.test_hg_bugs#64")]
     public void Multiple_repeat_operators_report_the_position_of_the_second_one()
     {
-        Action act = static () => _ = new FuzzyRegex(@".???");
+        Action act = static () => _ = Upstream.Compile(@".???");
 
         var error = act.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("multiple repeat");
@@ -78,7 +78,7 @@ public sealed class RegressionsParseErrorTests
     [Property("Upstream", "RegexTests.test_hg_bugs#111")]
     public void Empty_property_name_reports_its_position()
     {
-        Action act = static () => _ = new FuzzyRegex(@"\p{}");
+        Action act = static () => _ = Upstream.Compile(@"\p{}");
 
         var error = act.Should().Throw<FuzzyRegexParseException>().Which;
         error.Message.Should().Be("unknown property");

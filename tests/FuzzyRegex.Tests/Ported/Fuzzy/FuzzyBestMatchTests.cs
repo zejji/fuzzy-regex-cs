@@ -24,7 +24,7 @@ public sealed class FuzzyBestMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#13,17")]
     public void BestMatch_prefers_a_real_match_over_the_empty_one_at_the_start(string pattern)
     {
-        Match m = FuzzyRegex.Match(FuzzyTestData.Anaconda, pattern);
+        Match m = Upstream.Match(FuzzyTestData.Anaconda, pattern);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((9, 10));
@@ -36,7 +36,7 @@ public sealed class FuzzyBestMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#21")]
     public void BestMatch_finds_the_closest_occurrence_rather_than_the_leftmost()
     {
-        Match m = FuzzyRegex.Match("xirefoabralfobarxie", "(?b)(foobar){e}");
+        Match m = Upstream.Match("xirefoabralfobarxie", "(?b)(foobar){e}");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((11, 16));
@@ -48,7 +48,7 @@ public sealed class FuzzyBestMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#27")]
     public void BestMatch_finds_the_closest_whole_word()
     {
-        Match m = FuzzyRegex.Match("boing zfoobarz goobar woop", "(?b)\\b(foobar){e}\\b");
+        Match m = Upstream.Match("boing zfoobarz goobar woop", "(?b)\\b(foobar){e}\\b");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((15, 21));
@@ -80,7 +80,7 @@ public sealed class FuzzyBestMatchTests
     [Property("Upstream", "RegexTests.test_fuzzy#44")]
     public void BestMatch_applies_under_a_weighted_cost_equation()
     {
-        Match m = FuzzyRegex.Match(FuzzyTestData.Scattered, "(?b)(foobar){i<=1,d<=2,s<=3,2d+1s<4}");
+        Match m = Upstream.Match(FuzzyTestData.Scattered, "(?b)(foobar){i<=1,d<=2,s<=3,2d+1s<4}");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((26, 33));
@@ -101,7 +101,7 @@ public sealed class FuzzyBestMatchTests
     [Test]
     public void BestMatch_under_a_unit_cost_equation_answers_what_upstream_answers()
     {
-        Match m = FuzzyRegex.Match(FuzzyTestData.Scattered, "(?b)(foobar){i<=1,d<=2,s<=3,1i+1d+1s<4}");
+        Match m = Upstream.Match(FuzzyTestData.Scattered, "(?b)(foobar){i<=1,d<=2,s<=3,1i+1d+1s<4}");
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((34, 39));

@@ -2209,6 +2209,9 @@ internal static class ParseFunctions
         int ch = source.Get();
         if (ch == Source.EndOfSource)
         {
+            // Upstream's exact text. PatternCompiler.Compile re-words it - and only it - when the
+            // pattern turns out to compile under version 0, which is the one case the version this
+            // port defaults to is what broke it.
             throw new FuzzyRegexParseException("unterminated character set", source.String, source.Pos);
         }
 

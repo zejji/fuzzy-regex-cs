@@ -14,10 +14,27 @@ namespace Fuzzy.Text.RegularExpressions.Parsing;
 internal static class PatternCompiler
 {
     /// <summary>
-    /// Upstream's <c>DEFAULT_VERSION</c> (<c>upstream/regex/__init__.py</c>): the version a
-    /// pattern gets when neither the flags nor an inline <c>(?V0)</c> / <c>(?V1)</c> pick one.
+    /// The version a pattern gets when neither the flags nor an inline <c>(?V0)</c> /
+    /// <c>(?V1)</c> pick one. Upstream's <c>DEFAULT_VERSION</c>.
     /// </summary>
-    internal const int DefaultVersion = (int)FuzzyRegexOptions.Version0;
+    /// <remarks>
+    /// <b>DIVERGES FROM UPSTREAM</b> (owner decision 2026-09-14, design spec amendment 24;
+    /// <c>docs/DIVERGENCES.md</c>). Upstream's <c>_main.py</c> line 443 sets
+    /// <c>DEFAULT_VERSION = VERSION0</c> so that <c>regex</c> stays a drop-in for Python's
+    /// <c>re</c>; this port has no <c>re</c> users to protect, and the two behaviours
+    /// <c>VERSION1</c> adds - nested sets with set operations, and full case-folding - are the
+    /// reason to use this library over <c>System.Text.RegularExpressions</c>. Measured on
+    /// 2026-09-14 (<c>tools/probes/upstream-version-defaults.py</c>), those two and a
+    /// backreference to an open group are the only live differences left; the zero-width and
+    /// inline-flag differences upstream's README still lists stopped existing when <c>VERSION0</c>
+    /// was brought in line with <c>re</c> 3.7+.
+    /// <para>
+    /// A caller who wants upstream's reading passes <see cref="FuzzyRegexOptions.Version0"/> or
+    /// writes <c>(?V0)</c>. The ported upstream suite does it through one helper
+    /// (<c>tests/FuzzyRegex.Tests/Ported/Upstream.cs</c>), so that it keeps measuring upstream.
+    /// </para>
+    /// </remarks>
+    internal const int DefaultVersion = (int)FuzzyRegexOptions.Version1;
 
     /// <summary>
     /// Compiles a pattern to upstream's bytecode.
@@ -49,6 +66,94 @@ internal static class PatternCompiler
         int flags = 0,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
         int defaultVersion = DefaultVersion
+    )
+    {
+        try
+        {
+            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion);
+        }
+        catch (FuzzyRegexParseException unterminated)
+            when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
+                && defaultVersion == RegexFlags.Version1
+                && (flags & RegexFlags.AllVersions) == 0
+            )
+        {
+            // NOT UPSTREAM'S MESSAGE (S50b; docs/DIVERGENCES.md). Under version 1 an unescaped `[`
+            // inside a set opens a NESTED set, so `[[]` and `[a[b]` - accepted by `re`, by
+            // `System.Text.RegularExpressions` and under `Version0` - stop compiling, and upstream's
+            // bare "unterminated character set" tells a caller arriving from `Regex` nothing about
+            // why their working pattern broke. Upstream can afford the bare text because its own
+            // DEFAULT_VERSION is VERSION0, where the nested reading does not exist.
+            //
+            // The condition is the WHOLE pattern compiling under version 0, decided by compiling it,
+            // because nothing cheaper is true. Two blind reviews killed two heuristics that looked
+            // equivalent and were not: a parse-wide "we read a nested set" flag advised Version0 on
+            // `[[a-z]--[aeiou]]x[`, whose nested part is a legal set operation and whose trailing `[`
+            // is the whole problem, and scoping that flag to one top-level set still advised it on
+            // `[[a]--[b`, where the nested set is inside the set that fails. Version 0 rejects both.
+            //
+            // It costs a second parse of a pattern that has already failed, and it cannot recurse:
+            // the retry names Version0 explicitly, so this arm's `defaultVersion == Version1` guard
+            // is false inside it. Skipped entirely when the caller or the pattern already chose a
+            // version, since then version 1 is not what the caller got by default.
+            if (!CompilesUnderVersion0(pattern, flags, namedLists))
+            {
+                throw;
+            }
+
+            throw new FuzzyRegexParseException(
+                _unterminatedNestedSet,
+                unterminated.Pattern ?? pattern,
+                unterminated.Offset
+            );
+        }
+    }
+
+    /// <summary>Upstream's message for a set that runs off the end of the pattern.</summary>
+    private const string _unterminatedSet = "unterminated character set";
+
+    /// <summary>
+    /// The same thing for a pattern that version 0 accepts, so the only thing wrong with it is that
+    /// version 1 reads a <c>[</c> inside a set as a nested-set opener.
+    /// </summary>
+    private const string _unterminatedNestedSet =
+        _unterminatedSet
+        + @": under version 1 - this library's default - an unescaped '[' inside a set opens a NESTED "
+        + @"set, which needs its own ']'. This pattern compiles as written under version 0. Escape "
+        + @"the '[' as '\[' to keep version 1, or compile with FuzzyRegexOptions.Version0 (or write "
+        + @"'(?V0)'), where a '[' inside a set is already literal, as it is in re and "
+        + @"System.Text.RegularExpressions.";
+
+    /// <summary>
+    /// Whether the pattern that just failed to compile would compile under upstream's default
+    /// version, which is what makes the nested-set advice above true rather than plausible.
+    /// </summary>
+    /// <param name="pattern">The pattern text.</param>
+    /// <param name="flags">The caller's flags.</param>
+    /// <param name="namedLists">The caller's named lists.</param>
+    /// <returns><see langword="true"/> if version 0 accepts it.</returns>
+    private static bool CompilesUnderVersion0(
+        string pattern,
+        int flags,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists
+    )
+    {
+        try
+        {
+            CompileUnderVersion(pattern, flags, namedLists, RegexFlags.Version0);
+            return true;
+        }
+        catch (FuzzyRegexParseException)
+        {
+            return false;
+        }
+    }
+
+    private static CompiledPattern CompileUnderVersion(
+        string pattern,
+        int flags,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
+        int defaultVersion
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =

@@ -18,5 +18,5 @@ public sealed class Issue18468Tests
 {
     [Test]
     [Property("Upstream", "RegexTests.test_issue_18468#1")]
-    public void Sub_replaces_a_literal() => FuzzyRegex.Replace("xyz", "y", "a").Should().Be("xaz");
+    public void Sub_replaces_a_literal() => Upstream.Replace("xyz", "y", "a").Should().Be("xaz");
 }

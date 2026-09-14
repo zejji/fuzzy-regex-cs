@@ -53,12 +53,12 @@ public sealed class PosixAndPropertyClassTableTests
     [Arguments(@"(?i)\P{InBasicLatin}", _latinPair, "á")]
     [Property("Upstream", "RegexTests.test_properties#73")]
     public void Class_finds_exactly_its_members_in_the_subject(string pattern, string subject, string expected) =>
-        string.Concat(FuzzyRegex.Matches(subject, pattern).Select(static m => m.Value)).Should().Be(expected);
+        string.Concat(Upstream.Matches(subject, pattern).Select(static m => m.Value)).Should().Be(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_properties#70")]
     public void Numeric_value_zero_matches_the_digit_zero() =>
-        new FuzzyRegex(@"\p{NumericValue=0}").IsMatchAtStart("0").Should().BeTrue();
+        Upstream.Compile(@"\p{NumericValue=0}").IsMatchAtStart("0").Should().BeTrue();
 
     /// <remarks>
     /// The subject is VULGAR FRACTION ONE HALF, U+00BD. Upstream asserts the same character
@@ -69,5 +69,5 @@ public sealed class PosixAndPropertyClassTableTests
     [Arguments(@"\p{NumericValue=0.5}")]
     [Property("Upstream", "RegexTests.test_properties#71-72")]
     public void Numeric_value_one_half_matches_the_vulgar_fraction(string pattern) =>
-        new FuzzyRegex(pattern).IsMatchAtStart(((char)0x00BD).ToString()).Should().BeTrue();
+        Upstream.Compile(pattern).IsMatchAtStart(((char)0x00BD).ToString()).Should().BeTrue();
 }

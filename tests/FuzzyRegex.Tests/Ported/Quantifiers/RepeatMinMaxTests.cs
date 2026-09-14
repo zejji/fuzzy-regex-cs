@@ -20,7 +20,7 @@ public sealed class RepeatMinMaxTests
     [Arguments("^x{}$", "xxx")]
     [Property("Upstream", "RegexTests.test_repeat_minmax#1-4,13-16,29")]
     public void MatchAtStart_fails_when_the_repeat_count_cannot_cover_the_subject(string pattern, string subject) =>
-        FuzzyRegex.MatchAtStart(subject, pattern).Success.Should().BeFalse();
+        Upstream.MatchAtStart(subject, pattern).Success.Should().BeFalse();
 
     [Test]
     [Arguments(@"^(\w){3}$")]
@@ -33,7 +33,7 @@ public sealed class RepeatMinMaxTests
     [Arguments(@"^(\w){3,4}?$")]
     [Property("Upstream", "RegexTests.test_repeat_minmax#5-12")]
     public void MatchAtStart_captures_the_last_repetition(string pattern) =>
-        FuzzyRegex.MatchAtStart("abc", pattern).Groups[1].Value.Should().Be("c");
+        Upstream.MatchAtStart("abc", pattern).Groups[1].Value.Should().Be("c");
 
     [Test]
     [Arguments("^x{1}", "x")]
@@ -42,7 +42,7 @@ public sealed class RepeatMinMaxTests
     [Arguments("^x{0,1}?", "")]
     [Property("Upstream", "RegexTests.test_repeat_minmax#17-20")]
     public void MatchAtStart_value_for_open_ended_repeats(string pattern, string expectedValue) =>
-        FuzzyRegex.MatchAtStart("xxx", pattern).Value.Should().Be(expectedValue);
+        Upstream.MatchAtStart("xxx", pattern).Value.Should().Be(expectedValue);
 
     [Test]
     [Arguments("^x{3}$")]
@@ -55,10 +55,10 @@ public sealed class RepeatMinMaxTests
     [Arguments("^x{3,4}?$")]
     [Property("Upstream", "RegexTests.test_repeat_minmax#21-28")]
     public void MatchAtStart_succeeds_when_the_repeat_count_covers_the_subject(string pattern) =>
-        FuzzyRegex.MatchAtStart("xxx", pattern).Success.Should().BeTrue();
+        Upstream.MatchAtStart("xxx", pattern).Success.Should().BeTrue();
 
     [Test]
     [Property("Upstream", "RegexTests.test_repeat_minmax#30")]
     public void MatchAtStart_treats_an_empty_brace_expression_as_a_literal() =>
-        FuzzyRegex.MatchAtStart("x{}", "^x{}$").Success.Should().BeTrue();
+        Upstream.MatchAtStart("x{}", "^x{}$").Success.Should().BeTrue();
 }

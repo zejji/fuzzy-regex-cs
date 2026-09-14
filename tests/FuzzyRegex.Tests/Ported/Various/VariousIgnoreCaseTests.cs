@@ -130,7 +130,7 @@ public sealed class VariousIgnoreCaseTests
         string?[] expected
     )
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         VariousTable.GroupValues(m, groups).Should().Equal(expected);
@@ -167,5 +167,5 @@ public sealed class VariousIgnoreCaseTests
         "RegexTests.test_various#340-342,351-353,358,362,366,368,375-376,378,389,391-392,399,424,435,444,451-452,459,463,479"
     )]
     public void Search_does_not_match(string pattern, string subject) =>
-        FuzzyRegex.Match(subject, pattern).Success.Should().BeFalse();
+        Upstream.Match(subject, pattern).Success.Should().BeFalse();
 }

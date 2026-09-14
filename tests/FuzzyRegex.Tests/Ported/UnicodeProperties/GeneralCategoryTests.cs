@@ -16,7 +16,7 @@ public sealed class GeneralCategoryTests
     [Arguments(@"\p{Ll}", "a")]
     [Property("Upstream", "RegexTests.test_properties#55-58")]
     public void General_category_matches_a_letter_of_that_category(string pattern, string subject) =>
-        new FuzzyRegex(pattern).IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile(pattern).IsMatchAtStart(subject).Should().BeTrue();
 
     /// <remarks>
     /// Upstream repeats assertion #58 verbatim at line 1122, after the grapheme block. Kept as its
@@ -25,12 +25,12 @@ public sealed class GeneralCategoryTests
     [Test]
     [Property("Upstream", "RegexTests.test_properties#69")]
     public void Lowercase_letter_category_still_matches_after_the_grapheme_block() =>
-        new FuzzyRegex(@"\p{Ll}").IsMatchAtStart("a").Should().BeTrue();
+        Upstream.Compile(@"\p{Ll}").IsMatchAtStart("a").Should().BeTrue();
 
     [Test]
     [Arguments("a")]
     [Arguments("A")]
     [Property("Upstream", "RegexTests.test_properties#59-60")]
     public void Inline_ignore_case_matches_either_case_of_a_literal(string subject) =>
-        new FuzzyRegex("(?i)a").IsMatchAtStart(subject).Should().BeTrue();
+        Upstream.Compile("(?i)a").IsMatchAtStart(subject).Should().BeTrue();
 }

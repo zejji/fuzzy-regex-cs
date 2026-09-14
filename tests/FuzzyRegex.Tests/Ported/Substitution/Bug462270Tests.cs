@@ -19,10 +19,10 @@ public sealed class Bug462270Tests
     public void Replace_with_a_star_quantifier_also_replaces_the_empty_matches_between_characters(
         string pattern,
         string expected
-    ) => FuzzyRegex.Replace("abxd", pattern, "-").Should().Be(expected);
+    ) => Upstream.Replace("abxd", pattern, "-").Should().Be(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_bug_462270#3")]
     public void Replace_with_a_plus_quantifier_does_not_replace_empty_matches() =>
-        FuzzyRegex.Replace("abxd", "x+", "-").Should().Be("ab-d");
+        Upstream.Replace("abxd", "x+", "-").Should().Be("ab-d");
 }

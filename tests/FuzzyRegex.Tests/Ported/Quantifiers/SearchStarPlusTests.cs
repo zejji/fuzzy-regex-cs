@@ -19,7 +19,7 @@ public sealed class SearchStarPlusTests
     [Property("Upstream", "RegexTests.test_search_star_plus#1-4")]
     public void Search_spans(string pattern, string subject, int start, int end)
     {
-        Match m = FuzzyRegex.Match(subject, pattern);
+        Match m = Upstream.Match(subject, pattern);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((start, end));
@@ -27,8 +27,7 @@ public sealed class SearchStarPlusTests
 
     [Test]
     [Property("Upstream", "RegexTests.test_search_star_plus#5")]
-    public void Search_for_an_absent_literal_does_not_match() =>
-        FuzzyRegex.Match("aaa", "x").Success.Should().BeFalse();
+    public void Search_for_an_absent_literal_does_not_match() => Upstream.Match("aaa", "x").Success.Should().BeFalse();
 
     [Test]
     [Arguments("a*", "xxx", 0, 0)]
@@ -36,7 +35,7 @@ public sealed class SearchStarPlusTests
     [Property("Upstream", "RegexTests.test_search_star_plus#6-9")]
     public void MatchAtStart_spans(string pattern, string subject, int start, int end)
     {
-        Match m = FuzzyRegex.MatchAtStart(subject, pattern);
+        Match m = Upstream.MatchAtStart(subject, pattern);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Index + m.Length).Should().Be((start, end));
@@ -45,5 +44,5 @@ public sealed class SearchStarPlusTests
     [Test]
     [Property("Upstream", "RegexTests.test_search_star_plus#10")]
     public void MatchAtStart_requires_the_pattern_to_start_at_the_beginning() =>
-        FuzzyRegex.MatchAtStart("xxx", "a+").Success.Should().BeFalse();
+        Upstream.MatchAtStart("xxx", "a+").Success.Should().BeFalse();
 }

@@ -23,17 +23,17 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#174")]
     public void Prune_verb_commits_the_preceding_run_so_a_trailing_atom_cannot_reuse_it() =>
-        FuzzyRegex.Match("123", @"\d+(*PRUNE)\d").Success.Should().BeFalse();
+        Upstream.Match("123", @"\d+(*PRUNE)\d").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#175")]
     public void Prune_verb_inside_a_lookahead_does_not_constrain_backtracking_outside_it() =>
-        FuzzyRegex.Match("123", @"\d+(?=(*PRUNE))\d").Value.Should().Be("123");
+        Upstream.Match("123", @"\d+(?=(*PRUNE))\d").Value.Should().Be("123");
 
     [Test]
     [Arguments(@"\d+(*PRUNE)bcd|[3d]", "123bcd", "123bcd")]
@@ -45,7 +45,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"\d++(?<=3(*PRUNE))zzd|[4d]$", "123zzd", "123zzd")]
@@ -57,17 +57,17 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#184")]
     public void Prune_verb_commits_the_preceding_run_when_searching_right_to_left() =>
-        FuzzyRegex.Match("123", @"(?r)\d(*PRUNE)\d+").Success.Should().BeFalse();
+        Upstream.Match("123", @"(?r)\d(*PRUNE)\d+").Success.Should().BeFalse();
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#185")]
     public void Prune_verb_inside_a_lookbehind_does_not_constrain_backtracking_outside_it_when_searching_right_to_left() =>
-        FuzzyRegex.Match("123", @"(?r)\d(?<=(*PRUNE))\d+").Value.Should().Be("123");
+        Upstream.Match("123", @"(?r)\d(?<=(*PRUNE))\d+").Value.Should().Be("123");
 
     [Test]
     [Arguments(@"(?r)\d+(*PRUNE)bcd|[3d]", "123bcd", "123bcd")]
@@ -77,7 +77,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?r)\d++(?<=3(*PRUNE))zzd|[4d]$", "123zzd", "123zzd")]
@@ -89,7 +89,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"\d+(*SKIP)bcd|[3d]", "123bcd", "123bcd")]
@@ -101,7 +101,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"\d++(?<=3(*SKIP))zzd|[4d]$", "123zzd", "123zzd")]
@@ -113,7 +113,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?r)\d+(*SKIP)bcd|[3d]", "123bcd", "123bcd")]
@@ -123,7 +123,7 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 
     [Test]
     [Arguments(@"(?r)\d++(?<=3(*SKIP))zzd|[4d]$", "123zzd", "123zzd")]
@@ -135,5 +135,5 @@ public sealed class RegressionsBacktrackingVerbTests
         string pattern,
         string subject,
         string expected
-    ) => FuzzyRegex.Match(subject, pattern).Value.Should().Be(expected);
+    ) => Upstream.Match(subject, pattern).Value.Should().Be(expected);
 }

@@ -18,25 +18,25 @@ public sealed class ReplacementTests
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#1")]
     public void Sub_leaves_unrecognised_backslash_escapes_and_control_characters_untouched() =>
-        FuzzyRegex.Replace("test?", @"test\?", "result\\?\\.\a\n").Should().Be("result\\?\\.\a\n");
+        Upstream.Replace("test?", @"test\?", "result\\?\\.\a\n").Should().Be("result\\?\\.\a\n");
 
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#2")]
     public void Sub_expands_a_backreference_in_the_replacement_template() =>
-        FuzzyRegex.Replace("x", "(.)", "\\1\\1").Should().Be("xx");
+        Upstream.Replace("x", "(.)", "\\1\\1").Should().Be("xx");
 
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#3")]
     public void Sub_treats_an_escaped_replacement_template_as_literal_text() =>
-        FuzzyRegex.Replace("x", "(.)", FuzzyRegex.Escape("\\1\\1")).Should().Be("\\1\\1");
+        Upstream.Replace("x", "(.)", Upstream.Escape("\\1\\1")).Should().Be("\\1\\1");
 
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#4")]
     public void Sub_treats_a_doubled_backslash_before_a_digit_as_a_literal_backslash_and_digit() =>
-        FuzzyRegex.Replace("x", "(.)", "\\\\1\\\\1").Should().Be("\\1\\1");
+        Upstream.Replace("x", "(.)", "\\\\1\\\\1").Should().Be("\\1\\1");
 
     [Test]
     [Property("Upstream", "RegexTests.test_replacement#5")]
     public void Sub_with_an_evaluator_uses_its_return_value_literally_with_no_further_expansion() =>
-        FuzzyRegex.Replace("x", "(.)", static _ => "\\1\\1").Should().Be("\\1\\1");
+        Upstream.Replace("x", "(.)", static _ => "\\1\\1").Should().Be("\\1\\1");
 }

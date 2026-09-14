@@ -24,7 +24,7 @@ public sealed class RegressionsAtomicTests
     [Property("Upstream", "RegexTests.test_hg_bugs#1")]
     public void Atomic_group_around_a_single_literal_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex("(?>b)", FuzzyRegexOptions.Version1);
+        Action act = static () => _ = Upstream.Compile("(?>b)", FuzzyRegexOptions.Version1);
 
         act.Should().NotThrow();
     }
@@ -33,7 +33,7 @@ public sealed class RegressionsAtomicTests
     [Property("Upstream", "RegexTests.test_hg_bugs#2")]
     public void Repeated_alternation_of_two_atomic_groups_compiles()
     {
-        Action act = static () => _ = new FuzzyRegex(@"^((?>\w+)|(?>\s+))*$", FuzzyRegexOptions.Version1);
+        Action act = static () => _ = Upstream.Compile(@"^((?>\w+)|(?>\s+))*$", FuzzyRegexOptions.Version1);
 
         act.Should().NotThrow();
     }
@@ -42,19 +42,19 @@ public sealed class RegressionsAtomicTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#16")]
     public void Atomic_group_over_dot_star_still_lets_the_rest_of_the_pattern_match() =>
-        FuzzyRegex.Match("a/b", "(?>.*/)b").Value.Should().Be("a/b");
+        Upstream.Match("a/b", "(?>.*/)b").Value.Should().Be("a/b");
 
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#206")]
     public void Negative_lookbehind_before_an_atomic_alternation_finds_exactly_one_match() =>
-        FuzzyRegex.Matches(_hgIssue154Subject, @"(?<!\d)(?>2014|2013 ?2012)").Should().HaveCount(1);
+        Upstream.Matches(_hgIssue154Subject, @"(?<!\d)(?>2014|2013 ?2012)").Should().HaveCount(1);
 
     // Hg issue 156: regression on atomic grouping.
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#207")]
     public void Atomic_group_after_a_literal_still_matches_at_the_start()
     {
-        Match m = FuzzyRegex.MatchAtStart("12", "1(?>2)");
+        Match m = Upstream.MatchAtStart("12", "1(?>2)");
 
         m.Index.Should().Be(0);
         m.Length.Should().Be(2);
@@ -64,5 +64,5 @@ public sealed class RegressionsAtomicTests
     [Test]
     [Property("Upstream", "RegexTests.test_hg_bugs#258")]
     public void Nested_atomic_alternation_over_quoted_strings_does_not_match_a_non_conforming_subject() =>
-        FuzzyRegex.Match(_hgIssue213Subject, _hgIssue213Pattern).Success.Should().BeFalse();
+        Upstream.Match(_hgIssue213Subject, _hgIssue213Pattern).Success.Should().BeFalse();
 }

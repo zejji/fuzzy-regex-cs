@@ -93,27 +93,37 @@ public sealed class PatternPropertyTests
     public void An_inline_flag_shows_up_in_Options()
     {
         // Upstream's Pattern.flags is info.flags | version, so a flag the pattern set for itself
-        // is reported as if the caller had passed it.
+        // is reported as if the caller had passed it - alongside the default version and the
+        // FullCase that version implies.
         new FuzzyRegex("(?s)a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Singleline | FuzzyRegexOptions.Version0);
+            .Be(FuzzyRegexOptions.Singleline | FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
     }
 
     [Test]
-    public void The_default_version_is_Version0_as_upstreams_own_front_end_sets_it()
+    public void The_default_version_is_Version1_where_upstreams_front_end_sets_Version0()
     {
-        // upstream/regex/_main.py line 443 overrides _regex_core.py line 161's VERSION1.
+        // DIVERGES FROM UPSTREAM (S50b, spec amendment 24; docs/DIVERGENCES.md). Upstream's
+        // _main.py line 443 overrides _regex_core.py line 161's VERSION1 with VERSION0 so that
+        // regex stays a drop-in for re; this port keeps _regex_core.py's value instead.
+        //
+        // Version 1 also turns FullCase on, because DEFAULT_FLAGS maps VERSION1 to FULLCASE
+        // (upstream/regex/_regex_core.py line 167). Verified against the local oracle 2026-08-30:
+        // regex.compile('a', regex.V1).flags is 0x4120 - FULLCASE, VERSION1 and the UNICODE that
+        // Options masks off - against 0x2020 with no flags at all.
         new FuzzyRegex("a")
+            .Options.Should()
+            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+
+        // The caller who wants upstream's reading says so, and gets upstream's flags exactly.
+        new FuzzyRegex("a", FuzzyRegexOptions.Version0)
             .Options.Should()
             .Be(FuzzyRegexOptions.Version0);
 
-        // Asking for version 1 also turns FullCase on, because DEFAULT_FLAGS maps VERSION1 to
-        // FULLCASE (upstream/regex/_regex_core.py line 167). Verified against the local oracle
-        // 2026-08-30: regex.compile('a', regex.V1).flags is 0x4120 - FULLCASE, VERSION1 and the
-        // UNICODE that Options masks off - against 0x2020 with no flags at all.
-        new FuzzyRegex("a", FuzzyRegexOptions.Version1)
+        // And so does a pattern that asks for it inline.
+        new FuzzyRegex("(?V0)a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+            .Be(FuzzyRegexOptions.Version0);
     }
 
     [Test]

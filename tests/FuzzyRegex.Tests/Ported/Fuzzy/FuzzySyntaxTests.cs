@@ -23,7 +23,7 @@ public sealed class FuzzySyntaxTests
     [Property("Upstream", "RegexTests.test_fuzzy#1-6,18")]
     public void A_fuzzy_constraint_compiles(string pattern)
     {
-        Action act = () => _ = new FuzzyRegex(pattern);
+        Action act = () => _ = Upstream.Compile(pattern);
 
         act.Should().NotThrow();
     }

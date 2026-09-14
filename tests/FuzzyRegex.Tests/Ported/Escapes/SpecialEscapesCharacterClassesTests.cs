@@ -15,5 +15,5 @@ public sealed class SpecialEscapesCharacterClassesTests
     [Test]
     [Property("Upstream", "RegexTests.test_special_escapes#15,17")]
     public void Digit_word_space_classes_and_their_negations_match_in_sequence() =>
-        FuzzyRegex.Match("1aa! a", "\\d\\D\\w\\W\\s\\S").Value.Should().Be("1aa! a");
+        Upstream.Match("1aa! a", "\\d\\D\\w\\W\\s\\S").Value.Should().Be("1aa! a");
 }
