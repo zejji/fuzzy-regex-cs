@@ -167,7 +167,39 @@ public sealed class Match : Group
         _fuzzyChanges = fuzzyChanges ?? [];
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
-        FuzzyCounts = fuzzyCounts;
+
+        // S47, ledger entry 11. ON A PARTIAL MATCH the counts are TALLIED FROM THE CHANGES instead
+        // of being taken from the state's counter, because on that one exit the counter provably is
+        // not the whole match's - see the remarks on 'FuzzyCounts'.
+        FuzzyCounts = partial ? TallyChanges(_fuzzyChanges) : fuzzyCounts;
+    }
+
+    /// <summary>The three counts of a change list, which is what the list says the counts are.</summary>
+    /// <param name="changes">The changes, in the order they were recorded.</param>
+    /// <returns>How many of each kind it holds.</returns>
+    private static FuzzyCounts TallyChanges(Engine.FuzzyChange[] changes)
+    {
+        int substitutions = 0;
+        int insertions = 0;
+        int deletions = 0;
+
+        foreach (Engine.FuzzyChange change in changes)
+        {
+            switch (change.Type)
+            {
+                case Engine.FuzzyValue.Sub:
+                    ++substitutions;
+                    break;
+                case Engine.FuzzyValue.Ins:
+                    ++insertions;
+                    break;
+                default:
+                    ++deletions;
+                    break;
+            }
+        }
+
+        return new FuzzyCounts(substitutions, insertions, deletions);
     }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
@@ -231,6 +263,44 @@ public sealed class Match : Group
     /// How many errors of each kind the fuzzy match used. Zero throughout for an exact match.
     /// Upstream <c>Match.fuzzy_counts</c> (<c>match_fuzzy_counts</c>, <c>:20493</c>).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>On a <see cref="PartialMatch"/> these are tallied from <see cref="FuzzyChanges"/>, where
+    /// upstream copies <c>state-&gt;fuzzy_counts</c> either way (<c>:20755-20759</c>). S47, ledger
+    /// entry 11, and a deliberate divergence.</b> The two attributes are documented as two views of
+    /// one edit script, so a pair that contradicts the other cannot be right whichever half a
+    /// caller trusts - and upstream's do contradict.
+    /// </para>
+    /// <para>
+    /// The state's counter is scoped to the innermost OPEN fuzzy section and was never the whole
+    /// match's tally: <c>FUZZY</c> zeroes it on entering a section and saves the enclosing
+    /// section's on the sstack (<c>:13137</c>, and the <c>memset</c> at <c>:13143</c>), and
+    /// <c>END_FUZZY</c> adds the inner back into the
+    /// outer on the way out (<c>:12473-12484</c>). On a complete match every section has closed and
+    /// the counter therefore IS the total, which is why it is still what a complete match reports.
+    /// A partial match returns from inside the section, before any of that unwinding, so the
+    /// counter holds the innermost section's errors alone - while the change list, which is global
+    /// and is never scoped, holds every one of them.
+    /// </para>
+    /// <para>
+    /// <c>match(r'(?:a\w(?:b\w){e&lt;=3}){i&lt;=1}', 'a ba', partial=True)</c> is the minimised
+    /// case: upstream answers <c>(1, 0, 0)</c> with an <b>insertion</b> at 1, because the outer
+    /// section's insertion is on its sstack and the inner section's substitution is in the counter.
+    /// This port's change list is <c>[ins@1, sub@3]</c>, which is the real edit script - the outer
+    /// section inserted the space and the inner substituted the 'a' - so it reports
+    /// <c>(1, 1, 0)</c>. <b>Upstream cannot be asked whether its own list holds the same two</b>:
+    /// <c>match_fuzzy_changes</c> reports only the first <c>sum(counts)</c> entries, so no public
+    /// call on regex 2026.9.10 returns more than the one it does. What IS measurable is that the
+    /// one it returns is the insertion its own counts deny.
+    /// </para>
+    /// <para>
+    /// The other door onto the same contradiction is a search restart: see the change-list clear in
+    /// <c>Matcher</c>'s <c>start_match</c>, which is the rest of the same fix. A third - the change
+    /// list desynchronising from the counts across <c>POSIX</c> and <c>BESTMATCH</c> candidates -
+    /// is NOT fixed here and is ledger entry 11's remaining half; it is why this tally is confined
+    /// to the partial exit rather than applied to every match.
+    /// </para>
+    /// </remarks>
     public FuzzyCounts FuzzyCounts { get; }
 
     /// <summary>
@@ -261,14 +331,22 @@ public sealed class Match : Group
     /// changes in the order they happened, split into three by kind.
     /// </summary>
     /// <remarks>
-    /// <b>Only the first <c>Total</c> changes are reported</b>, and the state's list may hold more:
-    /// upstream's loop runs <c>for (i = 0; i &lt; count; i++)</c> where <c>count</c> is the sum of
-    /// the three <b>counts</b> (<c>:20522</c>), not the length of the list <c>pattern_new_match</c>
-    /// copied. A nested fuzzy section leaves the two out of step - the counts are recomputed at
-    /// <c>END_FUZZY</c> and the change list is not always unwound to match - and reading the whole
-    /// list instead put a change on three rows of the S38 wave that upstream does not report.
-    /// The bound is also a real one here where upstream has none: its <c>count</c> can exceed the
-    /// array it allocated, which is a read past the end.
+    /// <para>
+    /// <b>Only the first <c>Total</c> changes are reported</b>, which is upstream's own bound:
+    /// its loop runs <c>for (i = 0; i &lt; count; i++)</c> with <c>count</c> the sum of the three
+    /// <b>counts</b> (<c>:20522</c>) rather than the length of the list <c>pattern_new_match</c>
+    /// copied. The bound is also a real one here where upstream has none - its <c>count</c> can
+    /// exceed the array it allocated, which is a read past the end.
+    /// </para>
+    /// <para>
+    /// It has nothing left to do wherever S47 put the two views back in step, because
+    /// <c>Total</c> is then the length of this list: on a partial match <see cref="FuzzyCounts"/>
+    /// is tallied from it, and on a complete match the state's counter is the whole match's. What
+    /// it still covers is ledger entry 11's unfixed half - the list desynchronising from the counts
+    /// across <c>POSIX</c> and <c>BESTMATCH</c> candidates, where it can hold a dozen entries for a
+    /// one-error match. Reporting the whole list there would turn an arbitrary answer into a
+    /// plainly wrong one, so the bound stays until that half is fixed.
+    /// </para>
     /// </remarks>
     /// <returns>The three lists.</returns>
     private FuzzyChanges SplitFuzzyChanges()

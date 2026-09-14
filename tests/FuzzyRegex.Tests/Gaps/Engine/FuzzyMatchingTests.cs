@@ -310,43 +310,69 @@ public sealed class FuzzyMatchingTests
     }
 
     [Test]
-    public void Only_as_many_changes_are_reported_as_the_counts_say_even_when_more_were_recorded()
+    public void A_partial_match_inside_a_nested_fuzzy_section_counts_the_outer_sections_errors_too()
     {
-        // Found by the S38 wave, three rows across three seeds, and a port bug rather than an
-        // upstream one. `match_fuzzy_changes` walks `count` entries where `count` is the sum of the
-        // three COUNTS (upstream/src/_regex.c:20522), not the length of the change list the match
-        // was given. A nested fuzzy section leaves the two out of step: END_FUZZY recomputes the
-        // counts and does not always unwind the change list to match, so the list keeps an entry the
-        // counts no longer cover. Reporting the whole list put an extra change on these rows.
+        // Found by the S38 wave, three rows across three seeds, read then as "report only as many
+        // changes as the counts say" and FIXED IN S47 the other way round - ledger entry 11, second
+        // door. The counts were the wrong half.
         //
-        // match(r'(?:a\w(?:b\w){e<=3}){i<=1}', 'a ba', partial=True):
+        // `state->fuzzy_counts` is scoped to the innermost OPEN fuzzy section: FUZZY saves the
+        // enclosing section's on the sstack (upstream/src/_regex.c:13137) and zeroes it
+        // (:13143), END_FUZZY adds
+        // the inner back into the outer on the way out (:12473-12484). A partial match returns from
+        // inside the section, so none of that unwinding happens and the counter holds the inner
+        // section's errors alone - while the change list, which is global, holds every one of them.
+        // Upstream then reports the first `sum(counts)` entries of that list (:20522), which does
+        // not merely omit a change: it presents the OUTER section's insertion as though it were the
+        // INNER section's substitution.
+        //
+        // match(r'(?:a\w(?:b\w){e<=3}){i<=1}', 'a ba', partial=True), regex 2026.9.10:
         //   span=(0, 4) counts=(1, 0, 0) changes=([], [1], [])
-        // One error, one change - and the change is the INSERTION at 1, not the substitution the
-        // count names. Upstream reports them out of step and so does this port.
+        // One substitution counted, one insertion reported, and no edit script means that. This
+        // port's own change list is [ins@1, sub@3] - the outer `{i<=1}` inserted the space and the
+        // inner `{e<=3}` substituted the 'a' - so (1, 1, 0) is the answer, and this port now tallies
+        // the counts from the changes rather than copying the state's counter. Upstream's list
+        // cannot be read past `sum(counts)` entries, so whether its own holds the same two is not
+        // measurable from Python; what is measurable is that the one entry it does return is an
+        // insertion its own counts deny.
         Match m = new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a ba", partial: true);
 
         m.Success.Should().BeTrue();
         (m.Index, m.Length).Should().Be((0, 4));
-        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
-        m.FuzzyChanges.Substitutions.Should().BeEmpty();
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(3);
         m.FuzzyChanges.Insertions.Should().Equal(1);
         m.FuzzyChanges.Deletions.Should().BeEmpty();
 
         // fullmatch(r'(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}', 'a b', partial=True):
-        //   span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
+        //   upstream span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
         Match costed = new FuzzyRegex(@"(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}").FullMatch("a b", partial: true);
 
-        costed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        costed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
         costed.FuzzyChanges.Insertions.Should().Equal(0);
-        costed.FuzzyChanges.Substitutions.Should().BeEmpty();
+        costed.FuzzyChanges.Substitutions.Should().Equal(2);
 
         // match(r'(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}', 'eab', partial=True):
-        //   span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
+        //   upstream span=(0, 3) counts=(1, 0, 0) changes=([], [0], [])
         Match boundary = new FuzzyRegex(@"(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}").MatchAtStart("eab", partial: true);
 
-        boundary.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        boundary.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
         boundary.FuzzyChanges.Insertions.Should().Equal(0);
-        boundary.FuzzyChanges.Substitutions.Should().BeEmpty();
+        boundary.FuzzyChanges.Substitutions.Should().Equal(2);
+
+        // THE CONTROL, and it is what makes the three rows above a statement about the PARTIAL exit
+        // rather than about nesting. The same two nested sections and the same outer insertion, on a
+        // subject the pattern COMPLETES on: END_FUZZY runs, merges the inner counts into the outer,
+        // and the counter already holds the outer section's insertion with nothing here to
+        // reconcile. Upstream agrees on this row, measured 2026-09-14 on regex 2026.9.10:
+        //   match(r'(?:a\w(?:b\w){e<=3}){i<=1}', 'a xby') -> (0, 5) (0, 1, 0) ([], [1], [])
+        Match completed = new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a xby");
+
+        completed.Success.Should().BeTrue();
+        completed.PartialMatch.Should().BeFalse();
+        (completed.Index, completed.Length).Should().Be((0, 5));
+        completed.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        completed.FuzzyChanges.Insertions.Should().Equal(1);
     }
 
     [Test]
@@ -358,22 +384,42 @@ public sealed class FuzzyMatchingTests
         // that cuts the backtracking drops the fuzzy frames instead of unwinding them, and then the
         // counts are still the abandoned attempt's. Found by S38's blind review.
         //
-        // search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab'): span=(1, 3) counts=(0, 0, 1)
-        //   changes=([0], [], [])
+        // UPSTREAM CLEARS THE COUNTS AND NOT THE CHANGE LIST, and the two then contradict each
+        // other. S47 clears both, which is ledger entry 11's first door and this port's own line -
+        // a cleared count already asserts that a fresh attempt has used no errors, so it can have
+        // no changes either. Upstream, regex 2026.9.10, re-run by
+        // `python tools/probes/upstream-fuzzy-restart-leak.py`:
+        //   search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab') -> (1, 3) (0, 0, 1) ([0], [], [])
+        // One DELETION counted and a SUBSTITUTION at 0 reported - the substitution belongs to the
+        // attempt at position 0 that `(*PRUNE)` abandoned. The winning attempt at 1 matched 'ab'
+        // and deleted the `[wx]` it had run out of subject for, so (0, 0, 1) with a deletion at 3
+        // is the edit script, and that is what this port answers.
         Match pruned = new FuzzyRegex("(?:[ab][bc](*PRUNE)[wx]){e<=2}").Match("qab");
 
         pruned.Success.Should().BeTrue();
         (pruned.Index, pruned.Length).Should().Be((1, 2));
         pruned.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
-        pruned.FuzzyChanges.Substitutions.Should().Equal(0);
+        pruned.FuzzyChanges.Substitutions.Should().BeEmpty();
+        pruned.FuzzyChanges.Deletions.Should().Equal(3);
 
-        // search(r'(?:[ab](*SKIP)[bc][wx]){e<=2}', 'qab'): span=(1, 3) counts=(0, 0, 1)
-        //   changes=([0], [], [])
+        // search(r'(?:[ab](*SKIP)[bc][wx]){e<=2}', 'qab'): upstream (1, 3) (0, 0, 1) ([0], [], [])
         Match skipped = new FuzzyRegex("(?:[ab](*SKIP)[bc][wx]){e<=2}").Match("qab");
 
         skipped.Success.Should().BeTrue();
         skipped.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
-        skipped.FuzzyChanges.Substitutions.Should().Equal(0);
+        skipped.FuzzyChanges.Substitutions.Should().BeEmpty();
+        skipped.FuzzyChanges.Deletions.Should().Equal(3);
+
+        // THE CONTROL: the same fuzzy section and the same abandoned first attempt with no verb to
+        // cut the backtracking, so the FUZZY backtrack arm unwinds the attempt at 0 the ordinary
+        // way and both engines agree. Without it these two rows would pass on an engine that had
+        // simply stopped recording changes.
+        Match unpruned = new FuzzyRegex("(?:[ab][bc][wx]){e<=2}").Match("qab");
+
+        unpruned.Success.Should().BeTrue();
+        (unpruned.Index, unpruned.Length).Should().Be((1, 2));
+        unpruned.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        unpruned.FuzzyChanges.Deletions.Should().Equal(3);
     }
 
     [Test]
@@ -509,51 +555,42 @@ public sealed class FuzzyMatchingTests
     }
 
     [Test]
-    public void A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one()
+    public void A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one()
     {
-        // S40a, out of S40's blind review, and the answer below is NOT the one that review expected.
-        // It reported that this port's FuzzyCounts and FuzzyChanges contradict each other here - one
-        // substitution counted, a deletion reported - and called that a defect on the row alone,
-        // before upstream is consulted. The contradiction is real. It is also UPSTREAM'S, inherited
-        // and already pinned two tests up by
-        // `A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`,
-        // whose recorded upstream answer is counts=(0,0,1) with a SUBSTITUTION at 0.
+        // S40a, out of S40's blind review, WHICH WAS RIGHT AFTER ALL - and S47 is where its finding
+        // was acted on. The review reported that this port's FuzzyCounts and FuzzyChanges
+        // contradicted each other here (one substitution counted, a deletion reported) and called
+        // that a defect on the row alone, before upstream is consulted. That contradiction was real
+        // and inherited: upstream clears the fuzzy counts on a search restart and leaves the change
+        // list, so an abandoned attempt's change displaced the winning attempt's. S40a measured the
+        // one-line clear and reverted it because it reddened the two `qab` rows two tests up, which
+        // pinned the same contradiction; S47 fixed both together, which is what those two rows
+        // needed all along. Ledger entry 11.
         //
-        // The mechanism, and why the obvious fix is wrong, are written out beside the fuzzy-counts
-        // clear in Matcher.cs's `start_match`. In short: upstream clears the counts on a search
-        // restart and leaves the change list, `Match.FuzzyChanges` reports the first `Total` entries
-        // of that list, and so an abandoned attempt's change DISPLACES the winning attempt's.
-        // Clearing the list here - S40a tried it - turns those two `qab` rows red and makes this
-        // port diverge on rows it currently agrees with upstream on. Ledger entry 11; Phase 6's
-        // inherited-bug sweep owns the fix, because fixing it means deciding what the right answer
-        // is and accepting a permanent oracle divergence.
-        //
-        // WHY THE TWO ENGINES DIFFER ON THESE ROWS AND NOT ON THE CONTROLS BELOW, which is the whole
-        // finding: `$` has a `search_start_*` twin, so upstream makes ONE attempt at the end of the
-        // subject, reaches the winning attempt first and has nothing to leak. This port has no
-        // prefilter until Phase 7, so it attempts 0, 1, 2 and 3 - and the attempt at 1 succeeds
-        // inside the lookbehind, records a deletion, then fails on the `$`. Measured with
-        // `python tools/probes/upstream-fuzzy-restart-leak.py`:
+        // WHY THE TWO ENGINES REACHED THIS ROW DIFFERENTLY AT ALL: `$` has a `search_start_*` twin,
+        // so upstream makes ONE attempt at the end of the subject and has nothing to leak. This port
+        // has no prefilter until Phase 7, so it attempts 0, 1, 2 and 3 - and the attempt at 1
+        // succeeds inside the lookbehind, records a deletion, then fails on the `$`. With the list
+        // cleared on restart that leftover is gone and the two engines now AGREE, which is the part
+        // worth noticing: fixing the leak removed a divergence here rather than adding one. Measured
+        // with `python tools/probes/upstream-fuzzy-restart-leak.py`, regex 2026.9.10:
         //   search('(?<=(?:[ab][cd]){e<=1})$', 'axc') -> (3, 3) counts=(1, 0, 0) changes=([2], [], [])
         //   search('(?<=(?:abc){e<=2})$',      'ac')  -> (2, 2) counts=(1, 0, 1) changes=([1], [], [0])
-        // Both reproduce unchanged on 2026.9.10. Classified in the oracle as
-        // `fuzzy-restart-change-leak`.
         Match reversed = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})$").Match("axc");
 
         reversed.Success.Should().BeTrue();
         (reversed.Index, reversed.Length).Should().Be((3, 0));
-        reversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0), "the COUNTS are right on both engines");
-        // The deletion the attempt at position 1 left behind, reported in place of the substitution
-        // the winning attempt at 3 recorded.
-        reversed.FuzzyChanges.Deletions.Should().Equal(1);
-        reversed.FuzzyChanges.Substitutions.Should().BeEmpty();
+        reversed.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        reversed.FuzzyChanges.Substitutions.Should().Equal(2);
+        reversed.FuzzyChanges.Deletions.Should().BeEmpty();
 
         Match twoErrors = new FuzzyRegex("(?<=(?:abc){e<=2})$").Match("ac");
 
         twoErrors.Success.Should().BeTrue();
         (twoErrors.Index, twoErrors.Length).Should().Be((2, 0));
         twoErrors.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 1));
-        twoErrors.FuzzyChanges.Deletions.Should().Equal(1, 2);
+        twoErrors.FuzzyChanges.Substitutions.Should().Equal(1);
+        twoErrors.FuzzyChanges.Deletions.Should().Equal(0);
 
         // THE CONTROLS, and they are what make the paragraph above a measurement rather than a
         // story. Every one of these agrees with upstream, and each removes exactly one ingredient:
@@ -582,5 +619,44 @@ public sealed class FuzzyMatchingTests
         Match noLookaround = new FuzzyRegex("(?:ab){e<=1}d").Match("axbaxd");
         noLookaround.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
         noLookaround.FuzzyChanges.Substitutions.Should().Equal(4);
+    }
+
+    [Test]
+    public void The_reported_changes_agree_with_the_counts_on_every_shape_that_used_to_contradict_them()
+    {
+        // S47, ledger entry 11. `fuzzy_counts` and `fuzzy_changes` are two views of ONE edit
+        // script - the documentation calls the second "a tuple of the positions of the
+        // substitutions, insertions and deletions" - so the invariant is that each list's length
+        // equals its own count. Upstream breaks it on every row below and this port used to
+        // reproduce that; S47 fixes it here, which is the owner's inherited-bug rule (2026-09-12).
+        //
+        // The rows are the seven upstream contradicts itself on, gathered from the two doors that
+        // reach the defect: a verb that cuts the backtracking without unwinding the fuzzy frames,
+        // and a nested section whose trailing insertions are counted back out and never unrecorded.
+        // `OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` applies the
+        // same property to every fuzzy row of a whole wave.
+        ChangesAgreeWithCounts(new FuzzyRegex("(?:[ab][bc](*PRUNE)[wx]){e<=2}").Match("qab"));
+        ChangesAgreeWithCounts(new FuzzyRegex("(?:[ab](*SKIP)[bc][wx]){e<=2}").Match("qab"));
+        ChangesAgreeWithCounts(new FuzzyRegex("(?<=(?:[ab][cd]){e<=1})$").Match("axc"));
+        ChangesAgreeWithCounts(new FuzzyRegex("(?<=(?:abc){e<=2})$").Match("ac"));
+        ChangesAgreeWithCounts(new FuzzyRegex(@"(?:a\w(?:b\w){e<=3}){i<=1}").MatchAtStart("a ba", partial: true));
+        ChangesAgreeWithCounts(
+            new FuzzyRegex(@"(?:[^a-f](?:\s\p{L}){2i+1d+1s<=2}){e<=2,i<=1}").FullMatch("a b", partial: true)
+        );
+        ChangesAgreeWithCounts(
+            new FuzzyRegex(@"(?:\B[a-f](?:\Wb){e<=3}){e<=2,i<=1}").MatchAtStart("eab", partial: true)
+        );
+    }
+
+    /// <summary>
+    /// The S47 invariant: each change list holds exactly as many positions as its own count.
+    /// </summary>
+    /// <param name="m">The match to check.</param>
+    private static void ChangesAgreeWithCounts(Match m)
+    {
+        m.Success.Should().BeTrue();
+        m.FuzzyChanges.Substitutions.Count.Should().Be(m.FuzzyCounts.Substitutions, "substitutions");
+        m.FuzzyChanges.Insertions.Count.Should().Be(m.FuzzyCounts.Insertions, "insertions");
+        m.FuzzyChanges.Deletions.Count.Should().Be(m.FuzzyCounts.Deletions, "deletions");
     }
 }

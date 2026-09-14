@@ -1102,10 +1102,46 @@ that goes quiet without saying so.
 
 ## 11. A fuzzy match reports change positions that contradict its own change counts
 
-**Status: not filed, and INHERITED BY THIS PORT.** Upstream's answer contradicts itself, this port
-reproduces it faithfully, and the owner's rule (2026-09-12) is that an inherited bug is fixed here
-before 1.0 - so this is an item for Phase 6's inherited-bug sweep, alongside entry 7, and not a
-divergence to pin.
+**Status: not filed. TWO OF ITS FOUR MECHANISMS ARE FIXED HERE (S47, 2026-09-14); TWO ARE NOT.**
+Upstream's answer contradicts itself, this port reproduced it faithfully, and the owner's rule
+(2026-09-12) is that an inherited bug is fixed here before 1.0. S47 found that "the change list and
+the counts drift apart" is not one defect with two doors, as this entry said, but **one defect class
+with at least four mechanisms**, because upstream saves and restores the COUNTS as a block and
+unwinds the CHANGES one item at a time, and nothing keeps the two in step across any construct that
+abandons a sub-attempt without backtracking through it.
+
+| # | Mechanism | Which half is wrong | S47 |
+|---|---|---|---|
+| A | A search restart clears the counts and leaves the list (`start_match`, `:11790-11792`) | the list | FIXED |
+| B | A partial match returns from inside a nested section, so the counter holds the innermost section's errors alone | the counts | FIXED |
+| C | `POSIX` and `BESTMATCH` candidates leave the list polluted or empty against the saved counts | the list | NOT FIXED |
+| D | A lookaround under `(?e)` restores a counts block whose changes were unwound item-wise | one of them | NOT FIXED |
+
+**THE FLAGS ARE PART OF EACH REPRODUCTION** - every one below comes from a wave row, and none of
+them reproduces without its flag bits.
+
+C's worst measured case is
+`(?r)(?p)(?!(?:[^[\p{L}--[a-z]]]\w([\p{L}||\p{N}])){s<=1})(?:([a]+?)(?P<g3>\p{L})){1i+2d+1s<=3:[^a-z]}`
+over `'ﬃﬃ𐐀𐐀𐐀'`, **flags 258** (`0x102`), overlapped `finditer`, whose second match carries a
+**fourteen-entry** change list against counts of `(0,0,1)`; with no flags the same pattern gives
+`(1,2,0)` and is not the same row. Its twin is
+`(?b)(?r)(?p)(\w)(?:\s(?:([\p{L}\p{N}]{2,})){e<=2,s<=1}){1<=e<=2}` over `'A\rAßß aaa'`, **flags
+16642** (`0x4102`), overlapped, whose fifth match has counts `(1,0,1)` against an **empty** list. D
+is `(?e)([abz])[a\d]{0,}?(?<=(?:(\d?)[A-Z]😀){s<=1,i<=1,d<=1})\b` over `'😀\r\n😀AA'`, **flags 130**
+(`0x82`), `search`: counts `(1,0,0)` against a list holding one DELETION at 7. With no
+flags that row does not match at all. D was found by S47's own new wave property at seed 4242, on
+its first run, which is what that property is for. **Both engines agree on C and D**, so the oracle
+cannot see them; only the property can - and it cannot see C either, because a POSIX row has no
+positions to count on either side (entry 9), which is why C is written out here by hand.
+
+**Why C and D are not fixed here.** The fix for them is not local: it is to save and restore the
+change list wherever the counts are saved and restored - eight `PushFuzzyCounts` sites and eleven
+`PopFuzzyCounts` sites in `Matcher.cs`, each needing a judgement about whether the semantics are
+"restore" (truncate the list too) or "merge" (leave it alone, as `END_FUZZY`'s forward arm needs).
+That is a slice of its own. Until it lands, `Match.FuzzyCounts` is tallied from the change list ONLY
+on a partial match - where the counter provably is not the whole match's - and taken from the
+counter otherwise, which is what keeps C and D answering exactly what they answered before rather
+than turning an arbitrary answer into a plainly wrong one.
 
 **Reproduction**, `regex` 2026.7.19, measured 2026-09-13 and re-run unchanged on 2026.9.10
 (`python tools/probes/upstream-fuzzy-restart-leak.py`):
@@ -1141,30 +1177,55 @@ counts already assert - a fresh attempt has used no errors, so it can have no ch
 alternative, resetting `state->fuzzy_changes.count = 0` there, is the same edit in upstream's own
 idiom.
 
-**What this port answers, and why it is not fixed here yet.** The same, exactly - both rows are pinned
-by `FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`
-(S38). S40a made the one-line fix, measured it, and **reverted it**: clearing the list turns those two
-pinned rows red and makes this port diverge from upstream on rows it currently agrees on. Fixing an
-inherited bug is a decision about what the right answer is plus a permanent oracle divergence to
-carry, which is a slice of its own - the shape entry 7 already has.
+**What this port answers now (S47).** `(0, 0, 1)` with a **deletion at 3**, which is the edit script:
+the winning attempt at position 1 matched `'ab'` and deleted the `[wx]` it had run out of subject for.
+The proof that this is upstream's own answer with the leak taken away is upstream's own control -
+delete the verb, so the abandoned attempt unwinds the ordinary way, and upstream agrees:
 
-**A second symptom, and the reason this was found at all.** This port reaches the leak on shapes
+```
+'(?:[ab][bc](*PRUNE)[wx]){e<=2}'  'qab' -> (1, 3) (0, 0, 1) ([0], [], [])   # leaked
+'(?:[ab](*SKIP)[bc][wx]){e<=2}'   'qab' -> (1, 3) (0, 0, 1) ([0], [], [])   # leaked
+'(?:[ab][bc][wx]){e<=2}'          'qab' -> (1, 3) (0, 0, 1) ([], [], [3])   # no verb, and this is ours
+```
+
+S40a made the same one-line fix, measured it, and **reverted it**, because clearing the list alone
+reddened the two rows S38 had pinned. S47 fixed the two together - the pinned rows were pinning the
+contradiction, and the right move was to re-judge them rather than to keep them. Both are pinned by
+`FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`,
+now with that no-verb control beside them.
+
+**A second symptom, and the reason this was found at all.** This port reached the leak on shapes
 upstream's optimiser keeps it away from, because it has no start prefilter until Phase 7:
 
 ```python
 >>> regex.search(r'(?<=(?:[ab][cd]){e<=1})$', 'axc').fuzzy_changes
-([2], [], [])          # this port: ([], [], [1])
+([2], [], [])          # this port BEFORE S47: ([], [], [1]); after S47: ([2], [], []), so it AGREES
 ```
 
 `$` has a `search_start_*` twin, so upstream makes ONE attempt, at the end of the subject, and its
 first attempt is its winning one. This port attempts positions 0, 1, 2 and 3; the attempt at 1
-succeeds *inside the lookbehind*, records a deletion and then fails on the `$`. Replace the `$` with a
-literal and upstream walks every position too - and then the two engines agree again, because
-upstream's winning attempt is still its first. Found by S40's blind review, which read it as a port
-defect; it is the same defect as above, reached by a different door. Pinned by
-`FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one`.
+succeeded *inside the lookbehind*, recorded a deletion and then failed on the `$`. Found by S40's
+blind review, which read it as a port defect; it was the same defect as above, reached by a
+different door, **and fixing mechanism A removed this divergence rather than adding one**. Pinned by
+`FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one`.
 
-**Related:** entry 7, the other inherited bug on Phase 6's list.
+**What the fix costs the oracle, which is the open problem S47 leaves.** Once this port stops
+reproducing the leak, every wave row on which upstream leaks becomes a divergence. Measured on the
+default wave at 6000 rows and three seeds (2026-09-14): **39 rows where upstream's counts are the
+innermost section's and ours are the whole match's** (mechanism B, always a partial), and **19 rows
+where the counts agree and the change POSITIONS differ** (mechanism A). No narrow
+`ExpectedDivergences` predicate exists for the second group: upstream's leaked positions are
+structurally indistinguishable from a port that computed a position wrongly, and a predicate saying
+"same counts, different positions" would swallow exactly the defect the oracle is there to catch.
+**The design that does work, and is the next sitting's job, is a second recorded question**, the
+shape `bestmatchFreeOutcome` and `searchOnlyPartial` already have: ask upstream the same row again
+ANCHORED at the span it reported (`match(pos=start, endpos=end)`), where no earlier attempt exists to
+leak from, and record that fuzzy half. A divergence is then accounted for when this port's answer
+equals upstream's own leak-free answer - which is tight, and fails the moment the port is the one
+that is wrong.
+
+**Related:** entry 7, the other inherited bug on Phase 6's list, and entry 9, whose POSIX
+`fuzzy_changes` crash is mechanism C seen from the C side.
 
 ---
 

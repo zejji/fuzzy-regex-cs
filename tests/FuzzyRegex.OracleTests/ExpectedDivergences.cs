@@ -594,7 +594,11 @@ internal static class ExpectedDivergences
         "match 0:(0,4)[(0,4)] 1:unset 2:(0,1)[(0,1)] last=2/g2 partial",
         "match 0:(0,9)[(0,9)] 1:unset 2:(0,4)[(0,4)] last=2/- partial fuzzy=(1,1,1)[s:6][i:5][d:4]",
         "match 0:(0,1)[(0,1)] 1:unset 2:unset last=-1/- partial",
-        "match 0:(5,1)[(5,1)] last=-1/- partial fuzzy=(1,0,0)[s:0][i:][d:]",
+        // The substitution position moved from 0 to 5 in S47, and the strictness alarm is what
+        // caught it. `start_match` now clears the change list beside the counts (ledger entry 11,
+        // mechanism A), so this row no longer reports the leftover of an attempt at position 0 that
+        // a `(*SKIP)` abandoned; 5 is inside the (5, 1) span this row matches and 0 was not.
+        "match 0:(5,1)[(5,1)] last=-1/- partial fuzzy=(1,0,0)[s:5][i:][d:]",
         "match 0:(8,0)[(8,0)] 1:unset 2:unset last=-1/- partial",
     ];
 

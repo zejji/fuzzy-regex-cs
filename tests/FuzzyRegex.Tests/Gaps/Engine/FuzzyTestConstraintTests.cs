@@ -205,31 +205,28 @@ public sealed class FuzzyTestConstraintTests
         // the substitution the match still succeeds by deleting instead, which is what makes the
         // counts rather than the success the measurement here.
         //
-        // ASSERT ONLY `FuzzyCounts` HERE, and that is a deliberate limit rather than an oversight.
-        // A fuzzy section inside a lookbehind reports change POSITIONS that contradict its own
-        // counts: `(?<=(?:[ab][cd]){e<=1})$` against 'axc' is `counts=(1, 0, 0) changes=([2], [], [])`
-        // upstream and `(1, 0, 0)` with a *deletion* at 1 here. That bug predates the `{...:test}`
-        // constraint - plain `(?r)(?:[ab][cd]){e<=1}` against 'axc' reports `[2]` correctly, and the
-        // patterns here have no test node at all.
+        // S40a ASKED FOR THE POSITIONS TO BE ASSERTED AND S47 IS WHERE THEY COULD BE. Until then a
+        // fuzzy section inside a lookbehind reported change POSITIONS that contradicted its own
+        // counts here - `(?<=(?:[ab][cd]){e<=1:x})$` against 'axc' answered `(1, 0, 0)` with a
+        // *deletion* at 1 where upstream answers a substitution at 2 - because a failed search
+        // attempt at an earlier position left its change on the list for the winning one to report.
+        // That is ledger entry 11, mechanism A, fixed in S47 by clearing the change list on a search
+        // restart; the first pair below now asserts the position upstream gives.
         //
-        // S40a ASKED FOR THESE ASSERTIONS TO BE STRENGTHENED AND THEY ARE STILL NOT, because what it
-        // found was not a port bug to fix. Upstream contradicts its own counts the same way -
-        // `search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab')` is `counts=(0,0,1)` with a
-        // SUBSTITUTION at 0 - and this port reproduces that faithfully; what differs on the rows
-        // above is only how many search attempts each engine makes, because `$` lets upstream's
-        // prefilter make one and this port has none until Phase 7. It is ledger entry 11, an
-        // inherited bug on Phase 6's sweep list, pinned meanwhile by
-        // `FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one`.
-        // Strengthen these when Phase 6 fixes the inherited bug - not before, and not by changing
-        // the engine here, which S40a measured and reverted.
+        // THE REST STAY COUNTS-ONLY, and that is the test's own scope rather than a leftover: what
+        // is under test is whether each `_REV` arm reads the character BEFORE the position, and the
+        // counts are what discriminate a constraint that refused a substitution from one that
+        // permitted it. Every row's upstream positions are recorded in the comment beside it.
 
         // char-rev-ok: counts=(1, 0, 0) changes=([2], [], [])
         // char-rev-no: counts=(0, 0, 1) changes=([], [], [2])
-        new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$")
-            .Match("axc")
-            .FuzzyCounts.Should()
-            .Be(new FuzzyCounts(1, 0, 0));
-        new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$").Match("azc").FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        Match charRevOk = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$").Match("axc");
+        charRevOk.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        charRevOk.FuzzyChanges.Substitutions.Should().Equal(2);
+
+        Match charRevNo = new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:x})$").Match("azc");
+        charRevNo.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        charRevNo.FuzzyChanges.Deletions.Should().Equal(2);
 
         // range-rev-ok / range-rev-no
         new FuzzyRegex("(?<=(?:[ab][cd]){e<=1:[0-9]})$")

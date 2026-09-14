@@ -4599,32 +4599,36 @@ internal static class Matcher
         // NOT PORTED: the pattern-call guard list clear (:11797-11803), which S30 settled as
         // write-only upstream - see docs/PORTMAP.md's "deliberately not ported" table.
         //
-        // THE CHANGE LIST IS DELIBERATELY *NOT* CLEARED HERE, and S40a tried it and reverted it, so
-        // read this before trying again. Upstream clears the counts and leaves the list, and the two
-        // therefore drift apart on a restart - `Match.FuzzyChanges` reports the first
+        // THE CHANGE LIST IS CLEARED HERE AND UPSTREAM'S IS NOT - a deliberate divergence, S47,
+        // ledger entry 11 mechanism A. Upstream clears the counts and leaves the list, and the two
+        // therefore drift apart on a restart: `Match.FuzzyChanges` reports the first
         // `FuzzyCounts.Total` entries, which is upstream's own `for (i = 0; i < count; i++)`
-        // (:20522), so a change left over from an abandoned attempt DISPLACES a real one. Upstream's
-        // own answers contradict its own counts because of it (.scratch is gone, but
-        // tools/probes/upstream-fuzzy-restart-leak.py re-runs it):
+        // (:20522), so a change left over from an abandoned attempt DISPLACES a real one and
+        // upstream's own answer contradicts its own counts (re-run with
+        // `python tools/probes/upstream-fuzzy-restart-leak.py`):
         //
         //   search(r'(?:[ab][bc](*PRUNE)[wx]){e<=2}', 'qab') -> counts=(0,0,1) changes=([0],[],[])
+        //   search(r'(?:[ab][bc][wx]){e<=2}',         'qab') -> counts=(0,0,1) changes=([],[],[3])
         //
-        // One deletion counted, a SUBSTITUTION reported. That is upstream's answer and this port's,
-        // and `A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one`
-        // pins both rows - so clearing the list here turns that test red and makes the port diverge
-        // on rows it currently agrees on. It is an INHERITED defect, ledger entry 11, and Phase 6's
-        // sweep owns it because fixing it means deciding what the right answer is and accepting a
-        // permanent oracle divergence.
+        // One deletion counted, a SUBSTITUTION reported - and the second line is upstream's own
+        // control, the same section with no verb to cut the backtracking, which answers the
+        // deletion at 3 that this port now answers on all three. A cleared count already asserts
+        // that a fresh attempt has used no errors, so it can have no changes either; that is the
+        // whole argument for this line. Pinned by
+        // FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_abandoned_attempt_s_errors_into_the_next_one,
+        // which carries the control.
         //
-        // What made it look like a port bug (S40's blind review) is that this port reaches the leak
-        // on shapes upstream does not: `(?<=(?:[ab][cd]){e<=1})$` over 'axc' makes ONE attempt
-        // upstream, because `$` has a `search_start_*` twin, and FOUR here, because the prefilter is
-        // Phase 7's. Pinned by
-        // FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_carries_its_change_into_the_next_one
-        // and classified in the oracle as `fuzzy-restart-change-leak`.
+        // S40a MADE THIS EDIT AND REVERTED IT, because on its own it reddens the two rows S38 had
+        // pinned - those rows pinned the contradiction, and re-judging them is what S47 did.
+        //
+        // It also REMOVES a divergence: `(?<=(?:[ab][cd]){e<=1})$` over 'axc' makes ONE attempt
+        // upstream, because `$` has a `search_start_*` twin, and FOUR here, because the prefilter
+        // is Phase 7's - so this port leaked where upstream did not and now agrees with it. Pinned
+        // by FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one.
         if (state.IsFuzzy)
         {
             Array.Clear(state.FuzzyCounts);
+            state.FuzzyChanges.Clear();
         }
 
         // Locate the required string, if there's one: deferred to Phase 7, so the start position

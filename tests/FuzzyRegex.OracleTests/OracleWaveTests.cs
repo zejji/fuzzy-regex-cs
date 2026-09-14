@@ -68,6 +68,82 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void Our_own_change_positions_always_agree_with_our_own_counts()
+    {
+        // S47, ledger entry 11. A property of THIS PORT'S answers alone - upstream is not consulted
+        // - so it says something about every row it reaches whatever upstream says, where the wave
+        // run above can only compare. `fuzzy_counts` and `fuzzy_changes` are two views of one edit
+        // script, so each list holds exactly as many positions as its own count; upstream breaks
+        // that on four mechanisms and this port reproduced all four. The minimised rows for the two
+        // S47 fixed are pinned by
+        // `The_reported_changes_agree_with_the_counts_on_every_shape_that_used_to_contradict_them`
+        // in `Gaps.Engine.FuzzyMatchingTests`, and this is the same property over a whole wave,
+        // which is what catches a shape nobody minimised - it found mechanism D at seed 4242 on its
+        // first run.
+        //
+        // EVERY MATCH OF A SCAN IS CHECKED TOO, not just the single-match rows: `finditer` and
+        // `finditer-overlapped` are about a fifth of a default wave and the leak mechanisms show up
+        // between the matches of one scan, which a single-match-only sweep would never see.
+        //
+        // WHAT IT CANNOT REACH IS A POSIX PATTERN, and that is a limit of the comparison shape
+        // rather than a choice. Upstream cannot be asked for the change positions of a POSIX fuzzy
+        // match at all - reading them kills the interpreter, ledger entry 9 - so
+        // `OracleComparer.Run` drops this port's positions as well, and there is nothing here left
+        // to count. Ledger entry 11 mechanism C lives exactly there, which is why that entry
+        // carries its reproduction by hand instead of relying on this.
+        OracleWaveFile wave = OracleWave.Load();
+        wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
+
+        List<string> contradictions = [];
+        int checkedMatches = 0;
+
+        foreach (OracleRow row in wave.Rows)
+        {
+            // Asked of nothing, exactly as `RunWave` skips them (OracleComparer:70-83): upstream
+            // ran out of time or of heap, so putting the row to this engine costs a whole
+            // `RowTimeout` each and a `MemoryError` row is one nothing here bounds. Six such rows
+            // in a 12,000-row wave cost this test 28.7 of its 29.0 seconds before this guard, and
+            // none of them can contribute a fuzzy match to count.
+            if (row.Expected is TimeoutOutcome or ResourceOutcome)
+            {
+                continue;
+            }
+
+            IOracleOutcome? ours = OracleComparer.Run(row);
+            IEnumerable<MatchOutcome> matches = ours switch
+            {
+                MatchOutcome single => [single],
+                MatchesOutcome scan => scan.Matches,
+                _ => [],
+            };
+
+            foreach (MatchOutcome match in matches)
+            {
+                if (match.Fuzzy is not { PositionsUnavailable: false } fuzzy)
+                {
+                    continue;
+                }
+
+                ++checkedMatches;
+
+                if (
+                    fuzzy.Substitutions != fuzzy.SubstitutionPositions!.Count
+                    || fuzzy.Insertions != fuzzy.InsertionPositions!.Count
+                    || fuzzy.Deletions != fuzzy.DeletionPositions!.Count
+                )
+                {
+                    contradictions.Add(OracleWave.Describe(row, ours));
+                }
+            }
+        }
+
+        // Without this the test would pass on a wave with no fuzzy row in it at all, which is what
+        // every wave recorded before S38 was - and what a `-Generator rows` run still is.
+        checkedMatches.Should().BeGreaterThan(0, "a wave with no fuzzy match in it discriminates nothing");
+        contradictions.Should().BeEmpty();
+    }
+
+    [Test]
     public void Every_expected_divergence_still_diverges()
     {
         // The staleness alarm for ExpectedDivergences, and the only strict thing about that list: a

@@ -2,38 +2,43 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S46 IS DONE** (sitting 2, 2026-09-14) and its file is in `slices/done/`. The POSIX-with-fuzzy
-exclusion is LIFTED: `_describe_match` records `fuzzyCounts` and omits `fuzzyChanges` on a POSIX
-pattern, and both sides render that row as `fuzzy=(s,i,d)[changes unavailable upstream]`. One guard,
-because all four recorder doors funnel through that function. Ratchet GREEN at 5,947 tests.
+**S47 IS A CHECKPOINT** (sitting 1, 2026-09-14) and its file is still in `slices/`. Ledger entry 11's
+invariant is decided and pinned; two of its four mechanisms are fixed. Entry 14 is UNTOUCHED.
+Ratchet GREEN at 5,948.
 
-**NEW KNOWN BUG IN THIS PORT, found by lifting it, minimised, NOT fixed - the next engine slice's
-work.** `regex.compile(r'(?e)(?r)(?:\w.){1<=e<=2:\w}(?:[^a-f]a\w){s<=1,i<=1,d<=1}', regex.POSIX)
-.fullmatch('+ aBA')`: upstream counts `(0,1,1)`, this port `(1,1,1)` for the same span. Drop POSIX
-and this port answers `(0,1,1)` too, so POSIX is losing an error count. Needs POSIX AND `(?e)`.
-Hypothesis, unproven: `RestoreBestMatch` restores `FuzzyCounts`/`FuzzyChanges` but not
-`state.TotalErrors` or `state.TotalCost`, which this port's ranking reads. No `ExpectedDivergences`
-entry - this port is wrong, so it stays RED. It is `interactions` seed 31337 row 3343.
+**Entry 11 turned out to be one defect class with FOUR mechanisms, not one bug with two doors.**
+Upstream saves the fuzzy COUNTS as a block and unwinds the CHANGES item by item, so anything that
+abandons a sub-attempt without backtracking through it desynchronises them. **A** (search restart)
+and **B** (a partial match returning from inside a nested section) are FIXED: `start_match` clears
+the change list, and `Match.FuzzyCounts` is tallied from the changes on a partial match only.
+**C** (POSIX/BESTMATCH candidates) and **D** (a lookaround under `(?e)`) are NOT - the fix is to pair
+the list with the counts at all 19 `PushFuzzyCounts`/`PopFuzzyCounts` sites, each needing a
+"restore or merge" judgement. Reproductions with flags are in LEDGER entry 11.
 
-**THE DEFAULT WAVE IS RED AT HEAD AND WAS BEFORE S46 - 14 untriaged rows, re-measured this sitting
-and unmoved.** 6000 rows, three seeds: 3 + 2 + 9. Seed 7: 74944, 85165, 100366. Seed 4242: 76664,
-89364. Seed 20260914: 73704, 73996, 77515, 84933, 97786, 99121, 101977, 104530, 106411. (Sitting 1
-said 15; that counted a HEAD row S46 itself retired.) **This is the S40a pattern and wants its own
-slice**, now with the row 3343 bug beside it.
+**SITTING 2 STARTS WITH THE ORACLE, NOT WITH ENTRY 14.** The fix makes the default wave diverge on
+39 rows (B) + 19 rows (A) per 18,000. No narrow predicate exists for the 19 - upstream's leaked
+positions look exactly like a port position bug. The design: **a second recorded question**, upstream
+asked the same row ANCHORED at the span it reported (`match(pos=start, endpos=end)`), where nothing
+can leak; account for a divergence when this port equals that leak-free answer. Recorder field +
+`OracleWave` + one `ExpectedDivergences` entry. Then entry 14, then S48.
 
-**Next: S47.** **S49** still needs a `gh` tracker snapshot.
+**Two oracle tests are RED on purpose and both must stay red until the work above lands:**
+`The_wave_agrees_with_upstream` (the family above, plus HEAD's own 15) and the NEW
+`Our_own_change_positions_always_agree_with_our_own_counts`, which is red at seed 4242 on mechanism
+D. That property checks THIS PORT ALONE over every match of every wave row, which is the only
+instrument that can see C or D - both engines agree on them.
 
-**Blockers:** none. **Known bugs in this port:** ledger 11, 14 (S47); 5's remaining door (S48); the
-issue sweep (S49, S50); the POSIX `(?e)` count above. Ledger entries 7, 12 and 9's port half are
-CLOSED; 13's port half was never open.
+**THE DEFAULT WAVE WAS ALREADY RED AT HEAD, 15 untriaged rows**, unchanged by S47 and still wanting
+their own slice: seed 7 74944, 85165, 100366; 4242 76664, 76681, 89364; 20260914 73704, 73996,
+77515, 84933, 97786, 99121, 101977, 104530, 106411. Plus the POSIX `(?e)` count bug S46 found
+(`interactions` seed 31337 row 3343).
 
-**NEVER RUN CONTROL S46-B AGAINST THE SUITE.** Its mutant hangs `dotnet run --project
-tests/FuzzyRegex.Tests` past 600s at 19 GB, and the hung host then blocks every later Debug build.
-Use `-Configuration Release`. Against the WAVE it is safe.
+**Blockers:** none. **Known bugs:** ledger 11's C and D, 14 (S47 sitting 2); 5's remaining door
+(S48); the issue sweep (S49, S50); the POSIX `(?e)` count above.
 
-**Delete `.scratch/control-waves/<generator>-*` for any generator whose code a slice changed before
-running its controls** - `run-controls.py` reuses a wave on disk, and a stale one made S46-D read as
-a weak control at two seeds of three until the files were deleted.
+**NEVER RUN CONTROL S46-B AGAINST THE SUITE** - its mutant hangs `dotnet run` past 600s at 19 GB.
+Use `-Configuration Release`. **Delete `.scratch/control-waves/<generator>-*` for any generator whose
+code a slice changed before running its controls.**
 
 **Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate).
 Ledger: `docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed.
@@ -41,9 +46,8 @@ Ledger: `docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed.
 **Owed maintenance, five items.** (1) `FOLD_TURKIC`'s share of the `case-folding` rotation is too
 small. (2) `turkic-default-folding`'s predicate has one false positive no predicate can close.
 (3) Five broken control sites. (4) PORTMAP's `_regex.c` line references are stale after the sync and
-need an owner decision first. (5) `python tools/record-oracle.py --self-check` exits 1 on "an
-interpreter limit rather than a judgement about the pattern: was recorded as if it were upstream's
-answer"; it predates S46.
+need an owner decision first. (5) `python tools/record-oracle.py --self-check` exits 1 on a
+pre-S46 message.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
 `origin/main` needs a push (nothing since Phase 4's close).
