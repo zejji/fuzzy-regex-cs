@@ -2,39 +2,34 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S47 IS A CHECKPOINT** (sitting 1, 2026-09-14) and its file is still in `slices/`. Ledger entry 11's
-invariant is decided and pinned; two of its four mechanisms are fixed. Entry 14 is UNTOUCHED.
-Ratchet GREEN at 5,948.
+**S47 IS A CHECKPOINT** (sitting 2, 2026-09-14) and its file is still in `slices/`. **This is its
+second checkpoint, so sitting 3 must CLOSE it** - three stop the driver. Ratchet GREEN at 5,948.
 
-**Entry 11 turned out to be one defect class with FOUR mechanisms, not one bug with two doors.**
-Upstream saves the fuzzy COUNTS as a block and unwinds the CHANGES item by item, so anything that
-abandons a sub-attempt without backtracking through it desynchronises them. **A** (search restart)
-and **B** (a partial match returning from inside a nested section) are FIXED: `start_match` clears
-the change list, and `Match.FuzzyCounts` is tallied from the changes on a partial match only.
-**C** (POSIX/BESTMATCH candidates) and **D** (a lookaround under `(?e)`) are NOT - the fix is to pair
-the list with the counts at all 19 `PushFuzzyCounts`/`PopFuzzyCounts` sites, each needing a
-"restore or merge" judgement. Reproductions with flags are in LEDGER entry 11.
+**Sitting 2 closed the oracle problem sitting 1 left.** Entry 11's mechanisms A and B are now
+accounted for: B by a predicate over upstream's own answer (its counts are componentwise no larger
+and its positions are a per-kind PREFIX of ours - a truncated change stack), A by a new recorded
+second question, `leakFreeFuzzy`, upstream asked the row again at `match(pos=start, endpos=end)`.
+**Default wave GREEN at three seeds**; the 6000-row three-seed gate went 24/23/25 diverging to
+3/2/9, and those 14 are exactly HEAD's own untriaged rows.
 
-**SITTING 2 STARTS WITH THE ORACLE, NOT WITH ENTRY 14.** The fix makes the default wave diverge on
-39 rows (B) + 19 rows (A) per 18,000. No narrow predicate exists for the 19 - upstream's leaked
-positions look exactly like a port position bug. The design: **a second recorded question**, upstream
-asked the same row ANCHORED at the span it reported (`match(pos=start, endpos=end)`), where nothing
-can leak; account for a divergence when this port equals that leak-free answer. Recorder field +
-`OracleWave` + one `ExpectedDivergences` entry. Then entry 14, then S48.
+**SITTING 3 IS ENTRY 14 AND NOTHING ELSE.** The port already bounds the blowup
+(`InvalidOperationException: ... backtracking stack exceeded its 1GB limit`, 0.25-1.52s) and its
+three tests now name that exception instead of accepting any. What is LEFT is the correctness fix
+PCRE2 named: a match-time guard on re-entering a recursion at a subject position it is already at
+(`PCRE2_ERROR_RECURSELOOP`, measured by `tools/probes/pcre2-bounds-an-unbounded-recursion.py`).
+**It is not a transcription** - PCRE2's guard is positional, not a progress proof, so a shape
+re-entering one position where a different branch would still have succeeded changes answer, and
+that must be measured against a wave. Then lift `INTERACTION_FUZZY_WRAPPERS`' exclusion of a
+self-recursive call round a fuzzy section, re-run the wave, close the slice.
 
-**Two oracle tests are RED on purpose and both must stay red until the work above lands:**
-`The_wave_agrees_with_upstream` (the family above, plus HEAD's own 15) and the NEW
-`Our_own_change_positions_always_agree_with_our_own_counts`, which is red at seed 4242 on mechanism
-D. That property checks THIS PORT ALONE over every match of every wave row, which is the only
-instrument that can see C or D - both engines agree on them.
+**THE 14 UNTRIAGED GATE ROWS ARE STILL UNTRIAGED and still want their own slice** (they predate
+S47): seed 7 74944, 85165, 100366; 4242 76664, 89364; 20260914 73704, 73996, 77515, 84933, 97786,
+99121, 101977, 104530, 106411. Plus the POSIX `(?e)` count bug S46 found (`interactions` seed 31337
+row 3343). `Our_own_change_positions_always_agree_with_our_own_counts` is RED at seed 4242 at 6000
+rows on mechanism D, on purpose, until C and D are fixed - that is S48's neighbour, not this slice.
 
-**THE DEFAULT WAVE WAS ALREADY RED AT HEAD, 15 untriaged rows**, unchanged by S47 and still wanting
-their own slice: seed 7 74944, 85165, 100366; 4242 76664, 76681, 89364; 20260914 73704, 73996,
-77515, 84933, 97786, 99121, 101977, 104530, 106411. Plus the POSIX `(?e)` count bug S46 found
-(`interactions` seed 31337 row 3343).
-
-**Blockers:** none. **Known bugs:** ledger 11's C and D, 14 (S47 sitting 2); 5's remaining door
-(S48); the issue sweep (S49, S50); the POSIX `(?e)` count above.
+**Blockers:** none. **Known bugs:** ledger 11's C and D; 5's remaining door (S48); the issue sweep
+(S49, S50); the POSIX `(?e)` count above.
 
 **NEVER RUN CONTROL S46-B AGAINST THE SUITE** - its mutant hangs `dotnet run` past 600s at 19 GB.
 Use `-Configuration Release`. **Delete `.scratch/control-waves/<generator>-*` for any generator whose

@@ -196,9 +196,27 @@ internal static class OracleWave
             ReadMatchList(row, "subMatches"),
             row.TryGetProperty("bestmatchFreeOutcome", out JsonElement bestmatchFree)
                 ? ReadOutcome(bestmatchFree)
-                : null
+                : null,
+            ReadLeakFreeFuzzy(row)
         );
     }
+
+    /// <summary>
+    /// The recorder's <c>leakFreeFuzzy</c>: upstream's own fuzzy half per recorded match, asked
+    /// again anchored at the span it reported, or <see langword="null"/> where the row carries none.
+    /// </summary>
+    /// <param name="row">The row.</param>
+    /// <returns>One entry per recorded match - itself <see langword="null"/> where upstream would
+    /// not answer - or <see langword="null"/> where the question was never asked.</returns>
+    private static IReadOnlyList<OracleFuzzy?>? ReadLeakFreeFuzzy(JsonElement row) =>
+        row.TryGetProperty("leakFreeFuzzy", out JsonElement asked) && asked.ValueKind == JsonValueKind.Array
+            ?
+            [
+                .. asked
+                    .EnumerateArray()
+                    .Select(static answer => answer.ValueKind == JsonValueKind.Null ? null : ReadFuzzy(answer)),
+            ]
+            : null;
 
     /// <summary>
     /// One of the recorder's second-fact match lists - <c>anchoredScan</c> or <c>subMatches</c> - or
@@ -580,6 +598,17 @@ internal sealed record OracleHeader(
 /// family from a defect. <see langword="null"/> on every other row and on any wave recorded before
 /// S46. Never compared; only <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="LeakFreeFuzzy">
+/// A fourth, and the same kind of thing again (S47, ledger entry 11 mechanism A). One entry per
+/// recorded match, in the recorded order: upstream's own fuzzy half for that match, asked again as
+/// <c>match(pos=start, endpos=end)</c> so that the winning attempt is upstream's FIRST attempt and no
+/// earlier one can have left anything on its change stack. An entry is <see langword="null"/> where
+/// upstream would not answer that question - a fuzzy section inside a lookahead has to read past
+/// <c>endpos</c>, a <c>\K</c> reports a start the attempt did not begin at, and a scan's second match
+/// at one position cannot be reached at all - and the whole list is <see langword="null"/> where no
+/// recorded match had a fuzzy half to ask about, which is every non-fuzzy row and every wave recorded
+/// before S47. Never compared; only <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -598,7 +627,8 @@ internal sealed record OracleRow(
     bool SearchOnlyPartial = false,
     MatchesOutcome? AnchoredScan = null,
     MatchesOutcome? SubMatches = null,
-    IOracleOutcome? BestmatchFree = null
+    IOracleOutcome? BestmatchFree = null,
+    IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -837,6 +867,19 @@ internal sealed record OracleFuzzy(
     /// answers correctly (ledger entry 9). All three lists are null together or none of them is.
     /// </summary>
     internal bool PositionsUnavailable => SubstitutionPositions is null;
+
+    /// <summary>
+    /// The S47 invariant: each change list holds exactly as many positions as its own count, because
+    /// the counts and the positions are two views of one edit script. Vacuously true where there are
+    /// no positions to count - see <see cref="PositionsUnavailable"/>.
+    /// </summary>
+    internal bool CountsAgreeWithPositions =>
+        PositionsUnavailable
+        || (
+            Substitutions == SubstitutionPositions!.Count
+            && Insertions == InsertionPositions!.Count
+            && Deletions == DeletionPositions!.Count
+        );
 
     /// <summary>Drops the change positions, leaving the counts, for comparison against a row upstream could not answer.</summary>
     /// <returns>The same counts with no positions.</returns>

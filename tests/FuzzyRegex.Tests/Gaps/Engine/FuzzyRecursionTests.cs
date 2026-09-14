@@ -101,6 +101,13 @@ public sealed class FuzzyRecursionTests
         // This port inherits the non-termination and bounds it. What is asserted is the BOUND, not
         // a match: that the engine gives up with an exception naming its own limit, rather than
         // taking the machine down or running past the deadline.
+        //
+        // THE EXCEPTION IS NAMED, AND THAT IS THE POINT OF THE ASSERTION (S47, sitting 2). It used
+        // to be `Throw<Exception>` with a non-empty message, which a `RegexMatchTimeoutException`
+        // from the 30-second budget above satisfies just as well - so the test could not tell the
+        // stack limit from the clock, and a regression that made the engine merely SLOW would have
+        // passed it. Measured 2026-09-14: all four raise `InvalidOperationException` carrying
+        // ByteStack's own message, in 0.63s to 1.52s against a 30-second deadline.
         foreach (string constraint in new[] { "{e<=2}", "{1<=e<=2}", "{2i+1d+1s<=2}", "{d<=2}" })
         {
             Action search = () =>
@@ -108,9 +115,10 @@ public sealed class FuzzyRecursionTests
 
             search
                 .Should()
-                .Throw<Exception>($"'(?:Ab){constraint}' can match the empty string, so the recursion never progresses")
-                .Which.Message.Should()
-                .NotBeEmpty();
+                .Throw<InvalidOperationException>(
+                    $"'(?:Ab){constraint}' can match the empty string, so the recursion never progresses"
+                )
+                .WithMessage("*backtracking stack exceeded its 1GB limit*");
         }
     }
 
@@ -131,7 +139,12 @@ public sealed class FuzzyRecursionTests
         Action blows = static () =>
             new FuzzyRegex("(?P<g1>(?:Abc){e<=3}(?&g1)?)", FuzzyRegexOptions.None, _budget).Match("AbcAbc");
 
-        blows.Should().Throw<Exception>("three deletions empty a three-atom section");
+        // The named exception, for the reason the test above states: a bare `Throw<Exception>` also
+        // passes on the deadline, so it cannot tell the bound from the clock. 1.10s of 30, 2026-09-14.
+        blows
+            .Should()
+            .Throw<InvalidOperationException>("three deletions empty a three-atom section")
+            .WithMessage("*backtracking stack exceeded its 1GB limit*");
     }
 
     [Test]
@@ -158,7 +171,12 @@ public sealed class FuzzyRecursionTests
         {
             Action search = () => new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
 
-            search.Should().Throw<Exception>($"'{pattern}' recurses without consuming");
+            // Named, for the reason the two tests above state. Measured 2026-09-14: 0.25s to 0.81s
+            // against a 30-second deadline, so it is the stack limit that fires and not the clock.
+            search
+                .Should()
+                .Throw<InvalidOperationException>($"'{pattern}' recurses without consuming")
+                .WithMessage("*backtracking stack exceeded its 1GB limit*");
         }
     }
 

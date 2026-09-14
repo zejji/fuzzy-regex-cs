@@ -1209,20 +1209,43 @@ blind review, which read it as a port defect; it was the same defect as above, r
 different door, **and fixing mechanism A removed this divergence rather than adding one**. Pinned by
 `FuzzyMatchingTests.A_search_attempt_that_fails_after_a_lookaround_leaves_nothing_behind_for_the_next_one`.
 
-**What the fix costs the oracle, which is the open problem S47 leaves.** Once this port stops
-reproducing the leak, every wave row on which upstream leaks becomes a divergence. Measured on the
-default wave at 6000 rows and three seeds (2026-09-14): **39 rows where upstream's counts are the
-innermost section's and ours are the whole match's** (mechanism B, always a partial), and **19 rows
-where the counts agree and the change POSITIONS differ** (mechanism A). No narrow
-`ExpectedDivergences` predicate exists for the second group: upstream's leaked positions are
-structurally indistinguishable from a port that computed a position wrongly, and a predicate saying
-"same counts, different positions" would swallow exactly the defect the oracle is there to catch.
-**The design that does work, and is the next sitting's job, is a second recorded question**, the
-shape `bestmatchFreeOutcome` and `searchOnlyPartial` already have: ask upstream the same row again
-ANCHORED at the span it reported (`match(pos=start, endpos=end)`), where no earlier attempt exists to
-leak from, and record that fuzzy half. A divergence is then accounted for when this port's answer
-equals upstream's own leak-free answer - which is tight, and fails the moment the port is the one
-that is wrong.
+**What the fix cost the oracle, and how S47's second sitting paid it (2026-09-14).** Once this port
+stopped reproducing the leak, every wave row on which upstream leaks became a divergence. Measured on
+the default wave at 6000 rows and three seeds: **39 rows where upstream's counts are the innermost
+section's and ours are the whole match's** (mechanism B, always a partial - 35 carrying positions and
+4 POSIX), and **19 rows where the counts agree and the change POSITIONS differ** (mechanism A). The
+two are accounted for separately, because only one of them needed a new question put to upstream.
+
+**Mechanism B needed no second question, because upstream's own answer is the evidence.** Its counts
+are componentwise no larger than this port's and its reported positions are a PREFIX of this port's,
+per kind and in record order - which is what a change stack truncated to a wrong total looks like,
+and is not what an engine computing different positions looks like. Measured across all 35 rows that
+carry positions: the prefix relation holds on every one, with none failing. Entry
+`fuzzy-counts-of-a-partial-are-the-innermost-sections`. Where it is wide is written into the entry:
+on 18 of the 35 upstream reports no errors at all, so the prefix it must be is the empty one.
+
+**Mechanism A did.** No predicate over the two answers is narrow enough - upstream's leaked positions
+are structurally indistinguishable from a port that computed a position wrongly, and "same counts,
+different positions" would swallow exactly the defect the oracle is there to catch. The recorder now
+asks upstream the same row again ANCHORED at the span it reported (`match(pos=start, endpos=end)`),
+where the winning attempt is upstream's FIRST attempt and no earlier one exists to leak from, and
+records that fuzzy half per match as `leakFreeFuzzy` (`_leak_free_fuzzy` in `tools/record-oracle.py`,
+the shape `bestmatchFreeOutcome` and `searchOnlyPartial` already have). **On all 15 diverging matches
+upstream would answer, its leak-free answer is this port's answer exactly** - counts, kinds and
+positions, with no exception. Entry `fuzzy-changes-leaked-from-an-abandoned-attempt`.
+
+**The anchored question cannot always be asked, and that is the weak half of the entry.** Eight of
+the 23 diverging matches, in four rows, are shapes where anchoring destroys the question: a fuzzy
+section inside a LOOKAHEAD, which has to read past `endpos`; a `\K`, whose reported start is not
+where the attempt began; and a scan's second match at a position an earlier match already used. On
+those the entry accepts this port's positions with nothing to hold them to. It fires about 1.3 times
+per 126,000-row seed, and what covers it instead is
+`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` and the minimised rows in
+`FuzzyMatchingTests`.
+
+**The result.** The default wave is GREEN at three seeds, and the 6000-row three-seed gate went from
+24 / 23 / 25 diverging rows to 3 / 2 / 9 - the 14 that remain being exactly the untriaged rows that
+were already red at HEAD before S47 touched anything, and none of them a fuzzy-reporting divergence.
 
 **Related:** entry 7, the other inherited bug on Phase 6's list, and entry 9, whose POSIX
 `fuzzy_changes` crash is mechanism C seen from the C side.
@@ -1469,6 +1492,11 @@ S46 fixed it, where it never reproduced this one; entries 1 and 5 for `(*SKIP)`.
 
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+**CHARACTERISED AND ITS FIX NAMED BY S47 (2026-09-14); THE FIX IS NOT MADE HERE YET.** The
+characterisation the slice asked for is settled - it is BOTH unbounded depth and unbounded branching,
+and a progress guard bounds only the first - and the second engine has been run. What is left is
+porting PCRE2's positional guard, measuring it against a wave, and only then lifting the generator
+exclusion. See "Proposed fix" and "What this port does" below.
 
 **Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
 
@@ -1514,16 +1542,42 @@ established - no mechanism was measured.
 resource-blowup family (issues 551 and 554) reached by a new shape. A report should carry the table,
 which is the part that is new.
 
-**Proposed fix.** Unknown. The general answer is a progress check on a group call the way the repeat
-opcodes already guard a zero-width body, but whether that is where upstream would want it is not
-this project's call to make.
+**Proposed fix, and it is now a NAMED one - PCRE2 has the guard already (S47, 2026-09-14).** Design
+spec amendment 16 asks for a real run of a second engine rather than an argument, and PCRE2 cannot be
+shown the pattern itself, because it has no fuzzy matching at all and reads `{e<=2}` as literal text
+(measured for entry 12). It CAN be shown the same mechanism with the fuzzy section replaced by an
+ordinary optional atom - a group that calls itself with a body that need not consume anything - and
+`python tools/probes/pcre2-bounds-an-unbounded-recursion.py`, pcre2 0.7.1 over libpcre2 10.47,
+2026-09-14:
 
-**What this port does.** Reproduces it, safely. `InvalidOperationException: the regular expression
-engine's backtracking stack exceeded its 1GB limit`, in 0.24s to 0.92s on the `(?R)` shapes -
-the same non-termination, bounded, rather than an allocator that keeps asking. That is the right
-outcome for a faithful port of a resource bug, and it is pinned by
-`Gaps/Engine/FuzzyRecursionTests.cs`, six tests, including the controls that show which budgets
-terminate.
+```
+'(?P<g1>(?:a?)(?&g1)?)'    -> LibraryError: nested recursion at the same subject position
+'(?P<g1>(?:a*)(?&g1)?)'    -> LibraryError: nested recursion at the same subject position
+'(?P<g1>(?:ab)?(?&g1)?)'   -> LibraryError: nested recursion at the same subject position
+'(?:(?R))'                 -> LibraryError: nested recursion at the same subject position
+'(?:a(?R)?b)'              -> (0, 4)          # the progressing recursion, which everyone answers
+```
+
+So the mature answer is neither an allocator that keeps asking nor a generic memory bound: it is a
+**specific match-time guard** - `PCRE2_ERROR_RECURSELOOP` - that detects re-entering a recursion at a
+subject position it is already at, which is precisely the condition under which no progress is
+possible. It costs microseconds and it names the fault, where a memory bound costs a second and a
+gigabyte and names only itself. Note that PCRE2's guard is *positional* rather than a progress proof,
+so porting it is not a transcription: a shape where the same position is re-entered and a DIFFERENT
+branch would still have succeeded would change answer, and that has to be measured against a wave
+before the guard lands.
+
+**What this port does, and the decision S47 recorded.** It reproduces the non-termination and bounds
+it: `InvalidOperationException: the regular expression engine's backtracking stack exceeded its 1GB
+limit`, in 0.25s to 1.52s across all ten pinned shapes (re-measured 2026-09-14), which is upstream's
+own `RE_MEMORY_LIMIT` check ported into `ByteStack.Grow`. **That satisfies "the port must not exhaust
+memory" and is NOT the end of the entry**: PCRE2's guard above is the correctness fix the slice asked
+whether there was one, and it is a slice of its own. Pinned by `Gaps/Engine/FuzzyRecursionTests.cs`,
+six tests, including the controls that show which budgets terminate - and, from S47 sitting 2, with
+the three blowup assertions naming the exception TYPE and its message instead of accepting any
+exception at all. That mattered: a bare `Throw<Exception>` is also satisfied by the
+`RegexMatchTimeoutException` from the tests' own 30-second budget, so the file could not tell its
+bound from its clock and a regression that merely made the engine slow would have passed.
 
 **Consequence for the oracle.** `INTERACTION_FUZZY_WRAPPERS` does not draw a self-recursive call
 round a fuzzy section at all. A guard that forces progress was tried and is NOT sufficient:
@@ -1531,6 +1585,13 @@ round a fuzzy section at all. A guard that forces progress was tried and is NOT 
 drawn rows still raised MemoryError on four of them. Progress bounds the DEPTH and does nothing
 about the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute choice at every
 position of every level.
+
+**The exclusion is NOT still in place for the reason the recorder used to give**, which S47 sitting 2
+corrected on the spot: upstream's `MemoryError` stopped aborting the wave in S43 and is now recorded
+as a `resource` outcome the consumer skips. What keeps the shape out is the branching above, plus
+cost - a row upstream cannot answer is a row this port spends about a second and a gigabyte on before
+its own bound fires, and a wave full of them buys no ground truth. **Lifting it belongs with the
+guard**, not before it.
 
 **Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.
 

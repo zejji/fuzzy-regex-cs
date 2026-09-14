@@ -630,16 +630,18 @@ def _record_row(regex, row: dict) -> dict:
             recorded["outcome"] = {"kind": "split", "parts": parts}
         else:
             offsets = _utf16_offsets(subject)
-            recorded["outcome"] = {
-                "kind": "matches",
-                "matches": [
-                    # The untranslated codepoint span per match, for the same reason the top-level
-                    # one exists: it makes the recorder's index translation visible in the file
-                    # rather than merely trusted. The consumer never reads it.
-                    dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0)))
-                    for m in found
-                ],
-            }
+            described = [
+                # The untranslated codepoint span per match, for the same reason the top-level
+                # one exists: it makes the recorder's index translation visible in the file
+                # rather than merely trusted. The consumer never reads it.
+                dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0)))
+                for m in found
+            ]
+            recorded["outcome"] = {"kind": "matches", "matches": described}
+
+            leak_free = _leak_free_fuzzy(compiled, subject, offsets, described, partial)
+            if leak_free is not None:
+                recorded["leakFreeFuzzy"] = leak_free
             # OVERLAPPED ONLY, and reversed only where the pattern reads nothing at the end of the
             # subject - each exclusion is a case where the walk below cannot ask upstream the same
             # question the scanner asks, so a recorded answer would be a third opinion rather than a
@@ -681,7 +683,15 @@ def _record_row(regex, row: dict) -> dict:
         return recorded
 
     recorded["codepointSpan"] = list(match.span(0))
-    recorded["outcome"] = {"kind": "match", **_describe_match(compiled, match, _utf16_offsets(subject))}
+    offsets = _utf16_offsets(subject)
+    described = _describe_match(compiled, match, offsets)
+    recorded["outcome"] = {"kind": "match", **described}
+
+    leak_free = _leak_free_fuzzy(
+        compiled, subject, offsets, [dict(described, codepointSpan=list(match.span(0)))], partial
+    )
+    if leak_free is not None:
+        recorded["leakFreeFuzzy"] = leak_free
 
     # One extra question, asked only of a SEARCH that answered a partial, and recorded as a fact
     # about upstream rather than compared against anything: does upstream's own `match` answer the
@@ -795,6 +805,80 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
         }
 
     return described
+
+
+def _leak_free_fuzzy(compiled, subject: str, offsets: list[int], matches: list[dict], partial: bool) -> list | None:
+    """Upstream's own fuzzy half for each recorded match, asked again ANCHORED at the span it reported.
+
+    A SECOND FACT ABOUT UPSTREAM, never compared against anything, exactly as ``anchoredScan``,
+    ``searchOnlyPartial`` and ``bestmatchFreeOutcome`` are. One entry per recorded match, in the
+    recorded order; ``None`` where upstream would not answer the question, and the key is left off the
+    row entirely where there was no question to ask.
+
+    WHAT IT IS FOR. Ledger entry 11 mechanism A: ``start_match`` clears ``state->fuzzy_counts`` and
+    leaves ``state->fuzzy_changes`` alone (``upstream/src/_regex.c:11790-11792``), so an attempt that
+    was abandoned without unwinding leaves its entries at the BOTTOM of the change stack, and
+    ``match_fuzzy_changes`` then reports the FIRST ``sum(fuzzy_counts)`` entries (``:20522``) - the
+    stale ones, DISPLACING the winning attempt's. This port clears the list beside the counts, so from
+    S47 on every row where upstream leaks is a divergence in which the two engines agree on the span,
+    the groups AND the fuzzy counts, and differ only over where the errors were spent. Nothing on our
+    side of the comparison can tell that from a port that computed a position wrongly.
+
+    What can tell them apart is upstream's OWN answer with the leak taken away. ``match(pos=start,
+    endpos=end)`` makes the winning attempt upstream's FIRST attempt, so there is no earlier attempt
+    to have left anything on the stack. Measured over the 19 rows of the three-seed 6000-row gate on
+    2026-09-14 (``.scratch/anchored.py``, reproduced in the S47 closing notes): on EVERY diverging
+    match upstream could be asked about this way, its leak-free answer is this port's answer exactly.
+
+    IT CANNOT ALWAYS BE ASKED, and that is why ``None`` is a recorded value rather than a reason to
+    omit the row. Anchoring at the reported span breaks three shapes: a fuzzy section inside a
+    LOOKAHEAD, which has to read past ``endpos``; a ``\\K``, whose reported start is not where the
+    attempt began; and the second match of a scan at a position an earlier match already used. Eight
+    of the 23 diverging matches in that gate are one of those. The consumer's entry says what it does
+    with them and how much weaker that arm is.
+
+    :param compiled: The compiled pattern.
+    :param subject: The subject.
+    :param offsets: The subject's codepoint-to-UTF-16 table.
+    :param matches: The recorded matches, each carrying its own ``codepointSpan``.
+    :param partial: Whether the row asked for a partial match.
+    :returns: One entry per recorded match, or ``None`` where no match had a fuzzy half to ask about.
+    """
+    # A POSIX row has no change positions on either side (ledger entry 9), so there is nothing here
+    # for a second question to be about - and `_describe_match` would refuse to read them anyway.
+    if compiled.flags & _POSIX_FLAG:
+        return None
+
+    asked: list = []
+    any_question = False
+    for described in matches:
+        if "fuzzyChanges" not in described:
+            asked.append(None)
+            continue
+
+        any_question = True
+        start, end = described["codepointSpan"]
+        try:
+            again = compiled.match(subject, start, end, partial=partial, timeout=ROW_TIMEOUT_SECONDS)
+        except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
+            again = None
+
+        # A different span is a different match, so its errors say nothing about this one's.
+        if again is None or list(again.span(0)) != [start, end]:
+            asked.append(None)
+            continue
+
+        answer = _describe_match(compiled, again, offsets)
+        asked.append(
+            {
+                "fuzzyCounts": answer.get("fuzzyCounts", [0, 0, 0]),
+                "fuzzyChanges": answer.get(
+                    "fuzzyChanges", {"substitutions": [], "insertions": [], "deletions": []}
+                ),
+            }
+        )
+
+    return asked if any_question else None
 
 
 def _anchored_scan(compiled, subject: str, offsets: list[int], reverse: bool = False) -> list[dict] | None:
@@ -2764,8 +2848,17 @@ INTERACTION_FUZZY_TESTS = (r"\w", r"\W", r"\d", r"\s", r"\S", "[a-z]", "[^a-z]",
 # regular expression engine's backtracking stack exceeded its 1GB limit` in 0.24s to 0.92s on all
 # six `(?R)` shapes where upstream raises MemoryError. It is an inherited upstream bug of the
 # 551/554 resource-blowup family already on Phase 6's triage list, pinned in
-# Gaps/Engine/FuzzyRecursionTests.cs and entered on the ledger. It is NOT a wave shape: upstream
-# raising MemoryError is an ENVIRONMENT_FAILURE, which aborts the recorder by design.
+# Gaps/Engine/FuzzyRecursionTests.cs and entered on the ledger.
+#
+# THE LAST SENTENCE OF THIS NOTE USED TO SAY the shape was out because upstream's MemoryError is an
+# ENVIRONMENT_FAILURE that aborts the recorder by design. S43 changed that - a MemoryError is now
+# recorded as a `resource` outcome and the consumer skips the row (see `exhausted` above) - so the
+# recorder is no longer the reason. What keeps the shape out now is the BRANCHING measurement two
+# paragraphs up, plus the cost: a row upstream cannot answer is a row this port spends a whole
+# second and a gigabyte on before its own bound fires, and a wave carrying many of them buys no
+# ground truth for it. S47 sitting 2 measured PCRE2's answer to the same mechanism
+# (tools/probes/pcre2-bounds-an-unbounded-recursion.py) and ledger entry 14 carries the decision;
+# the shape comes back when the guard that decision names lands.
 INTERACTION_FUZZY_WRAPPERS = ("look", "atomic", "cond", "verb")
 
 # How often a composed section carries a `{...:test}`, nests a second section with a different

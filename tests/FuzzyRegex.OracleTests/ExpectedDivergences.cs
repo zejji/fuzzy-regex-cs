@@ -168,6 +168,41 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The two rows of <c>fuzzy-changes-leaked-from-an-abandoned-attempt</c>, one per arm, recorded
+    /// by <c>python tools/record-oracle.py --rows</c> on 2026-09-14.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is ledger entry 11's own minimised reproduction, and it is the STRONG arm: upstream
+    /// answers the anchored question - <c>leakFreeFuzzy</c> is one deletion at 3, which is this
+    /// port's answer, where the row itself records one substitution at 0 against counts of
+    /// <c>(0, 0, 1)</c>. Row 2 is row 77766 of the seed-4242 6000-row gate as the wave drew it, and
+    /// it is the WEAK arm: a fuzzy section inside a lookahead before a <c>\K</c>, where all four
+    /// <c>leakFreeFuzzy</c> entries are null because <c>endpos</c> cuts the lookahead off and the
+    /// reported start is not where the attempt began. Upstream reports match k's substitution at
+    /// position k+1 there - the previous attempt's, one per step down the reversed scan.
+    /// </remarks>
+    private const string _leakedChangeRows = """
+        {"generator": "rows", "pattern": "(?:[ab][bc](*PRUNE)[wx]){e<=2}", "flags": 0, "namedLists": {}, "subject": "qab", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}}]}
+        {"generator": "rows", "pattern": "(?e)(?r)(?=(?:\\p{Nd}[a-f]){s<=1,i<=1,d<=1:.})\\K", "flags": 10, "namedLists": {}, "subject": "aaaa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [3, 3]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": []}, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}, "codepointSpan": [1, 1]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}, "codepointSpan": [0, 0]}]}, "leakFreeFuzzy": [null, null, null, null]}
+        """;
+
+    /// <summary>
+    /// The two rows of <c>fuzzy-counts-of-a-partial-are-the-innermost-sections</c>, one per shape,
+    /// recorded by <c>python tools/record-oracle.py --rows</c> on 2026-09-14.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is row 120049 of the seed-7 6000-row gate: upstream reports <c>(0, 3, 0)</c> with
+    /// insertions at 2, 5 and 7 where this port reports <c>(0, 5, 0)</c> with those three and two
+    /// more, which is the truncation the entry is named for. Row 2 is row 120002 of the same gate and
+    /// is the commoner shape - the innermost section had spent nothing, so upstream reports no fuzzy
+    /// half at all and the prefix it must be is the empty one.
+    /// </remarks>
+    private const string _innermostPartialCountRows = """
+        {"generator": "rows", "pattern": "(?b)(ab)(?:[ab]*?(?:\\Zoba[^a-f](?:\\1)){e<=3}){i<=2}", "flags": 0, "namedLists": {}, "subject": "abxbaobaya", "operation": "search", "partial": true, "codepointSpan": [0, 10], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 5, 7], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 5, 7], "deletions": []}}], "searchOnlyPartial": false, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 5, 7], "deletions": []}}}
+        {"generator": "rows", "pattern": "(?i)(?:[ab]*?(?:\\d[^a]){2i+1d+1s<=2:[a-cx-z]}){i<=2}", "flags": 0, "namedLists": {}, "subject": " Axb", "operation": "match", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        """;
+
+    /// <summary>
     /// The rows of the bounded-lazy-repeat partial family, recorded by
     /// <c>tools/record-oracle.py --rows</c>. This entry is keyed on the ROWS rather than on a
     /// predicate, which is why they live here as recorder output - see its own
@@ -1601,6 +1636,120 @@ internal static class ExpectedDivergences
             """,
             Applies: static (row, ours) => DivergenceStartsOnATurkicI(row, ours)
         ),
+        new(
+            Id: "fuzzy-changes-leaked-from-an-abandoned-attempt",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - ledger entry 11 "
+                + "mechanism A, fixed here by S47 on 2026-09-14 under the owner's inherited-bug rule "
+                + "(2026-09-12). `basic_match`'s `start_match` clears `state->fuzzy_counts` with a "
+                + "`memset` and leaves `state->fuzzy_changes` alone "
+                + "(upstream/src/_regex.c:11790-11792), so a search attempt abandoned without "
+                + "unwinding - which is what `(*PRUNE)` and `(*SKIP)` do, and what every restart of a "
+                + "scan does - leaves its entries at the BOTTOM of the change stack. "
+                + "`match_fuzzy_changes` then reports the FIRST `sum(fuzzy_counts)` entries (:20522), "
+                + "so a stale entry does not merely sit there unread: it DISPLACES the change the "
+                + "winning attempt recorded. The counts survive because they are cleared; the list "
+                + "does not because it is not.\n"
+                + "THE JUDGEMENT NEEDS NO SECOND ENGINE, and there is none to ask - PCRE2, Perl and "
+                + ".NET have no approximate matching at all (measured for ledger entry 12, "
+                + "tools/probes/pcre2-has-no-fuzzy-matching.py). It rests on upstream's own "
+                + "documentation and on upstream's own control. `fuzzy_changes` is documented as "
+                + "\"a tuple of the positions of the substitutions, insertions and deletions\" of the "
+                + "match `fuzzy_counts` counts, so the two are views of ONE edit script and cannot "
+                + "both be right when they disagree. Upstream's control is the same pattern with the "
+                + "verb deleted, where the abandoned attempt unwinds the ordinary way: "
+                + "`(?:[ab][bc][wx]){e<=2}` over 'qab' gives upstream (0,0,1) with a DELETION at 3, "
+                + "which is this port's answer, where `(?:[ab][bc](*PRUNE)[wx]){e<=2}` over the same "
+                + "subject gives upstream (0,0,1) with a SUBSTITUTION at 0 - one deletion counted, "
+                + "one substitution reported.\n"
+                + "KEYED ON THE RECORDED `leakFreeFuzzy`, and NOT on the shape of the disagreement, "
+                + "because the shape is exactly what cannot be judged. On every row of this family "
+                + "the two engines agree on the span, the groups AND the fuzzy counts and differ only "
+                + "over where the errors were spent, so a predicate saying 'same counts, different "
+                + "positions' would swallow precisely the defect the oracle exists to catch. What "
+                + "does distinguish it is upstream's OWN answer with the leak taken away: the "
+                + "recorder asks `match(pos=start, endpos=end)`, which makes the winning attempt "
+                + "upstream's FIRST attempt, so no earlier attempt exists to have left anything "
+                + "behind (`_leak_free_fuzzy` in tools/record-oracle.py).\n"
+                + "TWO ARMS, OF VERY DIFFERENT STRENGTH, and the second is the widest thing in this "
+                + "file. STRONG: upstream answered the anchored question, and this port's fuzzy half "
+                + "is upstream's own leak-free answer exactly, counts and positions. Measured over "
+                + "the three-seed 6000-row gate of 2026-09-14 - 19 rows, 23 diverging matches - "
+                + "upstream's leak-free answer is this port's answer on all 15 it would answer, with "
+                + "no exception (.scratch/anchored.py, reproduced in the S47 closing notes). WEAK: "
+                + "upstream would NOT answer the anchored question, so nothing can be demanded of it "
+                + "and the entry accepts this port's positions on that match alone. Eight of the 23 "
+                + "are there, in four rows, and they are three recognisable shapes rather than a "
+                + "grab bag - a fuzzy section inside a LOOKAHEAD, which has to read past `endpos`; a "
+                + "`\\K`, whose reported start is not where the attempt began; and a scan's second "
+                + "match at a position an earlier match already used. WHAT THE WEAK ARM MASKS, said "
+                + "out loud: a port defect in the change POSITIONS on a row of one of those three "
+                + "shapes, where the counts and everything else are right, is classified rather than "
+                + "reported. It fires about 1.3 times per 126,000-row seed. The instrument that "
+                + "covers it is not this list - it is "
+                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts`, a "
+                + "property of this port's answers alone over every fuzzy match of a whole wave, plus "
+                + "the minimised rows in the test named below.\n"
+                + "BOTH ARMS ALSO DEMAND that everything but the fuzzy half already agrees, that the "
+                + "counts agree on every differing match - counts that differ are mechanism B, which "
+                + "has its own entry and its own argument - and that this port's own change lists "
+                + "agree with its own counts, so a regression of the S47 invariant makes the entry "
+                + "silent rather than absorbing the row.",
+            PinnedBy: "Gaps.Engine.FuzzyMatchingTests.A_search_that_restarts_does_not_carry_the_"
+                + "abandoned_attempt_s_errors_into_the_next_one, .A_search_attempt_that_fails_after_"
+                + "a_lookaround_leaves_nothing_behind_for_the_next_one and .The_reported_changes_"
+                + "agree_with_the_counts_on_every_shape_that_used_to_contradict_them",
+            // Two rows, one per arm, so the staleness alarm re-tests both. Row 1 is ledger entry 11's
+            // own minimised reproduction and upstream answers the anchored question on it, so it is
+            // the STRONG arm; row 2 is row 77766 of the seed-4242 6000-row gate as the wave drew it,
+            // a fuzzy section inside a lookahead before a `\K`, where upstream answers nothing
+            // anchored - the WEAK arm. Recorded by `python tools/record-oracle.py --rows`, 2026-09-14.
+            Example: _leakedChangeRows,
+            Applies: static (row, ours) => OnlyTheChangePositionsLeaked(row, ours)
+        ),
+        new(
+            Id: "fuzzy-counts-of-a-partial-are-the-innermost-sections",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - ledger entry 11 "
+                + "mechanism B, the other half of what S47 fixed. On a PARTIAL match the engine "
+                + "returns from inside whichever fuzzy section was still open, and `state->fuzzy_"
+                + "counts` at that moment holds THAT section's errors alone: the enclosing sections' "
+                + "counts were pushed on the way in and are never merged back, because nothing "
+                + "completes. `match_fuzzy_changes` then truncates the change list to "
+                + "`sum(fuzzy_counts)` entries (upstream/src/_regex.c:20522), so upstream's reported "
+                + "positions are the first few of the real edit script and its counts are the "
+                + "innermost section's - two views of one script, and neither is the match's.\n"
+                + "THE JUDGEMENT IS UPSTREAM'S OWN TRUNCATION, which is visible on the row without "
+                + "any second engine: upstream's change positions are a PREFIX of this port's, per "
+                + "kind and in record order, and its counts are componentwise no larger. On seed 7 "
+                + "row 120049 - `(?b)(ab)(?:[ab]*?(?:\\Zoba[^a-f](?:\\1)){e<=3}){i<=2}` over "
+                + "'abxbaobaya' - upstream reports (0,3,0) with insertions at 2, 5 and 7 and this "
+                + "port reports (0,5,0) with insertions at 2, 5, 7, 8 and 9. Upstream's three ARE "
+                + "this port's first three, which is what a stack truncated to a wrong total looks "
+                + "like and is not what a port computing different positions would look like.\n"
+                + "PREDICATE RATHER THAN ROWS, unlike its mechanism-A sibling, because here the "
+                + "shape of the disagreement IS the evidence. Measured over the three-seed 6000-row "
+                + "gate of 2026-09-14: 39 rows, every one a partial, the prefix relation holding on "
+                + "all 35 that carry positions and the remaining 4 POSIX, where neither engine has "
+                + "positions at all (ledger entry 9) and only the counts can be compared.\n"
+                + "WHERE IT IS WIDE, said out loud: on 18 of those 35 upstream reports NO errors at "
+                + "all - the innermost section had spent none - so the prefix it must be is the "
+                + "empty one and the entry accepts whatever positions this port reports on that "
+                + "match. That is the price of comparing against an engine whose answer is a "
+                + "truncation of the truth, and the instruments that cover it are "
+                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` and "
+                + "the three partial rows of the test named below, not this list. The entry still "
+                + "demands the span, the groups, `lastindex`, `lastgroup` and the partial flag agree "
+                + "exactly, that BOTH engines called the match partial, that this port's counts are "
+                + "no smaller than upstream's, and that this port's own change lists agree with its "
+                + "own counts.",
+            PinnedBy: "Gaps.Engine.FuzzyMatchingTests.The_reported_changes_agree_with_the_counts_on_"
+                + "every_shape_that_used_to_contradict_them, whose last three rows are partials, and "
+                + "OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts",
+            // One row per shape the entry has to survive: upstream reporting a shorter prefix of the
+            // real script, and upstream reporting nothing at all. Recorded by
+            // `python tools/record-oracle.py --rows`, 2026-09-14.
+            Example: _innermostPartialCountRows,
+            Applies: static (row, ours) => UpstreamCountedOnlyTheInnermostSection(row, ours)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -2342,6 +2491,184 @@ internal static class ExpectedDivergences
         pattern.Contains("(?&", StringComparison.Ordinal)
         || pattern.Contains("(?P>", StringComparison.Ordinal)
         || pattern.Contains(@"\g<", StringComparison.Ordinal);
+
+    /// <summary>Every match of an answer, or <see langword="null"/> where it is not a match at all.</summary>
+    /// <param name="outcome">One engine's answer.</param>
+    /// <returns>The matches, a single-match answer being a list of one.</returns>
+    private static IReadOnlyList<MatchOutcome>? MatchesOf(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            MatchOutcome single => [single],
+            MatchesOutcome scan => scan.Matches,
+            _ => null,
+        };
+
+    /// <summary>
+    /// Whether two matches say the same thing about everything except how the errors were spent.
+    /// </summary>
+    /// <param name="theirs">Upstream's match.</param>
+    /// <param name="ours">This port's.</param>
+    /// <returns><see langword="true"/> if only the fuzzy half can differ.</returns>
+    private static bool AgreeApartFromTheFuzzyHalf(MatchOutcome theirs, MatchOutcome ours) =>
+        string.Equals(
+            (theirs with { Fuzzy = null }).Describe(),
+            (ours with { Fuzzy = null }).Describe(),
+            StringComparison.Ordinal
+        );
+
+    /// <summary>
+    /// Whether a divergence is ledger entry 11 mechanism A: the two engines agree on everything
+    /// including the fuzzy counts, and upstream's change POSITIONS are a stale attempt's.
+    /// </summary>
+    /// <remarks>
+    /// The entry's own <see cref="ExpectedDivergence.Reason"/> carries the argument and names what
+    /// the weak arm masks. Read it before widening anything here.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer and the recorded leak-free one.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if the divergence belongs to the family.</returns>
+    private static bool OnlyTheChangePositionsLeaked(OracleRow row, IOracleOutcome ours)
+    {
+        // Absent means the question was never asked, which is every non-fuzzy row and every wave
+        // recorded before S47. A null ENTRY means it was asked and upstream would not answer.
+        if (row.LeakFreeFuzzy is not { } leakFree)
+        {
+            return false;
+        }
+
+        if (MatchesOf(row.Expected) is not { } theirs || MatchesOf(ours) is not { } mine)
+        {
+            return false;
+        }
+
+        if (theirs.Count != mine.Count || theirs.Count != leakFree.Count)
+        {
+            return false;
+        }
+
+        bool anyDiffer = false;
+
+        for (int m = 0; m < theirs.Count; m++)
+        {
+            if (string.Equals(theirs[m].Describe(), mine[m].Describe(), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            anyDiffer = true;
+
+            if (
+                !AgreeApartFromTheFuzzyHalf(theirs[m], mine[m])
+                || theirs[m].Fuzzy is not { } theirFuzzy
+                || mine[m].Fuzzy is not { CountsAgreeWithPositions: true } ourFuzzy
+            )
+            {
+                return false;
+            }
+
+            // Counts that differ are mechanism B, whose entry follows this one and whose argument is
+            // a different one entirely.
+            if (
+                theirFuzzy.Substitutions != ourFuzzy.Substitutions
+                || theirFuzzy.Insertions != ourFuzzy.Insertions
+                || theirFuzzy.Deletions != ourFuzzy.Deletions
+            )
+            {
+                return false;
+            }
+
+            // The STRONG arm. A null here is the WEAK one: upstream refused the anchored question,
+            // so there is nothing to hold this port's positions to.
+            if (
+                leakFree[m] is { } free
+                && !string.Equals(free.Describe(), ourFuzzy.Describe(), StringComparison.Ordinal)
+            )
+            {
+                return false;
+            }
+        }
+
+        return anyDiffer;
+    }
+
+    /// <summary>
+    /// Whether a divergence is ledger entry 11 mechanism B: on a partial match upstream's counts are
+    /// the innermost open section's, and its change positions are this port's script truncated to
+    /// that total.
+    /// </summary>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if the divergence belongs to the family.</returns>
+    private static bool UpstreamCountedOnlyTheInnermostSection(OracleRow row, IOracleOutcome ours)
+    {
+        if (MatchesOf(row.Expected) is not { } theirs || MatchesOf(ours) is not { } mine)
+        {
+            return false;
+        }
+
+        if (theirs.Count != mine.Count)
+        {
+            return false;
+        }
+
+        bool anyDiffer = false;
+
+        for (int m = 0; m < theirs.Count; m++)
+        {
+            if (string.Equals(theirs[m].Describe(), mine[m].Describe(), StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            anyDiffer = true;
+
+            // Only a partial match can carry an open section's counter out of the engine, and both
+            // engines must agree that this is one: a partial appearing on one side alone is a
+            // different question and several entries above already account for those.
+            if (
+                !theirs[m].Partial
+                || !mine[m].Partial
+                || !AgreeApartFromTheFuzzyHalf(theirs[m], mine[m])
+                || mine[m].Fuzzy is not { CountsAgreeWithPositions: true } ourFuzzy
+            )
+            {
+                return false;
+            }
+
+            // A match upstream says spent no errors renders no fuzzy half at all, which is the
+            // commonest shape of this family rather than an edge case - the innermost section had
+            // spent none.
+            OracleFuzzy theirFuzzy = theirs[m].Fuzzy ?? new OracleFuzzy(0, 0, 0, [], [], []);
+
+            if (
+                theirFuzzy.Substitutions > ourFuzzy.Substitutions
+                || theirFuzzy.Insertions > ourFuzzy.Insertions
+                || theirFuzzy.Deletions > ourFuzzy.Deletions
+                || !IsAPrefixOf(theirFuzzy.SubstitutionPositions, ourFuzzy.SubstitutionPositions)
+                || !IsAPrefixOf(theirFuzzy.InsertionPositions, ourFuzzy.InsertionPositions)
+                || !IsAPrefixOf(theirFuzzy.DeletionPositions, ourFuzzy.DeletionPositions)
+            )
+            {
+                return false;
+            }
+        }
+
+        return anyDiffer;
+    }
+
+    /// <summary>
+    /// Whether upstream's positions of one kind are the first few of this port's, in order.
+    /// </summary>
+    /// <remarks>
+    /// Vacuously true where either side has no positions, which is a POSIX row: upstream cannot be
+    /// asked for them at all and <c>OracleComparer</c> drops this port's to match (ledger entry 9),
+    /// so such a row is judged on its counts alone.
+    /// </remarks>
+    /// <param name="theirs">Upstream's positions of one kind.</param>
+    /// <param name="ours">This port's.</param>
+    /// <returns><see langword="true"/> if upstream's are a prefix of ours.</returns>
+    private static bool IsAPrefixOf(IReadOnlyList<int>? theirs, IReadOnlyList<int>? ours) =>
+        theirs is null || ours is null || (theirs.Count <= ours.Count && theirs.SequenceEqual(ours.Take(theirs.Count)));
 
     // S44 DELETED `OnlyDifferenceIsACaptureUpstreamLeftEmpty`, both overloads. It existed only for
     // `group-call-direction`'s predicate - "the only captures that differ are ones where upstream
