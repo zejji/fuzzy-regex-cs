@@ -107,6 +107,15 @@ Then, in this order:
    run one more blind pass over that delta only.** This is not a second opinion on reviewed code;
    it is a first pass over unreviewed code, and skipping it is how S01 shipped ~200 lines of
    unreviewed public API. Judge it by what changed, not by how the first pass went.
+3. **Then the independent verifier** (spec amendment 16 limb (d); owner-approved 2026-09-14, after an
+   audit found no slice since S44 had one). A FRESH Opus subagent, briefed with nothing but the
+   commit-ready tree, re-runs from the committed files every probe, second-engine command and wave
+   summary the slice's notes and ledger entries quote, and reports each number as CONFIRMED,
+   DIFFERENT (with its value) or COULD NOT RUN (with why). Anything not CONFIRMED is fixed or the
+   claim is removed before the commit; a pin whose evidence the verifier could not reproduce is not
+   kept. This is not a review and it renders no opinion - it is the second pair of hands the
+   standard asks for, and it is the step that turns a scratch-only probe into evidence, because a
+   probe the verifier cannot find in `tools/probes/` is COULD NOT RUN.
 
 From phase 3 onward, also run the differential oracle locally before you commit any slice that
 touches the engine, and minimise every divergence into a permanent test. The ported suite passing
