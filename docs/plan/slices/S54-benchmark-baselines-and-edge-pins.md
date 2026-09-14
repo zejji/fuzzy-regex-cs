@@ -13,6 +13,16 @@ Optimisation is where silent behaviour change is likeliest, so Phase 6 pins two 
 
 ## Scope
 
+- **Two runtimes, one build (owner decision 2026-09-14).** The library stays `net10.0` (LTS) as its
+  only target through 1.0: .NET 11's RC1 notes are JIT work (bounds-check and redundant-branch
+  elimination, devirtualisation, SIMD cost model) that a `net10.0` assembly gets for free on a .NET 11
+  host, and its libraries add nothing a regex engine calls. So the baselines are recorded with the
+  SAME `net10.0` build under the .NET 10 runtime and, once .NET 11 is GA (expected November 2026) or
+  on its go-live RC if the slice runs earlier, under the .NET 11 runtime as well - BenchmarkDotNet
+  `--runtimes net10.0 net11.0` against an installed 11 runtime, no TFM change, no `global.json`
+  change. Phase 7 then knows which speed-ups the newer JIT already delivers before hand-optimising
+  for them. If no .NET 11 runtime is installed, record .NET 10 only and say so.
+
 - **The suite**, per `.claude/skills/benchmark/SKILL.md` and spec section 11: literal-heavy,
   class-heavy, backtracking-heavy, fuzzy short and long subjects, `(?e)` and `(?b)`, case-folded,
   reverse, partial, scan (`Matches`) over a long text, `Replace` with a template, compile time for
