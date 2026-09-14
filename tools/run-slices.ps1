@@ -82,7 +82,10 @@ $allowedTools = @(
     # real run of a second engine, so a session needs the web, a fetch into .scratch/, and perl.
     # tasklist / Get-Process are read-only and let a session see an orphaned test host (S44).
     'WebFetch', 'WebSearch', 'Bash(curl *)', 'Bash(perl *)',
-    'Bash(tasklist *)', 'PowerShell(Get-Process *)'
+    'Bash(tasklist *)', 'PowerShell(Get-Process *)',
+    # Compound commands are matched part by part, so `cd repo && dotnet run ...` was denied on the
+    # cd (S45, 2026-09-14). These read or set nothing outside the shell. Owner-approved 2026-09-14.
+    'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)'
 )
 
 function Get-PendingSlice {
