@@ -400,6 +400,19 @@ need the orchestrator to act before launch (S44 installs the wheel, S49 snapshot
 installs Stryker and S56 needs the overnight queue run) because the driver cannot install or post;
 each file says so at the top. Budget at Phase 5's measured 1.27 sessions a slice: about 18 sessions.
 
+**Phase 6 gained three slices on 2026-09-14, all owner-decided.** S47b and S47c after an independent
+audit of S44-S46 (two oracle pins wider than their evidence, evidence only in scratch, notes claiming
+unmeasured numbers; and ledger entry 13's mechanism, since traced to the line in a debug build of
+upstream). **S52b thread safety** (spec amendment 23): the design spec promises a compiled pattern
+is immutable and shareable across threads, as upstream and .NET `Regex` do, and nothing in the
+repository proved it - no test used a second thread. S52b adds a structural immutability test over
+the whole pattern graph, a static-state audit, a debug `ArrayPool` wrapper that catches double
+returns, a deterministic stress test under real parallelism, and the documented contract. **Its tests
+are PERMANENT and constrain Phase 7 directly**: optimisation is where caches appear, and a Phase 7
+slice that turns one of them red has introduced shared mutable state and removes it rather than
+widening an allowlist. Placed after S52 so the stress test can draw its subjects from the hardened
+waves. Estimate 10-15 becomes 13-18.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 

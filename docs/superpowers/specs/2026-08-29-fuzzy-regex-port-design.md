@@ -809,3 +809,17 @@ amended text is inline above; this list is the record of what changed and why.
     Guidelines and recent first-party libraries, with the precedent quoted. Placed in Phase 6 rather
     than after Phase 7 because the poll sits on the matcher's hot path and optimisation must measure
     the final shape. Estimate 9-14 becomes 10-15. Decided by the project owner.
+
+23. **Thread safety is proven, not promised, and proven before Phase 7 (2026-09-14, owner request).**
+    The runtime-discipline paragraph promises immutable, shareable compiled patterns; the gap-test
+    list mentions "thread-safety smoke tests"; no slice carried either. Phase 6 gains S52b: a
+    reflection test that every field reachable from a compiled pattern is readonly or init-only
+    (justified, proven allowlist), a static-state audit, a debug `ArrayPool` wrapper that fails on a
+    double return, a deterministic stress test of every matching family under real parallelism
+    compared with the sequential answer, immutability of `Match`, and the contract in the XML docs
+    and README in the words .NET `Regex` uses. The .NET side is harder than upstream's: upstream's
+    engine already runs GIL-free on several threads (`release_GIL`, `concurrent=True`), so pattern
+    immutability is its own rule, but everything outside its match loop is GIL-protected and the
+    port has no such umbrella, while .NET callers meet concurrency by default. The tests are
+    permanent and constrain Phase 7, where caches appear. Estimate 10-15 becomes 13-18 with S47b
+    and S47c. Decided by the project owner.
