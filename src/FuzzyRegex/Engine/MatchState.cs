@@ -213,6 +213,52 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>pstack</c>: the pruning stack.</summary>
     internal readonly ByteStack Pstack = new();
 
+    /// <summary>
+    /// NOT UPSTREAM'S: the group calls that are open right now, one key per call, as
+    /// <c>(call index &lt;&lt; 32) | text position</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Ledger entry 14's guard, and PCRE2's: a call that re-enters a group at a text position where
+    /// a call of that same group is already open cannot consume anything before it arrives back
+    /// where it started, so that path recurses for ever. PCRE2 answers the whole match with
+    /// <c>PCRE2_ERROR_RECURSELOOP</c>, "nested recursion at the same subject position"; upstream has
+    /// no guard at all and allocates until <c>MemoryError</c>.
+    /// </para>
+    /// <para>
+    /// A set rather than a counter, because a key is only ever added when it is absent - that is
+    /// what the guard tests. <see cref="OpenCalls"/> is the same information as a stack, and is what
+    /// keeps the two in step; this is only here so the test itself costs O(1) on a recursion ten
+    /// thousand deep.
+    /// </para>
+    /// </remarks>
+    internal readonly HashSet<long> ActiveCalls = [];
+
+    /// <summary>
+    /// NOT UPSTREAM'S: the same open calls as <see cref="ActiveCalls"/>, innermost last, each with
+    /// the <see cref="Sstack"/> depth its frame ends at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The depth is what makes the guard safe, and it was a blind review that proved it has to be
+    /// here</b> (S47). Pushing and popping the key at <c>GROUP_CALL</c> and <c>GROUP_RETURN</c> is
+    /// not enough, because a call's frames can be thrown away without either arm ever running: a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> truncates the backtracking stack and leaves the saved stack
+    /// alone, so the <c>GROUP_CALL</c> entry is gone while the call is still open, and an enclosing
+    /// atomic group, lookaround or conditional then restores <see cref="ByteStack.Count"/> on the
+    /// saved stack and discards the orphan. The key would stay in the set for the rest of the
+    /// attempt and refuse the next legitimate call of that group at that position - a match upstream
+    /// finds, lost, and not a shape upstream blows up on. So every site that restores the saved
+    /// stack's count calls <c>Matcher.CloseCallsAbove</c>, which drops every entry whose frame that
+    /// restore has just discarded.
+    /// </para>
+    /// <para>
+    /// <see cref="Matcher"/>'s <c>start_match</c> clears both, which covers a whole attempt being
+    /// abandoned.
+    /// </para>
+    /// </remarks>
+    internal readonly List<(long Key, int SstackDepth)> OpenCalls = [];
+
     /// <summary>Upstream <c>best_match_pos</c>: where the best POSIX match so far starts.</summary>
     internal int BestMatchPos;
 

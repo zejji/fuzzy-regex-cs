@@ -2371,6 +2371,57 @@ internal static class Matcher
         return true;
     }
 
+    /// <summary>
+    /// The key <see cref="MatchState.ActiveCalls"/> holds for one open group call: which group, and
+    /// where the call was made.
+    /// </summary>
+    /// <param name="callIndex">The call-ref index the <c>GROUP_CALL</c> node carries.</param>
+    /// <param name="textPos">Where matching had got to when the call was made.</param>
+    /// <returns>The set key.</returns>
+    private static long ActiveCallKey(int callIndex, int textPos) => ((long)callIndex << 32) | (uint)textPos;
+
+    /// <summary>
+    /// Closes the innermost open group call, whether it returned or was backtracked past, and gives
+    /// back its key.
+    /// </summary>
+    /// <remarks>
+    /// Calls nest, so the innermost open one is always the last entry. Both callers are reached only
+    /// with a call open - <c>GROUP_RETURN</c>'s called arm and <c>GROUP_CALL</c>'s backtrack arm -
+    /// so an empty list would be a bug in the bookkeeping rather than a state to handle.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <returns>The closed call's key.</returns>
+    private static long PopOpenCall(MatchState state)
+    {
+        (long key, _) = state.OpenCalls[^1];
+        state.OpenCalls.RemoveAt(state.OpenCalls.Count - 1);
+        state.ActiveCalls.Remove(key);
+        return key;
+    }
+
+    /// <summary>
+    /// Closes every group call whose saved-stack frame has just been discarded by a restore of
+    /// <see cref="ByteStack.Count"/>.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM'S, and the reason <see cref="MatchState.OpenCalls"/> records a depth at all - see
+    /// its remarks. Called after each of the six sites that put back a saved
+    /// <c>state.Sstack.Count</c>: <c>END_ATOMIC</c>, <c>END_CONDITIONAL</c> and
+    /// <c>END_LOOKAROUND</c> forward, and <c>ATOMIC</c>, <c>CONDITIONAL</c> and <c>LOOKAROUND</c> in
+    /// the backtrack switch. Ordinarily it pops nothing, because a call opened inside one of those
+    /// constructs has returned before the construct ends; it earns its keep when a
+    /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> has already thrown the call's <c>GROUP_CALL</c> entry off
+    /// the backtracking stack, so the arm that would have closed the call can never run.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    private static void CloseCallsAbove(MatchState state)
+    {
+        while (state.OpenCalls.Count > 0 && state.OpenCalls[^1].SstackDepth > state.Sstack.Count)
+        {
+            PopOpenCall(state);
+        }
+    }
+
     /// <summary>Upstream <c>top_bstack</c> (line 2811).</summary>
     /// <remarks>
     /// Reads the top entry of the pruning stack straight into <see cref="ByteStack.Count"/> of the
@@ -4631,6 +4682,12 @@ internal static class Matcher
             state.FuzzyChanges.Clear();
         }
 
+        // NOT UPSTREAM'S, and the same shape as the clear above: a fresh attempt has no group call
+        // open, and the abandoned one may have left some - a verb that cuts the backtracking drops
+        // the frames that would otherwise have closed them. See MatchState.OpenCalls.
+        state.ActiveCalls.Clear();
+        state.OpenCalls.Clear();
+
         // Locate the required string, if there's one: deferred to Phase 7, so the start position
         // stands.
         int foundPos = state.TextPos;
@@ -4883,6 +4940,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
+                    CloseCallsAbove(state);
                     state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
 
                     /* bstack: captures fuzzy_counts capture_change END_ATOMIC
@@ -4950,6 +5008,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endCondSstackCount;
+                    CloseCallsAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
                     {
@@ -5541,6 +5600,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endLookSstackCount;
+                    CloseCallsAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
                     {
@@ -6036,12 +6096,27 @@ internal static class Matcher
                     int groupCallIndex = (int)node.Values[0];
                     Node groupCallReturnNode = node.Next1.Node!;
 
+                    // NOT UPSTREAM'S: refuse a call that re-enters this group where a call of it is
+                    // already open. See MatchState.ActiveCalls and ledger entry 14 - the path is
+                    // infinite, and failing it leaves every other path alone.
+                    long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);
+
+                    if (!state.ActiveCalls.Add(groupCallKey))
+                    {
+                        goto backtrack;
+                    }
+
                     // For the caller.
                     PushGroups(state, state.Sstack);
                     PushRepeats(state, state.Sstack);
                     state.Sstack.PushSize(state.CaptureChange);
                     state.Sstack.PushNode(groupCallReturnNode);
                     state.Bstack.PushUInt8((byte)Opcode.GroupCall);
+
+                    // The call is open, and the frame it belongs to ends here. See
+                    // MatchState.OpenCalls: the depth is what lets a saved-stack restore tell which
+                    // open calls it has just thrown away.
+                    state.OpenCalls.Add((groupCallKey, state.Sstack.Count));
 
                     /* sstack: caller_groups caller_repeats capture_change return_node
                      *
@@ -6124,10 +6199,16 @@ internal static class Matcher
                         // The group was called.
                         node = groupReturnNode;
 
+                        // The call is closed, so it is no longer one this position may not re-enter.
+                        // It is the innermost open one - calls nest - and its key goes on the
+                        // backtracking stack so the arm below can re-open it.
+                        long groupReturnCallKey = PopOpenCall(state);
+
                         // For the callee.
                         PushGroups(state, state.Bstack);
                         PushRepeats(state, state.Bstack);
                         state.Bstack.PushSize(state.CaptureChange);
+                        state.Bstack.PushSize(groupReturnCallKey);
                         state.Bstack.PushNode(groupReturnNode);
                         state.Bstack.PushUInt8((byte)Opcode.GroupReturn);
 
@@ -6159,7 +6240,8 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change return_node GROUP_RETURN
+                     * bstack: callee_groups callee_repeats capture_change call_key return_node
+                     *         GROUP_RETURN
                      *
                      * else:
                      *
@@ -7790,6 +7872,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
+                    CloseCallsAbove(state);
 
                     if (!state.Bstack.PopSize(out long atomicCaptureChange))
                     {
@@ -7853,6 +7936,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)condSstackCount;
+                    CloseCallsAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
                     {
@@ -8059,8 +8143,11 @@ internal static class Matcher
                      * bstack: -
                      */
 
+                    // The call is no longer open: backtracking past it means it never happened.
+                    PopOpenCall(state);
+
                     // The return node is dropped rather than popped: backtracking past the call
-                    // means the call never happened, so there is nowhere to return to.
+                    // means there is nowhere to return to.
                     if (
                         !state.Sstack.DropSize()
                         || !state.Sstack.PopSize(out long groupCallCaptureChange)
@@ -8081,7 +8168,7 @@ internal static class Matcher
                      *
                      * sstack: -
                      *
-                     * bstack: callee_groups callee_repeats capture_change return_node
+                     * bstack: callee_groups callee_repeats capture_change call_key return_node
                      *
                      * else:
                      *
@@ -8097,6 +8184,13 @@ internal static class Matcher
 
                     if (groupReturnBackNode is not null)
                     {
+                        // Backtracking into the call re-opens it, so its key comes back off the
+                        // backtracking stack.
+                        if (!state.Bstack.PopSize(out long groupReturnBackKey))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
                         // For the caller. The forward arm's exchange, run the other way round: the
                         // caller's state goes back on the saved stack and the callee's comes off
                         // the backtracking stack, so the callee resumes inside the call.
@@ -8104,6 +8198,10 @@ internal static class Matcher
                         PushRepeats(state, state.Sstack);
                         state.Sstack.PushSize(state.CaptureChange);
                         state.Sstack.PushNode(groupReturnBackNode);
+
+                        // The frame is back, so the call is open again and ends where it now ends.
+                        state.ActiveCalls.Add(groupReturnBackKey);
+                        state.OpenCalls.Add((groupReturnBackKey, state.Sstack.Count));
 
                         /* sstack: caller_groups caller_repeats capture_change return_node
                          *
@@ -8765,6 +8863,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)lookSstackCount;
+                    CloseCallsAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
                     {

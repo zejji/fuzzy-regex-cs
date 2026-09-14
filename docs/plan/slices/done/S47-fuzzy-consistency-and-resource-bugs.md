@@ -42,11 +42,13 @@ code, so research is the first half of the slice.
 - [x] Entry 11's invariant decided from the definition, fixed, pinned as a property. **Decided and
       pinned; fixed on two of its four mechanisms** - see sitting 1's note. **The oracle now accounts
       for both of the fixed ones and the default wave is GREEN at three seeds** - sitting 2.
-- [ ] Entry 14 characterised, bounded or fixed, pinned; exclusion lifted. **Characterised, bounded,
-      pinned and its fix NAMED by a second engine; the exclusion is NOT lifted** - sitting 2.
-- [ ] Ratchet GREEN, blind review (hunt: the invariant met by trimming the list rather than
+- [x] Entry 14 characterised, bounded or fixed, pinned; exclusion lifted. **FIXED in sitting 3** -
+      PCRE2's positional guard, failing the path rather than the match; the bound stays as the
+      backstop with a test of its own; the exclusion is lifted and paid for itself on its first run.
+- [x] Ratchet GREEN, blind review (hunt: the invariant met by trimming the list rather than
       recording correctly; a bound that turns a finite pattern into an exception), commit.
-      **Sittings 1 and 2 each did all three; the box closes when the slice does.**
+      **All three sittings did all three. Sitting 3's pass found a real defect in the guard and it
+      is fixed; a SECOND pass over that fix is owed and was not run - see the closing notes.**
 
 ## Checkpoint, sitting 1 (2026-09-14)
 
@@ -192,3 +194,98 @@ second pass was needed: nothing changed after the review.**
 changed, and the instrument for the two new entries is the reviewer's 17-row corruption batch, which
 is a negative control by another name - it demonstrates the predicates failing on wrong answers
 rather than asserting that they would.
+
+## Closing notes, sitting 3 (2026-09-14)
+
+**Entry 14 is fixed, the exclusion is lifted, and the slice closes.** PCRE2's positional recursion
+guard is ported: a call that would re-enter call-ref index `i` at text position `p` while a call of
+`i` at `p` is already open fails that path. `MatchState.ActiveCalls` is the membership set,
+`MatchState.OpenCalls` the same calls as a stack with the sstack depth each frame ends at, and
+`Matcher.CloseCallsAbove` is called after each of the six sites that restore a saved
+`state.Sstack.Count`.
+
+*The one deliberate difference from PCRE2, which is the whole design judgement.* PCRE2 fails the
+MATCH (`PCRE2_ERROR_RECURSELOOP`); this fails the PATH. Refusing one infinite path cannot cost an
+answer another path reaches, and it demonstrably keeps answers PCRE2 throws away:
+`(?P<g1>(?:ab)?(?&g1)?)` over `'abab'` is an error there and (0, 4) here, and `(?P<g>(?&g)a|b)` over
+`'ba'` gets left recursion's one-step unrolling, (0, 2), rather than nothing. Every shape the ledger
+table predicted a blowup for now answers what its non-vanishing sibling answers - (0, 4) at two atoms,
+(0, 6) at three - and the degenerate `(?R)` rows answer `no match`, which is right: a pattern whose
+only content is a call to itself has an empty language.
+
+*The 1GB bound stays and gained its own test.* The guard bounds DEPTH, not BRANCHING, so
+`ByteStack.Grow` is still the backstop - reachable by `(?P<g1>\p{L}*)+?(?:ab){e<=1}` over `'bb.a\r.'`,
+which holds no group call at all. Without that test nothing in the suite would reach that path any
+more, which is a coverage loss the removal of the three blowup assertions would otherwise have caused.
+
+*The exclusion.* `INTERACTION_FUZZY_WRAPPERS` gained `call`, so the generator draws a self-recursive
+call round a fuzzy section again: 14 rows of 600 at seed 1, three of them `resource`. It paid for
+itself at once - row 72179 of `interactions` at seed 20260914 is a drawn self-recursive call this port
+used to exhaust its stack on, and upstream's `no match` there is its REQUIRED-STRING PREFILTER
+refusing the subject rather than an answer from its engine (put the required character in and upstream
+raises MemoryError). Pinned as
+`FuzzyRecursionTests.A_drawn_wave_row_upstream_only_escapes_through_its_prefilter`. All the generator's
+measured figures were re-taken, including both ablations, as its docstring requires.
+
+*Proof the guard costs nothing upstream can answer.* The three saved 6000-row gate waves (126,000 rows
+a seed) were consumed again by the PRE-GUARD engine, from a stash, and the result is identical
+row-for-row at seeds 7 and 4242 and one row WORSE without the guard at seed 20260914. The 19 rows the
+gate still reddens on are therefore HEAD's own - the 14 STATE already named plus 5 more the RNG shift
+exposed, none holding a group call. The gate now takes about 6.5 minutes rather than about one,
+because upstream spends ~1s on each `resource` row.
+
+*Review.* **One blind pass over the whole diff, and it raised two findings, both reproduced and both
+fixed - the first a real defect in the guard.** `(*PRUNE)` and `(*SKIP)` truncate the backtracking
+stack and leave the saved stack alone, so an open call's `GROUP_CALL` entry is discarded while the
+call is still open; an enclosing atomic group, lookaround or conditional then restores
+`Sstack.Count` and throws the orphan frame away, so NEITHER backtrack arm ever runs and the key stayed
+in the set for the rest of the attempt, refusing the next legitimate call of that group at that
+position. Reproduced with
+`regex.search(r'(?>(?&g))?(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))', 'aa')` - upstream
+(0, 2) in 0.00s, this port `no match` - and it is not a shape upstream blows up on, so it was a real
+answer lost. That is what `OpenCalls`, the recorded sstack depth and `CloseCallsAbove` exist for; the
+first draft's claim that the `start_match` clear covered the verb cuts was the second finding, and it
+was simply false. Pinned by
+`GroupCallTests.A_verb_that_cuts_the_backtracking_inside_a_call_does_not_leave_the_call_open`, whose
+first row is the no-wrapper control. The reviewer also verified the two stacks' push and pop orders
+mirror, that the key cannot collide for a reachable position, and that no new test is unfalsifiable.
+
+**A SECOND BLIND PASS OVER THE FIX IS OWED AND WAS NOT RUN** - the orchestrator's shutdown landed
+about fifteen minutes after the fix went green. `OpenCalls`, `PopOpenCall`, `CloseCallsAbove`, the six
+call sites, the reverted sstack slot and the new test are unreviewed code. Control C below is the only
+instrument that has been pointed at them. This is the first thing the next session should do.
+
+*Controls.* All three re-run against the code being committed, at two seeds each.
+
+> **Control A, the guard made positionless**: in `Matcher.cs`, `GROUP_CALL` forward, change
+> `long groupCallKey = ActiveCallKey(groupCallIndex, state.TextPos);` to
+> `long groupCallKey = ActiveCallKey(groupCallIndex, 0);`.
+> Wave: `pwsh -File tools/run-oracle.ps1 -Generator recursion,interactions,fuzzy -Seeds 7,31337 -Count 6000`.
+> Result: 8 diverging of 18,000 at seed 7 and 8 at seed 31337, against a baseline of 4 and 3 - so
+> +4 and +5, every one of them a row holding a self-recursive call. Suite: 8 failures of 5,953.
+
+> **Control B, the guard removed**: in the same place, replace
+> `if (!state.ActiveCalls.Add(groupCallKey))\n{\n    goto backtrack;\n}` with
+> `state.ActiveCalls.Add(groupCallKey);`.
+> Same wave: 4 and 3, IDENTICAL to the baseline - **the wave cannot see this mutation at these
+> seeds**, and that is the honest reading. What sees it is the suite (5 failures of 5,953) and the
+> 6000-row three-seed gate, where the pre-guard engine diverges on one row more at seed 20260914
+> (row 72179) and on exactly the same rows at seeds 7 and 4242.
+
+> **Control C, the depth bookkeeping made useless** - the control for the blind review's finding: in
+> `Matcher.cs`, `GROUP_CALL` forward, change
+> `state.OpenCalls.Add((groupCallKey, state.Sstack.Count));` to
+> `state.OpenCalls.Add((groupCallKey, 0));`, so `CloseCallsAbove` never pops.
+> Wave: `pwsh -File tools/run-oracle.ps1 -Generator recursion,interactions,fuzzy,verbs -Seeds 7,31337 -Count 6000`.
+> Result: 4 and 4 of 24,000, identical to the baseline - **the wave cannot see this one either**.
+> Suite: exactly one failure,
+> `A_verb_that_cuts_the_backtracking_inside_a_call_does_not_leave_the_call_open`.
+
+**Two of the three controls are invisible to the wave, and that is a finding about the generator
+rather than a tick.** No generator draws a backtracking verb inside a CALLED group inside an atomic
+group, a lookaround or a conditional, which is the shape the leak needs; `interactions` composes
+verbs and calls but never nests them that way. S52 (oracle hardening) should widen `called-group` or
+`verb-alt` to reach it. Until then the suite is the only instrument that can see a regression in the
+guard's bookkeeping.
+
+*Suite 5,953, ratchet GREEN, default wave GREEN at three seeds.*

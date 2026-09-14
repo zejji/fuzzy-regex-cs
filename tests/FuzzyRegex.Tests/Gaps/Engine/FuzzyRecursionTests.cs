@@ -4,10 +4,19 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
 /// <summary>
 /// Recursion and group calls composed with a fuzzy section - which of the shapes terminate, which
-/// exhaust their budget, and that the port fails the unbounded ones SAFELY rather than by running
-/// the machine out of memory.
+/// ones upstream cannot terminate at all, and what this port answers instead.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Read this file's history first: the rule below describes UPSTREAM, and since S47 it no longer
+/// describes this port.</b> Ledger entry 14's guard, taken from PCRE2's
+/// <c>PCRE2_ERROR_RECURSELOOP</c>, refuses a call that re-enters a group at a text position where a
+/// call of that group is already open, which is exactly the condition under which no progress is
+/// possible. Every shape the rule predicts a blowup for is now answered here in microseconds, and
+/// the answer is the one the non-vanishing sibling gives. Upstream still raises <c>MemoryError</c>
+/// on all of them, so these rows are a deliberate divergence - an inherited bug fixed here, which
+/// is the third of design spec amendment 16's four outcomes.
+/// </para>
 /// <para>
 /// <b>The rule, measured rather than reasoned.</b> A group that calls ITSELF makes progress only if
 /// its body must consume something. A fuzzy section can match the empty string whenever its budget
@@ -28,16 +37,16 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </para>
 /// <para>
 /// It is upstream's 551/554 resource-blowup family, already on Phase 6's triage list, reached by a
-/// shape no earlier wave could draw. This port INHERITS it - which is the right outcome for a
-/// faithful port - but fails safely: a bounded backtracking stack with a stated limit, rather than
-/// an allocator that keeps asking. Re-runnable as
+/// shape no earlier wave could draw. Re-runnable as
 /// <c>python tools/probes/upstream-fuzzy-recursion-blowup.py</c>, whose 23 rows are the evidence
 /// for the rule and for the two exceptions to it below.
 /// </para>
 /// <para>
-/// The generator does not draw a self-recursive call round a fuzzy section at all, and a guard that
-/// forces progress was tried and is NOT sufficient - see <c>INTERACTION_FUZZY_WRAPPERS</c> in
-/// <c>tools/record-oracle.py</c>. So this file is the whole of the recursion-times-fuzzy coverage.
+/// <b>The bound is still there and is still the backstop</b> - <c>ByteStack.Grow</c> raises
+/// <c>InvalidOperationException: the regular expression engine's backtracking stack exceeded its 1GB
+/// limit</c> - because the guard bounds the DEPTH of a recursion and does nothing about the
+/// BRANCHING a fuzzy section offers at every position of every level. It is no longer reachable by
+/// any shape in this file, which is the point.
 /// </para>
 /// </remarks>
 public sealed class FuzzyRecursionTests
@@ -89,36 +98,28 @@ public sealed class FuzzyRecursionTests
     }
 
     [Test]
-    public void A_self_recursive_call_whose_section_can_vanish_fails_with_a_stated_limit()
+    public void A_self_recursive_call_whose_section_can_vanish_answers_the_same_as_one_that_cannot()
     {
-        // The three of the eleven that DO blow up, where two deletions empty a two-atom section -
-        // `{2i+1d+1s<=2}` prices a deletion at 1 against a budget of 2, so it reaches two as well:
+        // S47's guard closes this. A section that CAN vanish leaves the call re-entering the very
+        // position it was called at, which is the condition PCRE2 names
+        // `PCRE2_ERROR_RECURSELOOP` - and refusing that one path is enough: the section's
+        // non-vanishing alternatives are still there, so all four of these now answer exactly what
+        // the eight constraints above answer, (0, 4), instead of filling a gigabyte.
+        //
+        // Upstream still raises MemoryError on all four (0.76s to 0.79s, quoted below), so this is
+        // a deliberate divergence from upstream and an inherited bug fixed here - ledger entry 14.
         //   (?P<g1>(?:Ab){e<=2}(?&g1)?)        over 'AbAb' -> MemoryError in 0.79s
         //   (?P<g1>(?:Ab){1<=e<=2}(?&g1)?)     over 'AbAb' -> MemoryError in 0.78s
         //   (?P<g1>(?:Ab){2i+1d+1s<=2}(?&g1)?) over 'AbAb' -> MemoryError in 0.78s
         //   (?P<g1>(?:Ab){d<=2}(?&g1)?)        over 'AbAb' -> MemoryError in 0.76s   (not drawn)
-        //
-        // This port inherits the non-termination and bounds it. What is asserted is the BOUND, not
-        // a match: that the engine gives up with an exception naming its own limit, rather than
-        // taking the machine down or running past the deadline.
-        //
-        // THE EXCEPTION IS NAMED, AND THAT IS THE POINT OF THE ASSERTION (S47, sitting 2). It used
-        // to be `Throw<Exception>` with a non-empty message, which a `RegexMatchTimeoutException`
-        // from the 30-second budget above satisfies just as well - so the test could not tell the
-        // stack limit from the clock, and a regression that made the engine merely SLOW would have
-        // passed it. Measured 2026-09-14: all four raise `InvalidOperationException` carrying
-        // ByteStack's own message, in 0.63s to 1.52s against a 30-second deadline.
         foreach (string constraint in new[] { "{e<=2}", "{1<=e<=2}", "{2i+1d+1s<=2}", "{d<=2}" })
         {
-            Action search = () =>
-                new FuzzyRegex($"(?P<g1>(?:Ab){constraint}(?&g1)?)", FuzzyRegexOptions.None, _budget).Match("AbAb");
+            Match m = new FuzzyRegex($"(?P<g1>(?:Ab){constraint}(?&g1)?)", FuzzyRegexOptions.None, _budget).Match(
+                "AbAb"
+            );
 
-            search
-                .Should()
-                .Throw<InvalidOperationException>(
-                    $"'(?:Ab){constraint}' can match the empty string, so the recursion never progresses"
-                )
-                .WithMessage("*backtracking stack exceeded its 1GB limit*");
+            m.Success.Should().BeTrue($"'(?:Ab){constraint}' still has a non-vanishing alternative");
+            (m.Index, m.Length).Should().Be((0, 4));
         }
     }
 
@@ -136,23 +137,23 @@ public sealed class FuzzyRecursionTests
         safe.Success.Should().BeTrue();
         (safe.Index, safe.Length).Should().Be((0, 6));
 
-        Action blows = static () =>
-            new FuzzyRegex("(?P<g1>(?:Abc){e<=3}(?&g1)?)", FuzzyRegexOptions.None, _budget).Match("AbcAbc");
+        // `{e<=3}` is the constraint that empties a three-atom section, so it is the one that used
+        // to recurse without progressing - and S47's guard cuts it at the re-entered position, so
+        // it now answers what its safe sibling answers. Upstream still raises MemoryError in 0.80s.
+        Match vanishing = new FuzzyRegex("(?P<g1>(?:Abc){e<=3}(?&g1)?)", FuzzyRegexOptions.None, _budget).Match(
+            "AbcAbc"
+        );
 
-        // The named exception, for the reason the test above states: a bare `Throw<Exception>` also
-        // passes on the deadline, so it cannot tell the bound from the clock. 1.10s of 30, 2026-09-14.
-        blows
-            .Should()
-            .Throw<InvalidOperationException>("three deletions empty a three-atom section")
-            .WithMessage("*backtracking stack exceeded its 1GB limit*");
+        vanishing.Success.Should().BeTrue("three deletions empty a three-atom section");
+        (vanishing.Index, vanishing.Length).Should().Be((0, 6));
     }
 
     [Test]
     public void Whole_pattern_recursion_inside_a_fuzzy_section_is_the_degenerate_case_of_the_rule()
     {
         // A section whose only content is the recursion matches empty at ANY budget, so every one
-        // of these blows up - with a base case, without one, and for an error kind that cannot
-        // delete anything:
+        // of these blows up UPSTREAM - with a base case, without one, and for an error kind that
+        // cannot delete anything. Here they are all cut at the position the call re-enters:
         //   (?:(?R)){e<=1}       over 'ab'   -> MemoryError in 0.48s
         //   (?:a(?R)?b){e<=1}    over 'aabb' -> MemoryError in 0.87s
         //   a(?:(?0)){e<=1}b     over 'aabb' -> MemoryError in 0.96s
@@ -167,17 +168,94 @@ public sealed class FuzzyRecursionTests
             ("(?=(?:(?R)){e<=1})a", "ab"),
         ];
 
-        foreach ((string pattern, string subject) in cases)
-        {
-            Action search = () => new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
+        // What each one answers once the re-entry is refused, measured 2026-09-14 and reasoned
+        // about rather than merely recorded, because there is no upstream answer to check against:
+        //
+        //   (?:(?R)){e<=1}       'ab'   -> None    the pattern's only content is a call to itself,
+        //   (?:(?R)){s<=1}       'ab'   -> None    so its language is empty however the budget is
+        //                                          spent - a section of one un-deletable item
+        //   a(?:(?0)){e<=1}b     'aabb' -> None    a REQUIRED recursion with no base case: every
+        //                                          level demands another, so nothing terminates it
+        //   (?=(?:(?R)){e<=1})a  'ab'   -> None    the first row inside a lookahead, so the
+        //                                          lookahead cannot succeed either
+        //   (?:a(?R)?b){e<=1}    'aabb' -> (0, 4)  the one with a base case, and it answers exactly
+        //                                          what the same recursion without the section does
+        (int Index, int Length)?[] expected = [null, (0, 4), null, null, null];
 
-            // Named, for the reason the two tests above state. Measured 2026-09-14: 0.25s to 0.81s
-            // against a 30-second deadline, so it is the stack limit that fires and not the clock.
-            search
-                .Should()
-                .Throw<InvalidOperationException>($"'{pattern}' recurses without consuming")
-                .WithMessage("*backtracking stack exceeded its 1GB limit*");
+        foreach (((string pattern, string subject), (int Index, int Length)? want) in cases.Zip(expected))
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
+
+            m.Success.Should().Be(want is not null, pattern);
+
+            if (want is not null)
+            {
+                (m.Index, m.Length).Should().Be(want.Value, pattern);
+            }
         }
+    }
+
+    [Test]
+    public void A_drawn_wave_row_upstream_only_escapes_through_its_prefilter()
+    {
+        // THE ROW THAT PAID FOR THE GUARD, and the only one in this file that is not hand-built.
+        // Row 72179 of the 6000-row `interactions` wave at seed 20260914, minimised from
+        // `(?b)\b(?P<g2>(?:(\p{Lu})(?:[[:digit:]]?){s<=1,i<=1,d<=1}){s<=1,i<=1,d<=1}(?P>g2)?)([a]+)`
+        // over 'B'. Before the guard this port exhausted its backtracking stack on it and upstream
+        // answered `no match`, so it was a live divergence; with the guard the two agree.
+        //
+        // Upstream's answer is its REQUIRED-STRING PREFILTER and not an answer from its engine,
+        // which is worth knowing before anyone reads the agreement as upstream getting this right.
+        // Put the required 'a' into the subject and upstream blows up like every other row here
+        // (`python tools/probes/upstream-same-position-reentry.py`, regex 2026.9.10, 2026-09-14):
+        //   fullmatch 'B'  -> no match     in 0.00s   <- no 'a' anywhere, so the engine never runs
+        //   fullmatch 'Ba' -> MemoryError  in 0.93s
+        //   search    'Ba' -> MemoryError  in 0.94s
+        // This port has no such prefilter - it is Phase 7's - so it reaches the engine on all three
+        // and the guard is what carries it.
+        var re = new FuzzyRegex(@"(?P<g2>(?:[A-Z]\d?){s<=1,i<=1,d<=1}(?P>g2)?)a", FuzzyRegexOptions.None, _budget);
+
+        re.FullMatch("B").Success.Should().BeFalse("the wave row, and upstream agrees");
+
+        Match full = re.FullMatch("Ba");
+
+        full.Success.Should().BeTrue();
+        (full.Index, full.Length).Should().Be((0, 2));
+
+        Match searched = re.Match("Ba");
+
+        searched.Success.Should().BeTrue();
+        (searched.Index, searched.Length).Should().Be((0, 2));
+    }
+
+    [Test]
+    public void The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see()
+    {
+        // The guard bounds the DEPTH of a recursion; nothing bounds the BRANCHING a fuzzy section
+        // offers at every position of every level, so `ByteStack.Grow`'s limit is still the
+        // backstop and still has to be reachable. Without this test nothing in the suite reaches
+        // it, because S47's guard answers every shape in this file.
+        //
+        // The row is the one `record-oracle.py` quotes for its own exclusion, and it holds no group
+        // call at all - which is why the guard cannot help it. Upstream raises MemoryError in 1.75s
+        // to 1.78s on the first three, with and without a ranking flag, and answers the last two at
+        // once (measured 2026-09-13, quoted in `_generate_interactions`):
+        //   (?b)(?P<g1>\p{L}*)+?(?:ab){e<=1}   MemoryError in 1.78s
+        //       (?P<g1>\p{L}+)+?(?:ab){e<=1}   (0, 2)      <- body must consume
+        Action blows = static () =>
+            new FuzzyRegex(@"(?P<g1>\p{L}*)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _budget).Match("bb.a\r.");
+
+        blows
+            .Should()
+            .Throw<InvalidOperationException>("a fuzzy section under a lazy repeat of an empty-matching body")
+            .WithMessage("*backtracking stack exceeded its 1GB limit*");
+
+        // The control the record-oracle note carries: make the body consume and the same row
+        // answers at once, on both engines.
+        Match m = new FuzzyRegex(@"(?P<g1>\p{L}+)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _budget).Match("bb.a\r.");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
     }
 
     [Test]

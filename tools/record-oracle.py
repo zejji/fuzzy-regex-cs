@@ -2832,34 +2832,31 @@ INTERACTION_FUZZY_TESTS = (r"\w", r"\W", r"\d", r"\s", r"\S", "[a-z]", "[^a-z]",
 # tools/probes/upstream-fuzzy-recursion-blowup.py raise MemoryError in 0.48s to 0.97s, where the
 # identical recursion WITHOUT a fuzzy section answers (0, 4) in 0.00s.
 #
-# A SELF-RECURSIVE CALL IS NOT IN THIS LIST EITHER, and the reason is worth stating because a
-# cheap-looking fix for it was tried here and measured to fail. Forcing an atom that must consume
-# OUTSIDE the section - `(?P<g1>A(?:Ab){C}(?&g1)?)` - makes the recursion provably progress, and it
-# is safe across every constraint this generator can draw and both body shapes tried
-# (.scratch/probe-selfcall-guard.py, all 0.00s). It is still not enough on real drawn rows: with the
-# guard in place, a 600-row wave at seed 1 raised MemoryError on four of them, every one a guarded
-# self-recursive call with a fuzzy section inside. Progress bounds the DEPTH; it does nothing about
-# the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute choice at every
-# position of every level. So the shape is out, and recursion still composes with fuzzy in this
-# generator through the 'called-group' piece - a call to a group that has already closed, which is
-# not recursion and is measured safe.
+# A SELF-RECURSIVE CALL IS BACK IN THIS LIST SINCE S47 (2026-09-14), and the history matters because
+# two earlier attempts to keep it are what the 'call' arm has to beat. Forcing an atom that must
+# consume OUTSIDE the section - `(?P<g1>A(?:Ab){C}(?&g1)?)` - makes the recursion provably progress
+# and is safe across every constraint this generator can draw (.scratch/probe-selfcall-guard.py, all
+# 0.00s), and it was still not enough on real drawn rows: a 600-row wave at seed 1 raised MemoryError
+# on four of them. Progress bounds the DEPTH; it does nothing about the BRANCHING, and a fuzzy
+# section offers a fresh insert/delete/substitute choice at every position of every level. So the
+# shape was drawn only through the 'called-group' piece - a call to a group that has already closed,
+# which is not recursion and is measured safe.
 #
-# This port reproduces the blowup faithfully and safely, raising `InvalidOperationException: the
-# regular expression engine's backtracking stack exceeded its 1GB limit` in 0.24s to 0.92s on all
-# six `(?R)` shapes where upstream raises MemoryError. It is an inherited upstream bug of the
-# 551/554 resource-blowup family already on Phase 6's triage list, pinned in
-# Gaps/Engine/FuzzyRecursionTests.cs and entered on the ledger.
+# What changed is the PORT, not the generator's arithmetic. S47 ported PCRE2's positional guard
+# (`PCRE2_ERROR_RECURSELOOP`, "nested recursion at the same subject position",
+# tools/probes/pcre2-bounds-an-unbounded-recursion.py), so a call that re-enters a group where a call
+# of it is already open now fails that path in microseconds instead of filling a gigabyte. Both of
+# the old objections go with it: the cost objection, because the port no longer spends a second and a
+# gigabyte on a row upstream cannot answer, and the blindness objection, because the rows upstream
+# CAN answer - the recursions that progress - are exactly the ones the guard must not touch, and
+# drawing them is the only instrument that can show it does not. Upstream still raises MemoryError on
+# the rest; the recorder writes that down as a `resource` outcome and the consumer skips it (see
+# `exhausted` above), so those rows cost a wave nothing but the draw.
 #
-# THE LAST SENTENCE OF THIS NOTE USED TO SAY the shape was out because upstream's MemoryError is an
-# ENVIRONMENT_FAILURE that aborts the recorder by design. S43 changed that - a MemoryError is now
-# recorded as a `resource` outcome and the consumer skips the row (see `exhausted` above) - so the
-# recorder is no longer the reason. What keeps the shape out now is the BRANCHING measurement two
-# paragraphs up, plus the cost: a row upstream cannot answer is a row this port spends a whole
-# second and a gigabyte on before its own bound fires, and a wave carrying many of them buys no
-# ground truth for it. S47 sitting 2 measured PCRE2's answer to the same mechanism
-# (tools/probes/pcre2-bounds-an-unbounded-recursion.py) and ledger entry 14 carries the decision;
-# the shape comes back when the guard that decision names lands.
-INTERACTION_FUZZY_WRAPPERS = ("look", "atomic", "cond", "verb")
+# The port's own blowups are a deliberate divergence now rather than an inherited bug, pinned in
+# Gaps/Engine/FuzzyRecursionTests.cs and carried by ledger entry 14. The 1GB bound is still the
+# backstop for the branching the guard cannot see.
+INTERACTION_FUZZY_WRAPPERS = ("look", "atomic", "cond", "verb", "call")
 
 # How often a composed section carries a `{...:test}`, nests a second section with a different
 # constraint, or holds a capture group. The capture group is the one a substitution template can
@@ -3051,10 +3048,11 @@ def _interaction_pattern(
             # Half the time the class is built out of characters the subject actually holds, rather
             # than drawn from the table. A reference can only match where the subject repeats what
             # the group captured, and a class drawn independently often cannot capture anything at
-            # all: measured over 600 rows of seed 1 (`.scratch/ablate.py` in the S26 session), 34 of
-            # 387 reference rows produced an answer with the table alone and 50 of 390 with this. It
-            # is still the cell this generator exists for - a class, in a quantified capture group,
-            # referenced back - only aimed at a subject that can satisfy it.
+            # all: re-measured over 600 rows of seed 1 at S47 with the threshold on this line set to
+            # 0.0, which ablates the class without moving the RNG stream, 49 of 326 reference rows
+            # produced an answer with the table alone and 58 of 345 with this (135 answers against
+            # 142 overall). It is still the cell this generator exists for - a class, in a quantified
+            # capture group, referenced back - only aimed at a subject that can satisfy it.
             body = _interaction_subject_class(rng, subject) if rng.random() < 0.5 else rng.choice(atoms)
             body += _quantifier(rng) if rng.random() < 0.5 else ""
             opened = group(body) + (_quantifier(rng) if rng.random() < 0.4 else "")
@@ -3121,6 +3119,14 @@ def _interaction_pattern(
                 pieces.append(rng.choice(LOOKAROUND_FORMS) + section + ")")
             elif wrapper == "atomic":
                 pieces.append("(?>" + section + ")")
+            elif wrapper == "call":
+                # Ledger entry 14's shape: a group that calls ITSELF round a fuzzy section. The name
+                # has to be known before the body that uses it is built, so the next counter value is
+                # spelled out here rather than read back out of `names` afterwards - `group(...,
+                # named=True)` assigns this same name.
+                self_name = f"g{counter[0] + 1}"
+                self_call = rng.choice((f"(?&{self_name})", f"(?P>{self_name})"))
+                pieces.append(group(section + self_call + "?", named=True))
             elif wrapper == "cond":
                 head = f"(?({rng.choice(defined)})"
                 pieces.append(f"{head}{section}|{rng.choice(atoms)})")
@@ -3165,28 +3171,32 @@ def _generate_interactions(rng: random.Random, count: int):
     `(?i)`, `(?fi)`, `(?r)`, `partial=True`, the operation and the substitution template at once.
     One shape is deliberately NOT drawn, and it is an upstream bug this generator found rather than
     an omission: a self-recursive call round a fuzzy section (see INTERACTION_FUZZY_WRAPPERS).
+    **S47 lifted that exclusion on 2026-09-14**, once the port gained PCRE2's positional recursion
+    guard, and the widening paid for itself on its first run: row 72179 at seed 20260914 is a drawn
+    self-recursive call this port used to exhaust its backtracking stack on.
     POSIX beside a fuzzy section was the other, suppressed from S43 until S46 sitting 2 lifted the
     suppression - the crash is still real, but the recorder no longer reads the attribute that
     triggers it, so the cell is drawn again and compared on everything but the change positions.
     See the POSIX draw below and `_describe_match`.
 
     Measured by `python tools/record-oracle.py --generator interactions --count 600 --seed 1`, after
-    the last change to this generator: 138 rows produce an answer - a match, a non-empty match list,
-    a split with more than one part or a substitution that replaced something - 455 produce none and
-    7 are rejected by upstream. 306 rows carry IGNORECASE, 158 FULLCASE, 294 MULTILINE, 223
-    VERSION1, 67 ASCII and 245 are reversed; 88 are POSIX (37 by flag, 51 as `(?p)`), 57 ask for a
-    partial match, and 204 have an astral subject. 337 hold a backreference, 213 a named group, 102 a
-    conditional, 99 a lookaround, 57 a group call, 65 a backtracking verb and 18 a `\\K`.
-    183 hold a FUZZY SECTION - 70 of those a second section nested inside it with a different
-    constraint, 81 a `{...:test}` and 35 a `\\L<name>` named list - and 49 carry `(?e)`, 56 `(?b)`.
-    Every one of the eight operations is recorded exactly 75 times, because the operation is cycled
-    by row index rather than drawn.
+    the last change to this generator: 142 rows produce an answer - a match, a non-empty match list,
+    a split with more than one part or a substitution that replaced something - 450 produce none, 5
+    are rejected by upstream and 3 are rows upstream cannot answer at all (`resource`). 326 rows
+    carry IGNORECASE, 149 FULLCASE, 310 MULTILINE, 207 VERSION1, 59 ASCII and 255 are reversed; 107
+    are POSIX (46 by flag, 61 as `(?p)`), 66 ask for a partial match, and 213 have an astral subject.
+    345 hold a backreference, 218 a named group, 109 a conditional, 103 a lookaround, 76 a group call
+    - 14 of those a SELF-RECURSIVE one, the cell S47 lifted the exclusion on - 60 a backtracking verb
+    and 21 a `\\K`. 182 hold a FUZZY SECTION - 67 of those a second section nested inside it with a
+    different constraint, 58 a `{...:test}` and 34 a `\\L<name>` named list - and 46 carry `(?e)`, 50
+    `(?b)`. Every one of the eight operations is recorded exactly 75 times, because the operation is
+    cycled by row index rather than drawn.
 
     **The fuzzy sections earn their place rather than decorating the pattern, and that is measured
     too**, because a composed generator whose sections never actually spend an error would look
-    identical to this one from the outside. Over 2000 rows at seed 7: 699 rows carry a section, 156
-    of them produce a match, and 103 of those 156 charge at least one error - a match no exact
-    engine could have returned. The remaining 53 match at zero cost, which is the row that says the
+    identical to this one from the outside. Over 2000 rows at seed 7: 718 rows carry a section, 127
+    of them produce a match, and 78 of those 127 charge at least one error - a match no exact
+    engine could have returned. The remaining 49 match at zero cost, which is the row that says the
     engine does not spend an error it did not need.
 
     The answer rate is deliberately in line with `classes` and `backrefs` rather than higher: a
@@ -3208,10 +3218,11 @@ def _generate_interactions(rng: random.Random, count: int):
             # Built from doubled characters, the trick `backrefs` and `case-folding` both use: a
             # reference cannot match unless the subject repeats something, and a reference is on
             # nearly two thirds of these rows. Worth less here than there, and the figure is
-            # recorded rather than assumed - measured over 600 rows of seed 1, 43 of 371 reference
-            # rows produced an answer without it and 50 of 390 with it (114 answers against 111
-            # overall). Kept because it is a gain on the cell this generator exists for, not because
-            # it is a large one.
+            # recorded rather than assumed - re-measured over 600 rows of seed 1 at S47 with
+            # INTERACTION_DOUBLED_SUBJECT_PROBABILITY set to 0.0, which ablates the trick without
+            # moving the RNG stream, 35 of 319 reference rows produced an answer without it and 58 of
+            # 345 with it (116 answers against 142 overall). Kept because it is a gain on the cell
+            # this generator exists for, and at this re-take a clear one.
             subject = ""
             while len(subject) < length:
                 subject += rng.choice(alphabet) * 2

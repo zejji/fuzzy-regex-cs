@@ -14,6 +14,12 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </remarks>
 public sealed class GroupCallTests
 {
+    /// <summary>
+    /// How long a recursion the guard is meant to cut short is allowed to take before the test
+    /// calls it a hang. Without the guard these shapes spend about a second filling a gigabyte.
+    /// </summary>
+    private static readonly TimeSpan _budget = TimeSpan.FromSeconds(30);
+
     [Test]
     public void A_call_leaves_its_capture_behind_but_restores_the_callers_current_span()
     {
@@ -517,5 +523,124 @@ public sealed class GroupCallTests
             .Match(astral, partial: true)
             .PartialMatch.Should()
             .BeTrue();
+    }
+
+    [Test]
+    public void A_call_re_entered_at_the_position_it_is_already_at_fails_instead_of_recursing_for_ever()
+    {
+        // S47's guard, and the shapes are PCRE2's own - `tools/probes/pcre2-bounds-an-unbounded-
+        // recursion.py`, pcre2 0.7.1 over libpcre2 10.47, which answers every one of them with
+        // `PCRE2_ERROR_RECURSELOOP`, "nested recursion at the same subject position", in
+        // microseconds. Upstream answers every one of them with `MemoryError` in 0.62s to 1.06s
+        // (`python tools/probes/upstream-same-position-reentry.py`, regex 2026.9.10, 2026-09-14),
+        // so there is no upstream answer to diverge from: the pattern has no match it can reach.
+        //
+        // The port's guard FAILS THE PATH rather than raising PCRE2's error, which is the one
+        // deliberate difference. A call that re-enters group g at text position p while a call of
+        // g at p is still open cannot consume anything before it gets back to where it started, so
+        // that path is infinite and no answer is lost by refusing it - but the OTHER paths are not
+        // lost either, and every shape below reaches its match through one of them. PCRE2 abandons
+        // the whole match instead, which is why `(?P<g1>(?:ab)?(?&g1)?)` is an error there and
+        // (0, 4) here.
+        (string Pattern, string Subject, int Index, int Length)[] answered =
+        [
+            (@"(?P<g1>(?:a?)(?&g1)?)", "aaaa", 0, 4),
+            (@"(?P<g1>(?:a*)(?&g1)?)", "aaaa", 0, 4),
+            (@"(?P<g1>(?:ab)?(?&g1)?)", "abab", 0, 4),
+        ];
+
+        foreach ((string pattern, string subject, int index, int length) in answered)
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
+
+            m.Success.Should().BeTrue(pattern);
+            (m.Index, m.Length).Should().Be((index, length), pattern);
+        }
+
+        // The degenerate one: a pattern whose only content is a call to itself has an empty
+        // language, so refusing the re-entry leaves nothing to match and the answer is no match.
+        new FuzzyRegex("(?:(?R))", FuzzyRegexOptions.None, _budget)
+            .Match("ab")
+            .Success.Should()
+            .BeFalse();
+
+        // The three shapes where a POSITIONAL guard and a progress proof could differ, which is the
+        // one thing about PCRE2's design that is not obviously right: left recursion, a lazy body
+        // that tries the empty branch first, and a call in both branches of an alternation. Each
+        // reaches its re-entry through a different route, and upstream MemoryErrors on all three.
+        //
+        // All three answer, and the first is the one worth reading twice: refusing the re-entry
+        // does NOT cost left recursion its match, it gives it the one-step unrolling the grammar
+        // means. `(?&g)` at 0 is allowed, because the top-level `g` is being matched where it was
+        // written rather than called and so has no open call; its own `(?&g)` at 0 is the one
+        // refused, which drops it to the `b` branch, and the outer `a` then matches.
+        (string Pattern, string Subject, int Index, int Length)[] ambiguous =
+        [
+            (@"(?P<g>(?&g)a|b)", "ba", 0, 2),
+            (@"(?P<g1>(?:ab)??(?&g1)?)", "abab", 0, 0),
+            (@"(?P<g1>x(?&g1)?|(?&g1)?y)", "xxy", 0, 3),
+        ];
+
+        foreach ((string pattern, string subject, int index, int length) in ambiguous)
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match(subject);
+
+            m.Success.Should().BeTrue(pattern);
+            (m.Index, m.Length).Should().Be((index, length), pattern);
+        }
+    }
+
+    [Test]
+    public void A_verb_that_cuts_the_backtracking_inside_a_call_does_not_leave_the_call_open()
+    {
+        // Found by S47's blind review, and the reason the guard's state rides the SSTACK rather
+        // than a clear at the start of each attempt. `(*PRUNE)` and `(*SKIP)` truncate the
+        // backtracking stack without touching the saved stack, so an open call's GROUP_CALL frame
+        // is discarded while its sstack frame survives; an enclosing atomic group, lookaround or
+        // conditional then restores `Sstack.Count` and throws the orphan away, so NEITHER backtrack
+        // arm runs. Anything the guard keyed on that call is then stale for the rest of the
+        // attempt, and the next legitimate call of the same group at the same position is refused.
+        //
+        // Upstream answers (0, 2) on all four in 0.00s (regex 2026.9.10, 2026-09-14):
+        //   regex.search(r'(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))', 'aa')
+        // The first row is the control - no wrapper, so nothing discards the frame - and it passed
+        // before the fix as well as after. The other three each wrap the leak site in one of the
+        // three constructs that restore `Sstack.Count`.
+        const string Body = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))";
+        const string SkipBody = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*SKIP)(?P=cap)))";
+
+        foreach (
+            string pattern in new[] { Body, "(?>(?&g))?" + Body, "(?:(?=(?&g))|)" + Body, "(?>(?&g))?" + SkipBody }
+        )
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match("aa");
+
+            m.Success.Should().BeTrue(pattern);
+            (m.Index, m.Length).Should().Be((0, 2), pattern);
+        }
+    }
+
+    [Test]
+    public void A_recursion_that_must_consume_is_left_alone_by_the_guard()
+    {
+        // The control that keeps the guard honest: these are the same three shapes with the body
+        // made to consume, so every level is at a NEW position and the guard can never fire.
+        // Upstream answers all three in 0.00s (`python .scratch/same-pos-reentry.py`, 2026-09-14):
+        //   (?:a(?R)?b)           over 'aabb' -> (0, 4)
+        //   (?P<g1>a(?&g1)?b)     over 'aabb' -> (0, 4), group 1 == 'aabb'
+        //   (?P<g1>(?:ab)(?&g1)?) over 'abab' -> (0, 4), group 1 == 'abab'
+        Match whole = new FuzzyRegex("(?:a(?R)?b)", FuzzyRegexOptions.None, _budget).Match("aabb");
+
+        (whole.Index, whole.Length).Should().Be((0, 4));
+
+        Match named = new FuzzyRegex("(?P<g1>a(?&g1)?b)", FuzzyRegexOptions.None, _budget).Match("aabb");
+
+        (named.Index, named.Length).Should().Be((0, 4));
+        named.Groups["g1"].Value.Should().Be("aabb");
+
+        Match pair = new FuzzyRegex("(?P<g1>(?:ab)(?&g1)?)", FuzzyRegexOptions.None, _budget).Match("abab");
+
+        (pair.Index, pair.Length).Should().Be((0, 4));
+        pair.Groups["g1"].Value.Should().Be("abab");
     }
 }

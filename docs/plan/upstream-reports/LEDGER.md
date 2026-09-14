@@ -1492,11 +1492,11 @@ S46 fixed it, where it never reproduced this one; entries 1 and 5 for `(*SKIP)`.
 
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
-**CHARACTERISED AND ITS FIX NAMED BY S47 (2026-09-14); THE FIX IS NOT MADE HERE YET.** The
-characterisation the slice asked for is settled - it is BOTH unbounded depth and unbounded branching,
-and a progress guard bounds only the first - and the second engine has been run. What is left is
-porting PCRE2's positional guard, measuring it against a wave, and only then lifting the generator
-exclusion. See "Proposed fix" and "What this port does" below.
+**FIXED HERE ON 2026-09-14 (S47 sitting 3), AND THE FIX IS A DELIBERATE DIVERGENCE FROM UPSTREAM.**
+The characterisation is settled - BOTH unbounded depth and unbounded branching, and a progress guard
+bounds only the first - and PCRE2's positional guard is now ported, with one deliberate difference
+from PCRE2. See "The fix, as made" below. This is amendment 16's third outcome: an inherited bug
+fixed here rather than reproduced, so the report drafted below still stands for upstream.
 
 **Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
 
@@ -1564,34 +1564,53 @@ subject position it is already at, which is precisely the condition under which 
 possible. It costs microseconds and it names the fault, where a memory bound costs a second and a
 gigabyte and names only itself. Note that PCRE2's guard is *positional* rather than a progress proof,
 so porting it is not a transcription: a shape where the same position is re-entered and a DIFFERENT
-branch would still have succeeded would change answer, and that has to be measured against a wave
-before the guard lands.
+branch would still have succeeded would change answer. **That was the measurement sitting 3 made, and
+it is why this port fails the path where PCRE2 fails the match** - see "The fix, as made".
 
-**What this port does, and the decision S47 recorded.** It reproduces the non-termination and bounds
-it: `InvalidOperationException: the regular expression engine's backtracking stack exceeded its 1GB
-limit`, in 0.25s to 1.52s across all ten pinned shapes (re-measured 2026-09-14), which is upstream's
-own `RE_MEMORY_LIMIT` check ported into `ByteStack.Grow`. **That satisfies "the port must not exhaust
-memory" and is NOT the end of the entry**: PCRE2's guard above is the correctness fix the slice asked
-whether there was one, and it is a slice of its own. Pinned by `Gaps/Engine/FuzzyRecursionTests.cs`,
-six tests, including the controls that show which budgets terminate - and, from S47 sitting 2, with
-the three blowup assertions naming the exception TYPE and its message instead of accepting any
-exception at all. That mattered: a bare `Throw<Exception>` is also satisfied by the
-`RegexMatchTimeoutException` from the tests' own 30-second budget, so the file could not tell its
-bound from its clock and a regression that merely made the engine slow would have passed.
+**The fix, as made (S47 sitting 3, 2026-09-14).** `Matcher`'s `GROUP_CALL` refuses a call that would
+re-enter call-ref index `i` at text position `p` while a call of `i` at `p` is still open. The state
+is `MatchState.ActiveCalls`, a set keyed on `(index, position)` and kept in step with the sstack -
+which IS the call stack - by saving the key beside the caller's frame and taking it off again at
+`GROUP_RETURN`; `start_match` clears it, which covers a verb that truncates the backtracking rather
+than unwinding it.
 
-**Consequence for the oracle.** `INTERACTION_FUZZY_WRAPPERS` does not draw a self-recursive call
-round a fuzzy section at all. A guard that forces progress was tried and is NOT sufficient:
-`(?P<g1>A(?:Ab){C}(?&g1)?)` is safe for every constraint in the table, and a 600-row wave of real
-drawn rows still raised MemoryError on four of them. Progress bounds the DEPTH and does nothing
-about the BRANCHING, and a fuzzy section offers a fresh insert/delete/substitute choice at every
-position of every level.
+**One deliberate difference from PCRE2, and it is the whole of the design judgement.** PCRE2 fails
+the MATCH with `PCRE2_ERROR_RECURSELOOP`; this port fails the PATH and carries on. Refusing one
+infinite path cannot cost an answer that any other path reaches, and it demonstrably keeps answers
+PCRE2 throws away: `(?P<g1>(?:ab)?(?&g1)?)` over `'abab'` is an error there and (0, 4) here, and
+`(?P<g>(?&g)a|b)` over `'ba'` gets left recursion's one-step unrolling, (0, 2), rather than nothing.
+The re-entry is refused, the alternative branch is not.
 
-**The exclusion is NOT still in place for the reason the recorder used to give**, which S47 sitting 2
-corrected on the spot: upstream's `MemoryError` stopped aborting the wave in S43 and is now recorded
-as a `resource` outcome the consumer skips. What keeps the shape out is the branching above, plus
-cost - a row upstream cannot answer is a row this port spends about a second and a gigabyte on before
-its own bound fires, and a wave full of them buys no ground truth. **Lifting it belongs with the
-guard**, not before it.
+**What it changed, measured rather than argued.** Every shape in the tables above now answers in
+microseconds, and answers what its non-vanishing sibling answers - `(0, 4)` for the two-atom family,
+`(0, 6)` for the three-atom one. The degenerate `(?R)` rows answer `no match`, which is right: a
+pattern whose only content is a call to itself has an empty language. On the oracle, the 6000-row
+three-seed gate (126,000 rows a seed) gives the IDENTICAL row-for-row result with the guard and
+without it at seeds 7 and 4242, and one row FEWER diverging at seed 20260914 - row 72179 of
+`interactions`, a drawn self-recursive call this port used to exhaust its stack on, where upstream
+answers `no match`. That row is pinned as
+`FuzzyRecursionTests.A_drawn_wave_row_upstream_only_escapes_through_its_prefilter`, and its own
+footnote matters: upstream's `no match` there is its required-string prefilter refusing the subject
+before the engine runs, not an answer from its engine. Put the required character into the subject
+and upstream blows up like every other row here.
+
+**The 1GB bound stays, and is still the backstop.** The guard bounds the DEPTH of a recursion and
+does nothing about the BRANCHING a fuzzy section offers at every position of every level, so
+`ByteStack.Grow`'s `InvalidOperationException` is still reachable - by
+`(?P<g1>\p{L}*)+?(?:ab){e<=1}` over `'bb.a\r.'`, which holds no group call at all and which upstream
+also cannot answer. Pinned by
+`FuzzyRecursionTests.The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see`, because
+otherwise nothing in the suite would reach that path any more.
+
+**Consequence for the oracle, now the other way round.** `INTERACTION_FUZZY_WRAPPERS` gained its
+`call` arm on 2026-09-14, so the generator draws a self-recursive call round a fuzzy section again -
+14 rows of 600 at seed 1, three of which upstream answers `resource` and the consumer skips. Both of
+the old objections went with the guard: the cost one, because this port now answers those rows in
+microseconds instead of spending a second and a gigabyte, and the blindness one, because the rows
+upstream CAN answer are exactly the ones the guard must not touch and drawing them is the only
+instrument that shows it does not. The earlier attempt to keep the cell by forcing progress
+(`(?P<g1>A(?:Ab){C}(?&g1)?)`) is still not sufficient on its own and is not what landed: progress
+bounds the depth and does nothing about the branching.
 
 **Related:** issues 551 and 554, the resource blowups on Phase 6's triage list.
 
