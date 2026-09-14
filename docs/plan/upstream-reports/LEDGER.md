@@ -586,53 +586,102 @@ unchanged.
 
 ---
 
-## 7. Full case folding never applies to `U+0130`, because the expansion list is not lower-cased
+## 7. The default case-folding tables carry CaseFolding.txt's Turkic-only rows - FIXED HERE (S45)
 
-**Title:** `İ` does not match `i̇` under `FULLCASE | IGNORECASE`
+**Title:** Turkic case folding is applied by default, so `I` matches `ı` and `İ` never reaches its
+full fold
+
+**THIS ENTRY WAS WRONG UNTIL 2026-09-14, in both its cause and its proposed fix, and S45 rewrote it
+after settling the question against the definitive source.** The symptom it recorded is real; the
+explanation - "the expansion list is not lower-cased" - described a consequence, not the cause, and
+the fix it proposed would have papered over the wrong layer. What is below replaces it. The original
+diagnosis is left nowhere else, on purpose: a ledger entry that states a wrong cause is worse than no
+entry, because the next reader spends the slice re-deriving it.
 
 **Body:**
 
 ```python
 >>> import regex
->>> regex.compile('İ', regex.I | regex.F).fullmatch('i̇')
+>>> regex.compile('İ', regex.I | regex.F).fullmatch('i̇')     # the F mapping is lost
 None
->>> 'İ'.casefold() == 'i̇'.casefold()
-True
+>>> regex.compile('I', regex.I).fullmatch('ı')                # the T mapping is applied
+<regex.Match object; span=(0, 1), match='ı'>
+>>> regex.compile('i', regex.I).fullmatch('İ')                # ... and its other half
+<regex.Match object; span=(0, 1), match='İ'>
 ```
 
-Every other expanding character matches its expansion: `ß`/`ss`, `ﬁ`/`fi`, `ﬃ`/`ffi` all do.
-`U+0130` is in `_regex.get_expand_on_folding()`, so the module knows it expands.
+`CaseFolding.txt` (17.0.0) gives these four rows, and no others, for the four codepoints:
 
-**Where it comes from.** `Sequence._fix_full_casefold` builds its inventory of expansions with
-`fold_case` alone (`:3639`) and then looks for them in a text that has been through
-`fold_case(...).lower()` (`:3643`). `U+0130` is the one character the two disagree about:
+```
+0049; C; 0069; # LATIN CAPITAL LETTER I
+0049; T; 0131; # LATIN CAPITAL LETTER I
+0130; F; 0069 0307; # LATIN CAPITAL LETTER I WITH DOT ABOVE
+0130; T; 0069; # LATIN CAPITAL LETTER I WITH DOT ABOVE
+```
+
+and its header says what to do with them:
+
+```
+# T: special case for uppercase I and dotted uppercase I
+#    - For non-Turkic languages, this mapping is normally not used.
+#    - For Turkic languages (tr, az), this mapping can be used instead of the normal mapping
+#      for these characters.
+#
+# Usage:
+#  A. To do a simple case folding, use the mappings with status C + S.
+#  B. To do a full case folding, use the mappings with status C + F.
+#
+#    The mappings with status T can be used or omitted depending on the desired case-folding
+#    behavior. (The default option is to exclude them.)
+```
+
+UTS #18 RL1.5 requires "at least the simple, **default** Unicode case-insensitive matching" and "at
+least the simple, **default** Unicode case folding"; the core specification section 5.18.2 calls the
+Turkish rule "a case mapping that depends on the locale". Neither the pattern nor the subject carries
+a locale, so the default applies.
+
+**Where it comes from.** `tools/build_regex_unicode.py` merges the `T` rows into **both** default
+tables - `kind in {'S', 'C', 'T'}` at `:455` and `kind in {'F', 'C', 'T'}` at `:459` - and hard-codes
+the Turkic pairing into the all-cases table at `:1071-1074`:
 
 ```python
->>> _regex.fold_case(FULL_CASE_FOLDING, 'İ')            # 'İ' - unchanged
->>> _regex.fold_case(FULL_CASE_FOLDING, 'İ').lower()    # 'i̇'
+all_cases[0x49] = {0x49, 0x69, 0x131} # Dotless capital I.
+all_cases[0x69] = {0x69, 0x49, 0x130} # Dotted small I.
 ```
 
-So its expansion is never found in the folded text, no chunk is ever marked for it, and the
-character compiles to `CHARACTER_IGN` instead of reaching the full fold at all.
+Every `_IGN` opcode reads `re_get_all_cases`, so that hard-coding is what makes `(?i)I` match `ı`.
+The folding half is then papered over by `unicode_possible_turkic` (`_regex.c:1984`), which passes
+all four codepoints through the fold functions **unchanged** - which is not the default mapping
+either. It loses `0049; C; 0069`, so `I` folds to `I`; and it loses `0130; F; 0069 0307`, so `İ`
+never reaches the full fold. That second loss is the symptom this entry was originally filed under.
 
-**Proposed fix.** Lower-case the inventory the same way the text is lower-cased - `[_regex.fold_case(
-FULL_CASE_FOLDING, c).lower() for c in _regex.get_expand_on_folding()]`. That alone is not enough:
-the matcher's `STRING_FLD` folds the subject with the same `fold_case`, so `U+0130` would have to
-expand there too, which is a change to the folding table rather than to this function. The
-maintainer's call is whether `U+0130` is excluded from full folding on purpose - CaseFolding.txt
-gives it an `F` mapping of `0069 0307` and a Turkic-only `T` mapping of `0069`, and no `C` or `S`
-mapping at all.
+**Three second engines were run on the whole 25-cell grid on 2026-09-14** (`.scratch/s45-definition.py`,
+`.scratch/s45-perl.pl`, `.scratch/s45-dotnet.ps1`). PCRE2 10.47 under `PCRE2_UTF | PCRE2_UCP |
+PCRE2_CASELESS` and .NET 10.0.10 under `RegexOptions.IgnoreCase | RegexOptions.CultureInvariant`
+agree cell for cell with default **simple** folding; Perl 5.42.2's `/i` under `(?u:...)`, which folds
+fully, agrees cell for cell with default **full** folding - `İ` matches `i̇` there and nowhere else.
+`regex 2026.9.10` is the only one of the four that answers the Turkic way.
 
-**Not fixed in this port either, and deliberately** - see `Sequence.FixFullCasefold`'s remarks in
-`src/FuzzyRegex/Parsing/Nodes.cs`. This port follows upstream's folding tables, so `İ` behaves the
-same way here; the half-fix would make the parser and the matcher disagree with each other.
+**The fix upstream would need.** Drop `'T'` from both sets at `:455` and `:459`, delete the four
+`all_cases` overrides at `:1071-1074`, and delete `unicode_possible_turkic` and its two call sites -
+it exists only to work around the merge. The assertion at `:468` that the Turkic set is exactly
+`{(0x49, (0x131,)), (0x130, (0x69,))}` should stay: it is the guard that would catch a future UCD
+adding a third `T` row. If a Turkic mode is ever wanted it needs a flag, because the module exposes
+no locale.
 
-**Where it goes, decided at the Phase 4 close (S36, 2026-09-12).** It is an inherited bug, and the
-owner's rule is that every conclusively identified bug is fixed here before 1.0, inherited or not. It
-needs the folding tables changed rather than the parser, so it is a slice of its own in **Phase 6's
-opening sweep** - the first item of the sweep's third slice, recorded in ROADMAP. It is the only
-ledger entry with a fix scheduled in this port; the other six are upstream's to fix and stay pinned
-as divergences until they do.
+**Fixed in this port, S45, 2026-09-14.** `src/FuzzyRegex/Unicode/TurkicDefaults.cs` substitutes the
+default simple folding, full folding and case set for exactly those four codepoints, and
+`Encodings.AllCases`, `.SimpleCaseFold` and `.FullCaseFold` consult it before the generated tables.
+The generated `.g.cs` is untouched - it is transliterated from upstream's C and must stay so. The
+divergence is classified for the oracle as `turkic-default-folding` and pinned by
+`Gaps.Engine.CaseFoldingTests`, which asserts all 25 cells under `(?i)` and `(?fi)`.
+`Sequence.FixFullCasefold` needed no change at all: with `fold_case` expanding `U+0130` on its own,
+the inventory and the text it is sought in agree, which is why the original "lower-case the
+inventory" fix was aimed at the wrong layer.
+
+**Nothing filed.** Design spec amendment 16 outcome (c): both this port and upstream were wrong, the
+fix lands here, the entry is corrected, and no report goes to mrab-regex until the owner approves the
+upstream ledger as a whole.
 
 ---
 

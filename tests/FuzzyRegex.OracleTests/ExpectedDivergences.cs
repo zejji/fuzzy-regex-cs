@@ -1417,6 +1417,58 @@ internal static class ExpectedDivergences
                 _bestmatchLostPartial.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
+        new(
+            Id: "turkic-default-folding",
+            Reason: "UPSTREAM IS WRONG, and this port diverges on purpose - S45. "
+                + "`CaseFolding.txt` marks two rows `T`, `0049; T; 0131` and `0130; T; 0069`, and "
+                + "says of them: \"For non-Turkic languages, this mapping is normally not used\" "
+                + "and \"The mappings with status T can be used or omitted depending on the desired "
+                + "case-folding behavior. (The default option is to exclude them.)\" "
+                + "`upstream/tools/build_regex_unicode.py` includes them in BOTH default tables "
+                + "(`kind in {'S','C','T'}` at :455, `kind in {'F','C','T'}` at :459) and hard-codes "
+                + "the Turkic pairing into the all-cases table at :1071-1074, so upstream applies a "
+                + "Turkish locale rule with no locale asked for. Every `_IGN` opcode reads "
+                + "`re_get_all_cases`, so `(?i)I` matches `ı` and `(?i)i` matches `İ` "
+                + "upstream. `unicode_possible_turkic` (:1984) papers over the folding half by "
+                + "passing all four through unchanged, which loses `0049; C; 0069` as well as "
+                + "`0130; F; 0069 0307` - that second loss is ledger entry 7.\n"
+                + "THREE SECOND ENGINES WERE RUN ON THE 25-CELL GRID before this entry was written "
+                + "(2026-09-14, .scratch/s45-definition.py, .scratch/s45-perl.pl, "
+                + ".scratch/s45-dotnet.ps1). PCRE2 10.47 under PCRE2_UTF|PCRE2_UCP|PCRE2_CASELESS "
+                + "and .NET 10.0.10 under IgnoreCase|CultureInvariant agree cell for cell with this "
+                + "port's simple folding; Perl 5.42.2's /i under (?u:...), which folds fully, "
+                + "agrees cell for cell with its full folding. regex 2026.9.10 is the only one of "
+                + "the four that answers the Turkic way. UTS #18 RL1.5 requires \"at least the "
+                + "simple, DEFAULT Unicode case-insensitive matching\"; core spec 5.18.2 calls the "
+                + "Turkish rule \"a case mapping that depends on the locale\". Nothing filed: this "
+                + "is a port-right divergence, pinned permanently.\n"
+                + "NARROW BY THE SPANS AND BY U+0130/U+0131, not by the subject's contents alone. "
+                + "Requiring only IGNORECASE and one of the four somewhere in the subject would "
+                + "classify any unrelated defect that landed on a row holding an `I`, which is what "
+                + "the class remarks above warn against. Both blind passes reproduced a probe "
+                + "against an earlier form of this predicate and both fixes are in it; "
+                + "`DivergenceStartsOnATurkicI`'s own remarks carry the two residual limits, one "
+                + "safe and one not, and the second is owed maintenance rather than a clause.\n"
+                + "THE DEFAULT WAVE REACHES THIS FAMILY THINLY, AND NOT THROUGH THE GENERATOR YOU "
+                + "WOULD EXPECT. Measured 2026-09-14 over the full 6300-row default wave: one row "
+                + "at seed 7 (row 3762) and one at seed 20260914 (row 3734), both from "
+                + "`interactions`, none at seed 4242. The `case-folding` generator itself draws "
+                + "NONE at 300 rows at any of the three seeds, and 4, 11 and 3 at 2000 rows - the "
+                + "four codepoints are in FOLD_TURKIC and in no other alphabet, so only about a "
+                + "sixth of its rows can reach them and both members of a pair must line up within "
+                + "one. So the examples, not the wave, are what keep this entry honest at the "
+                + "default count; widening FOLD_TURKIC's share is owed maintenance, not this slice.",
+            PinnedBy: "Gaps.Engine.CaseFoldingTests, which asserts the whole 25-cell grid under "
+                + "(?i) and (?fi) against the definitive source, plus "
+                + "Gaps.Unicode.UnicodeCasingTests.The_four_turkic_codepoints_carry_the_default_"
+                + "case_data_not_upstreams and Ported.CaseFolding.TurkicTests",
+            Example: """
+            {"generator": "rows", "pattern": "[İ]", "flags": 2, "namedLists": {}, "subject": "i", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "rows", "pattern": "[A-Z]", "flags": 2, "namedLists": {}, "subject": "ı", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "rows", "pattern": "İ", "flags": 16386, "namedLists": {}, "subject": "i̇", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            """,
+            Applies: static (row, ours) => DivergenceStartsOnATurkicI(row, ours)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -1432,6 +1484,127 @@ internal static class ExpectedDivergences
         ArgumentNullException.ThrowIfNull(ours);
 
         return Array.Find(_entries, entry => entry.Applies(row, ours));
+    }
+
+    /// <summary>Upstream's <c>IGNORECASE</c> flag bit, which is <c>regex.I</c>.</summary>
+    private const int _ignoreCase = 0x2;
+
+    /// <summary>The four dotted and dotless I codepoints, all of them BMP.</summary>
+    private static readonly System.Buffers.SearchValues<char> _turkicI = System.Buffers.SearchValues.Create("Iiİı");
+
+    /// <summary>
+    /// Whether the divergence COVERS one of the four dotted or dotless I codepoints, with
+    /// IGNORECASE in force and with a dotted or dotless form somewhere in the row - the shape
+    /// every judged row of <c>turkic-default-folding</c> has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without IGNORECASE no case data is consulted at all, so no Turkic divergence is possible and
+    /// the first clause is not a convenience.
+    /// </para>
+    /// <para>
+    /// <b>The second clause is what stops this classifying an unrelated defect, and it was added
+    /// because the first S45 blind pass reproduced exactly that.</b> A span test alone accepts a
+    /// match covering plain ASCII <c>i</c>, which is most of a case-folding wave; the reviewer's
+    /// probe put a total engine failure on <c>(?i)i.</c> against <c>ix</c> and this entry swallowed
+    /// it as EXPECTED. The two Turkic-only rows of <c>CaseFolding.txt</c> are
+    /// <c>0049 -&gt; 0131</c> and <c>0130 -&gt; 0069</c>, and each names exactly one of U+0130 and
+    /// U+0131, so a divergence in this family needs one of those two in play.
+    /// </para>
+    /// <para>
+    /// <b>The span test reads EVERY match of BOTH answers, not the first character of the first
+    /// match, and that too came from a reproduced finding.</b> The second blind pass ran
+    /// <c>fullmatch('aI', 'aı', I)</c> - the case-folding generator's commonest shape - where
+    /// upstream matches <c>(0, 2)</c> beginning on <c>a</c> and this port does not match at all, and
+    /// a start-character test missed it; likewise <c>finditer('[^I]', 'aıb')</c>, where the
+    /// extra match this port finds is the SECOND one.
+    /// </para>
+    /// <para>
+    /// <b>TWO LIMITS, both reproduced by the second blind pass and both left in place.</b>
+    /// </para>
+    /// <list type="number">
+    /// <item>
+    /// FALSE NEGATIVES, which are safe: the second clause reads the pattern as text, so a row that
+    /// reaches U+0130 or U+0131 by an escape (<c>ı</c>), by <c>\N{LATIN SMALL LETTER DOTLESS
+    /// I}</c>, through a <c>\L&lt;name&gt;</c> list, or by a RANGE that spans it without naming it
+    /// (<c>[į-Ĳ]</c>) is NOT classified and reddens the run. Someone then judges it,
+    /// which is the right way round. The <c>interactions</c> generator does draw
+    /// <c>\L&lt;name&gt;</c>, so this is reachable, not hypothetical.
+    /// </item>
+    /// <item>
+    /// ONE FALSE POSITIVE that no predicate over the row and the two answers can close: an
+    /// unrelated port defect on a row that carries U+0130 or U+0131 and whose answer covers one of
+    /// the four is classified as this family. The reviewer's probe is a fabricated total failure on
+    /// <c>(?i)ı.</c> against <c>ıx</c>, where both engines pair U+0131 with itself and no
+    /// Turkic divergence is possible at all. Closing it needs the question "would this row agree if
+    /// the port used upstream's Turkic case data?", which means a selectable Turkic case mode this
+    /// port does not have and should not grow for a test. Recorded as owed maintenance.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// All four codepoints are in the BMP, so a UTF-16 index into the subject addresses one whole
+    /// character and no surrogate arithmetic is needed; <c>OracleGroup.Index</c> is UTF-16 on both
+    /// sides.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer.</param>
+    /// <returns><see langword="true"/> if the divergence belongs to the family.</returns>
+    private static bool DivergenceStartsOnATurkicI(OracleRow row, IOracleOutcome ours)
+    {
+        if ((row.Flags & _ignoreCase) == 0 && !row.Pattern.Contains("(?i", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!HoldsADottedOrDotlessI(row.Pattern) && !HoldsADottedOrDotlessI(row.Subject))
+        {
+            return false;
+        }
+
+        return CoversATurkicI(row.Subject, row.Expected) || CoversATurkicI(row.Subject, ours);
+    }
+
+    /// <summary>Whether the text holds U+0130 or U+0131, the two codepoints only this family uses.</summary>
+    /// <param name="text">The pattern or the subject.</param>
+    /// <returns><see langword="true"/> if either appears.</returns>
+    private static bool HoldsADottedOrDotlessI(string text) =>
+        text.Contains('İ', StringComparison.Ordinal) || text.Contains('ı', StringComparison.Ordinal);
+
+    /// <summary>Whether any span of an answer covers one of the four.</summary>
+    /// <remarks>
+    /// A zero-width match covers nothing, so the character AT its position is read as well: a
+    /// lookaround or an empty alternative can diverge on a character it never consumes.
+    /// </remarks>
+    /// <param name="subject">The row's subject.</param>
+    /// <param name="outcome">One engine's answer.</param>
+    /// <returns><see langword="true"/> if it matched over or at a dotted or dotless I.</returns>
+    private static bool CoversATurkicI(string subject, IOracleOutcome outcome)
+    {
+        IEnumerable<MatchOutcome> matches = outcome switch
+        {
+            MatchOutcome match => [match],
+            MatchesOutcome scan => scan.Matches,
+            _ => [],
+        };
+
+        return matches
+            .Select(static match => match.Groups)
+            .Where(static groups => groups.Count > 0 && groups[0].Success)
+            .Any(groups => SpanHoldsATurkicI(subject, groups[0].Index, groups[0].Length));
+    }
+
+    /// <summary>Whether one span of the subject holds one of the four.</summary>
+    /// <param name="subject">The row's subject.</param>
+    /// <param name="index">The span's start, in UTF-16 code units.</param>
+    /// <param name="length">Its length; a zero-width span is read as the one character at it.</param>
+    /// <returns><see langword="true"/> if a dotted or dotless I is in it.</returns>
+    private static bool SpanHoldsATurkicI(string subject, int index, int length)
+    {
+        int start = Math.Clamp(index, 0, subject.Length);
+        int end = Math.Clamp(index + Math.Max(1, length), start, subject.Length);
+
+        return subject.AsSpan(start, end - start).IndexOfAny(_turkicI) >= 0;
     }
 
     /// <summary>

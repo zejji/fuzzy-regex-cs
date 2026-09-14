@@ -369,10 +369,16 @@ error-propagation PRs (615-618) that have nothing to port. Three slices, in this
    ledgered; both are wrong, so **the port is fixed here even though the bug is inherited**, and
    ledgered; or the evidence is strong but not conclusive, so it is ledgered and the owner decides.
    The list of known bugs in this port - ours or inherited - is empty before Phase 7 touches the
-   engine. **Ledger entry 7 - `İ` (U+0130) never
-   reaches the full case fold because upstream's expansion inventory is not lower-cased where the text
-   it is sought in is - is the first item on this list** (S35, 2026-09-12): a port bug inherited from
-   upstream, fixable only by changing the folding tables, so it is a slice of its own here.
+   engine. **Ledger entry 7 was the first item on this list** (S35, 2026-09-12), recorded then as
+   "`İ` (U+0130) never reaches the full case fold because upstream's expansion inventory is not
+   lower-cased where the text it is sought in is". S45 settled it against `CaseFolding.txt` on
+   2026-09-14 and **that statement of the cause was wrong**: upstream's table builder merges
+   CaseFolding.txt's Turkic-only `T` rows into both default tables, which the file itself says to
+   exclude by default, so upstream applies a Turkish locale rule with no locale asked for. The
+   lost expansion of `U+0130` is one consequence and `(?i)I` matching `ı` is the other. Fixed in
+   S45 by substituting the default case data for the four codepoints; the ledger entry was
+   rewritten cause and fix, and this port now diverges from upstream on four of `test_turkic`'s
+   sixteen cells, deliberately and in agreement with PCRE2, Perl and .NET.
 
 The estimate moves from 7-12 to 9-14 for the two slices this adds beyond the sweep already planned.
 

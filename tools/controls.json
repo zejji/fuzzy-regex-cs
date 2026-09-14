@@ -1580,5 +1580,37 @@
       7,
       31
     ]
+  },
+  {
+    "id": "S45-A",
+    "name": "turkic-all-cases-guard",
+    "file": "src/FuzzyRegex/Unicode/Encodings.cs",
+    "anchor": "    internal static int AllCases(CaseEncoding encoding, uint ch, Span<uint> codepoints)",
+    "anchorNth": 1,
+    "before": "        if (encoding == CaseEncoding.Unicode)\n        {\n            // DIVERGES FROM UPSTREAM, deliberately - see TurkicDefaults.\n            if (TurkicDefaults.TryAllCases(ch, codepoints, out int turkicCount))\n            {\n                return turkicCount;\n            }\n\n            return UnicodeTables.GetAllCases(ch, codepoints);\n        }\n",
+    "after": "        if (encoding == CaseEncoding.Unicode)\n        {\n            return UnicodeTables.GetAllCases(ch, codepoints);\n        }\n",
+    "generator": "case-folding",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      31337
+    ]
+  },
+  {
+    "id": "S45-B",
+    "name": "turkic-full-fold-expansion",
+    "file": "src/FuzzyRegex/Unicode/TurkicDefaults.cs",
+    "anchor": "    internal static bool TryFullCaseFold(uint ch, Span<uint> folded, out int count)",
+    "anchorNth": 1,
+    "before": "            // 0130; F; 0069 0307 - the row upstream loses, and the one that grows.\n            // 0x0307 is COMBINING DOT ABOVE.\n            case 0x0130:\n                folded[0] = 'i';\n                folded[1] = 0x0307;\n                count = 2;\n                return true;\n",
+    "after": "            // 0130; F; 0069 0307 - the row upstream loses, and the one that grows.\n            // 0x0307 is COMBINING DOT ABOVE.\n            case 0x0130:\n                folded[0] = 0x0130;\n                count = 1;\n                return true;\n",
+    "generator": "case-folding",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      31337
+    ]
   }
 ]

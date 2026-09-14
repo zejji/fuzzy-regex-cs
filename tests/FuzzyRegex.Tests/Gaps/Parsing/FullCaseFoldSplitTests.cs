@@ -12,11 +12,25 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// <remarks>
 /// <para>
 /// The function folds the literal, lower-cases the result, and marks every chunk that matches the
-/// folded form of a character which expands on folding. Folding alone is not enough: <c>fold_case</c>
-/// leaves <c>I</c> alone, because <c>I</c>/<c>i</c>/<c>ı</c> are the Turkic triple, so
-/// <c>fold("fI")</c> is <c>"fI"</c> and only <c>.lower()</c> turns it into <c>"fi"</c> - which is
-/// the folded form of the ligature U+FB01. Drop the <c>.lower()</c> and this literal gets
-/// <c>STRING_IGN</c> instead of <c>STRING_FLD</c>.
+/// folded form of a character which expands on folding. <b>Upstream needs the lower-casing to get
+/// this literal right and THIS PORT NO LONGER DOES, which is S45's doing and is recorded here
+/// rather than hidden.</b> Upstream's <c>fold_case</c> leaves <c>I</c> alone - its
+/// <c>unicode_possible_turkic</c> passes all four I variants through - so <c>fold("fI")</c> is
+/// <c>"fI"</c> and only <c>.lower()</c> turns it into <c>"fi"</c>, the folded form of the ligature
+/// U+FB01. S45 restored <c>0049; C; 0069</c>, so <c>fold("fI")</c> is <c>"fi"</c> here already and
+/// the <c>.lower()</c> no longer decides anything for this literal.
+/// </para>
+/// <para>
+/// The bytecode below therefore carries <c>102, 105</c> where upstream's carries <c>102, 73</c>:
+/// same opcode, same split, folded <c>i</c> in place of unfolded <c>I</c>. The OPCODE is still what
+/// these tests are for, and it is unchanged.
+/// </para>
+/// <para>
+/// No character is currently known for which dropping the <c>.lower()</c> would change which chunks
+/// get marked: the characters whose fold is not already lowercase are the Cherokee small letters,
+/// which fold upward into U+13A0, and none of them expands on folding. The line is kept because it
+/// is upstream's and a future UCD could add such a character - see
+/// <c>Parsing.Sequence.FixFullCasefold</c>'s own remarks.
 /// </para>
 /// <para>
 /// No corpus row reaches it - upstream's own suite has no case-folded literal whose lower-casing
@@ -38,18 +52,23 @@ public sealed class FullCaseFoldSplitTests
     private static readonly Dictionary<string, IReadOnlyList<string>> _noNamedLists = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// <c>fI</c> is one chunk needing full case-folding, but only because the folded text is
-    /// lower-cased before the expanding forms are looked for in it.
+    /// <c>fI</c> is one chunk needing full case-folding, because its folded form is <c>fi</c> -
+    /// which is the folded form of the ligature U+FB01.
     /// </summary>
+    /// <remarks>
+    /// Upstream reaches the same opcode by a different route and carries the unfolded <c>I</c>:
+    /// <c>'fI' flags=I|F|U code = [75, 16, 2, 102, 73, 1] req_chars = [102, 73]</c>, measured
+    /// 2026-08-30 against regex 2026.7.19 and unchanged on 2026.9.10. See this class's remarks.
+    /// </remarks>
     [Test]
-    public void A_literal_whose_folded_form_only_matches_an_expansion_after_lowercasing_uses_the_full_fold_opcode()
+    public void A_literal_whose_folded_form_matches_an_expansion_uses_the_full_fold_opcode()
     {
         CompiledPattern compiled = Compile("fI", RegexFlags.IgnoreCase | RegexFlags.FullCase | RegexFlags.Unicode);
 
         using (new AssertionScope())
         {
-            compiled.Code.Should().Equal((uint)Opcode.StringFld, 16u, 2u, 102u, 73u, (uint)Opcode.Success);
-            compiled.ReqChars.Should().Equal(102, 73);
+            compiled.Code.Should().Equal((uint)Opcode.StringFld, 16u, 2u, 102u, 105u, (uint)Opcode.Success);
+            compiled.ReqChars.Should().Equal(102, 105);
             compiled.ReqFlags.Should().Be(RegexFlags.FullCase | RegexFlags.IgnoreCase);
         }
     }

@@ -127,20 +127,36 @@ public sealed class NamedListTests
         (m.Index, m.Index + m.Length).Should().Be((0, 7));
     }
 
-    // İ (U+0130) case-folds to i, so "kit" is found inside "SKİTS" as well as inside "SKITS".
+    /// <summary>
+    /// A named list folds case when searching, so "kit" is found inside "SKITS".
+    /// </summary>
+    /// <remarks>
+    /// <b>DIVERGES FROM UPSTREAM on the second subject, deliberately.</b> Upstream finds "kit"
+    /// inside <c>SKİTS</c> too, because its <c>get_all_cases</c> pairs <c>i</c> with U+0130 - the
+    /// Turkic mapping <c>CaseFolding.txt</c> says to exclude by default. S45 removed that pairing;
+    /// PCRE2, Perl and .NET do not make it either. Upstream's answer on 2026.9.10:
+    /// <c>regex.search(r'(?i)\L&lt;words&gt;', 'SKİTS', words=['kit']).span() == (1, 4)</c>.
+    /// See <c>Unicode.TurkicDefaults</c> and <c>Gaps.Engine.CaseFoldingTests</c>.
+    /// <para>
+    /// The dotted subject is KEPT rather than dropped: it is what upstream's
+    /// <c>test_named_lists</c> asserts, and a row that records the divergence is worth more than a
+    /// row that hides it. <c>test_named_lists#13-14</c> is a known divergence for the parity board.
+    /// </para>
+    /// </remarks>
     [Test]
     [Property("Upstream", "RegexTests.test_named_lists#13-14")]
     public void A_named_list_folds_case_when_searching()
     {
         Dictionary<string, IReadOnlyCollection<string>> named = new(StringComparer.Ordinal) { ["words"] = ["kit"] };
 
-        foreach (string subject in new[] { "SKITS", _skitsDotted })
-        {
-            Match m = FuzzyRegex.Match(subject, "(?i)\\L<words>", FuzzyRegexOptions.None, named);
+        Match plain = FuzzyRegex.Match("SKITS", "(?i)\\L<words>", FuzzyRegexOptions.None, named);
 
-            m.Success.Should().BeTrue();
-            (m.Index, m.Index + m.Length).Should().Be((1, 4));
-        }
+        plain.Success.Should().BeTrue();
+        (plain.Index, plain.Index + plain.Length).Should().Be((1, 4));
+
+        Match dotted = FuzzyRegex.Match(_skitsDotted, "(?i)\\L<words>", FuzzyRegexOptions.None, named);
+
+        dotted.Success.Should().BeFalse("U+0130 is alone in its case set under the default case data");
     }
 
     [Test]

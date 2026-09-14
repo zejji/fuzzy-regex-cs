@@ -23,6 +23,42 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.CompileParity;
 /// </remarks>
 public sealed class CompileParityTests
 {
+    /// <summary>
+    /// The corpus rows whose bytecode this port DELIBERATELY does not reproduce, because S45
+    /// replaced upstream's Turkic case data with the default one that <c>CaseFolding.txt</c>
+    /// specifies - see <see cref="Fuzzy.Text.RegularExpressions.Unicode.TurkicDefaults"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each row is listed with what moved, all of it inside the four codepoints
+    /// U+0049, U+0069, U+0130 and U+0131:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>(?fi)FFI</c> - the trailing <c>I</c> full-folds to <c>i</c> here and to <c>I</c>
+    /// upstream, because upstream's <c>unicode_possible_turkic</c> passes it through and so loses
+    /// the <c>0049; C; 0069</c> row.</item>
+    /// <item><c>(?i)\Aİ\Z</c> and <c>(?i)\Aı\Z</c> - each is alone in its case set here
+    /// and paired with <c>i</c> / <c>I</c> upstream, so the <c>_IGN</c> opcode changes.</item>
+    /// <item><c>(?iV1)[\w--a]</c> - the set carries the expand-on-folding inventory, and U+0130 is
+    /// in it. Upstream emits it as the ONE codepoint <c>304</c>, which is the defect itself: an
+    /// entry in the expansion inventory whose folding does not expand. This port emits the two it
+    /// folds to, <c>105 775</c> - <c>i</c> and U+0307.</item>
+    /// </list>
+    /// <para>
+    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a fifth
+    /// row that starts diverging fails the equality below, and a listed row that stops diverging
+    /// fails the inequality. Re-recording the corpus against a newer <c>regex</c> gets the same
+    /// alarm either way.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> _turkicDivergentPatterns =
+    [
+        "(?fi)FFI",
+        "(?i)\\Aİ\\Z",
+        "(?i)\\Aı\\Z",
+        "(?iV1)[\\w--a]",
+    ];
+
     [Test]
     [MethodDataSource(typeof(Corpus), nameof(Corpus.Compiles))]
     public void Compiles_to_upstreams_bytecode(CompileRow row)
@@ -32,6 +68,20 @@ public sealed class CompileParityTests
         CompiledPattern compiled = RunSeam(() =>
             PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
         );
+
+        if (_turkicDivergentPatterns.Contains(row.Pattern))
+        {
+            compiled
+                .Code.Should()
+                .NotEqual(
+                    row.Code,
+                    "row #{0} is pinned as a deliberate Turkic divergence; if it now agrees with "
+                        + "upstream, the pin is stale and belongs off the list",
+                    row.Index
+                );
+
+            return;
+        }
 
         using (new AssertionScope())
         {

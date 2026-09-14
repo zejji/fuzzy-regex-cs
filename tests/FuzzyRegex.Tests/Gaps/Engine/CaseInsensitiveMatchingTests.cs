@@ -198,18 +198,18 @@ public sealed class CaseInsensitiveMatchingTests
     [Arguments("(?i)\u017F", "s", 0, 1)]
     // upstream: regex.search('(?i)\u017f', 'S').span() == (0, 1)
     [Arguments("(?i)\u017F", "S", 0, 1)]
-    // Turkic: unicode_simple_case_fold passes all four I variants through unchanged, so 'i' and 'I'
-    // still fold together but the dotless form folds with neither of the dotted ones.
+    // The plain pair folds together, here and upstream.
     // upstream: regex.search(r'(?i)i', 'I').span() == (0, 1)
     [Arguments("(?i)i", "I", 0, 1)]
-    // upstream: regex.search('(?i)i', '\u0130').span() == (0, 1)
-    [Arguments("(?i)i", "\u0130", 0, 1)]
     // upstream: regex.search('(?i)i', '\u0131') is None
     [Arguments("(?i)i", "\u0131", -1, 0)]
-    // upstream: regex.search('(?i)I', '\u0131').span() == (0, 1)
-    [Arguments("(?i)I", "\u0131", 0, 1)]
     // upstream: regex.search('(?i)\u0130', '\u0131') is None
     [Arguments("(?i)\u0130", "\u0131", -1, 0)]
+    // The two rows where upstream pairs a dotted form with a dotless one - '(?i)i' against U+0130,
+    // and '(?i)I' against U+0131 - are NOT here any more. S45 replaced upstream's Turkic case data
+    // with the default one CaseFolding.txt specifies, so this port no longer matches where upstream
+    // does on either. They live in Gaps.Engine.CaseFoldingTests, which asserts the whole 25-cell
+    // grid against the definitive source and against PCRE2, Perl and .NET.
     // Cherokee folds *upward*: the small letters at U+AB70 fold into the U+13A0 block.
     // upstream: regex.search('(?i)\u13a0', '\uab70').span() == (0, 1)
     [Arguments("(?i)\u13A0", "\uAB70", 0, 1)]

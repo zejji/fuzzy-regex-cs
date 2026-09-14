@@ -2574,11 +2574,22 @@ internal sealed class Sequence : RegexBase
     /// with the same value and so covered everything up to it.
     /// </para>
     /// <para>
-    /// NOT fixed here, and not this function's defect: <c>expanded</c> is built from
-    /// <c>fold_case</c> while the text it is sought in is <c>fold_case(...).lower()</c>, so
-    /// <c>U+0130</c> - the one character the two disagree about - is never marked at all. Making it
-    /// match <c>i̇</c> means expanding it in <c>fold_case</c>, which is a change to the
-    /// case-folding tables and to every construct that reads them. Ledger entry 7.
+    /// FIXED ELSEWHERE, S45, and it was never this function's defect. <c>expanded</c> is built from
+    /// <c>fold_case</c> while the text it is sought in is <c>fold_case(...).lower()</c>, and
+    /// <c>U+0130</c> used to be the one character the two disagreed about, so it was never marked
+    /// at all. The cause was upstream's case data, not this arithmetic:
+    /// <c>CaseFolding.txt</c> gives <c>0130; F; 0069 0307</c> and upstream's table builder lets the
+    /// Turkic-only <c>0130; T; 0069</c> overwrite it. <see cref="Unicode.TurkicDefaults"/> restores
+    /// the default row, <c>fold_case</c> expands U+0130 on its own, and both sides of the
+    /// comparison agree without a line changing here. Ledger entry 7.
+    /// </para>
+    /// <para>
+    /// One consequence for whoever reads the <c>.lower()</c> next: with U+0130 folding properly, no
+    /// character is currently known for which the lower-casing changes which chunks get marked.
+    /// The characters whose fold is not already lowercase are the Cherokee small letters, which
+    /// fold UPWARD into U+13A0, and none of them is in the expansion inventory. The call is kept
+    /// because it is upstream's (<c>:3643</c>) and a future UCD could add such a character; the
+    /// test that used to pin it, <c>Gaps.Parsing.FullCaseFoldSplitTests</c>, says so too.
     /// </para>
     /// </remarks>
     private static List<Literal> FixFullCasefold(List<int> characters)

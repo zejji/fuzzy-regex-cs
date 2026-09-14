@@ -66,6 +66,12 @@ internal static class Encodings
     {
         if (encoding == CaseEncoding.Unicode)
         {
+            // DIVERGES FROM UPSTREAM, deliberately - see TurkicDefaults.
+            if (TurkicDefaults.TryAllCases(ch, codepoints, out int turkicCount))
+            {
+                return turkicCount;
+            }
+
             return UnicodeTables.GetAllCases(ch, codepoints);
         }
 
@@ -96,10 +102,12 @@ internal static class Encodings
             return ch is >= 'A' and <= 'Z' ? ch ^ 0x20 : ch;
         }
 
-        // Is it a possible Turkic character? If so, pass it through unchanged.
-        if (IsPossibleTurkic(ch))
+        // DIVERGES FROM UPSTREAM, deliberately. Upstream passes the four I variants through
+        // UNCHANGED here; this port returns their default (non-Turkic) simple folding instead.
+        // See TurkicDefaults.
+        if (TurkicDefaults.TrySimpleCaseFold(ch, out uint turkicFolded))
         {
-            return ch;
+            return turkicFolded;
         }
 
         return UnicodeTables.GetSimpleCaseFolding(ch);
@@ -123,11 +131,12 @@ internal static class Encodings
             return 1;
         }
 
-        // Is it a possible Turkic character? If so, pass it through unchanged.
-        if (IsPossibleTurkic(ch))
+        // DIVERGES FROM UPSTREAM, deliberately. Upstream passes the four I variants through
+        // UNCHANGED here, which is what loses U+0130's expansion to 'i' + U+0307.
+        // See TurkicDefaults.
+        if (TurkicDefaults.TryFullCaseFold(ch, folded, out int turkicCount))
         {
-            folded[0] = ch;
-            return 1;
+            return turkicCount;
         }
 
         return UnicodeTables.GetFullCaseFolding(ch, folded);
@@ -150,10 +159,12 @@ internal static class Encodings
             ? ch is >= 0x0A and <= 0x0D
             : ch is (>= 0x0A and <= 0x0D) or 0x85 or 0x2028 or 0x2029;
 
-    /// <summary>Upstream <c>unicode_possible_turkic</c> (line 1984).</summary>
-    /// <param name="ch">The codepoint.</param>
-    /// <returns><see langword="true"/> for the four variants of I/i.</returns>
-    internal static bool IsPossibleTurkic(uint ch) => ch is 'I' or 'i' or 0x0130 or 0x0131;
+    // Upstream <c>unicode_possible_turkic</c> (line 1984) - "is it one of the four variants of
+    // I/i?" - is NOT ported as a predicate. Its only two readers here were the two fold functions
+    // above, where it made them pass those four through unchanged; <see cref="TurkicDefaults"/>
+    // replaces that with the default mapping and is keyed on the same four codepoints. Upstream's
+    // other reader, <c>same_char_ign_turkic</c> inside <c>string_search_fld</c>, is a Phase 7
+    // deferral (see <c>Engine.Matcher</c>'s remarks); a slice restoring it restores this too.
 
     /// <summary>Upstream <c>RE_PROP_GC_LU</c> (<c>upstream/src/_regex.c</c> line 66).</summary>
     /// <remarks>
