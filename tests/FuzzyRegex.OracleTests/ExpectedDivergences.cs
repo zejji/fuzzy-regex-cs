@@ -594,8 +594,10 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The five rows of <c>bestmatch-loses-a-partial</c>, each copied out of
-    /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> on 2026-09-13 rather than retyped.
+    /// The seven rows of <c>bestmatch-loses-a-partial</c>: five wave draws, the minimised forward
+    /// shape and, since S47c, the minimised REVERSED one. Re-recorded whole on 2026-09-14 by
+    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-partial-rows.jsonl</c>,
+    /// so this constant is the recorder's own output and the block reproduces.
     /// </summary>
     /// <remarks>
     /// Rows 74938 and 77937 (seed 7), 76251 and 76681 (seed 4242) and 76593 (seed 20260913) of
@@ -611,14 +613,44 @@ internal static class ExpectedDivergences
     /// defect is not confined to the search loop and a predicate keyed on the operation would be
     /// wrong as well as wide.
     /// </para>
+    /// <para>
+    /// <b>Row 7 is S47c's widening, and it is the only widening that slice made.</b> The mechanism
+    /// it traced has two arms, because <c>RE_OP_SKIP</c> moves <c>slice_start</c> going forwards
+    /// (<c>_regex.c:14555</c>) and <c>slice_end</c> going backwards (<c>:14553</c>). Row 7,
+    /// <c>(?b)(?r)(?:ab){e&lt;=1}(?:\S(*SKIP)\w|\W)</c> over <c>".ab"</c>, is the MINIMISED witness
+    /// of the reversed arm - the reversed twin of row 6, and there for the reason row 6 is there.
+    /// It is not the only row that reaches that arm: the two <c>(?r)</c> wave rows, 1 and 2, fire
+    /// <c>:14553</c> too, which the blind review measured after a first draft of this comment
+    /// claimed rows 1-6 were forward-only. What rows 1 and 2 are not is small - each is several
+    /// hundred characters of generated pattern. Upstream answers nothing to row 7; a build with
+    /// either candidate fix answers this port's <c>(0, 3)</c> partial with <c>fuzzy=(1,0,0)</c> at
+    /// position 1. Which arm each row fires is printed by
+    /// <c>python tools/probes/upstream-bestmatch-lost-candidate.py --trace</c> and the answers by
+    /// <c>--fix</c>.
+    /// </para>
+    /// <para>
+    /// <b>Seed 20260914 row 76345 is explained by the same mechanism and is still NOT pinned here</b>,
+    /// because its recorded question is not on disk: the wave file that held it has been overwritten
+    /// and a single-generator re-run at its seed does not redraw it, so recovering it needs the full
+    /// 21-generator 6000-row gate at seed 20260914. What was measured rather than assumed is that
+    /// the mechanism reaches it -
+    /// <c>(?b)(?e)\b(?:\p{Ll}(*SKIP)[^\d]|\W)(?=(?:(\p{ASCII}+)([^\d]*)a){e&lt;=2,s&lt;=1})</c> over
+    /// <c>"aaa"</c>, the row's own <c>search</c> from position 0, is None on stock and the
+    /// <c>(0, 3)</c> partial this port answers on both fixed builds
+    /// (<c>... --fix</c>). <b>It is not None from every door</b>, and a draft that said so was
+    /// wrong: <c>search</c> from 1, 2 or 3 answers the empty partial at (3, 3) even on stock. It
+    /// will red a wave that draws it again, which is the owner's 2026-09-14 ruling working as
+    /// intended.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostPartialRows = """
-        {"generator": "interactions", "pattern": "(?b)(?r)(?:[^\\d]+(*SKIP)\\p{L}|[^\\d])(?:(?:(\\p{Nd}{1})(?:(?P<g2>\\p{ASCII})){e<=2,i<=1}){s<=1,i<=1,d<=1}(*SKIP)\\p{L}|\\w)\\D", "flags": 16386, "namedLists": {}, "subject": " 𐐨 ", "operation": "match", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "interactions", "pattern": "(?b)(?r)^(\\d)(?:([^\\d]{3,4}?)a(?:[[:alpha:]]{2,3}?){e<=2,s<=1:[A-Za-z_]}){s<=1,i<=1,d<=1}(?:\\S*?(*SKIP)\\w|[^\\d])", "flags": 10, "namedLists": {}, "subject": "a\n𐐀\r\na𝔘", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "interactions", "pattern": "(?b)(?e)^(?:(?:AA){s<=1,i<=1,d<=1}(*SKIP)\\p{ASCII}|\\s)(?:(?:A([[a-z]--[aei]])(?:(\\D*)){e<=2,s<=1}){i<=1}(*SKIP)\\p{ASCII}|[A-Z])", "flags": 256, "namedLists": {}, "subject": "A", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "interactions", "pattern": "(?b)(?e)(?:a\\w){s<=1,i<=1,d<=1}(?:\\S(*SKIP)[\\p{L}\\p{N}]|\\W)", "flags": 8, "namedLists": {}, "subject": "\r\na𝔘\n", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
-        {"generator": "interactions", "pattern": "(?b)ﬁ(?:(?:(.)ﬁﬁ){s<=1:[^a-z]}(*SKIP)[A-Z]|\\p{ASCII})(?P<g2>[[:digit:]])?", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁﬁﬁßß\n ", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "interactions", "pattern": "(?b)(?r)(?:[^\\d]+(*SKIP)\\p{L}|[^\\d])(?:(?:(\\p{Nd}{1})(?:(?P<g2>\\p{ASCII})){e<=2,i<=1}){s<=1,i<=1,d<=1}(*SKIP)\\p{L}|\\w)\\D", "flags": 16386, "namedLists": {}, "subject": " \ud801\udc28 ", "operation": "match", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": true}}
+        {"generator": "interactions", "pattern": "(?b)(?r)^(\\d)(?:([^\\d]{3,4}?)a(?:[[:alpha:]]{2,3}?){e<=2,s<=1:[A-Za-z_]}){s<=1,i<=1,d<=1}(?:\\S*?(*SKIP)\\w|[^\\d])", "flags": 10, "namedLists": {}, "subject": "a\n\ud801\udc00\r\na\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "interactions", "pattern": "(?b)(?e)^(?:(?:AA){s<=1,i<=1,d<=1}(*SKIP)\\p{ASCII}|\\s)(?:(?:A([[a-z]--[aei]])(?:(\\D*)){e<=2,s<=1}){i<=1}(*SKIP)\\p{ASCII}|[A-Z])", "flags": 256, "namedLists": {}, "subject": "A", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "interactions", "pattern": "(?b)(?e)(?:a\\w){s<=1,i<=1,d<=1}(?:\\S(*SKIP)[\\p{L}\\p{N}]|\\W)", "flags": 8, "namedLists": {}, "subject": "\r\na\ud835\udd18\n", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)\ufb01(?:(?:(.)\ufb01\ufb01){s<=1:[^a-z]}(*SKIP)[A-Z]|\\p{ASCII})(?P<g2>[[:digit:]])?", "flags": 16394, "namedLists": {}, "subject": "\ufb01\ufb01\ufb01\ufb01\u00df\u00df\n ", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 8, "length": 0, "captures": [[8, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "fuzzy", "pattern": "(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)", "flags": 0, "namedLists": {}, "subject": "ab.", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "fuzzy", "pattern": "(?b)(?r)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)", "flags": 0, "namedLists": {}, "subject": ".ab", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
         """;
 
     /// <summary>
@@ -633,15 +665,24 @@ internal static class ExpectedDivergences
     /// <b>On four of the five that flagless answer is this port's answer in FULL - groups, counts
     /// and all - and on row 77937 (the second) only the span agrees.</b> Upstream flagless spends no
     /// errors and captures nothing there, where this port answers <c>fuzzy=(1,1,1)</c> with group 2
-    /// set. Row 77937 therefore rests on the weak form alone, and the entry's own
-    /// <see cref="ExpectedDivergence.Reason"/> says so. The blind review found this because the
-    /// probe compared spans while the prose claimed whole answers; it now prints groups and counts.
+    /// set. The blind review found this because the probe compared spans while the prose claimed
+    /// whole answers; it now prints groups and counts.
+    /// </para>
+    /// <para>
+    /// <b>S47c retires what that used to mean.</b> The flagless answer was only ever a stand-in for
+    /// "what upstream would say if the defect were not there", and now there is a build without the
+    /// defect to ask directly. On a <c>/Od</c> build of the pinned source carrying either candidate
+    /// fix, upstream's answer UNDER <c>(?b)</c> is this port's answer IN FULL on all five wave rows,
+    /// <b>77937 included</b>: codepoints (0, 7) with <c>fuzzy=(1,1,1)</c> and group 2 at (0, 3),
+    /// which is the (0, 9) / (0, 4) rendering below. So 77937 no longer rests on the weak form alone
+    /// because its whole answer agrees - with a repaired upstream rather than with a flagless one.
     /// </para>
     /// <para>
     /// Measured row by row rather than described -
     /// <c>python tools/probes/upstream-bestmatch-loses-a-partial.py</c>, whose second section
     /// replays all five whole, each asked its own operation, and whose third sweeps both anchored
-    /// doors.
+    /// doors; and <c>python tools/probes/upstream-bestmatch-lost-candidate.py --fix</c>, which
+    /// builds stock and fixed upstreams and prints all five from each.
     /// </para>
     /// </remarks>
     private static readonly string[] _bestmatchLostPartialOurs =
@@ -664,6 +705,13 @@ internal static class ExpectedDivergences
         // And this port's answer to it IS upstream's own flagless answer, span for span: delete the
         // `(?b)` and upstream returns the (0, 3) partial it refused with the flag present.
         "match 0:(0,3)[(0,3)] last=-1/- partial",
+        // S47c. Row 7 is row 6 turned round: `RE_OP_SKIP` writes `slice_start` going forwards
+        // (`_regex.c:14555`) and `slice_end` going backwards (`:14553`), and this is the MINIMISED
+        // witness of the reversed arm. Wave rows 1 and 2 reach that arm as well - measured, after a
+        // first draft claimed they did not - but neither is small. Upstream answers nothing; both
+        // candidate fixes answer this (0, 3) partial with the substitution at 1, which is also what
+        // upstream answers with the `(?b)` deleted.
+        "match 0:(0,3)[(0,3)] last=-1/- partial fuzzy=(1,0,0)[s:1][i:][d:]",
     ];
 
     /// <summary>
@@ -1500,6 +1548,11 @@ internal static class ExpectedDivergences
                 + "NOT on 'upstream's flagless answer is ours'. The first draft claimed the latter "
                 + "for all five because its probe compared `m.span()` alone while its prose claimed "
                 + "the whole answer; the probe now prints the groups and the counts.\n"
+                + "  S47c RETIRES THAT CAVEAT, by asking a better question. The flagless answer was "
+                + "a stand-in for 'what upstream would say without the defect', and there is now a "
+                + "build without the defect: with either candidate fix below, upstream's answer "
+                + "UNDER `(?b)` is this port's answer IN FULL on all five, 77937 included. So the "
+                + "yardstick was wrong for that row, not the port.\n"
                 + "Minimised, AND SINCE S47b AN EXAMPLE ROW OF THIS ENTRY (row 6) rather than only a "
                 + "sentence and a probe, so the staleness alarm runs it on every oracle run: "
                 + "`(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)` over 'ab.' - upstream's "
@@ -1509,14 +1562,46 @@ internal static class ExpectedDivergences
                 + "fuzzy section, a `(*SKIP)` (the same pattern without the verb keeps its match "
                 + "under `(?b)`), and `partial=True`. Measured 2026-09-13 on regex 2026.7.19, "
                 + "tools/probes/upstream-bestmatch-loses-a-partial.py, whose second section replays "
-                + "all five wave rows whole, each asked its own operation.\n"
-                + "FAULTING MECHANISM: `do_best_fuzzy_match` (upstream/src/_regex.c:17584). THE "
-                + "EXACT LINE IS NOT ESTABLISHED and the report must say so or establish it first. "
-                + "The shape is suggestive - the retry sets `start_pos = state->match_pos` and "
-                + "tightens `state->max_errors`, and the loop guard `state->slice_start <= "
-                + "start_pos && start_pos <= state->slice_end` is one a `(*SKIP)` moving "
-                + "`slice_start` can falsify - but that is a hypothesis with the right shape, not a "
-                + "measurement. No debugger and no ASAN build, for the reason ledger entry 9 gives.\n"
+                + "all five wave rows whole, each asked its own operation. SINCE S47c THERE IS A ROW "
+                + "7 AS WELL, the minimised shape REVERSED - `(?b)(?r)(?:ab){e<=1}(?:\\S(*SKIP)\\w|"
+                + "\\W)` over '.ab' - because the mechanism has a `slice_end` arm (`:14553`) that "
+                + "rows 1-6 never touched. The whole block is re-recorded output: `python "
+                + "tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-partial-rows.jsonl`.\n"
+                + "FAULTING MECHANISM, ESTABLISHED TO THE LINE BY S47c ON 2026-09-14 in a `/Od /Zi` "
+                + "build of the pinned 2026.9.10 source, instrumented with `fprintf` and run "
+                + "(`python tools/probes/upstream-bestmatch-lost-candidate.py --trace`). It is a "
+                + "LEAK ACROSS TWO ATTEMPTS AT ONE MATCH, not a ranking rule:\n"
+                + "  1. `_regex.c:14555` - `RE_OP_SKIP` sets `state->slice_start = state->text_pos`. "
+                + "On the minimised shape the trace reads `SKIP :14555 slice_start 0 -> 3`, during "
+                + "the NORMAL (non-partial) attempt, which then fails.\n"
+                + "  2. `_regex.c:18170` - `do_match`'s partial fallback restores `text_pos` ALONE, "
+                + "so the second attempt runs with `slice=[3,3]` and `text_pos=0`.\n"
+                + "  3. `_regex.c:17625` - `do_best_fuzzy_match`'s scan loop is guarded by "
+                + "`state->slice_start <= start_pos && start_pos <= state->slice_end`. With "
+                + "`slice_start=3` and `start_pos=0` that is FALSE, the body never runs once, and "
+                + "`status` keeps the `RE_ERROR_FAILURE` it was initialised with at `:17599`. The "
+                + "partial is not ranked and rejected - IT IS NEVER ATTEMPTED. The hypothesis this "
+                + "entry carried before S47c named the right guard for the wrong reason: it blamed "
+                + "the RETRY's `start_pos = state->match_pos`, and the trace shows the loop is "
+                + "refused on its FIRST iteration.\n"
+                + "WHY THE FLAG MATTERS, AND IT IS NOT A FILTER. `do_simple_fuzzy_match` is handed "
+                + "the SAME leaked `slice=[3,3]` - the trace prints it - and still answers, because "
+                + "it has no such guard. `(?b)` does not remove the match; it routes the retry "
+                + "through the one entry point whose loop guard the leaked bound falsifies. And "
+                + "`do_enhanced_fuzzy_match` restores the slice before every return that is not a "
+                + "hard error (`:18003`; the `goto error` at `:18001` skips it, and that path aborts "
+                + "the whole match anyway), which is upstream's own statement that the slice is "
+                + "per-attempt state; `do_best_fuzzy_match` restores it only inside its "
+                + "`found_match && fewest_errors > 0` branch (`:17848`), so an attempt that merely "
+                + "fails leaks.\n"
+                + "TWO FIXES, BOTH MEASURED, BOTH LEAVING UPSTREAM'S OWN SUITE AT 101 RUN / 0 FAILED. "
+                + "(A) `do_match` saves the slice beside `text_pos` and restores both - WHICH IS "
+                + "WHAT THIS PORT ALREADY DOES at `Matcher.cs:10098-10100`, chosen in S40b on "
+                + "self-refutation grounds before the upstream mechanism was known. (B) "
+                + "`do_best_fuzzy_match` restores the slice on every exit, as its sibling does. Both "
+                + "fix all five wave rows, the minimised shape and its reversed twin; A also reaches "
+                + "the non-BESTMATCH retry and changes one flagless answer (row 77937 gains "
+                + "`fuzzy=(1,1,1)` and group 2), B changes nothing outside `(?b)`.\n"
                 + "KEYED ON ROWS, like `bounded-lazy-repeat-partial`, `partial-retry-reversed-slice` "
                 + "and `search-start-partial`'s second arm, and for their reason rather than for "
                 + "convenience. Every predicate over 'upstream answered nothing and this port "

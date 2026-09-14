@@ -1,0 +1,7 @@
+{"generator": "interactions", "pattern": "(?b)(?r)(?:[^\\d]+(*SKIP)\\p{L}|[^\\d])(?:(?:(\\p{Nd}{1})(?:(?P<g2>\\p{ASCII})){e<=2,i<=1}){s<=1,i<=1,d<=1}(*SKIP)\\p{L}|\\w)\\D", "flags": 16386, "namedLists": {}, "subject": " 𐐨 ", "operation": "match", "partial": true}
+{"generator": "interactions", "pattern": "(?b)(?r)^(\\d)(?:([^\\d]{3,4}?)a(?:[[:alpha:]]{2,3}?){e<=2,s<=1:[A-Za-z_]}){s<=1,i<=1,d<=1}(?:\\S*?(*SKIP)\\w|[^\\d])", "flags": 10, "namedLists": {}, "subject": "a\n𐐀\r\na𝔘", "operation": "search", "partial": true}
+{"generator": "interactions", "pattern": "(?b)(?e)^(?:(?:AA){s<=1,i<=1,d<=1}(*SKIP)\\p{ASCII}|\\s)(?:(?:A([[a-z]--[aei]])(?:(\\D*)){e<=2,s<=1}){i<=1}(*SKIP)\\p{ASCII}|[A-Z])", "flags": 256, "namedLists": {}, "subject": "A", "operation": "fullmatch", "partial": true}
+{"generator": "interactions", "pattern": "(?b)(?e)(?:a\\w){s<=1,i<=1,d<=1}(?:\\S(*SKIP)[\\p{L}\\p{N}]|\\W)", "flags": 8, "namedLists": {}, "subject": "\r\na𝔘\n", "operation": "search", "partial": true}
+{"generator": "interactions", "pattern": "(?b)ﬁ(?:(?:(.)ﬁﬁ){s<=1:[^a-z]}(*SKIP)[A-Z]|\\p{ASCII})(?P<g2>[[:digit:]])?", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁﬁﬁßß\n ", "operation": "search", "partial": true}
+{"generator": "fuzzy", "pattern": "(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)", "flags": 0, "namedLists": {}, "subject": "ab.", "operation": "search", "partial": true}
+{"generator": "fuzzy", "pattern": "(?b)(?r)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)", "flags": 0, "namedLists": {}, "subject": ".ab", "operation": "search", "partial": true}

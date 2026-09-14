@@ -1383,6 +1383,8 @@ inherited-bug sweep.
 
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+**Mechanism established to the line by S47c on 2026-09-14** - see "Faulting mechanism" below. This
+entry is no longer amendment 16 outcome (d).
 
 **Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
 
@@ -1450,14 +1452,94 @@ Upstream's anchored walk under `(?b)` is also SHORTER than the same walk without
 flag drops the partials at starts 0 and 1 and keeps 2 and 3 - so the loss is not only in the search
 loop.
 
-**Faulting mechanism: `do_best_fuzzy_match` (`:17584`).** The exact line inside it is NOT
-established, and a report must say so or establish it first. The shape of the function is
-suggestive - its retry sets `start_pos = state->match_pos` and tightens `state->max_errors`, and its
-loop guard is `state->slice_start <= start_pos && start_pos <= state->slice_end`, which a `(*SKIP)`
-moving `slice_start` can falsify - but that is a hypothesis with the right shape, not a measurement.
-No debugger was attached and no ASAN build was made, for the reason entry 9 gives.
+**Faulting mechanism: ESTABLISHED TO THE LINE, S47c, 2026-09-14.** A `/Od /Zi` build of the pinned
+2026.9.10 source, instrumented with `fprintf` and run. It is a LEAK ACROSS THE TWO ATTEMPTS THAT
+MAKE ONE MATCH, and not a ranking rule at all:
 
-**Proposed fix.** Unknown, for the same reason.
+1. **`_regex.c:14555`** - `RE_OP_SKIP` sets `state->slice_start = state->text_pos`. On the minimised
+   shape the trace reads `SKIP :14555 slice_start 0 -> 3`, and it happens during the NORMAL
+   (non-partial) attempt, which then fails.
+2. **`_regex.c:18170`** - `do_match`'s partial fallback restores `text_pos` ALONE. The slice stays
+   where `(*SKIP)` left it, so the second attempt runs with `slice=[3,3]` and `text_pos=0`.
+3. **`_regex.c:17625`** - `do_best_fuzzy_match`'s scan loop is guarded by
+   `state->slice_start <= start_pos && start_pos <= state->slice_end`. With `slice_start=3` and
+   `start_pos=0` that guard is FALSE, the body never runs once, and `status` keeps the
+   `RE_ERROR_FAILURE` it was initialised with at `:17599`. **This is the discard: the partial is not
+   ranked and rejected, it is never attempted.**
+
+The trace, from `python tools/probes/upstream-bestmatch-lost-candidate.py --trace`, for the `(?b)`
+search of the minimised shape and then for the flagless one:
+
+```
+[LC] ENTER best search=1 text_pos=0 slice=[0,3] partial_side=-1
+[LC]   scan :17625 GUARD PASSED start_pos=0 slice=[0,3]
+[LC]     SKIP :14555 slice_start 0 -> 3
+[LC]   scan :17641 basic_match -> status=0 total_errors=0 match_pos=3 text_pos=3
+[LC]   scan :17648 break on FAILURE
+[LC] RETURN :17857 status=0 (0 is RE_ERROR_FAILURE)
+[LC] do_match :18170 partial retry: text_pos restored to 0, slice LEFT at [3,3]
+[LC] ENTER best search=1 text_pos=0 slice=[3,3] partial_side=1
+[LC] RETURN :17857 status=0 (0 is RE_ERROR_FAILURE)
+ANSWER: None
+
+[LC] ENTER simple search=1 text_pos=0 slice=[0,3] partial_side=-1
+[LC]     SKIP :14555 slice_start 0 -> 3
+[LC] do_match :18170 partial retry: text_pos restored to 0, slice LEFT at [3,3]
+[LC] ENTER simple search=1 text_pos=0 slice=[3,3] partial_side=1
+[LC]     SKIP :14555 slice_start 3 -> 3
+ANSWER: <regex.Match object; span=(0, 3), match='ab.', partial=True>
+```
+
+Read the second call of each pair. Under `(?b)` there is no `GUARD PASSED` line at all - the loop
+never ran. **The hypothesis this entry carried before S47c named the right guard for the wrong
+reason:** it blamed the retry's `start_pos = state->match_pos`, and the trace shows the loop is
+refused on its FIRST iteration, before any retry exists.
+
+**Why the flag matters, and it is not a filter.** `do_simple_fuzzy_match` is handed the SAME leaked
+`slice=[3,3]` - the trace prints it - and still answers, because it has no such guard: it calls
+`basic_match` from `text_pos` and lets the match walk. `(?b)` does not remove the match; it routes
+the retry through the one entry point whose loop guard the leaked bound falsifies. That also
+explains this entry's own observation above, that the anchored walk under `(?b)` is shorter: starts
+0 and 1 fall outside the leaked slice and start 2 does not.
+
+**`do_enhanced_fuzzy_match` already restores the slice before every return that is not a hard error
+(`:18003`; the `goto error` at `:18001` skips it, and that path aborts the whole match anyway)**,
+which is upstream's own statement that the slice is per-attempt state. `do_best_fuzzy_match` restores
+it only inside its `found_match && fewest_errors > 0` branch (`:17848`), so an attempt that merely
+fails leaks. That asymmetry between siblings is the defect in one sentence.
+
+**The mechanism has two arms**, because `RE_OP_SKIP` writes `slice_end` rather than `slice_start`
+when the node is `RE_STATUS_REVERSE` (`:14553`). Which arm each pinned row fires is printed by
+`... --trace`: the two `(?r)` wave rows, 74938 and 77937, take the reversed arm and the other three
+take the forward one. The reversed twin of the minimised shape,
+`(?b)(?r)(?:ab){e<=1}(?:\S(*SKIP)\w|\W)` over `'.ab'`, loses its partial the same way and is the
+MINIMISED witness of that arm; it is now row 7 of this entry's pin.
+
+**Proposed fix - two, both measured, and upstream's own suite is 101 run / 0 failed under each.**
+
+* **A.** `do_match` saves `slice_start`/`slice_end` beside `text_pos` at `:18155-18159` and restores
+  them at `:18170`. **This is what this port already does**, at `Matcher.cs:10098-10100`, chosen in S40b
+  on self-refutation grounds before the upstream mechanism was known. It also reaches the
+  non-BESTMATCH retry, so it changes one flagless answer: row 77937 gains `fuzzy=(1,1,1)` and group
+  2.
+* **B.** `do_best_fuzzy_match` saves the slice at entry and restores it on every return, as its
+  sibling does. Narrower: it changes nothing outside `(?b)`.
+
+Both fix the minimised shape, its reversed twin and all five judged wave rows. **Recommend A**,
+because it puts the per-attempt reset where the two attempts actually meet, and because this port
+has run it since S40b with the oracle evidence to show for it. B is the smaller diff and the easier
+sell if upstream would rather not touch the flagless path.
+
+**With either fix, upstream's answer UNDER `(?b)` is this port's answer IN FULL - span, groups and
+fuzzy counts - on all five judged rows, 77937 included.** That retires this entry's long-standing
+caveat that 77937 agreed on the span alone. The flagless answer was only ever a stand-in for what
+upstream would say without the defect, and there is now a build without the defect to ask instead.
+
+**Reproduce:** `python tools/probes/upstream-bestmatch-lost-candidate.py` (the plain contradiction,
+no compiler needed), `--trace` (the instrumented build and the trace above), `--fix` (stock, fix A
+and fix B built side by side, each asked the minimised shape, the five wave rows and upstream's own
+suite). The builds need MSVC and `REGEX_VCVARS` overrides the search; everything is built under
+`.scratch/` and `upstream/` is never written to.
 
 **What this port answers, and why it is right.** The partial upstream's own anchored `match` reports,
 and the same answer upstream gives once `(?b)` is removed. Pinned by
@@ -1476,7 +1558,14 @@ it, and the default wave is green at 6000 rows at all three seeds.
 **S46 CHECKED THE PORT HALF AND IT WAS ALREADY CLOSED, 2026-09-14.** The slice was written to "fix so
 the port answers what its own `match` answers"; it already did, and had since S43 - this port never
 reproduced this defect, which is exactly what the five classified rows above say. Nothing was
-changed for this entry. The upstream half stands: not filed, mechanism not established to the line.
+changed for this entry.
+
+**S47c CLOSED THE UPSTREAM HALF, 2026-09-14.** Mechanism established to the line, fix proposed and
+proven, probe committed, pin widened by one row. Still not filed: the owner rule stands. A draft
+report is at `docs/plan/upstream-reports/entry-13-bestmatch-loses-a-partial.md`. **Why this port
+never reproduced it is now a fact rather than a coincidence:** S40b restored the slice beside
+`text_pos` at `Matcher.cs:10098-10100`, which IS fix A, on this port's own self-refutation evidence
+and before anyone knew what it corresponded to upstream.
 
 **What S46 did add is a second instance nobody had judged, and a machine-checkable form of the weak
 argument.** Seed 20260914 row 76345 -

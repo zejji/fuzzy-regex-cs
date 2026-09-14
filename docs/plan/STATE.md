@@ -2,49 +2,44 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S47b IS CLOSED** (2026-09-14). Suite 5,953, ratchet GREEN. No engine change - oracle-test code,
-probes and notes only. Next in the queue is **S47c**, then S48.
+**S47c IS CLOSED** (2026-09-14, one sitting). Suite 5,953, ratchet GREEN, default oracle wave GREEN
+at three seeds. No engine change. Next in the queue is **S48**.
 
-**S47's owed blind pass ran first and is clean** (NO REPRODUCIBLE DEFECTS over `OpenCalls` /
-`CloseCallsAbove`, 22,400 differential rows plus 720 at the frame depth its strict `>` rides on).
-Discharged; do not re-run it.
+**Ledger entry 13's mechanism is established to the line**, in a `/Od /Zi` MSVC build of the pinned
+upstream, instrumented and run. `(*SKIP)` narrows `slice_start` at `_regex.c:14555` during the
+NORMAL attempt; `do_match:18170` restores `text_pos` alone on the partial fallback; and
+`do_best_fuzzy_match:17625`'s loop guard is then false for the caller's own start position, so the
+body never runs and `status` keeps the `RE_ERROR_FAILURE` from `:17599`. **The partial is never
+attempted.** `do_simple_fuzzy_match` gets the same leaked slice and answers anyway - no such guard -
+which is why `(?b)` looks like a filter and is not one.
 
-**Both audited pins are narrowed, each with a red-first test.** `bestmatch-loses-a-candidate` is
-keyed on nine judged questions as well as on upstream's flagless answer, so it no longer classifies
-ledger entry 13's family or a port that ignored `(?b)`; the five wave rows the narrowing reddened
-were each triaged with the probe and added. `turkic-default-folding` now needs a `T`-row PAIRING, or
-a pattern holding `[`, `\` or a named backreference. **Six rows killed five reasoned drafts of that
-predicate** - three from waves, three from the two blind passes. Twelve are pinned in
-`_turkicRowsToRefuse` and `_turkicRowsToClassify`; **touch the predicate, run both.**
+**Two fixes proven, upstream's own suite 101/0 under each. Fix A is what this port already does**
+(`Matcher.cs:10098-10100`, S40b). Both give, under `(?b)`, this port's answer IN FULL on all five
+judged rows - **77937 included**, which retires that row's "only the span agrees" caveat.
 
-**The independent verifier ran for the first time and found two claims that were not measurements**
-- a transposed line in a probe's pasted output, and the `timeout`/`resource` columns of the
-6000-row gate, which are not reproducible (2/50 one run, 3/49 the next). Both fixed, 11 of 13
-CONFIRMED. **Keep the step.**
+**Probe: `tools/probes/upstream-bestmatch-lost-candidate.py`** - plain (no compiler), `--trace`
+(instrumented build, plus which SKIP arm each pinned row fires), `--fix` (stock / A / B side by
+side). Builds go in `.scratch/`; `upstream/` is never written to. Needs MSVC; `REGEX_VCVARS`
+overrides the search. setuptools is NOT installed for this interpreter - the probe drives `cl.exe`.
 
-**Waves.** Default 300-row GREEN at seeds 7 / 4242 / 20260914 / 99991; `fuzzy` at 6,000 GREEN at the
-same four; `case-folding` at 6,000 `diverge 0` at five seeds. **The 6000-row everything gate at
-99991 is RED at 4 of 126,000** (73665, 73737, 75324 `interactions`; 118893 `verbs`), all
-pre-existing. S44's "GREEN at three seeds and 99991" box is UNTICKED in its notes.
+**Pin widened by one row**, `bestmatch-loses-a-partial` 6 -> 7: the minimised REVERSED shape, the
+`slice_end` arm's only small witness. The whole block is now re-recordable -
+`python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-partial-rows.jsonl`.
+**Seed 20260914 row 76345 is explained but NOT pinned:** its recorded question is gone (the wave file
+was overwritten; a single-generator re-run does not redraw it) and a guessed key would be fabricated.
 
-**Untriaged:** those 4, plus the three-seed gate's 19; the POSIX `(?e)` count bug (`interactions`
-seed 31337 row 3343); ledger 11 mechanisms C and D; 5's remaining door (S48); the issue sweep (S49,
-S50). **New:** the promoted fold sweep reports 30 `fold_case(FULL)` vs `str.casefold()` mismatches,
-not 2 - the 28 extra fold the other way in recent UCD additions, plausibly a version skew, NOT
-measured.
+**The blind pass raised 5 and ALL 5 reproduced** - two false scope claims, a probe that did not
+measure what three documents said it measured, a wrong "unconditionally", an off-by-one line. All
+fixed. An investigation slice gives a reviewer real purchase; budget for findings.
 
-**NEVER RUN CONTROL S46-B AGAINST THE SUITE** (19 GB, past 600s). Use `-Configuration Release`.
-**After editing a file with a script, run `dotnet csharpier format` on it** or IDE0055 fails lines
-you never touched. A single-generator wave with no fuzzy row reports RED on a vacuity guard, not a
-divergence.
+**Untriaged (unchanged):** the 6000-row everything gate at 99991 RED at 4 of 126,000; the three-seed
+gate's 19; the POSIX `(?e)` count bug; ledger 11 mechanisms C and D; 5's remaining door (S48); the
+issue sweep (S49, S50); the promoted fold sweep's 30 `fold_case(FULL)` mismatches, NOT measured.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate). Ledger:
-`docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed; entry 7 has `Reproduce:` naming
-four tracked probes.
+**Watch:** `FuzzyRecursionTests.The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see`
+went RED once for the reviewer under load and passed idle. Not this slice's doing.
 
-**Owed maintenance:** `FOLD_TURKIC`'s share of the `case-folding` rotation is too small; five broken
-control sites; PORTMAP's `_regex.c` line references stale after the sync (owner decision first);
-`record-oracle.py --self-check` exits 1 on a pre-S46 message.
-
-**Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
-`origin/main` needs a push (nothing since Phase 4's close).
+**Owed maintenance (unchanged):** `FOLD_TURKIC`'s share of the `case-folding` rotation; five broken
+control sites; PORTMAP's `_regex.c` line references stale after the sync; `record-oracle.py
+--self-check` exits 1 on a pre-S46 message. **Still open for the owner:** `slice-log.jsonl` marks S26
+`failed`; `origin/main` needs a push.
