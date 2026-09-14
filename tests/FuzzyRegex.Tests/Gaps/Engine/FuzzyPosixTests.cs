@@ -152,4 +152,92 @@ public sealed class FuzzyPosixTests
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
         m.FuzzyChanges.Insertions.Should().HaveCount(1);
     }
+
+    /// <summary>
+    /// POSIX chooses which match is answered; it does not make the chosen span cost more than the
+    /// same span costs without it.
+    /// </summary>
+    /// <remarks>
+    /// Row 76983 of the seed-7 6000-row gate, as the wave drew it. Both engines answer the span
+    /// <c>(0, 3)</c> and the same group, and <b>upstream charges <c>(1, 0, 1)</c> under POSIX where
+    /// its own POSIX-free engine fits that very span in <c>(0, 0, 1)</c></b>. Measured 2026-09-14 on
+    /// regex 2026.9.10, <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>; the oracle
+    /// entry <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> classifies the wave row.
+    /// <para>
+    /// <b>This is ledger entry 9 seen from upstream's side.</b> S48b fixed this port's copy of the
+    /// same defect - the POSIX <c>FAILURE</c> arm's <c>RestoreBestMatch</c> put the counts back and
+    /// left <c>TotalErrors</c> holding the LOSING candidate's, so the <c>(?e)</c> walk cut itself
+    /// off at <c>3 &gt;= 3</c> - and upstream still has it. The assertion is therefore an invariant
+    /// of this port against ITSELF, POSIX against no POSIX, which is the only standard available
+    /// when upstream's own answer is the thing under suspicion.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_posix_enhancematch_span_costs_no_more_than_the_same_span_costs_without_posix()
+    {
+        const string pattern = @"(?e)(?r)(?:[^\d][a\d]\p{L}){s<=1,i<=1,d<=1}(\p{Lu})+\b";
+        const string subject = " ﬀS";
+
+        Match posix = new FuzzyRegex("(?p)" + pattern).Match(subject);
+        Match plain = new FuzzyRegex(pattern).Match(subject);
+
+        posix.Success.Should().BeTrue();
+        plain.Success.Should().BeTrue();
+
+        (posix.Index, posix.Length).Should().Be((0, 3));
+        (posix.Index, posix.Length).Should().Be((plain.Index, plain.Length));
+
+        // The whole of the claim: the flag moved no bound, so it must not have moved the cost.
+        // Upstream answers (1, 0, 1) to the POSIX question and (0, 0, 1) to the other.
+        posix.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        posix.FuzzyCounts.Should().Be(plain.FuzzyCounts);
+    }
+
+    /// <summary>
+    /// A POSIX fuzzy match spends the errors its own POSIX-free engine spends, at the span the two
+    /// agree on.
+    /// </summary>
+    /// <remarks>
+    /// Row 73895 of the seed-7 6000-row gate, and the second shape the entry
+    /// <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> covers. Upstream, under
+    /// <c>(?b)(?e)(?r)(?p)</c>, reports the span <c>(0, 7)</c> in codepoints at a cost of one
+    /// error - and <b>its own POSIX-free <c>fullmatch</c> over that very span answers it with
+    /// none</b>. This port answers the span with none, and with the captures upstream's own
+    /// POSIX-free engine gives.
+    /// <para>
+    /// The anchored question is what judges this row, because upstream's POSIX-free SCAN starts its
+    /// first match at codepoint 4 rather than 0 - POSIX is doing its proper job of choosing the
+    /// longer match, and doing it at a price its own engine does not charge. Measured 2026-09-14 on
+    /// regex 2026.9.10, <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>.
+    /// </para>
+    /// <para>
+    /// The subject's two astral characters are why the UTF-16 span is <c>(0, 9)</c> where upstream's
+    /// codepoint span is <c>(0, 7)</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_posix_fuzzy_match_spends_what_the_flagless_engine_spends()
+    {
+        const string pattern =
+            @"(?b)(?e)(?r)(?:(?P<g1>\D+?)([\p{L}||\p{N}]*)\w){e<=2,s<=1}(?P<g3>[A])(?:(?(3)(?!(?P>g3))[\w--[0-9]]))*?";
+        string subject = "\nAA" + char.ConvertFromUtf32(0x1F600) + char.ConvertFromUtf32(0x1F600) + "aa ";
+
+        // The flag bits the wave drew it at, 0x10A, written inline: VERSION1, MULTILINE, IGNORECASE.
+        Match m = new FuzzyRegex("(?imV1)(?p)" + pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 9));
+
+        // Upstream charges one substitution for this span; its own POSIX-free fullmatch over the
+        // same span charges nothing, and so does this port.
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // And the captures are upstream's own POSIX-free anchored answer: codepoints (0, 5), (5, 5)
+        // and (6, 7), which are UTF-16 (0, 7), (7, 7) and (8, 9) across the two astral characters.
+        (m.Groups[1].Index, m.Groups[1].Length)
+            .Should()
+            .Be((0, 7));
+        (m.Groups[2].Index, m.Groups[2].Length).Should().Be((7, 0));
+        (m.Groups[3].Index, m.Groups[3].Length).Should().Be((8, 1));
+    }
 }

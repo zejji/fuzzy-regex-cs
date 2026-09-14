@@ -887,6 +887,131 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchWalkTruncatedOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The three rows of <c>posix-fuzzy-contradicts-its-own-flagless-answer</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-14, and all three because between
+    /// them they are the shapes the defect appears in - an error spent on a span that needs fewer, a
+    /// match charged an error its own POSIX-free engine fits with none, and a substitution whose
+    /// replacement text moves.
+    /// </summary>
+    /// <remarks>
+    /// Rows 76983 (seed 7) and 76101 (seed 20260914) are the plain shape: both engines report the
+    /// same answer except for what it cost, and upstream's own <c>posixFreeOutcome</c> is this port's
+    /// answer exactly. <b>Row 73895 (seed 7) is the shape that needs the anchored question</b>: the
+    /// whole SCAN moves when POSIX goes - upstream's POSIX-free scan starts its first match at
+    /// codepoint 4 rather than 0 - so the recorded <c>posixFreeOutcome</c> is NOT this port's answer
+    /// and cannot be the key. What judges that row is upstream's own POSIX-free <c>fullmatch</c> over
+    /// the span it reported UNDER POSIX, which answers with NO errors where the POSIX scan charged
+    /// one; that is upstream contradicting itself at identical flags, and it is this port's answer to
+    /// the code unit. Measured 2026-09-14,
+    /// <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>.
+    /// </remarks>
+    private const string _posixOvercostRows = """
+        {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?p)(?:(?P<g1>\\D+?)([\\p{L}||\\p{N}]*)\\w){e<=2,s<=1}(?P<g3>[A])(?:(?(3)(?!(?P>g3))[\\w--[0-9]]))*?", "flags": 266, "namedLists": {}, "subject": "\nAA😀😀aa ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 2, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 2, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 4, "captures": [[5, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 2, "success": true, "index": 7, "length": 0, "captures": [[7, 0]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [4, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}}
+        {"generator": "interactions", "pattern": "(?e)(?r)(?p)(?:[^\\d][a\\d]\\p{L}){s<=1,i<=1,d<=1}(\\p{Lu})+\\b", "flags": 8, "namedLists": {}, "subject": " ﬀS", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}, "codepointSpan": [0, 3]}]}}
+        {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?:\\p{Ll}+.([a]+)){s<=1:\\W}(?:[a](?P<g2>[\\w\\s]*)){e<=1}$", "flags": 65536, "namedLists": {}, "subject": "ıı\rAAﬁ\r\n", "operation": "subf", "template": "{g2}{g2}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "AAﬁ\rAAﬁ\r\r\n", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_posixOvercostRows"/>, in the same order,
+    /// as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Rows 2 and 3 are upstream's own recorded <c>posixFreeOutcome</c> - row 3 to the character, row
+    /// 2 to the counts, because a POSIX row carries no change positions on either side (ledger entry
+    /// 9) and the comparison drops them from both. Row 1 is upstream's own POSIX-free
+    /// <c>fullmatch</c> over the span upstream reported under POSIX, which is a different question
+    /// from the recorded scan and the reason this entry lists rows rather than keying on the
+    /// discriminator alone.
+    /// </remarks>
+    private static readonly string[] _posixOvercostOurs =
+    [
+        "matches 2 | match 0:(0,9)[(0,9)] 1:(0,7)[(0,7)] 2:(7,0)[(7,0)] 3:(8,1)[(8,1)] last=3/g3 "
+            + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:(1,0)[(1,0)] 3:(2,1)[(2,1)] last=3/g3",
+        "matches 1 | match 0:(0,3)[(0,3)] 1:(2,1)[(2,1)] last=1/- fuzzy=(0,0,1)[changes unavailable upstream]",
+        // Deliberately NOT a verbatim string: `OracleWave.Printable` renders the ligature and the two
+        // line endings as the six-character escapes themselves, so each backslash has to survive into
+        // the literal rather than being read as one.
+        "sub 1 'AA\\ufb01\\u000d\\u000aAA\\ufb01\\u000d\\u000a\\u000d'",
+    ];
+
+    /// <summary>
+    /// <see cref="_posixOvercostRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _posixOvercost = OracleWave
+        .ParseRows(_posixOvercostRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _posixOvercostOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The one row of <c>atomic-group-leaks-a-change-position</c>, row 74033 of the seed-20260914
+    /// 6000-row gate, as <c>tools/record-oracle.py --rows</c> wrote it on 2026-09-14.
+    /// </summary>
+    /// <remarks>
+    /// One row, because one is all any wave has drawn: the shape needs an atomic group whose body
+    /// carries a fuzzy section that spends an error and then abandons a sub-attempt, which is a
+    /// narrower accident than the earlier-attempt leak <c>leakFreeFuzzy</c> already covers. Note the
+    /// row's own <c>leakFreeFuzzy</c>, which agrees with upstream's drawn answer and NOT with this
+    /// port's: that is the entry's reason for existing said in one field, because the anchored
+    /// question removes an EARLIER attempt's leak and an atomic group's is inside one attempt.
+    /// </remarks>
+    private const string _atomicLeakedChangeRows = """
+        {"generator": "interactions", "pattern": "^(?:\\p{Ll}\\w??[a-f]){1i+2d+1s<=3}(?>(?:\\p{Ll}(?:\\p{L}){s<=1,i<=1,d<=1}){d<=1})$", "flags": 0, "namedLists": {}, "subject": "AA𝔘𝔘", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [2]}}], "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [4]}}}
+        """;
+
+    /// <summary>
+    /// The one row of <c>reversed-lookahead-change-at-the-match-start</c>, row 73463 of the seed-7
+    /// 6000-row gate, as <c>tools/record-oracle.py --rows</c> wrote it on 2026-09-14.
+    /// </summary>
+    /// <remarks>
+    /// One row, because one is all any wave has drawn, and KEYED ON THE ROW rather than on a
+    /// recorded discriminator because the control that judges it cannot be recorded: deleting the
+    /// <c>(?r)</c> makes upstream answer None to THIS row, so there is no forward answer to write
+    /// down. The contradiction was established on a minimised reproducer instead - see the entry's
+    /// own <c>Reason</c> - and the gap test carries that reproducer.
+    /// <para>
+    /// Note the row's own <c>leakFreeFuzzy</c>, which is a THIRD answer again: substitutions at 5
+    /// and 6 where the row records 1 and 0 and this port answers 6 and 7. Anchoring at the reported
+    /// span cuts the lookahead off - it has to read past <c>endpos</c> - so that question is not the
+    /// same question, and the recorder's own docstring names this as one of the three shapes where
+    /// it cannot be asked.
+    /// </para>
+    /// </remarks>
+    private const string _reversedLookaheadChangeRows = """
+        {"generator": "interactions", "pattern": "(?r)A(?=(?:[a\\d]([^a-f]*)){1i+2d+1s<=3})(?:(?:([A-Z]{1,})([^\\p{L}]*)\\D+){e<=2,s<=1}(*PRUNE)[a]|[abz])", "flags": 16394, "namedLists": {}, "subject": "\r\n\r\nAAAA_", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 4, "captures": [[4, 4]]}, {"number": 1, "success": true, "index": 6, "length": 3, "captures": [[6, 3]]}, {"number": 2, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 3, "success": true, "index": 6, "length": 0, "captures": [[6, 0]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 0], "insertions": [], "deletions": []}, "codepointSpan": [4, 8]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [5, 6], "insertions": [], "deletions": []}}]}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to <see cref="_reversedLookaheadChangeRows"/>, as the report
+    /// renders it.
+    /// </summary>
+    /// <remarks>
+    /// Both substitutions sit one code unit to the RIGHT of upstream's, which is the distance from
+    /// the match start to the position the lookahead tests - one leading <c>A</c>. The minimised
+    /// reproducer in the entry's <c>Reason</c> shows the same shift of one, and shows upstream's own
+    /// FORWARD matching of that pattern answering this port's positions.
+    /// </remarks>
+    private static readonly string[] _reversedLookaheadChangeOurs =
+    [
+        "matches 1 | match 0:(4,4)[(4,4)] 1:(6,3)[(6,3)] 2:(5,1)[(5,1)] 3:(6,0)[(6,0)] last=1/- "
+            + "fuzzy=(2,0,0)[s:6,7][i:][d:]",
+    ];
+
+    /// <summary>
+    /// <see cref="_reversedLookaheadChangeRows"/> by its question, mapped to this port's judged
+    /// answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _reversedLookaheadChange = OracleWave
+        .ParseRows(_reversedLookaheadChangeRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _reversedLookaheadChangeOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary><see cref="_atomicLeakedChangeRows"/> by its question.</summary>
+    private static readonly HashSet<string> _atomicLeakedChange = OracleWave
+        .ParseRows(_atomicLeakedChangeRows)
+        .Select(Question)
+        .ToHashSet(StringComparer.Ordinal);
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -1802,7 +1927,8 @@ internal static class ExpectedDivergences
                 + "nothing on our side of the comparison distinguishes the family from a defect. "
                 + "What does distinguish it is upstream's OWN answer with the flag deleted, which "
                 + "the recorder now asks for on every `(?b)` row "
-                + "(`_record_row_and_its_bestmatch_free_answer`): on all nine rows the fix moved - "
+                + "(`_without_bestmatch`, one of `tools/record-oracle.py`'s `_CONTROLS`): on all "
+                + "nine rows the fix moved - "
                 + "four at seed 4242 where upstream lost the match outright, three where both "
                 + "matched and the error mix differs, one `sub` and one `finditer` - this port's "
                 + "answer is upstream's flagless answer EXACTLY, groups, counts, change positions "
@@ -1851,6 +1977,155 @@ internal static class ExpectedDivergences
                 _bestmatchLostCandidate.Contains(Question(row))
                 && row.BestmatchFree is not null
                 && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+        ),
+        new(
+            Id: "posix-fuzzy-contradicts-its-own-flagless-answer",
+            Reason: "Upstream bug, and the inherited half of what S48b fixed on this side. POSIX is "
+                + "a CHOOSING flag - leftmost-longest among the matches the ordinary engine can "
+                + "make - so it may move WHICH match is answered, and only within what the flagless "
+                + "engine can already produce. On these three rows it breaks that, and on every one "
+                + "THIS PORT'S ANSWER IS UPSTREAM'S OWN POSIX-FREE ANSWER. Measured 2026-09-14, "
+                + "tools/probes/upstream-posix-and-atomic-free-answers.py, on regex 2026.9.10.\n"
+                + "ROW BY ROW, because the three are NOT one symptom - a first draft of this entry "
+                + "said they were and the blind review reproduced the row that refutes it. Seed 7 "
+                + "row 76983, `(?e)(?r)(?p)`: both engines answer the span (0, 3) and the same "
+                + "group, and upstream charges (1, 0, 1) where its own POSIX-free engine fits that "
+                + "span in (0, 0, 1). That is LEDGER ENTRY 9's mechanism seen from the other side - "
+                + "S48b fixed this port's copy of it, the POSIX FAILURE arm's `RestoreBestMatch` "
+                + "leaving `TotalErrors` holding the LOSING candidate's, and upstream still has it. "
+                + "Seed 7 row 73895, `(?b)(?e)(?r)(?p)`: upstream reports (0, 7) at a cost of one "
+                + "error, and its own POSIX-free `fullmatch` OVER THAT VERY SPAN answers it with "
+                + "none. **Seed 20260914 row 76101 is a DIFFERENT defect and the cost does not move "
+                + "at all**: both answers cost (1, 0, 1), and what changes is the SPAN - (0, 7) "
+                + "under POSIX against (0, 8) without it, so the flag picked the SHORTER of two "
+                + "equal-cost matches and the group the template reads captured somewhere else. "
+                + "That is leftmost-longest inverted, which is LEDGER ENTRY 16's mechanism, and it "
+                + "is pinned here because the discriminator and the judgement are the same ones.\n"
+                + "KEYED ON THE THREE ROWS AND ON THIS PORT'S ANSWER TO EACH, which is the owner's "
+                + "2026-09-14 ruling applied as `bestmatch-loses-a-candidate` applies it: a pin "
+                + "covers the rows whose contradiction was measured, every other POSIX fuzzy "
+                + "divergence shows red for triage, and it widens only by judging another row with "
+                + "the probe and adding it. `posixFreeOutcome` is required as well, AND required to "
+                + "differ from upstream's drawn answer, so the staleness alarm re-tests the "
+                + "discriminator rather than merely confirming it was asked - without that second "
+                + "clause a recorder whose POSIX removal had silently become a no-op would leave "
+                + "the entry classifying on evidence that says nothing.\n"
+                + "WHY NOT KEY ON THE DISCRIMINATOR ALONE, which would be self-maintaining and is "
+                + "what the atomic entry below does: on row 73895 the POSIX-free SCAN answers a "
+                + "DIFFERENT SPAN - its first match starts at codepoint 4 rather than 0 - so "
+                + "upstream's recorded flagless outcome is not this port's answer and cannot be the "
+                + "key. The question that judges that row is anchored, and an anchored question is "
+                + "not what the recorder writes down. Row 76983 fails the same test for a duller "
+                + "reason: a POSIX row carries no change positions on either side (ledger entry 9 - "
+                + "reading `fuzzy_changes` there segfaults the interpreter), so the comparison drops "
+                + "them from both, and the rendered answers differ in that field alone.",
+            PinnedBy: "FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_"
+                + "costs_without_posix and .A_posix_fuzzy_match_spends_what_the_flagless_engine_spends",
+            Example: _posixOvercostRows,
+            Applies: static (row, ours) =>
+                _posixOvercost.TryGetValue(Question(row), out string? judged)
+                // The discriminator has to have MOVED upstream's answer, not merely been asked.
+                // Without this clause the recorder's POSIX removal could silently become a no-op -
+                // a `(?p)` spelt somewhere the prefix rule does not reach, say - and the entry would
+                // go on classifying on evidence that says nothing. All three rows differ here: one
+                // in the counts, one in the span, one in the replacement text.
+                && row.PosixFree is not null
+                && !string.Equals(row.PosixFree.Describe(), row.Expected.Describe(), StringComparison.Ordinal)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "atomic-group-leaks-a-change-position",
+            Reason: "Upstream bug, and LEDGER ENTRY 11's mechanism through a door S47's "
+                + "`leakFreeFuzzy` cannot open. Upstream saves and restores the fuzzy COUNTS as a "
+                + "block and unwinds the CHANGES one item at a time (`start_match` clears "
+                + "`state->fuzzy_counts` and leaves `state->fuzzy_changes` alone, "
+                + "upstream/src/_regex.c:11790-11792), so any construct that abandons a sub-attempt "
+                + "WITHOUT backtracking through it leaves that sub-attempt's change entries behind. "
+                + "An ATOMIC GROUP is exactly such a construct, and its leak is inside ONE attempt - "
+                + "which is why the anchored question cannot see it: this row's own recorded "
+                + "`leakFreeFuzzy` agrees with upstream's drawn answer, not with this port's, "
+                + "because anchoring removes an EARLIER attempt's leak and there is no earlier "
+                + "attempt here.\n"
+                + "WHAT SETTLES IT IS UPSTREAM'S OWN CONTROL: spell the `(?>` as `(?:` - the same "
+                + "body, the same alternatives, the backtracking cut gone - and upstream moves its "
+                + "deletion from codepoint 2 to codepoint 3, which is UTF-16 4 on this astral "
+                + "subject and is this port's answer. Everything else about the two answers is "
+                + "identical: the same span, the same counts (2, 1, 1), the same two substitutions "
+                + "and the same insertion. Measured 2026-09-14, "
+                + "tools/probes/upstream-posix-and-atomic-free-answers.py, on regex 2026.9.10.\n"
+                + "KEYED ON THE ROW **AND** ON THE RECORDED `atomicFreeOutcome`, the shape "
+                + "`bestmatch-loses-a-candidate` uses: the row makes the entry as narrow as one "
+                + "judged question, and demanding that this port's whole answer equals upstream's "
+                + "own cut-free answer makes the staleness alarm re-test the discriminator on every "
+                + "run. A predicate over the two compared answers would not do: both engines report "
+                + "the same span, the same counts and two of the three change positions, and differ "
+                + "over one deletion - which is indistinguishable from this port computing a "
+                + "position wrongly.",
+            PinnedBy: "FuzzyCountsAndChangesTests.An_atomic_group_reports_the_deletion_the_cut_"
+                + "free_pattern_reports",
+            Example: _atomicLeakedChangeRows,
+            Applies: static (row, ours) =>
+                _atomicLeakedChange.Contains(Question(row))
+                && row.AtomicFree is not null
+                && string.Equals(ours.Describe(), row.AtomicFree.Describe(), StringComparison.Ordinal)
+        ),
+        new(
+            Id: "reversed-lookahead-change-at-the-match-start",
+            Reason: "Upstream bug, and LEDGER ENTRY 11's mechanism through a third door. Under "
+                + "`(?r)`, a fuzzy section inside a LOOKAHEAD has its change positions reported at "
+                + "the MATCH START rather than at the position the lookahead actually tested. The "
+                + "counts are right and the positions are not, so the two engines agree on the "
+                + "span, the groups and the counts and differ only over where the errors were "
+                + "spent - which is indistinguishable from this port computing a position wrongly, "
+                + "and is why this entry lists a row rather than a predicate.\n"
+                + "WHAT SETTLES IT IS UPSTREAM CONTRADICTING ITSELF, on a reproducer minimised to "
+                + "four constructs and a three-character subject, with no flags at all. "
+                + "`A(?=[^A]{e<=1})A+\\D` over 'AAA': FORWARD, upstream answers (0, 3) with one "
+                + "substitution at 1 - the position the lookahead tests, one past the leading `A` - "
+                + "and this port answers the same thing. Add `(?r)`, which moves no bound and picks "
+                + "the same candidate here (both engines still answer the span (0, 3) at the same "
+                + "count), and UPSTREAM'S substitution moves to 0 while this port's stays at 1.\n"
+                + "THE CONDITION IS A GENERAL REPEAT AFTER THE LOOKAHEAD, measured rather than "
+                + "guessed, and the first draft of this entry had it wrong. It claimed the shift was "
+                + "the lookahead's OFFSET from the match start; `AA(?=[^A]{e<=1})A+\\D` over 'AAAA' "
+                + "kills that, because its offset is 2 and upstream reversed still answers 0 where "
+                + "its own forward answer is 2. What actually separates the rows is the atom after "
+                + "the lookahead: make it a FIXED count - `A(?=[^A]{e<=1})A\\D` over 'AAA', the "
+                + "reproducer and nothing else changed - and both directions answer 1. With the "
+                + "lookahead AT the match start there is nowhere for the position to move to, and "
+                + "both directions answer 0. Measured 2026-09-14 on regex 2026.9.10, "
+                + "tools/probes/upstream-reversed-lookahead-change-position.py, whose four rows are "
+                + "those four and which exits non-zero if any of them stops behaving that way.\n"
+                + "HOW MUCH OF THE WAVE ROW THIS ACCOUNTS FOR, stated exactly rather than "
+                + "generously. The row has the reproducer's three ingredients - `(?r)`, a fuzzy "
+                + "section inside a lookahead, and general repeats (`[A-Z]{1,}`, `\\D+`) after it - "
+                + "but it has TWO fuzzy sections and spends one substitution in each, so the "
+                + "minimisation isolates one mechanism and the row shows the sum. It also carries "
+                + "an earlier attempt's leak ON TOP: trimming the leading '\\r\\n\\r\\n', which "
+                + "leaves the match identical in shape, span and groups, moves upstream's pair from "
+                + "an absolute (1, 0) that sits OUTSIDE the match to a relative (1, 2) that sits "
+                + "inside, while this port answers a relative (2, 3) at every prefix length. So "
+                + "what is judged here is that this port's positions are the ones upstream's own "
+                + "forward matching gives for this family, not that the row's whole difference has "
+                + "been reduced to one line of upstream.\n"
+                + "NO RECORDED DISCRIMINATOR, and that is a real weakness rather than an oversight: "
+                + "deleting the `(?r)` makes upstream answer None to THIS row, so its forward answer "
+                + "cannot be written down, and `leakFreeFuzzy` gives a THIRD answer again because "
+                + "anchoring cuts off a lookahead that must read past `endpos`. The entry is "
+                + "therefore keyed on the one judged question and on this port's exact answer to it, "
+                + "and it widens only by judging another row.\n"
+                + "WHAT THIS PORT CHANGED, said out loud because it is the reason the row is here at "
+                + "all: before S48b this port reproduced upstream's answer exactly, leak included. "
+                + "S48b's `PopFuzzyCounts` truncation - the fix for mechanisms C and D - moved it "
+                + "onto upstream's own forward answer. Verified by bisection against a worktree at "
+                + "c8165b5 and by flipping the truncation's comparison, which restores upstream's "
+                + "answer at every prefix length.",
+            PinnedBy: "FuzzyCountsAndChangesTests.A_reversed_lookahead_reports_its_substitution_"
+                + "where_the_lookahead_tested",
+            Example: _reversedLookaheadChangeRows,
+            Applies: static (row, ours) =>
+                _reversedLookaheadChange.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
             Id: "turkic-default-folding",

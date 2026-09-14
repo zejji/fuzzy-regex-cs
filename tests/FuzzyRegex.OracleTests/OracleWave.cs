@@ -197,7 +197,9 @@ internal static class OracleWave
             row.TryGetProperty("bestmatchFreeOutcome", out JsonElement bestmatchFree)
                 ? ReadOutcome(bestmatchFree)
                 : null,
-            ReadLeakFreeFuzzy(row)
+            ReadLeakFreeFuzzy(row),
+            row.TryGetProperty("posixFreeOutcome", out JsonElement posixFree) ? ReadOutcome(posixFree) : null,
+            row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null
         );
     }
 
@@ -609,6 +611,24 @@ internal sealed record OracleHeader(
 /// recorded match had a fuzzy half to ask about, which is every non-fuzzy row and every wave recorded
 /// before S47. Never compared; only <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="PosixFree">
+/// A fifth (S48b, second sitting). The whole row asked again with POSIX taken away - the <c>(?p)</c>
+/// deleted from the leading run of inline-flag groups, or <c>regex.P</c> cleared. POSIX chooses
+/// leftmost-LONGEST among the matches the ordinary engine can make, so like <c>BESTMATCH</c> it can
+/// move WHICH match is answered and must not change what a given span COSTS; the rows the entry
+/// <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> lists are where upstream does change it.
+/// <see langword="null"/> on every row that carries no POSIX, on any row upstream will not answer
+/// without it, and on any wave recorded before this slice. Never compared; only
+/// <see cref="ExpectedDivergences"/> reads it.
+/// </param>
+/// <param name="AtomicFree">
+/// A sixth, and the same kind of thing again. The whole row asked again with every <c>(?&gt;</c>
+/// spelled <c>(?:</c> - the same body and the same alternatives, the backtracking cut gone. It is
+/// the door <see cref="LeakFreeFuzzy"/> cannot open: that question re-asks upstream ANCHORED, which
+/// removes an EARLIER attempt's leak, and an atomic group abandons a sub-attempt WITHIN one attempt.
+/// <see langword="null"/> on every pattern without an atomic group and on any wave recorded before
+/// this slice. Never compared; only <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -628,7 +648,9 @@ internal sealed record OracleRow(
     MatchesOutcome? AnchoredScan = null,
     MatchesOutcome? SubMatches = null,
     IOracleOutcome? BestmatchFree = null,
-    IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null
+    IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null,
+    IOracleOutcome? PosixFree = null,
+    IOracleOutcome? AtomicFree = null
 );
 
 /// <summary>What a matching operation answered.</summary>

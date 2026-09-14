@@ -195,6 +195,54 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_this_port_answers_upstreams_way_is_not_accounted_for_by_the_three_judged_entries()
+    {
+        // The over-classification guard for S48b's second sitting, and the control its three entries
+        // rest on. Each is keyed on exact judged questions AND on this port's exact rendered answer,
+        // so the thing to prove is that a DIFFERENT answer to the same question is reported rather
+        // than swallowed - which is the failure mode the S47b audit found in the `(?b)` entry and
+        // the owner ruled against on 2026-09-14.
+        //
+        // Two wrong answers per row, both realistic rather than arbitrary:
+        //
+        //   * upstream's OWN drawn answer, which is what this port gave on `73463` before S48b -
+        //     verified by bisection against a worktree at c8165b5 - so it is the regression these
+        //     entries could plausibly hide rather than a fabricated one; and
+        //   * no match at all, which is what an unrelated engine defect landing on one of these rows
+        //     looks like.
+        string[] judged =
+        [
+            "posix-fuzzy-contradicts-its-own-flagless-answer",
+            "atomic-group-leaks-a-change-position",
+            "reversed-lookahead-change-at-the-match-start",
+        ];
+
+        foreach (string id in judged)
+        {
+            ExpectedDivergence entry = ExpectedDivergences
+                .All.Should()
+                .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+                .Subject;
+
+            foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+            {
+                ExpectedDivergences
+                    .For(row, row.Expected)
+                    .Should()
+                    .BeNull(
+                        "{0}: a port that reproduced upstream's own answer to row {1} is not this family",
+                        id,
+                        row.Number
+                    );
+                ExpectedDivergences
+                    .For(row, new NoMatchOutcome())
+                    .Should()
+                    .BeNull("{0}: a total failure on row {1} is a defect, not this family", id, row.Number);
+            }
+        }
+    }
+
+    [Test]
     public void An_accounted_divergence_is_reported_but_does_not_fail_the_run()
     {
         // Half one: the wave loop reclassifies, tallies and renders it as EXPECTED rather than

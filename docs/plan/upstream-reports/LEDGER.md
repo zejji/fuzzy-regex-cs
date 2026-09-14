@@ -1136,6 +1136,19 @@ upstream on the counts and on every position. Pinned by `Gaps.Engine.FuzzyCounts
 assertion IS the self-refutation: the POSIX answer must equal the flagless one. Negative control
 **S48b-B**, `posix-restore-leaves-the-running-totals-stale`, takes the two lines out again.
 
+**UPSTREAM STILL HAS THE STALE-TOTALS BUG, and S48b's second sitting pinned it (2026-09-14).** The
+port side is closed; the same over-charge is visible in upstream at seed-7 gate row 76983,
+`(?e)(?r)(?p)(?:[^\d][a\d]\p{L}){s<=1,i<=1,d<=1}(\p{Lu})+\b` over `' ﬀS'`, flags `0x8`, overlapped
+`finditer`. Both engines answer the span `(0, 3)` and the same group; upstream charges `(1, 0, 1)`
+where its own POSIX-free engine fits that very span in `(0, 0, 1)`, which is this port's answer.
+Two more rows of the same family are pinned with it - seed-7 row 73895, where upstream's own
+POSIX-free `fullmatch` over the span it reported under POSIX answers with NO errors, and
+seed-20260914 row 76101, a `subf` whose replacement TEXT moves. Oracle entry
+`posix-fuzzy-contradicts-its-own-flagless-answer`; probe
+`python tools/probes/upstream-posix-and-atomic-free-answers.py`; pinned by
+`Gaps.Engine.FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_costs_without_posix`
+and `.A_posix_fuzzy_match_spends_what_the_flagless_engine_spends`.
+
 **Proposed fix, for the upstream half that remains** - the `fuzzy_changes` over-read. Unknown.
 Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
@@ -1230,6 +1243,11 @@ abandons a sub-attempt without backtracking through it.
 | B | A partial match returns from inside a nested section, so the counter holds the innermost section's errors alone | the counts | FIXED |
 | C | `POSIX` and `BESTMATCH` candidates leave the list polluted or empty against the saved counts | the list | FIXED (S48b) |
 | D | A lookaround under `(?e)` restores a counts block whose changes were unwound item-wise | one of them | FIXED (S48b) |
+| E | An ATOMIC GROUP's abandoned sub-attempt leaves its change entry behind | the list | NOT SHARED - pinned (S48b) |
+| F | Under `(?r)`, a fuzzy lookahead followed by a general repeat reports its change at the MATCH START | the list | NOT SHARED - pinned (S48b) |
+
+E and F were found by S48b's second sitting and are written up under the table; the "four
+mechanisms" count above is A to D, which are the four this port ever shared.
 
 **THE FLAGS ARE PART OF EACH REPRODUCTION** - every one below comes from a wave row, and none of
 them reproduces without its flag bits.
@@ -1407,6 +1425,48 @@ per 126,000-row seed, and what covers it instead is
 **The result.** The default wave is GREEN at three seeds, and the 6000-row three-seed gate went from
 24 / 23 / 25 diverging rows to 3 / 2 / 9 - the 14 that remain being exactly the untriaged rows that
 were already red at HEAD before S47 touched anything, and none of them a fuzzy-reporting divergence.
+
+### Two more doors, found by S48b's second sitting (2026-09-14) - E and F, and NEITHER is shared
+
+The defect class is the same - upstream abandons a sub-attempt without unwinding its change entries
+- but these two are doors mechanism A's anchored question cannot open, because the leak is inside
+ONE attempt rather than left by an earlier one. **This port does not share either**, so each is
+pinned in the oracle rather than fixed, and each carries a permanent test.
+
+| # | Mechanism | Upstream's own control | Oracle entry |
+|---|---|---|---|
+| E | An ATOMIC GROUP's abandoned sub-attempt leaves its change entry behind | spell the `(?>` as `(?:` | `atomic-group-leaks-a-change-position` |
+| F | Under `(?r)`, a fuzzy section inside a LOOKAHEAD followed by a GENERAL REPEAT reports its change at the MATCH START | match the same pattern FORWARD | `reversed-lookahead-change-at-the-match-start` |
+
+**E**, row 74033 of the seed-20260914 6000-row gate:
+`^(?:\p{Ll}\w??[a-f]){1i+2d+1s<=3}(?>(?:\p{Ll}(?:\p{L}){s<=1,i<=1,d<=1}){d<=1})$` over `'AA𝔘𝔘'`, no
+flags, `search`. Both engines answer the span, the counts `(2,1,1)`, the same two substitutions and
+the same insertion; upstream puts the DELETION at codepoint 2 and this port at 3. Replace the `(?>`
+with `(?:` and upstream moves to 3. The row's own `leakFreeFuzzy` agrees with upstream's drawn
+answer, which is mechanism A's question failing to see this one in a single field.
+
+**F**, row 73463 of the seed-7 gate, minimised to four constructs, three characters and no flags at
+all. `A(?=[^A]{e<=1})A+\D` over `'AAA'`: matched FORWARD upstream answers `(0, 3)` with the
+substitution at 1 - where `[^A]` was tested, one past the leading `A` - and with `(?r)` added, which
+picks the same candidate at the same span and count, it answers **0**. The condition is a GENERAL
+repeat after the lookahead and was measured, not guessed: with `A+` made a fixed `A` and nothing
+else changed, both directions answer 1; and `AA(?=[^A]{e<=1})A+\D` over `'AAAA'` answers 2 forward
+and **0** reversed, which is what killed the first draft's claim that the shift was the lookahead's
+offset.
+
+**F is the one S48b itself moved, and that is worth saying plainly.** Before S48b this port
+reproduced upstream's answer on the wave row exactly, leak and all; the `PopFuzzyCounts` truncation
+that fixed C and D moved it onto upstream's own forward answer. Verified by bisecting against a
+worktree at `c8165b5` and by flipping the truncation's comparison, which restores upstream's answer
+at every prefix length. The drawn row also carries an earlier attempt's leak on top of F, so the
+oracle entry judges the positions rather than claiming the whole row reduces to one line of
+upstream.
+
+Both re-runnable: `python tools/probes/upstream-posix-and-atomic-free-answers.py` and
+`python tools/probes/upstream-reversed-lookahead-change-position.py` (the second exits non-zero if
+upstream stops behaving this way). Pinned by
+`Gaps/Engine/FuzzyCountsAndChangesTests.An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports`
+and `.A_reversed_lookahead_reports_its_substitution_where_the_lookahead_tested`.
 
 **Related:** entry 7, the other inherited bug on Phase 6's list, and entry 9, whose POSIX
 `fuzzy_changes` crash is mechanism C seen from the C side.

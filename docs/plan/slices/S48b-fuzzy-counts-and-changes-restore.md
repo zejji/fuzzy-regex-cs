@@ -277,3 +277,121 @@ would mean this change removes a hang rather than introducing one. **This slice 
 minimise that**, and it is written down as a lead, not a result. The sweep's headline figure - zero
 counts-versus-changes contradictions across 22,400 rows, including the POSIX rows the wave invariant
 cannot reach - is corroboration of the fix and was likewise not independently re-run.
+
+---
+
+# Progress, sitting 2 (2026-09-14) - STILL A CHECKPOINT, the slice is NOT closed
+
+## What landed
+
+**All five of the gate's new rows are classified, and the three-seed 6000-row gate is back to
+6 + 4 + 9 = 19** - S48's baseline exactly, which is the slice's Verification bar. Suite 5,963 (+4),
+ratchet GREEN, default wave GREEN at three seeds.
+
+**Sitting 1 named two families; the measurement found THREE, plus one row neither reached.**
+
+- `tools/record-oracle.py` gained two second questions beside `bestmatchFreeOutcome`, in a new
+  `_CONTROLS` table that replaces the single-purpose wrapper: **`posixFreeOutcome`** (the row again
+  with POSIX taken away) and **`atomicFreeOutcome`** (every `(?>` spelt `(?:`). Both keep the
+  original's rule that an unanswerable second question leaves the key OFF, which makes the consuming
+  entry not apply and REPORTS the row.
+- Three `ExpectedDivergences` entries, each keyed on judged questions **and** on this port's exact
+  rendered answer: `posix-fuzzy-contradicts-its-own-flagless-answer` (3 rows),
+  `atomic-group-leaks-a-change-position` (1) and `reversed-lookahead-change-at-the-match-start` (1).
+- Four gap tests, and `OracleWaveTests.A_row_this_port_answers_upstreams_way_is_not_accounted_for_
+  by_the_three_judged_entries` - an over-classification guard that feeds every example row upstream's
+  own drawn answer (what this port really gave before S48b) and a total failure, and asserts neither
+  is classified.
+
+**The fifth row was not upstream's fault by default, and sitting 1's claim about it was FALSE.**
+Sitting 1 wrote "on every one of the five this port answers what upstream's own control answers"; on
+seed-7 row 73463 this port answered neither upstream's drawn answer `[1,0]` nor its anchored one
+`[5,6]`. Bisecting against a worktree at `c8165b5` showed the pre-S48b port reproduced upstream
+EXACTLY, leak included, and that S48b's own `PopFuzzyCounts` truncation moved it. What justifies the
+new answer is upstream contradicting **itself** between its two directions, on a reproducer cut to
+four constructs, three characters and no flags: `A(?=[^A]{e<=1})A+\D` over `'AAA'` answers the
+substitution at 1 FORWARD - where the lookahead tested - and at 0 REVERSED, while this port answers
+1 both ways. The condition is a GENERAL REPEAT after the lookahead, measured rather than guessed:
+the first draft said it was the lookahead's OFFSET and `AA(?=[^A]{e<=1})A+\D` over `'AAAA'` (offset
+2, reversed answer 0) killed that.
+
+**Ledger entry 11 gains mechanisms E and F, NEITHER shared**; entry 9 gains the note that upstream
+still has the stale-totals over-charge this port fixed. `DIVERGENCES.md`'s ledger-11 phrase and
+`PORTMAP.md`'s recorder and fuzzy-machinery rows are corrected.
+
+## Negative controls - in these notes, NOT in `controls.json`, and that is itself a finding
+
+**`tools/run-controls.py` cannot measure a control that mutates the recorder.** `wave_for` records
+each wave BEFORE the mutation and caches it, on the stated assumption that "the rows do not depend on
+our own code" - true of an engine mutation, false of a recorder one. Both controls reported
+identical figures at every seed, which was the tell: the numbers came from cached waves recorded
+without the new fields. Applied by hand they behave correctly and differently. The 76 stale
+`.scratch/control-waves` were deleted (the cache has no version key). **S42-2A mutates the same file
+and is in the same position - owed maintenance, not this slice's to fix.**
+
+Both re-run by hand, against the tree being committed, with the unmutated baseline measured by the
+same command:
+
+> **Control C, `posix-control-asks-the-same-question-it-was-asked`**: in
+> `tools/record-oracle.py`, `_without_posix`, replace
+> ```
+>     prefix = _INLINE_FLAG_PREFIX.match(pattern)
+>     if prefix and _POSIX_INLINE in prefix.group(0):
+>         return {**row, "pattern": pattern.replace(_POSIX_INLINE, "", 1)}
+>     if flags & _POSIX_FLAG:
+>         return {**row, "flags": flags & ~_POSIX_FLAG}
+>     return None
+> ```
+> with
+> ```
+>     if _POSIX_INLINE in pattern or flags & _POSIX_FLAG:
+>         return dict(row)
+>     return None
+> ```
+> Wave: `pwsh -File tools/run-oracle.ps1 -Generator interactions -Count 6000 -Seeds 7,20260914`.
+> Seed 7: **4 diverge unmutated, 6 mutated**. Seed 20260914: **3 unmutated, 4 mutated**.
+> That is +3, which is exactly the entry's three rows.
+
+> **Control D, `atomic-control-leaves-the-cut-in-place`**: in `tools/record-oracle.py`,
+> `_without_atomic_groups`, replace
+> ```
+>     return {**row, "pattern": pattern.replace(_ATOMIC_OPEN, _ATOMIC_FREE_OPEN)} if _ATOMIC_OPEN in pattern else None
+> ```
+> with
+> ```
+>     return dict(row) if _ATOMIC_OPEN in pattern else None
+> ```
+> Same wave command. Seed 20260914: **3 unmutated, 4 mutated**. Seed 7: **4 unmutated, 4 mutated -
+> IT DOES NOT FIRE AT THIS SEED**, and that is correct rather than thin: the entry's only row is
+> drawn at seed 20260914 and there is no atomic row at seed 7. Each control fires exactly where its
+> family is drawn and nowhere else.
+
+## Review
+
+**Blind review: one pass, 3 findings raised, 3 reproduced, 3 fixed.** All three were accuracy
+defects in text this sitting wrote, and all three were real:
+
+1. `_without_posix`'s docstring justified the prefix-only rule by saying a mid-pattern `(?p)` scopes
+   to the group it sits in. **It does not** - `(?:a|ab)(?p)(?:c|cd)` and `(?:a|ab)(?:(?p)c|cd)` both
+   set the global bit and both answer `(0, 4)` where the flagless pattern answers `(0, 3)`. The
+   rule is KEPT and its reason rewritten to the true one, which was then measured: a textual `(?p)`
+   is not always a flag group - `[(?p)]+` matches the literal text with POSIX off, and deleting
+   those four characters leaves `[]+`, which does not compile.
+2. Row 76101 was described as upstream changing what a span costs. **The cost does not move at all**:
+   both answers cost `(1, 0, 1)` and the SPAN changes, `(0, 7)` under POSIX against `(0, 8)` without
+   it - POSIX choosing the SHORTER of two equal-cost matches, which is leftmost-longest inverted and
+   is ledger entry 16's mechanism rather than entry 9's. Corrected in the entry and in the probe.
+3. A stale entry name, `posix-costs-a-span-more-than-it-needs`, left in `OracleWave.cs` and the
+   probe docstring after the entry was renamed.
+
+**No second blind pass is owed**: all three fixes are XML doc comments and a probe docstring, in the
+very passages the reviewer read and flagged. No public API, no production logic and no predicate
+changed after the review.
+
+## What is LEFT
+
+1. **The independent verifier has NOT run** (spec amendment 16 limb (d)). It is the whole of what
+   makes this a checkpoint rather than a close.
+2. **The ratchet has not been re-run since the review's three fixes.** The OracleTests project
+   builds clean, but run `pwsh -File tools/check-ratchet.ps1` first thing.
+3. Then the closing notes' "Done when" boxes, `git mv` to `done/`, and the slice closes.

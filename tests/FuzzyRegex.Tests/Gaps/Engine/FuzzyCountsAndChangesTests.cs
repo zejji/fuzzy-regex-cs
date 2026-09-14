@@ -153,6 +153,116 @@ public sealed class FuzzyCountsAndChangesTests
     }
 
     /// <summary>
+    /// An ATOMIC GROUP's abandoned sub-attempt does not leave its deletion behind - the position
+    /// reported is the one the same pattern reports with the backtracking cut removed.
+    /// </summary>
+    /// <remarks>
+    /// Row 74033 of the seed-20260914 6000-row gate, minimised only by dropping the flags it did not
+    /// need. <b>Upstream and this port agree on everything except this one position</b>: the same
+    /// span, the same counts <c>(2, 1, 1)</c>, the same two substitutions and the same insertion,
+    /// and a deletion at codepoint 2 upstream against codepoint 3 here - UTF-16 4, because the
+    /// subject's last two characters are astral.
+    /// <para>
+    /// <b>Upstream's own control is what says which is right</b>, because the two answers are both
+    /// self-consistent and nothing on this side of the comparison separates them. Spell the
+    /// <c>(?&gt;</c> as <c>(?:</c> - the same body, the same alternatives, the backtracking cut gone
+    /// - and upstream moves its deletion to codepoint 3. Measured 2026-09-14 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>. The oracle entry
+    /// <c>atomic-group-leaks-a-change-position</c> classifies the wave row on that control.
+    /// </para>
+    /// <para>
+    /// S47's <c>leakFreeFuzzy</c> question cannot reach this: it re-asks upstream ANCHORED at the
+    /// reported span, which removes an EARLIER attempt's leak, and an atomic group abandons a
+    /// sub-attempt inside ONE attempt. The row's recorded <c>leakFreeFuzzy</c> agrees with
+    /// upstream's drawn answer, not with this one.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports()
+    {
+        const string pattern = @"^(?:\p{Ll}\w??[a-f]){1i+2d+1s<=3}(?>(?:\p{Ll}(?:\p{L}){s<=1,i<=1,d<=1}){d<=1})$";
+        string subject = "AA" + char.ConvertFromUtf32(0x1D518) + char.ConvertFromUtf32(0x1D518);
+
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 6));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(2, 1, 1));
+        m.FuzzyChanges.Substitutions.Should().Equal(0, 1);
+        m.FuzzyChanges.Insertions.Should().Equal(2);
+
+        // The whole of the divergence, and upstream's own cut-free answer: codepoint 3, which is
+        // UTF-16 4 across the first astral character.
+        m.FuzzyChanges.Deletions.Should().Equal(4);
+
+        AssertChangesAgreeWithCounts(m);
+
+        // The control itself, run here as well as in the probe: with the cut removed this port does
+        // not move, which is what says the position belongs to the match rather than to the group.
+        Match cutFree = new FuzzyRegex(pattern.Replace("(?>", "(?:", StringComparison.Ordinal)).Match(subject);
+
+        cutFree.Success.Should().BeTrue();
+        cutFree.FuzzyChanges.Deletions.Should().Equal(4);
+    }
+
+    /// <summary>
+    /// A reversed match reports a LOOKAHEAD's substitution where the lookahead tested, not at the
+    /// start of the match.
+    /// </summary>
+    /// <remarks>
+    /// The minimised reproducer behind seed-7 gate row 73463, cut to four constructs, a
+    /// three-character subject and no flags at all. <b>Upstream contradicts itself here</b>: matched
+    /// FORWARD it answers <c>(0, 3)</c> with the substitution at 1 - where <c>[^A]</c> was tested,
+    /// one past the leading <c>A</c> - and with <c>(?r)</c> added, which picks the same candidate at
+    /// the same span and the same count, it answers 0.
+    /// <para>
+    /// <b>The condition is a GENERAL REPEAT after the lookahead</b>, which was measured rather than
+    /// assumed: with <c>A+</c> made a fixed <c>A</c> and nothing else changed, both of upstream's
+    /// directions answer 1. Measured 2026-09-14 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-reversed-lookahead-change-position.py</c>, which carries that
+    /// control and two more.
+    /// </para>
+    /// <para>
+    /// <b>This port answered upstream's reversed answer until S48b</b>, whose <c>PopFuzzyCounts</c>
+    /// truncation moved it onto upstream's own forward answer. That is why the row shows as a new
+    /// divergence rather than as a fix: the oracle entry
+    /// <c>reversed-lookahead-change-at-the-match-start</c> classifies the wave row, and this test
+    /// pins the reproducer so the answer cannot drift back without a red suite.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_reversed_lookahead_reports_its_substitution_where_the_lookahead_tested()
+    {
+        const string pattern = @"A(?=[^A]{e<=1})A+\D";
+
+        Match forward = new FuzzyRegex(pattern).Match("AAA");
+        Match backward = new FuzzyRegex("(?r)" + pattern).Match("AAA");
+
+        forward.Success.Should().BeTrue();
+        backward.Success.Should().BeTrue();
+
+        (forward.Index, forward.Length).Should().Be((0, 3));
+        (backward.Index, backward.Length).Should().Be((0, 3));
+        forward.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        backward.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+
+        // Upstream's own FORWARD answer, which this port gives in both directions. Upstream reversed
+        // answers 0.
+        forward.FuzzyChanges.Substitutions.Should().Equal(1);
+        backward.FuzzyChanges.Substitutions.Should().Equal(1);
+
+        AssertChangesAgreeWithCounts(forward);
+        AssertChangesAgreeWithCounts(backward);
+
+        // The control that establishes the condition: a FIXED count after the lookahead, where the
+        // two engines and the two directions all agree on 1.
+        Match fixedCount = new FuzzyRegex(@"(?r)A(?=[^A]{e<=1})A\D").Match("AAA");
+
+        fixedCount.Success.Should().BeTrue();
+        fixedCount.FuzzyChanges.Substitutions.Should().Equal(1);
+    }
+
+    /// <summary>
     /// The invariant both mechanisms break: a match's change list holds exactly as many positions of
     /// each kind as its own counts claim.
     /// </summary>

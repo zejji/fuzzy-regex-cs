@@ -297,6 +297,11 @@ _REVERSE_FLAG = 0x400
 # 2026-09-14), all of which set the bit on `Pattern.flags`.
 _POSIX_FLAG = 0x10000
 
+# The leading run of inline-flag groups, which is where every generator writes a pattern's flags.
+# Only a construct INSIDE this run is taken away by a control below: past it, an inline group
+# scopes to what encloses it, and deleting one there would ask a different question.
+_INLINE_FLAG_PREFIX = re.compile(r"^(?:\(\?[a-zA-Z0-9]+\))+")
+
 # Upstream's BESTMATCH flag bit, which is `regex.B`, spelled out for the same reason. Both
 # generators that draw the flag write it as the inline `(?b)` prefix rather than setting the bit
 # (`_generate_fuzzy` and `_generate_interactions`), so the prefix is the case that fires in practice
@@ -304,49 +309,118 @@ _POSIX_FLAG = 0x10000
 _BESTMATCH_FLAG = 0x1000
 _BESTMATCH_INLINE = "(?b)"
 
+# The inline spelling of POSIX, and of an atomic group. Both are handled as a PREFIX-ONLY or
+# whole-pattern textual edit, which is as narrow as `_BESTMATCH_INLINE`'s own `startswith` and
+# narrow for the same reason: a `(?p)` written mid-pattern scopes to the group it sits in, so
+# deleting it there would ask a different question rather than the same one without POSIX.
+_POSIX_INLINE = "(?p)"
+_ATOMIC_OPEN = "(?>"
+_ATOMIC_FREE_OPEN = "(?:"
 
-def _record_row_and_its_bestmatch_free_answer(regex, row: dict) -> dict:
-    """Records one row, and - if it carries BESTMATCH - the same row again without it.
+# Which outcome kinds are an ANSWER to a second question. Anything else - an error, a timeout, a
+# resource blowup - says nothing about what the construct did, so the key is left off entirely.
+_ANSWERED = ("match", "nomatch", "sub", "split", "matches")
 
-    A SECOND FACT ABOUT UPSTREAM, never compared against anything, exactly as ``searchOnlyPartial``
-    and ``anchoredScan`` are. It exists because the consumer's ``ExpectedDivergences`` needs a
-    discriminator for the ``bestmatch-loses-a-candidate`` family, and no predicate over the
-    two answers alone is narrow enough: on one of that family's rows the two engines report the SAME
-    span, the SAME groups and the SAME fuzzy COUNTS, and differ only in which positions they call a
-    substitution and which an insertion. Nothing on our side of the comparison can see that as a
-    family rather than as a defect.
 
-    What makes the family judgeable is upstream's OWN answer with the flag deleted. ``BESTMATCH`` is
-    documented as a ranking flag - "By default, fuzzy matching searches for the first match that
-    meets the given constraints ... The BESTMATCH flag will make it search for the best match
-    instead" (``upstream/README.rst:592``) - so the flag chooses among the flagless engine's
-    candidates and cannot invent or destroy one. This port, with the doubled trailing-insertion
-    guard removed (ledger entry 12, S46), lands on upstream's own flagless answer on every row the
-    fix moved: nine rows across three seeds, each measured one at a time by
-    ``tools/probes/upstream-bestmatch-free-answer.py`` and reproduced in the S46 closing notes.
+def _without_bestmatch(row: dict, pattern: str, flags: int) -> dict | None:
+    """The same row without BESTMATCH, or ``None`` where it carries none.
 
-    NOT A GATE AND NOT NARROW BY ITSELF - see the entry's own ``Reason``, which records what a
-    control measured about its width and what backstops it.
+    ``BESTMATCH`` is documented as a RANKING flag - "By default, fuzzy matching searches for the
+    first match that meets the given constraints ... The BESTMATCH flag will make it search for the
+    best match instead" (``upstream/README.rst:592``) - so the flag chooses among the flagless
+    engine's candidates and cannot invent or destroy one.
     """
+    if pattern.startswith(_BESTMATCH_INLINE):
+        return {**row, "pattern": pattern[len(_BESTMATCH_INLINE) :]}
+    if flags & _BESTMATCH_FLAG:
+        return {**row, "flags": flags & ~_BESTMATCH_FLAG}
+    return None
+
+
+def _without_posix(row: dict, pattern: str, flags: int) -> dict | None:
+    """The same row without POSIX, or ``None`` where it carries none.
+
+    ``POSIX`` chooses leftmost-LONGEST among the matches the ordinary engine can make
+    (``upstream/README.rst``, and ``_regex.c``'s ``RE_FLAG_POSIX`` arms), so like ``BESTMATCH`` it
+    is a CHOOSING flag: it may move which match is answered, and only within what the flagless
+    engine can already produce. The three rows S48b's second sitting judged are where upstream
+    breaks that - two by charging a span more errors than its own flagless engine needs for the
+    same span, and one by choosing the SHORTER of two equal-cost matches, which is the opposite of
+    leftmost-longest.
+
+    ONLY A `(?p)` IN THE LEADING RUN of inline-flag groups is stripped, and the reason is NOT
+    scoping. A `(?p)` is a GLOBAL flag wherever it is a flag group - written mid-pattern, or even
+    inside a group, it sets the bit on the whole pattern exactly as a leading one does (measured
+    2026-09-14 on regex 2026.9.10; the probe named in the consumer's entry carries it). The reason
+    is that a textual `(?p)` is not always a flag group: `[(?p)]+` matches the literal text `(?p)`
+    with POSIX OFF, and deleting those four characters leaves `[]+`, which does not compile. Telling
+    the two apart needs a parser, and the leading run of flag groups is the cheap place where the
+    question is certain. A pattern that carries POSIX any other way records no key at all, so its
+    row is REPORTED rather than classified - the direction that cannot hide a defect. No wave has
+    drawn one: zero non-leading `(?p)` across 418,005 recorded rows.
+    """
+    prefix = _INLINE_FLAG_PREFIX.match(pattern)
+    if prefix and _POSIX_INLINE in prefix.group(0):
+        return {**row, "pattern": pattern.replace(_POSIX_INLINE, "", 1)}
+    if flags & _POSIX_FLAG:
+        return {**row, "flags": flags & ~_POSIX_FLAG}
+    return None
+
+
+def _without_atomic_groups(row: dict, pattern: str, flags: int) -> dict | None:
+    """The same row with every atomic group made an ordinary one, or ``None`` where there is none.
+
+    An atomic group is the one construct that abandons a sub-attempt WITHOUT backtracking through
+    it, so it is the door onto ledger entry 11's mechanism that S47's ``leakFreeFuzzy`` cannot see:
+    that question re-asks upstream ANCHORED, which removes an EARLIER attempt's leak, and an atomic
+    group's leak is inside ONE attempt. ``(?>`` to ``(?:`` is upstream's own control for it - the
+    same body, the same alternatives, the backtracking cut gone - and it is an unambiguous
+    three-character edit, so no paren matching is needed.
+
+    Unused ``flags``, kept so every control below has one signature.
+    """
+    del flags
+    return {**row, "pattern": pattern.replace(_ATOMIC_OPEN, _ATOMIC_FREE_OPEN)} if _ATOMIC_OPEN in pattern else None
+
+
+# Each control's recorded key, and how to take its construct away. Every one is A SECOND FACT
+# ABOUT UPSTREAM, never compared against anything, exactly as `searchOnlyPartial` and
+# `anchoredScan` are: only the consumer's `ExpectedDivergences` reads them.
+#
+# They exist because no predicate over the two COMPARED answers is narrow enough for these
+# families. On one `bestmatch` row the two engines report the same span, the same groups and the
+# same fuzzy counts and differ only over which positions are substitutions and which insertions;
+# on the POSIX rows they report the same span and differ only in what it cost. Nothing on our side
+# of the comparison can see that as a family rather than as a defect.
+#
+# NONE OF THEM IS A GATE OR NARROW BY ITSELF - see each entry's own `Reason`, which records what a
+# control measured about its width and what backstops it.
+_CONTROLS = (
+    ("bestmatchFreeOutcome", _without_bestmatch),
+    ("posixFreeOutcome", _without_posix),
+    ("atomicFreeOutcome", _without_atomic_groups),
+)
+
+
+def _record_row_and_its_control_answers(regex, row: dict) -> dict:
+    """Records one row, and the same row again with each construct a control takes away."""
     recorded = _record_row(regex, row)
 
     pattern = row["pattern"]
     flags = int(row.get("flags", 0))
-    if pattern.startswith(_BESTMATCH_INLINE):
-        flagless = {**row, "pattern": pattern[len(_BESTMATCH_INLINE) :]}
-    elif flags & _BESTMATCH_FLAG:
-        flagless = {**row, "flags": flags & ~_BESTMATCH_FLAG}
-    else:
-        return recorded
+    for key, without in _CONTROLS:
+        changed = without(row, pattern, flags)
+        if changed is None:
+            continue
 
-    free = _record_row(regex, flagless)["outcome"]
+        free = _record_row(regex, changed)["outcome"]
 
-    # An unanswerable second question is recorded as unasked, which is `searchOnlyPartial`'s rule.
-    # A row upstream errors, times out or exhausts itself on WITHOUT the flag says nothing about
-    # what the flag did, and leaving the key off makes the entry not apply - the direction that
-    # reports a row rather than hiding it.
-    if free["kind"] in ("match", "nomatch", "sub", "split", "matches"):
-        recorded["bestmatchFreeOutcome"] = free
+        # An unanswerable second question is recorded as unasked, which is `searchOnlyPartial`'s
+        # rule. A row upstream errors, times out or exhausts itself on WITHOUT the construct says
+        # nothing about what the construct did, and leaving the key off makes the entry not apply -
+        # the direction that reports a row rather than hiding it.
+        if free["kind"] in _ANSWERED:
+            recorded[key] = free
 
     return recorded
 
@@ -5413,7 +5487,7 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
             for row in _generate(name, random.Random(f"{seed}:{name}"), count)
         ]
 
-    recorded = [_record_row_and_its_bestmatch_free_answer(regex, row) for row in unrecorded]
+    recorded = [_record_row_and_its_control_answers(regex, row) for row in unrecorded]
 
     header = {
         "kind": "header",
