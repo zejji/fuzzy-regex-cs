@@ -242,8 +242,22 @@ public sealed class FuzzyRecursionTests
         // once (measured 2026-09-13, quoted in `_generate_interactions`):
         //   (?b)(?P<g1>\p{L}*)+?(?:ab){e<=1}   MemoryError in 1.78s
         //       (?P<g1>\p{L}+)+?(?:ab){e<=1}   (0, 2)      <- body must consume
+        //
+        // This one call runs on InfiniteMatchTimeout and not on `_budget`, and that is the whole
+        // difference between a test and a race. Reaching the limit means COMMITTING a gigabyte, so
+        // how long it takes is a fact about the machine's free memory rather than about the engine:
+        // measured on one 32GB machine with 3.4GB free (2026-09-14), the same unchanged code took
+        // 63.4s, 30.2s and 17.6s on three consecutive runs. Under `_budget` the 30s arm lost the
+        // race and the engine raised RegexMatchTimeoutException instead, red-ratcheting a tree whose
+        // engine had not changed - reproduced identically at c8165b5, three commits earlier. The
+        // assembly-wide [Timeout(120_000)] is the backstop, and it fails loudly if the bound ever
+        // stops being reachable, which is what this test is actually for.
         Action blows = static () =>
-            new FuzzyRegex(@"(?P<g1>\p{L}*)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _budget).Match("bb.a\r.");
+            new FuzzyRegex(
+                @"(?P<g1>\p{L}*)+?(?:ab){e<=1}",
+                FuzzyRegexOptions.None,
+                FuzzyRegex.InfiniteMatchTimeout
+            ).Match("bb.a\r.");
 
         blows
             .Should()
