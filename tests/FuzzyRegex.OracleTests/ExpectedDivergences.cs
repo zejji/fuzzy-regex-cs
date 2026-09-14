@@ -142,12 +142,13 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The four rows of <c>bestmatch-loses-a-candidate</c>, hand-built from the family's four
-    /// shapes and recorded by
+    /// The nine rows of <c>bestmatch-loses-a-candidate</c>, recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c> on 2026-09-14.
     /// </summary>
     /// <remarks>
-    /// Row 1 is ledger entry 12's own minimised reproduction - upstream loses the match outright.
+    /// <b>These rows are the entry's KEY as well as its staleness alarm since S47b</b>, so a row is
+    /// here only because someone ran the probe over it and judged it. Row 1 is ledger entry 12's own
+    /// minimised reproduction - upstream loses the match outright.
     /// Row 2 is the same shape as wave row 121859 (seed 4242), an insertion-only budget. Row 3 is
     /// wave row 120771 (seed 4242), where BOTH engines match the same span at the same error count
     /// and the mix differs - upstream spends two substitutions under the flag and one substitution
@@ -155,16 +156,34 @@ internal static class ExpectedDivergences
     /// outcome is a string and a count rather than a match: the flag costs upstream one of the two
     /// replacements it makes without it.
     /// <para>
-    /// Every one carries a recorded <c>bestmatchFreeOutcome</c>, which is what the entry's
-    /// <see cref="ExpectedDivergence.Applies"/> reads, so the staleness alarm re-tests the
-    /// discriminator and not only the divergence.
+    /// <b>Rows 5 to 9 are the five the narrowing itself turned red</b>, and they are here because
+    /// the owner's 2026-09-14 ruling says a pin widens by judging another row with the probe and
+    /// adding it. All five are the 6000-row <c>fuzzy</c> wave: 3179, 3683, 4251 and 5275 at seed
+    /// 4242 and 1774 at seed 7. Rows 5, 7 and 8 are the commonest shape, upstream refusing a match
+    /// outright over one or two insertions its own flagless engine spends. <b>The other two are
+    /// shapes the first four did not have.</b> Row 6 is a <c>partial=True</c> row where upstream
+    /// does not lose the match but DOWNGRADES it - a full match with one substitution and one
+    /// insertion becomes a partial with two substitutions, because the insertion is what the guard
+    /// refuses. Row 9 is a <c>finditer</c> that loses one match of three, which is the first row of
+    /// this family whose divergence is inside a scan rather than at its only answer.
+    /// </para>
+    /// <para>
+    /// Every one carries a recorded <c>bestmatchFreeOutcome</c>, which is the second half of the
+    /// entry's <see cref="ExpectedDivergence.Applies"/>, so the staleness alarm re-tests the
+    /// discriminator and not only the divergence - and on all nine this port's answer is upstream's
+    /// own flagless answer exactly, groups, counts and change positions included.
     /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
         {"generator": "fuzzy", "pattern": "(?b)(?:abx\\sx){i<=2}", "flags": 0, "namedLists": {}, "subject": "abx bxx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4, 6], "deletions": []}}}
-        {"generator": "fuzzy", "pattern": "(?b)(?e)(?:x0bb+?[^a-f]b+?){e<=2}", "flags": 0, "namedLists": {}, "subject": "x0fbbbxba", "operation": "fullmatch", "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [2, 8], "insertions": [], "deletions": []}}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [8], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?e)(?:x0bb+?[^a-f]b+?){e<=2}", "flags": 0, "namedLists": {}, "subject": "x0fbbbxba", "operation": "fullmatch", "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [2, 8], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [8], "deletions": []}}}
         {"generator": "fuzzy", "pattern": "(?b)(?i)(?:x\\A){e<=3}", "flags": 0, "namedLists": {}, "subject": "aX", "operation": "sub", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<>aX", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>X", "count": 2}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:[^a-f]a0\\Bx\\p{L}){e<=3:[abx]}", "flags": 0, "namedLists": {}, "subject": "zaQa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 2], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": [2, 3]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:[ab]*?[^a-f]){e<=2}", "flags": 0, "namedLists": {}, "subject": "0aya", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [0, 2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [3], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:[a-f][a-f][^a-f]){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "badyf", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 4], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:\\s[ab]+){i<=2}", "flags": 0, "namedLists": {}, "subject": "a bax", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0, 4], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:\\W(?:b\\B){d<=1:\\d}){e}", "flags": 0, "namedLists": {}, "subject": ".ba", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}, "codepointSpan": [2, 2]}]}, "leakFreeFuzzy": [null, null], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 2], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": [2, 3]}, "codepointSpan": [2, 3]}]}}
         """;
 
     /// <summary>
@@ -599,6 +618,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(?e)^(?:(?:AA){s<=1,i<=1,d<=1}(*SKIP)\\p{ASCII}|\\s)(?:(?:A([[a-z]--[aei]])(?:(\\D*)){e<=2,s<=1}){i<=1}(*SKIP)\\p{ASCII}|[A-Z])", "flags": 256, "namedLists": {}, "subject": "A", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "interactions", "pattern": "(?b)(?e)(?:a\\w){s<=1,i<=1,d<=1}(?:\\S(*SKIP)[\\p{L}\\p{N}]|\\W)", "flags": 8, "namedLists": {}, "subject": "\r\na𝔘\n", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "interactions", "pattern": "(?b)ﬁ(?:(?:(.)ﬁﬁ){s<=1:[^a-z]}(*SKIP)[A-Z]|\\p{ASCII})(?P<g2>[[:digit:]])?", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁﬁﬁßß\n ", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)", "flags": 0, "namedLists": {}, "subject": "ab.", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -635,7 +655,33 @@ internal static class ExpectedDivergences
         // a `(*SKIP)` abandoned; 5 is inside the (5, 1) span this row matches and 0 was not.
         "match 0:(5,1)[(5,1)] last=-1/- partial fuzzy=(1,0,0)[s:5][i:][d:]",
         "match 0:(8,0)[(8,0)] 1:unset 2:unset last=-1/- partial",
+        // S47b. Row 6 is not a wave row at all: it is ledger entry 13's MINIMISED shape, the four
+        // conditions with nothing else around them, recorded on 2026-09-14 by
+        // `python tools/record-oracle.py --rows`. Held here because the five wave rows are each
+        // several hundred characters of generated pattern, so if one of them changes nobody can see
+        // from the list what the family actually IS - and because the minimised shape was, until
+        // this slice, evidence that existed only in prose and in a probe.
+        // And this port's answer to it IS upstream's own flagless answer, span for span: delete the
+        // `(?b)` and upstream returns the (0, 3) partial it refused with the flag present.
+        "match 0:(0,3)[(0,3)] last=-1/- partial",
     ];
+
+    /// <summary>
+    /// The question each row of <see cref="_bestmatchLostCandidateRows"/> asks, which is what
+    /// <c>bestmatch-loses-a-candidate</c> is keyed on.
+    /// </summary>
+    /// <remarks>
+    /// S47b, from the independent audit of S44-S46. Keyed on the rows because nothing about the two
+    /// compared ANSWERS distinguishes this family from a defect in the feature it is about: a port
+    /// that ignored <c>(?b)</c> outright lands on upstream's flagless answer on every row, which is
+    /// the one thing the flagless discriminator cannot see, and the entry's own Reason said so
+    /// before the audit read it. The flagless test is kept as well - it is what makes an entry go
+    /// stale when upstream changes its mind - but it no longer decides on its own.
+    /// </remarks>
+    private static readonly HashSet<string> _bestmatchLostCandidate = OracleWave
+        .ParseRows(_bestmatchLostCandidateRows)
+        .Select(Question)
+        .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// <see cref="_bestmatchLostPartialRows"/> by its question, mapped to this port's judged answer.
@@ -1454,7 +1500,9 @@ internal static class ExpectedDivergences
                 + "NOT on 'upstream's flagless answer is ours'. The first draft claimed the latter "
                 + "for all five because its probe compared `m.span()` alone while its prose claimed "
                 + "the whole answer; the probe now prints the groups and the counts.\n"
-                + "Minimised: `(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)` over 'ab.' - upstream's "
+                + "Minimised, AND SINCE S47b AN EXAMPLE ROW OF THIS ENTRY (row 6) rather than only a "
+                + "sentence and a probe, so the staleness alarm runs it on every oracle run: "
+                + "`(?b)(?:ab){e<=1}(?:\\S(*SKIP)\\w|\\W)` over 'ab.' - upstream's "
                 + "search is None and its own `match('ab.', 2, partial=True)` is (2, 3) partial. "
                 + "Four conditions, each necessary on that shape: `(?b)` (`(?e)` in its place keeps "
                 + "the match, so it is `do_best_fuzzy_match` and not fuzzy ranking at large), a "
@@ -1522,12 +1570,27 @@ internal static class ExpectedDivergences
                 + "insertions, which is upstream contradicting its own definition. Measured on regex "
                 + "2026.9.10, 2026-09-14, tools/probes/upstream-bestmatch-trailing-insertions.py; the S46 closing notes "
                 + "carry the whole (k trailing chars, N budget) matrix and how to re-run it.\n"
-                + "KEYED ON THE RECORDED `bestmatchFreeOutcome`, and neither on rows nor on a "
-                + "predicate over the two compared answers, because neither works here. Rows: this "
+                + "KEYED ON THE NINE ROWS **AND** ON THE RECORDED `bestmatchFreeOutcome` SINCE S47b, "
+                + "where it was keyed on the recorded answer alone. The independent audit of "
+                + "S44-S46 read the paragraph below - the entry's own admission that a port which "
+                + "IGNORED `(?b)` satisfies the flagless test on every row - and graded this the "
+                + "list's highest-risk entry for exactly that reason: the widest possible defect in "
+                + "the feature the entry is about would have been tallied EXPECTED wherever it "
+                + "landed. The owner ruled on 2026-09-14 that a pin is narrowed to the rows where "
+                + "its contradiction was measured and every other `(?b)` divergence shows red for "
+                + "triage, and that it widens only by judging another row with the probe and adding "
+                + "it here. `OracleWaveTests.A_bestmatch_row_answered_as_though_the_flag_were_"
+                + "absent_is_not_accounted_for` is the red-first test: `(?b)(?:cats|cat){e<=1}` over "
+                + "'cat', where upstream's two answers DIFFER and its flagged one is right, "
+                + "classified EXPECTED before the change and unclassified after.\n"
+                + "WHAT THAT COSTS, stated because it is a real cost and not a free win: this "
                 + "family fires about three times per three-seed gate and its rows RENUMBER with the "
                 + "row count as well as with the seed - the seed-7 gate draws different questions at "
-                + "6000 and at 6300 - so a row-keyed arm would red every wave forever. A predicate "
-                + "over the answers: on seed 20260914 row 76927 the two engines report the SAME "
+                + "6000 and at 6300 - so a new draw of the same mechanism now reds the wave until "
+                + "someone judges it and adds it. That is the trade the owner decision names, and "
+                + "the alternative was a predicate that cannot see the defect it is guarding.\n"
+                + "A PREDICATE OVER THE TWO COMPARED ANSWERS WAS THE OTHER OPTION AND IT DOES NOT "
+                + "WORK: on seed 20260914 row 76927 the two engines report the SAME "
                 + "span, the SAME groups AND the SAME fuzzy counts (2,2,0), differing only over "
                 + "which of positions 7 and 8 is the substitution and which the insertion, so "
                 + "nothing on our side of the comparison distinguishes the family from a defect. "
@@ -1538,26 +1601,21 @@ internal static class ExpectedDivergences
                 + "matched and the error mix differs, one `sub` and one `finditer` - this port's "
                 + "answer is upstream's flagless answer EXACTLY, groups, counts, change positions "
                 + "and all. Measured row by row, tools/probes/upstream-bestmatch-free-answer.py.\n"
-                + "SO WHAT THE ENTRY ASSERTS IS WIDER THAN ITS ONE PROVEN MECHANISM, and the id "
-                + "says so: this port answered a candidate upstream's OWN flagless engine answers, "
-                + "on a row where upstream's `(?b)` pass did not. The doubled guard is the one "
-                + "mechanism established to the line; LEDGER ENTRY 13 IS A SECOND WITH THE SAME "
-                + "SIGNATURE and no established line - `(?b)` plus a fuzzy section plus a `(*SKIP)` "
-                + "plus `partial=True`, where upstream loses a partial its own anchored `match` "
-                + "still finds. S46 did not go looking for that: seed 20260914 row 76345 - "
+                + "THE ENTRY IS NOW THE DOUBLED GUARD AND NOTHING ELSE, which it was not between "
+                + "S46 and S47b. S46's flagless-only key swept in a SECOND mechanism with the same "
+                + "signature and no established line - LEDGER ENTRY 13, `(?b)` plus a fuzzy section "
+                + "plus a `(*SKIP)` plus `partial=True`, where upstream loses a partial its own "
+                + "anchored `match` still finds. Seed 20260914 row 76345 - "
                 + "`(?b)(?e)\\b(?:\\p{Ll}(*SKIP)[^\\d]|\\W)(?=(?:(\\p{ASCII}+)([^\\d]*)a){e<=2,s<=1})` "
-                + "over 'aaa' - was diverging UNCLASSIFIED at HEAD before this slice, and it is "
-                + "entry 13's four conditions exactly. It is classified here because the "
-                + "discriminator is entry 13's own WEAK FORM made machine-checkable, and because it "
-                + "is STRICTLY NARROWER than the predicate entry 13 considered and rejected: that "
-                + "one asked only that this port answer a partial where upstream answered nothing, "
-                + "which a port INVENTING a partial also satisfies, where this one demands the "
-                + "answer be upstream's own, groups and counts included. `bestmatch-loses-a-partial` "
-                + "is left above this entry and keeps its five judged rows, so it still takes them "
-                + "first and its staleness alarm still tests them.\n"
-                + "WHAT THIS ENTRY DOES NOT CATCH, stated because it is wider than a predicate over "
-                + "behaviour would be: a port that IGNORED `(?b)` altogether would also answer the "
-                + "flagless answer on every row, and this entry would classify it. That is the one "
+                + "over 'aaa' - is entry 13's four conditions exactly, and S46 classified it here "
+                + "without going looking for it. **It is NOT classified here any more.** Entry 13 "
+                + "keeps its own pin one entry above, `bestmatch-loses-a-partial`, which is keyed on "
+                + "its five judged wave rows and, since S47b, on its minimised shape as well; row "
+                + "76345 is not among them and will red a wave that draws it again, which is the "
+                + "owner's 2026-09-14 ruling applied to the row that prompted it.\n"
+                + "WHAT THE FLAGLESS TEST ALONE COULD NOT CATCH, which is why it is no longer alone: "
+                + "a port that IGNORED `(?b)` altogether answers the "
+                + "flagless answer on every row, and this entry classified it. That is the one "
                 + "thing the flagless answer cannot discriminate - it says the port picked a legal "
                 + "candidate, not that it picked the BEST one. S46 MEASURED THAT RATHER THAN "
                 + "ASSUMING IT, as control S46-C (`bestmatch-stops-ranking`, in tools/controls.json): "
@@ -1565,8 +1623,9 @@ internal static class ExpectedDivergences
                 + "match rather than the best, leaves a 6000-row `fuzzy` wave at 0 / 0 / 1 "
                 + "divergences over seeds 7, 4242 and 31337 against an unmutated 0 / 0 / 0, with "
                 + "the accounted-for count moving 1 -> 3 at seed 7. So the wave DOES still report "
-                + "the defect, at one row in eighteen thousand, and this entry swallows two rows of "
-                + "it at seed 7. The instrument that actually catches it is the suite: the same "
+                + "the defect, at one row in eighteen thousand, and this entry swallowed two rows of "
+                + "it at seed 7 - **which it no longer does**, because those two are wave draws and "
+                + "the key is now the nine pinned questions. The instrument that actually catches it is the suite: the same "
                 + "mutation fails 5 of 5,947 tests. Read that as the division of labour rather than "
                 + "as a gap - `(?b)`'s ranking is pinned by `Gaps/Engine/FuzzyBestMatchTests.cs` "
                 + "and the ported `test_bestmatch` family, and the oracle cannot substitute for "
@@ -1574,14 +1633,17 @@ internal static class ExpectedDivergences
             PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_"
                 + "insertions, .Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget "
                 + "and .Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford",
-            // Four rows rather than one, because the family has four shapes and the staleness alarm
-            // should re-test each: upstream losing the match outright, upstream keeping it with a
-            // different error mix at the same error count, and the two aggregate operations whose
-            // outcome is not a match object. Recorded by
+            // Nine rows rather than one, because each is a judged member of the family and the
+            // staleness alarm should re-test each: upstream losing the match outright, upstream
+            // keeping it with a different error mix at the same error count, the two aggregate
+            // operations whose outcome is not a match object, a `partial=True` row upstream
+            // DOWNGRADES rather than loses, and a `finditer` that loses one match of three.
+            // Recorded by
             // `python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl`, 2026-09-14.
             Example: _bestmatchLostCandidateRows,
             Applies: static (row, ours) =>
-                row.BestmatchFree is not null
+                _bestmatchLostCandidate.Contains(Question(row))
+                && row.BestmatchFree is not null
                 && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
         ),
         new(
@@ -1813,13 +1875,37 @@ internal static class ExpectedDivergences
     /// <c>\L&lt;name&gt;</c>, so this is reachable, not hypothetical.
     /// </item>
     /// <item>
-    /// ONE FALSE POSITIVE that no predicate over the row and the two answers can close: an
-    /// unrelated port defect on a row that carries U+0130 or U+0131 and whose answer covers one of
-    /// the four is classified as this family. The reviewer's probe is a fabricated total failure on
-    /// <c>(?i)ı.</c> against <c>ıx</c>, where both engines pair U+0131 with itself and no
-    /// Turkic divergence is possible at all. Closing it needs the question "would this row agree if
-    /// the port used upstream's Turkic case data?", which means a selectable Turkic case mode this
-    /// port does not have and should not grow for a test. Recorded as owed maintenance.
+    /// <b>THE FALSE POSITIVE S45 RECORDED AS UNCLOSABLE IS CLOSED, by asking what the PATTERN offers
+    /// rather than what the two answers say (S47b).</b> Upstream can only diverge here by USING a
+    /// <c>T</c> row, and a <c>T</c> row is a PAIRING: it is worth something only where the pattern
+    /// offers one side and the answer lands on the other. S45's probe is a fabricated total failure
+    /// on <c>(?i)ı.</c> against <c>ıx</c>, where the pattern offers U+0131 and the answer lands on
+    /// U+0131 - the same letter, which every engine matches without reading the case data at all -
+    /// so the row is refused. S45 looked for the discriminator in the answers, where there is none:
+    /// a fabricated total failure and a real one are the same two answers.
+    /// </item>
+    /// <item>
+    /// <b>THREE REAL WAVE ROWS SAY WHAT THE RULE IS NOT, and every one of them was MEASURED, red
+    /// against a draft of this predicate before it read the way it now does.</b>
+    /// <list type="bullet">
+    /// <item>
+    /// Not "the pattern does not spell the letter": row 50168 of the seed-99991 6000-row
+    /// <c>case-folding</c> gate is <c>match('iiİ', 'iİ', I|F)</c>, where the pattern spells the
+    /// <c>i</c> upstream's span lands on AND spells the <c>İ</c> whose <c>T</c> row is the whole
+    /// divergence. A <c>T</c> row is a PAIRING, so the test has to be about pairs.
+    /// </item>
+    /// <item>
+    /// Not the pairing alone: row 6150 of the seed-31337 <c>interactions</c> wave spells <c>ı</c>
+    /// and reaches the subject's <c>ı</c> through an <c>[A-Z]</c>, which pairs with nothing in the
+    /// pattern's own text. Minimised as <c>match('ıı', 'ı[A-Z]', I)</c>.
+    /// </item>
+    /// <item>
+    /// And not a LIST of folding constructs either: row 52004 of the same gate is
+    /// <c>match('Iıi', r'(i)\1', I|F)</c>, where the pairing is between a backreference and the
+    /// subject, so a list naming classes, properties and named lists misses it. Hence the two
+    /// characters <c>[</c> and <c>\</c>, which every such construct starts with.
+    /// </item>
+    /// </list>
     /// </item>
     /// </list>
     /// <para>
@@ -1843,8 +1929,170 @@ internal static class ExpectedDivergences
             return false;
         }
 
-        return CoversATurkicI(row.Subject, row.Expected) || CoversATurkicI(row.Subject, ours);
+        // S47b: upstream can only diverge here by USING a `T` row, so the pattern has to offer one
+        // side of a `T` pair where the answer landed on the other - or a construct that folds. A
+        // pattern that writes U+0131 and an answer that lands on U+0131 pair the letter with itself,
+        // which every engine matches without reading the case data at all.
+        char[] covered =
+        [
+            .. TurkicLettersCovered(row.Subject, row.Expected).Concat(TurkicLettersCovered(row.Subject, ours)),
+        ];
+
+        if (CanFoldIntoALetterItDoesNotSpell(row.Pattern))
+        {
+            return covered.Length > 0;
+        }
+
+        string spelled = PatternTextThatIsMatchedRatherThanRead(row.Pattern);
+
+        return Array.Exists(covered, letter => spelled.Contains(TurkicPartnerOf(letter), StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// The pattern with every <c>(?...</c> HEADER blanked out, so what is left is the text the
+    /// pattern can actually match a character against.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The pairing test above reads this and not the raw pattern, because the raw pattern carries
+    /// letters nothing ever matches - and both of S47b's blind passes found a Turkic false positive
+    /// walking back in through one.</b> The first pass: <c>TurkicPartnerOf('İ')</c> is <c>i</c> and
+    /// <c>(?i)</c> puts an <c>i</c> in the text, so a fabricated total failure on <c>(?i)İ.</c>
+    /// against <c>İx</c> still classified while its dotless original was refused. The second pass,
+    /// over the fix for the first: a group NAME or a COMMENT does it too -
+    /// <c>(?P&lt;I&gt;ı).</c>, <c>(?&lt;I&gt;ı).</c>, <c>(?P&lt;i&gt;İ).</c> and <c>(?#I)ı.</c> all
+    /// classified, and the doc comment written with the first fix claimed in as many words that a
+    /// group name could not do this. Both passes are pinned as rows of
+    /// <c>OracleWaveTests._turkicRows</c>, asserted together, so the next fix cannot pass one shape
+    /// and fail its twin.
+    /// </para>
+    /// <para>
+    /// <b>ONE RULE, because the enumeration was what kept being incomplete.</b> Blank from
+    /// <c>(?</c> up to and including the first <c>)</c>, <c>:</c>, <c>&gt;</c> or <c>'</c>. That
+    /// covers a flag group (<c>(?i)</c>, <c>(?fi:</c>, <c>(?V1)</c>, <c>(?-i:</c>), a non-capturing
+    /// group (<c>(?:</c>), an atomic one (<c>(?&gt;</c>), a name in any of its three spellings
+    /// (<c>(?P&lt;g&gt;</c>, <c>(?&lt;g&gt;</c>, <c>(?'g'</c>), a named backreference or call
+    /// (<c>(?P=g)</c>, <c>(?P&gt;g)</c>, <c>(?&amp;g)</c>), a comment (<c>(?#...)</c>) and a
+    /// conditional's condition (<c>(?(1)</c>) - and in each case leaves the BODY, which is real
+    /// matched text, alone.
+    /// </para>
+    /// <para>
+    /// The one exception is a LOOKAROUND, whose body starts immediately: <c>(?=</c>, <c>(?!</c>,
+    /// <c>(?&lt;=</c> and <c>(?&lt;!</c> are skipped, or the <c>&gt;</c> rule would eat the first
+    /// character of a lookbehind's body. Hand-written rather than a
+    /// <c>System.Text.RegularExpressions</c> call so the exception is visible as three comparisons
+    /// rather than hidden in a pattern.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The row's pattern.</param>
+    /// <returns>The pattern with those headers replaced by spaces, or the pattern itself if it has none.</returns>
+    private static string PatternTextThatIsMatchedRatherThanRead(string pattern)
+    {
+        int open = pattern.IndexOf("(?", StringComparison.Ordinal);
+
+        if (open < 0)
+        {
+            return pattern;
+        }
+
+        char[] text = pattern.ToCharArray();
+
+        while (open >= 0)
+        {
+            if (!IsLookaround(pattern, open))
+            {
+                for (int i = open + 2; i < text.Length; i++)
+                {
+                    if (text[i] is ')' or ':' or '>' or '\'')
+                    {
+                        Array.Fill(text, ' ', open, i - open + 1);
+                        break;
+                    }
+                }
+            }
+
+            open = pattern.IndexOf("(?", open + 2, StringComparison.Ordinal);
+        }
+
+        return new string(text);
+    }
+
+    /// <summary>Whether the <c>(?</c> at this position opens a lookaround, whose body starts at once.</summary>
+    /// <param name="pattern">The row's pattern.</param>
+    /// <param name="open">The index of the <c>(</c>.</param>
+    /// <returns><see langword="true"/> for <c>(?=</c>, <c>(?!</c>, <c>(?&lt;=</c> and <c>(?&lt;!</c>.</returns>
+    private static bool IsLookaround(string pattern, int open)
+    {
+        int i = open + 2;
+
+        if (i < pattern.Length && pattern[i] == '<')
+        {
+            i++;
+        }
+
+        return i < pattern.Length && (pattern[i] == '=' || pattern[i] == '!');
+    }
+
+    /// <summary>The letter <c>CaseFolding.txt</c>'s two <c>T</c> rows pair one of the four with.</summary>
+    /// <remarks>
+    /// The rows are <c>0049; T; 0131</c> and <c>0130; T; 0069</c>, so the pairs are I with U+0131
+    /// and U+0130 with i, each read both ways. Called only on a letter that came out of
+    /// <see cref="TurkicLettersInSpan"/>, so the default arm is unreachable and returns the letter
+    /// itself rather than inventing one.
+    /// </remarks>
+    /// <param name="letter">One of the four.</param>
+    /// <returns>Its Turkic partner.</returns>
+    private static char TurkicPartnerOf(char letter) =>
+        letter switch
+        {
+            'I' => 'ı',
+            'ı' => 'I',
+            'İ' => 'i',
+            'i' => 'İ',
+            _ => letter,
+        };
+
+    /// <summary>
+    /// Whether the pattern can match a character it does not spell out, and so can reach one of the
+    /// four through the case data rather than literally.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two characters answer nearly all of it, and the breadth is deliberate: a class folds its
+    /// members, a property matches the other case under IGNORECASE, a named list and a
+    /// BACKREFERENCE carry text from outside the pattern's own spelling, and <c>\N{...}</c> names a
+    /// character rather than writing it. Every one of those begins with <c>[</c> or <c>\</c>, and
+    /// enumerating them instead is how this test got three rows wrong before it was written this
+    /// way - a list with classes and properties on it missed row 52004 of the seed-99991 gate,
+    /// <c>match('Iıi', r'(i)\1', I|F)</c>, where the <c>T</c> row is consulted by a backreference.
+    /// </para>
+    /// <para>
+    /// <b>The NAMED spellings are the exception, and S47b's second blind pass found them by taking
+    /// that same row's named twin.</b> <c>(?P=g)</c>, <c>(?P&gt;g)</c>, <c>(?&amp;g)</c> and
+    /// <c>(?R)</c> reach text the pattern does not spell and carry neither <c>[</c> nor <c>\</c>, so
+    /// <c>match('Iıi', '(?P&lt;g&gt;i)(?P=g)', I|F)</c> - upstream (0, 2), no match here, the same
+    /// family as row 52004 in every respect - was left unclassified and would have reddened a wave.
+    /// Four prefixes, not a rule, because that is the whole of the list: every other construct that
+    /// can reach an unspelled character is already caught by the two characters above.
+    /// </para>
+    /// <para>
+    /// <b>So the pairing test below bites only on a pattern of literals and dots</b>, which is
+    /// exactly where S45's recorded false positive lives and is the honest boundary: on a pattern
+    /// holding a class or an escape, nothing about the row and the two answers can say whether the
+    /// case data was consulted, and this list guesses in the direction that keeps real family rows.
+    /// A DOT is deliberately not on it - it matches any character whatever the case data says, so no
+    /// divergence can come out of one, and admitting it would re-open S45's probe, <c>(?i)ı.</c>
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The row's pattern.</param>
+    /// <returns><see langword="true"/> if the pattern has such a construct.</returns>
+    private static bool CanFoldIntoALetterItDoesNotSpell(string pattern) =>
+        pattern.Contains('[', StringComparison.Ordinal)
+        || pattern.Contains('\\', StringComparison.Ordinal)
+        || pattern.Contains("(?P=", StringComparison.Ordinal)
+        || pattern.Contains("(?P>", StringComparison.Ordinal)
+        || pattern.Contains("(?&", StringComparison.Ordinal)
+        || pattern.Contains("(?R", StringComparison.Ordinal);
 
     /// <summary>Whether the text holds U+0130 or U+0131, the two codepoints only this family uses.</summary>
     /// <param name="text">The pattern or the subject.</param>
@@ -1852,15 +2100,15 @@ internal static class ExpectedDivergences
     private static bool HoldsADottedOrDotlessI(string text) =>
         text.Contains('İ', StringComparison.Ordinal) || text.Contains('ı', StringComparison.Ordinal);
 
-    /// <summary>Whether any span of an answer covers one of the four.</summary>
+    /// <summary>Every one of the four that a span of an answer covers.</summary>
     /// <remarks>
     /// A zero-width match covers nothing, so the character AT its position is read as well: a
     /// lookaround or an empty alternative can diverge on a character it never consumes.
     /// </remarks>
     /// <param name="subject">The row's subject.</param>
     /// <param name="outcome">One engine's answer.</param>
-    /// <returns><see langword="true"/> if it matched over or at a dotted or dotless I.</returns>
-    private static bool CoversATurkicI(string subject, IOracleOutcome outcome)
+    /// <returns>The letters it matched over or at, with duplicates.</returns>
+    private static IEnumerable<char> TurkicLettersCovered(string subject, IOracleOutcome outcome)
     {
         IEnumerable<MatchOutcome> matches = outcome switch
         {
@@ -1872,20 +2120,26 @@ internal static class ExpectedDivergences
         return matches
             .Select(static match => match.Groups)
             .Where(static groups => groups.Count > 0 && groups[0].Success)
-            .Any(groups => SpanHoldsATurkicI(subject, groups[0].Index, groups[0].Length));
+            .SelectMany(groups => TurkicLettersInSpan(subject, groups[0].Index, groups[0].Length));
     }
 
-    /// <summary>Whether one span of the subject holds one of the four.</summary>
+    /// <summary>Every one of the four in one span of the subject.</summary>
     /// <param name="subject">The row's subject.</param>
     /// <param name="index">The span's start, in UTF-16 code units.</param>
     /// <param name="length">Its length; a zero-width span is read as the one character at it.</param>
-    /// <returns><see langword="true"/> if a dotted or dotless I is in it.</returns>
-    private static bool SpanHoldsATurkicI(string subject, int index, int length)
+    /// <returns>The letters in it, with duplicates.</returns>
+    private static IEnumerable<char> TurkicLettersInSpan(string subject, int index, int length)
     {
         int start = Math.Clamp(index, 0, subject.Length);
         int end = Math.Clamp(index + Math.Max(1, length), start, subject.Length);
 
-        return subject.AsSpan(start, end - start).IndexOfAny(_turkicI) >= 0;
+        for (int i = start; i < end; i++)
+        {
+            if (_turkicI.Contains(subject[i]))
+            {
+                yield return subject[i];
+            }
+        }
     }
 
     /// <summary>

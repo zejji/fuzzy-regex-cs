@@ -662,6 +662,11 @@ agree cell for cell with default **simple** folding; Perl 5.42.2's `/i` under `(
 fully, agrees cell for cell with default **full** folding - `İ` matches `i̇` there and nowhere else.
 `regex 2026.9.10` is the only one of the four that answers the Turkic way.
 
+**Reproduce:** `python tools/probes/upstream-turkic-definition.py`,
+`python tools/probes/upstream-turkic-fold-sweep.py`, `perl tools/probes/upstream-turkic-grid.pl`
+and `pwsh -File tools/probes/upstream-turkic-grid.ps1`. Measured 2026-09-14, regex 2026.9.10,
+PCRE2 10.47 2025-10-21, Perl 5.42.2, .NET 10.0.10.
+
 **The fix upstream would need.** Drop `'T'` from both sets at `:455` and `:459`, delete the four
 `all_cases` overrides at `:1071-1074`, and delete `unicode_possible_turkic` and its two call sites -
 it exists only to work around the merge. The assertion at `:468` that the Turkic set is exactly

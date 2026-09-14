@@ -2,49 +2,49 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S47 IS CLOSED** (sitting 3, 2026-09-14). Suite 5,953, ratchet GREEN, default wave GREEN at three
-seeds. Next in the queue is **S47b**, then S47c, S48.
+**S47b IS CLOSED** (2026-09-14). Suite 5,953, ratchet GREEN. No engine change - oracle-test code,
+probes and notes only. Next in the queue is **S47c**, then S48.
 
-**Sitting 3 fixed ledger entry 14**: PCRE2's positional recursion guard, ported with one deliberate
-difference - it fails the PATH where PCRE2 fails the MATCH, so left recursion keeps its one-step
-unrolling and `(?P<g1>(?:ab)?(?&g1)?)` answers (0, 4) where PCRE2 errors. `MatchState.ActiveCalls`
-plus `OpenCalls` (key and sstack depth) and `Matcher.CloseCallsAbove`. The 1GB bound stays as the
-backstop for the branching the guard cannot see and now has a test of its own. The
-`INTERACTION_FUZZY_WRAPPERS` exclusion is lifted and paid for itself: drawn row 72179 was a real
-divergence the guard closes.
+**S47's owed blind pass ran first and is clean** (NO REPRODUCIBLE DEFECTS over `OpenCalls` /
+`CloseCallsAbove`, 22,400 differential rows plus 720 at the frame depth its strict `>` rides on).
+Discharged; do not re-run it.
 
-**THE FIRST THING THE NEXT SESSION SHOULD DO: a blind pass over sitting 3's own fix.** The blind
-review found a real defect - a `(*PRUNE)`/`(*SKIP)` inside an open call leaked a guard key and lost a
-match upstream finds - and the fix for it (`OpenCalls`, `PopOpenCall`, `CloseCallsAbove`, six call
-sites, the new `GroupCallTests` leak test) is UNREVIEWED. Shutdown landed 15 minutes after it went
-green. Closing notes in `slices/done/S47-*.md` have the reproduction and all three controls.
+**Both audited pins are narrowed, each with a red-first test.** `bestmatch-loses-a-candidate` is
+keyed on nine judged questions as well as on upstream's flagless answer, so it no longer classifies
+ledger entry 13's family or a port that ignored `(?b)`; the five wave rows the narrowing reddened
+were each triaged with the probe and added. `turkic-default-folding` now needs a `T`-row PAIRING, or
+a pattern holding `[`, `\` or a named backreference. **Six rows killed five reasoned drafts of that
+predicate** - three from waves, three from the two blind passes. Twelve are pinned in
+`_turkicRowsToRefuse` and `_turkicRowsToClassify`; **touch the predicate, run both.**
 
-**Two of S47's three controls are invisible to the wave**, which is a finding for S52: no generator
-draws a backtracking verb inside a CALLED group inside an atomic group, lookaround or conditional,
-so only the suite can see a regression in the guard's bookkeeping.
+**The independent verifier ran for the first time and found two claims that were not measurements**
+- a transposed line in a probe's pasted output, and the `timeout`/`resource` columns of the
+6000-row gate, which are not reproducible (2/50 one run, 3/49 the next). Both fixed, 11 of 13
+CONFIRMED. **Keep the step.**
 
-**The 6000-row three-seed gate is RED at 19 rows and takes ~6.5 minutes now** (it was 14 rows and
-~1 minute). Proven not the guard's: the three saved waves consumed by the pre-guard engine give the
-identical rows at seeds 7 and 4242 and one MORE at 20260914. The 5 extra rows are the RNG shift the
-generator change caused, none holding a group call. Still untriaged, still want their own slice.
-Plus the POSIX `(?e)` count bug S46 found (`interactions` seed 31337 row 3343).
+**Waves.** Default 300-row GREEN at seeds 7 / 4242 / 20260914 / 99991; `fuzzy` at 6,000 GREEN at the
+same four; `case-folding` at 6,000 `diverge 0` at five seeds. **The 6000-row everything gate at
+99991 is RED at 4 of 126,000** (73665, 73737, 75324 `interactions`; 118893 `verbs`), all
+pre-existing. S44's "GREEN at three seeds and 99991" box is UNTICKED in its notes.
 
-**Blockers:** none. **Known bugs:** ledger 11's mechanisms C and D; 5's remaining door (S48); the
-issue sweep (S49, S50); the POSIX `(?e)` count above.
+**Untriaged:** those 4, plus the three-seed gate's 19; the POSIX `(?e)` count bug (`interactions`
+seed 31337 row 3343); ledger 11 mechanisms C and D; 5's remaining door (S48); the issue sweep (S49,
+S50). **New:** the promoted fold sweep reports 30 `fold_case(FULL)` vs `str.casefold()` mismatches,
+not 2 - the 28 extra fold the other way in recent UCD additions, plausibly a version skew, NOT
+measured.
 
-**NEVER RUN CONTROL S46-B AGAINST THE SUITE** - its mutant hangs `dotnet run` past 600s at 19 GB.
-Use `-Configuration Release`. **Delete `.scratch/control-waves/<generator>-*` for any generator whose
-code a slice changed before running its controls.** **After editing `Matcher.cs` with a script, run
-`dotnet csharpier format` on it or the build fails IDE0055 on lines you never touched.**
+**NEVER RUN CONTROL S46-B AGAINST THE SUITE** (19 GB, past 600s). Use `-Configuration Release`.
+**After editing a file with a script, run `dotnet csharpier format` on it** or IDE0055 fails lines
+you never touched. A single-generator wave with no fuzzy row reports RED on a vacuity guard, not a
+divergence.
 
-**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate).
-Ledger: `docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed.
+**Oracle:** `pwsh -File tools/run-oracle.ps1` (three seeds; `-Count 6000` is the gate). Ledger:
+`docs/plan/upstream-reports/LEDGER.md`, 15 entries, nothing filed; entry 7 has `Reproduce:` naming
+four tracked probes.
 
-**Owed maintenance, five items.** (1) `FOLD_TURKIC`'s share of the `case-folding` rotation is too
-small. (2) `turkic-default-folding`'s predicate has one false positive no predicate can close.
-(3) Five broken control sites. (4) PORTMAP's `_regex.c` line references are stale after the sync and
-need an owner decision first. (5) `python tools/record-oracle.py --self-check` exits 1 on a
-pre-S46 message.
+**Owed maintenance:** `FOLD_TURKIC`'s share of the `case-folding` rotation is too small; five broken
+control sites; PORTMAP's `_regex.c` line references stale after the sync (owner decision first);
+`record-oracle.py --self-check` exits 1 on a pre-S46 message.
 
 **Still open for the owner:** `slice-log.jsonl` marks S26 `failed` though its commit is real;
 `origin/main` needs a push (nothing since Phase 4's close).

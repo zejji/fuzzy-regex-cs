@@ -57,7 +57,21 @@ first check is `python -c "import regex; print(regex.__version__)"` printing `20
 - [x] Submodule at 2026.9.10, byte-identity proven, changelog delta fully accounted for in PORTMAP.
 - [x] Every divergence entry re-recorded; stale ones deleted with the fixing commit; ledger closed
       where upstream fixed it.
-- [x] Waves GREEN at three seeds and 99991.
+- [ ] ~~Waves GREEN at three seeds and 99991.~~ **UNTICKED 2026-09-14 (S47b), and the 99991 half is
+      now measured rather than claimed.** The audit graded this box ASSERTED ONLY: the three-seed
+      6000-row gate is evidenced here with numbers, but no result was ever reported for seed 99991,
+      and STATE.md at this commit says the oracle was *blocked* by two stuck PIDs. Run on 2026-09-14
+      against the S47b tree: the **6000-row gate at seed 99991 is RED at 4 rows of 126,000** -
+      73665 and 73737 (`interactions`), 75324 (`interactions`, a `sub`) and 118893 (`verbs`, a
+      `subf`) - with `agree` 125,869 and `expected` 75. (The `timeout` and `resource` columns are
+      **not** reproducible and are deliberately not quoted: two consecutive runs of the same seed on
+      the same tree gave 2/50 and 3/49, summing to 52 either way, because a row that exhausts the
+      recorder's heap on one run exhausts its per-row clock on the next.) All four predate S47b, and the
+      only `(?b)` row among them is 73737, whose flagless answer differs from this port's, so no
+      version of the `bestmatch-loses-a-candidate` key ever classified it. They join the untriaged
+      list in STATE.md. What IS green at four seeds including 99991, measured the same day: the
+      default 300-row wave (6300 rows a seed, `diverge 0` at 7 / 4242 / 20260914 / 99991) and the
+      6000-row `fuzzy` wave (`diverge 0` at the same four).
 - [ ] **Controls re-run - PARTLY: 89 of the 102 in `controls.json`.** 58 in pass 1 before it
       aborted, 30 in pass 2, and S42-1B in sitting 2, which fired as a hang. The 13 left are the
       5 that no longer resolve, the 7 blocked by a locked build output this session cannot unlock,

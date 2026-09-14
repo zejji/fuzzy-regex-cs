@@ -39,7 +39,17 @@ in `Matcher.DoBestFuzzyMatch` and the POSIX save/restore, so one slice. Each is 
 
 ## Done when
 
-- [x] Entries 12, 13 and 9's port half fixed test-first, each with its definition quoted.
+- [x] ~~Entries 12, 13 and 9's port half fixed test-first, each with its definition quoted.~~
+      **CORRECTED 2026-09-14 (S47b):** entry 12 was fixed, with `README.rst:592` quoted and 111 lines
+      of `FuzzyBestMatchTests.cs` written for it - but the tests were written ALONGSIDE the guard
+      change, not before it, and nowhere do these notes record how many were red without it. Entries
+      13 and 9 were not fixed at all: they needed no work, which this slice states plainly at
+      `:56-62` with `Matcher.cs:2092-2094` and `:2121-2123` cited. So the box as written overstates
+      on both halves. The honest box is "entry 12's guard fixed and pinned by three new tests;
+      entries 13 and 9's port halves measured as already correct". The audit graded it ASSERTED ONLY
+      and it is left ticked because the WORK landed - what was missing is the failing-first evidence,
+      and S47b did not re-run it from a stashed `src/` because that measures a guard nobody is
+      changing. The red-first discipline is evidenced instead where S47b's own changes are.
 - [x] Divergence entries, controls, ledger updates; POSIX exclusion lifted.
 - [x] Ratchet GREEN and blind review done in sitting 1; the box closes with the slice.
 

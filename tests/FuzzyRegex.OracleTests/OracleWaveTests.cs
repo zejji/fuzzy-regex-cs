@@ -217,6 +217,139 @@ public sealed class OracleWaveTests
         wrong.Divergences.Should().ContainSingle().Which.Should().StartWith("DIVERGE row");
     }
 
+    /// <summary>
+    /// The row a port that ignored <c>(?b)</c> would get wrong, recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-09-14 against regex 2026.9.10.
+    /// </summary>
+    /// <remarks>
+    /// Chosen because upstream's two answers to it DIFFER and upstream's <c>(?b)</c> answer is the
+    /// right one: with the flag it matches <c>cat</c> against the second alternative for nothing,
+    /// and without it the first alternative wins with one deletion at 3. So this port's answer must
+    /// be upstream's flagged answer, and <see cref="OracleRow.BestmatchFree"/> is precisely what a
+    /// port that dropped the flag would say.
+    /// </remarks>
+    private const string _bestmatchFlagIgnoredRow =
+        """{"generator": "fuzzy", "pattern": "(?b)(?:cats|cat){e<=1}", "flags": 0, "namedLists": {}, "subject": "cat", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}}}""";
+
+    [Test]
+    public void A_bestmatch_row_answered_as_though_the_flag_were_absent_is_not_accounted_for()
+    {
+        // S47b, from the independent audit of S44-S46. `bestmatch-loses-a-candidate` classified any
+        // `(?b)` row whose divergence landed on upstream's own flagless answer, and the entry's own
+        // Reason admitted what that cannot tell apart: a port that IGNORED `(?b)` altogether answers
+        // the flagless answer on every row, so the widest possible defect in the feature the entry
+        // is about would have been tallied EXPECTED on every row it touched.
+        OracleRow row = OracleWave.ParseRows(_bestmatchFlagIgnoredRow)[0];
+
+        row.BestmatchFree.Should().NotBeNull("the row is only a discriminator if upstream answered both ways");
+        row.BestmatchFree.Describe()
+            .Should()
+            .NotBe(row.Expected.Describe(), "a row where the flag changes nothing discriminates nothing");
+
+        ExpectedDivergences.For(row, row.BestmatchFree).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Six fabricated rows this entry must REFUSE, recorded by
+    /// <c>python tools/record-oracle.py --rows</c> on 2026-09-14 against regex 2026.9.10.
+    /// </summary>
+    /// <remarks>
+    /// Every one is the same trap in a different spelling: the pattern offers a Turkic letter and
+    /// the answer lands on THAT SAME letter, which every engine matches without reading a <c>T</c>
+    /// row, so a divergence there is some other defect. Row 1 is S45's own blind-review finding 6,
+    /// recorded there as beyond any predicate. The other five are the mirrors and the
+    /// text-that-is-never-matched spellings that S47b's two blind passes found walking back in
+    /// after each fix: the dotted twin of row 1, then a group name in all three spellings and a
+    /// comment, each of which puts the partner letter in the pattern TEXT where nothing matches it.
+    /// <para>
+    /// They are held apart from the rows that must be CLASSIFIED rather than numbered inside one
+    /// list, because the numbering is exactly what went wrong: the second blind pass found this
+    /// comment describing six rows when there were seven, every claim past the second off by one.
+    /// </para>
+    /// </remarks>
+    private const string _turkicRowsToRefuse = """
+        {"generator": "rows", "pattern": "(?i)ı.", "flags": 0, "namedLists": {}, "subject": "ıx", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?i)İ.", "flags": 0, "namedLists": {}, "subject": "İx", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?P<I>\u0131).", "flags": 2, "namedLists": {}, "subject": "\u0131x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "I", "partial": false}}
+        {"generator": "rows", "pattern": "(?#I)\u0131.", "flags": 2, "namedLists": {}, "subject": "\u0131x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?P<i>\u0130).", "flags": 2, "namedLists": {}, "subject": "\u0130x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "i", "partial": false}}
+        {"generator": "rows", "pattern": "(?<I>\u0131).", "flags": 2, "namedLists": {}, "subject": "\u0131x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "I", "partial": false}}
+        """;
+
+    /// <summary>
+    /// Six rows this entry must CLASSIFY, five of them real wave rows, recorded the same day.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is <c>fullmatch('aı', 'aI', I)</c>, the <c>case-folding</c> generator's commonest
+    /// shape and the one S45's blind review found a start-character test missing: upstream matches
+    /// (0, 2) and this port does not match at all. <b>A total failure, which is why the
+    /// discriminator cannot be "the port matched"</b> - the slice text asked for that clause and it
+    /// would have deleted most of the family. Row 2 is the shape whose divergence is its SECOND
+    /// match rather than its first.
+    /// <para>
+    /// <b>Rows 3 to 6 are what stop the narrowing going too far, and each killed a draft of the
+    /// rule.</b> Row 3 is row 6150 of the seed-31337 <c>interactions</c> wave minimised: the pattern
+    /// spells U+0131 AND holds a class that only a <c>T</c> row lets reach the second U+0131. Rows 4
+    /// and 5 are rows 50168 and 52004 of the seed-99991 6000-row gate verbatim, both from
+    /// <c>case-folding</c>: the first spells the <c>i</c> upstream's span lands on AND the
+    /// <c>İ</c> whose <c>T</c> row is the whole divergence, and the second reaches the pairing
+    /// through a BACKREFERENCE. Row 6 is row 52004's named twin, which S47b's second blind pass
+    /// wrote: <c>(?P&lt;g&gt;i)(?P=g)</c> carries neither <c>[</c> nor <c>\</c>, so the fix for the
+    /// unnamed form left it unclassified and it would have reddened a wave.
+    /// </para>
+    /// </remarks>
+    private const string _turkicRowsToClassify = """
+        {"generator": "rows", "pattern": "aI", "flags": 2, "namedLists": {}, "subject": "aı", "operation": "fullmatch", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "[^I]", "flags": 2, "namedLists": {}, "subject": "aıb", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}]}}
+        {"generator": "rows", "pattern": "ı[A-Z]", "flags": 2, "namedLists": {}, "subject": "ıı", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "case-folding", "pattern": "iİ", "flags": 16386, "namedLists": {}, "subject": "iiİ", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "case-folding", "pattern": "(i)\\1", "flags": 16386, "namedLists": {}, "subject": "Iıi", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?P<g>i)(?P=g)", "flags": 16386, "namedLists": {}, "subject": "I\u0131i", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "g", "partial": false}}
+        """;
+
+    [Test]
+    public void A_failure_on_a_row_whose_turkic_letter_needs_no_turkic_rule_is_not_accounted_for()
+    {
+        // S47b, from the independent audit of S44-S46, closing the false positive S45's second blind
+        // pass reproduced and recorded as unfixable. A total engine failure on `(?i)ı.` against `ıx`
+        // was tallied EXPECTED, because the predicate asked only that a Turkic letter be in play -
+        // and U+0131 is in play here against ITSELF, which every engine matches without consulting
+        // a `T` row at all.
+        //
+        // ALL SIX, in one loop, because each of the first two fixes closed the spelling in front of
+        // it and left its twin open - `(?i)İ.` after `(?i)ı.`, then four group-name and comment
+        // spellings after those. Every row here is the identical trap and a fix that passes some of
+        // them is the bug; the port is fabricated to fail outright on each, which is what an
+        // unrelated engine defect landing on such a row would look like.
+        foreach (OracleRow row in OracleWave.ParseRows(_turkicRowsToRefuse))
+        {
+            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("{0}", row.Pattern);
+        }
+    }
+
+    [Test]
+    public void The_turkic_family_is_still_accounted_for_on_the_shapes_it_was_narrowed_around()
+    {
+        // The other half of the narrowing, and the half that makes it a narrowing rather than a
+        // deletion. Every row goes through the LIVE engine, so this fails the day the port stops
+        // diverging on one as well as the day the predicate stops reaching it - and the first row's
+        // divergence is a total failure, the same shape as the six that must be refused, which is
+        // why the discriminator cannot be "the port matched".
+        foreach (OracleRow row in OracleWave.ParseRows(_turkicRowsToClassify))
+        {
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull("{0}", row.Pattern)
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("turkic-default-folding");
+        }
+    }
+
     [Test]
     public void Corrupting_a_recorded_row_is_reported_as_a_divergence()
     {

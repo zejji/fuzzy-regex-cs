@@ -2,3 +2,8 @@
 {"generator": "fuzzy", "pattern": "(?b)(?:abx\\sx){i<=2}", "flags": 0, "namedLists": {}, "subject": "abx bxx", "operation": "fullmatch"}
 {"generator": "fuzzy", "pattern": "(?b)(?e)(?:x0bb+?[^a-f]b+?){e<=2}", "flags": 0, "namedLists": {}, "subject": "x0fbbbxba", "operation": "fullmatch"}
 {"generator": "fuzzy", "pattern": "(?b)(?i)(?:x\\A){e<=3}", "flags": 0, "namedLists": {}, "subject": "aX", "operation": "sub", "template": "<>", "count": 0}
+{"generator": "fuzzy", "pattern": "(?b)(?:[^a-f]a0\\Bx\\p{L}){e<=3:[abx]}", "flags": 0, "namedLists": {}, "subject": "zaQa", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:[ab]*?[^a-f]){e<=2}", "flags": 0, "namedLists": {}, "subject": "0aya", "operation": "fullmatch", "partial": true}
+{"generator": "fuzzy", "pattern": "(?b)(?:[a-f][a-f][^a-f]){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "badyf", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:\\s[ab]+){i<=2}", "flags": 0, "namedLists": {}, "subject": "a bax", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:\\W(?:b\\B){d<=1:\\d}){e}", "flags": 0, "namedLists": {}, "subject": ".ba", "operation": "finditer"}

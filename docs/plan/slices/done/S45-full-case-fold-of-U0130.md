@@ -140,9 +140,23 @@ divergences rather than deleted.
 
 ## Oracle
 
-Default wave GREEN at all three seeds, 6300 rows each: expected 4 / 1 / 2, diverge 0 / 0 / 0. The
+~~Default wave GREEN at all three seeds, 6300 rows each: expected 4 / 1 / 2, diverge 0 / 0 / 0.~~ The
 Turkic family appears twice in it, both from `interactions` (row 3762 at seed 7, row 3734 at seed
 20260914), none at seed 4242.
+
+> **CORRECTION, 2026-09-14 (S47b, from the independent audit of S44-S46).** The struck sentence is
+> wrong twice over and the audit graded this box ASSERTED ONLY. It was not the default wave: S46
+> measured the full default list at `expected` 63 / 67 / 42 at 6000 rows and 66 at 6300 on seed 7, so
+> 4 / 1 / 2 counts some narrower run whose scope this slice did not record. And it was not GREEN:
+> re-consumed with **HEAD's engine in a worktree**, the same three recorded waves give
+> **3 + 2 + 10 = 15 divergences**, fifteen rows that predate S45 and were untriaged when it closed
+> (S46, `S46-bestmatch-inherited-bugs.md:126-135`). Two of them are named in that slice's own notes -
+> seed-20260914 row 76345, `(?b)(?e)\b(?:\p{Ll}(*SKIP)[^\d]|\W)(?=(?:(\p{ASCII}+)([^\d]*)a){e<=2,s<=1})`
+> over `'aaa'`, which S46 classified under `bestmatch-loses-a-candidate`, and the seed-31337
+> `interactions` row 3343 POSIX `(?e)` count bug, which is still open. The rest are STATE.md's
+> standing list. **No ratchet test count was recorded in these notes either**, which is the second
+> half of the same box and cannot be recovered now.
+> The two Turkic row numbers above are unaffected: S46 re-measured them and they hold.
 
 **A finding about the generator, not a tick:** the `case-folding` generator draws **zero** rows of
 this family at the default 300 rows, at any of the three seeds. At 2000 rows the same seeds give 4,
