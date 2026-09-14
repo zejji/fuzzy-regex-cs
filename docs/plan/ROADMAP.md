@@ -18,7 +18,7 @@ would be wrong by the time phase 5 arrives, for the same reason a stale TODO lis
 | 5 | Fuzzy matching, `BESTMATCH`, `ENHANCEMATCH` | 5-8 | Opus |
 | 6 | **Opens with the upstream sync and bug sweep (owner decision, 2026-09-12; three slices, gate for Phase 7)**, then oracle *hardening* (broader generators, all Unicode planes), gap tests, the native-AOT compatibility gate, and a Stryker.NET mutation-testing pass that now covers the engine as well as the API layer | 9-14 | Opus/Sonnet |
 | 7 | Benchmarks and optimisation, every optimisation AOT-compatible | 5-10 | Opus |
-| 8 | Docs, packaging, NuGet, 1.0 | 2-3 | Sonnet/Opus |
+| 8 | Docs, packaging, NuGet, 1.0. **The user documentation is written from `docs/DIVERGENCES.md`**, the running record of every deliberate difference from upstream (Version 1 default, cost ranking, fixed inherited bugs, API shape, timeouts); every slice appends there when it diverges, so Phase 8 starts from a list, not from memory (owner, 2026-09-14). The ledger's upstream reports are filed in this phase, owner-approved. | 2-3 | Sonnet/Opus |
 | 9 | Browser demo: Vue 3 page, the engine in a Web Worker, deployed to GitHub Pages | 2-3 | Opus |
 
 Roughly 52-80 slice sessions in total, at plus or minus 50%. The generated status board makes the

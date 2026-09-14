@@ -247,6 +247,9 @@ rejects, all of which have already burned turns on real slices:
   and stashes the rest, so commit early and often.
   **Second engines are installed** - PCRE2 (`import pcre2`), Perl, .NET, regex 2026.9.10; see
   OPERATIONS.md "Second engines". Run them; do not stop to ask whether they are available.
+  **A deliberate difference from upstream is appended to `docs/DIVERGENCES.md` in the same commit**
+  (what, why, where decided, how a user gets upstream's behaviour). Phase 8 writes the user docs from
+  that file. Accidental differences are oracle divergences and go through the ledger instead.
 
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in
