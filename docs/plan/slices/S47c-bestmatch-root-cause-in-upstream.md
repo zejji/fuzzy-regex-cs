@@ -19,6 +19,13 @@ C++ workload (`winget install Microsoft.VisualStudio.2022.BuildTools` with
 `--add Microsoft.VisualStudio.Workload.VCTools`), or confirm `cl.exe` is already on the path. The
 session may not install system software; it says so in STATE.md and stops if the compiler is absent.
 
+**Done 2026-09-14 09:25 (orchestrator; the owner ran the elevated installer):** Visual Studio 2022
+Build Tools at `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`, MSVC 14.44.35207.
+`vcvars64.bat` then `cl /nologo hello.c` compiled, and the program printed `cl ok`. Python 3.14.6
+headers are at `C:\Python314\Include`. Build from a shell that has called
+`"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"`,
+or let `pip`/`setuptools` find MSVC itself (it locates Build Tools through `vswhere`).
+
 ## Scope
 
 1. **Build upstream from source, debug.** `upstream/` is the pinned 2026.9.10 checkout. Build it
