@@ -836,3 +836,27 @@ amended text is inline above; this list is the record of what changed and why.
     helper because upstream's suite assumes it. Slice S50b, placed before S51 so timeouts,
     thread-safety, oracle hardening and the benchmark baselines all exercise the shipped default.
     Estimate 13-18 becomes 14-19.
+
+25. **The inherited-bug group needs one more slice, and its own inventory is what says so
+    (2026-09-14, S48).** S45-S48 were planned as the four slices that empty the known-bug list
+    before Phase 7. S48's inventory of ledger entries 1-15 - the thing its own scope asked for -
+    closes thirteen of them and leaves three, and the three are one mechanism seen three ways:
+    upstream saves and restores the fuzzy COUNTS as a block and unwinds the CHANGES one item at a
+    time, so ledger 11's mechanisms C and D and ledger 9's remaining port-side count bug are all
+    "the counts and the list drifted apart". Ledger entry 11 already said "That is a slice of its
+    own"; **S48b is that slice**, placed immediately after S48 and before the issue sweep, because
+    the owner's rule of 2026-09-12 is that no known bug survives into Phase 7. It is not scope
+    creep and it is not a feature: it is the same pattern amendment 21 recorded for Phase 5, where
+    verification getting stricter adds slices and each addition finds a real defect. Estimate 14-19
+    becomes 15-20.
+
+    Two facts the slice inherits and should not have to re-derive. **The oracle cannot see C or
+    D** - both engines agree on them, which is the blindness the ROADMAP's own bug-sweep paragraph
+    exists for - so the instrument is
+    `OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts`, not a wave. And
+    **a negative control on this family may legitimately fire zero**: S48's own S48-A, which puts
+    the fixed `(?b)` walk back to reading the verb-moved slice, moved nothing at all across 24,000
+    `interactions` rows at four seeds, while the fault it restores changes upstream's answer on
+    1,861 of 11,340 shapes in a hand-built alphabet. That is a measured gap in the generators, it
+    is handed to S52, and until S52 closes it a zero control on this family is evidence about the
+    generator rather than about the fix.

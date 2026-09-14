@@ -825,6 +825,68 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _skipBlocksRetreatOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The five rows of <c>bestmatch-walk-truncated-by-a-skip</c>: a <c>(*SKIP)</c> ends upstream's
+    /// own <c>(?b)</c> walk on its first successful candidate, so a better match further along the
+    /// subject is never attempted.
+    /// </summary>
+    /// <remarks>
+    /// Not drawn by a wave. The mechanism was found by reading <c>do_best_fuzzy_match</c>'s loop
+    /// guard (<c>upstream/src/_regex.c:17625</c>) while S48 inventoried ledger entry 5, and then
+    /// hunted for over a small alphabet - 11,340 shapes, 1,861 of which answer differently with
+    /// <c>(*SKIP)</c> than with <c>(*PRUNE)</c>. Row 1 is the minimisation, four ASCII characters
+    /// and no flags; rows 2 to 5 are the first larger shapes the hunt drew, kept because each one
+    /// spends a different error kind.
+    /// <para>
+    /// Re-recordable in full:
+    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-walk-truncated-rows.jsonl</c>,
+    /// or straight through the runner as
+    /// <c>pwsh -File tools/run-oracle.ps1 -Rows &lt;that file&gt;</c>. That file carries a SIXTH row
+    /// which is deliberately not in this entry: <c>(?b)(?:\w(*SKIP)a|a){e&lt;=1}</c> over
+    /// <c>'a b c'</c>, on which both engines answer <c>(0, 2)</c> with one substitution at 1. It is
+    /// there because the five rows above are all PERFECT matches, and a wave holding no fuzzy match
+    /// with an error in it fails
+    /// <c>OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts</c>'s
+    /// non-degeneracy guard - so without it the artifact cannot be replayed through the runner at
+    /// all. It doubles as the family's agreeing control.
+    /// </para>
+    /// </remarks>
+    private const string _bestmatchWalkTruncatedRows = """
+        {"generator": "interactions", "pattern": "(?b)(?:a(*SKIP)b){e<=1}", "flags": 0, "namedLists": {}, "subject": "axab", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?:b(*SKIP)a){e<=1}", "flags": 0, "namedLists": {}, "subject": "bxba", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?:b(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "bbbab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "abcabc", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}}
+        {"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=2}", "flags": 0, "namedLists": {}, "subject": "qqxyab", "operation": "search", "codepointSpan": [2, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 4, "captures": [[2, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 2], "insertions": [], "deletions": []}}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_bestmatchWalkTruncatedRows"/>, in the
+    /// same order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Every one is a PERFECT match - no errors at all, which is why none of them carries a
+    /// <c>fuzzy=</c> field - and on every one it is the answer the same compiled pattern's own
+    /// anchored <c>match</c> gives at that position, on upstream as well as here. It is also what
+    /// upstream answers with the verb replaced by <c>(*PRUNE)</c> and with the verb deleted.
+    /// </remarks>
+    private static readonly string[] _bestmatchWalkTruncatedOurs =
+    [
+        "match 0:(2,2)[(2,2)] last=-1/-",
+        "match 0:(2,2)[(2,2)] last=-1/-",
+        "match 0:(2,3)[(2,3)] last=-1/-",
+        "match 0:(2,3)[(2,3)] last=-1/-",
+        "match 0:(3,3)[(3,3)] last=-1/-",
+    ];
+
+    /// <summary>
+    /// <see cref="_bestmatchWalkTruncatedRows"/> by its question, mapped to this port's judged
+    /// answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _bestmatchWalkTruncated = OracleWave
+        .ParseRows(_bestmatchWalkTruncatedRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchWalkTruncatedOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -1420,6 +1482,65 @@ internal static class ExpectedDivergences
             Example: _skipBlocksRetreatRows,
             Applies: static (row, ours) =>
                 _skipBlocksRetreat.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "bestmatch-walk-truncated-by-a-skip",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - ledger entry 5's SIXTH "
+                + "door, fixed here by S48 because the port shared it. Every door above this one "
+                + "carries the stale slice from one MATCH to the next, or between the two passes of "
+                + "one match; this one carries it between the CANDIDATES of a single `(?b)` match.\n"
+                + "THE MECHANISM, READ OFF THE SOURCE. `do_best_fuzzy_match` walks `start_pos` across "
+                + "the slice, one `basic_match` per candidate, and its loop guard holds `start_pos` "
+                + "between `state->slice_start` and `state->slice_end` (upstream/src/_regex.c:17625). "
+                + "`RE_OP_SKIP` assigns `slice_start` mid-attempt (:14555, or `slice_end` under `(?r)`, "
+                + ":14553) and nothing puts it back - `init_match` (:3404), which this walk calls once "
+                + "per candidate, resets the stacks, the groups and the guards but not the slice. "
+                + "`start_pos` is then set to `state->match_pos`, the START of the match the candidate "
+                + "just found, so a verb that consumed anything leaves `slice_start` ABOVE it and the "
+                + "guard is false on the next turn. THE WALK ENDS ON ITS FIRST SUCCESSFUL CANDIDATE.\n"
+                + "WHAT JUDGES IT IS THE VERB'S OWN DEFINITION, not a preference between rankings. "
+                + "`(*SKIP)` sets a skip point, and what the skip point forbids is a later attempt "
+                + "BELOW it (PCRE2 pcre2pattern, 'Verbs that act after backtracking'). On row 1 the "
+                + "skip point is 1 and the candidate the walk never reaches starts at 2, which the "
+                + "verb permits outright. `(?b)` then promises the fewest errors among the matches "
+                + "that exist, and the match it loses is PERFECT.\n"
+                + "AND UPSTREAM CONTRADICTS ITSELF ON THE SAME COMPILED PATTERN, which is the form "
+                + "`bestmatch-loses-a-partial` and both `partial-retry-*` entries rest on. Row 1, "
+                + "measured 2026-09-14 on regex 2026.9.10, "
+                + "tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py:\n"
+                + "  (?b)(?:a(*SKIP)b){e<=1} over 'axab'\n"
+                + "    search .................  (0, 2) one substitution   <- upstream\n"
+                + "    ...the same object....... match(2)  (2, 4) NO errors\n"
+                + "    (*PRUNE) in its place ..  search    (2, 4) NO errors\n"
+                + "    the verb deleted .......  search    (2, 4) NO errors\n"
+                + "`(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so "
+                + "the third line is what makes the moved bound the cause rather than the pattern's "
+                + "meaning - the same control `search-start-partial` and `partial-retry-carried-slice-"
+                + "forward` rest on. NO SECOND ENGINE IS AVAILABLE and none is needed: PCRE2 has no "
+                + "fuzzy matching at all (tools/probes/pcre2-has-no-fuzzy-matching.py), and a search "
+                + "that reports a worse match than its own anchored door finds is wrong on `(?b)`'s "
+                + "own definition.\n"
+                + "WHAT THE FIX IS, AND WHERE IT IS NOT. Matcher.DoBestFuzzyMatch restores the "
+                + "caller's slice before each candidate, in the walk and in the second pass. It is "
+                + "NOT hoisted into `InitMatch`, where ledger entry 5's note puts upstream's version "
+                + "of the fix: `DoEnhancedFuzzyMatch` and this function's own widened-slice fallback "
+                + "narrow the slice DELIBERATELY and then call it, and a reset there would throw "
+                + "their narrowing away. The restore is once per candidate, so a verb still moves the "
+                + "slice for the rest of the attempt it fired in - pinned separately by "
+                + "`Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives`, on a row where "
+                + "the pruning decides the answer and the moved bound does not, and which is "
+                + "upstream's own answer rather than a divergence.\n"
+                + "KEYED ON ITS ROWS, like every sibling above, and here the reason is sharper than "
+                + "usual: 'this port answered a better fuzzy match than upstream' is exactly what a "
+                + "ranking defect in this port's own cost walk would also look like, and this port "
+                + "has shipped two of those in Phase 5 (S42's two hangs). Widening means judging "
+                + "another row with the probe and adding it, not loosening a condition. Phase 7 must "
+                + "not import upstream's answer here along with the prefilter.",
+            PinnedBy: "FuzzyBestMatchTests.Bestmatch_looks_past_the_candidate_whose_own_skip_moved_" + "the_slice",
+            Example: _bestmatchWalkTruncatedRows,
+            Applies: static (row, ours) =>
+                _bestmatchWalkTruncated.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(

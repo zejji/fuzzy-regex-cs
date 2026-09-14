@@ -319,6 +319,13 @@ turn out to be bugs the maintainer has **already fixed**, so reporting them woul
 
 **HOLD lifted 2026-09-12:** re-run against 2026.9.10, identical output, so issue 613's fix does not cover it.
 
+**Status, S48 2026-09-14: SIX DOORS, all of them still open upstream, and this port now diverges from
+upstream on every one.** Five were already closed here when they were written up - S40a's per-match
+reset and S40b's restore before the partial pass, each with its own `ExpectedDivergences` entry. The
+sixth, below, is the one this port SHARED, and it is fixed here (owner's rule of 2026-09-12: an
+inherited bug is fixed before 1.0). The entry's own proposed fix needs one correction for it; the
+sixth door says which.
+
 **Title:** overlapped `finditer` with `(*SKIP)` returns a match shorter than the pattern's minimum
 width
 
@@ -515,6 +522,74 @@ control this family has not had before.
 classified by `ExpectedDivergences.partial-retry-carried-slice-forward`. The reversed twin of this
 same door is `ExpectedDivergences.partial-retry-reversed-slice`, found by S40b. Re-runnable:
 `python tools/probes/upstream-skip-carried-slice-forward.py`.
+
+**A SIXTH DOOR, added by S48 on 2026-09-14, and it is the first one this port SHARED** - every door
+above it was already fixed here when it was written up, and this one was not. It is neither a scan
+nor a two-pass partial: the stale slice crosses from one CANDIDATE of a single `(?b)` match to the
+next.
+
+`do_best_fuzzy_match` walks `start_pos` across the slice, one `basic_match` per candidate, holding
+the next run to strictly fewer errors than the last. Its loop guard reads the LIVE bounds
+(`:17625`):
+
+```c
+    while (state->slice_start <= start_pos && start_pos <= state->slice_end) {
+        state->text_pos = start_pos;
+        state->must_advance = must_advance;
+
+        /* Initialise the state. */
+        init_match(state);
+```
+
+`init_match` is this report's own subject: it does not reset the slice. And `start_pos` is set to
+`state->match_pos` at the foot of the loop (`:17680`) - the START of the match the candidate just
+found - so a `(*SKIP)` that consumed anything leaves `slice_start` above it and the guard is false
+on the next turn. **The walk ends on its first successful candidate**, and every better match
+further along the subject is never attempted. The second pass reads the same stale bound again, in
+its `max_offset` (`:17721`) and in every anchored re-run.
+
+Minimised to four ASCII characters and no flags:
+
+```python
+>>> regex.compile(r'(?b)(?:a(*SKIP)b){e<=1}').search('axab')
+<regex.Match object; span=(0, 2), match='ax', fuzzy_counts=(1, 0, 0)>
+>>> regex.compile(r'(?b)(?:a(*SKIP)b){e<=1}').match('axab', 2)
+<regex.Match object; span=(2, 4), match='ab', fuzzy_counts=(0, 0, 0)>
+```
+
+The search answers a one-error match; the same compiled pattern's own `match` finds a PERFECT one
+two characters later. `(*PRUNE)` in the verb's place, and the verb deleted, both give `(2, 4)` with
+no errors.
+
+**What judges it is the verb's own definition, and it is sharper here than anywhere else in this
+entry.** `(*SKIP)` sets a skip point, and what a skip point forbids is a later attempt *below* it
+(pcre2pattern, "Verbs that act after backtracking"). Here the skip point is 1 and the candidate the
+walk never reaches starts at 2 - which the verb permits outright. `BESTMATCH` then promises the
+fewest errors among the matches that exist, so losing a zero-error match its own anchored door finds
+needs no appeal to any other engine. **No second engine is available in any case: PCRE2 has no fuzzy
+matching at all** (`tools/probes/pcre2-has-no-fuzzy-matching.py`), which is why the self-refutation
+and the `(*PRUNE)` control carry the whole judgement.
+
+**Not rare.** Over a small alphabet of 11,340 `(?b)`-plus-`(*SKIP)` shapes, 1,861 answer differently
+with `(*SKIP)` than with `(*PRUNE)`
+(`python tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py --hunt`).
+
+**Proposed fix.** This entry's own - reset the slice in `init_match`, or save and restore it around
+the walk - but **with one correction this report must state, because the `init_match` form is wrong
+for this door**: `do_enhanced_fuzzy_match` (`:17871`) and `do_best_fuzzy_match`'s own widened-slice
+fallback (`:17807`) narrow the slice deliberately and then call `init_match`, and a reset there
+would throw their narrowing away. Save and restore around each candidate instead.
+
+**FIXED HERE, S48, 2026-09-14**, that second way: `Matcher.DoBestFuzzyMatch` restores the caller's
+slice before each candidate in both passes. Pinned by
+`Gaps.Engine.FuzzyBestMatchTests.Bestmatch_looks_past_the_candidate_whose_own_skip_moved_the_slice`,
+with `.Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives` holding the line the fix
+must not cross - the restore is once per candidate and restores the slice only, so a verb still cuts
+the backtracking of the attempt it fired in, on a row where the pruning decides the answer and the
+moved bound does not (`(?b)(?:\w(*SKIP)a|a){e<=1}` over `'axab'`, both engines `(1, 3)`) - and
+classified by `ExpectedDivergences.bestmatch-walk-truncated-by-a-skip`. Re-runnable:
+`python tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py` and
+`pwsh -File tools/probes/port-bestmatch-walk-cases.ps1`.
 
 ---
 

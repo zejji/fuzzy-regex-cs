@@ -1,0 +1,6 @@
+{"generator": "interactions", "pattern": "(?b)(?:a(*SKIP)b){e<=1}", "flags": 0, "namedLists": {}, "subject": "axab", "operation": "search"}
+{"generator": "interactions", "pattern": "(?b)(?:b(*SKIP)a){e<=1}", "flags": 0, "namedLists": {}, "subject": "bxba", "operation": "search"}
+{"generator": "interactions", "pattern": "(?b)(?:b(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "bbbab", "operation": "search"}
+{"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "abcabc", "operation": "search"}
+{"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=2}", "flags": 0, "namedLists": {}, "subject": "qqxyab", "operation": "search"}
+{"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)a|a){e<=1}", "flags": 0, "namedLists": {}, "subject": "a b c", "operation": "search"}

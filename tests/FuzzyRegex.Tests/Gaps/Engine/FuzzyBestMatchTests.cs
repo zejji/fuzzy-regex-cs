@@ -489,4 +489,94 @@ public sealed class FuzzyBestMatchTests
         m.PartialMatch.Should().BeFalse();
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
+
+    [Test]
+    public void Bestmatch_looks_past_the_candidate_whose_own_skip_moved_the_slice()
+    {
+        // INHERITED BUG, FIXED HERE - ledger entry 5's sixth door, and the first one that is neither
+        // a scan nor a two-pass partial. `(*SKIP)` assigns `slice_start` mid-attempt
+        // (upstream/src/_regex.c:14555) and nothing puts it back, and `do_best_fuzzy_match`'s walk
+        // guard at `:17625` - which holds `start_pos` between `state->slice_start` and
+        // `state->slice_end` - reads the moved bound on its next turn. `start_pos` is the match this
+        // candidate found, so a verb that consumed anything leaves `slice_start` ABOVE it and the
+        // walk ends on its first successful candidate.
+        //
+        // Measured 2026-09-14 on regex 2026.9.10, `python
+        // tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py`; this port answered the same
+        // until this slice:
+        //
+        //   (?b)(?:a(*SKIP)b){e<=1}   'axab'  search    (0, 2) one substitution   <- upstream, and
+        //                                                                            this port before
+        //   ...the same compiled pattern............... match(2)  (2, 4) NO errors
+        //   (*PRUNE) in its place...................... search    (2, 4) NO errors
+        //   the verb deleted........................... search    (2, 4) NO errors
+        //
+        // WHAT JUDGES IT IS THE VERB'S OWN DEFINITION, not a preference between two rankings.
+        // `(*SKIP)` sets a skip point: a later attempt must not start BELOW it (pcre2pattern,
+        // "Verbs that act after backtracking"). Here the skip point is 1 and the candidate the walk
+        // never reaches starts at 2, which the verb permits outright. And `(?b)` promises the match
+        // with the fewest errors among those that exist, so a zero-error match its own anchored door
+        // finds settles it without a second engine - which is as well, because PCRE2 has no fuzzy
+        // matching at all (tools/probes/pcre2-has-no-fuzzy-matching.py).
+        //
+        // `(*PRUNE)` prunes backtracking exactly as `(*SKIP)` does and moves NO bound, so the last
+        // two lines are what make the moved bound the cause rather than the pattern's meaning.
+        Match best = new FuzzyRegex("(?b)(?:a(*SKIP)b){e<=1}").Match("axab");
+
+        best.Success.Should().BeTrue();
+        (best.Index, best.Index + best.Length).Should().Be((2, 4));
+        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // The same pattern's own anchored door, which is the self-refutation stated as a test: it
+        // found this answer before the fix as well, which is why the search could be called wrong
+        // without appealing to upstream at all.
+        Match anchored = new FuzzyRegex("(?b)(?:a(*SKIP)b){e<=1}").MatchAtStart("axab", beginning: 2);
+
+        (anchored.Index, anchored.Index + anchored.Length).Should().Be((2, 4));
+        anchored.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives()
+    {
+        // THE NEGATIVE CONTROL for the fix above. The restore is once PER CANDIDATE and it restores
+        // the SLICE ONLY, so a `(*SKIP)` inside a candidate's attempt must still do what the verb is
+        // for - cut the backtracking. This row is one where the pruning decides the answer and the
+        // moved bound does not, so a fix that had reached too far would move it and the fix as
+        // written must not.
+        //
+        // Upstream, regex 2026.9.10, measured 2026-09-14 - and the row is upstream's OWN answer, so
+        // it is not a divergence and no `ExpectedDivergences` entry classifies it:
+        //
+        //   (?b)(?:\w(*SKIP)a|a){e<=1}   over 'axab'   (1, 3) no errors
+        //   (*PRUNE) in its place .....................  (1, 3) no errors
+        //   the verb deleted ..........................  (0, 1) no errors
+        //
+        // Both verbs agree, so the bound the `(*SKIP)` moves changes nothing here; deleting the verb
+        // changes the answer, so the PRUNING is what decides it. The attempt at 0 takes `\w` = 'a',
+        // the verb commits, the 'a' it then needs is 'x', and the `|a` alternative it would have
+        // backtracked into is cut - so 0 can only answer by substituting, and the walk finds the
+        // perfect match at 1. Position 0 is NOT barren, and the doors say so on both engines:
+        //
+        //   match at 0  (0, 2) one substitution      match at 2  (2, 4) one substitution
+        //   match at 1  (1, 3) NO errors             match at 3  (3, 4) one deletion
+        //
+        // With the verb deleted, 0 answers (0, 1) with no errors and wins on being earliest, which
+        // is the whole of the difference this test pins.
+        //
+        // It also exercises the walk more than once, which the test above does not: the fix is in
+        // `DoBestFuzzyMatch` and `DoMatch2` reaches that only for a fuzzy pattern with `BESTMATCH`
+        // set (Matcher.cs, the `RegexFlags.BestMatch` arm), so a control without `(?b)` would be
+        // routed to `DoSimpleFuzzyMatch` and would pin nothing about this fix.
+        Match pruned = new FuzzyRegex(@"(?b)(?:\w(*SKIP)a|a){e<=1}").Match("axab");
+
+        (pruned.Index, pruned.Index + pruned.Length).Should().Be((1, 3));
+        pruned.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // The verb deleted, which is what says the pruning and not the ranking is doing the work.
+        Match gone = new FuzzyRegex(@"(?b)(?:\wa|a){e<=1}").Match("axab");
+
+        (gone.Index, gone.Index + gone.Length).Should().Be((0, 1));
+        gone.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
 }

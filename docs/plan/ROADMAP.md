@@ -422,6 +422,26 @@ row, the ported suite pins `Version0` through one helper, and the one loud edge 
 gets an error that names `Version0`. Before S51 so every later slice tests and measures the shipped
 default. Estimate 13-18 becomes 14-19.
 
+**And S48's own inventory added a fifth: S48b (2026-09-14, spec amendment 25).** S45-S48 were the
+four slices meant to empty the known-bug list. S48 inventoried all fifteen ledger entries, which is
+what its scope asked for, and thirteen are closed: entries 1-4, 6 and 8 are upstream-only with this
+port pinned right, 7, 12 and 14 were fixed here, 9's crash half and 13's port half were already
+closed, 10 is closed by the sync, 15 is a regression this port never had, and entry 5's sixth door
+is fixed by S48 itself. What is left is three items that are **one mechanism seen three ways** -
+the fuzzy counts are saved and restored as a block while the change list is unwound one item at a
+time - so ledger 11's mechanisms C and D and ledger 9's remaining port-side count bug become S48b,
+placed before the issue sweep. Ledger entry 11 had already written "That is a slice of its own".
+
+**Two things S48 measured that Phase 6 should carry forward.** First, the sixth door was found by
+READING upstream's C while inventorying, not by a wave, and no generator can see it: the negative
+control that restores the fault moves nothing at all across 24,000 `interactions` rows at four
+seeds, while the same fault changes upstream's answer on 1,861 of 11,340 shapes in a hand-built
+alphabet. **That is a measured gap and it belongs to S52**: the generators compose `(?b)` with
+`(*SKIP)` and never in a shape where the walk truncation decides anything. Second, three of the
+"five broken control sites" were S31-A, S31-B and S31-C, broken because S40b's own fix moved the
+text they mutate; S48 repaired all three and they now fire 10-68 divergences of 600. A control that
+will not resolve is not a control, and the repair cost minutes.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 

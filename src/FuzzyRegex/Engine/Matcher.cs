@@ -9482,6 +9482,48 @@ internal static class Matcher
         long available = CountBetween(state, state.TextPos, state.Reverse ? state.SliceStart : state.SliceEnd);
         int step = state.Reverse ? -1 : 1;
 
+        // EVERY CANDIDATE IS TRIED AGAINST THE SLICE THE CALLER ASKED FOR. Added by S48, and it is a
+        // deliberate departure from upstream, which restores the slice nowhere - so read this before
+        // "restoring" the fidelity. It is LEDGER ENTRY 5's sixth door and its own proposed fix, one
+        // level in from the door 'DoMatch' closed: there the stale slice crossed from one match to
+        // the next, here it crosses from one CANDIDATE of a single '(?b)' match to the next.
+        //
+        // '(*SKIP)' assigns 'slice_start' mid-attempt (':14555', or 'slice_end' under '(?r)',
+        // ':14553') and nothing puts it back. Both this function's attempt loops then read the moved
+        // bound: the walk's guard holds 'start_pos' between the two (':17625') and 'start_pos' is the
+        // match the candidate just found, so a verb that consumed anything leaves 'slice_start' ABOVE
+        // it and the walk stops on its first successful candidate; the second pass reads it again in
+        // its 'max_offset' (':17721') and in every anchored re-run.
+        //
+        // Measured 2026-09-14 on regex 2026.9.10, 'python
+        // tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py', minimised to four characters:
+        //
+        //   (?b)(?:a(*SKIP)b){e<=1}   'axab'   search     (0, 2) one substitution
+        //   ... the same compiled pattern ....  match(2)   (2, 4) NO errors
+        //   (*PRUNE) in its place ............  search     (2, 4) NO errors
+        //   the verb deleted .................  search     (2, 4) NO errors
+        //
+        // WHAT JUDGES IT IS THE VERB'S OWN DEFINITION. '(*SKIP)' sets a skip point and a later
+        // attempt must not start BELOW it (PCRE2 pcre2pattern, "Verbs that act after backtracking");
+        // the skip point here is 1 and the candidate the walk never reaches starts at 2, which the
+        // verb permits outright. '(?b)' then promises the fewest errors among the matches that exist,
+        // and this port's own anchored door finds a zero-error one - so it needs no second engine,
+        // which is as well: PCRE2 has no fuzzy matching (tools/probes/pcre2-has-no-fuzzy-matching.py).
+        // '(*PRUNE)' prunes backtracking identically and moves no bound, which is what makes the moved
+        // bound the cause rather than the pattern's meaning.
+        //
+        // THE RESTORE IS ONCE PER CANDIDATE, NOT INSIDE THE ATTEMPT, and it restores the SLICE ONLY,
+        // so a verb still cuts the backtracking of the attempt it fired in and still moves the slice
+        // for the rest of that attempt - pinned by 'Gaps.Engine.FuzzyBestMatchTests.
+        // Bestmatch_still_lets_a_skip_prune_a_candidates_own_alternatives', on a row where the
+        // pruning decides the answer and the moved bound does not.
+        // And it is NOT hoisted into 'InitMatch', where entry 5's note puts upstream's version of the
+        // fix: 'DoEnhancedFuzzyMatch' (':17871') and this function's widened-slice fallback
+        // (':17807') both narrow the slice DELIBERATELY and then call 'init_match', and a reset there
+        // would throw their narrowing away.
+        int callerSliceStart = state.SliceStart;
+        int callerSliceEnd = state.SliceEnd;
+
         // WHICH BUDGET BOUNDS THE PASSES. Two conditions, one for soundness and one for waste.
         //
         // ONE FUZZY SECTION, because a cost is only a number the bound and the answer agree on while
@@ -9554,8 +9596,12 @@ internal static class Matcher
 
             // Search the text for the best match.
             startPos = firstStartPos;
-            while (state.SliceStart <= startPos && startPos <= state.SliceEnd)
+            while (callerSliceStart <= startPos && startPos <= callerSliceEnd)
             {
+                // The candidate is tried against the caller's slice - see the note at the top.
+                state.SliceStart = callerSliceStart;
+                state.SliceEnd = callerSliceEnd;
+
                 state.TextPos = startPos;
                 state.MustAdvance = mustAdvance;
 
@@ -9711,9 +9757,14 @@ internal static class Matcher
             return status;
         }
 
-        // It doesn't look like a perfect match.
-        int sliceStart = state.SliceStart;
-        int sliceEnd = state.SliceEnd;
+        // It doesn't look like a perfect match. Upstream saves the LIVE slice here (':17700'); this
+        // port saved it at the top instead, because by this line the walk's last attempt may have
+        // moved it - see the note there.
+        int sliceStart = callerSliceStart;
+        int sliceEnd = callerSliceEnd;
+
+        state.SliceStart = callerSliceStart;
+        state.SliceEnd = callerSliceEnd;
 
         long errorLimit = Math.Min(fewestErrors, FuzzyValue.MaxErrorsLimit);
 
@@ -9741,6 +9792,11 @@ internal static class Matcher
         {
             // Look for the best fit at this position.
             BestEntry entry = bestList[i];
+
+            // 'maxOffset' below measures against the slice, and a previous entry's attempt may have
+            // moved it - see the note at the top.
+            state.SliceStart = callerSliceStart;
+            state.SliceEnd = callerSliceEnd;
 
             long maxOffset;
             if (search)
@@ -9773,6 +9829,10 @@ internal static class Matcher
 
                 while (state.MaxErrors <= errorLimit)
                 {
+                    // The candidate is tried against the caller's slice - see the note at the top.
+                    state.SliceStart = callerSliceStart;
+                    state.SliceEnd = callerSliceEnd;
+
                     state.TextPos = startPos;
                     state.InitMatch();
                     status = BasicMatch(state, false);

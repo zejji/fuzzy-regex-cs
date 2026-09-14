@@ -2,44 +2,43 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S47c IS CLOSED** (2026-09-14, one sitting). Suite 5,953, ratchet GREEN, default oracle wave GREEN
-at three seeds. No engine change. Next in the queue is **S48**.
+**S48 IS CLOSED** (2026-09-14, one sitting). Suite 5,955, ratchet GREEN, default wave GREEN at three
+seeds. Next in the queue is **S48b**, authored by this slice; then S49.
 
-**Ledger entry 13's mechanism is established to the line**, in a `/Od /Zi` MSVC build of the pinned
-upstream, instrumented and run. `(*SKIP)` narrows `slice_start` at `_regex.c:14555` during the
-NORMAL attempt; `do_match:18170` restores `text_pos` alone on the partial fallback; and
-`do_best_fuzzy_match:17625`'s loop guard is then false for the caller's own start position, so the
-body never runs and `status` keeps the `RE_ERROR_FAILURE` from `:17599`. **The partial is never
-attempted.** `do_simple_fuzzy_match` gets the same leaked slice and answers anyway - no such guard -
-which is why `(?b)` looks like a filter and is not one.
+**The slice's premise was stale.** Entry 5's "fifth door still inherited" was closed by S40b before
+S48 began. **There is a SIXTH door and this port shared it**: `do_best_fuzzy_match`'s walk guard
+(`:17625`) reads the LIVE slice, `init_match` never resets it, and `start_pos` is the candidate's own
+match start - so a `(*SKIP)` that consumed anything ends the `(?b)` walk on its first successful
+candidate. `(?b)(?:a(*SKIP)b){e<=1}` over `'axab'` gave a one-error match where the pattern's own
+`match(2)` finds a perfect one. Fixed in `DoBestFuzzyMatch` (restore per candidate, both passes) -
+**not in `InitMatch`, where the ledger's own proposed fix puts it, because `(?e)` and the widened
+fallback narrow the slice deliberately.**
 
-**Two fixes proven, upstream's own suite 101/0 under each. Fix A is what this port already does**
-(`Matcher.cs:10098-10100`, S40b). Both give, under `(?b)`, this port's answer IN FULL on all five
-judged rows - **77937 included**, which retires that row's "only the span agrees" caveat.
+**The inventory is the slice's other half: 13 of the 15 ledger entries are closed.** The table is in
+the closing notes with a proof per row. Three items left, one mechanism seen three ways -
+**ledger 11 C and D, and ledger 9's POSIX+`(?e)` count bug, which is THIS PORT's and still
+reproduces** (`(0,5)` counts `(1,1,1)` with POSIX, `(0,1,1)` without). That is **S48b**, authored,
+with ROADMAP and spec amendment 25.
 
-**Probe: `tools/probes/upstream-bestmatch-lost-candidate.py`** - plain (no compiler), `--trace`
-(instrumented build, plus which SKIP arm each pinned row fires), `--fix` (stock / A / B side by
-side). Builds go in `.scratch/`; `upstream/` is never written to. Needs MSVC; `REGEX_VCVARS`
-overrides the search. setuptools is NOT installed for this interpreter - the probe drives `cl.exe`.
+**S48-A fires ZERO** at four seeds over 24,000 `interactions` rows - mutated and unmutated identical
+- while the same fault moves upstream on 1,861 of 11,340 hand-built shapes. A measured generator gap,
+handed to S52. **S31-A/B/C repaired** (S40b had moved their text); they now fire 10-68 of 600.
 
-**Pin widened by one row**, `bestmatch-loses-a-partial` 6 -> 7: the minimised REVERSED shape, the
-`slice_end` arm's only small witness. The whole block is now re-recordable -
-`python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-partial-rows.jsonl`.
-**Seed 20260914 row 76345 is explained but NOT pinned:** its recorded question is gone (the wave file
-was overwritten; a single-generator re-run does not redraw it) and a guessed key would be fabricated.
+**Two blind passes: the first raised 4 and ALL 4 reproduced, the second raised 1 and it reproduced.**
+All fixed. The sharpest was a negative control with no `(?b)` in it, which never entered the function
+the slice changed - a control routed to the wrong door looks exactly like a control that passes.
 
-**The blind pass raised 5 and ALL 5 reproduced** - two false scope claims, a probe that did not
-measure what three documents said it measured, a wrong "unconditionally", an off-by-one line. All
-fixed. An investigation slice gives a reviewer real purchase; budget for findings.
+**The independent verifier re-ran every number and returned two DIFFERENT and two COULD NOT RUN; all
+four are corrected in the notes, not kept.** A control table read off a truncated `tail` was one of
+them - read the whole output.
 
 **Untriaged (unchanged):** the 6000-row everything gate at 99991 RED at 4 of 126,000; the three-seed
-gate's 19; the POSIX `(?e)` count bug; ledger 11 mechanisms C and D; 5's remaining door (S48); the
-issue sweep (S49, S50); the promoted fold sweep's 30 `fold_case(FULL)` mismatches, NOT measured.
+6000-row gate's 19, none of which can be this slice's (no diverging row carries BESTMATCH or an
+inline `(?b)`, and the change is reachable only through it); the promoted fold sweep's 30
+`fold_case(FULL)` mismatches, NOT measured.
 
-**Watch:** `FuzzyRecursionTests.The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see`
-went RED once for the reviewer under load and passed idle. Not this slice's doing.
-
-**Owed maintenance (unchanged):** `FOLD_TURKIC`'s share of the `case-folding` rotation; five broken
-control sites; PORTMAP's `_regex.c` line references stale after the sync; `record-oracle.py
---self-check` exits 1 on a pre-S46 message. **Still open for the owner:** `slice-log.jsonl` marks S26
-`failed`; `origin/main` needs a push.
+**Owed maintenance:** `FOLD_TURKIC`'s share of the `case-folding` rotation; **two** broken control
+sites left; S35-A and S29-A/D are thin (S35-A fires at 1 seed of 6 - numbers in S48's notes);
+PORTMAP's `_regex.c` line references stale after the sync; `record-oracle.py --self-check` exits 1 on
+a pre-S46 message. **Still open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main`
+needs a push.
