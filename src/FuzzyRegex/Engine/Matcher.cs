@@ -7937,6 +7937,28 @@ internal static class Matcher
 
                     // Try one more insertion after the section. This is the only place a trailing
                     // insertion can come from: every item inside the section has already been tried.
+                    //
+                    // THE SECOND TEST IS UPSTREAM'S WITH ITS DOUBLE COUNT REMOVED - a deliberate
+                    // divergence, ledger entry 12, fixed by S46 (2026-09-14). Upstream writes
+                    // 'total_errors(state->fuzzy_counts) + total_errors(inner_counts) <
+                    // state->max_errors' (:15515-15517), and END_FUZZY has already merged
+                    // 'inner_counts' INTO 'state->fuzzy_counts' twenty lines earlier (:12473-12484),
+                    // so the two terms are the same errors added twice. Every other 'max_errors'
+                    // test in upstream's file asks about ONE set of counts ('any_error_permitted'
+                    // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and
+                    // 'insertion_permitted' on the line above already applies the section's own
+                    // limits to 'inner_counts', so nothing is lost by dropping the second term.
+                    //
+                    // The double count is invisible wherever 'max_errors' is unbounded, which is
+                    // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
+                    // upstream's ':18027' sets PY_SSIZE_T_MAX). It bites in 'DoBestFuzzyMatch',
+                    // whose second pass climbs 'max_errors' only to 'fewest_errors' - so a match
+                    // needing n trailing insertions needs 'n > 2n-2', which is false for every
+                    // n >= 2 AT EVERY BUDGET, and '(?b)' loses a match the same engine finds the
+                    // moment the flag is deleted. Held by 'Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_keeps_a_match_that_needs_two_trailing_insertions' and the (k, N)
+                    // matrix beside it.
+                    //
                     // The third test is this port's, for the reason the second test at 'END_FUZZY'
                     // spells out: 'InsertionPermitted' bounds the cost of the section it is handed,
                     // and nothing here bounds the cost of the WHOLE MATCH, which is the quantity
@@ -7958,7 +7980,7 @@ internal static class Matcher
                     // constructed, it becomes a test here and this note goes.
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
-                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors
+                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors
                         && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
                             <= state.MaxCost
                         && FuzzyExtMatch(state, innerNode, state.TextPos)

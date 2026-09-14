@@ -193,7 +193,10 @@ internal static class OracleWave
             row.TryGetProperty("searchOnlyPartial", out JsonElement searchOnly)
                 && searchOnly.ValueKind == JsonValueKind.True,
             ReadMatchList(row, "anchoredScan"),
-            ReadMatchList(row, "subMatches")
+            ReadMatchList(row, "subMatches"),
+            row.TryGetProperty("bestmatchFreeOutcome", out JsonElement bestmatchFree)
+                ? ReadOutcome(bestmatchFree)
+                : null
         );
     }
 
@@ -557,6 +560,18 @@ internal sealed record OracleHeader(
 /// <see cref="ExpectedDivergences"/> reads on a scan apply unchanged. Never compared, and read only
 /// after its length is checked against the recorded replacement count.
 /// </param>
+/// <param name="BestmatchFree">
+/// Recorded only on a row that carries <c>BESTMATCH</c>, and only when upstream could answer the
+/// question: upstream's own answer to the SAME row with the flag deleted. <c>BESTMATCH</c> is
+/// documented as a ranking flag - it chooses among the flagless engine's candidates rather than
+/// inventing or destroying one (<c>upstream/README.rst:592</c>) - so this is the set the flagged
+/// answer is supposed to be drawn from, and it is what makes
+/// <c>bestmatch-loses-a-candidate</c> judgeable: on one row of that family the two engines
+/// agree on the span, the groups AND the fuzzy counts, and differ only over which position is a
+/// substitution and which an insertion, so no predicate over the two compared answers can tell the
+/// family from a defect. <see langword="null"/> on every other row and on any wave recorded before
+/// S46. Never compared; only <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -574,7 +589,8 @@ internal sealed record OracleRow(
     int? EndPos = null,
     bool SearchOnlyPartial = false,
     MatchesOutcome? AnchoredScan = null,
-    MatchesOutcome? SubMatches = null
+    MatchesOutcome? SubMatches = null,
+    IOracleOutcome? BestmatchFree = null
 );
 
 /// <summary>What a matching operation answered.</summary>

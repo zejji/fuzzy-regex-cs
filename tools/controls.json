@@ -1572,8 +1572,8 @@
     "file": "src/FuzzyRegex/Engine/Matcher.cs",
     "anchor": "case Opcode.EndFuzzy: // End of fuzzy matching (:15488).",
     "anchorNth": 1,
-    "before": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors\n                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]\n                            <= state.MaxCost\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
-    "after": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
+    "before": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors\n                        && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]\n                            <= state.MaxCost\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
+    "after": "                    if (\n                        InsertionPermitted(state, innerNode!, innerCounts)\n                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors\n                        && FuzzyExtMatch(state, innerNode, state.TextPos)\n                    )\n",
     "generator": "fuzzy",
     "count": 2000,
     "seeds": [
@@ -1607,6 +1607,54 @@
     "after": "            // 0130; F; 0069 0307 - the row upstream loses, and the one that grows.\n            // 0x0307 is COMBINING DOT ABOVE.\n            case 0x0130:\n                folded[0] = 0x0130;\n                count = 1;\n                return true;\n",
     "generator": "case-folding",
     "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      31337
+    ]
+  },
+  {
+    "id": "S46-A",
+    "name": "bestmatch-doubled-guard",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "                case Opcode.EndFuzzy: // End of fuzzy matching (:15488).",
+    "anchorNth": 1,
+    "before": "                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors\n",
+    "after": "                        && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors\n",
+    "generator": "fuzzy",
+    "count": 6000,
+    "seeds": [
+      7,
+      4242,
+      31337
+    ]
+  },
+  {
+    "id": "S46-B",
+    "name": "bestmatch-guard-off-by-one",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "                case Opcode.EndFuzzy: // End of fuzzy matching (:15488).",
+    "anchorNth": 1,
+    "before": "                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors\n",
+    "after": "                        && TotalErrors(state.FuzzyCounts) <= state.MaxErrors\n",
+    "generator": "fuzzy",
+    "count": 6000,
+    "seeds": [
+      7,
+      4242,
+      31337
+    ]
+  },
+  {
+    "id": "S46-C",
+    "name": "bestmatch-stops-ranking",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static int DoBestFuzzyMatch(MatchState state, bool search)",
+    "anchorNth": 1,
+    "before": "                    state.MaxErrors = fewestErrors - 1;\n",
+    "after": "                    state.MaxErrors = 0;\n",
+    "generator": "fuzzy",
+    "count": 6000,
     "seeds": [
       7,
       4242,

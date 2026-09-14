@@ -290,6 +290,59 @@ _REQ_CHARS_ARG = 8
 # this file states the number the wave's `flags` field carries.
 _REVERSE_FLAG = 0x400
 
+# Upstream's BESTMATCH flag bit, which is `regex.B`, spelled out for the same reason. Both
+# generators that draw the flag write it as the inline `(?b)` prefix rather than setting the bit
+# (`_generate_fuzzy` and `_generate_interactions`), so the prefix is the case that fires in practice
+# and the bit is handled because a hand-built `--rows` file may use it.
+_BESTMATCH_FLAG = 0x1000
+_BESTMATCH_INLINE = "(?b)"
+
+
+def _record_row_and_its_bestmatch_free_answer(regex, row: dict) -> dict:
+    """Records one row, and - if it carries BESTMATCH - the same row again without it.
+
+    A SECOND FACT ABOUT UPSTREAM, never compared against anything, exactly as ``searchOnlyPartial``
+    and ``anchoredScan`` are. It exists because the consumer's ``ExpectedDivergences`` needs a
+    discriminator for the ``bestmatch-loses-a-candidate`` family, and no predicate over the
+    two answers alone is narrow enough: on one of that family's rows the two engines report the SAME
+    span, the SAME groups and the SAME fuzzy COUNTS, and differ only in which positions they call a
+    substitution and which an insertion. Nothing on our side of the comparison can see that as a
+    family rather than as a defect.
+
+    What makes the family judgeable is upstream's OWN answer with the flag deleted. ``BESTMATCH`` is
+    documented as a ranking flag - "By default, fuzzy matching searches for the first match that
+    meets the given constraints ... The BESTMATCH flag will make it search for the best match
+    instead" (``upstream/README.rst:592``) - so the flag chooses among the flagless engine's
+    candidates and cannot invent or destroy one. This port, with the doubled trailing-insertion
+    guard removed (ledger entry 12, S46), lands on upstream's own flagless answer on every row the
+    fix moved: nine rows across three seeds, each measured one at a time by
+    ``tools/probes/upstream-bestmatch-free-answer.py`` and reproduced in the S46 closing notes.
+
+    NOT A GATE AND NOT NARROW BY ITSELF - see the entry's own ``Reason``, which records what a
+    control measured about its width and what backstops it.
+    """
+    recorded = _record_row(regex, row)
+
+    pattern = row["pattern"]
+    flags = int(row.get("flags", 0))
+    if pattern.startswith(_BESTMATCH_INLINE):
+        flagless = {**row, "pattern": pattern[len(_BESTMATCH_INLINE) :]}
+    elif flags & _BESTMATCH_FLAG:
+        flagless = {**row, "flags": flags & ~_BESTMATCH_FLAG}
+    else:
+        return recorded
+
+    free = _record_row(regex, flagless)["outcome"]
+
+    # An unanswerable second question is recorded as unasked, which is `searchOnlyPartial`'s rule.
+    # A row upstream errors, times out or exhausts itself on WITHOUT the flag says nothing about
+    # what the flag did, and leaving the key off makes the entry not apply - the direction that
+    # reports a row rather than hiding it.
+    if free["kind"] in ("match", "nomatch", "sub", "split", "matches"):
+        recorded["bestmatchFreeOutcome"] = free
+
+    return recorded
+
 
 def _compile_upstream(regex, recorded: dict, pattern: str, flags: int, named_lists: dict):
     """Compiles one row's pattern, with the required-string prefilter off where a generator wants it.
@@ -3093,6 +3146,22 @@ def _generate_interactions(rng: random.Random, count: int):
         # named list lowers to exactly that shape (sorted by length, `_regex_core.py:4069`), so do
         # conditionals and verb alternations, and any future widening would reintroduce the crash
         # silently. The row-level rule cannot rot.
+        #
+        # S46 RE-MEASURED THIS ON THE PINNED 2026.9.10 (2026-09-14) AND FOUND THE CHEAP WAY OUT.
+        # The crash still takes the recorder with it - `--rows` over one such row exits 139 and
+        # writes no file - and the faulting condition is still a SPENT ERROR rather than a pattern
+        # shape. The row that settles the "no predicate is safe" argument for good is
+        # `(?p)(?:abc){e<=1}` over 'abcd': it looks exact and is not, because POSIX leftmost-longest
+        # stretches it to spend an insertion, so not even the SUBJECT is a safe test.
+        #
+        # But `fuzzy_counts` is safe on a faulting row and only `fuzzy_changes` faults, and
+        # `_describe_match` reads the changes only when the counts are non-zero. So a recorder that
+        # records `fuzzyCounts` and OMITS `fuzzyChanges` on a POSIX row never touches the faulting
+        # access, and this suppression can go. What it costs is the change POSITIONS on those rows,
+        # which upstream has no answer for anyway - so both sides have to render the fuzzy half
+        # without positions for a marked row, which means `OracleWave`, `OracleComparer` and every
+        # path that reads a match (`finditer`, `sub` and `split` as well as the single-match door).
+        # NOT DONE: S46 stopped at the measurement. Ledger entry 9 carries the full design.
         # Both draws happen before the suppression, never inside it, for the reason S42 records
         # against FUZZY_BESTMATCH_PROBABILITY: a suppression that swallows a draw reshuffles the
         # whole row stream and makes two waves incomparable.
@@ -5214,7 +5283,7 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
             for row in _generate(name, random.Random(f"{seed}:{name}"), count)
         ]
 
-    recorded = [_record_row(regex, row) for row in unrecorded]
+    recorded = [_record_row_and_its_bestmatch_free_answer(regex, row) for row in unrecorded]
 
     header = {
         "kind": "header",

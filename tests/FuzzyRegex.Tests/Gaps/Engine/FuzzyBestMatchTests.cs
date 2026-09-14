@@ -242,39 +242,110 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
-    public void Bestmatch_loses_a_match_that_needs_two_trailing_insertions()
+    public void Bestmatch_keeps_a_match_that_needs_two_trailing_insertions()
     {
-        // AN INHERITED UPSTREAM BUG, REPRODUCED FAITHFULLY AND PINNED - ledger entry 12, found while
-        // choosing an ExpectedDivergences example row for 'bestmatch-ranks-by-cost' (S42, 2026-09-13).
-        // '(?b)' LOSES a match that plain fuzzy matching finds. Upstream, regex 2026.7.19:
+        // A DELIBERATE DIVERGENCE, AND AN INHERITED UPSTREAM BUG FIXED HERE - ledger entry 12, found
+        // by S42 while choosing an ExpectedDivergences example row for 'bestmatch-ranks-by-cost'
+        // (2026-09-13) and fixed by S46 (2026-09-14). Upstream, regex 2026.9.10:
         //
         //   regex.fullmatch(r'(?b)(?:x){e<=3}', 'xyz')  ->  None
         //   regex.fullmatch(r'(?:x){e<=3}',     'xyz')  ->  (0, 3) counts=(0, 2, 0)
         //
-        // The mechanism is two lines meeting. END_FUZZY's backtrack arm is the only place a TRAILING
-        // insertion can come from, and it is guarded by 'total_errors(state->fuzzy_counts) +
-        // total_errors(inner_counts) < state->max_errors' (:15516) - which DOUBLE-COUNTS, because
-        // for a pattern with one fuzzy section the outer counts are the merged inner ones. So n
-        // trailing insertions need 'max_errors' above 2n-1 rather than above n-1. The first pass
-        // finds the two-insertion match with 'max_errors' at PY_SSIZE_T_MAX and records
-        // 'fewest_errors' as 2; the second pass then climbs 'max_errors' only to 2 (:17732) and the
-        // widened-slice fallback uses 2 as well (:17823), and at 2 the guard refuses the second
-        // insertion. Neither can re-find the match the first pass just found, so the whole call
-        // fails.
+        // '(?b)' is documented as a ranking flag and not as a filter - "By default, fuzzy matching
+        // searches for the first match that meets the given constraints ... The BESTMATCH flag will
+        // make it search for the best match instead" (upstream/README.rst:592). A flag that turns a
+        // match meeting the constraints into NO match contradicts that definition, and the same
+        // engine answers the match the moment the flag is deleted. That self-refutation is the whole
+        // judgement; no second engine implements fuzzy matching to be asked.
         //
-        // This test asserts NO MATCH because that is what this port answers and what upstream
-        // answers. It is a bug on both sides, not a divergence, so the oracle cannot see it - which
-        // is the whole reason Phase 6 sweeps for inherited bugs separately.
-        new FuzzyRegex("(?b)(?:x){e<=3}")
-            .FullMatch("xyz")
-            .Success.Should()
-            .BeFalse();
+        // The mechanism is two lines meeting. END_FUZZY's backtrack arm is the only place a TRAILING
+        // insertion can come from, and it was guarded by 'total_errors(state->fuzzy_counts) +
+        // total_errors(inner_counts) < state->max_errors' (:15516) - which DOUBLE-COUNTS, because
+        // END_FUZZY has already merged 'inner_counts' into 'state->fuzzy_counts' (:12473-12484), so
+        // the two terms are the same errors added twice. Every other 'max_errors' test in upstream's
+        // file asks about ONE set of counts ('any_error_permitted' :9672, 'this_error_permitted'
+        // :9690, 'insertion_permitted' :9708), and 'insertion_permitted' on the line above already
+        // applies the section's own limits to 'inner_counts', so dropping the second term loses
+        // nothing.
+        //
+        // WHY IT IS INVISIBLE OUTSIDE '(?b)' AND '(?e)': plain fuzzy matching runs with 'max_errors'
+        // at PY_SSIZE_T_MAX ('do_simple_fuzzy_match' :18027), so the guard never bites and the real
+        // limit is the section's own budget. 'do_best_fuzzy_match' is where 'max_errors' becomes
+        // finite - the first pass finds the two-insertion match and records 'fewest_errors' as 2,
+        // the second pass climbs 'max_errors' only to 2 (:17732) and the widened-slice fallback uses
+        // 2 as well (:17823) - and at 2 the doubled guard refuses the second insertion.
+        Match m = new FuzzyRegex("(?b)(?:x){e<=3}").FullMatch("xyz");
 
-        // The control, and what says the match is really there to be lost.
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+
+        // The control, and what says the match is really there to be lost: upstream's own flagless
+        // answer, which this port now matches under the flag as well.
         Match plain = new FuzzyRegex("(?:x){e<=3}").FullMatch("xyz");
 
         plain.Success.Should().BeTrue();
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 3));
         plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+    }
+
+    [Test]
+    public void Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget()
+    {
+        // THE MEASURED BOUNDARY, and it corrects ledger entry 12's own statement of the symptom.
+        // The entry said n trailing insertions need 'max_errors' above 2n-1, which reads as though a
+        // large enough budget buys the match. It does not: under '(?b)' the second pass sets
+        // 'max_errors' to 'fewest_errors' = n itself, so the doubled guard needs n > 2n-2, which is
+        // false for every n >= 2 AT EVERY BUDGET. Measured on regex 2026.9.10, 2026-09-14,
+        // tools/probes/upstream-bestmatch-trailing-insertions.py - re-runnable from the closing notes of S46:
+        //
+        //   fullmatch (?:x){e<=N} over 'x' + k trailing chars     matches exactly when N >= k
+        //   fullmatch (?e)(?:x){e<=N}   same subject              matches exactly when N >= k
+        //   fullmatch (?b)(?:x){e<=N}   same subject              matches only for k <= 1, any N
+        //
+        // So this test is the (?b) row of that matrix, which must now read like the other two.
+        for (int k = 0; k <= 4; ++k)
+        {
+            string subject = "x" + "yzwvu"[..k];
+
+            for (int budget = 0; budget <= 6; ++budget)
+            {
+                Match m = new FuzzyRegex($"(?b)(?:x){{e<={budget}}}").FullMatch(subject);
+
+                m.Success.Should().Be(budget >= k, $"(?b)(?:x){{e<={budget}}} over '{subject}'");
+
+                if (m.Success)
+                {
+                    m.FuzzyCounts.Should().Be(new FuzzyCounts(0, k, 0));
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford()
+    {
+        // The other side of the fix, and what says the guard is still a guard. Dropping the doubled
+        // term must not let the arm spend an error the whole match cannot afford: 'max_errors' is a
+        // bound on the WHOLE match, so an insertion is permitted only while the merged count is
+        // strictly below it.
+        //
+        // 'k=3 at N=2' is the cell the matrix above shows empty on all three rows, upstream
+        // included: the subject needs three insertions and the section permits two.
+        new FuzzyRegex("(?b)(?:x){e<=2}")
+            .FullMatch("xyzw")
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("(?:x){e<=2}").FullMatch("xyzw").Success.Should().BeFalse();
+
+        // And a second fuzzy section is where the merged count earns the word "whole": each section
+        // permits one error, the match needs one from each, and the outer budget is what says two.
+        // Upstream answers (0, 4) counts=(0, 2, 0) here, with the flag and without it.
+        Match m = new FuzzyRegex("(?b)(?:a){i<=1}(?:b){i<=1}").FullMatch("aXbY");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
     }
 
     [Test]

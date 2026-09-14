@@ -956,6 +956,34 @@ depends on the subject rather than on the pattern, so nothing the generator can 
 is a safe test. Neither must change until this is fixed upstream. Noted here rather than only in the
 generator so the next slice that widens either one knows why.
 
+**S46 RE-MEASURED ALL OF THAT ON THE PINNED 2026.9.10 AND FOUND THE WAY TO LIFT THE EXCLUSION
+CHEAPLY, 2026-09-14.** Three facts, each run rather than reasoned:
+
+1. **The crash still kills the recorder outright.** `python tools/record-oracle.py --rows` over a
+   two-row file holding `(?p)(?:abc){e<=1}` on `'axc'` exits 139 (SIGSEGV under Git Bash) and writes
+   no output file at all. So the slice's own gate - "upstream's crash must arrive as a recorded
+   `error` or `timeout` row, not a dead recorder" - is NOT met as the recorder stands.
+2. **Entry 9's spent-error rule holds exactly on 2026.9.10** (`tools/probes/upstream-posix-fuzzy-spent-error.py`, each
+   case in its own child): `(?p)(?:abc){e<=1}` faults on `'axc'` (counts `(1,0,0)`) and on `'abcd'`
+   (counts `(0,1,0)`), and is safe on `'abc'` (counts `(0,0,0)`); `(?p)(?:aa|a){e<=1}` on `'aa'` is
+   safe. **And the `'abcd'` row is the one to carry into a report**: it looks like an exact match
+   and is not, because POSIX leftmost-longest stretches it to spend an insertion. That is the
+   sharpest available demonstration that no predicate over the pattern OR the subject is a safe
+   test, which is the claim the paragraph above makes.
+3. **`fuzzy_counts` is safe on a faulting row; only `fuzzy_changes` faults**, exactly as this entry
+   says - the probe prints the span and the counts of every faulting row before it dies.
+
+Fact 3 is the lever, and it makes the exclusion liftable without any per-row process isolation:
+`_describe_match` reads `fuzzy_changes` only when the counts are non-zero, so a recorder that records
+`fuzzyCounts` and OMITS `fuzzyChanges` on a POSIX row never touches the faulting access. The cost is
+that change POSITIONS cannot be compared on those rows - which is not a loss, because upstream has no
+answer to give for them - so both sides must render the fuzzy half without positions for a row the
+recorder marks. **Not done in S46**: it needs the recorder, `OracleWave`, the comparison in
+`OracleComparer` and the generator's own suppression changed together, and every path that reads a
+match - `finditer`, `sub`, `split` as well as the single-match door - guarded, because missing one
+kills the wave rather than failing a test. S46 carried it as far as the measurement and left the
+exclusion in place; the design above is the next sitting's work.
+
 **Proposed fix.** Unknown. Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
 
@@ -1100,12 +1128,64 @@ defect; it is the same defect as above, reached by a different door. Pinned by
 
 ---
 
-## 12. `BESTMATCH` loses a match that plain fuzzy matching finds, when the best fit needs two trailing insertions
+## 12. `BESTMATCH` loses a match that plain fuzzy matching finds, when the best fit needs two trailing insertions - FIXED HERE (S46)
 
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
 
-**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13:
+**FIXED IN THIS PORT ON 2026-09-14 (S46), AND ONE SENTENCE BELOW WAS WRONG ABOUT THE SYMPTOM.** The
+mechanism this entry names is right to the line and was confirmed on the pinned release; what was
+wrong is "*n* trailing insertions need `max_errors` above *2n-1*", which reads as though a large
+enough budget buys the match back. It does not. Under `(?b)` the user never sets `max_errors`: the
+second pass sets it to `fewest_errors` = *n* itself, so the doubled guard needs *n > 2n-2*, which is
+false for every *n >= 2* **at every budget**. Measured on `regex` 2026.9.10, 2026-09-14,
+`tools/probes/upstream-bestmatch-trailing-insertions.py`, over `fullmatch` of `(?:x){e<=N}` against `'x'` plus *k* trailing
+characters:
+
+```
+              N=0   N=1   N=2   N=3   N=4   N=5   N=6        (i<n> = matched, n insertions)
+plain  k=2      -     -    i2    i2    i2    i2    i2        matches exactly when N >= k
+(?e)   k=2      -     -    i2    i2    i2    i2    i2        matches exactly when N >= k
+(?b)   k=2      -     -     -     -     -     -     -        never matches, at any N
+(?b)   k=1      -    i1    i1    i1    i1    i1    i1        k <= 1 is the whole of what survives
+```
+
+Leading insertions and substitutions are unaffected under `(?b)`, which is what places the defect in
+the trailing-insertion arm rather than in the flag.
+
+**The fix here is this entry's own proposed fix**: `Matcher.cs`'s `END_FUZZY` backtrack arm now reads
+`TotalErrors(state.FuzzyCounts) < state.MaxErrors`, with upstream's second term dropped.
+
+**There is no second engine to ask, and that was MEASURED rather than asserted** - amendment 16 asks
+for a real run of one, so the absence has to be evidence too. `python
+tools/probes/pcre2-has-no-fuzzy-matching.py`, on the `pcre2` binding 0.7.1 over libpcre2 10.47,
+2026-09-14: PCRE2 does not merely lack fuzzy matching, it reads the suffix as **literal text**, which
+is worse than an error because a comparison built on it would answer confidently and wrongly -
+`pcre2.compile(r'(?:x){e<=3}').match('xyz')` is `None` and `.match('x{e<=3}')` is `(0, 7)`. Only
+`(?b)` fails loudly, and only because PCRE2 has no such flag. Perl and .NET have no approximate
+matching either; TRE and agrep do, and neither implements upstream's `{...}` syntax or its
+`BESTMATCH` ranking, so neither would be answering this question.
+
+So the judgement rests on upstream's own definition and on self-refutation: `BESTMATCH` is documented
+as a ranking flag ("By default, fuzzy matching searches for the first match that meets the given
+constraints ... The `BESTMATCH` flag will make it search for the best match instead",
+`upstream/README.rst:592`), so it chooses among the flagless engine's candidates and cannot destroy
+them all, and the same engine answers the match the moment the flag is deleted. **A report must say
+all of this**: a maintainer who reads "no second engine" as "nobody checked" will dismiss it.
+
+**Every row the fix moved lands on upstream's own flagless answer.** Nine rows across the three
+default seeds of the 6000-row gate - four where upstream lost the match outright, three where both
+engines match and the error mix differs, one `sub` and one `finditer` - and on all nine this port's
+answer is upstream's BESTMATCH-free answer EXACTLY, groups, counts and change positions included
+(`tools/probes/upstream-bestmatch-free-answer.py`, 2026-09-14). Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_insertions`, the
+`(k, N)` matrix test beside it and
+`.Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford`; accounted for in the oracle
+by `bestmatch-loses-a-candidate`, whose discriminator is a new recorded field,
+`bestmatchFreeOutcome`. Controls S46-A and S46-B in `tools/controls.json`.
+
+**Reproduction**, on `regex` 2026.7.19 (CPython 3.14, Windows), measured 2026-09-13, and re-measured
+unchanged on `regex` 2026.9.10 on 2026-09-14:
 
 ```python
 >>> import regex
@@ -1151,11 +1231,11 @@ the file (`any_error_permitted` `:9672`, `this_error_permitted` `:9690`, `insert
 `:9708`), each of which asks about ONE set of counts. `insertion_permitted` on the line above already
 applies the section's own limits to `inner_counts`, so nothing is lost.
 
-**This port reproduces it faithfully** - `Matcher` carries upstream's line unchanged - and pins the
-behaviour in
-`Gaps/Engine/FuzzyBestMatchTests.Bestmatch_loses_a_match_that_needs_two_trailing_insertions`, which
-asserts NO match because that is what both engines answer. The oracle is blind to it for the reason
-the roadmap gives: a bug reproduced faithfully shows up as agreement.
+**This port reproduced it faithfully until S46** - `Matcher` carried upstream's line unchanged - and
+pinned the behaviour in a test asserting NO match, because that is what both engines answered. The
+oracle was blind to it for the reason the roadmap gives: a bug reproduced faithfully shows up as
+agreement. That test is now
+`.Bestmatch_keeps_a_match_that_needs_two_trailing_insertions` and asserts the match.
 
 **Found by S42's second sitting, 2026-09-13**, while choosing an `ExpectedDivergences` example row
 for `bestmatch-ranks-by-cost`. The cost budget does not cause it and does widen its reach: on
@@ -1264,8 +1344,25 @@ seed 20260913 row 76593 (`search`) - and all five carry `(?b)`, a fuzzy section,
 `ExpectedDivergences` as `bestmatch-loses-a-partial`, keyed on the row and on this port's answer to
 it, and the default wave is green at 6000 rows at all three seeds.
 
-**Related:** entry 12, the other `BESTMATCH` match-loss, which this port reproduces faithfully where
-it does not reproduce this one; entries 1 and 5 for `(*SKIP)`.
+**S46 CHECKED THE PORT HALF AND IT WAS ALREADY CLOSED, 2026-09-14.** The slice was written to "fix so
+the port answers what its own `match` answers"; it already did, and had since S43 - this port never
+reproduced this defect, which is exactly what the five classified rows above say. Nothing was
+changed for this entry. The upstream half stands: not filed, mechanism not established to the line.
+
+**What S46 did add is a second instance nobody had judged, and a machine-checkable form of the weak
+argument.** Seed 20260914 row 76345 -
+`(?b)(?e)\b(?:\p{Ll}(*SKIP)[^\d]|\W)(?=(?:(\p{ASCII}+)([^\d]*)a){e<=2,s<=1})` over `'aaa'`, upstream
+no match against this port's `(0, 3)` partial - carries this entry's four conditions exactly and was
+diverging UNCLASSIFIED at HEAD before S46. It is now accounted for by `bestmatch-loses-a-candidate`,
+whose predicate is this entry's own **weak form** made checkable: the recorder asks upstream the same
+row with `(?b)` deleted and records the answer, and the entry fires only where this port's answer IS
+that answer. That is strictly narrower than the predicate this entry considered and rejected - "this
+port answered a partial where upstream answered nothing", which a port INVENTING a partial also
+satisfies - because it demands the whole answer, groups and counts included. This entry keeps its
+five judged rows and its own arm above the new one, so it still takes them first.
+
+**Related:** entry 12, the other `BESTMATCH` match-loss, which this port reproduced faithfully until
+S46 fixed it, where it never reproduced this one; entries 1 and 5 for `(*SKIP)`.
 
 ## 14. A self-recursive call round a fuzzy section that can match empty exhausts memory
 

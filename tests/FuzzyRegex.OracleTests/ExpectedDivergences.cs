@@ -127,15 +127,45 @@ internal static class ExpectedDivergences
     /// <para>
     /// The cheaper answer is two SUBSTITUTIONS rather than the insertions the <c>(?e)</c> row above
     /// uses, and that is not a stylistic choice. Steering <c>BESTMATCH</c> onto a candidate whose
-    /// fit needs two TRAILING insertions walks into an inherited bug that loses the match outright -
+    /// fit needs two TRAILING insertions walked into an inherited bug that lost the match outright -
     /// <c>regex.fullmatch(r'(?b)(?:x){e&lt;=3}', 'xyz')</c> is <c>None</c> where the same pattern
-    /// without <c>(?b)</c> answers <c>(0, 2, 0)</c>, measured on regex 2026.7.19 - so an insertion
-    /// row would pin an unrelated defect instead of this entry's family. Ledger entry 12;
-    /// <c>Gaps.Engine.FuzzyBestMatchTests.Bestmatch_loses_a_match_that_needs_two_trailing_insertions</c>.
+    /// without <c>(?b)</c> answers <c>(0, 2, 0)</c> - so an insertion row would have pinned an
+    /// unrelated defect instead of this entry's family.
+    /// <b>S46 fixed that defect and this row is left as it is anyway</b>: upstream still answers
+    /// <c>None</c> to it, so an insertion row would now diverge for the OTHER entry's reason and
+    /// this one would stop being about cost ranking. Ledger entry 12;
+    /// <c>bestmatch-loses-a-candidate</c> below;
+    /// <c>Gaps.Engine.FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_insertions</c>.
     /// </para>
     /// </summary>
     private const string _bestCostRankedRow =
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
+
+    /// <summary>
+    /// The four rows of <c>bestmatch-loses-a-candidate</c>, hand-built from the family's four
+    /// shapes and recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c> on 2026-09-14.
+    /// </summary>
+    /// <remarks>
+    /// Row 1 is ledger entry 12's own minimised reproduction - upstream loses the match outright.
+    /// Row 2 is the same shape as wave row 121859 (seed 4242), an insertion-only budget. Row 3 is
+    /// wave row 120771 (seed 4242), where BOTH engines match the same span at the same error count
+    /// and the mix differs - upstream spends two substitutions under the flag and one substitution
+    /// plus one insertion without it. Row 4 is wave row 125716 (seed 4242), a <c>sub</c>, whose
+    /// outcome is a string and a count rather than a match: the flag costs upstream one of the two
+    /// replacements it makes without it.
+    /// <para>
+    /// Every one carries a recorded <c>bestmatchFreeOutcome</c>, which is what the entry's
+    /// <see cref="ExpectedDivergence.Applies"/> reads, so the staleness alarm re-tests the
+    /// discriminator and not only the divergence.
+    /// </para>
+    /// </remarks>
+    private const string _bestmatchLostCandidateRows = """
+        {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:abx\\sx){i<=2}", "flags": 0, "namedLists": {}, "subject": "abx bxx", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4, 6], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?e)(?:x0bb+?[^a-f]b+?){e<=2}", "flags": 0, "namedLists": {}, "subject": "x0fbbbxba", "operation": "fullmatch", "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [2, 8], "insertions": [], "deletions": []}}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [8], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?i)(?:x\\A){e<=3}", "flags": 0, "namedLists": {}, "subject": "aX", "operation": "sub", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<>aX", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>X", "count": 2}}
+        """;
 
     /// <summary>
     /// The rows of the bounded-lazy-repeat partial family, recorded by
@@ -1416,6 +1446,104 @@ internal static class ExpectedDivergences
             Applies: static (row, ours) =>
                 _bestmatchLostPartial.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "bestmatch-loses-a-candidate",
+            Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - ledger entry 12, fixed by "
+                + "S46 on 2026-09-14. `END_FUZZY`'s backtrack arm is the only place a TRAILING "
+                + "insertion can come from, and upstream guards it with "
+                + "`total_errors(state->fuzzy_counts) + total_errors(inner_counts) < "
+                + "state->max_errors` (upstream/src/_regex.c:15515-15517), which DOUBLE-COUNTS: "
+                + "`END_FUZZY` merged `inner_counts` INTO `state->fuzzy_counts` twenty lines earlier "
+                + "(:12473-12484), so the two terms are the same errors added twice. Every other "
+                + "`max_errors` test in the file asks about ONE set of counts (`any_error_permitted` "
+                + ":9672, `this_error_permitted` :9690, `insertion_permitted` :9708), and "
+                + "`insertion_permitted` on the line above already bounds `inner_counts` by the "
+                + "section's own limits, so this port drops the second term and nothing is lost.\n"
+                + "WHY IT IS ONLY VISIBLE UNDER `(?b)`: plain fuzzy matching runs with `max_errors` "
+                + "at PY_SSIZE_T_MAX (`do_simple_fuzzy_match` :18027) so the guard never bites. "
+                + "`do_best_fuzzy_match` is where it becomes finite - the second pass climbs it only "
+                + "to `fewest_errors` (:17732) and the widened-slice fallback uses `fewest_errors` "
+                + "too (:17823) - so a match needing n trailing insertions needs `n > 2n-2`, false "
+                + "for every n >= 2 AT EVERY BUDGET.\n"
+                + "THERE IS NO SECOND ENGINE TO ASK, AND THAT WAS MEASURED RATHER THAN ASSERTED - "
+                + "amendment 16 asks for a real run of one, so the absence has to be evidence too. "
+                + "`python tools/probes/pcre2-has-no-fuzzy-matching.py`, pcre2 0.7.1 over libpcre2 "
+                + "10.47, 2026-09-14: PCRE2 does not merely lack fuzzy matching, it reads the "
+                + "suffix as LITERAL TEXT - `compile(r'(?:x){e<=3}').match('xyz')` is None and "
+                + "`.match('x{e<=3}')` is (0, 7) - so a comparison built on it would answer "
+                + "confidently and wrongly. Only `(?b)` fails loudly, and only because PCRE2 has no "
+                + "such flag. Perl and .NET have no approximate matching either. `BESTMATCH` is "
+                + "documented as a RANKING flag - "
+                + "\"By default, fuzzy matching searches for the first match that meets the given "
+                + "constraints ... The BESTMATCH flag will make it search for the best match "
+                + "instead\" (upstream/README.rst:592) - so it chooses among the flagless engine's "
+                + "candidates and cannot destroy them all. `regex.fullmatch(r'(?b)(?:x){e<=3}', "
+                + "'xyz')` is None where the same engine without the flag answers (0, 3) with two "
+                + "insertions, which is upstream contradicting its own definition. Measured on regex "
+                + "2026.9.10, 2026-09-14, tools/probes/upstream-bestmatch-trailing-insertions.py; the S46 closing notes "
+                + "carry the whole (k trailing chars, N budget) matrix and how to re-run it.\n"
+                + "KEYED ON THE RECORDED `bestmatchFreeOutcome`, and neither on rows nor on a "
+                + "predicate over the two compared answers, because neither works here. Rows: this "
+                + "family fires about three times per three-seed gate and its rows RENUMBER with the "
+                + "row count as well as with the seed - the seed-7 gate draws different questions at "
+                + "6000 and at 6300 - so a row-keyed arm would red every wave forever. A predicate "
+                + "over the answers: on seed 20260914 row 76927 the two engines report the SAME "
+                + "span, the SAME groups AND the SAME fuzzy counts (2,2,0), differing only over "
+                + "which of positions 7 and 8 is the substitution and which the insertion, so "
+                + "nothing on our side of the comparison distinguishes the family from a defect. "
+                + "What does distinguish it is upstream's OWN answer with the flag deleted, which "
+                + "the recorder now asks for on every `(?b)` row "
+                + "(`_record_row_and_its_bestmatch_free_answer`): on all nine rows the fix moved - "
+                + "four at seed 4242 where upstream lost the match outright, three where both "
+                + "matched and the error mix differs, one `sub` and one `finditer` - this port's "
+                + "answer is upstream's flagless answer EXACTLY, groups, counts, change positions "
+                + "and all. Measured row by row, tools/probes/upstream-bestmatch-free-answer.py.\n"
+                + "SO WHAT THE ENTRY ASSERTS IS WIDER THAN ITS ONE PROVEN MECHANISM, and the id "
+                + "says so: this port answered a candidate upstream's OWN flagless engine answers, "
+                + "on a row where upstream's `(?b)` pass did not. The doubled guard is the one "
+                + "mechanism established to the line; LEDGER ENTRY 13 IS A SECOND WITH THE SAME "
+                + "SIGNATURE and no established line - `(?b)` plus a fuzzy section plus a `(*SKIP)` "
+                + "plus `partial=True`, where upstream loses a partial its own anchored `match` "
+                + "still finds. S46 did not go looking for that: seed 20260914 row 76345 - "
+                + "`(?b)(?e)\\b(?:\\p{Ll}(*SKIP)[^\\d]|\\W)(?=(?:(\\p{ASCII}+)([^\\d]*)a){e<=2,s<=1})` "
+                + "over 'aaa' - was diverging UNCLASSIFIED at HEAD before this slice, and it is "
+                + "entry 13's four conditions exactly. It is classified here because the "
+                + "discriminator is entry 13's own WEAK FORM made machine-checkable, and because it "
+                + "is STRICTLY NARROWER than the predicate entry 13 considered and rejected: that "
+                + "one asked only that this port answer a partial where upstream answered nothing, "
+                + "which a port INVENTING a partial also satisfies, where this one demands the "
+                + "answer be upstream's own, groups and counts included. `bestmatch-loses-a-partial` "
+                + "is left above this entry and keeps its five judged rows, so it still takes them "
+                + "first and its staleness alarm still tests them.\n"
+                + "WHAT THIS ENTRY DOES NOT CATCH, stated because it is wider than a predicate over "
+                + "behaviour would be: a port that IGNORED `(?b)` altogether would also answer the "
+                + "flagless answer on every row, and this entry would classify it. That is the one "
+                + "thing the flagless answer cannot discriminate - it says the port picked a legal "
+                + "candidate, not that it picked the BEST one. S46 MEASURED THAT RATHER THAN "
+                + "ASSUMING IT, as control S46-C (`bestmatch-stops-ranking`, in tools/controls.json): "
+                + "stopping the first walk's budget from tightening, so `(?b)` keeps the earliest "
+                + "match rather than the best, leaves a 6000-row `fuzzy` wave at 0 / 0 / 1 "
+                + "divergences over seeds 7, 4242 and 31337 against an unmutated 0 / 0 / 0, with "
+                + "the accounted-for count moving 1 -> 3 at seed 7. So the wave DOES still report "
+                + "the defect, at one row in eighteen thousand, and this entry swallows two rows of "
+                + "it at seed 7. The instrument that actually catches it is the suite: the same "
+                + "mutation fails 5 of 5,947 tests. Read that as the division of labour rather than "
+                + "as a gap - `(?b)`'s ranking is pinned by `Gaps/Engine/FuzzyBestMatchTests.cs` "
+                + "and the ported `test_bestmatch` family, and the oracle cannot substitute for "
+                + "either, because upstream's own answer is the thing under suspicion here.",
+            PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_"
+                + "insertions, .Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget "
+                + "and .Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford",
+            // Four rows rather than one, because the family has four shapes and the staleness alarm
+            // should re-test each: upstream losing the match outright, upstream keeping it with a
+            // different error mix at the same error count, and the two aggregate operations whose
+            // outcome is not a match object. Recorded by
+            // `python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl`, 2026-09-14.
+            Example: _bestmatchLostCandidateRows,
+            Applies: static (row, ours) =>
+                row.BestmatchFree is not null
+                && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
         ),
         new(
             Id: "turkic-default-folding",
