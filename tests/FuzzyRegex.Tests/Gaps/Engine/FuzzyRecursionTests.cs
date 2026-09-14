@@ -54,6 +54,13 @@ public sealed class FuzzyRecursionTests
     /// <summary>How long a blowup is allowed to take before the test calls it a hang.</summary>
     private static readonly TimeSpan _budget = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// The same, for the one test that has to fill a gigabyte before it can assert. That is paced
+    /// by the machine's free memory rather than by the engine, so it needs a budget nothing short
+    /// of a real hang can exhaust; the measurements are beside the call that uses it.
+    /// </summary>
+    private static readonly TimeSpan _blowupBudget = TimeSpan.FromMinutes(5);
+
     [Test]
     public void A_call_to_a_group_that_has_already_closed_is_not_recursion_and_matches()
     {
@@ -243,21 +250,28 @@ public sealed class FuzzyRecursionTests
         //   (?b)(?P<g1>\p{L}*)+?(?:ab){e<=1}   MemoryError in 1.78s
         //       (?P<g1>\p{L}+)+?(?:ab){e<=1}   (0, 2)      <- body must consume
         //
-        // This one call runs on InfiniteMatchTimeout and not on `_budget`, and that is the whole
-        // difference between a test and a race. Reaching the limit means COMMITTING a gigabyte, so
-        // how long it takes is a fact about the machine's free memory rather than about the engine:
-        // measured on one 32GB machine with 3.4GB free (2026-09-14), the same unchanged code took
-        // 63.4s, 30.2s and 17.6s on three consecutive runs. Under `_budget` the 30s arm lost the
-        // race and the engine raised RegexMatchTimeoutException instead, red-ratcheting a tree whose
-        // engine had not changed - reproduced identically at c8165b5, three commits earlier. The
-        // assembly-wide [Timeout(120_000)] is the backstop, and it fails loudly if the bound ever
-        // stops being reachable, which is what this test is actually for.
+        // This one call gets `_blowupBudget` and not the file's 30s `_budget`, and the reason is
+        // that reaching the limit means COMMITTING a gigabyte, so how long it takes is a fact about
+        // the machine's FREE MEMORY and not about the engine. Measured on one 32GB machine,
+        // 2026-09-14, on engines that are byte-identical:
+        //   3.4GB free - 63.4s and 17.6s to throw; a third run under a 30s budget never got there
+        //                and the engine raised RegexMatchTimeoutException at 30.2s instead
+        //   9.3GB free - 15.1s to 18.8s to throw, five runs, no timeout at any of them
+        // Under `_budget` that 30s arm lost the race and red-ratcheted a tree whose engine had not
+        // changed - identically at c8165b5, three commits earlier - so the failure was never about
+        // the code under test.
+        //
+        // InfiniteMatchTimeout would be the wrong answer even though it removes the race outright.
+        // A MatchTimeout is the ONLY thing that can stop this loop: `MatchState.CheckTimedOut`
+        // returns false immediately on `NoTimeout`, the engine observes no CancellationToken, and
+        // the assembly-wide [Timeout(120_000)] does not touch a CPU-bound synchronous test - a
+        // 20-second body passes under a 3-second assembly timeout, and `tools/check-ratchet.ps1`
+        // carries the same lesson from a host that ran 44 minutes past `--timeout 20m`. So an
+        // infinite budget would turn "the bound stopped being reachable" from a red test into a
+        // hung suite. Five minutes is about five times the slowest throw ever measured here, and it
+        // still fails LOUDLY if the bound goes away.
         Action blows = static () =>
-            new FuzzyRegex(
-                @"(?P<g1>\p{L}*)+?(?:ab){e<=1}",
-                FuzzyRegexOptions.None,
-                FuzzyRegex.InfiniteMatchTimeout
-            ).Match("bb.a\r.");
+            new FuzzyRegex(@"(?P<g1>\p{L}*)+?(?:ab){e<=1}", FuzzyRegexOptions.None, _blowupBudget).Match("bb.a\r.");
 
         blows
             .Should()

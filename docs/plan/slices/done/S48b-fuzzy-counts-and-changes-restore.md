@@ -77,16 +77,18 @@ Three items, in this order, because the first is the one the other two are proba
       fixed test-first or parked with the evidence and the reason it cannot be fixed here.
       *(Sitting 1: all three fixed, all three measured. Ledger 9's was established by instrumenting
       the walk; C and D by before/after on the ledger's own rows plus upstream's own controls.)*
-- [ ] Ledger entries 9 and 11 rewritten to what is then true; `ExpectedDivergences` and
+- [x] Ledger entries 9 and 11 rewritten to what is then true; `ExpectedDivergences` and
       `DIVERGENCES.md` updated for any new deliberate difference.
       *(Sitting 1: entries 9 and 11 rewritten, entry 16 added, `DIVERGENCES.md` moved to SHIPPED.
-      **`ExpectedDivergences` is NOT done** and is the whole of what makes this a checkpoint - see
-      "What is LEFT" above.)*
-- [ ] Ratchet GREEN, blind review (hunt: a counts/changes restore that silently truncates a
+      Sitting 2: the three `ExpectedDivergences` entries added, entry 11 gained mechanisms E and F.
+      Sitting 3: the verifier confirmed all three entries and their 3/1/1 row counts.)*
+- [x] Ratchet GREEN, blind review (hunt: a counts/changes restore that silently truncates a
       `END_FUZZY` merge; a POSIX fix that moves a `(?b)` answer), independent verifier, commit.
       *(Sitting 1: ratchet GREEN, blind review done (2 raised, 2 reproduced, 2 fixed), independent
-      verifier done (9 CONFIRMED, 1 DIFFERENT, corrected), checkpoint commit made. Re-run all of it
-      on the sitting that closes the slice.)*
+      verifier done (9 CONFIRMED, 1 DIFFERENT, corrected), checkpoint commit made. Sitting 2: ratchet
+      GREEN, blind review done (3 raised, 3 reproduced, 3 fixed). Sitting 3: ratchet GREEN, the
+      independent verifier ran over sitting 2's claims - every one CONFIRMED - and a blind pass over
+      sitting 3's own unreviewed delta raised 1, reproduced 1, fixed 1.)*
 
 ---
 
@@ -395,3 +397,95 @@ changed after the review.
 2. **The ratchet has not been re-run since the review's three fixes.** The OracleTests project
    builds clean, but run `pwsh -File tools/check-ratchet.ps1` first thing.
 3. Then the closing notes' "Done when" boxes, `git mv` to `done/`, and the slice closes.
+
+---
+
+# Progress, sitting 3 (2026-09-14) - THE SLICE CLOSES
+
+## What landed
+
+**No engine change. The slice's three scoped fixes and its five classified gate rows are sitting 1's
+and sitting 2's; this sitting ran the verification they were still owed and found it all sound.**
+
+**The independent verifier (spec amendment 16 limb (d)) ran over every number sitting 2 quotes, and
+every one is CONFIRMED.** A fresh Opus agent briefed with nothing but the tree re-ran, from the
+committed files: the three-seed 6000-row gate, which reports **6 + 4 + 9 = 19** - S48's baseline
+exactly, which is this slice's Verification bar; the ratchet at 5,963 of 5,963; the default wave
+green at three seeds; both hand-applied negative controls C and D, including their unmutated
+baselines and the fact that D correctly does not fire at seed 7; all three probes; every hand-
+measured upstream fact of sitting 2 - both `(?p)` spellings at `(0, 4)` against the flagless
+`(0, 3)`, `[(?p)]+` matching literally, `A(?=[^A]{e<=1})A+\D` at 1 forward and 0 reversed, the
+`'AAAA'` offset-2 control at 0, and row 76101 costing `(1, 0, 1)` on both sides with only the span
+moving; the four gap tests and the over-classification guard; and the three `ExpectedDivergences`
+entries at 3 + 1 + 1 rows. It left the tree byte-identical to HEAD.
+
+**The only DIFFERENT findings were about claims this sitting had just made itself, and they are
+corrected below rather than kept.**
+
+## The ratchet was RED when this sitting opened, and it was not the slice's doing
+
+`FuzzyRecursionTests.The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see` failed
+with `RegexMatchTimeoutException` where it asserts the 1GB stack bound. **Proven environmental
+rather than a regression before anything was edited**: the same test fails identically in a worktree
+at `c8165b5`, three commits before this slice began, and `4bd2b4b` shows the engine is byte-identical
+between the two.
+
+The mechanism is that reaching `ByteStack.Grow`'s limit means **committing a gigabyte**, so how long
+it takes is a fact about the machine's free memory, not about the engine. Running it under the
+file's shared 30-second `_budget` made the test assert a performance property it never meant to.
+Measured on one 32GB machine, 2026-09-14, on identical engines:
+
+| free memory | time to throw |
+|---|---|
+| 3.4GB | 63.4s, 17.6s; a third run under a 30s budget never arrived and timed out at 30.2s |
+| 9.3GB | 15.1s to 18.8s over five runs, no timeout at any |
+
+and later the same day, with the machine loaded again, 56.8s for the class and 1m 28s for the whole
+suite. **The fix went in as its own commit** (`4bd2b4b`), so that the slice's own diff stays the
+slice's, and was then revised in this close commit after the blind review below. What it does now:
+the one blowing call gets a five-minute `_blowupBudget` of its own.
+
+**The first draft of that fix used `FuzzyRegex.InfiniteMatchTimeout`, and the blind review killed
+it with a reproduction.** The justification written into the comment - that the assembly-wide
+`[Timeout(120_000)]` would be the backstop - is **false**: TUnit's timeout does not touch a
+CPU-bound synchronous test, because the `CancellationToken` is the only enforcement mechanism and
+the engine's match loop never receives one. The reviewer demonstrated a 20-second test body
+**passing** under a 3-second assembly timeout, and made the bound unreachable in `ByteStack.cs` to
+show the real test then running 200 seconds without ever failing. `tools/check-ratchet.ps1:33-36`
+already carries the same lesson from a host that ran 44 minutes past `--timeout 20m` on 2026-09-13,
+which is what made the finding cheap to confirm independently. So an infinite budget would have
+converted "the bound stopped being reachable" from a red test into a **hung suite** - a worse defect
+than the flake it fixed. A `MatchTimeout` is the only thing that can stop that loop, so the value
+had to be generous rather than absent: five minutes is about five times the slowest throw ever
+measured here, and it still fails loudly if the bound goes away.
+
+## Review
+
+**Blind review: one pass over this sitting's own unreviewed delta, 1 finding raised, 1 reproduced,
+1 fixed** - and it is the finding described above, which changed the fix rather than polishing it.
+The verifier's own two DIFFERENT items are the same story from the other side: it could not
+reproduce the 63.4 / 30.2 / 17.6s spread, getting 15.1s to 18.8s, because by then the machine had
+9.3GB free against 3.4GB. That is corroboration of the mechanism rather than a contradiction, and
+the comment now records **both** measurements with the free-memory figure beside each, instead of
+three bare durations nobody can reproduce on demand. The loose wording is corrected too: 30.2s was
+where the run was **cut off**, not how long it took.
+
+**No second blind pass is owed.** The fix that followed the review is confined to the same test file
+and the same passage the reviewer read, it adds no public API and no tooling, and the ratchet was
+re-run GREEN after it (5,963 of 5,963, baseline 5,855).
+
+## Negative controls
+
+**None new, because this sitting changed no engine code.** Sitting 2's controls C and D stand, they
+are recorded in full in sitting 2's notes above, and the independent verifier re-ran both by hand
+and confirmed every figure, the unmutated baselines included.
+
+## What the next slice should know
+
+1. **`tools/run-controls.py` cannot measure a control that mutates the recorder**, and sitting 2's
+   note on that is unchanged: `S42-2A` is in the same position and is owed maintenance.
+2. **A test that has to allocate its way to an assertion is timing a machine, not an engine.** This
+   one is now the only such test and it is budgeted for it; if another appears, budget it the same
+   way and do not reach for `InfiniteMatchTimeout`.
+3. **The assembly `[Timeout]` is not a safety net for anything in this suite.** The outer wall clock
+   in `check-ratchet.ps1` is, and it kills rather than reports.
