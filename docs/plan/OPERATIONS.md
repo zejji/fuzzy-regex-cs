@@ -219,3 +219,18 @@ this list.
 | `docs/plan/slices/` vs `slices/done/` | remaining vs completed work |
 | `docs/plan/DECISIONS.md` | dated one-line decision log |
 | `git log --oneline` | one commit per slice, readable history |
+
+## Second engines for divergence research
+
+The evidence standard (spec amendment 16) wants a real run of another engine, not a recollection
+of one. Installed on this machine, 2026-09-14:
+
+- **PCRE2 10.47**: `import pcre2` in the system Python (binding 0.7.1), or ctypes over Git for
+  Windows' `msys-pcre2-8-0.dll` as `tools/probes/pcre2-partial-and-skip.py` does.
+- **Perl 5.42** (Git for Windows): `perl script.pl`; the driver allowlist permits it.
+- **.NET 10** `System.Text.RegularExpressions`: a scratch console project or the test project.
+- **regex 2026.9.10**: `.venvs/regex-2026.9.10` for probes; the oracle interpreter is on the same
+  version.
+
+Quote the version and the flags in the slice notes, as S45 did.
+

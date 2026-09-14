@@ -236,6 +236,8 @@ rejects, all of which have already burned turns on real slices:
   for the pre-commit inspection. A `[message from the orchestrator]` line is an instruction from
   the human's session: follow it. If the kill does land, the driver keeps your last GREEN commit
   and stashes the rest, so commit early and often.
+  **Second engines are installed** - PCRE2 (`import pcre2`), Perl, .NET, regex 2026.9.10; see
+  OPERATIONS.md "Second engines". Run them; do not stop to ask whether they are available.
 
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in
