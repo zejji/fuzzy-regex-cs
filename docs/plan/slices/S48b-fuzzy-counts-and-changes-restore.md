@@ -55,6 +55,11 @@ Three items, in this order, because the first is the one the other two are proba
   taken from the counter otherwise. That stopgap is S47's, it is deliberate, and this slice is
   what replaces it - say in the closing notes whether it stayed or went.
 
+- **Do not widen the ledger 9 fix into the ranking rule** (orchestrator, 2026-09-14). S41/S42's
+  cost ranking for `(?e)`/`(?b)` is an owner decision; if the bug is that the ranking reads stale
+  totals after `RestoreBestMatch`, fix the staleness and leave the rule. Update the inherited-bugs
+  row of `docs/DIVERGENCES.md` from PLANNED (S48b) to SHIPPED in the same commit.
+
 ## Verification
 
 - `OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` is the instrument
