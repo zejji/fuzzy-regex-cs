@@ -953,8 +953,9 @@ actual answers by `Gaps/Engine/FuzzyPosixTests.cs`.
 row that kills the interpreter takes the whole wave with it, and no `except` clause can see it.
 A narrower exclusion was considered and rejected - the faulting condition is a spent error, which
 depends on the subject rather than on the pattern, so nothing the generator can read off the pattern
-is a safe test. Neither must change until this is fixed upstream. Noted here rather than only in the
-generator so the next slice that widens either one knows why.
+is a safe test. **S46 sitting 2 removed that suppression** (see below); the crash is unchanged and
+still upstream's, but the recorder no longer reads the attribute that triggers it, so the generator
+draws the cell again and the wave compares everything about it but the change positions.
 
 **S46 RE-MEASURED ALL OF THAT ON THE PINNED 2026.9.10 AND FOUND THE WAY TO LIFT THE EXCLUSION
 CHEAPLY, 2026-09-14.** Three facts, each run rather than reasoned:
@@ -977,12 +978,51 @@ Fact 3 is the lever, and it makes the exclusion liftable without any per-row pro
 `_describe_match` reads `fuzzy_changes` only when the counts are non-zero, so a recorder that records
 `fuzzyCounts` and OMITS `fuzzyChanges` on a POSIX row never touches the faulting access. The cost is
 that change POSITIONS cannot be compared on those rows - which is not a loss, because upstream has no
-answer to give for them - so both sides must render the fuzzy half without positions for a row the
-recorder marks. **Not done in S46**: it needs the recorder, `OracleWave`, the comparison in
-`OracleComparer` and the generator's own suppression changed together, and every path that reads a
-match - `finditer`, `sub`, `split` as well as the single-match door - guarded, because missing one
-kills the wave rather than failing a test. S46 carried it as far as the measurement and left the
-exclusion in place; the design above is the next sitting's work.
+answer to give for them - so both sides must render the fuzzy half without positions.
+
+**S46 SITTING 2 LIFTED THE EXCLUSION, 2026-09-14, AND IT WAS ONE GUARD RATHER THAN FOUR.** The
+design above feared "every path that reads a match - `finditer`, `sub`, `split` as well as the
+single-match door". They all call `_describe_match`: the single-match door at `:684`, `finditer` at
+`:639`, a `(*SKIP)` substitution's `subMatches` at `:607` and `_anchored_scan` at `:896`. So the
+guard sits in that one function, which is also the only place the recorder ever reads the attribute.
+`sub` and `split` answer a string and a list of parts and read no match at all.
+
+Four measurements stand behind it, each run rather than reasoned, on regex 2026.9.10:
+
+1. **`compiled.flags` is a safe test for POSIX, on every spelling** - the flag, a leading `(?p)`,
+   one written mid-pattern and one inside a group all set the bit
+   (`tools/probes/upstream-posix-flag-is-visible-on-compiled.py`). So the guard can be read off the
+   compiled pattern, where the row's own `flags` field would miss an inline `(?p)` entirely.
+2. **Every other read `_describe_match` makes is safe on a faulting match** - `span(n)` and
+   `spans(n)` over the whole group range, `lastindex`, `lastgroup`, `partial`, and the `finditer`,
+   `subn` and `split` doors (`tools/probes/upstream-posix-fuzzy-safe-attributes.py`, one child
+   process per read). Only `fuzzy_changes` dies, with 0xC0000005.
+3. **Before and after, on the same sixteen rows.** `git show HEAD:tools/record-oracle.py` over a
+   file holding `(?p)(?:abc){e<=1}` on `'axc'` and fifteen neighbours exits 139 and writes nothing;
+   the guarded recorder writes all sixteen, and this port agrees with upstream on every one of them
+   - 16 of 16, spans, groups and error counts.
+4. **The cell was genuinely blind and now is not.** Control `S46-D` reverses the counts copy in
+   `Matcher.RestoreBestMatch`. Against an `interactions` wave recorded by HEAD's recorder it moves
+   nothing at all (5 divergences against an unmutated 5 at seed 31337, and that wave holds **zero**
+   POSIX-and-fuzzy rows); against the same wave recorded by the guarded one it gives 37 against 6.
+
+**And lifting it found a bug in THIS PORT on its first run** - which is what the cell was blind to,
+and it is not upstream's. Seed 31337 row 3343, minimised:
+
+    regex.compile(r'(?e)(?r)(?:\w.){1<=e<=2:\w}(?:[^a-f]a\w){s<=1,i<=1,d<=1}', regex.POSIX)
+      .fullmatch('+ aBA')
+    # upstream: (0, 5) fuzzy_counts (0, 1, 1)     - two errors
+    # this port: (0, 5) fuzzy_counts (1, 1, 1)    - three, for the same span
+
+Self-refuting on this port's own behaviour: drop POSIX and this port answers `(0, 1, 1)` too, so it
+is not a ranking difference but POSIX losing an error count. It needs POSIX **and** `(?e)`, which is
+where this port's own cost ranking lives (`DoEnhancedFuzzyMatch`, `IsBetterFuzzyMatch`); `(?b)`,
+`(?r)` alone, and the same row without POSIX all agree. The standing hypothesis, not yet proven, is
+that `RestoreBestMatch` puts back `FuzzyCounts` and `FuzzyChanges` but not `state.TotalErrors` or
+`state.TotalCost`, and this port's ranking - unlike upstream's, which keeps the last successful run -
+reads both. Upstream leaves `total_errors` stale too (`restore_best_match`, `:11565`), so the
+staleness is inherited and the cost field is not. **Open, unfixed, and RED in the `interactions`
+wave at seed 31337**; it is a port bug, so it gets no `ExpectedDivergences` entry.
 
 **Proposed fix.** Unknown. Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).

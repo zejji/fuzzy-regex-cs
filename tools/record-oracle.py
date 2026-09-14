@@ -290,6 +290,13 @@ _REQ_CHARS_ARG = 8
 # this file states the number the wave's `flags` field carries.
 _REVERSE_FLAG = 0x400
 
+# Upstream's POSIX flag bit, which is `regex.P`, spelled out for the same reason. Read off the
+# COMPILED pattern rather than off the row's flags, because an inline `(?p)` never reaches the row's
+# flags: measured on every spelling - the flag, a leading `(?p)`, one written mid-pattern and one
+# inside a group - by `tools/probes/upstream-posix-flag-is-visible-on-compiled.py` (regex 2026.9.10,
+# 2026-09-14), all of which set the bit on `Pattern.flags`.
+_POSIX_FLAG = 0x10000
+
 # Upstream's BESTMATCH flag bit, which is `regex.B`, spelled out for the same reason. Both
 # generators that draw the flag write it as the inline `(?b)` prefix rather than setting the bit
 # (`_generate_fuzzy` and `_generate_interactions`), so the prefix is the case that fires in practice
@@ -746,8 +753,34 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
     # The S31 `partial` precedent.
     substitutions, insertions, deletions = match.fuzzy_counts
     if substitutions or insertions or deletions:
-        sub_positions, ins_positions, del_positions = match.fuzzy_changes
+        # NEVER `match.fuzzy_changes` ON A POSIX PATTERN. Reading it on a POSIX fuzzy match that
+        # spent an error is an access violation (0xC0000005 on Windows, SIGSEGV under Git Bash) that
+        # kills this process - not an exception, so no `except` clause below can see it, and
+        # `--rows` over one such row exits 139 and writes no output file at all. Ledger entry 9.
+        #
+        # The counts on the same match answer correctly, and so does every other read this function
+        # makes - `span(n)` and `spans(n)` over the whole group range, `lastindex`, `lastgroup` and
+        # `partial` - each measured in its own child process by
+        # `tools/probes/upstream-posix-fuzzy-safe-attributes.py` (regex 2026.9.10, 2026-09-14). So a
+        # POSIX row records its counts and omits its positions, and the consumer drops the positions
+        # from BOTH sides of the comparison rather than comparing ours against nothing. What that
+        # costs is the change positions on those rows, which upstream has no answer for anyway.
+        #
+        # The guard is here, at the one funnel every recorded match passes through - the single-match
+        # door, `finditer`, a `(*SKIP)` substitution's `subMatches` and `_anchored_scan` all call this
+        # function - rather than at each of those call sites, because missing one would kill a wave
+        # rather than fail a test.
+        #
+        # Keyed off POSIX and not off "this match spent errors", which is the faulting condition:
+        # nothing readable off the pattern OR the subject predicts a spent error, since POSIX
+        # leftmost-longest can stretch an apparently exact row into spending one -
+        # `(?p)(?:abc){e<=1}` over 'abcd' looks exact and faults
+        # (`tools/probes/upstream-posix-fuzzy-spent-error.py`).
         described["fuzzyCounts"] = [substitutions, insertions, deletions]
+        if compiled.flags & _POSIX_FLAG:
+            return described
+
+        sub_positions, ins_positions, del_positions = match.fuzzy_changes
         described["fuzzyChanges"] = {
             "substitutions": [_utf16_index(offsets, p) for p in sub_positions],
             "insertions": [_utf16_index(offsets, p) for p in ins_positions],
@@ -3037,15 +3070,18 @@ def _generate_interactions(rng: random.Random, count: int):
     pieces - `fuzzy`, `fuzzy-wrapped` and `fuzzy-list` - plus `(?e)` and `(?b)` at the row level.
     Everything else about a row was already drawn, so one fuzzy piece composes a section with
     `(?i)`, `(?fi)`, `(?r)`, `partial=True`, the operation and the substitution template at once.
-    Two shapes are deliberately NOT drawn and both are upstream bugs this slice found rather than
-    omissions: POSIX beside a fuzzy section (see the suppression below - reading `fuzzy_changes`
-    faults the interpreter) and a self-recursive call round one (see INTERACTION_FUZZY_WRAPPERS).
+    One shape is deliberately NOT drawn, and it is an upstream bug this generator found rather than
+    an omission: a self-recursive call round a fuzzy section (see INTERACTION_FUZZY_WRAPPERS).
+    POSIX beside a fuzzy section was the other, suppressed from S43 until S46 sitting 2 lifted the
+    suppression - the crash is still real, but the recorder no longer reads the attribute that
+    triggers it, so the cell is drawn again and compared on everything but the change positions.
+    See the POSIX draw below and `_describe_match`.
 
     Measured by `python tools/record-oracle.py --generator interactions --count 600 --seed 1`, after
     the last change to this generator: 138 rows produce an answer - a match, a non-empty match list,
     a split with more than one part or a substitution that replaced something - 455 produce none and
     7 are rejected by upstream. 306 rows carry IGNORECASE, 158 FULLCASE, 294 MULTILINE, 223
-    VERSION1, 67 ASCII and 245 are reversed; 58 are POSIX (26 by flag, 32 as `(?p)`), 57 ask for a
+    VERSION1, 67 ASCII and 245 are reversed; 88 are POSIX (37 by flag, 51 as `(?p)`), 57 ask for a
     partial match, and 204 have an astral subject. 337 hold a backreference, 213 a named group, 102 a
     conditional, 99 a lookaround, 57 a group call, 65 a backtracking verb and 18 a `\\K`.
     183 hold a FUZZY SECTION - 70 of those a second section nested inside it with a different
@@ -3118,11 +3154,20 @@ def _generate_interactions(rng: random.Random, count: int):
         # Half as the flag and half inline, exactly as `posix` writes it, because the two reach the
         # parser by different routes and a composed row is where a mis-scoped flag would show.
         #
-        # NEVER ON A FUZZY ROW, and that is an upstream CRASH rather than a preference. Reading
-        # `fuzzy_changes` on a POSIX fuzzy match kills the interpreter with an access violation
-        # (0xC0000005 on Windows, SIGSEGV under Git Bash), which takes the whole recorder with it -
-        # it is not an exception and no `except` clause can see it. The recorder reads that attribute
-        # for every match it records, so such a row cannot be recorded at all, at any wave size.
+        # A FUZZY ROW MAY CARRY POSIX AGAIN SINCE S46 SITTING 2 (2026-09-14), and the way it is safe
+        # is in `_describe_match`, not here. From S43 until then this read `if posix and not fuzzy`,
+        # because reading `fuzzy_changes` on a POSIX fuzzy match that spent an error kills the
+        # interpreter with an access violation (0xC0000005 on Windows, SIGSEGV under Git Bash) - not
+        # an exception, so no `except` clause can see it, and the recorder read that attribute for
+        # every match it recorded. `--rows` over one such row still exits 139 and writes no file.
+        #
+        # What changed is that the recorder no longer reads it on a POSIX row: `fuzzy_counts` is safe
+        # on a faulting match and every other read `_describe_match` makes is too, so a POSIX row
+        # records its counts and omits its change positions, and the consumer drops the positions
+        # from both sides. The crash is still real, still upstream's, still pinned by
+        # `Gaps/Engine/FuzzyPosixTests.cs` and still entered on the ledger as entry 9; what the wave
+        # now compares on this cell is the span, the groups and the error COUNTS, which is everything
+        # about it upstream can be asked at all.
         #
         # Minimised to four necessary conditions (2026-09-13, .scratch/minimise-crash3.py, regex
         # 2026.7.19); removing any one of them makes it safe:
@@ -3135,39 +3180,20 @@ def _generate_interactions(rng: random.Random, count: int):
         #         '{d<=1}' do not
         #       - a subject long enough to take the longer branch: 'aa' crashes, 'a' does not
         #
-        # `m.span()`, every `m.span(n)` and `m.fuzzy_counts` all answer correctly on the same match;
-        # only `fuzzy_changes` faults. THIS PORT IS RIGHT AND ANSWERS IT: (0, 2) with no errors
-        # spent and empty changes, which is leftmost-longest picking the longer branch for free. It
-        # is a new upstream memory-safety bug of the 611-614 fuzzing-campaign family, found by this
-        # generator, pinned in Gaps/Engine/FuzzyPosixTests.cs and entered on the ledger.
+        # S43 SHARPENED THAT and the sharpening is why no narrower suppression was ever possible: the
+        # faulting condition is a SPENT ERROR, not a pattern shape, and POSIX leftmost-longest can
+        # stretch an apparently exact row into spending one - `(?p)(?:abc){e<=1}` over 'abcd' looks
+        # exact and faults (`tools/probes/upstream-posix-fuzzy-spent-error.py`, re-run on the pinned
+        # 2026.9.10). Not even the subject is a safe test, which is exactly why the guard that
+        # replaced this one keys off POSIX rather than off any prediction of a spent error.
         #
-        # The POSIX x fuzzy cell is therefore covered by those pinned tests and NOT by the wave. A
-        # narrower exclusion was considered - refuse only the alternation shape - and rejected: a
-        # named list lowers to exactly that shape (sorted by length, `_regex_core.py:4069`), so do
-        # conditionals and verb alternations, and any future widening would reintroduce the crash
-        # silently. The row-level rule cannot rot.
-        #
-        # S46 RE-MEASURED THIS ON THE PINNED 2026.9.10 (2026-09-14) AND FOUND THE CHEAP WAY OUT.
-        # The crash still takes the recorder with it - `--rows` over one such row exits 139 and
-        # writes no file - and the faulting condition is still a SPENT ERROR rather than a pattern
-        # shape. The row that settles the "no predicate is safe" argument for good is
-        # `(?p)(?:abc){e<=1}` over 'abcd': it looks exact and is not, because POSIX leftmost-longest
-        # stretches it to spend an insertion, so not even the SUBJECT is a safe test.
-        #
-        # But `fuzzy_counts` is safe on a faulting row and only `fuzzy_changes` faults, and
-        # `_describe_match` reads the changes only when the counts are non-zero. So a recorder that
-        # records `fuzzyCounts` and OMITS `fuzzyChanges` on a POSIX row never touches the faulting
-        # access, and this suppression can go. What it costs is the change POSITIONS on those rows,
-        # which upstream has no answer for anyway - so both sides have to render the fuzzy half
-        # without positions for a marked row, which means `OracleWave`, `OracleComparer` and every
-        # path that reads a match (`finditer`, `sub` and `split` as well as the single-match door).
-        # NOT DONE: S46 stopped at the measurement. Ledger entry 9 carries the full design.
         # Both draws happen before the suppression, never inside it, for the reason S42 records
         # against FUZZY_BESTMATCH_PROBABILITY: a suppression that swallows a draw reshuffles the
-        # whole row stream and makes two waves incomparable.
+        # whole row stream and makes two waves incomparable. Kept as written even though there is no
+        # longer a suppression to swallow one, so a future narrowing cannot reintroduce the problem.
         posix = rng.random() < INTERACTION_POSIX_PROBABILITY
         posix_inline = rng.random() < INTERACTION_POSIX_INLINE_PROBABILITY
-        if posix and not fuzzy:
+        if posix:
             if posix_inline:
                 pattern = "(?p)" + pattern
             else:

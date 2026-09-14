@@ -565,6 +565,75 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(noLimit, OracleComparer.Run(noLimit)).Should().Be(OracleVerdict.Agree);
     }
 
+    [Test]
+    public void A_posix_fuzzy_row_compares_its_error_counts_where_upstream_cannot_give_the_positions()
+    {
+        // Ledger entry 9. Reading `Match.fuzzy_changes` on a POSIX fuzzy match that spent an error
+        // kills the CPython process outright - 0xC0000005, not an exception - so the recorder cannot
+        // ask upstream where the errors were. `fuzzy_counts` on the same match is safe
+        // (tools/probes/upstream-posix-fuzzy-safe-attributes.py, regex 2026.9.10, 2026-09-14: every
+        // read `_describe_match` makes is safe except that one), so the recorder writes `fuzzyCounts`
+        // and omits `fuzzyChanges`, and both sides render the fuzzy half without positions.
+        //
+        // Recorder output, `(?p)(?:abc){e<=1}` over 'axc': upstream matches (0, 3) having spent one
+        // substitution. This port answers the same span and the same counts, and knows the
+        // substitution was at index 1 - a fact upstream has no answer to compare against.
+        OracleRow posix = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(?p)(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0]}}
+            """
+        )[0];
+
+        OracleComparer.Compare(posix, OracleComparer.Run(posix)).Should().Be(OracleVerdict.Agree);
+
+        // And the suppression reaches the POSITIONS only. A row recorded with different counts must
+        // still diverge, or lifting the generator's exclusion would buy a cell of the matrix that
+        // agrees with anything. Same row, upstream's substitution rewritten as a deletion.
+        OracleRow wrongCounts = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(?p)(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1]}}
+            """
+        )[0];
+
+        OracleComparer.Compare(wrongCounts, OracleComparer.Run(wrongCounts)).Should().Be(OracleVerdict.Diverge);
+
+        // A non-POSIX row is untouched by any of it: the positions are recorded, compared, and a
+        // wrong one is a divergence. Without this half the test above would pass on a comparator
+        // that had simply stopped comparing change positions everywhere.
+        OracleRow ordinary = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
+            """
+        )[0];
+
+        OracleComparer.Compare(ordinary, OracleComparer.Run(ordinary)).Should().Be(OracleVerdict.Agree);
+
+        OracleRow wrongPosition = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "axc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}}
+            """
+        )[0];
+
+        OracleComparer.Compare(wrongPosition, OracleComparer.Run(wrongPosition)).Should().Be(OracleVerdict.Diverge);
+    }
+
+    [Test]
+    public void A_posix_fuzzy_row_that_spent_no_errors_still_renders_no_fuzzy_half_at_all()
+    {
+        // The suppression keys off POSIX, not off "this match spent errors", because this port has
+        // no way to know in advance which rows upstream would have died on - the faulting condition
+        // is a spent error, and leftmost-longest can make an apparently exact row spend one
+        // (`(?p)(?:abc){e<=1}` over 'abcd'). An exact match renders no fuzzy half either way, so the
+        // suppression must not turn one into `fuzzy=(0,0,0)` and red every such row.
+        OracleRow exact = OracleWave.ParseRows(
+            """
+            {"generator": "rows", "pattern": "(?p)(?:abc){e<=1}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            """
+        )[0];
+
+        OracleComparer.Compare(exact, OracleComparer.Run(exact)).Should().Be(OracleVerdict.Agree);
+    }
+
     /// <summary>
     /// This port's real answer to <c>regex.compile('a', V0|V1)</c>, thrown rather than hand-written
     /// so the assertion above is made against the message .NET actually decorates, not against an

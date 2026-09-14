@@ -40,7 +40,7 @@ in `Matcher.DoBestFuzzyMatch` and the POSIX save/restore, so one slice. Each is 
 ## Done when
 
 - [x] Entries 12, 13 and 9's port half fixed test-first, each with its definition quoted.
-- [ ] Divergence entries, controls, ledger updates; POSIX exclusion lifted.
+- [x] Divergence entries, controls, ledger updates; POSIX exclusion lifted.
 - [x] Ratchet GREEN and blind review done in sitting 1; the box closes with the slice.
 
 ---
@@ -240,3 +240,172 @@ key is correctly omitted and the entry does not apply.
 2. The `interactions` seed-7 row `(?e)\b\L<w1>{e<=2}([^a-f]{1}?)` over `'ﬁ ı'` is red and
    unaccounted - the dotted/dotless-I family, no `(?b)`, no trailing insertion. It is one of the
    fifteen pre-existing rows listed in STATE.md.
+
+---
+
+# Sitting 2, 2026-09-14 - THE POSIX EXCLUSION IS LIFTED, and the slice closes
+
+Sitting 1 fixed entry 12 and found entries 13 and 9's port half already closed by S43. This sitting
+did the one piece left: the `interactions` generator draws POSIX beside a fuzzy section again, and
+both engines are compared on it.
+
+## It was ONE guard, where ledger entry 9's design feared four
+
+The design said the change needed "every path that reads a match - `finditer`, `sub`, `split` as
+well as the single-match door - guarded, because missing one kills the wave rather than failing a
+test". They all funnel through `_describe_match`: the single-match door (`record-oracle.py:684`),
+`finditer` (`:639`), a `(*SKIP)` substitution's `subMatches` (`:607`) and `_anchored_scan` (`:896`).
+`sub` and `split` answer a string and a list of parts and read no match at all. So one guard in that
+function covers every door, and it is also the only place the recorder has ever read the faulting
+attribute.
+
+The guard keys off POSIX rather than off "this match spent errors", which is the real faulting
+condition, because nothing readable off the pattern OR the subject predicts a spent error -
+`(?p)(?:abc){e<=1}` over `'abcd'` looks exact and faults, because leftmost-longest stretches it into
+spending an insertion.
+
+## Four measurements, not four arguments
+
+1. **`compiled.flags` is a safe POSIX test on every spelling.** The flag, a leading `(?p)`, one
+   written mid-pattern, one inside a group: all set the bit
+   (`tools/probes/upstream-posix-flag-is-visible-on-compiled.py`, regex 2026.9.10). The row's own
+   `flags` field would miss an inline `(?p)`, which is how `interactions` writes half of them.
+2. **Every other read `_describe_match` makes is safe on a faulting match** - `span(n)` and
+   `spans(n)` over the whole group range, `lastindex`, `lastgroup`, `partial`, plus the `finditer`,
+   `subn` and `split` doors. One child process per read:
+   `tools/probes/upstream-posix-fuzzy-safe-attributes.py`. Only `fuzzy_changes` dies (0xC0000005).
+3. **Before and after on the same sixteen rows.** `git show HEAD:tools/record-oracle.py` over
+   `.scratch/posix-fuzzy-rows.jsonl` exits **139** and writes no file; the guarded recorder writes
+   all sixteen, and the consumer then agrees with upstream on **16 of 16** - spans, groups and error
+   counts, with the positions dropped from both sides.
+4. **Only `interactions` reaches the cell.** A 12,000-row `posix,fuzzy` wave at seed 7 holds **zero**
+   POSIX-and-fuzzy rows, so no other generator's rows move.
+
+The consumer renders a marked row as `fuzzy=(s,i,d)[changes unavailable upstream]` on both sides,
+spelled out rather than shown as three empty lists so a divergence block says why it carries no
+positions instead of looking like an engine that spent errors nowhere.
+
+## Lifting it found a bug in THIS PORT on the first run, and that bug is left open
+
+Seed 31337 row 3343, the one new divergence the whole change introduced. Minimised from a
+hundred-character pattern to this, twelve candidate rows at a time through `run-oracle.ps1 -Rows`:
+
+    regex.compile(r'(?e)(?r)(?:\w.){1<=e<=2:\w}(?:[^a-f]a\w){s<=1,i<=1,d<=1}', regex.POSIX)
+      .fullmatch('+ aBA')
+    # upstream:  (0, 5) fuzzy_counts (0, 1, 1)   - two errors
+    # this port: (0, 5) fuzzy_counts (1, 1, 1)   - three, for the same span and the same groups
+
+**It refutes itself on this port's own behaviour**: drop POSIX and this port answers `(0, 1, 1)` too.
+So it is not the cost-versus-error-count ranking difference S42 pinned - it is POSIX losing an error
+count that the same engine finds without it, and under `(?e)`, which minimises errors, a three-error
+answer beside a two-error one is wrong on its face. It needs POSIX **and** `(?e)`: `(?b)`, `(?r)`
+alone, a BMP or astral *word* character in place of the `+`, and the same row without POSIX all
+agree. The astral subject the wave drew turned out not to be load-bearing; a leading NON-word
+character is.
+
+Standing hypothesis for the slice that fixes it, stated as a hypothesis because it was not proven:
+`RestoreBestMatch` puts back `FuzzyCounts` and `FuzzyChanges` but not `state.TotalErrors` or
+`state.TotalCost`, and this port's ranking reads both where upstream's simply keeps the last
+successful run. Upstream leaves `total_errors` stale in the same place (`restore_best_match`,
+`:11565`), so that half is inherited; `TotalCost` is this port's own field and is not.
+
+**No `ExpectedDivergences` entry**, deliberately: that list holds families where this port is right
+and a permanent test pins its answer. Here this port is wrong, so the row stays RED until it is
+fixed - which is the direction that cannot hide a defect.
+
+## The slice's own gate says GREEN and that was never reachable
+
+Verification asked for "`interactions` with POSIX no longer excluded, GREEN". The `interactions` wave
+is **not** green and was not green at HEAD either: 1 / 1 / 5 divergences at seeds 7 / 4242 / 31337
+with HEAD's recorder and HEAD's engine, all pre-existing and none of them POSIX. With this sitting's
+change the same seeds give 1 / 1 / 6 - the identical rows plus row 3343 above. The gate as written
+could only have been met by a slice that also cleared the pre-existing pile, which STATE.md has
+called a slice of its own since sitting 1. The slice closes against the honest reading: no new
+unaccounted divergence except the one it minimised and diagnosed.
+
+**The default wave is unmoved.** 6000 rows, all 21 generators, seeds 7 / 4242 / 20260914:
+3 + 2 + 9 = 14 divergences, and every row number is one STATE.md already lists. Nothing new, and the
+one new row does not appear because 31337 is not a default seed.
+
+## Controls
+
+> **Control S46-D, `posix-restore-keeps-the-losing-counts`**: in `Matcher.cs`, `RestoreBestMatch`,
+> change
+> `        state.BestFuzzyCounts.CopyTo(state.FuzzyCounts, 0);`
+> to
+> `        state.FuzzyCounts.CopyTo(state.BestFuzzyCounts, 0);`
+> so the live counts of the attempt that deliberately failed survive instead of the saved best's.
+> Wave: `interactions`, 6000 rows, seeds 7, 4242, 31337 and 99991. Result: **diverge 40 / 29 / 37 /
+> 27** against an unmutated **1 / 1 / 6 / 1**. Registered in `tools/controls.json` and re-run against
+> the code and generator being committed.
+>
+> **And the same control against a wave recorded by HEAD's recorder moves NOTHING** - 5 divergences
+> against an unmutated 5 at seed 31337 - because that wave holds **zero** POSIX-and-fuzzy rows. That
+> is the measurement that says lifting the exclusion bought coverage rather than rows: a defect in
+> the POSIX fuzzy restore was invisible to `interactions` at any wave size, and is now caught on 31
+> extra rows in 6000. To re-run that half: `git show HEAD:tools/record-oracle.py` into a scratch
+> file, record `interactions` 6000 at seed 31337 with it, copy the result over
+> `.scratch/control-waves/interactions-6000-31337.jsonl`, and run
+> `python tools/run-controls.py --ids S46-D`, which reuses a wave already on disk.
+>
+> **A stale wave nearly made this control lie.** `run-controls.py` reuses
+> `.scratch/control-waves/<generator>-<count>-<seed>.jsonl` if it exists, and the seed 7 and 4242
+> files were left there by an earlier slice, recorded with the exclusion in place. The first run gave
+> 2 / 6 / 37 against a baseline of 1 / 1 / 6 and looked like a weak control at two seeds out of
+> three; deleting the two stale files and re-running gave 40 / 29 / 37. **Delete the waves for any
+> generator whose generator code the slice changed before running its controls.**
+
+## Review
+
+**One blind pass over the whole sitting-2 diff. Three findings raised, three reproduced, three
+fixed** - and none of them in the recorder or the consumer, which is the part the pass was pointed
+at hardest.
+
+1. **The four `_describe_match` call-site line numbers quoted in this file and in ledger entry 9 were
+   HEAD's, not the changed file's**, because the `_POSIX_FLAG` block shifted everything below it.
+   Reproduced with `grep -n "_describe_match(compiled" tools/record-oracle.py`: 600 / 632 / 677 / 863
+   are really 607 / 639 / 684 / 896. Corrected in both files. A stale reference in the very commit
+   that writes it is the kind that never gets found later.
+2. **`tools/probes/upstream-posix-fuzzy-safe-attributes.py` measured a GROUPLESS pattern** while
+   three code comments cited it for a claim about `span(n)` and `spans(n)` "over the whole group
+   range": `regex.compile(r'(?p)(?:abc){e<=1}').groups` is 0, so both reads only ever asked about
+   group 0. The conclusion survives - the reviewer measured a grouped pattern itself and every read
+   was still safe - but the evidence did not support the claim. The probe's pattern is now
+   `(?p)(?P<g1>(?:abc){e<=1})(?P<g2>d)?`, two groups with one taking no part in the match, and its
+   output shows `[(0, 3), (0, 3), (-1, -1)]`, a real `lastindex` of 1 and a real `lastgroup` of
+   `'g1'` where the groupless version answered `None` to both.
+3. **The same probe rendered an ordinary `IndexError` as a process death**, in a probe whose whole
+   point is telling those apart: a `m.span(1)` case on a pattern with no group 1 printed
+   `*** DIED rc=1 ***` beside the real `*** DIED rc=3221225477 ***`. The bogus case is gone with the
+   grouped pattern, and `verdict()` now separates a fault (a negative return code, or Windows's
+   0xC0000005) from an exception, which prints as `raised (rc=N)`.
+
+**A second blind pass was run over the delta**, because finding 2's fix rewrote a tooling file the
+first reviewer only saw in its earlier form. Scope: that one probe, hunting for a claim the probe
+does not measure, a mislabelled verdict, an "ok" for an expression that never evaluated, and a
+docstring stating a result the run does not produce. **No defects found**, with the re-run output and
+a line-by-line check of the `READS` list against every attribute `_describe_match` touches.
+
+**What the first pass proved rather than merely failed to disprove**, because a "no finding" on the
+recorder is only worth as much as what was tried:
+
+- **No surviving `fuzzy_changes` read.** 30,000 `interactions` rows over five seeds and 12,000
+  `fuzzy,posix` rows recorded with `exit=0`, and - the sharp test - a scratch copy of the recorder
+  with `INTERACTION_POSIX_PROBABILITY = 1.0` recorded 24,000 rows at four seeds, every one POSIX,
+  holding 1,356 fuzzy matches, `exit=0`, and **zero** rows where a `fuzzyChanges` key leaked onto a
+  POSIX row. The pre-change recorder over the same input exits -1073741819 and writes no file.
+- **The two sides agree about which rows are POSIX.** The 6,000-row all-POSIX wave consumes with no
+  report line anywhere containing `[s:`, so the port dropped positions on all 6,000; and a
+  hand-built twenty-row file covering `(?p)` leading, mid-pattern, inside a group, inside a
+  lookahead, inside an alternation branch, under `(?V1)`, with `(?e)`, `(?b)`, `(?r)` and `(?i)`,
+  astral, and the flag spelling, agrees 20 of 20.
+- **Non-POSIX rows kept their positions**: 303 matches with `fuzzyChanges` in the seed-7 wave, and a
+  mutation still diverges on their rendered positions.
+- **The draw stream did not shift**: old against new recorder at seed 1, 600 rows, gives zero
+  question differences over all 600, 30 rows differing only by POSIX being added, and zero outcome
+  differences on identical questions. The updated docstring counts were checked exactly.
+- **Waves recorded before the change still parse and compare identically** - the same seed-1 wave
+  recorded by both recorders consumes to `agree 598 unsupported 0 expected 2 diverge 0`.
+
+Suites at the end: ratchet GREEN, 5,947 tests, 5,947 passing, 0 skipped; the oracle harness's own 15
+tests pass.

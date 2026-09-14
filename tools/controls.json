@@ -1660,5 +1660,22 @@
       4242,
       31337
     ]
+  },
+  {
+    "id": "S46-D",
+    "name": "posix-restore-keeps-the-losing-counts",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void RestoreBestMatch(MatchState state)",
+    "anchorNth": 1,
+    "before": "        state.BestFuzzyCounts.CopyTo(state.FuzzyCounts, 0);\n",
+    "after": "        state.FuzzyCounts.CopyTo(state.BestFuzzyCounts, 0);\n",
+    "generator": "interactions",
+    "count": 6000,
+    "seeds": [
+      7,
+      4242,
+      31337,
+      99991
+    ]
   }
 ]

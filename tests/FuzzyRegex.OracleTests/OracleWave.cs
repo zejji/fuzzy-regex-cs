@@ -268,7 +268,15 @@ internal static class OracleWave
             return null;
         }
 
-        JsonElement changes = match.GetProperty("fuzzyChanges");
+        // Absent where upstream cannot be asked, which is a POSIX fuzzy match that spent an error:
+        // reading `Match.fuzzy_changes` on one is an access violation that takes the whole recorder
+        // with it (ledger entry 9), where `fuzzy_counts` on the same match answers correctly. The
+        // recorder omits the key on exactly those rows and the comparison drops the positions from
+        // both sides - never the counts, which are compared as they always were.
+        if (!match.TryGetProperty("fuzzyChanges", out JsonElement changes))
+        {
+            return new OracleFuzzy(counts[0].GetInt32(), counts[1].GetInt32(), counts[2].GetInt32(), null, null, null);
+        }
 
         return new OracleFuzzy(
             counts[0].GetInt32(),
@@ -800,33 +808,59 @@ internal sealed record MatchOutcome(
 /// <param name="Substitutions">How many characters were substituted.</param>
 /// <param name="Insertions">How many were inserted.</param>
 /// <param name="Deletions">How many were deleted.</param>
-/// <param name="SubstitutionPositions">Where each substitution was, in the order they were used.</param>
-/// <param name="InsertionPositions">Where each insertion was.</param>
+/// <param name="SubstitutionPositions">
+/// Where each substitution was, in the order they were used, or <see langword="null"/> where
+/// upstream has no answer to give - see <see cref="PositionsUnavailable"/>.
+/// </param>
+/// <param name="InsertionPositions">Where each insertion was, or <see langword="null"/>.</param>
 /// <param name="DeletionPositions">
 /// Where each deletion was, already shifted by one per earlier deletion - so these are positions in
-/// a string with the missing characters put back, and may be past the end of the match.
+/// a string with the missing characters put back, and may be past the end of the match. Or
+/// <see langword="null"/>.
 /// </param>
 internal sealed record OracleFuzzy(
     int Substitutions,
     int Insertions,
     int Deletions,
-    IReadOnlyList<int> SubstitutionPositions,
-    IReadOnlyList<int> InsertionPositions,
-    IReadOnlyList<int> DeletionPositions
+    IReadOnlyList<int>? SubstitutionPositions,
+    IReadOnlyList<int>? InsertionPositions,
+    IReadOnlyList<int>? DeletionPositions
 )
 {
     /// <summary>Whether the match used no errors at all, which renders as nothing.</summary>
     internal bool IsExact => Substitutions == 0 && Insertions == 0 && Deletions == 0;
 
+    /// <summary>
+    /// Whether the change positions are missing on purpose, because upstream cannot be asked for
+    /// them: <c>Match.fuzzy_changes</c> on a POSIX fuzzy match that spent an error is an access
+    /// violation that kills the interpreter, where <c>Match.fuzzy_counts</c> on the same match
+    /// answers correctly (ledger entry 9). All three lists are null together or none of them is.
+    /// </summary>
+    internal bool PositionsUnavailable => SubstitutionPositions is null;
+
+    /// <summary>Drops the change positions, leaving the counts, for comparison against a row upstream could not answer.</summary>
+    /// <returns>The same counts with no positions.</returns>
+    internal OracleFuzzy WithoutPositions() =>
+        this with
+        {
+            SubstitutionPositions = null,
+            InsertionPositions = null,
+            DeletionPositions = null,
+        };
+
     /// <summary>The fuzzy half as one token of a <see cref="MatchOutcome"/>'s line.</summary>
     /// <returns>The rendered counts and positions.</returns>
     public string Describe() =>
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"fuzzy=({Substitutions},{Insertions},{Deletions})"
-                + $"[s:{string.Join(",", SubstitutionPositions)}]"
-                + $"[i:{string.Join(",", InsertionPositions)}]"
-                + $"[d:{string.Join(",", DeletionPositions)}]"
+        string.Create(CultureInfo.InvariantCulture, $"fuzzy=({Substitutions},{Insertions},{Deletions})")
+        + (
+            PositionsUnavailable
+                // Spelled out rather than rendered as three empty lists, so a divergence block on
+                // such a row says why it carries no positions instead of looking like an engine that
+                // spent errors nowhere.
+                ? "[changes unavailable upstream]"
+                : $"[s:{string.Join(",", SubstitutionPositions!)}]"
+                    + $"[i:{string.Join(",", InsertionPositions!)}]"
+                    + $"[d:{string.Join(",", DeletionPositions!)}]"
         );
 }
 

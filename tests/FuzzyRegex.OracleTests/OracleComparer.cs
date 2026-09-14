@@ -181,7 +181,9 @@ internal static class OracleComparer
                 bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
 
                 return new MatchesOutcome([
-                    .. compiled.Matches(row.Subject, overlapped: overlapped).Select(DescribeGroups),
+                    .. compiled
+                        .Matches(row.Subject, overlapped: overlapped)
+                        .Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
                 ]);
             }
 
@@ -216,7 +218,7 @@ internal static class OracleComparer
                 _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial),
             };
 
-            return Describe(match);
+            return Describe(match, PositionsUnavailableUpstream(compiled));
         }
         catch (NotImplementedException)
         {
@@ -333,9 +335,39 @@ internal static class OracleComparer
             _ => recorded,
         };
 
-    private static IOracleOutcome Describe(Match match) => match.Success ? DescribeGroups(match) : new NoMatchOutcome();
+    /// <summary>
+    /// Whether upstream could have been asked where a fuzzy match spent its errors, which it cannot
+    /// be on a POSIX pattern.
+    /// </summary>
+    /// <param name="compiled">The pattern, as this port compiled it.</param>
+    /// <returns><see langword="true"/> where the recorder had to omit the change positions.</returns>
+    /// <remarks>
+    /// <para>
+    /// Reading <c>Match.fuzzy_changes</c> on a POSIX fuzzy match that spent an error is an access
+    /// violation that kills the recorder outright - not an exception, so no <c>except</c> clause can
+    /// see it, and <c>record-oracle.py --rows</c> over one such row exits 139 and writes no file at
+    /// all. <c>Match.fuzzy_counts</c> on the same match answers correctly, so the recorder records
+    /// the counts and omits the positions, and this side drops its own positions to match. Ledger
+    /// entry 9; the reads are enumerated in <c>tools/probes/upstream-posix-fuzzy-safe-attributes.py</c>.
+    /// </para>
+    /// <para>
+    /// Read off the COMPILED pattern rather than off <c>row.Flags</c>, because an inline <c>(?p)</c>
+    /// never reaches the flags the row carries. Upstream's recorder reads its own
+    /// <c>Pattern.flags</c> for the same reason and the two agree on every spelling - the flag, a
+    /// leading <c>(?p)</c>, one written mid-pattern, and one inside a group
+    /// (<c>tools/probes/upstream-posix-flag-is-visible-on-compiled.py</c>, regex 2026.9.10,
+    /// 2026-09-14). Deriving it on each side independently rather than passing a recorded marker is
+    /// deliberate: if the two ever stopped agreeing about which rows are POSIX, the row would be
+    /// REPORTED as a divergence rather than quietly compared with the positions dropped.
+    /// </para>
+    /// </remarks>
+    private static bool PositionsUnavailableUpstream(FuzzyRegex compiled) =>
+        (compiled.Options & FuzzyRegexOptions.Posix) != FuzzyRegexOptions.None;
 
-    private static MatchOutcome DescribeGroups(Match match)
+    private static IOracleOutcome Describe(Match match, bool positionsUnavailable) =>
+        match.Success ? DescribeGroups(match, positionsUnavailable) : new NoMatchOutcome();
+
+    private static MatchOutcome DescribeGroups(Match match, bool positionsUnavailable)
     {
         GroupCollection groups = match.Groups;
         var described = new List<OracleGroup>(groups.Count);
@@ -357,7 +389,7 @@ internal static class OracleComparer
 
         FuzzyCounts counts = match.FuzzyCounts;
         FuzzyChanges changes = match.FuzzyChanges;
-        var fuzzy = new OracleFuzzy(
+        OracleFuzzy fuzzy = new OracleFuzzy(
             counts.Substitutions,
             counts.Insertions,
             counts.Deletions,
@@ -366,6 +398,11 @@ internal static class OracleComparer
             changes.Deletions
         );
 
+        if (positionsUnavailable)
+        {
+            fuzzy = fuzzy.WithoutPositions();
+        }
+
         return new MatchOutcome(
             described,
             match.LastGroupNumber,
@@ -373,7 +410,9 @@ internal static class OracleComparer
             match.PartialMatch,
             // A match that used no errors renders no fuzzy half at all, which is what the recorder
             // writes for one too - so an exact match of a fuzzy pattern reads the same as a match of
-            // an exact one, and every wave recorded before S38 still compares.
+            // an exact one, and every wave recorded before S38 still compares. That test comes after
+            // the positions are dropped and not before it: an exact POSIX match is one upstream never
+            // died on, and rendering it as `fuzzy=(0,0,0)` here would red every such row.
             fuzzy.IsExact
                 ? null
                 : fuzzy
