@@ -2062,3 +2062,241 @@ and the substitution at 6 - which is upstream's own answer on the three doors th
 
 **Related:** entry 11 (mechanism C, the fix that exposed this), entry 9 (the stale running totals
 that this port shared), entry 12 and entry 13 (the other two ways `BESTMATCH` loses a candidate).
+
+---
+
+**Entries 17-21 come from S49's upstream issue sweep (2026-09-14) and differ in kind from 1-16.**
+Everything above was found by this port's own oracle or by reading upstream's C, so each entry is a
+place the two engines *disagree*. These five are the opposite: they are bugs both engines share, so
+the oracle reports agreement and sees nothing (design spec amendment 13). They come from the live
+tracker instead, re-triaged in `docs/plan/upstream-issues/2026-09-14-triage.md`, and each already
+has an upstream issue number, a reporter and in two cases a maintainer's own "it looks like a bug" -
+so the report a filing would need is mostly written. What this ledger adds is the measurement that
+this port reproduces it, the test that pins the correct answer, and the bar S50 has to clear.
+
+Every reproduction below is re-runnable from the committed tree:
+`python tools/probes/upstream-issue-sweep.py` (upstream 2026.9.10),
+`pwsh -File tools/probes/port-issue-sweep.ps1` (this port, after a Debug build), and
+`python tools/probes/pcre2-partial-truncation-assertions.py` (PCRE2 10.47, entry 21 only).
+Each has a failing test skipped `needs:issue-<n>` in
+`tests/FuzzyRegex.Tests/Gaps/UpstreamIssues/InheritedIssueTests.cs`, which S50 un-skips.
+
+## 17. Branch reset gives two groups in the same branch the same number (upstream issue 425)
+
+**Status:** not filed; inherited here. Upstream issue 425 is open since 2021-09-28 with two
+maintainer comments. **Not fixed here yet - S50 owns it.**
+
+**Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14:
+
+```python
+>>> import regex
+>>> p = regex.compile(r'(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))')
+>>> m = p.match('BUG!')
+>>> m.groupdict()['bug'], m.groups(), dict(p.groupindex), p.groups
+('!', ('!', None), {'bug': 1}, 2)
+```
+
+This port answers `bug='!' bugIndex=1 | g1='!' g2=None` - identical.
+
+**The mechanism.** In the second branch, `(?P<bug>BUG)` takes number 1 because the branch reset
+restarts the numbering, and `(!)` *also* takes number 1, because the reset does not skip a number
+the branch has already consumed. Two distinct groups then write to one slot and the later write
+wins, so 'BUG' is unrecoverable from the match object at all.
+
+**Why it is a defect even though the maintainer asked "is it a bug?", stated carefully, because an
+earlier draft of this entry over-claimed and a blind review caught it.** His second comment offers
+three candidate rules, and **option 1 is explicitly labelled "(current behaviour)"** - so it is not
+true that the status quo matches none of them:
+
+> 1. Number consecutively (current behaviour).
+> 2. Number consecutively, but skip group numbers that have been used up to that point in the branch.
+> 3. Number consecutively, but skip group numbers that have used anywhere in that branch.
+
+Options **2 and 3 both** give branch 2 the numbers 1 and 2, so both make `bug` reach 'BUG'. Option 1
+keeps today's answer. So this entry, and the test, do commit a fixer to rejecting option 1, and the
+grounds are not "two options out of three":
+
+- **Under option 1 a capture group's text is unreachable through any API.** `(?P<bug>BUG)` matches
+  'BUG' and nothing can retrieve it - not by name, not by number, not through `captures`.
+- **Worse, the name resolves to another group's text.** `groupindex` maps `bug` to 1 and group 1
+  holds '!', so `m.group('bug')` returns text matched by a different group in the pattern. That is
+  not a numbering convention anyone chose; it is two groups writing to one slot.
+- **The maintainer calls it the problem himself**, in his first comment: "The problem here is that
+  the branch reset is restarting the numbering and it's not skipping over group numbers that have
+  already been used in that branch. The question is whether it should."
+
+So what is genuinely open upstream is the choice between options 2 and 3 - they differ only on a
+branch's *later* groups - and both fix this row.
+
+**What the test asserts,** deliberately narrower than the issue: `bug` reaches 'BUG', and '!' lives
+in some other group. Options 2 and 3 agree on that, so S50 picks between them freely; what the test
+does rule out is leaving the behaviour as it is.
+
+**Proposed fix (for the eventual report).** In the branch-reset handler, start each branch's counter
+at the same value but advance past any number the branch has already assigned - the maintainer's
+own option 2 - so a named group that resolves to an earlier number does not leave its slot free for
+the next unnamed group in the same branch.
+
+## 18. A repeated capture group costs hundreds of bytes per repetition (upstream issue 554)
+
+**Status:** not filed; inherited here **and amplified**. Upstream issue 554 is open since
+2025-02-17 with no maintainer comment. **Not fixed here yet - S50 owns it.**
+
+**Reproduction and bisection**, measured 2026-09-14, `fullmatch('(ab)*', 'ab' * n)`:
+
+| n | stdlib `re` | `regex` 2026.9.10 | this port |
+|---|---|---|---|
+| 1,000,000 | ok, 99 B/rep | ok, 192 B/rep | ok, **611 B/rep** (583 MB) |
+| 2,000,000 | ok, 96 B/rep | ok, 192 B/rep | ok |
+| 4,000,000 | ok, 94 B/rep | ok, 192 B/rep | **`InvalidOperationException`: 1GB backtracking bound** |
+| 6,000,000 | ok, 98 B/rep | ok, 161 B/rep | (not reached) |
+| 10,000,000 | ok, 92 B/rep | **`MemoryError`**, 0.6 s | (not reached) |
+
+The `re` and `regex` columns are `tracemalloc` peaks printed by
+`tools/probes/upstream-issue-sweep.py`; the port column is `GC.GetTotalAllocatedBytes` from
+`tools/probes/port-issue-sweep.ps1`. **All three exclude the subject string** - each probe builds
+the subject before it starts measuring, which was checked rather than assumed
+(`get_traced_memory()` reads `(0, 0)` at `start()` with a 2,000,041-byte subject already live). So
+these are engine allocations, and this port costs about three times `regex`, which costs about
+twice `re`.
+
+**Only the port's n=1,000,000 figure is quoted, and that is a correction an independent verifier
+forced.** Two earlier drafts of this table quoted per-n figures for the port that would not
+reproduce - first a `GetTotalMemory` live delta the verifier measured as 537 B/rep flat where the
+draft said 574 then 343, then an allocation counter that still gave 611 on one run and 343 on the
+next. The cause was found rather than averaged away: the engine rents its backtracking buffer from
+a **process-wide** pool, so a later call in the same process may reuse the earlier one's buffer and
+allocate nothing for it, and a fresh pattern object does not help. Cold - the first call in a fresh
+process - is 611 B/rep every time. Timings are not evidence here either; the failing call has taken
+between 3.4 s and 8.6 s. The 1GB bound is the one figure that is deterministic by construction,
+because it is a fixed constant rather than a measurement, and it is what the test asserts.
+
+**This port is worse than the thing it reproduces**, which is the useful finding: it gives up at
+4,000,000 where upstream still manages 6,000,000. The failure mode is better - a clear exception
+naming a documented 1GB bound rather than a `MemoryError` - but the bound arrives sooner.
+
+**Where the bytes go here**, from the stack of the failing run: `Matcher.BasicMatch`
+(`Matcher.cs:5406`) pushes one `MatchBodyTailStateData` block per repetition through
+`PushMatchBodyTailStateData` (`:2679`) into `ByteStack.PushSize` -> `PushBlock` -> `Grow`
+(`ByteStack.cs:290`), and nothing pops them while the repeat is still running.
+
+**Where they go upstream**, at the precision the evidence supports: **not established.** The shape
+is the same - a repeat body that captures must record enough to restore the group on backtracking -
+but no line has been identified in upstream's C and a report must say so. The `/Od /Zi` MSVC build
+S47c installed is the instrument that would settle it.
+
+**Why it is a defect rather than a fact about backtracking.** `(ab)*` is deterministic: at every
+position either `ab` matches or the repeat ends, so there is nothing to backtrack into. An engine
+that recognised the body as having no alternative would need O(1) state per repetition, and stdlib
+`re` - which is not a sophisticated engine - reaches 10,000,000 where `regex` does not.
+
+**What the test asserts.** `FullMatch("(ab)*", "ab" * 4_000_000)` succeeds - upstream's own ceiling,
+not a byte figure that would vary by machine. The 1GB bound is a fixed constant, so the test is
+deterministic rather than a race against the machine.
+
+## 19. `\m` before a fuzzy section does not match at position 0 (upstream issue 563)
+
+**Status:** not filed; inherited here. Upstream issue 563 is open since 2025-04-17, and the
+maintainer's own comment is "It looks like a bug, but I'm not sure whether I want to fix it in case
+I break something in the current codebase." **Not fixed here yet - S50 owns it.**
+
+**Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
+
+```python
+>>> regex.findall(r'\m(?:Y){i}\M', 'XY YX')
+['YX']                       # 'XY' is missing
+>>> regex.findall(r'\m(?:X){i}\M', 'XY YX')
+['XY', 'YX']                 # the same shape, literal 'X', both found
+>>> regex.findall(r'\m(?:Y){i}\M', ' XY YX')
+['XY', 'YX']                 # the same pattern, one leading space, both found
+```
+
+**The three rows are the whole argument.** Changing the literal so the first word *starts* with it
+fixes it, and prepending one space to the subject fixes it. Position 0 is the only difference, so
+this is `\m` (start-of-word) failing to hold at the start of the subject when what follows is a
+fuzzy section that must insert a character before the literal - not a fact about `{i}` or about
+the subject's content.
+
+**Where it comes from,** at the precision the evidence supports: **not established to a line.**
+The suspected area is the interaction between the word-boundary check and the fuzzy insertion that
+precedes the first consumed character, since an insertion at position 0 has no preceding character
+for `\m` to compare against. A report must say it does not know.
+
+## 20. Loosening a fuzzy budget loses a match (upstream issue 564)
+
+**Status:** not filed; inherited here. Upstream issue 564 is open since 2025-04-17, same date and
+same maintainer comment as entry 19 ("It looks like a bug"). The reporter suspected the two were
+related; they may share entry 19's mechanism, and that is a hypothesis rather than a finding.
+**Not fixed here yet - S50 owns it.**
+
+**Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
+
+```python
+>>> regex.findall(r'(?b)\m(?:Y){1i+1d+1s<=1}\M', ' XY Z')
+['XY', 'Z']
+>>> regex.findall(r'(?b)\m(?:Y){1i+1d+1s<=2}\M', ' XY Z')
+['Z']                        # the LOOSER budget finds fewer matches
+```
+
+**Why it is a defect and not a ranking choice.** Fuzzy budgets are monotone by construction: every
+candidate that satisfies `<=1` also satisfies `<=2`, because the cost equation is the same and the
+bound is weaker. A looser budget may legitimately return a *different, better* match at a given
+position - that is what `(?b)` is for - but it cannot make a position stop matching altogether.
+'XY' does not reappear in any other form; it is simply gone.
+
+**What the test asserts:** monotonicity - the `<=2` result contains everything the `<=1` result
+found - rather than an expected span list. That is true whatever the right answer set turns out to
+be, so it does not commit S50 to spans this slice has no authority to fix.
+
+## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
+
+**Status:** not filed; inherited here. Upstream issue 589 is open since 2025-10-08 with six
+comments; the maintainer considers the behaviour correct. **This entry disagrees with him, on his
+own documentation and on a second engine.** Not fixed here yet - S50 owns it.
+
+**Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
+
+```python
+>>> a = regex.compile(r"(?!(True|False)\b)(.*)")
+>>> a.fullmatch("Truest")
+<regex.Match object; span=(0, 6), match='Truest'>     # a complete match exists
+>>> a.fullmatch("True", partial=True)
+None                                                  # yet its own prefix is denied
+```
+
+**Upstream's documented definition is the first half of the case.** `upstream/docs/Features.html`
+line 576: "A partial match is one that matches up to the end of string, but that string has been
+truncated and you want to know **whether a complete match could be possible if the string had not
+been truncated**." 'True' is a prefix of 'Truest', 'Truest' is a complete match, so a complete match
+is possible and the documented answer is a partial.
+
+**A second engine is the other half.** PCRE2 10.47
+(`python tools/probes/pcre2-partial-truncation-assertions.py`):
+
+```
+(?!(True|False)\b)(.*)  over 'True'    SOFT=PARTIAL (0,4)   HARD=PARTIAL (0,4)
+True\b                  over 'True'    SOFT=match   (0,4)   HARD=PARTIAL (0,4)
+True\B                  over 'True'    SOFT=PARTIAL (0,4)   HARD=PARTIAL (0,4)
+```
+
+The `True\b` row is the mechanism: under SOFT, PCRE2 reports a definite match when it has one, and
+under HARD it reports the same span as PARTIAL - so it treats the boundary at the end of the
+available text as **unresolved** and escalates, instead of deciding it against text the caller has
+declared truncated. Upstream resolves it, which is coherent but produces a false negative.
+
+**Why the false-negative direction matters.** Upstream's own documentation advertises partial
+matching for incremental input ("if you wanted a user to enter a 4-digit number and check it
+character by character"), and there a false negative tells the user "it'll never match" about input
+that will. That is the failure the feature exists to prevent.
+
+**Not the same as issue 367, and this entry is careful about that.** 367 reports the opposite
+complaint - a partial that no continuation can complete - and S49 **dismissed** it: PCRE2 answers
+PARTIAL on 367's identical rows, and deciding satisfiability in general is not possible (367's own
+example encodes primality). 367's false positive is shared by every engine and undecidable; 589's
+false negative is shared by no second engine and is decidable at the truncation point. A report
+that conflates them will be rejected, and so would a fix that tried to solve both.
+
+**Proposed fix (for the eventual report).** Under `partial`, a zero-width assertion evaluated at the
+end of the available text should not be resolved against it: `\b`, `\B` and the lookarounds that
+depend on them should yield "unresolved", which fails the match into a partial rather than into a
+no-match. PCRE2's SOFT semantics are the model - a definite complete match still wins.

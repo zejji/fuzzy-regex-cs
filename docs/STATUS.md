@@ -53,11 +53,17 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 21 | 21 | 0 | 0 |
-| Gaps | 3975 | 3975 | 0 | 0 |
+| Gaps | 3980 | 3975 | 5 | 0 |
 
 ## Tests waiting on a capability
 
 What the next slice should deliver, biggest win first.
 
-None: every test is enabled.
+| Capability | Tests it would enable |
+|---|---:|
+| `issue-425` | 1 |
+| `issue-554` | 1 |
+| `issue-563` | 1 |
+| `issue-564` | 1 |
+| `issue-589` | 1 |
 

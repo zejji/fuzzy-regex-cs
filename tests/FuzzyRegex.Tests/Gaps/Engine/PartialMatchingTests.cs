@@ -166,8 +166,19 @@ public sealed class PartialMatchingTests
     {
         // Upstream issue 367 ("second even prime"): no continuation of the subject can satisfy both
         // lookaheads, so a partial match here is a true positive that can never become a real one.
-        // Ported faithfully and pinned, not fixed - the Phase 6 upstream sweep owns it
-        // (docs/plan/2026-08-31-upstream-issue-triage.md, row 367).
+        //
+        // S49's sweep judged the issue on 2026-09-14 and DISMISSED IT, so this pin is now permanent
+        // rather than provisional: PCRE2 10.47 answers PARTIAL on the identical rows, including the
+        // reporter's own `(?!.+).*` over '1', so reporting a partial no continuation can complete is
+        // what every engine does (tools/probes/pcre2-partial-truncation-assertions.py). Deciding it
+        // in general is not possible - the issue's own example encodes primality. What is wrong is
+        // upstream's documented promise, "whether a complete match could be possible if the string
+        // had not been truncated" (upstream/docs/Features.html:576), which no engine keeps. See
+        // docs/plan/upstream-issues/2026-09-14-triage.md, row 367, reclassified C -> A.
+        //
+        // Issue 589 is the SAME machinery failing the other way and IS a bug - a prefix denied
+        // although its completion exists, where PCRE2 answers PARTIAL. It is ledger entry 21 and
+        // Gaps/UpstreamIssues/InheritedIssueTests.cs, and it is not this row.
         //
         // Measured 2026-09-12, .scratch/probe-issue367.py:
         //   compile('(?=ab)(?=cd)').match('a', partial=True)  -> (0,1) partial True
