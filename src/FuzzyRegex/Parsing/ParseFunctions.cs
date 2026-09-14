@@ -1188,14 +1188,25 @@ internal static class ParseFunctions
     {
         // Capture group numbers in different branches can reuse the group numbers.
         int initialGroupCount = info.GroupCount;
+
+        // NOT UPSTREAM'S (S50, upstream issue 425): each branch gets its own view of which numbers
+        // a reused name has already claimed, and the branch reset as a whole leaves none behind.
+        // Saved and restored rather than just cleared, because branch resets nest.
+        int[] outerBranchGroupNumbers = [.. info.BranchGroupNumbers];
+        info.BranchGroupNumbers.Clear();
+
         List<RegexBase> branches = [ParseSequence(source, info)];
         int finalGroupCount = info.GroupCount;
         while (source.MatchText("|"))
         {
             info.GroupCount = initialGroupCount;
+            info.BranchGroupNumbers.Clear();
             branches.Add(ParseSequence(source, info));
             finalGroupCount = Math.Max(finalGroupCount, info.GroupCount);
         }
+
+        info.BranchGroupNumbers.Clear();
+        info.BranchGroupNumbers.UnionWith(outerBranchGroupNumbers);
 
         info.GroupCount = finalGroupCount;
         source.Expect(")");

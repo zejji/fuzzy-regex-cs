@@ -100,6 +100,14 @@ internal sealed class Info
     /// </summary>
     internal List<(RegexBase Group, bool Reverse, bool Fuzzy)> AdditionalGroups { get; set; } = [];
 
+    /// <summary>
+    /// NOT UPSTREAM'S (S50, upstream issue 425). The group numbers that a name already seen in an
+    /// earlier branch has pulled into the branch-reset branch now being parsed, so that
+    /// <see cref="OpenGroup"/> does not hand one of them to a second group in the same branch.
+    /// Empty outside a branch reset; <see cref="ParseFunctions.ParseCommon"/> scopes it to a branch.
+    /// </summary>
+    internal HashSet<int> BranchGroupNumbers { get; } = [];
+
     /// <summary>Opens a capture group, assigning its number. Upstream <c>open_group</c>.</summary>
     /// <param name="name">The group's name, or <see langword="null"/> for an unnamed group.</param>
     /// <returns>The group number, negative for a nested named group's private alias.</returns>
@@ -110,6 +118,26 @@ internal sealed class Info
             while (true)
             {
                 GroupCount++;
+
+                // DIVERGES FROM UPSTREAM by the BranchGroupNumbers test (S50, upstream issue 425;
+                // DIVERGENCES.md). Upstream skips a number only for a NAMED group, and only when
+                // another name owns it - which is enough outside a branch reset, where numbers are
+                // handed out in order and never reused. Inside one, ParseCommon rolls GroupCount
+                // back for each branch and a name already seen in an earlier branch resolves to its
+                // old number without moving the counter, so the next group in the same branch is
+                // handed that number a second time. Two groups then write to one slot and the later
+                // write wins: on `(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))` over 'BUG!' upstream answers
+                // bug='!', so `(?P<bug>BUG)`'s text is unreachable through any API and the NAME
+                // resolves to text a different group matched.
+                //
+                // This is the maintainer's own option 2, "number consecutively, but skip group
+                // numbers that have been used up to that point in the branch" (2021-09-28). It is
+                // a no-op outside a branch reset, where BranchGroupNumbers is empty.
+                if (BranchGroupNumbers.Contains(GroupCount))
+                {
+                    continue;
+                }
+
                 if (name is null || !GroupName.ContainsKey(GroupCount))
                 {
                     break;
@@ -125,6 +153,12 @@ internal sealed class Info
                 GroupIndex[name] = group;
                 GroupName[group] = name;
             }
+        }
+        else
+        {
+            // The number this name already owns is now used in the branch being parsed, so the
+            // loop above must not hand it out again. ParseCommon scopes this to one branch.
+            BranchGroupNumbers.Add(group);
         }
 
         if (OpenGroups.Contains(group))

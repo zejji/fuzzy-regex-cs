@@ -2083,8 +2083,33 @@ Each has a failing test skipped `needs:issue-<n>` in
 
 ## 17. Branch reset gives two groups in the same branch the same number (upstream issue 425)
 
-**Status:** not filed; inherited here. Upstream issue 425 is open since 2021-09-28 with two
-maintainer comments. **Not fixed here yet - S50 owns it.**
+**Status:** not filed; inherited here and **FIXED HERE (S50)** for the shape the issue reports, with
+two other orderings parked. Upstream issue 425 is open since 2021-09-28 with two maintainer comments.
+
+**What S50 changed.** `Info.OpenGroup` now skips a number that a reused name has already claimed in
+the branch being parsed, which is the maintainer's own **option 2**. `ParseCommon` scopes the set to
+one branch and restores it afterwards, because branch resets nest. The pattern above answers
+`bug='BUG'`, `groups=('BUG', '!')`. It is a no-op outside a branch reset, where numbers are handed
+out in order and never reused, and **no compile-parity corpus row changes** - corpus row 613,
+`(?|(?<a>a)(?<b>b)|(?<b>c)(d))(e)`, is the one that would, and it is green.
+
+**Two orderings are PARKED and this entry is explicit about them,** because an earlier draft of the
+fix broke upstream's own `test_branch_reset#16-17` by advancing the counter to the reused name's
+number instead of merely skipping it. Where the UNNAMED group comes first the collision is the other
+way round and option 2 cannot reach it, because the name's number is already fixed by an earlier
+branch:
+
+```
+(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))  over '!BUG'  -> groups=('BUG', None), '!' lost
+(?|(?P<n>a)(b)|(c)(?P<n>d))          over 'cd'    -> groups=('d', None),   'c' lost
+```
+
+Both reproduce on upstream 2026.9.10 and both still reproduce here. Only **option 3** - "skip group
+numbers that have been used anywhere in that branch" - fixes them, and that needs the branch's later
+named groups known before its earlier unnamed ones are numbered, which the single-pass parser cannot
+do without a source-level pre-scan. The maintainer has not chosen between options 2 and 3, so
+building option 3's machinery would be inventing semantics upstream may contradict. Carried as a
+named blocker in STATE.md.
 
 **Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14:
 
@@ -2140,7 +2165,8 @@ the next unnamed group in the same branch.
 ## 18. A repeated capture group costs hundreds of bytes per repetition (upstream issue 554)
 
 **Status:** not filed; inherited here **and amplified**. Upstream issue 554 is open since
-2025-02-17 with no maintainer comment. **Not fixed here yet - S50 owns it.**
+2025-02-17 with no maintainer comment. **PARKED BY S50** - see the end of this entry for why, and
+what was ruled out before parking it.
 
 **Reproduction and bisection**, measured 2026-09-14, `fullmatch('(ab)*', 'ab' * n)`:
 
@@ -2196,9 +2222,12 @@ deterministic rather than a race against the machine.
 
 ## 19. `\m` before a fuzzy section does not match at position 0 (upstream issue 563)
 
-**Status:** not filed; inherited here. Upstream issue 563 is open since 2025-04-17, and the
-maintainer's own comment is "It looks like a bug, but I'm not sure whether I want to fix it in case
-I break something in the current codebase." **Not fixed here yet - S50 owns it.**
+**Status:** not filed; inherited here. **PARKED BY S50**, together with entry 20, which S50 proved is
+the same bug. The mechanism is now established to a line, and two fix designs were built and
+reverted - see "What S50 built and why it went back" at the end of this entry, which is the most
+useful thing in it. Upstream issue 563 is open since 2025-04-17, and the maintainer's own comment is
+"It looks like a bug, but I'm not sure whether I want to fix it in case I break something in the
+current codebase."
 
 **Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
 
@@ -2217,17 +2246,103 @@ this is `\m` (start-of-word) failing to hold at the start of the subject when wh
 fuzzy section that must insert a character before the literal - not a fact about `{i}` or about
 the subject's content.
 
-**Where it comes from,** at the precision the evidence supports: **not established to a line.**
-The suspected area is the interaction between the word-boundary check and the fuzzy insertion that
-precedes the first consumed character, since an insertion at position 0 has no preceding character
-for `\m` to compare against. A report must say it does not know.
+**Where it comes from - ESTABLISHED TO A LINE by S50, and the earlier draft of this paragraph, which
+said "not established", was wrong about the area as well.** It is nothing to do with the word
+boundary having no preceding character. It is `_regex.c`:10214, with upstream's own comment two lines
+above it:
+
+```c
+/* Permit insertion except initially when searching (it's better just to
+ * start searching one character later).
+ */
+data.permit_insertion = !search || state->text_pos != state->search_anchor;
+```
+
+`search_anchor` is set once per matching operation (`init_match`, :3410) and never per candidate
+start position, so **the rule fires at exactly ONE of the positions a scan visits.** The isolating
+probe is the same subject and the same winning span answered two different ways purely according to
+where the search was told to begin (`python tools/probes/issue-563-anchor-rule.py`, section 2):
+
+```
+>>> a = regex.compile(r'\m(?:Y){i}\M')
+>>> a.search(' XY', 0)      # span (1, 3) 'XY'
+>>> a.search(' XY', 1)      # None
+```
+
+**Upstream's premise is false exactly when a zero-width assertion before the fuzzy item holds at the
+anchor and NOT one character on.** Starting one character later is then a *different* match rather
+than this one minus an insertion, and the match is lost outright.
+
+**The fix is a generalisation of upstream's own behaviour, not a new rule, and that is the strongest
+thing in this entry.** `^` and `\A` already escape the rule, because `basic_match` turns a
+start-anchored pattern into an anchored match and stops searching - so upstream **keeps** a match
+that begins with an inserted character:
+
+```
+findall(r'^(?:abc){i<=1}', 'xabc')      -> ['xabc']
+findall(r'\A(?:abc){i<=1}', 'xabc')     -> ['xabc']
+findall(r'(?m)^(?:abc){i<=1}', 'xabc')  -> []        # the same pattern, no anchoring
+findall(r'(?=x)(?:abc){i<=1}', 'xabc')  -> []
+```
+
+**Upstream also already allows a runaway leading insertion everywhere except the anchor.** These two
+subjects differ by one leading space, and the answer at the same relative position differs:
+
+```
+findall(r'\m(?:Y){i}\M', 'q XY YX')   -> ['XY', 'YX']
+findall(r'\m(?:Y){i}\M', ' q XY YX')  -> ['q XY', 'YX']
+```
+
+## What S50 built and why it went back
+
+**Two designs, both reverted, and each was killed by a different blind review finding.** Neither was
+killed by its rule: the one-step-on rule below is right and survived both. What does not work is
+holding the answer in a bare field.
+
+**The rule, which the next attempt should keep.** Lift upstream's prohibition at the anchor only when
+a zero-width assertion held there AND fails one character on - because only then is "start searching
+one character later" a *different* match rather than this one minus an insertion. The narrowing is
+not optional: a first version that lifted the rule whenever any assertion had held reddened upstream's
+own `test_fuzzy` rows 51, 52, 54 and 56, which is how it was found rather than argued.
+
+**The design, which does not work.** A `MatchState` flag set where the assertion succeeds at the
+anchor and read by `AtInsertionAnchor`. It is bare mutable state that the backtracking engine never
+saves or restores, so it is wrong in BOTH directions and each review found a different half:
+
+- **Under-clearing.** An assertion that held only on a path the engine then abandoned still pinned
+  the anchor. `(?:\bq|)(?:abc){i<=1}` and `(?!\bz)(?:abc){i<=1}` over 'xabc' answered `'xabc'` where
+  upstream says `'abc'`.
+- **Clearing it in the `Branch` and failed-lookaround backtrack arms fixed those two shapes and left
+  the repeats.** `(?:\bq)*`, `(?:\bq)?`, `(?:\bq){0,3}`, `(?:\bq)*+` and `(?>(?:\bq)*)` before
+  `(?:abc){i<=1}` over 'xabc' all still answered `'xabc'`; ten of twelve probed shapes diverged.
+- **Over-clearing, by the same two clears.** They also discard a pin set BEFORE and OUTSIDE the
+  construct, so a semantically inert group after the assertion threw the fix away again:
+  `\m(?:z|)(?:Y){i}\M` and `\m(?!q)(?:Y){i}\M` over 'XY' went back to no match, while
+  `\m(?:Y){i}\M` matched.
+
+**So the pin has to be part of the backtracking state rather than a field beside it** - pushed and
+popped with the frames that abandon a path - **or be replaced by a compile-time analysis**: "every
+path from the start node to this fuzzy item passes a position assertion", combined with the same
+dynamic one-step-on test. Either is a slice's work with its own oracle pass, and neither should be
+improvised at the end of one.
+
+**All of it is pinned** in `Gaps/UpstreamIssues/InheritedIssueTests.cs`, which asserts the inherited
+answer plus every row the two attempts broke, so the next attempt has to keep them. Re-run the
+evidence with `python tools/probes/issue-563-anchor-rule.py`.
 
 ## 20. Loosening a fuzzy budget loses a match (upstream issue 564)
 
-**Status:** not filed; inherited here. Upstream issue 564 is open since 2025-04-17, same date and
-same maintainer comment as entry 19 ("It looks like a bug"). The reporter suspected the two were
-related; they may share entry 19's mechanism, and that is a hypothesis rather than a finding.
-**Not fixed here yet - S50 owns it.**
+**Status:** not filed; inherited here. **PARKED BY S50 with entry 19, which S50 proved is the same
+bug.** Upstream issue 564 is open since 2025-04-17, same date and same maintainer comment as entry 19
+("It looks like a bug").
+
+**The reporter's suspicion that the two are related was right, and this is now a finding rather than
+a hypothesis:** entry 19's one-clause change turned this row green with no code of its own, so both
+budgets answered `['XY', 'Z']`, and reverting entry 19 took it straight back. The route is
+`BESTMATCH`'s re-anchoring - the
+looser budget makes the candidate walk restart with the anchor at the match start, where the tighter
+one never does, and `\m` then holds at an anchor that entry 19's rule had frozen. That is why the
+LOOSER budget was the one losing the match.
 
 **Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
 
@@ -2250,9 +2365,11 @@ be, so it does not commit S50 to spans this slice has no authority to fix.
 
 ## 21. A partial `fullmatch` denies a prefix whose completion exists (upstream issue 589)
 
-**Status:** not filed; inherited here. Upstream issue 589 is open since 2025-10-08 with six
-comments; the maintainer considers the behaviour correct. **This entry disagrees with him, on his
-own documentation and on a second engine.** Not fixed here yet - S50 owns it.
+**Status:** not filed; inherited here. **S50 FIXED IT AND THEN REVERTED THE FIX** - see the end of
+this entry, which is the most useful thing in it for whoever picks this up. Upstream issue 589 is
+open since 2025-10-08 with six comments; the maintainer considers the behaviour correct. **This
+entry disagrees with him, on his own documentation and on a second engine**, and nothing below
+weakens that - what was wrong was the mechanism, not the verdict.
 
 **Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14 - identical on both:
 
@@ -2296,7 +2413,56 @@ example encodes primality). 367's false positive is shared by every engine and u
 false negative is shared by no second engine and is decidable at the truncation point. A report
 that conflates them will be rejected, and so would a fix that tried to solve both.
 
-**Proposed fix (for the eventual report).** Under `partial`, a zero-width assertion evaluated at the
-end of the available text should not be resolved against it: `\b`, `\B` and the lookarounds that
-depend on them should yield "unresolved", which fails the match into a partial rather than into a
-no-match. PCRE2's SOFT semantics are the model - a definite complete match still wins.
+**Proposed fix (for the eventual report).** Under `partial`, a word or grapheme boundary evaluated
+at the end of the available text should not be resolved against it: it should yield "unresolved",
+which fails the match into a partial rather than into a no-match. PCRE2's SOFT semantics are the
+model - a definite complete match still wins.
+
+## WHAT S50 BUILT, AND WHY IT WAS REVERTED
+
+**S50 wrote that fix, measured it green, and its own blind review broke it.** The attempt made all
+seven word and grapheme boundary predicates answer `PARTIAL` at the right-hand truncation point,
+through one helper. It turned the issue's row green and survived two rounds of narrowing. It is
+still reverted, and the reason is worth more than the code was.
+
+**Returning `PARTIAL` from a predicate ENDS the match, and the engine had not finished
+backtracking.** Measured against the reverted build and against `HEAD`:
+
+```
+search(r'(\.+?)\1\b', '..',   partial=True)  -> group 1 was (0, 1); upstream and HEAD give (0, 2)
+search(r'(\.+?)\1\b', '....', partial=True)  -> group 1 was (0, 2); upstream and HEAD give (0, 3)
+```
+
+The lazy repeat's FIRST try reached the boundary, escalated, and returned before the repeat could
+grow - so a partial this port previously got exactly right came back with a truncated capture group.
+A live `partial-sliced` wave row at seed 20260915 showed the same thing.
+
+**And the `ExpectedDivergences` entry written for the fix hid it.** The entry classified the
+regression as expected, because its predicate compared overall spans and never looked inside a
+capture group. An entry that swallows a regression in the fix it accounts for is the rot that file
+exists to prevent, and it went with the revert.
+
+**The sound fix is PCRE2's model, and it is not a predicate tweak.** PCRE2 does not return "partial"
+from the assertion; it sets a `hitend` flag meaning "the end of the subject was reached while
+deciding", lets matching and backtracking run to completion, and only turns a FINAL failure into a
+partial. That keeps a definite complete match winning and keeps backtracking whole. Implementing it
+here means new match state, a decision about which span a hitend-derived partial reports, and its own
+oracle pass - a slice, not a tail-end fix. Carried as a named blocker in STATE.md.
+
+**Two of the reverted attempt's narrowings are worth keeping for whoever does it**, because both were
+forced by measurement rather than chosen:
+
+1. **The attempt must have consumed something.** Escalating at a position the match has not reached
+   turns every `\b`-leading pattern into a zero-width partial on a short or empty subject: without
+   the clause a default three-seed 6300-row wave went from 0 divergences to **8, 5 and 5**, and every
+   one of the eight at seed 7 was that shape. It is also the answer this port has already judged
+   WRONG - a zero-width partial at the truncation point is what the `search-start-partial` pin
+   refuses.
+2. **The LEFT-hand twin needs deciding at the same time.** `(?r)\b$` over `''` is the mirror image
+   and is a PERMANENT divergence decided 2026-09-12 - on reasoning that quotes the maintainer's
+   issue-589 argument, which this entry rejects. Fixing one side and not the other is not a
+   principled place to stop, and S50's attempt did exactly that.
+
+**The test now pins the inherited answer** in
+`Gaps/UpstreamIssues/InheritedIssueTests.cs`, together with the two `(\.+?)\1\b` rows the reverted
+attempt broke, so the next attempt has to keep them.

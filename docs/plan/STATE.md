@@ -2,37 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S49 IS CLOSED (2026-09-14, one sitting).** Suite 5,968 / 5,963 passing / 5 skipped, ratchet GREEN,
-baseline unchanged at 5,855. No `src/` file changed, so no oracle wave and no control were owed.
-**Next slice is S50** (fix the inherited issues), and its list is exactly five.
+**S50 IS CLOSED (2026-09-14, one sitting).** Suite 5,968 / 5,968 passing / **0 skipped**, ratchet
+GREEN, baseline 5,860, oracle GREEN at seeds 7, 4242, 20260914 and 99991.
+**Only 425 shipped. 554, 563, 564 and 589 are parked** - 563/564 and 589 were fixed, reviewed, and
+REVERTED. **Next slice is S50b** (Version 1 default).
 
-**The live re-triage is `docs/plan/upstream-issues/2026-09-14-triage.md`: 74 open, A=36 B=28 C=10,
-no class D.** Five issues closed upstream since 2026-08-31 (609, 611-614), **none opened**, and not
-one still-open issue's text changed - newest `updatedAt` 2026-08-28, newest comment 2026-03-25.
+**Read this before re-attempting any of the three: the diagnosis is the slice's product, and it is in
+`InheritedIssueTests.cs` and ledger 19-21, not here.** All five tests are un-skipped and pin the
+INHERITED answers plus every row the failed attempts broke, so a fix cannot land silently.
 
-**S50 fixes 425, 554, 563, 564, 589** - ledger entries 17-21, five failing tests skipped
-`needs:issue-<n>` in `Gaps/UpstreamIssues/InheritedIssueTests.cs`, all watched failing before being
-parked. **554 first:** this port is WORSE than upstream, giving up at n=4,000,000 where upstream
-reaches 6,000,000 and stdlib `re` reaches 10,000,000; the bytes go to one
-`MatchBodyTailStateData` block per repetition (`Matcher.cs:2679`, `ByteStack.cs:290`).
+**563 and 564 are ONE bug** - `_regex.c:10214`, `permit_insertion = !search || text_pos !=
+search_anchor`, where `search_anchor` is set once per operation (`:3410`) so the rule fires at ONE of
+the positions a scan visits. 564 reaches it through BESTMATCH's re-anchoring; the 563 change turned
+564 green with no code of its own. Probe: `python tools/probes/issue-563-anchor-rule.py`.
+**The RULE that survived both reviews: lift the prohibition only when an assertion held at the anchor
+AND fails one character on** (without that, upstream's own `test_fuzzy` 51/52/54/56 redden).
+**The DESIGN that failed: a bare `MatchState` flag.** Backtracking never saves or restores it, so it
+under-clears (a repeat that gives up its body leaves the pin: ten of twelve probed shapes wrong) and
+over-clears (an inert `(?:z|)` after `\m` discards a pin set outside it). It must be backtracking
+state, or a compile-time "every path to this fuzzy item passes an assertion" analysis.
 
-**Four of the old triage's class C are gone: 334, 551 and 596 do not reproduce, and 367 is not a
-bug** - PCRE2 answers as upstream does, and the defect is upstream's documented promise, which is
-undecidable. **589 is the reverse and IS a bug**, decided by PCRE2 answering PARTIAL where upstream
-answers None. Do not conflate the two; ledger 21 says why a merged report would be rejected.
-**397 was already fixed here** by S47's entry-14 guard, and DIVERGENCES now names the issue.
+**589's sound fix is PCRE2's `hitend`**, not a predicate returning PARTIAL: that ENDS the match
+before backtracking finishes, and truncated a capture group on `(\.+?)\1\b`. Its
+`ExpectedDivergences` entry then HID the regression - a control went GREEN with the fault present.
+**Its left-hand twin `(?r)\b$` over `''` is a PERMANENT pin resting on the maintainer's issue-589
+reasoning, which ledger 21 rejects; the two want re-judging together.**
 
-**The lesson of the sitting, and it cost three separate corrections: numbers were quoted more
-precisely than the instrument justified.** Two blind passes and the independent verifier each found
-one. The port's per-repetition allocation varies with the ORDER of calls, not just run to run - the
-backtracking buffer comes from a process-wide pool, so 2,000,000 reps cost 611 B/rep cold and
-343 B/rep warm - so only the first call in a fresh process is quotable. Quote a ratio or a range;
-find the cause before quoting a figure that moves.
+**554 is a performance gap, not a wrong answer**, and Phase 7 owns it: capturing doubles the
+per-repetition cost, atomic and possessive do not avoid it, and clamping the 1GB bound would patch
+the symptom. **425's two unnamed-first orderings need the maintainer's undecided option 3.**
 
-**Owed maintenance (unchanged, none of it S50's scope by default):** `tools/run-controls.py` cannot
-measure a control that mutates the recorder, so **S42-2A is owed** and S48b's controls C and D live
-in its closing notes; the two broken control sites S32-B and S38-A; `FOLD_TURKIC`'s share of the
-`case-folding` rotation; S35-A and S29-A/D are thin; PORTMAP's `_regex.c` line references stale
-after the sync; `record-oracle.py --self-check` exits 1 on a pre-S46 message.
+**Owed maintenance (unchanged):** `tools/run-controls.py` cannot measure a control that mutates the
+recorder, so **S42-2A is owed**; the two broken control sites S32-B and S38-A; `FOLD_TURKIC`'s share
+of the `case-folding` rotation; S35-A and S29-A/D are thin; PORTMAP's `_regex.c` line references
+stale after the sync; `record-oracle.py --self-check` exits 1 on a pre-S46 message.
 **Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.
 **Housekeeping:** the `s48b-baseline` and `pre-s48b` worktrees can now go.
