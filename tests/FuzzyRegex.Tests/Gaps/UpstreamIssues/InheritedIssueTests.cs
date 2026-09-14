@@ -17,8 +17,6 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.UpstreamIssues;
 /// broke. 554's notes carry the two cheap answers that were ruled out by measurement. Both are
 /// named blockers in <c>docs/plan/STATE.md</c>.
 /// </para>
-/// </remarks>
-/// <remarks>
 /// <para>
 /// Measured 2026-09-14 against <c>regex</c> 2026.9.10 and against this port, by
 /// <c>tools/probes/upstream-issue-sweep.py</c> and <c>tools/probes/port-issue-sweep.ps1</c>. Both
