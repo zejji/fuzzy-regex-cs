@@ -1381,6 +1381,18 @@ seed-20260914 row 76101, a `subf` whose replacement TEXT moves. Oracle entry
 `Gaps.Engine.FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_costs_without_posix`
 and `.A_posix_fuzzy_match_spends_what_the_flagless_engine_spends`.
 
+**Two more rows joined that family in S52 sitting 17 (2026-09-15), and one of them was nearly filed
+under entry 16 on the strength of its flags.** Rows 10 and 12 of
+`tools/probes/sweep-divergence-rows.jsonl` are a `subf` and a `sub` that the same port-side control
+moves as entry 16's two - deleting `RestoreBestMatch`'s two running totals - which is what the
+control cannot separate, because those two lines serve both arms. **Row 12 is written
+`(?b)(?r)(?p)`**, so it looks like entry 16's conjunction, and it is not: deleting its `(?b)` leaves
+upstream's answer character for character (its recorded `bestmatchFreeOutcome` IS its drawn answer),
+while removing POSIX restores the second `𐐨` this port replaces. Row 10 carries POSIX as a flag with
+no `(?b)` and no BESTMATCH bit at all. **Carrying a flag is not needing it**, the ablation costs
+three seconds - `python tools/probes/upstream-bestmatch-sweep-group-a.py` - and sitting 16 had all
+three `(?b)` rows down as the conjunction before it was run.
+
 **Proposed fix, for the upstream half that remains** - the `fuzzy_changes` over-read. Unknown.
 Establishing it needs a debug build of the C extension, which this
 project has deliberately not set up (design spec amendment 7: releases and PyPI wheels only).
@@ -2379,8 +2391,9 @@ ENTIRELY on a plain anchored call, `fullmatch` on one and `match` on the other, 
 | 35 | `match` | `None` | (0, 0) g1 (1, 3) | (0, 0) g1 (1, 3), the POSIX FLAG bit cleared |
 
 Spans are codepoints, as upstream reports them; both subjects are astral.
-`python tools/probes/upstream-bestmatch-sweep-group-a.py` prints the whole table, reading the four
-rows out of the committed sweep file rather than carrying them inline.
+`python tools/probes/upstream-bestmatch-sweep-group-a.py` prints the whole table, reading these two
+rows - and the four others the two port-side controls separated, 4, 10, 12 and 15 - out of the
+committed sweep file rather than carrying them inline.
 
 So neither flag alone destroys the match and the conjunction does, which is this entry's four-way
 self-refutation on a simpler subject than the one above. **And the suspected area is now measured
@@ -2388,15 +2401,75 @@ rather than suspected, on this port's side at least**: deleting the two running-
 `RestoreBestMatch` in `Matcher.cs` - S48b's fix, which gave the POSIX restore the `TotalErrors` and
 `TotalCost` upstream leaves stale - makes this port lose these two rows and no row that the other
 control moves. Over all 37 sweep rows it moves **four**: 18 and 35 here, plus rows 10 and 12, which
-are a `subf` and a `sub` whose outcome is not a match object and which nobody has looked at yet -
-and **row 10 carries POSIX without BESTMATCH at all**, so it cannot be this entry's conjunction; it
-belongs to entry 9's family, which is the other half of what these two lines restore
+are a `subf` and a `sub` whose outcome is not a match object
 (`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl`, `agree 4,
-expected 5, diverge 28 of 37` against `agree 0, expected 5, diverge 32` on the committed tree). That
+expected 5, diverge 28 of 37` against `agree 0, expected 5, diverge 32` on the tree sitting 16
+committed). That
 is evidence about the mechanism in THIS port and a strong hypothesis about upstream's C, not proof
 about upstream's C; the `/Od /Zi` MSVC build is still the instrument that would settle it.
-**None of the four is judged into an oracle entry yet** - that is the next sitting's work, and until
-it happens all four show red.
+
+**Only two of the four are this entry's conjunction, and S52 sitting 17 measured which rather than
+reading it off the flags (2026-09-15).** Sitting 16 had rows 12, 18 and 35 down as the conjunction
+because all three carry both flags, and row 12 is not one: deleting its `(?b)` leaves upstream's
+answer character for character - its recorded `bestmatchFreeOutcome` IS its drawn answer - and only
+removing POSIX restores the second astral character. Row 12 joins row 10 in **entry 9's** family,
+POSIX alone, which is also why a single control reaches all four: the two running totals
+`RestoreBestMatch` gives back serve both arms. Carrying a flag is not the same as needing it, and
+the ablation costs three seconds -
+`python tools/probes/upstream-bestmatch-sweep-group-a.py`, which now carries all six of the rows the
+two port-side controls separated.
+
+**All four are judged.** They are rows 6 to 9 of
+`posix-fuzzy-contradicts-its-own-flagless-answer` in `ExpectedDivergences.cs`, in sweep order 10,
+12, 18, 35, keyed on the row and on this port's answer to it - which is upstream's own POSIX-free
+answer in all four cases. The 37-row file now reads `expected 9, diverge 28`.
+
+**Row 18 also answers with its atomic group deleted** (its recorded `atomicFreeOutcome`), and this
+entry does not count that as a third contradiction: an atomic group may legitimately refuse a match
+by forbidding the backtracking it needs, where POSIX may only choose among the matches the flagless
+engine already makes and BESTMATCH may only rank them. A report should say so before a maintainer
+does.
+
+### Row 35 minimised: three ASCII characters, and the fuzzy section spends NOTHING
+
+This is the form to file. The pattern is `(?b)(?r)\K(.(.{2}){i<=1})`, the subject is `'baa'` and
+the flag is `regex.POSIX`; each line below deletes something from that, and the `neither flag` line
+deletes both flags at once. Measured on regex 2026.9.10,
+2026-09-15, and copied out of the last block of
+`python tools/probes/upstream-bestmatch-sweep-group-a.py`, which is what prints it:
+
+```
+--- sweep row 35 minimised, all ASCII (S52 sitting 17)
+    as drawn                   None
+    no (?b)                    (0, 0)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    POSIX flag cleared         (0, 0)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    neither flag               (0, 0)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    no (?r)                    (0, 3)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    no \K                      (0, 3)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    no fuzzy section           (0, 0)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+    substitutions not inserts  (0, 0)  g1=(0, 3) g2=(1, 3)  complete  counts=(0, 0, 0)
+```
+
+The first four lines are the defect: `None` under both flags, and the SAME match back the moment
+either one goes. **Every door that answers reports `(0, 0, 0)`, so no fuzzy matching happens on the
+winning path** - and yet the last four lines, the negative controls, say the fuzzy section has to be
+THERE: delete the `{i<=1}` and upstream answers under both flags, write it `{s<=1}` and it answers,
+and the `(?r)` and the `\K` are load-bearing too, though they only move the span rather than
+restoring it.
+
+(Those counts are printed by that block alone. The four match-returning row blocks above it go
+through `describe`, which suppresses an all-zero triple the way every recorded row does, and the two
+`sub` blocks report a replacement and a count rather than a match at all; here the zero IS the
+finding, so this block supplies it.)
+
+So the conjunction destroys a match that costs nothing, on a pattern whose fuzzy section is never
+used, and it needs a reversed match and a `\K`. That is a much smaller report than the overlapped
+nine-character scan above, and it says something the scan does not: the defect is not about ranking
+fuzzy candidates by cost, because there is only one candidate and its cost is zero.
+
+Pinned by `Gaps.Engine.FuzzyPosixTests
+.Posix_and_bestmatch_together_keep_a_match_that_either_flag_alone_keeps`, which asserts this port's
+answer - upstream's own, with the spans converted from (start, end) to (index, length).
 
 **Related:** entry 11 (mechanism C, the fix that exposed this), entry 9 (the stale running totals
 that this port shared), entry 12 and entry 13 (the other two ways `BESTMATCH` loses a candidate).

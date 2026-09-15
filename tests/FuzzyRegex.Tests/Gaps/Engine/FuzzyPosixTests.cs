@@ -282,4 +282,64 @@ public sealed class FuzzyPosixTests
         replacements.Should().Be(1);
         replaced.Should().Be("\rA\n");
     }
+
+    /// <summary>
+    /// POSIX and <c>BESTMATCH</c> together do not destroy a match that either flag alone keeps -
+    /// not even when the fuzzy section they are wrapped round spends no error at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sweep row 35 of <c>tools/probes/sweep-divergence-rows.jsonl</c>, minimised by S52 sitting 17
+    /// to three ASCII characters, and the fourth shape the entry
+    /// <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> covers: the one where POSIX moves
+    /// neither a cost nor a span nor a count, because there is no answer left to move. Upstream
+    /// reports <c>None</c>, and gives the same match back the moment either flag is deleted.
+    /// </para>
+    /// <para>
+    /// <b>Measured on regex 2026.9.10, 2026-09-15</b>, the last block of
+    /// <c>python tools/probes/upstream-bestmatch-sweep-group-a.py</c>, which prints all four flag
+    /// combinations and the four negative controls below:
+    /// <code>
+    /// regex.compile(r'(?b)(?r)\K(.(.{2}){i&lt;=1})', regex.POSIX).match('baa')  -> None
+    /// regex.compile(r'(?r)\K(.(.{2}){i&lt;=1})',     regex.POSIX).match('baa')  -> (0,0) g1=(0,3) g2=(1,3)
+    /// regex.compile(r'(?b)(?r)\K(.(.{2}){i&lt;=1})', 0          ).match('baa')  -> (0,0) g1=(0,3) g2=(1,3)
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <b>The fuzzy section has to be there and has to spend nothing</b>, which is the part that
+    /// makes this the strongest form of ledger entry 16. Every door that answers reports counts
+    /// <c>(0, 0, 0)</c>, so no fuzzy matching happens on the winning path; delete the
+    /// <c>{i&lt;=1}</c> entirely and upstream answers under both flags; make it <c>{s&lt;=1}</c>
+    /// instead and it answers as well. The <c>\K</c> and the <c>(?r)</c> are load-bearing too -
+    /// without either, upstream answers the span <c>(0, 3)</c> under both flags.
+    /// </para>
+    /// <para>
+    /// Upstream's own reproduction of entry 16 needs <c>finditer(overlapped=True)</c> over a
+    /// nine-character subject and loses only the LONGEST of seven matches. This is a plain
+    /// <c>match</c>, no scan anywhere, and the whole answer goes.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void Posix_and_bestmatch_together_keep_a_match_that_either_flag_alone_keeps()
+    {
+        // POSIX as the flag, as the row drew it; the recorder resolves a version-less pattern under
+        // upstream's own default, so Version0 here.
+        FuzzyRegex pattern = new(@"(?b)(?r)\K(.(.{2}){i<=1})", FuzzyRegexOptions.Posix | FuzzyRegexOptions.Version0);
+
+        Match m = pattern.Match("baa");
+
+        m.Success.Should().BeTrue();
+
+        // Upstream's own answer with either flag deleted, all ASCII so UTF-16 and codepoints agree.
+        // Upstream's spans above are (start, END); these are (index, LENGTH), so its g2 (1, 3) is
+        // (1, 2) here.
+        (m.Index, m.Length)
+            .Should()
+            .Be((0, 0));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 3));
+        (m.Groups[2].Index, m.Groups[2].Length).Should().Be((1, 2));
+
+        // Nothing fuzzy happened on the path that wins, which is what makes the loss indefensible.
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
 }

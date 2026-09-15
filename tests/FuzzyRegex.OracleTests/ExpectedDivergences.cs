@@ -1441,11 +1441,11 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The five rows of <c>posix-fuzzy-contradicts-its-own-flagless-answer</c>, as
-    /// <c>tools/record-oracle.py --rows</c> wrote them, and all five because between them they are
+    /// The nine rows of <c>posix-fuzzy-contradicts-its-own-flagless-answer</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them, and all nine because between them they are
     /// the shapes the defect appears in - an error spent on a span that needs fewer, a match charged
     /// an error its own POSIX-free engine fits with none, a substitution whose replacement text
-    /// moves, and a substitution COUNT that moves while the text does not.
+    /// moves, a substitution COUNT that moves while the text does not, and the match lost outright.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1473,6 +1473,30 @@ internal static class ExpectedDivergences
     /// among the matches the ordinary engine can make; it cannot produce one the flagless engine
     /// cannot. Both measured 2026-09-15 by the same probe, which carries both rows.
     /// </para>
+    /// <para>
+    /// <b>S52 sitting 17 added four more, rows 10, 12, 18 and 35 of
+    /// <c>tools/probes/sweep-divergence-rows.jsonl</c>, and on two of them POSIX does not move the
+    /// answer - it DESTROYS it.</b> Rows 18 and 35 answer <c>None</c> as drawn and give the same
+    /// match back the moment either the <c>(?b)</c> or the POSIX bit goes, on a plain
+    /// <c>fullmatch</c> and a plain <c>match</c> with no scan anywhere; that is ledger entry 16's
+    /// conjunction, and it is a stronger reproduction than the entry's own, which needs
+    /// <c>finditer(overlapped=True)</c>. Rows 10 and 12 are ledger entry 9's family instead: POSIX
+    /// ALONE moves them. Row 12 is written <c>(?b)(?r)(?p)</c> and looks like the other two, and
+    /// deleting its <c>(?b)</c> changes upstream's answer not at all - its recorded
+    /// <c>bestmatchFreeOutcome</c> is its drawn answer, character for character - while removing
+    /// POSIX restores the second <c>𐐨</c> this port replaces. Row 10 carries POSIX as a
+    /// flag with no <c>(?b)</c> and no BESTMATCH bit at all. Which of the two families a row is in
+    /// was measured and not read off its flags: sitting 16 had all three <c>(?b)</c> rows down as
+    /// the conjunction. All four by
+    /// <c>python tools/probes/upstream-bestmatch-sweep-group-a.py</c>, regex 2026.9.10, 2026-09-15.
+    /// </para>
+    /// <para>
+    /// Row 18 also carries an <c>atomicFreeOutcome</c> that answers the match, so deleting its
+    /// <c>(?&gt;</c> is a third door. That is NOT a third contradiction and the entry does not
+    /// count it as one: an atomic group can legitimately refuse a match by forbidding the
+    /// backtracking it needs, where POSIX may only CHOOSE among the matches the flagless engine
+    /// already makes and BESTMATCH may only RANK them. Only the two flag doors are self-refuting.
+    /// </para>
     /// </remarks>
     private const string _posixOvercostRows = """
         {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?p)(?:(?P<g1>\\D+?)([\\p{L}||\\p{N}]*)\\w){e<=2,s<=1}(?P<g3>[A])(?:(?(3)(?!(?P>g3))[\\w--[0-9]]))*?", "flags": 266, "namedLists": {}, "subject": "\nAA😀😀aa ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 2, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 2, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 4, "captures": [[5, 4]]}, {"number": 1, "success": true, "index": 5, "length": 2, "captures": [[5, 2]]}, {"number": 2, "success": true, "index": 7, "length": 0, "captures": [[7, 0]]}, {"number": 3, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [4, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 3, "lastGroup": "g3", "partial": false, "codepointSpan": [0, 3]}]}}
@@ -1480,6 +1504,10 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(?e)(?r)(?:\\p{Ll}+.([a]+)){s<=1:\\W}(?:[a](?P<g2>[\\w\\s]*)){e<=1}$", "flags": 65536, "namedLists": {}, "subject": "ıı\rAAﬁ\r\n", "operation": "subf", "template": "{g2}{g2}{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "AAﬁ\rAAﬁ\r\r\n", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "AAﬁ\r\nAAﬁ\r\n\r", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b(?P<g1>[[:alpha:]]+?)\\L<w1>{s<=1,i<=1,d<=1:\\d}(?<!(?:[a\\d](?P<g2>[\\p{L}\\p{N}]+?)😀){e<=2,i<=1})", "flags": 65544, "namedLists": {"w1": ["😀A", "😀𝔘", "😀𝔘A"]}, "subject": "a😀𐐨😀𝔘\r\nAa", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 2]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 6, "captures": [[3, 6]]}, {"number": 1, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [3]}, "codepointSpan": [0, 2]}]}}
         {"generator": "interactions", "pattern": "(?b)(?:([a]*)[a]*){s<=1}\\g<1>\\K$", "flags": 81930, "namedLists": {}, "subject": "\rA\n", "operation": "sub", "template": "\\1", "count": 2, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 2}, "posixFreeOutcome": {"kind": "sub", "text": "\rA\n", "count": 1}}
+        {"generator": "interactions", "pattern": "(?e)^(?:(?P<g1>[a]??)[a-f]*){e<=1}\\L<w1>{s<=1,i<=1,d<=1:[^a-z]}", "flags": 82058, "namedLists": {"w1": ["AA", "A_", "ß𐐀ß", "ﬃßß"]}, "subject": "AAaA_A", "operation": "subf", "template": "[{{", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "[{", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "[{A", "count": 1}}
+        {"generator": "interactions", "pattern": "(?b)(?r)(?p)(\\p{L})(?:[abz]*(?P<g2>[^\\d])A){e<=2,s<=1}", "flags": 16394, "namedLists": {}, "subject": "𐐨𐐨AAaa", "operation": "sub", "template": "\\1-", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "bestmatchFreeOutcome": {"kind": "sub", "text": "𐐨-", "count": 1}, "posixFreeOutcome": {"kind": "sub", "text": "𐐨𐐨-", "count": 1}}
+        {"generator": "interactions", "pattern": "(?b)(?p)^(?:[A-Z][^a-f](\\p{ASCII}{0,})){e<=2}(?>(?:[a\\d]*?(\\s)(\\p{ASCII})){s<=1,i<=1,d<=1})$", "flags": 0, "namedLists": {}, "subject": "aa𝔘𝔘😀", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1], "fuzzyChanges": {"substitutions": [0, 1, 2], "insertions": [4, 1], "deletions": []}}, "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 2, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}, {"number": 3, "success": true, "index": 6, "length": 2, "captures": [[6, 2]]}], "lastIndex": 3, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 2, 1]}}
+        {"generator": "interactions", "pattern": "(?b)(?e)(?r)\\K(?:[^a](?:([^\\d]{2}?)){s<=1,i<=1,d<=1:[^a-z]}){d<=1:.}", "flags": 65536, "namedLists": {}, "subject": "😀😀‍", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false}, "posixFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false}}
         """;
 
     /// <summary>
@@ -1487,12 +1515,21 @@ internal static class ExpectedDivergences
     /// as the report renders it.
     /// </summary>
     /// <remarks>
-    /// Rows 2, 3, 4 and 5 are upstream's own recorded <c>posixFreeOutcome</c> - rows 3 and 5 to the
-    /// character, rows 2 and 4 to the counts, because a POSIX row carries no change positions on
-    /// either side (ledger entry 9) and the comparison drops them from both. Row 1 is upstream's own
-    /// POSIX-free <c>fullmatch</c> over the span upstream reported under POSIX, which is a different
-    /// question from the recorded scan and the reason this entry lists rows rather than keying on the
-    /// discriminator alone.
+    /// Every row but the first is upstream's own recorded <c>posixFreeOutcome</c> - rows 3, 5, 6, 7
+    /// and 9 to the character, rows 2, 4 and 8 to the counts, because a POSIX row carries no change
+    /// positions on either side (ledger entry 9) and the comparison drops them from both. Row 1 is
+    /// upstream's own POSIX-free <c>fullmatch</c> over the span upstream reported under POSIX, which
+    /// is a different question from the recorded scan and the reason this entry lists rows rather
+    /// than keying on the discriminator alone.
+    /// <para>
+    /// Rows 6 to 9 are S52 sitting 17's, sweep rows 10, 12, 18 and 35. Row 8 is the one whose
+    /// POSIX-free side carries change positions while the drawn side has none at all - the drawn
+    /// side is <c>None</c> - and it still keys cleanly, because the comparison drops the positions
+    /// from both sides on any POSIX row and this port renders its own as
+    /// <c>[changes unavailable upstream]</c>. Rows 8 and 9 are in UTF-16, as every recorded row is:
+    /// row 8's span <c>(0,8)</c> is upstream's five codepoints over an astral subject, and row 9's
+    /// group <c>(2,3)</c> is upstream's <c>(1, 3)</c> in codepoints.
+    /// </para>
     /// </remarks>
     private static readonly string[] _posixOvercostOurs =
     [
@@ -1507,6 +1544,12 @@ internal static class ExpectedDivergences
             + "|| match 0:(0,3)[(0,3)] 1:(0,1)[(0,1)] 2:unset last=1/g1 "
             + "fuzzy=(0,0,1)[changes unavailable upstream]",
         "sub 1 '\\u000dA\\u000a'",
+        // S52 sitting 17's four, sweep rows 10, 12, 18 and 35 in that order.
+        "sub 1 '[{A'",
+        "sub 1 '\\ud801\\udc28\\ud801\\udc28-'",
+        "match 0:(0,8)[(0,8)] 1:(4,0)[(4,0)] 2:(4,2)[(4,2)] 3:(6,2)[(6,2)] last=3/- "
+            + "fuzzy=(2,2,1)[changes unavailable upstream]",
+        "match 0:(0,0)[(0,0)] 1:(2,3)[(2,3)] last=1/-",
     ];
 
     /// <summary>
@@ -2975,7 +3018,27 @@ internal static class ExpectedDivergences
                 + "unchanged and only the count says what happened. A flag that chooses "
                 + "leftmost-longest among the matches the ordinary engine can make cannot produce one "
                 + "the flagless engine cannot, so this breaks the same contract by a third route.\n"
-                + "KEYED ON THE FIVE ROWS AND ON THIS PORT'S ANSWER TO EACH, which is the owner's "
+                + "S52 SITTING 17 ADDED FOUR MORE, rows 10, 12, 18 and 35 of "
+                + "tools/probes/sweep-divergence-rows.jsonl, and on two of them POSIX does not move "
+                + "the answer - IT DESTROYS IT. Rows 18 and 35 answer `None` as drawn and give the "
+                + "SAME match back the moment either the `(?b)` or the POSIX bit is taken away, on a "
+                + "plain `fullmatch` and a plain `match` with no scan anywhere: that is LEDGER ENTRY "
+                + "16's conjunction, and a stronger reproduction than entry 16's own, which needs "
+                + "`finditer(overlapped=True)`. Rows 10 and 12 are ENTRY 9's family instead, because "
+                + "POSIX ALONE moves them - row 12 is written `(?b)(?r)(?p)` and looks like the "
+                + "other two, and deleting its `(?b)` leaves upstream's answer character for "
+                + "character (its recorded `bestmatchFreeOutcome` IS its drawn answer), while "
+                + "removing POSIX restores the second astral character this port replaces; row 10 "
+                + "carries POSIX as a flag with no `(?b)` and no BESTMATCH bit at all. Which family "
+                + "a row is in was MEASURED, not read off its flags: sitting 16 had all three `(?b)` "
+                + "rows down as the conjunction and row 12 is not. All four by "
+                + "`python tools/probes/upstream-bestmatch-sweep-group-a.py`, regex 2026.9.10.\n"
+                + "ROW 18 ALSO ANSWERS WITH ITS ATOMIC GROUP DELETED, and that is NOT counted as a "
+                + "third contradiction: an atomic group may legitimately refuse a match by "
+                + "forbidding the backtracking it needs, where POSIX may only CHOOSE among the "
+                + "matches the flagless engine already makes and BESTMATCH may only RANK them. Only "
+                + "a door that cannot legitimately close is evidence here.\n"
+                + "KEYED ON THE NINE ROWS AND ON THIS PORT'S ANSWER TO EACH, which is the owner's "
                 + "2026-09-14 ruling applied as `bestmatch-loses-a-candidate` applies it: a pin "
                 + "covers the rows whose contradiction was measured, every other POSIX fuzzy "
                 + "divergence shows red for triage, and it widens only by judging another row with "
@@ -2994,16 +3057,18 @@ internal static class ExpectedDivergences
                 + "reading `fuzzy_changes` there segfaults the interpreter), so the comparison drops "
                 + "them from both, and the rendered answers differ in that field alone.",
             PinnedBy: "FuzzyPosixTests.A_posix_enhancematch_span_costs_no_more_than_the_same_span_"
-                + "costs_without_posix, .A_posix_fuzzy_match_spends_what_the_flagless_engine_spends "
-                + "and .Posix_does_not_add_a_match_the_flagless_engine_cannot_make",
+                + "costs_without_posix, .A_posix_fuzzy_match_spends_what_the_flagless_engine_spends, "
+                + ".Posix_does_not_add_a_match_the_flagless_engine_cannot_make and "
+                + ".Posix_and_bestmatch_together_keep_a_match_that_either_flag_alone_keeps",
             Example: _posixOvercostRows,
             Applies: static (row, ours) =>
                 _posixOvercost.TryGetValue(Question(row), out string? judged)
                 // The discriminator has to have MOVED upstream's answer, not merely been asked.
                 // Without this clause the recorder's POSIX removal could silently become a no-op -
                 // a `(?p)` spelt somewhere the prefix rule does not reach, say - and the entry would
-                // go on classifying on evidence that says nothing. All three rows differ here: one
-                // in the counts, one in the span, one in the replacement text.
+                // go on classifying on evidence that says nothing. Every row differs here: in the
+                // counts, in the span, in the replacement text, in the replacement COUNT, or - on
+                // rows 8 and 9 - in there being a match at all.
                 && row.PosixFree is not null
                 && !string.Equals(row.PosixFree.Describe(), row.Expected.Describe(), StringComparison.Ordinal)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
