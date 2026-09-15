@@ -1191,6 +1191,28 @@ internal static class ExpectedDivergences
         .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
+    /// The one row of <c>reversed-skip-invents-a-match</c>, row 74889 (<c>interactions</c>) of the
+    /// seed-20260915 6000-row wave, as <c>tools/record-oracle.py</c> wrote it on 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// Kept for its <c>pruneOutcome</c>, which is the control the entry is keyed on: upstream's own
+    /// answer to the same question with every <c>(*SKIP)</c> spelled <c>(*PRUNE)</c>.
+    /// </remarks>
+    private const string _reversedSkipInventedMatchRows = """
+        {"generator": "interactions", "pattern": "(?r)^(?:[^a]+(*SKIP)[^a-f]|\\p{Lu})(?P<g1>\\D)(?:(?(1)(?=(?P>g1))\\w))*$", "flags": 10, "namedLists": {}, "subject": "\ud83d\ude00\ufb03 _\ud801\udc00a\ufb03\ud801\udc00", "operation": "search", "partial": true, "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 7, "length": 1, "captures": [[7, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        """;
+
+    /// <summary>
+    /// The question <see cref="_reversedSkipInventedMatchRows"/> asks, which is half of what
+    /// <c>reversed-skip-invents-a-match</c> is keyed on; the other half is the row's own recorded
+    /// <c>pruneOutcome</c>.
+    /// </summary>
+    private static readonly HashSet<string> _reversedSkipInventedMatch = OracleWave
+        .ParseRows(_reversedSkipInventedMatchRows)
+        .Select(Question)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
     /// <see cref="_bestmatchLostPartialRows"/> by its question, mapped to this port's judged answer.
     /// </summary>
     private static readonly Dictionary<string, string> _bestmatchLostPartial = OracleWave
@@ -1712,7 +1734,21 @@ internal static class ExpectedDivergences
                 + "scan is not merely wrong but memory-unsafe - printing each match as it arrives "
                 + "SEGFAULTS the interpreter (exit 139), which is the same instability the forward "
                 + "entry records as a `gc.collect()` changing the answer. All three are re-runnable: "
-                + "`python tools/probes/upstream-reversed-overlapped-skip.py [--crash]`.",
+                + "`python tools/probes/upstream-reversed-overlapped-skip.py [--crash]`.\n"
+                + "A FOURTH FACT, and the one S52 added the walk tell for (seed 4242 row 119927 of "
+                + "the 6000-row gate): the carried `slice_end` can move a CAPTURE's END while every "
+                + "whole-match span stays put, which the moved-spans-right test cannot see because "
+                + "it requires an inner group to keep its length. "
+                + "`(?r)^(?:[^a]*?(*SKIP)\\w|\\u200d)(?P<g1>\\S*(*SKIP)A)` over 'aa\\u200d\\u200dAAa', "
+                + "overlapped and prefilter-free, has upstream reporting (0, 6) with g1 at (1, 6) "
+                + "and then (0, 5) with g1 at (1, 6) AGAIN - a capture reaching past the end of its "
+                + "own match, in a pattern with no lookaround and no `\\K` to put one there, which "
+                + "is the same self-evident symptom the forward entry records. Upstream's OWN "
+                + "stepwise walk gives (0, 6) g1=(1, 6) and then (0, 5) g1=(1, 5), which is this "
+                + "port's answer rendering for rendering, and its `(*PRUNE)` spelling and its "
+                + "verb-free spelling both give that answer too. The row carries that walk as its "
+                + "recorded `anchoredScan`, so the tell is a fact of the row rather than a probe's "
+                + "claim about it.",
             PinnedBy: "BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_keeps_every_"
                 + "span_where_upstreams_own_single_shot_door_puts_it",
             Example: """
@@ -1727,19 +1763,42 @@ internal static class ExpectedDivergences
             // end, or changes how many matches there are, and each of those is reported.
             //
             // The hole, said out loud: a port defect that wrongly extended a span LEFTWARDS while
-            // keeping its end and the match count would satisfy this. What bounds it is that the
-            // reversed walk cannot be recorded to check against - tools/record-oracle.py refuses an
-            // `anchoredScan` for a reversed row, because stepping one means moving `endpos`, which
-            // truncates the subject and changes what every end-of-subject assertion means. Making
-            // that walk conditional on the pattern having no such assertion is the way to close
-            // this, and it is Phase 6 oracle hardening.
+            // keeping its end and the match count would satisfy the moved-spans-right test. It used
+            // to be unbounded, because the reversed walk could not be recorded to check against -
+            // tools/record-oracle.py refused an `anchoredScan` for a reversed row, since stepping
+            // one means moving `endpos`, which truncates the subject and changes what every
+            // end-of-subject assertion means.
+            //
+            // CLOSED for the rows that carry a walk, and this is the Phase 6 oracle hardening the
+            // paragraph used to ask for: S40d made the recorder's refusal read the PATTERN rather
+            // than the direction, so a reversed row with no end-sensitive item now carries
+            // upstream's own stepwise answer, and S52 put it to work as the second arm of the
+            // predicate below. A row that has the walk is judged by it and the hole does not reach
+            // it; a row that does not is judged by the moved-spans-right test alone and the
+            // paragraph above still applies to it.
             Applies: static (row, ours) =>
                 row.Pattern.Contains("(*SKIP)", StringComparison.Ordinal)
                 && IsReversed(row)
                 && string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal)
                 && row.Expected is MatchesOutcome theirScan
                 && ours is MatchesOutcome ourScan
-                && EveryStaleSliceHasOnlyMovedSpansRight(theirScan, ourScan)
+                && (
+                    EveryStaleSliceHasOnlyMovedSpansRight(theirScan, ourScan)
+                    // THE WALK TELL, added by S52 sitting 10 for seed 4242 row 119927 of the
+                    // 6000-row gate. It is the discriminator `overlapped-skip-stale-slice` uses
+                    // forward, which S40d brought within reach of a reversed row by making the
+                    // recorder's refusal read the pattern rather than the direction - and it is
+                    // the one this entry's own "hole, said out loud" paragraph above names as the
+                    // way to close that hole. The count is required to be EQUAL here because a
+                    // scan upstream ran too long or too short is the two entries below, not this
+                    // one, and an id has to keep naming the mechanism it is.
+                    || (
+                        theirScan.Matches.Count == ourScan.Matches.Count
+                        && row.AnchoredScan is { } walked
+                        && !string.Equals(theirScan.Describe(), walked.Describe(), StringComparison.Ordinal)
+                        && string.Equals(ourScan.Describe(), walked.Describe(), StringComparison.Ordinal)
+                    )
+                )
         ),
         new(
             Id: "overlapped-skip-extra-match-reversed",
@@ -2064,6 +2123,67 @@ internal static class ExpectedDivergences
             Applies: static (row, ours) =>
                 _skipCarriedSliceNoWalk.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "reversed-skip-invents-a-match",
+            Reason: "Upstream bug, the same carried `slice_end` as the `overlapped-skip-*` entries "
+                + "above and a symptom none of them records: not a span that moved, not a match too "
+                + "many in a scan, but a SINGLE `search` finding a complete match where the same "
+                + "search without the verb finds nothing at all. Seed 20260915 row 74889 of S52's "
+                + "6000-row gate, judged in sitting 10, 2026-09-15, regex 2026.9.10.\n"
+                + "THE ROW. `(?r)^(?:[^a]+(*SKIP)[^a-f]|\\p{Lu})(?P<g1>\\D)(?:(?(1)(?=(?P>g1))\\w))*$` "
+                + "searched with `partial=True` over '\\U0001F600\\uFB03 _\\U00010400a\\uFB03\\U00010400' "
+                + "(IGNORECASE and MULTILINE). Upstream answers a COMPLETE match at codepoints (0, 6) "
+                + "with g1 at (5, 6); this port answers the zero-width partial at (0, 0).\n"
+                + "THE CONTRADICTION NEEDS NO READING, and it is the sharpest this file has. A verb "
+                + "whose entire job is to REMOVE backtracking positions cannot create a match that "
+                + "does not exist without it - pruning only ever takes candidates away. Upstream's "
+                + "own three spellings of the same question, all measured on the same call:\n"
+                + "  `(*SKIP)`, partial=True    complete (0, 6), g1 (5, 6)   <- the drawn answer\n"
+                + "  `(*PRUNE)`, partial=True   zero-width partial (0, 0)    <- THIS PORT's answer\n"
+                + "  verb deleted, partial=True zero-width partial (0, 0)    <- THIS PORT's answer\n"
+                + "`(*PRUNE)` is the same opcode body but for the two lines `(*SKIP)` has first, which "
+                + "are the ones that move the slice (upstream/src/_regex.c:14553 reversed, :14555 "
+                + "forward), so it prunes identically and moves no bound. The complete match exists in "
+                + "upstream when and only when a bound was moved.\n"
+                + "AND IT IS NOT THE PARTIAL MACHINERY, which is what keeps this row out of "
+                + "`partial-retry-reversed-slice` and `search-start-partial`. Asked with `partial=True` "
+                + "DROPPED, upstream still answers the complete match and this port still answers no "
+                + "match - while the verb-free non-partial spelling is None on BOTH sides. So the "
+                + "divergence is in the ordinary reversed search and the partial is only how this port "
+                + "renders having found nothing.\n"
+                + "THE MECHANISM, and where it has been seen before: under `(?r)` a `(*SKIP)` moves "
+                + "`slice_end` mid-attempt and nothing puts it back, so a LATER ANCHOR of the same "
+                + "`search` runs in a view of the subject that ends where a FAILED earlier attempt "
+                + "left the bound. That is the carry-over the four `overlapped-skip-*` entries record "
+                + "between the matches of a scan, happening inside one call instead - which "
+                + "`end-of-line-reads-a-skip-moved-slice` already records on its row 38101 (of the 2000-row wave "
+                + "it was judged from, and held as the second row of `_endOfLineReadsMovedSliceRows` "
+                + "above) - a `subf` whose "
+                + "recorded outcome is an IndexError, to which that entry puts a single "
+                + "`search(subject, 0, 10)` as a DOOR and gets a match as drawn and None with the "
+                + "verb spelled `(*PRUNE)`.\n"
+                + "KEYED ON THE ROW AND ON THE ROW'S OWN RECORDED `pruneOutcome`, not on a judged "
+                + "answer string. The row set is the owner's 2026-09-14 ruling for this file; the "
+                + "`pruneOutcome` half is the live control, so if upstream ever makes `(*PRUNE)` "
+                + "answer something else, or this port stops agreeing with it, the row stops being "
+                + "classified and is reported. Widening this entry means judging another row with the "
+                + "probe and adding it. Re-runnable: "
+                + "tools/probes/upstream-reversed-skip-invents-a-match.py.",
+            PinnedBy: "BacktrackingVerbTests.A_reversed_search_of_a_skip_finds_nothing_where_pruning_"
+                + "alone_finds_nothing",
+            Example: _reversedSkipInventedMatchRows,
+            // Narrow twice over. The row set fixes WHICH question this can answer, and the
+            // `pruneOutcome` equality makes the classification depend on a fact the RUN recorded
+            // rather than on a string judged once: this port has to land on upstream's own
+            // pruning-equivalent answer, group for group and partial flag included, or the row is
+            // reported. A port defect that merely lost the match would have to lose it into exactly
+            // upstream's `(*PRUNE)` rendering to be hidden here.
+            Applies: static (row, ours) =>
+                _reversedSkipInventedMatch.Contains(Question(row))
+                && row.PruneOutcome is { } pruned
+                && !string.Equals(row.Expected.Describe(), pruned.Describe(), StringComparison.Ordinal)
+                && string.Equals(ours.Describe(), pruned.Describe(), StringComparison.Ordinal)
         ),
         new(
             Id: "group-call-loses-the-match",

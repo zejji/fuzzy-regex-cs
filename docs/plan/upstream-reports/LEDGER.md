@@ -683,6 +683,73 @@ that closes the "a `(*SKIP)` is allowed to differ on a scan" objection for this 
 no partial requested the `(*SKIP)` and `(*PRUNE)` lines agree (both `None`) and only the verb-free
 line matches; what the partial pass gets back is the VERB-FREE answer, character for character.
 
+### What S52's tenth sitting added, 2026-09-15: two symptoms neither the report nor its doors had
+
+Two more rows from the 6000-row gate, and each is the carried slice doing something the six doors
+above do not describe. Both are re-runnable: `python tools/probes/upstream-reversed-overlapped-skip.py`
+for the first and `python tools/probes/upstream-reversed-skip-invents-a-match.py` for the second.
+
+**ONE, the capture whose END moves while every match span stays put.** Seed 4242 row 119927,
+`verbs`, recorded PREFILTER-FREE:
+
+```python
+# regex 2026.9.10, with the required-string prefilter switched off
+pat = r"(?r)^(?:[^a]*?(*SKIP)\w|\u200d)(?P<g1>\S*(*SKIP)A)"
+sub = "aa\u200d\u200dAAa"
+# (span, g1 span) per match, finditer(overlapped=True)
+as drawn            [((0, 6), (1, 6)), ((0, 5), (1, 6))]
+(*SKIP) -> (*PRUNE) [((0, 6), (1, 6)), ((0, 5), (1, 5))]
+verb deleted        [((0, 6), (1, 6)), ((0, 5), (1, 5))]
+stepwise walk       [((0, 6), (1, 6)), ((0, 5), (1, 5))]
+```
+
+Upstream's SECOND match is (0, 5) and carries g1 at (1, 6) - **a capture reaching one character past
+the end of the match it belongs to**, in a pattern with no lookaround and no `\K` that could put one
+there. Every report above this one describes the carried slice as moving a whole-match SPAN or
+adding a MATCH; here the spans and the count are right and only the capture's end reads the stale
+bound. A maintainer testing a fix on match spans alone will not see this row change.
+
+**And it only reproduces prefilter-free.** With upstream's required-string prefilter ON, the same
+scan gives (1, 5) - the correct capture. That is worth a line in the report: the defect is masked by
+an optimisation, so whether a user meets it depends on whether their pattern has a required string
+the compiler can find.
+
+**TWO, and this is the plainest statement of the defect in the whole report: `(*SKIP)` makes a match
+that does not exist without it.** Seed 20260915 row 74889, a single reversed `search` - no scan, no
+second match, one call:
+
+```python
+# regex 2026.9.10, flags = I | M
+pat = r"(?r)^(?:[^a]+(*SKIP)[^a-f]|\p{Lu})(?P<g1>\D)(?:(?(1)(?=(?P>g1))\w))*$"
+sub = "\U0001F600\ufb03 _\U00010400a\ufb03\U00010400"
+#                      partial=True                  partial=False
+# as drawn, (*SKIP)    (0, 6) g1=(5, 6) complete     (0, 6) g1=(5, 6) complete
+# (*SKIP) -> (*PRUNE)  (0, 0) PARTIAL, g1 unset      None
+# verb deleted         (0, 0) PARTIAL, g1 unset      None
+```
+
+`(*PRUNE)` is the same opcode body but for the two lines `(*SKIP)` has first, which are the ones
+that write the slice bound (`:14553` reversed, `:14555` forward). So the two verbs prune identically
+and only one of them moves a bound - and the match exists only for the one that moves a bound. **A
+verb whose entire job is to remove backtracking positions cannot create a match.** The `partial`
+column is there to show that the partial machinery is not involved: dropping it leaves the drawn
+answer a complete match and both controls None.
+
+This is the carried slice reaching a LATER ANCHOR of the same `search`, rather than the next match
+of a scan: a failed earlier attempt leaves `slice_end` where the verb put it, and the anchor that
+succeeds runs in a view of the subject that ends there. Row 38101 of this report already shows one call
+behaving that way - it is the row held as the second of `_endOfLineReadsMovedSliceRows` in
+`ExpectedDivergences.cs`, numbered in the 2000-row wave it was judged from rather than in this
+gate; a `subf` whose recorded outcome is an IndexError, and the single
+`search(subject, 0, 10)` put to it as a door is what shows the bound being read inside one call.
+This row shows the same thing producing a match out of nothing, which is the symptom hardest to
+argue with.
+
+Classified by `ExpectedDivergences.overlapped-skip-stale-slice-reversed` (row 119927, through a new
+walk arm) and `.reversed-skip-invents-a-match` (row 74889); pinned by
+`BacktrackingVerbTests.An_overlapped_reversed_scan_of_a_skip_keeps_a_capture_inside_the_match_it_belongs_to`
+and `.A_reversed_search_of_a_skip_finds_nothing_where_pruning_alone_finds_nothing`.
+
 **Verified 2026-09-15** against `regex` 2026.9.10. All six rows and every control above are
 re-runnable from one script: `python tools/probes/upstream-skip-carried-slice-doors.py`. Pinned by
 `BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_the_line_does_not_end`,
@@ -2721,3 +2788,129 @@ that would settle it and was not used here.
 classified in the oracle by `posix-fuzzy-contradicts-its-own-flagless-answer`.
 
 **Related:** entry 9 (the cost half, whose port side S48b fixed), entry 16 (the longest-match half).
+
+---
+
+## 24. A reversed partial match reports running out of text at the slice start, or does not, depending on which optimisation ran
+
+**Status: upstream's inconsistency is conclusive; WHICH answer is right is NOT settled, and THIS
+PORT carries both rules too.** Recorded here rather than pinned as a divergence for exactly that
+reason - see the closing paragraph, which is what the owner is being asked to rule on. Found by
+S52's tenth sitting, 2026-09-15, judging seed 20260915 row 104366 of the 6000-row gate.
+
+### The contradiction
+
+`init_match` sets the two text bounds asymmetrically, five lines under a comment describing the
+contract the asymmetry breaks (`upstream/src/_regex.c:18435-18446`):
+
+```c
+/* The documentation says that the end of the slice behaves like the end of
+ * the string.
+ */
+state->text = str_info->characters;
+state->text_length = str_info->length;
+
+/* Open start and closed end bounds, like in re module. */
+state->text_start = 0;
+state->text_end = end;      /* <- the slice end */
+
+state->slice_start = start;
+state->slice_end = end;
+```
+
+Two different pieces of the engine then ask "has this reversed match run out of text on the left?"
+and read different fields:
+
+```c
+/* every node handler - :6747, :12173, :13854, :13964, :14206, :14502, :14922, :15065 and
+   about thirty more */
+if (text_pos <= state->text_start && state->partial_side == RE_PARTIAL_LEFT)
+    ...                                   /* text_start is 0 - the SLICE START IS IGNORED */
+
+/* search_start, the optimiser's entry - :8400-8405 */
+if (state->reverse) {
+    if (start_pos < state->slice_start) {
+        if (state->partial_side == RE_PARTIAL_LEFT) {
+            new_position->text_pos = state->slice_start;
+            return RE_ERROR_PARTIAL;      /* the SLICE START IS THE BOUND */
+        }
+        return RE_ERROR_FAILURE;
+    }
+}
+```
+
+and so do the three `search_start_STRING*_REV` helpers, which pass `state->slice_start` as the
+limit and let their `string_search*_rev` set `is_partial` there (`:8335-8382` - `_FLD_REV` at
+`:8335`, `_IGN_REV` at `:8361`, `_REV` at `:8373`). **So whether a reversed partial is
+reported at a non-zero slice start depends on whether the optimiser picked the pattern's leading
+string as its search test - a decision about SPEED, which must not change the answer.**
+
+The forward side has no such split: `text_end` IS the slice end, so a forward partial fires at the
+slice end exactly as the comment promises.
+
+### The reproduction, three patterns over the same one visible character
+
+```python
+# regex 2026.9.10
+import regex
+def ask(p, s, pos, end):
+    m = regex.compile(p).match(s, pos, end, partial=True)
+    return "None" if m is None else (m.span(), m.partial)
+
+#                              the character as the whole subject   the same character as a slice
+ask(r"(?r)ya",       "a", 0, 1)        ((0, 1), True)     ask(r"(?r)ya",       "xya", 2, 3)  None
+ask(r"(?r)ya(.*?)\b","a", 0, 1)        ((0, 1), True)     ask(r"(?r)ya(.*?)\b","xya", 2, 3)  ((2, 3), True)
+ask(r"(?r)ya(.*)\b", "a", 0, 1)        ((0, 1), True)     ask(r"(?r)ya(.*)\b", "xya", 2, 3)  None
+```
+
+Both halves of the slice column are wrong on upstream's own terms:
+
+- **Greedy against lazy.** `(?r)ya(.*)\b` and `(?r)ya(.*?)\b` differ only in preference order, which
+  chooses AMONG matches and cannot decide whether one exists - and over the one character the slice
+  shows, `(.*)` and `(.*?)` have the same single possible behaviour. Upstream answers None to one
+  and a partial to the other.
+- **Min width.** At the empty slice (2, 2) of `'xyz'`, `(?r)a` needs one character and answers None
+  while `(?r)ab(.*?)\b` needs two and answers a partial. A partial means the available text ran out;
+  needing more of it cannot make it run out less.
+
+Upstream's own suite never asks a partial at a non-zero `pos` AT ALL - it makes 72 `partial=True`
+calls (`regex/tests/test_regex.py`, the reversed ones concentrated at :4073-4112) and not one of
+them passes a `pos`. That is why the two rules have never met.
+
+Re-runnable: `python tools/probes/upstream-reversed-partial-ignores-the-slice-start.py`, thirty-three
+cells in seven blocks.
+
+### Why this is not pinned as a divergence, and what the owner is asked
+
+This port carries `text_start = 0` as `MatchState.TextStart` and asks the same question at every
+site (`Engine/Matcher.cs:3273`, `:5788`, `:6644`, `:6705`, `:6787`, `:7393`, `:7458`, `:7556` and the
+rest) - **and it has an equivalent of the second rule as well**, because on the sliced single
+character it answers the same partial to `(?r)ya(.*?)\b` that upstream does.
+`tools/probes/port-reversed-partial-ignores-the-slice-start.ps1` runs the same grid, and over its 33
+cells in 7 blocks the two engines agree on 23 and differ on 10 - **and the 10 split BOTH ways**:
+
+```
+3 cells   this port reports a partial and upstream does not
+          (?r)ya(.*)\b  and  (?r)ya(.?)\b  over 'xya' slice (2,3)   port (2, 3) partial, upstream None
+7 cells   upstream reports a partial and this port does not
+          the drawn row and its \b-less cut over the empty slice (2, 2)
+          (?r)ab(.*?)\b at the empty slices 1, 2 and 3 of 'xyz'
+          (?r)ab(.*?)\b and (?r)abc(.*?)\b at the empty slice (2, 2) of 'xyz'
+```
+
+So "upstream contradicts itself" is true and does not settle it: each engine reports a reversed
+partial at a non-zero slice start in SOME shapes and refuses it in others, the shapes do not line
+up, and neither engine's set of partials contains the other's. Pinning row 104366 under either
+reading would be a guess.
+
+**The probable reading, for the owner to rule on.** `text_start = 0` exists to make `^` and `\A`
+refuse a non-zero `pos` - Python `re`'s documented open-start bound, which is what the comment
+beside it is about. The partial handlers reuse that field for a DIFFERENT question, "have we run out
+of text on the left", whose correct bound is `slice_start`; upstream's own `search_start` and its
+own forward side both answer the run-out question with the slice. If that is right, the
+slice-honouring answer is correct and **this port has inherited the bug**, which the owner's
+2026-09-12 rule says must be fixed before 1.0 - an engine change wherever that question is asked,
+which is 38 sites in upstream and the 9 in this port's `Engine/Matcher.cs` that mirror them
+(`:967`, `:3273`, `:5788`, `:6644`, `:6705`, `:6787`, `:7393`, `:7458`, `:7556`), plus whatever this
+port's own second rule turns out to be - so a slice of its own. Nothing was changed in
+S52 sitting 10.

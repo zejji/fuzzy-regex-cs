@@ -1434,3 +1434,395 @@ re-run here afterwards on the restored tree and is reported in full above.
 - The long generators remain **off** the default `-Generator` list, for sitting 6's reason.
 - The `pos`/`endpos` versus `codepointSlice` ambiguity sitting 8 narrowed is still open, and is still
   a wave-format change wanting its own slice.
+
+---
+
+## Sitting 10 (2026-09-15) - CHECKPOINT, not closed
+
+STATE.md made sitting 10's first job the eight remaining gate divergences. **Two of the eight are
+now judged, classified and pinned, a third is measured to the bottom and deliberately NOT pinned,
+and the gate is down from 8 to 6.** No engine code changed. The two judged are both the reversed
+carried `slice_end` this port has already been judged right about eight times; the third is a
+question neither engine answers consistently, which is why it is not pinned.
+
+Sitting 9 left the eight regenerable with a door already put to each, so this sitting started from
+`python tools/probes/gate-divergence-doors.py` over the reports still on disk rather than from raw
+rows. Sitting 8's table was right about the mechanism on both rows judged here and **wrong about
+which engine is in the wrong on the one that is not** - see the third section.
+
+### The two, and what judges each
+
+**Seed 4242 row 119927 joins `overlapped-skip-stale-slice-reversed`, through a new second arm of
+its predicate.** The entry's own text and its moved-spans-right test both look for whole-match
+spans that moved; on this row **every whole-match span agrees and only a CAPTURE'S END moves**, and
+`EveryStaleSliceHasOnlyMovedSpansRight` cannot see that because it requires an inner group to keep
+its length. So the row was reported rather than classified, and the fix is the arm the entry's own
+"hole, said out loud" paragraph had been asking for since S40d.
+
+The row, `verbs`, prefilter-free, `(?r)^(?:[^a]*?(*SKIP)\w|\u200d)(?P<g1>\S*(*SKIP)A)` over
+`'aa\u200d\u200dAAa'`, overlapped, as `(span, g1 span)` per match:
+
+```
+as drawn           [((0, 6), (1, 6)), ((0, 5), (1, 6))]
+(*SKIP)->(*PRUNE)  [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+verb deleted       [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+stepwise walk      [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+with the prefilter [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+```
+
+Upstream's SECOND match is (0, 5) and carries g1 at (1, 6) - **a capture reaching past the end of
+the match it belongs to**, in a pattern holding no lookaround and no `\K` that could put one there,
+which is the same self-evident symptom the forward entry records. The predicate keys on the WALK
+rather than on that, because the walk is a fact the recorder already wrote into the row
+(`anchoredScan`) and the capture test would need a new inference. The new arm requires the match
+COUNT to be equal, so a scan upstream ran too long or too short still belongs to the two entries
+below it and the ids keep naming their mechanisms.
+
+**PREFILTER-FREE IS NOT OPTIONAL ON THIS ROW, and an ordinary `regex.finditer` does not reproduce
+it.** With upstream's required-string prefilter ON, upstream gives this port's answer; the `verbs`
+generator is recorded with it off (`tools/record-oracle.py:325`). A first draft of this judgement
+measured the row with the prefilter on, got this port's answer for upstream, and would have
+concluded the wave was lying. The probe section added here asks the way the wave does.
+
+**Seed 20260915 row 74889 is a NEW entry, `reversed-skip-invents-a-match`**, and its argument is
+the sharpest in the file because it needs no reading at all: **a verb whose entire job is to REMOVE
+backtracking positions cannot create a match that does not exist without it.** Upstream's own three
+spellings of the one question, `interactions`, search over
+`'\U0001F600\ufb03 _\U00010400a\ufb03\U00010400'` with IGNORECASE and MULTILINE:
+
+```
+                     partial=True                  partial=False
+as drawn, (*SKIP)    (0, 6) g1=(5, 6) complete     (0, 6) g1=(5, 6) complete
+(*SKIP) -> (*PRUNE)  (0, 0) PARTIAL, g1 unset      None
+verb deleted         (0, 0) PARTIAL, g1 unset      None
+```
+
+`(*PRUNE)` is the same opcode body but for the two lines `(*SKIP)` has first, which are the ones
+that move the slice (`upstream/src/_regex.c:14553` reversed, `:14555` forward), so it prunes
+identically and moves no bound. Upstream's complete match exists when and only when a bound was
+moved. Both of this port's cells are upstream's own `(*PRUNE)` and verb-free cells.
+
+**And it is not the partial machinery**, which is what keeps the row out of
+`partial-retry-reversed-slice` and `search-start-partial`: with `partial=True` dropped, upstream
+still answers the complete match and this port still answers no match, while the verb-free
+non-partial spelling is None on both sides. The right-hand column is what settled that, and it was
+not in sitting 8's table. The entry is keyed on the row AND on the row's own recorded
+`pruneOutcome`, so the classification depends on a fact the run recorded rather than on a string
+judged once.
+
+### The row measured to the bottom and deliberately NOT pinned, and why it is the important one
+
+**Seed 20260915 row 104366**, `(?r)\xdf\ufb01(.*?)\b` asked as `match(subject, 2, 2, partial=True)`
+over `'\ufb01\u0131'` - an EMPTY slice at the end of a two-character subject. Upstream answers a
+zero-width partial at (2, 2); this port answers no match. Sitting 8 called it "the only one of the
+thirteen that is not about a verb, a fuzzy cost or a Turkic fold", which is right, and expected it
+to be a small question, which it is not.
+
+**Upstream holds TWO rules for "has a reversed match run out of text on the left", and they
+disagree about whether the slice start counts.** Both are in its own source:
+
+- `init_match` (`upstream/src/_regex.c:18442-18446`) sets `text_end = end` - the SLICE end - but
+  `text_start = 0`, the real string start, under the comment "Open start and closed end bounds,
+  like in re module". Five lines above, at `:18435-18437`, sits the contract that asymmetry breaks: *"The documentation
+  says that the end of the slice behaves like the end of the string."*
+- Every node handler then asks `text_pos <= state->text_start && partial_side == RE_PARTIAL_LEFT`
+  (`:6747`, `:12173`, `:13854`, `:14502` and about thirty more), so a reversed match that runs out
+  at a NON-ZERO slice start reports no match.
+- `search_start` - the optimiser's entry, taken only for the shapes it is enabled for - asks
+  `start_pos < state->slice_start` and returns `RE_ERROR_PARTIAL` positioned at `slice_start`
+  (`:8400-8405`), and so do the `search_start_STRING*_REV` helpers, which pass `state->slice_start`
+  as the limit and let their `string_search*_rev` set `is_partial` there (`:8335-8382` - `_FLD_REV`
+  at `:8335`, `_IGN_REV` at `:8361`, `_REV` at `:8373`).
+
+So whether a reversed partial is reported at a non-zero slice start depends on **whether the
+optimiser picked the pattern's leading string as the search test** - a decision about SPEED, which
+must not change the answer. Upstream's own suite never asks a partial at a non-zero `pos` AT ALL: it makes 72 `partial=True`
+calls (`upstream/regex/tests/test_regex.py`, the reversed ones concentrated at :4073-4112) and not
+one of them passes a `pos`. That is why the two rules have never met.
+
+The control that shows it, and it is three patterns over the SAME one visible character:
+
+```
+                              over 'a', no slice        over 'xya' slice (2,3)
+(?r)ya                        (0, 1) partial=True       None
+(?r)ya(.*?)\b                 (0, 1) partial=True       (2, 3) partial=True
+(?r)ya(.*)\b                  (0, 1) partial=True       None
+```
+
+Greedy against lazy is the cleanest half: preference order chooses AMONG matches and cannot decide
+whether one exists, and over the one character the slice shows, `(.*)` and `(.*?)` have the same
+single possible behaviour.
+
+**THIS PORT IS NOT SELF-CONSISTENT EITHER, and measuring it is what stopped this being pinned.**
+The port carries upstream's `text_start = 0` as `MatchState.TextStart` and asks the same question at
+every site (`Engine/Matcher.cs:3273`, `:5788`, `:6644`, `:6705`, `:6787`, `:7393`, `:7458`, `:7556`
+and the rest) - and it has an equivalent of the second rule as well, because on the one-character
+slice it answers `(2, 3) partial` to `(?r)ya(.*?)\b` exactly as upstream does. Over the probes' 33
+cells in 7 blocks the two engines agree on 23 and differ on 10, and **the 10 split both ways**: 3
+where this port reports a partial and upstream does not (the greedy and bounded spellings over the
+one-character slice) and 7 where upstream does and this port does not (the drawn row, its `\b`-less
+cut, and the `(?r)ab(.*?)\b` empty-slice family).
+
+So "upstream contradicts itself" is true and is not enough here: each engine reports a reversed
+partial at a non-zero slice start in some shapes and refuses it in others, the shapes do not line
+up, and neither engine's set contains the other's. Pinning it under either reading would be the
+guess this file spends three paragraphs on. Left for sitting 11 with the
+measurement, both probes committed
+(`tools/probes/upstream-reversed-partial-ignores-the-slice-start.py` and its port half
+`tools/probes/port-reversed-partial-ignores-the-slice-start.ps1`, same grid, same headings).
+
+**What it probably is, said out loud so sitting 11 does not have to re-derive it.** `text_start = 0`
+exists to make `^` and `\A` refuse a non-zero `pos` - Python `re`'s documented open-start bound. The
+partial handlers reuse that field for a DIFFERENT question, "have we run out of text on the left",
+whose right bound is `slice_start`. Conflating the anchor rule with the run-out rule is the defect,
+and upstream's own `search_start` and its own forward side both answer the run-out question with the
+slice. If that reading is right then the slice-honouring answer is the correct one and **this port
+has inherited the bug**, which the owner's 2026-09-12 rule says must be fixed before 1.0. It is an
+engine change wherever that question is asked - 38 sites in upstream and the 9 in this port's
+`Engine/Matcher.cs` that mirror them - plus whatever the port's own second rule turns out to be, so
+it is a slice of its own and it needs the owner's ruling first. **Nothing was changed here.**
+
+### A recorded control that does not do what it says
+
+**`tools/run-oracle.ps1 -Rows <file> -SkipRecord` does not read `<file>`.** `-SkipRecord` skips the
+recording step entirely (`tools/run-oracle.ps1:286`), so the consumer eats whatever wave is already
+on disk and `-Rows` never reaches the recorder. Observed here directly: the eight-row file run that
+way reported on rows 121402, 124034, 124474 and 125913 - rows of the 6000-row gate, not of the file.
+Sitting 8's Control A is recorded as
+`pwsh -File tools/run-oracle.ps1 -Rows <file> -SkipRecord`, so **as written it measures the last
+wave rather than its sixteen rows**. Sitting 9's controls use `-Rows <file>` with no `-SkipRecord`
+and are unaffected. Not changed here - it is someone else's recorded control and the fix is a
+one-word edit to a closing note, which is between-slice maintenance rather than mid-slice.
+
+### One more hazard, found and not fixed
+
+`tools/probes/upstream-reversed-overlapped-skip.py`'s original three cases compile WITH upstream's
+required-string prefilter, and all three are `verbs` rows, which the recorder records without it.
+The probe is cited by `overlapped-skip-extra-match-reversed` and by
+`overlapped-skip-stale-slice-reversed` for facts measured in 2026-09-12, and whether those three
+still reproduce prefilter-free is untested. The section this sitting added to that probe does ask
+prefilter-free and says so in place. Flagged rather than changed: re-measuring three older entries'
+evidence is not this sitting's scope, and it is a real item for sitting 11.
+
+### Numbers
+
+- Ratchet **GREEN**, **6119 / 6119 / 0 skipped**, **6011 distinct ids**, baseline **6005 -> 6011**.
+- Default wave, Release, three seeds, 300 rows a generator, run BEFORE the gate as STATE.md
+  requires: **GREEN, diverge 0 of 6300 at each seed** (agree 6286 / 6293 / 6293,
+  expected 8 / 2 / 4, timeout 2 / 0 / 0, resource 4 / 5 / 3).
+- The eight remaining rows replayed through `-Rows` on the commit-ready tree: **expected 2,
+  diverge 6 of 8**, and the two expected are the two judged here, each classified by the entry it
+  was judged into and by no other. Before the changes the same file gave **expected 0, diverge 8**.
+- **The 6000-row three-seed gate, re-run on the commit-ready tree: 8 -> 6 diverging rows**, and the
+  accounted-for count rises by exactly the two judged:
+
+  | seed | before (sitting 9) | after | expected before -> after |
+  |---|---:|---:|---|
+  | 7 | 3 | **3** | 96 -> 96 |
+  | 4242 | 3 | **2** | 76 -> 77 |
+  | 20260915 | 2 | **1** | 87 -> 88 |
+  | total | 8 | **6** | 259 -> 261 |
+
+  `agree 125828 / 125852 / 125826`, `timeout 2 / 1 / 2`, `resource 71 / 68 / 83` of 126,000 a seed.
+  Seed 7 is unchanged because neither of the two was drawn there. Run as
+  `pwsh -File tools/run-oracle.ps1 -Count 6000`, about ten minutes of wall clock here. The
+  `timeout`/`resource` split at seed 20260915 is 2/83 where sitting 9 recorded 1/84: one row that
+  hit the interpreter's resource guard last time ran out of time instead. Those two buckets are both
+  "upstream did not answer" and the total is the same, so nothing rests on which of them a row lands
+  in; it is recorded because a reader diffing the two sittings' numbers will see it.
+- Two new gap tests, each mutated once and watched go red, each carrying its provenance beside the
+  assertion as the owner's 2026-09-15 rule requires: the upstream call, the version (regex
+  2026.9.10) and the answer, and the probe that reproduces it.
+
+### The negative controls, run against the code committed here
+
+No control this sitting mutates the engine - no engine code changed. What it controls is the two
+things the sitting added: **the row-and-`pruneOutcome` keying of the new entry**, and **the new walk
+arm of the old one**. Run last, after the final code change, on the tree being committed, over
+`.scratch/eight-rows.jsonl` - the eight remaining gate rows written out of the waves by seed and row
+number - with `pwsh -File tools/run-oracle.ps1 -Rows <file>`. No seed: these are explicit rows.
+
+Four of them, because the sitting added two different keying mechanisms and each has a live half and
+a copied half. `.scratch/control.py break-<x>` / `restore-<x>` applies and reverts each by exact
+re-edit; **never revert one with git on this tree.**
+
+> **Control A, the new entry's ROW KEY**: in `_reversedSkipInventedMatchRows`, change
+> `"flags": 10,` to `"flags": 11,`. `Question(row)` is pattern, flags, subject, operation, partial,
+> pos and endpos, so the set no longer holds the live row's question.
+> Result: **expected 1, diverge 7 of 8** - row 7 alone stops being classified - `failed: 1`.
+>
+> **Control B, the new WALK ARM's direction**: in `overlapped-skip-stale-slice-reversed`'s
+> `Applies`, change the arm's second comparison from
+> `string.Equals(ourScan.Describe(), walked.Describe(), ...)` to
+> `string.Equals(theirScan.Describe(), walked.Describe(), ...)` - the mutation that would let a
+> PORT defect through, because it stops asking whether this port agrees with upstream's own walk.
+> Result: **expected 1, diverge 7 of 8** - row 6 alone stops being classified - `failed: 1`.
+>
+> **Control C, the new entry's LIVE GATE**: in `reversed-skip-invents-a-match`'s `Applies`, change
+> `string.Equals(ours.Describe(), pruned.Describe(), ...)` to
+> `string.Equals(row.Expected.Describe(), pruned.Describe(), ...)`, so the entry asks whether
+> UPSTREAM lands on its own `(*PRUNE)` answer rather than whether this port does.
+> Result: **expected 1, diverge 7 of 8**, and `failed: 2` - row 7 stops being classified AND
+> `Every_expected_divergence_still_diverges` fires.
+>
+> **Control D, the Example COPY's recorded control**: in the same row constant, change
+> `"pruneOutcome": ... "length": 0, "captures": [[0, 0]]` to `"length": 1, "captures": [[0, 1]]`.
+> Result: **classification does NOT change - expected 2, diverge 6 of 8** - and `failed: 2`, the
+> two being `The_wave_agrees_with_upstream` and `Every_expected_divergence_still_diverges`.
+
+Rows: `.scratch/eight-rows.jsonl`, the eight remaining gate rows written out of the waves by seed and
+row number, run with `pwsh -File tools/run-oracle.ps1 -Rows .scratch/eight-rows.jsonl`. **No
+`-SkipRecord`** - see above; with it the command reads a different file's worth of rows entirely.
+Unbroken, before and after all four: **expected 2, diverge 6 of 8, `failed: 1`**, the one failure
+being `The_wave_agrees_with_upstream`, which the six unjudged rows fail by design.
+
+**Control D not flipping its row is the control working rather than failing**, and it is the third
+sitting in a row to learn it: an entry keyed on a LIVE recorded field cannot be broken by editing
+the `Example` copy of that field, because nothing reads the copy to classify. What the copy does is
+fail the staleness alarm, which is the instrument that guards it - so D and C together show both
+halves are live, and they fail DIFFERENTLY. Anyone re-running these should expect that difference.
+
+The second seed these controls ask for does not apply: they run on eight explicit rows rather than
+on a generator, so there is no seed to vary. What stands in for it is the gate itself, which drew
+the two judged rows at two different seeds, 4242 and 20260915.
+
+The second seed these controls ask for does not apply: they run on eight explicit rows rather than
+on a generator, so there is no seed to vary. What stands in for it is the gate itself, which drew
+the two judged rows at two different seeds, 4242 and 20260915.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results, and an independent
+verifier.**
+
+**Pass one, over the whole diff: six findings raised, six reproduced, six fixed.** None was a defect
+in the port or in either judgement; all six were defects in the EVIDENCE, and the first was serious.
+
+1. **The cell count behind the row-104366 decision was wrong, and it is the count the owner-facing
+   conclusion rests on.** The notes, ledger entry 24 and DECISIONS all said "27 cells, the two
+   engines agree on 26, and the one that differs is the greedy spelling". Measured on the committed
+   probes it is **33 cells in 7 blocks, 23 agree and 10 differ** - and the 10 split BOTH ways: 3
+   where this port reports a partial and upstream does not, 7 where upstream does and this port does
+   not, the drawn row among them. The figure had been read off the first scratch grid, which was the
+   empty-slice block alone, and then stated of the whole probe. **The conclusion is unchanged and
+   better supported** - neither engine is consistent and neither engine's set of partials contains
+   the other's - but the number was wrong and it was load-bearing.
+2. **A probe comment contradicted the probe's own output four lines later**: "the cuts are
+   upstream's own controls and every one of them answers None" where the `\b`-less cut answers a
+   partial. Corrected, and the correction says what the cut actually isolates.
+3. **The 119927 test claimed to quote the wave's pattern and did not.** The row's JSON `‍` is
+   JSON for ONE ZWJ CHARACTER; the test put the six characters `‍` into the pattern. The answer
+   is the same either way - measured both spellings - so this was a false provenance claim rather
+   than a wrong assertion, which is the kind this file exists to prevent.
+4. **The same test dropped the row's MULTILINE flag** (`flags: 8`), where the sibling test one
+   method above maps the wave's flags properly. Answer unaffected; provenance wrong again.
+5. **Two of this sitting's new citations reintroduced a stale line number the repo already records
+   as known-wrong**: `_regex.c:14545` is a `TRACE` call, and the reversed and forward slice writes
+   are `:14553` and `:14555`. Three of the five occurrences had already been found and fixed in the
+   working tree while the review ran - the same defect, found independently - and the review caught
+   the two left. The pre-existing `:14545` elsewhere in the repo is the carried debt STATE.md lists
+   and was not touched.
+6. **The new `Reason` called row 38101 "a single `search`"**, which reads as its operation; the row
+   is a `subf` whose recorded outcome is an `IndexError`, and the single `search` is a DOOR that
+   entry puts to it. Reworded to say which.
+
+The reviewer also confirmed, with reproductions, everything the sitting claimed about the
+classifications themselves: both new entries fire and absorb no other row, the
+`_reversedSkipInventedMatchRows` constant is byte-identical to the wave row including its
+`pruneOutcome`, both probes reproduce every cell of their quoted tables, `tools/run-oracle.ps1:286`
+is the `-SkipRecord` line cited, every other `_regex.c` and `Matcher.cs` citation checks out, both
+gap tests go red on a one-value mutation, and the ratchet is GREEN at 6119/6119. It measured the
+`partial-sliced` probe's 21 distinct cells with and without the prefilter and found none that moves,
+which is why the plain `regex.compile` there is not a finding.
+
+**Pass two, a first pass over the fix delta** (the rewritten test construction and its provenance
+block, the probe comment, the reworded `Reason`, the corrected counts and citations, and
+`.scratch/control.py`): **one finding raised, one
+reproduced, one fixed.** Entry 24 quoted `_regex.c:18436-18446` for a block that starts at 18435 -
+`:18436` is the second line of a two-line comment sentence - and said `text_start = 0` sits "three
+lines under" it where the comment closes at 18437 and the assignment is at 18442, so it is five. Both
+corrected in all four places they appear. The reviewer additionally derived the 33 / 7 / 23 / 10
+split cell by cell and both directional lists independently, ran all four controls and matched every
+count in their docstring, checked the rewritten test's pattern and subject byte-for-byte against the
+wave row (and confirmed `regex.M` is the only flag with value 8), watched the test go red on a
+mutation, verified the six-character and literal ZWJ spellings and both flag settings give the same
+four spans, and confirmed the remaining `_regex.c` citations line by line, including the three that
+are line-wrapped in the source. It left the tree byte-for-byte as it found it.
+
+**And the independent verifier ran** (amendment 16 limb (d)), a fresh agent briefed with nothing but
+this tree - and with `docs/VERIFICATION.md`'s do-not-use-git clause, which sitting 9 paid for.
+It re-ran every claim the notes, the ledger sub-section, entry 24 and DECISIONS make. **Four came
+back DIFFERENT and all four are fixed above; three came back COULD NOT RUN and all three are
+annotated in place; everything else was CONFIRMED.**
+
+**DIFFERENT, and the first is the one that mattered.**
+
+1. **The baseline had not actually been updated.** The notes claimed `baseline 6005 -> 6011` and
+   STATE.md claimed `6011`, and `tests/parity-baseline.json` still read 6005 and was unmodified in
+   the working tree - `check-ratchet.ps1 -UpdateBaseline` had simply not been run yet. It has been
+   now: `Baseline updated: 6011 distinct passing test ids recorded.` A claim about a generated file
+   that nobody had generated is exactly what limb (d) is for.
+2. **One `_regex.c:14545` this sitting added survived the pass-one fix**, in the second new gap test
+   (`A_reversed_search_of_a_skip_finds_nothing_where_pruning_alone_finds_nothing`). The earlier fix
+   pass had found five and fixed four. Fixed; the `:14545` still in this repo is all pre-existing,
+   which is the carried debt STATE.md lists.
+3. **"`test_regex.py:4073-4112` is the whole of the reversed-partial coverage" is false** - there is
+   at least one reversed partial outside it. The load-bearing half holds and is now what the text
+   says, measured rather than asserted: **upstream's suite makes 72 `partial=True` calls and not one
+   of them passes a `pos`**.
+4. **"an engine change across some thirty sites" was upstream's number applied to this port.**
+   Measured: **38** sites in `_regex.c` ask `text_pos <= state->text_start`, and **9** in this port's
+   `Engine/Matcher.cs` mirror them. Both figures are in entry 24 now. (The related "about thirty
+   more" after the eight cited handlers is exact: 38 minus 8.)
+
+A fifth, found by the verifier and fixed with them: **`:8371-8382` starts one helper too late.**
+There are three reversed `search_start_STRING*_REV` helpers and they span `:8335-8382` - `_FLD_REV`
+at `:8335`, `_IGN_REV` at `:8361`, `_REV` at `:8373`.
+
+**COULD NOT RUN, three, none of them a gap in the measurement.** The gate table's `before` column and
+the default wave's figures, because a later run overwrites `report-<seed>.txt` - the `before` column
+is sitting 9's own recorded `after` row, quoted, and the default wave was captured to `.scratch`
+before the gate ran, which is also what proves the run-before-the-gate ordering was kept. And
+"before the changes the same file gave expected 0, diverge 8", which would need reverting the
+sitting's uncommitted work.
+
+**One COULD NOT RUN that was a real defect in the text, and it is fixed:** the verifier looked for
+row 38101 in the on-disk 6000-row wave and found a `boundaries` row there. The number belongs to the
+2000-row wave that entry was judged from; both places that cite it now say so and point at the row
+constant in `ExpectedDivergences.cs` that holds it.
+
+**CONFIRMED:** the ratchet (GREEN, 6119 / 6119 / 0 skipped, 6011 distinct ids); the eight-row replay
+and which entry classifies which row and that neither absorbs any other; all fifteen gate figures,
+derived from the reports and waves still on disk; the six diverging rows in those reports being
+row-for-row the six named as still owed; every cell of both judged rows' tables; the 33 cells in 7
+blocks, 23 agree, 10 differ split AND both directional lists, derived cell by cell independently;
+all four controls, each to the exact `expected` / `diverge` / `failed` triple, with `D` the one that
+does not reclassify; every other `_regex.c`, `Matcher.cs`, `record-oracle.py` and `run-oracle.ps1`
+citation; the `-SkipRecord` claim, reproduced empirically by running a five-row file and watching
+the report name `eight-rows.jsonl`; `_reversedSkipInventedMatchRows` being byte-identical to
+wave-20260915's row; both new gap tests going red on a mutation; and - under the owner's 2026-09-15
+rule - **both new gap tests' expected values re-derived directly against regex 2026.9.10 with the
+verifier's own prefilter-off harness rather than through this repo's probes**, every cell of both.
+
+It used no git undo command and left the tree byte-for-byte as it found it, checking
+`ExpectedDivergences.cs` by md5 before and after every one of the four controls.
+
+### Still owed on S52 after this sitting
+
+- **The six remaining gate divergences.** Five are `(*SKIP)` rows that sitting 8's table still
+  describes correctly (seed 7 74413 and 76160, seed 4242 76778 and 77119) plus seed 7 75921, which
+  sitting 9 measured fully and deliberately did not pin; and the sixth is seed 20260915 104366, the
+  empty-slice partial measured above, which needs the owner's ruling before anything is done with
+  it. Regenerate with `pwsh -File tools/run-oracle.ps1 -Count 6000` then
+  `python tools/probes/gate-divergence-doors.py`.
+- **For the owner**: whether the reversed run-out should read `slice_start` rather than
+  `text_start`. If yes it is an engine slice; if no, row 104366 is pinned as upstream's and this
+  port's own greedy cell needs its own look.
+- The **timeout rows** generator (scope item, depends on S51's `timeout` comparison) - untouched.
+- The **20-seed sweep run**; `tools/sweep-seeds.ps1` and the `oracle.yml` cron both exist, the run
+  does not.
+- The long generators remain **off** the default `-Generator` list, for sitting 6's reason.
+- The `pos`/`endpos` versus `codepointSlice` ambiguity sitting 8 narrowed is still open, and is
+  still a wave-format change wanting its own slice.
+- Sitting 8's Control A's `-SkipRecord`, and the three prefilter-on cases in
+  `upstream-reversed-overlapped-skip.py`, both above.

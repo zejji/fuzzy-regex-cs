@@ -342,6 +342,117 @@ public sealed class BacktrackingVerbTests
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
+    public void A_reversed_search_of_a_skip_finds_nothing_where_pruning_alone_finds_nothing()
+    {
+        // Seed 20260915 row 74889 of S52's 6000-row gate, quoted as the wave drew it. Under '(?r)' a
+        // '(*SKIP)' moves slice_end (upstream/src/_regex.c:14553) and nothing puts it back, so a later
+        // anchor of the SAME search runs in a view of the subject that ends where a failed earlier
+        // attempt left the bound - the carry-over the overlapped entries record between the matches of
+        // a scan, happening inside one call.
+        //
+        // UPSTREAM REFUTES ITSELF, and this is the sharpest form of it: a verb whose whole job is to
+        // REMOVE backtracking positions cannot create a match that does not exist without it.
+        //
+        // PROVENANCE. regex 2026.9.10, 2026-09-15, tools/probes/upstream-reversed-skip-invents-a-match.py:
+        //
+        //   pattern  (?r)^(?:[^a]+(*SKIP)[^a-f]|\p{Lu})(?P<g1>\D)(?:(?(1)(?=(?P>g1))\w))*$
+        //   subject  '\U0001f600ﬃ _\U00010400aﬃ\U00010400'   flags I|M, search
+        //
+        //                              partial=True                  partial=False
+        //   as drawn, (*SKIP)          (0, 6) g1=(5, 6) complete     (0, 6) g1=(5, 6) complete
+        //   (*SKIP) -> (*PRUNE)        (0, 0) PARTIAL, g1 unset      None
+        //   verb deleted               (0, 0) PARTIAL, g1 unset      None
+        //
+        // '(*PRUNE)' is the same opcode body but for the two lines '(*SKIP)' has first, which are the
+        // ones that move the slice, so it prunes identically and moves no bound. Upstream's complete
+        // match exists when and only when a bound was moved. Dropping partial=True changes nothing
+        // about which side is which, which is what keeps this row out of 'partial-retry-reversed-slice'
+        // and 'search-start-partial': the divergence is in the ordinary reversed search.
+        //
+        // The four cells below are this port's, and they are upstream's own (*PRUNE) and verb-free
+        // answers cell for cell.
+        const string pattern = @"(?r)^(?:[^a]+(*SKIP)[^a-f]|\p{Lu})(?P<g1>\D)(?:(?(1)(?=(?P>g1))\w))*$";
+        string subject =
+            char.ConvertFromUtf32(0x1F600)
+            + "ﬃ _"
+            + char.ConvertFromUtf32(0x10400)
+            + "aﬃ"
+            + char.ConvertFromUtf32(0x10400);
+        FuzzyRegexOptions options = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline;
+
+        Match drawnPartial = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+        drawnPartial.Success.Should().BeTrue();
+        drawnPartial.PartialMatch.Should().BeTrue();
+        (drawnPartial.Index, drawnPartial.Length).Should().Be((0, 0));
+        drawnPartial.Groups["g1"].Success.Should().BeFalse();
+
+        new FuzzyRegex(pattern, options).Match(subject).Success.Should().BeFalse();
+
+        // The controls, run through this port as well: with the verb pruning-equivalent or gone, this
+        // port answers what it answers to the drawn row - so the difference upstream sees between the
+        // three spellings does not exist here.
+        foreach (string control in new[] { pattern.Replace("(*SKIP)", "(*PRUNE)"), pattern.Replace("(*SKIP)", "") })
+        {
+            Match controlPartial = new FuzzyRegex(control, options).Match(subject, partial: true);
+            controlPartial.PartialMatch.Should().BeTrue();
+            (controlPartial.Index, controlPartial.Length).Should().Be((0, 0));
+            new FuzzyRegex(control, options).Match(subject).Success.Should().BeFalse();
+        }
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void An_overlapped_reversed_scan_of_a_skip_keeps_a_capture_inside_the_match_it_belongs_to()
+    {
+        // Seed 4242 row 119927 of S52's 6000-row gate, quoted as the wave drew it. The same carried
+        // slice_end as the two tests around it (upstream/src/_regex.c:14553), and the reason it needed
+        // its own tell: here EVERY whole-match span agrees and only a CAPTURE's end moves, which the
+        // moved-spans-right test cannot see because it requires an inner group to keep its length.
+        //
+        // PROVENANCE. regex 2026.9.10, 2026-09-15, recorded prefilter-free as the `verbs` generator
+        // always is (tools/record-oracle.py:325) - with upstream's required-string prefilter ON it
+        // gives this port's answer, so an ordinary regex.finditer does NOT reproduce the row. Run
+        // tools/probes/upstream-reversed-overlapped-skip.py, which asks it the way the wave does.
+        //
+        //   pattern  (?r)^(?:[^a]*?(*SKIP)\w|<ZWJ>)(?P<g1>\S*(*SKIP)A)     flags 8 = MULTILINE
+        //   subject  'aa<ZWJ><ZWJ>AAa'               finditer(overlapped=True), prefilter-free
+        //
+        //   as drawn          [((0, 6), (1, 6)), ((0, 5), (1, 6))]   <- (span, g1 span)
+        //   (*SKIP)->(*PRUNE) [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+        //   verb deleted      [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+        //   stepwise walk     [((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+        //   with the prefilter[((0, 6), (1, 6)), ((0, 5), (1, 5))]   <- this port's answer
+        //
+        // UPSTREAM REFUTES ITSELF ON THE ROW ALONE: its second match is (0, 5) and carries g1 at
+        // (1, 6), a capture reaching one character PAST THE END of the match it belongs to, in a
+        // pattern holding no lookaround and no \K that could put one there. Its own stepwise walk -
+        // each match asked from a fresh state, so no bound a previous match's (*SKIP) moved is still
+        // moved - gives (1, 5) instead, and so do both its verb ablations.
+        // Quoted as the wave holds it, and the two details that takes. The row's JSON writes the
+        // alternative and the subject with `‍`, which is JSON for ONE ZWJ CHARACTER rather than
+        // for the six characters a regex compiler would read as an escape - so both carry a literal
+        // one here, built from its code point because a literal ZWJ in source trips S2479 and an
+        // escape is too easy for an editor to resolve silently. And the row's `flags` is 8, which is
+        // MULTILINE. Neither changes the answer - both spellings of the ZWJ and both flag settings
+        // give the four spans below - but a test that says it quotes the row has to quote it.
+        string zwj = char.ConvertFromUtf32(0x200D);
+        MatchCollection scan = new FuzzyRegex(
+            @"(?r)^(?:[^a]*?(*SKIP)\w|" + zwj + @")(?P<g1>\S*(*SKIP)A)",
+            FuzzyRegexOptions.Multiline
+        ).Matches("aa" + zwj + zwj + "AAa", overlapped: true);
+
+        scan.Select(static m => (m.Index, m.Length)).Should().Equal((0, 6), (0, 5));
+        scan.Select(static m => (m.Groups["g1"].Index, m.Groups["g1"].Length)).Should().Equal((1, 5), (1, 4));
+
+        // The point of the test, said as an assertion rather than as a comment: every capture this
+        // port reports lies inside the match it belongs to.
+        scan.Select(static m => m.Groups["g1"].Index + m.Groups["g1"].Length <= m.Index + m.Length)
+            .Should()
+            .AllSatisfy(static inside => inside.Should().BeTrue());
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
     public void An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves()
     {
         // The three rows S35 left for S36 to judge, all found by the `verbs` generator at 2000 rows
