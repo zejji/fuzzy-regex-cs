@@ -476,7 +476,7 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The six rows of <c>turkic-default-folding-without-spans</c>, recorded by
+    /// The eight rows of <c>turkic-default-folding-without-spans</c>, recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/turkic-without-spans-rows.jsonl</c> on
     /// 2026-09-15.
     /// </summary>
@@ -492,6 +492,18 @@ internal static class ExpectedDivergences
     /// swapped for a letter whose DEFAULT fold reaches <c>A-Z</c>. It is row 29165's
     /// range-spanning-<c>I</c> control in a second operation, which is why it needs no new argument.
     /// <para>
+    /// <b>Rows 7 and 8 are seed 7 row 118133 (<c>verbs</c>, <c>subf</c>) and seed 20260915 row 75528
+    /// (<c>interactions</c>, <c>split</c>) of the 6000-row three-seed gate</b>, added by S52's ninth
+    /// sitting. Row 7 is row 29165's control again in a third operation and with the range written
+    /// <c>[A-Z]{1,3}</c>: <c>[A-Z]</c> and <c>[A-Y]</c> both reach the dotless small i and
+    /// <c>[A-H]</c> and <c>[J-Z]</c> find nothing at all, which is this port's answer. Row 8 is a new
+    /// symptom rather than a new argument - upstream EATS the U+0130, so its first match is
+    /// <c>(0, 1)</c> where every swap for a letter with no <c>T</c> row gives a ZERO-WIDTH first
+    /// match and hands the letter back as a part. <b>Fold LENGTH is measured not to be the variable
+    /// there</b>: U+00DF, U+FB00 and U+01F0 all fold to two characters and <c>h</c> to one, and all
+    /// four agree with this port.
+    /// </para>
+    /// <para>
     /// Every one carries the recorder's <c>scanMatches</c>, which is upstream's own <c>finditer</c>
     /// over the row and the only thing on any of these rows that has a span at all; the entry's
     /// <see cref="ExpectedDivergence.Applies"/> reads it, so the staleness alarm re-tests the
@@ -505,6 +517,8 @@ internal static class ExpectedDivergences
         {"generator": "conditionals", "pattern": "(?r)(?(?!s)[A-Z]{2}|(S))$", "flags": 16394, "namedLists": {}, "subject": "s\rS\u0131", "operation": "subf", "template": "{0[2]}", "count": 3, "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}
         {"generator": "interactions", "pattern": "^(?:\ufb01\u0130){e<=2:\\S}([^a-f]+)$", "flags": 16386, "namedLists": {}, "subject": "\u0130\u0130\ufb01 \ufb01\ufb00", "operation": "split", "count": 3, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", " \ufb01\ufb00", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [2], "deletions": []}, "codepointSpan": [0, 6]}]}
         {"generator": "interactions", "pattern": "\\b(?P<g1>[^a-f])*?(?P<g2>[A-Z]{1}?)", "flags": 16386, "namedLists": {}, "subject": "\u00df\u00df\u0131\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "\u00df", "\u0131", "\u0131"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[0, 1], [1, 1]]}, {"number": 2, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 2, "lastGroup": "g2", "partial": false, "codepointSpan": [0, 3]}]}
+        {"generator": "verbs", "pattern": "[A-Z]{1,3}(?<![a\\d](*SKIP))[\\w\\s]\\d*+(?=(*PRUNE))[^a][^a]*(?!(*SKIP)\u0131)\\S", "flags": 10, "namedLists": {}, "subject": "A\u0130\ufb00\u0131\r\nS", "operation": "subf", "template": "{0}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 7]}]}
+        {"generator": "interactions", "pattern": "(?p)(?P<g1>\\d)??\\L<w1>{e<=2:\\s}", "flags": 266, "namedLists": {"w1": ["a", "\ufb01"]}, "subject": "\u0130\ufb01\r\n\u0131", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", null, "", null, "", null, "\u0131", null, ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "codepointSpan": [1, 4]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [4, 4]}, {"groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [5, 5]}], "posixFreeOutcome": {"kind": "split", "parts": ["", null, "", null, "", null, "", null, "", null, "", null, "", null, "\u0131", null, ""]}}
         """;
 
     /// <summary>
@@ -541,6 +555,8 @@ internal static class ExpectedDivergences
         "sub 0 's\\u000dS\\u0131'",
         "split 3 '' '\\ufb01 \\ufb01\\ufb00' ''",
         "split 1 '\\u00df\\u00df\\u0131\\u0131'",
+        "sub 0 'A\\u0130\\ufb00\\u0131\\u000d\\u000aS'",
+        "split 9 '' <null> '\\u0130' <null> '' <null> '\\u0131' <null> ''",
     ];
 
     /// <summary>
@@ -549,6 +565,42 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _turkicWithoutSpans = OracleWave
         .ParseRows(_turkicWithoutSpansRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _turkicWithoutSpansOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The one row of <c>turkic-default-folding-read-by-a-lookaround</c>, seed 20260915 row 88716
+    /// (<c>conditionals</c>, <c>sub</c>) of the 6000-row three-seed gate, as
+    /// <c>tools/record-oracle.py --rows</c> wrote it on 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// The subject is four dotless small i followed by two <c>a</c>, and BOTH of upstream's matches
+    /// land on the <c>a</c> at the end - <c>(5, 6)</c> and <c>(4, 5)</c>. <b>No span on either side
+    /// covers a Turkic letter</b>, so the sibling entry's <c>scanMatches</c> condition refuses this
+    /// row and the span test the first Turkic entry uses cannot reach it either. What reads the
+    /// letter is the set union inside the NEGATIVE LOOKBEHIND <c>(?&lt;!(?:a|\p{ASCII})+)</c>,
+    /// which is not part of any match by construction - see the entry's <c>Reason</c> for the
+    /// one-line isolation and for the construct a first draft named wrongly.
+    /// </remarks>
+    private const string _turkicLookaroundRows = """
+        {"generator": "conditionals", "pattern": "(?r)(?(?<!(?:a|\\p{ASCII})+)\\d{3}|)(?:(?(?<=ı[\\w\\s])a\\w|(?P<g1>ı))ı|a)", "flags": 16386, "namedLists": {}, "subject": "ııııaa", "operation": "sub", "template": "\\1\\1", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ıııı", "count": 2}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [5, 6]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [4, 5]}]}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to <see cref="_turkicLookaroundRows"/>, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// One replacement where upstream makes two, and the surviving <c>a</c> is the whole of the
+    /// difference in the text. Written with doubled backslashes for the reason
+    /// <see cref="_turkicWithoutSpansOurs"/> records.
+    /// </remarks>
+    private static readonly string[] _turkicLookaroundOurs = ["sub 1 '\\u0131\\u0131\\u0131\\u0131a'"];
+
+    /// <summary>
+    /// <see cref="_turkicLookaroundRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _turkicLookaround = OracleWave
+        .ParseRows(_turkicLookaroundRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _turkicLookaroundOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
@@ -1372,19 +1424,31 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The one row of <c>atomic-group-leaks-a-change-position</c>, row 74033 of the seed-20260914
-    /// 6000-row gate, as <c>tools/record-oracle.py --rows</c> wrote it on 2026-09-14.
+    /// The two rows of <c>atomic-group-leaks-a-change-position</c> - row 74033 of the seed-20260914
+    /// 6000-row gate and row 74510 of the seed-7 one - as <c>tools/record-oracle.py --rows</c> wrote
+    /// them on 2026-09-14 and 2026-09-15.
     /// </summary>
     /// <remarks>
-    /// One row, because one is all any wave has drawn: the shape needs an atomic group whose body
+    /// Two rows, because two is all any wave has drawn: the shape needs an atomic group whose body
     /// carries a fuzzy section that spends an error and then abandons a sub-attempt, which is a
-    /// narrower accident than the earlier-attempt leak <c>leakFreeFuzzy</c> already covers. Note the
+    /// narrower accident than the earlier-attempt leak <c>leakFreeFuzzy</c> already covers. Note each
     /// row's own <c>leakFreeFuzzy</c>, which agrees with upstream's drawn answer and NOT with this
     /// port's: that is the entry's reason for existing said in one field, because the anchored
     /// question removes an EARLIER attempt's leak and an atomic group's is inside one attempt.
+    /// <para>
+    /// Row 74510 is the STRONGER of the two and was added by S52 sitting 9. On row 74033 upstream's
+    /// drawn change list is internally consistent - counts <c>(2,1,1)</c> against two substitutions,
+    /// one insertion and one deletion - and only the deletion's POSITION differs, which is the shape
+    /// the entry's own <c>Reason</c> says is indistinguishable from this port miscomputing a
+    /// position. On row 74510 upstream's list is of the wrong KIND for upstream's own counts: it
+    /// counts <c>(1,2,0)</c> - one substitution and two insertions - and then lists TWO substitutions
+    /// and ONE insertion. That is upstream contradicting its own documentation on one answer, before
+    /// any comparison with this port is made.
+    /// </para>
     /// </remarks>
     private const string _atomicLeakedChangeRows = """
         {"generator": "interactions", "pattern": "^(?:\\p{Ll}\\w??[a-f]){1i+2d+1s<=3}(?>(?:\\p{Ll}(?:\\p{L}){s<=1,i<=1,d<=1}){d<=1})$", "flags": 0, "namedLists": {}, "subject": "AA𝔘𝔘", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [2]}}], "atomicFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [2], "deletions": [4]}}}
+        {"generator": "interactions", "pattern": "^(?:(\\p{Lu})([\\w\\s])\\W){1i+2d+1s<=3}(?>(?:(\\s?)(?:([^\\d])){s<=1,i<=1,d<=1:\\w}){2i+1d+1s<=2})([a\\d]{0,})$", "flags": 16394, "namedLists": {}, "subject": "ﬃﬃ ﬃﬃßß", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 4, "success": true, "index": 6, "length": 1, "captures": [[6, 1]]}, {"number": 5, "success": true, "index": 7, "length": 0, "captures": [[7, 0]]}], "lastIndex": 5, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 2, 0], "fuzzyChanges": {"substitutions": [3, 4], "insertions": [3], "deletions": []}, "codepointSpan": [0, 7]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 2, 0], "fuzzyChanges": {"substitutions": [3, 4], "insertions": [3], "deletions": []}}], "atomicFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 3, "success": true, "index": 5, "length": 1, "captures": [[5, 1]]}, {"number": 4, "success": true, "index": 6, "length": 1, "captures": [[6, 1]]}, {"number": 5, "success": true, "index": 7, "length": 0, "captures": [[7, 0]]}], "lastIndex": 5, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 2, 0], "fuzzyChanges": {"substitutions": [5], "insertions": [3, 4], "deletions": []}, "codepointSpan": [0, 7]}]}}
         """;
 
     /// <summary>
@@ -1439,6 +1503,40 @@ internal static class ExpectedDivergences
         .ParseRows(_atomicLeakedChangeRows)
         .Select(Question)
         .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The one row of <c>fuzzy-changes-of-the-wrong-kind-for-their-own-counts</c>, row 74345 of the
+    /// seed-7 6000-row gate, as <c>tools/record-oracle.py --rows</c> wrote it on 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// One row, because one is all any wave has drawn. Note the row's own <c>leakFreeFuzzy</c>,
+    /// which reproduces upstream's drawn answer CHARACTER FOR CHARACTER: the leak is inside one
+    /// attempt, so S47's anchored question cannot see it, exactly as on the atomic-group and
+    /// reversed-lookahead rows above.
+    /// </remarks>
+    private const string _wrongKindChangeRows = """
+        {"generator": "interactions", "pattern": "(?r)(?!(?:(?P<g1>\\p{Nd}{0,2})ß){s<=1,i<=1,d<=1:\\s})(?:𐐀𐐀){e<=2}\\b", "flags": 264, "namedLists": {}, "subject": "ßß𐐀\n", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": [1]}}], "searchOnlyPartial": false}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to <see cref="_wrongKindChangeRows"/>, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Two INSERTIONS, which is the only kind the counts both engines agree on can take. Upstream
+    /// reports the same counts and then lists a substitution and a deletion.
+    /// </remarks>
+    private static readonly string[] _wrongKindChangeOurs =
+    [
+        "match 0:(0,4)[(0,4)] 1:unset last=-1/- partial fuzzy=(0,2,0)[s:][i:2,1][d:]",
+    ];
+
+    /// <summary>
+    /// <see cref="_wrongKindChangeRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _wrongKindChange = OracleWave
+        .ParseRows(_wrongKindChangeRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _wrongKindChangeOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     private static readonly ExpectedDivergence[] _entries =
     [
@@ -2692,6 +2790,17 @@ internal static class ExpectedDivergences
                 + "identical: the same span, the same counts (2, 1, 1), the same two substitutions "
                 + "and the same insertion. Measured 2026-09-14, "
                 + "tools/probes/upstream-posix-and-atomic-free-answers.py, on regex 2026.9.10.\n"
+                + "THE SECOND ROW SETTLES IT WITHOUT THE CONTROL AT ALL, which is why S52 sitting 9 "
+                + "added it (seed 7 row 74510 of the 6000-row gate, 2026-09-15). Upstream counts "
+                + "(1, 2, 0) - one substitution, two insertions - and then lists TWO substitutions "
+                + "(codepoints 3 and 4) and ONE insertion (3). `fuzzy_changes` is documented as the "
+                + "positions of the changes `fuzzy_counts` counts, so the two are views of one edit "
+                + "script and that answer contradicts itself before this port is consulted. The cut-"
+                + "free control then agrees with this port anyway: the same span (0, 7), the same "
+                + "five groups, the same counts, and the list re-kinded to one substitution at 5 and "
+                + "two insertions at 3 and 4. Row 74033's list is internally consistent and only its "
+                + "deletion POSITION moves, so it needs the control; this one does not, and the "
+                + "control agreeing on top is what makes the pair evidence rather than a reading.\n"
                 + "KEYED ON THE ROW **AND** ON THE RECORDED `atomicFreeOutcome`, the shape "
                 + "`bestmatch-loses-a-candidate` uses: the row makes the entry as narrow as one "
                 + "judged question, and demanding that this port's whole answer equals upstream's "
@@ -2764,6 +2873,56 @@ internal static class ExpectedDivergences
             Example: _reversedLookaheadChangeRows,
             Applies: static (row, ours) =>
                 _reversedLookaheadChange.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "fuzzy-changes-of-the-wrong-kind-for-their-own-counts",
+            Reason: "Upstream bug, and LEDGER ENTRY 11's mechanism through a fourth door. S52 "
+                + "sitting 9, 2026-09-15, seed 7 row 74345 of the 6000-row gate.\n"
+                + "WHAT SETTLES IT IS UPSTREAM CONTRADICTING ITSELF ON ONE ANSWER, with no ablation "
+                + "and no comparison with this port. Upstream reports `fuzzy_counts` (0, 2, 0) - no "
+                + "substitutions, TWO insertions, no deletions - and then reports `fuzzy_changes` "
+                + "holding ONE substitution (codepoint 2) and ONE deletion (1) and NO insertion. "
+                + "`fuzzy_changes` is documented as \"a tuple of the positions of the substitutions, "
+                + "insertions and deletions\" of the match `fuzzy_counts` counts, so the two are "
+                + "views of ONE edit script and cannot both be right. BOTH ENGINES AGREE ON THE "
+                + "COUNTS, so there is no dispute about what the edit script is: it is two "
+                + "insertions, and two insertion positions are the only thing either engine may "
+                + "report. This port reports two insertions. Upstream reports none.\n"
+                + "THE LEAK IS INSIDE ONE ATTEMPT, which is why the row is here rather than under "
+                + "`fuzzy-changes-leaked-from-an-abandoned-attempt`: the row's own `leakFreeFuzzy` "
+                + "reproduces upstream's drawn answer character for character, so S47's anchored "
+                + "question - which removes an EARLIER attempt's leak - sees nothing. That is the "
+                + "same field reading the same way on the atomic-group and reversed-lookahead rows "
+                + "above, and it is what puts all three in the E/F/G half of ledger entry 11's table "
+                + "rather than the A/B half this port fixed.\n"
+                + "WHICH CONSTRUCT LEAKED IS NOT ESTABLISHED, and it is not guessed at here. The "
+                + "pattern carries a fuzzy section inside a NEGATIVE LOOKAHEAD - a construct that "
+                + "succeeds precisely when its body's sub-attempts are abandoned, which is the "
+                + "defect class's own description - but every ablation that would isolate it MOVES "
+                + "THE CANDIDATE and so cannot arbitrate this one. Measured 2026-09-15 on regex "
+                + "2026.9.10, `python tools/probes/upstream-fuzzy-changes-of-the-wrong-kind.py`: "
+                + "deleting the lookahead answers (1, 3) complete, making its body non-fuzzy answers "
+                + "(2, 3) complete, giving its body a zero budget answers (2, 3) complete, and "
+                + "spelling it POSITIVE answers (1, 3) complete - against the drawn (0, 3) partial. "
+                + "Anchoring the drawn span instead holds the candidate and reproduces the "
+                + "contradiction unchanged, which is the `leakFreeFuzzy` line said a second way.\n"
+                + "WHAT THIS ENTRY DOES NOT ESTABLISH, said out loud: that codepoints 2 and 1 are "
+                + "the RIGHT two insertion positions. The KIND is settled and the positions are not, "
+                + "and this is the same weak arm `fuzzy-changes-leaked-from-an-abandoned-attempt` "
+                + "already names. The instrument that covers it is not this list - it is "
+                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` over "
+                + "every fuzzy match of a whole wave, plus the gap test named below.\n"
+                + "KEYED ON THE ROW AND ON THIS PORT'S EXACT ANSWER TO IT, the shape "
+                + "`reversed-lookahead-change-at-the-match-start` uses, and for its reason: a "
+                + "predicate over the two compared answers would say \"same span, same groups, same "
+                + "counts, different positions\", which is indistinguishable from this port "
+                + "computing a position wrongly. It widens only by judging another row.",
+            PinnedBy: "FuzzyCountsAndChangesTests.A_negative_lookahead_s_abandoned_attempt_does_not_"
+                + "re_kind_the_changes_that_follow_it",
+            Example: _wrongKindChangeRows,
+            Applies: static (row, ours) =>
+                _wrongKindChange.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
@@ -2952,6 +3111,75 @@ internal static class ExpectedDivergences
             Example: _turkicPatternSideRows,
             Applies: static (row, ours) =>
                 _turkicPatternSide.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "turkic-default-folding-read-by-a-lookaround",
+            Reason: "THE SAME UPSTREAM DEFECT AS THE THREE ENTRIES ABOVE - `CaseFolding.txt`'s two "
+                + "`T` rows merged into both default tables - on a row where the Turkic letter is "
+                + "read only by a LOOKAROUND, so nothing with a span touches it. S52 sitting 9, "
+                + "2026-09-15, seed 20260915 row 88716 of the 6000-row gate.\n"
+                + "WHY IT NEEDED A FOURTH ENTRY, and it is one clause rather than a new argument. "
+                + "The subject is 'ııııaa' and BOTH of upstream's matches land "
+                + "on the trailing `a` - (5, 6) and (4, 5) - so the span test "
+                + "`turkic-default-folding` uses finds no Turkic letter, and so does the recorded "
+                + "`scanMatches` that `turkic-default-folding-without-spans` reads as its staleness "
+                + "alarm. Adding the row to that entry would have meant loosening its second "
+                + "condition, which the owner's 2026-09-14 ruling for this file forbids. What reads "
+                + "the letter is the NEGATIVE LOOKBEHIND `(?<!(?:a|\\p{ASCII})+)`, and a lookaround "
+                + "is not part of any match by construction.\n"
+                + "THE MECHANISM IS THE SET INSIDE THAT LOOKBEHIND, isolated to one line and not "
+                + "inferred from the row. Under IGNORECASE|FULLCASE `[a\\p{ASCII}]` MATCHES U+0131 "
+                + "while `a`, `[a]`, `[ab]`, `\\p{ASCII}` and `[\\p{ASCII}]` all answer None.\n"
+                + "WHAT SWITCHES THE EXPANSION ON IS A SECOND MEMBER, and that was MEASURED after "
+                + "a first draft got it wrong. The draft said \"a set is expanded by its members' "
+                + "case partners\"; `[\\p{ASCII}]` refutes it, because that set's member holds `I` "
+                + "and it reaches nothing. What actually divides the cells is how many members the "
+                + "set has: `[\\p{ASCII}]` answers None and `[\\p{ASCII}\\p{ASCII}]` - the SAME "
+                + "member twice, so the same characters - MATCHES, as do `[\\p{ASCII}z]` and "
+                + "`[a\\p{ASCII}]`. A one-member set behaves like the bare property and a "
+                + "two-member one case-expands the property's contents. `[ab]` reaching nothing "
+                + "says it is the PROPERTY's members expanding rather than sets in general.\n"
+                + "AND THE EXPANSION IS NOT ITSELF THE DEFECT, which is the control that makes "
+                + "this the `T` rows rather than a set-folding bug. A multi-member set holding "
+                + "`\\p{ASCII}` reaches every character whose partner is ASCII: U+212A KELVIN SIGN "
+                + "(`212A; C; 006B`) and U+017F LATIN SMALL LETTER LONG S (`017F; C; 0073`) as "
+                + "well as U+0131 (`0049; T; 0131`) and U+0130 (`0130; T; 0069`), and it reaches "
+                + "neither U+00C5 nor U+00F1, whose partners are not ASCII. THIS PORT AGREES ON "
+                + "THE TWO `C` ROWS AND REFUSES THE TWO `T` ROWS: over the 42-cell grid of those "
+                + "six characters against seven spellings, 36 cells AGREE and the only six that "
+                + "diverge are U+0131 and U+0130 against the three MULTI-MEMBER spellings. So both "
+                + "the expansion and the one-member exception are shared behaviour, and the `T` "
+                + "rows are the whole of the difference.\n"
+                + "THE FOUR-SWAP CONTROL OVER THE WHOLE ROW SAYS THE SAME THING, and EVERY SWAP "
+                + "MUST STAY NON-ASCII: the lookbehind reads ASCII-ness, so the obvious swaps - "
+                + "`h` and `i` - change the question rather than removing the `T` row, and BOTH of "
+                + "them reproduce upstream's count for that reason. A first draft of this "
+                + "judgement used `h` and read the agreement as \"not Turkic after all\"; the "
+                + "confound is recorded because the next reader will reach for `h` too. U+00F1, "
+                + "U+01E7, U+0125 and U+00E5 are non-ASCII, fold to ONE character and carry no "
+                + "`T` row: on all four the two engines AGREE, and only the dotless small i "
+                + "diverges. Dropping IGNORECASE agrees too.\n"
+                + "A FIRST DRAFT OF THIS ENTRY NAMED THE WRONG LOOKAROUND - the inner "
+                + "`(?<=ı[\\w\\s])`, which decides the conditional - and the blind review "
+                + "killed it by measuring: neutering that lookbehind leaves the engines still "
+                + "disagreeing (upstream 3, this port 1), while deleting only the `a|` from the "
+                + "outer one makes upstream agree with this port (1 and 1). The judgement did not "
+                + "move - it is the `T` rows either way - but the construct did, and the "
+                + "one-line set control above is what replaced the guess.\n"
+                + "Measured 2026-09-15 on regex 2026.9.10, "
+                + "`python tools/probes/upstream-turkic-without-spans.py`, in the two sections "
+                + "headed `seed 20260915 row 88716` and `the MECHANISM of the lookaround row`.\n"
+                + "KEYED ON THE ROW AND ON THIS PORT'S EXACT ANSWER, like its two row-keyed "
+                + "siblings. There is no `scanMatches` clause because there is nothing for one to "
+                + "read - that absence is the entry's reason for existing - so this entry is "
+                + "narrower than its siblings by one guard, and it widens only by judging another "
+                + "row with the probe.",
+            PinnedBy: "Gaps.Engine.CaseFoldingTests.A_set_union_reaches_the_case_partners_of_its_"
+                + "members_but_not_through_a_Turkic_row",
+            Example: _turkicLookaroundRows,
+            Applies: static (row, ours) =>
+                _turkicLookaround.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(

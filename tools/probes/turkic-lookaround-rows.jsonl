@@ -1,0 +1,1 @@
+{"generator": "conditionals", "pattern": "(?r)(?(?<!(?:a|\\p{ASCII})+)\\d{3}|)(?:(?(?<=ı[\\w\\s])a\\w|(?P<g1>ı))ı|a)", "flags": 16386, "namedLists": {}, "subject": "ııııaa", "operation": "sub", "template": "\\1\\1", "count": 0}

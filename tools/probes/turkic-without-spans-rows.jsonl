@@ -4,3 +4,5 @@
 {"generator": "conditionals", "pattern": "(?r)(?(?!s)[A-Z]{2}|(S))$", "flags": 16394, "namedLists": {}, "subject": "s\rSı", "operation": "subf", "template": "{0[2]}", "count": 3}
 {"generator": "interactions", "pattern": "^(?:ﬁİ){e<=2:\\S}([^a-f]+)$", "flags": 16386, "namedLists": {}, "subject": "İİﬁ ﬁﬀ", "operation": "split", "count": 3}
 {"generator": "interactions", "pattern": "\\b(?P<g1>[^a-f])*?(?P<g2>[A-Z]{1}?)", "flags": 16386, "namedLists": {}, "subject": "ßßıı", "operation": "split", "count": 0}
+{"generator": "verbs", "pattern": "[A-Z]{1,3}(?<![a\\d](*SKIP))[\\w\\s]\\d*+(?=(*PRUNE))[^a][^a]*(?!(*SKIP)ı)\\S", "flags": 10, "namedLists": {}, "subject": "Aİﬀı\r\nS", "operation": "subf", "template": "{0}{0[-2]}", "count": 0}
+{"generator": "interactions", "pattern": "(?p)(?P<g1>\\d)??\\L<w1>{e<=2:\\s}", "flags": 266, "namedLists": {"w1": ["a", "ﬁ"]}, "subject": "İﬁ\r\nı", "operation": "split", "count": 0}

@@ -206,6 +206,115 @@ public sealed class FuzzyCountsAndChangesTests
     }
 
     /// <summary>
+    /// An ATOMIC GROUP's abandoned sub-attempt does not re-KIND the changes the match reports - the
+    /// substitution and the two insertions land as the cut-free pattern reports them.
+    /// </summary>
+    /// <remarks>
+    /// Seed 7 row 74510 of the 6000-row gate of 2026-09-15, added by S52 sitting 9 as the second and
+    /// stronger row of <c>atomic-group-leaks-a-change-position</c>. Where row 74033 above needs
+    /// upstream's control to be judgeable at all - its list is internally consistent and only one
+    /// POSITION moves - <b>this row is wrong on upstream's own terms before any control is
+    /// applied</b>: upstream counts <c>(1, 2, 0)</c> and then lists TWO substitutions (codepoints 3
+    /// and 4) and ONE insertion (3). <c>fuzzy_changes</c> is documented as the positions of the
+    /// changes <c>fuzzy_counts</c> counts, so that one answer contradicts itself.
+    /// <para>
+    /// <b>Provenance of the expected values.</b> They are upstream's own cut-free answer, measured on
+    /// regex 2026.9.10 on 2026-09-15 by
+    /// <c>python tools/probes/upstream-posix-and-atomic-free-answers.py</c>, whose <c>control</c>
+    /// line for this row reads
+    /// <c>1 | span=(0, 7) g1=(0, 1) g2=(1, 2) g3=(5, 6) g4=(6, 7) g5=(7, 7) counts=(1, 2, 0)
+    /// changes=([5], [3, 4], [])</c> - the same span, the same five groups and the same counts as the
+    /// drawn answer, with the list re-kinded. The subject is BMP throughout, so codepoint and UTF-16
+    /// positions coincide and no conversion is involved.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void An_atomic_group_reports_the_change_kinds_the_cut_free_pattern_reports()
+    {
+        // Flags 16394 (0x400A) - IGNORECASE | MULTILINE | FULLCASE, and no version bit, so the
+        // ambient default. The row does not reproduce without them.
+        const FuzzyRegexOptions options =
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.FullCase;
+        const string pattern =
+            @"^(?:(\p{Lu})([\w\s])\W){1i+2d+1s<=3}(?>(?:(\s?)(?:([^\d])){s<=1,i<=1,d<=1:\w}){2i+1d+1s<=2})([a\d]{0,})$";
+        const string subject = "ﬃﬃ ﬃﬃßß";
+
+        Match m = new FuzzyRegex(pattern, options).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 7));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 2, 0));
+
+        // Upstream's own cut-free answer. Upstream as drawn lists substitutions at 3 and 4 and an
+        // insertion at 3, which is two substitutions and one insertion under a count of one and two.
+        m.FuzzyChanges.Substitutions.Should().Equal(5);
+        m.FuzzyChanges.Insertions.Should().Equal(3, 4);
+        m.FuzzyChanges.Deletions.Should().BeEmpty();
+
+        AssertChangesAgreeWithCounts(m);
+
+        // The control itself, run here as well as in the probe: with the cut removed this port does
+        // not move, which is what says the kinds belong to the match rather than to the group.
+        Match cutFree = new FuzzyRegex(pattern.Replace("(?>", "(?:", StringComparison.Ordinal), options).Match(subject);
+
+        cutFree.Success.Should().BeTrue();
+        cutFree.FuzzyChanges.Substitutions.Should().Equal(5);
+        cutFree.FuzzyChanges.Insertions.Should().Equal(3, 4);
+    }
+
+    /// <summary>
+    /// A NEGATIVE LOOKAHEAD's abandoned sub-attempt does not re-kind the changes that follow it: the
+    /// match counts two insertions and reports two INSERTION positions.
+    /// </summary>
+    /// <remarks>
+    /// Seed 7 row 74345 of the 6000-row gate of 2026-09-15, and ledger entry 11's mechanism G.
+    /// <b>Upstream contradicts itself on one answer</b>: it counts <c>(0, 2, 0)</c> - two insertions
+    /// and nothing else - and then lists one SUBSTITUTION (codepoint 2) and one DELETION (1) and no
+    /// insertion. The totals agree, two entries for two errors, and the KINDS do not, because
+    /// <c>match_fuzzy_changes</c> reports the first <c>sum(fuzzy_counts)</c> entries of the change
+    /// stack (<c>upstream/src/_regex.c:20522</c>) without regard to what kind each entry is.
+    /// <para>
+    /// <b>Provenance of the expected values.</b> The COUNTS are upstream's own, measured on regex
+    /// 2026.9.10 on 2026-09-15 by
+    /// <c>python tools/probes/upstream-fuzzy-changes-of-the-wrong-kind.py</c>, whose
+    /// <c>as drawn</c> line reads <c>span=(0, 3) g1=unset PARTIAL counts=(0, 2, 0)
+    /// changes=([2], [], [1])</c> and whose next line reads
+    /// <c>counts say 2 ins; list names 1 sub, 1 del</c>. Both engines agree on the counts, so the
+    /// edit script is two insertions and two INSERTION positions are the only thing either engine may
+    /// report - which is what this test asserts. <b>That the two positions are 2 and 1 is NOT
+    /// established by upstream</b> and the oracle entry
+    /// <c>fuzzy-changes-of-the-wrong-kind-for-their-own-counts</c> says so: every ablation that would
+    /// isolate the leaking construct moves the candidate, so the KIND is settled and the positions
+    /// are not. They are asserted here to pin this port's answer against drift, not as upstream's.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_negative_lookahead_s_abandoned_attempt_does_not_re_kind_the_changes_that_follow_it()
+    {
+        // Flags 264 (0x108) - VERSION1 | MULTILINE. The row does not reproduce without them.
+        const FuzzyRegexOptions options = FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline;
+        const string pattern = @"(?r)(?!(?:(?P<g1>\p{Nd}{0,2})ß){s<=1,i<=1,d<=1:\s})(?:\U00010400\U00010400){e<=2}\b";
+        string subject = "ßß" + char.ConvertFromUtf32(0x10400) + "\n";
+
+        Match m = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+
+        m.Success.Should().BeTrue();
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 4));
+
+        // Upstream's counts, which both engines agree on.
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+
+        // The whole of the divergence: two insertions, because two insertions is what the agreed
+        // counts say. Upstream lists a substitution and a deletion and no insertion.
+        m.FuzzyChanges.Substitutions.Should().BeEmpty();
+        m.FuzzyChanges.Deletions.Should().BeEmpty();
+        m.FuzzyChanges.Insertions.Should().Equal(2, 1);
+
+        AssertChangesAgreeWithCounts(m);
+    }
+
+    /// <summary>
     /// A reversed match reports a LOOKAHEAD's substitution where the lookahead tested, not at the
     /// start of the match.
     /// </summary>

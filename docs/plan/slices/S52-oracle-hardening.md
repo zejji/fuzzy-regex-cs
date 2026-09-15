@@ -1163,3 +1163,274 @@ two, and - under the new owner rule - both gap tests' expected values re-derived
 - The **20-seed sweep run**; `tools/sweep-seeds.ps1` and the `oracle.yml` cron both exist, the run
   does not.
 - The long generators remain **off** the default `-Generator` list, for sitting 6's reason.
+
+---
+
+## Sitting 9 (2026-09-15) - CHECKPOINT, not closed
+
+STATE.md made sitting 9's first job the thirteen remaining gate divergences. **Five of the thirteen
+are now judged, classified and pinned, and the gate is down from 13 to 8.** No engine code changed -
+every one of the five is upstream diverging in a family this port has already been judged right
+about, and the port's answer was not touched on any of them.
+
+Sitting 8 left the thirteen regenerable and with a door already put to each, so this sitting started
+from `python tools/probes/gate-divergence-doors.py` over the reports still on disk rather than from
+raw rows. That table's own guesses were right on three rows and **wrong about the mechanism on a
+fourth**, and measuring is what caught it - see "the Turkic label that was a guess" below.
+
+### The five, and what judges each
+
+**Two are ledger entry 11's defect class - the fuzzy counts and the change list drifting apart.**
+
+- **Seed 7 row 74510 joins `atomic-group-leaks-a-change-position`** as its second row, and it is the
+  STRONGER of the two. Row 74033 needs upstream's control to be judgeable at all, because its list
+  is internally consistent and only the deletion's POSITION moves. This row is wrong on upstream's
+  own terms before any control is applied: upstream counts `(1, 2, 0)` - one substitution and two
+  insertions - and then lists **two substitutions and one insertion**. The `(?>` to `(?:` control
+  then agrees with this port anyway, keeping the span `(0, 7)`, all five groups and the counts and
+  re-kinding the list to one substitution at 5 and two insertions at 3 and 4.
+- **Seed 7 row 74345 is a NEW entry, `fuzzy-changes-of-the-wrong-kind-for-their-own-counts`**, and
+  ledger entry 11's **mechanism G**. Upstream counts `(0, 2, 0)` - two insertions and nothing else -
+  and lists one substitution and one deletion and no insertion. The totals agree, two entries for
+  two errors, and the KINDS do not: `match_fuzzy_changes` reports the first `sum(fuzzy_counts)`
+  entries of the change stack (`:20522`) without regard to each entry's kind, so a polluted stack
+  does not merely misplace a change, it mis-names it. **Both engines agree on the counts**, so the
+  edit script is two insertions and two insertion positions are the only thing either engine may
+  report; this port reports two and upstream reports none. The row's own `leakFreeFuzzy` reproduces
+  upstream's drawn answer character for character, which is what puts it in the E/F/G half of the
+  ledger's table rather than the A/B half this port fixed.
+
+  **Which construct leaked is NOT established, and the entry says so.** Every ablation moves the
+  candidate - deleting the lookahead answers `(1, 3)` complete, making its body non-fuzzy or giving
+  it a zero budget answers `(2, 3)` complete, spelling it positive answers `(1, 3)` complete, against
+  the drawn `(0, 3)` partial. So the KIND is settled and the positions are not, which is the same
+  weak arm `fuzzy-changes-leaked-from-an-abandoned-attempt` already names.
+
+**Three are the Turkic `T` rows, in shapes whose answers carry no match position.**
+
+- **Seed 7 row 118133 and seed 20260915 row 75528 join `turkic-default-folding-without-spans`** as
+  rows 7 and 8. 118133 is row 29165's range control again in a third operation: `[A-Z]{1,3}` and
+  `[A-Y]{1,3}` both reach the dotless small i and `[A-H]{1,3}` and `[J-Z]{1,3}` find nothing at all,
+  which is this port's answer. 75528 is a new symptom rather than a new argument - upstream EATS the
+  U+0130, so its first match is `(0, 1)` where every swap for a letter with no `T` row gives a
+  zero-width first match and hands the letter back as a part. **Fold LENGTH is measured not to be
+  the variable**: U+00DF, U+FB00 and U+01F0 all fold to two characters and `h` to one, and all four
+  agree with this port.
+- **Seed 20260915 row 88716 is a NEW entry, `turkic-default-folding-read-by-a-lookaround`.** Both of
+  upstream's matches land on the trailing `a` - `(5, 6)` and `(4, 5)` - so **no span on either side
+  covers a Turkic letter**, and both the first Turkic entry's span test and the without-spans
+  entry's recorded `scanMatches` alarm refuse it. Adding it to the sibling would have meant
+  loosening that alarm, which the owner's 2026-09-14 ruling for this file forbids.
+
+### The Turkic label that was a guess, and the three drafts measurement killed
+
+Sitting 8's table called row 88716 Turkic on the strength of four dotless `ı` in the subject. It IS
+Turkic, but **this sitting reached that conclusion three times by bad reasoning before measuring it
+properly**, and each draft died. Worth recording because the next reader will make the same moves:
+
+1. **The first control swapped `ı` for `h` and for `i`, and both reproduced upstream's count.** Read
+   naively that says "not Turkic". It says nothing of the kind: the pattern's own
+   `(?<!(?:a|\p{ASCII})+)` reads ASCII-ness, and `h` and `i` are ASCII where `ı` is not, so the swap
+   changed the question. Four non-ASCII, single-fold, no-`T`-row letters - U+00F1, U+01E7, U+0125,
+   U+00E5 - all AGREE between the engines, and only the dotless i diverges. Dropping IGNORECASE
+   agrees too. Caught by me before the entry was written.
+2. **The entry then named the wrong construct** - the inner `(?<=ı[\w\s])` that decides the
+   conditional. The blind review killed it by measuring: neutering that lookbehind leaves the
+   engines disagreeing (upstream 3, this port 1), while deleting only the `a|` from the OUTER
+   negative lookbehind makes upstream agree with this port (1 and 1).
+3. **The replacement claim - "a set is expanded by its members' case partners" - was ALSO wrong**,
+   and the delta pass killed that one. `[\p{ASCII}]` refutes it: that set's member holds `I` and it
+   reaches nothing. What actually divides the cells is **how many members the set has**.
+   `[\p{ASCII}]` answers None and `[\p{ASCII}\p{ASCII}]` - the same member twice, so exactly the
+   same characters - MATCHES, as do `[\p{ASCII}z]` and `[a\p{ASCII}]`. A one-member set behaves like
+   the bare property; a two-member one case-expands the property's contents. `[ab]` reaching nothing
+   says it is the PROPERTY's members expanding rather than sets in general.
+
+**And the expansion is not itself the defect, which is the control that makes this the `T` rows.** A
+multi-member set holding `\p{ASCII}` reaches every character whose partner is ASCII - U+212A KELVIN
+SIGN (`212A; C; 006B`) and U+017F LATIN SMALL LETTER LONG S (`017F; C; 0073`) as well as the two
+Turkic rows - and reaches neither U+00C5 nor U+00F1, whose partners are not ASCII. Over the 42-cell
+grid of those six characters against seven spellings, **36 cells AGREE and the only six that diverge
+are U+0131 and U+0130 against the three multi-member spellings**. So both the expansion and the
+one-member exception are shared behaviour, and the `T` rows are the whole of the difference.
+
+### One row measured and deliberately NOT pinned
+
+**Seed 7 row 75921** (`interactions`, partial `search`). Better measured than sitting 8 left it, and
+still not judged:
+
+- Upstream's drawn answer names a change at codepoint **2, outside its own reported span `(4, 5)`**,
+  under counts `(0, 1, 0)` that say one INSERTION. Its own anchored `match(4, 5, partial=True)` gives
+  a THIRD answer - same span, same group, same counts, one DELETION at 4. So upstream contradicts
+  itself in kind on both answers, and its drawn list is wrong on a second, independent ground.
+- This port answers `(0, 1, 1)` with an insertion and a deletion at 4, self-consistent.
+- **The count cannot be settled from the row.** The port spends two errors where upstream spends
+  one, and upstream's own totals agree with each other, so nothing upstream says its count is wrong.
+  The structural argument is mechanism B - a partial returns from inside a nested section, and the
+  inner `{1<=e<=2}` demands at least one error while the outer `{e<=1:\d}` may add one - but
+  `UpstreamCountedOnlyTheInnermostSection`'s prefix test fails because the list is ALSO leaked, so
+  the mechanism-B signature is only half present. `(?>` to `(?:` moves the candidate, `(3, 5)`
+  against `(4, 5)`, so the atomic control cannot arbitrate it either.
+- Pinning it under either mechanism would be the guess this file spends three paragraphs on. Left
+  for sitting 10 with the measurement above.
+
+### Numbers
+
+- Ratchet **GREEN**, **6117 / 6117 / 0 skipped**, **6009 distinct ids**, baseline **6005**.
+- Default wave, Release, three seeds, 300 rows a generator, run BEFORE the gate as STATE.md
+  requires: **GREEN, diverge 0 of 6300 at each seed** (agree 6286 / 6293 / 6293, expected 8 / 2 / 4).
+- **The 6000-row three-seed gate, re-run on the commit-ready tree: 13 -> 8 diverging rows**, and the
+  accounted-for count rises by exactly the five judged:
+
+  | seed | before (sitting 8) | after | expected before -> after |
+  |---|---:|---:|---|
+  | 7 | 6 | **3** | 93 -> 96 |
+  | 4242 | 3 | **3** | 76 -> 76 |
+  | 20260915 | 4 | **2** | 85 -> 87 |
+  | total | 13 | **8** | 254 -> 259 |
+
+  `agree 125828 / 125852 / 125826`, `timeout 2 / 1 / 1`, `resource 71 / 68 / 84` of 126,000 a seed.
+  Seed 4242 is unchanged because none of the five was drawn there.
+- The five judged rows replayed through `--rows`: **expected 5, diverge 0 of 5**, each classified by
+  the entry it was judged into and by no other.
+- Three new gap tests, each mutated once and watched go red, each carrying its provenance beside the
+  assertion as the owner's 2026-09-15 rule requires.
+
+### The negative controls, run against the code committed here
+
+No control this sitting mutates the engine - no engine code changed. What it controls is **the
+keying**, because four of the five rows are keyed on a judged answer and the fifth on a recorded
+discriminator. Run last, after the final code change, on the tree being committed.
+
+> **Control A, `entry-keying`**: in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, change one
+> character in one judged ANSWER of each of the four answer-keyed entries -
+> `_wrongKindChangeOurs[0]` `...fuzzy=(0,2,0)[s:][i:2,1][d:]` to `[i:2,0]`;
+> `_turkicWithoutSpansOurs[6]` `sub 0 'Aİﬀı
+S'` to `sub 1 '...'`;
+> `_turkicWithoutSpansOurs[7]` `split 9 '' <null> 'İ' <null> '' <null> 'ı' <null> ''` to
+> `split 8 ...`; `_turkicLookaroundOurs[0]` `sub 1 'ııııa'` to `sub 2 '...'`.
+> Rows: the five themselves, written out of the waves by seed and row number - seed 7 rows 74345,
+> 74510 and 118133, seed 20260915 rows 75528 and 88716 - run with
+> `pwsh -File tools/run-oracle.ps1 -Rows <file>`. No seed - these are explicit rows.
+> Result: **5 expected / 0 diverge** unbroken, **1 expected / 4 diverge** broken, and the four that
+> flip are exactly the four whose judged answer was changed. Broken, three tests fail:
+> `The_wave_agrees_with_upstream`,
+> `An_answer_with_no_spans_is_classified_by_the_row_keyed_turkic_entry` and
+> `Every_expected_divergence_still_diverges`.
+
+> **Control B, `atomic-discriminator`**: in the same file, in `_atomicLeakedChangeRows`, change row
+> 74510's `atomicFreeOutcome` `"substitutions": [5]` to `"substitutions": [6]`. Same rows, same
+> command. Result: **classification does NOT change - 5 expected / 0 diverge** - and
+> `Every_expected_divergence_still_diverges` fails instead, `failed: 1`.
+
+**Control B not flipping its row is the control working rather than failing**, and it is sitting 8's
+finding reproduced for the new row: `atomic-group-leaks-a-change-position` keys on the LIVE row's
+recorded `atomicFreeOutcome`, not on a judged-answer string, so editing the `Example` copy cannot
+change how a row is classified. What it does instead is fail the staleness alarm, which is the
+instrument that guards that entry. Anyone re-running these should expect a DIFFERENT failure from
+Control B than from Control A, and that difference is the point.
+
+The second seed these controls ask for does not apply: they run on five explicit rows rather than on
+a generator, so there is no seed to vary. What stands in for it is the gate itself, which drew these
+five at TWO different seeds, 7 and 20260915.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results, and an independent
+verifier.**
+
+**Pass one, over the whole diff: two findings raised, two reproduced, two fixed.** Neither was a
+defect in the port; both were defects in the evidence, and the first was serious.
+
+1. **The `turkic-default-folding-read-by-a-lookaround` entry named the wrong construct.** It said the
+   letter was read by the inner `(?<=ı[\w\s])`; neutering that leaves the engines disagreeing
+   (upstream 3, this port 1), while deleting only the `a|` from the outer negative lookbehind makes
+   upstream agree (1 and 1). The JUDGEMENT did not move - it is the `T` rows either way - but the
+   mechanism did, and a one-line set control replaced the guess.
+2. **The gap test was declared "the minimal form of row 88716" and was not**: it pinned a
+   pattern-side `ı` against a subject `I`, a direction that appears nowhere in the row, so the row
+   could regress with all four assertions still passing. Replaced by the set-union test; the
+   lookbehind test was KEPT, because its four cells are measured upstream facts, with its claim
+   corrected to what it actually pins.
+
+**Pass two, a first pass over the fix delta** (the rewritten entry `Reason`, the new set-union gap
+test, the probe's new sections and the corrected doc on the lookbehind test): **three findings
+raised, three reproduced, three fixed.**
+
+- **The replacement mechanism claim was ALSO wrong** - see "the three drafts measurement killed"
+  above. `[\p{ASCII}]` refutes "a set is expanded by its members", and `[\p{ASCII}\p{ASCII}]` is the
+  cell that says what the rule actually is. The entry, the test and the probe now state the
+  member-count rule, and the test asserts the discriminating cells rather than only the refusals.
+- **Two "last section" citations into the probe were wrong** after the probe grew sections. Both now
+  cite the section by its HEADING, which does not rot.
+- **The lookbehind test's summary sentence still carried the first draft's mechanism** ("the
+  conditional it decides takes the other branch and the scan stops one match earlier"), false in
+  both halves: forcing that lookbehind to fail gives one match MORE, not fewer, and the test body
+  contains no conditional and no scan.
+
+### The independent verifier ran, and it destroyed this slice's main file
+
+**Amendment 16 limb (d)'s verifier was dispatched, a fresh agent briefed with nothing but this tree,
+and it re-ran every claim. Ten of the eleven came back CONFIRMED.** Then, reverting Control A's four
+one-character edits, **it ran `git checkout -- tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`
+and discarded the whole of this sitting's uncommitted work in that file** - both new entries, both
+new row constants, the two rows appended to `_turkicWithoutSpansRows`, row 74510 of
+`_atomicLeakedChangeRows`, and three edited `Reason` texts. `.scratch/control.py` exists precisely to
+revert those four edits and the verifier did not use it. No other file was touched.
+
+**It was recoverable, and the recovery is itself checkable.** The verifier had built the good file at
+12:53 and preserved the assembly, so it left `.scratch/RECOVERY-expected-divergences.json` holding
+every entry's `Id`, `Reason`, `PinnedBy` and `Example` and all seven field values as the good build
+computed them. The file was rebuilt from this session's own edit text and then diffed against that
+dump (`.scratch/difframe.py`): **all four row constants byte-identical after JSON normalisation, all
+three judged-answer arrays identical, and both new entries present.** One `Reason` differed, by two
+characters, and the rebuild is the CORRECT one - "the E/F half of ledger entry 11's table" where the
+rebuild says "E/F/G", which is what the table now reads. `Applies` lambdas are IL-only and could not
+be recovered from the dump; they were rewritten from this session's text and are proved by the
+controls below rather than by the diff.
+
+**Everything was then re-run on the restored tree, and nothing rests on a pre-incident run**: the
+ratchet, the five-row replay, Control A, Control B and the 6000-row gate. The numbers in this
+sitting's "Numbers" section are all from those re-runs.
+
+**The instruction the next verifier brief needs, said plainly: an independent verifier must never run
+`git checkout`, `git restore`, `git stash` or `git reset` on a dirty tree.** It is handed a working
+tree full of uncommitted work and no commit to fall back to, so the ordinary undo is the one command
+that cannot be safely used. A control it applies must be reverted by re-editing exactly what it
+edited, or by the slice's own revert script where one exists.
+
+### The verifier's verdicts
+
+Ten CONFIRMED, one COULD NOT RUN, none DIFFERENT. CONFIRMED: the ratchet (GREEN, 6117 / 6117 / 0
+skipped, 6009 distinct ids, baseline 6005); all fifteen gate figures; the five-row replay and the
+order of the five entries that classify it; Control A, including that the four that flip are the
+four whose judged answer changed and the three tests that fail; both change-position probes; the
+Turkic probe's row-118133, row-75528, row-88716 and set-grid sections; the 42-cell port-side grid,
+re-derived from a rows file the verifier built itself (36 agree, 6 diverge, and the six are U+0131
+and U+0130 against the three multi-member spellings); the claim that seed 4242 is unchanged because
+none of the five was drawn there, which it checked twice - by seed and by asking whether any row
+anywhere in `wave-4242.jsonl` carries one of the five questions. **And, under the owner's 2026-09-15
+rule, all three new gap tests' expected values re-derived directly against regex 2026.9.10 rather
+than through this repo's probes** - each cited upstream value is what upstream actually answers, and
+the verifier additionally read `upstream/src/_regex.c:20522` and confirmed that
+`match_fuzzy_changes` walks `fuzzy_changes[i]` for `i < sum(fuzzy_counts)` and bins each entry by
+`change->type` with no check that the stack's kinds match the counts, which is mechanism G's claim in
+upstream's own source.
+
+COULD NOT RUN: Control B, because the file was destroyed before the verifier reached it. It was
+re-run here afterwards on the restored tree and is reported in full above.
+
+### Still owed on S52 after this sitting
+
+- **The eight remaining gate divergences.** Sitting 8's table still describes seven of them
+  correctly. What is left is six `(*SKIP)` slice rows (seed 7 74413 and 76160, seed 4242 76778,
+  77119 and 119927, seed 20260915 74889), the empty-slice partial (seed 20260915 104366, the only
+  one of the thirteen with no verb, no fuzzy cost and no Turkic fold), and seed 7 75921, measured
+  above and deliberately unpinned. Regenerate with `pwsh -File tools/run-oracle.ps1 -Count 6000`
+  then `python tools/probes/gate-divergence-doors.py`.
+- The **timeout rows** generator (scope item, depends on S51's `timeout` comparison) - untouched.
+- The **20-seed sweep run**; `tools/sweep-seeds.ps1` and the `oracle.yml` cron both exist, the run
+  does not.
+- The long generators remain **off** the default `-Generator` list, for sitting 6's reason.
+- The `pos`/`endpos` versus `codepointSlice` ambiguity sitting 8 narrowed is still open, and is still
+  a wave-format change wanting its own slice.

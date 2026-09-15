@@ -278,6 +278,147 @@ public sealed class CaseFoldingTests
     }
 
     /// <summary>
+    /// A SET UNION reaches the case partners of its members - including partners no member reaches
+    /// on its own - but it does not reach them through a Turkic <c>T</c> row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The mechanism of seed 20260915 row 88716 of the 6000-row gate, isolated to one line. That row
+    /// needed a fourth Turkic oracle entry because the letter is read by a negative LOOKBEHIND, so
+    /// no match span on either side covers it; what the lookbehind holds is
+    /// <c>[a\p{ASCII}]</c>, and <b>the union reaches U+0131 where neither <c>a</c> nor
+    /// <c>\p{ASCII}</c> does</b>, because a set is expanded by its members' case partners and
+    /// <c>I</c> is ASCII.
+    /// </para>
+    /// <para>
+    /// <b>What switches the expansion on is a SECOND MEMBER, which was measured after a first
+    /// draft got it wrong.</b> The draft said a set is expanded by its members' case partners;
+    /// <c>[\p{ASCII}]</c> refutes that, because its member holds <c>I</c> and it reaches nothing.
+    /// <c>[\p{ASCII}\p{ASCII}]</c> - the same member twice, so exactly the same characters - DOES
+    /// reach U+0131. A one-member set behaves like the bare property; a two-member one
+    /// case-expands the property's contents. <c>[ab]</c> reaching nothing says it is the
+    /// property's members expanding rather than sets in general.
+    /// </para>
+    /// <para>
+    /// <b>The expansion itself is not the defect, and that is what this test separates.</b> A
+    /// multi-member set holding <c>\p{ASCII}</c> reaches every character whose partner is ASCII,
+    /// and this port agrees on the ordinary <c>C</c> rows - U+212A KELVIN SIGN and U+017F LATIN
+    /// SMALL LETTER LONG S - while refusing the two <c>T</c> rows. A test that only asserted the
+    /// refusals would pass on an engine that had lost set expansion altogether.
+    /// </para>
+    /// <para>
+    /// <b>Provenance of the expected values.</b> Upstream's answers, measured 2026-09-15 on regex
+    /// 2026.9.10 by <c>python tools/probes/upstream-turkic-without-spans.py</c>, in the section
+    /// headed "the MECHANISM of the lookaround row": a multi-member set holding <c>\p{ASCII}</c>
+    /// matches U+0131, U+0130, U+212A and U+017F and answers None to U+00C5 and U+00F1, while
+    /// <c>a</c>, <c>[ab]</c>, <c>\p{ASCII}</c> and <c>[\p{ASCII}]</c> answer None to all six. The
+    /// port-side half was measured the same day with <c>pwsh -File tools/run-oracle.ps1 -Rows</c>
+    /// over the 42-cell grid of those six characters against seven spellings: <b>36 cells AGREE,
+    /// and the only six that diverge are U+0131 and U+0130 against the three multi-member
+    /// spellings.</b>
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_set_union_reaches_the_case_partners_of_its_members_but_not_through_a_Turkic_row()
+    {
+        const string union = @"[a\p{ASCII}]";
+        const FuzzyRegexOptions fold = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase;
+
+        // The two ordinary `C` rows, where upstream and this port agree: the union reaches a
+        // character neither of its members reaches, and that expansion is correct.
+        FuzzyRegex.MatchAtStart("K", union, fold).Success.Should().BeTrue();
+        FuzzyRegex.MatchAtStart("ſ", union, fold).Success.Should().BeTrue();
+
+        // The two `T` rows, which upstream reaches through the same expansion and this port does
+        // not. This is the whole of the divergence on row 88716.
+        FuzzyRegex.MatchAtStart(_dotlessSmall, union, fold).Success.Should().BeFalse();
+        FuzzyRegex.MatchAtStart("İ", union, fold).Success.Should().BeFalse();
+
+        // Partners that are not ASCII are out of reach for both engines, so the union is not simply
+        // matching every cased letter.
+        FuzzyRegex.MatchAtStart("Å", union, fold).Success.Should().BeFalse();
+        FuzzyRegex.MatchAtStart("ñ", union, fold).Success.Should().BeFalse();
+
+        // And no ONE-MEMBER spelling reaches any of them, on either engine. `[\p{ASCII}]` is the
+        // cell that kills the "a set expands its members" reading: same member, same characters,
+        // and nothing reached.
+        foreach (string alone in (string[])[@"a", @"[a]", @"[ab]", @"\p{ASCII}", @"[\p{ASCII}]"])
+        {
+            foreach (string subject in (string[])["K", "ſ", _dotlessSmall, "İ"])
+            {
+                FuzzyRegex.MatchAtStart(subject, alone, fold).Success.Should().BeFalse();
+            }
+        }
+
+        // A SECOND member is the whole of the switch - the same property twice is enough, so it is
+        // not the other member contributing anything.
+        FuzzyRegex.MatchAtStart("K", @"[\p{ASCII}\p{ASCII}]", fold).Success.Should().BeTrue();
+        FuzzyRegex.MatchAtStart("K", @"[\p{ASCII}z]", fold).Success.Should().BeTrue();
+        FuzzyRegex.MatchAtStart(_dotlessSmall, @"[\p{ASCII}\p{ASCII}]", fold).Success.Should().BeFalse();
+        FuzzyRegex.MatchAtStart(_dotlessSmall, @"[\p{ASCII}z]", fold).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A LOOKBEHIND that spells a dotless small i does not reach a plain <c>I</c> here, where
+    /// upstream's does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is NOT the minimal form of gate row 88716, and an earlier version of this comment
+    /// said it was.</b> The blind review killed that claim by measuring: row 88716's letter is
+    /// read by the set union in its NEGATIVE lookbehind, which the test above isolates, and
+    /// neutering row 88716's inner <c>(?&lt;=ı[\w\s])</c> leaves the engines disagreeing. What this
+    /// test pins is a separate and narrower fact - that a lookbehind is not itself a way round the
+    /// Turkic refusal - which is worth keeping because the oracle entry it sits beside is about a
+    /// letter read inside a lookaround.
+    /// </para>
+    /// <para>
+    /// <b>Provenance of the expected values.</b> Measured 2026-09-15 on regex 2026.9.10 by
+    /// <c>python tools/probes/upstream-turkic-without-spans.py</c>, in the section headed "a
+    /// lookbehind is not itself a way round the refusal", which is exactly the four calls below:
+    /// <c>search('(?i)(?&lt;=ı)ı', 'Iı')</c> is <c>(1, 2)</c> upstream, <c>'ıı'</c> is
+    /// <c>(1, 2)</c>, and <c>'iı'</c> and <c>'İı'</c> are both <c>None</c>. So it is the plain
+    /// capital <c>I</c> that pairs - <c>0049; T; 0131</c> and that row alone - and not case
+    /// folding in general.
+    /// </para>
+    /// <para>
+    /// <b>Why the swap letters are all non-ASCII, said out loud because the obvious control is
+    /// wrong.</b> The full pattern's <c>(?&lt;!(?:a|\p{ASCII})+)</c> reads ASCII-ness, so swapping
+    /// the dotless i for <c>h</c> or <c>i</c> changes the question rather than removing the
+    /// <c>T</c> row, and both of those reproduce upstream's count. A first draft of this judgement
+    /// used <c>h</c> and read the agreement as "not Turkic after all".
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_lookbehind_that_reads_a_dotless_small_i_does_not_reach_the_plain_I()
+    {
+        // The lookbehind spells the DOTLESS small i; the subject offers the plain capital I, which
+        // upstream pairs with it through `0049; T; 0131` and this port does not.
+        FuzzyRegex
+            .Match("I" + _dotlessSmall, "(?i)(?<=" + _dotlessSmall + ")" + _dotlessSmall)
+            .Success.Should()
+            .BeFalse();
+
+        // The same lookbehind over the letter it actually spells still matches, so the test is about
+        // the pairing and not about lookbehinds. Upstream agrees here: (1, 2) on both engines.
+        FuzzyRegex
+            .Match(_dotlessSmall + _dotlessSmall, "(?i)(?<=" + _dotlessSmall + ")" + _dotlessSmall)
+            .Success.Should()
+            .BeTrue();
+
+        // And it is the PLAIN CAPITAL I that pairs, not case folding in general: upstream answers
+        // None to both of these too, so the two engines agree on them.
+        FuzzyRegex
+            .Match("i" + _dotlessSmall, "(?i)(?<=" + _dotlessSmall + ")" + _dotlessSmall)
+            .Success.Should()
+            .BeFalse();
+        FuzzyRegex
+            .Match("İ" + _dotlessSmall, "(?i)(?<=" + _dotlessSmall + ")" + _dotlessSmall)
+            .Success.Should()
+            .BeFalse();
+    }
+
+    /// <summary>
     /// <c>(?fi)FFI</c> - corpus row #313 - reaches the ligature, and <b>this is the row where the
     /// bytecode moved and the BEHAVIOUR did not</b>. That is what the test is for.
     /// </summary>

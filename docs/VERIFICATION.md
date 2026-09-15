@@ -55,6 +55,28 @@ diff, no praise.
 
 Do not add "explain your reasoning" or "suggest a fix" to this brief. Both make it worse.
 
+## Verifier brief - the clause without which it can destroy the slice
+
+The independent verifier of spec amendment 16 limb (d) re-runs claims rather than reviewing, so it
+applies and reverts controls. **It is working on a tree full of UNCOMMITTED work with no commit to
+fall back to, which makes the ordinary undo the one command it must never use.** Put this in every
+verifier brief, verbatim:
+
+```
+You are working on a tree with UNCOMMITTED changes and there is NO commit to fall back to.
+NEVER run `git checkout`, `git restore`, `git stash`, `git reset` or `git clean`, on any
+path, for any reason. To revert a control you applied, re-edit exactly what you edited, or
+use the slice's own revert script if it names one. Finish by showing `git status --porcelain`
+and `git diff --stat`.
+```
+
+Measured, 2026-09-15 (S52 sitting 9): a verifier reverted a four-character control with
+`git checkout -- tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs` and discarded the entire
+slice's work in that file - two new oracle entries, four row constants and three rewritten `Reason`
+texts - although the slice's own `break`/`restore` script was sitting in `.scratch/`. It was
+rebuilt and proved identical against a dump the verifier had taken from the good build, but only
+because the verifier happened to have built that file minutes earlier; nothing guaranteed that.
+
 ## Why these rules, in one line each
 
 | Rule | Evidence |

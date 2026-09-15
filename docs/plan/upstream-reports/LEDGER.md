@@ -1348,9 +1348,10 @@ abandons a sub-attempt without backtracking through it.
 | D | A lookaround under `(?e)` restores a counts block whose changes were unwound item-wise | one of them | FIXED (S48b) |
 | E | An ATOMIC GROUP's abandoned sub-attempt leaves its change entry behind | the list | NOT SHARED - pinned (S48b) |
 | F | Under `(?r)`, a fuzzy lookahead followed by a general repeat reports its change at the MATCH START | the list | NOT SHARED - pinned (S48b) |
+| G | A change list whose entries are of the wrong KIND for the counts the same answer reports | the list | NOT SHARED - pinned (S52) |
 
-E and F were found by S48b's second sitting and are written up under the table; the "four
-mechanisms" count above is A to D, which are the four this port ever shared.
+E and F were found by S48b's second sitting and G by S52's ninth; all three are written up under
+the table. The "four mechanisms" count above is A to D, which are the four this port ever shared.
 
 **THE FLAGS ARE PART OF EACH REPRODUCTION** - every one below comes from a wave row, and none of
 them reproduces without its flag bits.
@@ -1529,17 +1530,18 @@ per 126,000-row seed, and what covers it instead is
 24 / 23 / 25 diverging rows to 3 / 2 / 9 - the 14 that remain being exactly the untriaged rows that
 were already red at HEAD before S47 touched anything, and none of them a fuzzy-reporting divergence.
 
-### Two more doors, found by S48b's second sitting (2026-09-14) - E and F, and NEITHER is shared
+### Three more doors, found by S48b's second sitting (2026-09-14) and S52's ninth (2026-09-15) - E, F and G, and NONE is shared
 
 The defect class is the same - upstream abandons a sub-attempt without unwinding its change entries
-- but these two are doors mechanism A's anchored question cannot open, because the leak is inside
-ONE attempt rather than left by an earlier one. **This port does not share either**, so each is
+- but these three are doors mechanism A's anchored question cannot open, because the leak is inside
+ONE attempt rather than left by an earlier one. **This port does not share any of them**, so each is
 pinned in the oracle rather than fixed, and each carries a permanent test.
 
 | # | Mechanism | Upstream's own control | Oracle entry |
 |---|---|---|---|
 | E | An ATOMIC GROUP's abandoned sub-attempt leaves its change entry behind | spell the `(?>` as `(?:` | `atomic-group-leaks-a-change-position` |
 | F | Under `(?r)`, a fuzzy section inside a LOOKAHEAD followed by a GENERAL REPEAT reports its change at the MATCH START | match the same pattern FORWARD | `reversed-lookahead-change-at-the-match-start` |
+| G | The change list's entries are of the wrong KIND for the counts the same answer reports | none needed - the answer contradicts itself | `fuzzy-changes-of-the-wrong-kind-for-their-own-counts` |
 
 **E**, row 74033 of the seed-20260914 6000-row gate:
 `^(?:\p{Ll}\w??[a-f]){1i+2d+1s<=3}(?>(?:\p{Ll}(?:\p{L}){s<=1,i<=1,d<=1}){d<=1})$` over `'AA𝔘𝔘'`, no
@@ -1565,11 +1567,46 @@ at every prefix length. The drawn row also carries an earlier attempt's leak on 
 oracle entry judges the positions rather than claiming the whole row reduces to one line of
 upstream.
 
-Both re-runnable: `python tools/probes/upstream-posix-and-atomic-free-answers.py` and
-`python tools/probes/upstream-reversed-lookahead-change-position.py` (the second exits non-zero if
-upstream stops behaving this way). Pinned by
-`Gaps/Engine/FuzzyCountsAndChangesTests.An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports`
-and `.A_reversed_lookahead_reports_its_substitution_where_the_lookahead_tested`.
+**E gained a second and much stronger row at S52's ninth sitting (2026-09-15)**, seed 7 row 74510 of
+the 6000-row gate:
+`^(?:(\p{Lu})([\w\s])\W){1i+2d+1s<=3}(?>(?:(\s?)(?:([^\d])){s<=1,i<=1,d<=1:\w}){2i+1d+1s<=2})([a\d]{0,})$`
+over `'ﬃﬃ ﬃﬃßß'`, **flags 16394** (`0x400A`), `finditer`. Upstream counts `(1, 2, 0)` - one
+substitution and two insertions - and then lists **two substitutions** (codepoints 3 and 4) and
+**one insertion** (3). Row 74033 needs the `(?:` control to be judgeable at all, because its list is
+internally consistent and only the deletion's position moves; **this one is wrong on upstream's own
+terms before any control is applied**, and the control then agrees anyway - the same span `(0, 7)`,
+the same five groups, the same counts, and the list re-kinded to one substitution at 5 and two
+insertions at 3 and 4, which is this port's answer. It is in the same probe.
+
+**G**, seed 7 row 74345 of the same gate:
+`(?r)(?!(?:(?P<g1>\p{Nd}{0,2})ß){s<=1,i<=1,d<=1:\s})(?:𐐀𐐀){e<=2}\b` over `'ßß𐐀\n'`, **flags 264**
+(`0x108`), partial `search`. Upstream counts `(0, 2, 0)` - two insertions and nothing else - and
+lists **one substitution** (codepoint 2) and **one deletion** (1) and **no insertion**. The totals
+agree (two entries for two errors) and the KINDS do not, which is the sharpest form this defect
+class takes: `match_fuzzy_changes` reports the first `sum(fuzzy_counts)` entries of the change stack
+(`:20522`) without regard to what kind each entry is, so a polluted stack does not merely misplace a
+change, it mis-names it. **Both engines agree on the counts**, so there is no dispute about what the
+edit script is - it is two insertions - and two insertion positions are the only thing either engine
+may report. This port reports two; upstream reports none.
+
+**What G does NOT establish, and it is stated here because the oracle entry states it too**: which
+construct leaked, and whether codepoints 2 and 1 are the right two insertion positions. The pattern
+carries a fuzzy section inside a NEGATIVE LOOKAHEAD - a construct that succeeds precisely when its
+body's sub-attempts are abandoned - but every ablation that would isolate it MOVES THE CANDIDATE:
+deleting the lookahead answers `(1, 3)` complete, making its body non-fuzzy or giving it a zero
+budget answers `(2, 3)` complete, and spelling it positive answers `(1, 3)` complete, against the
+drawn `(0, 3)` partial. Anchoring the drawn span holds the candidate and reproduces the
+contradiction unchanged, which is the row's own `leakFreeFuzzy` said a second way. So the KIND is
+settled and the positions are not.
+
+All three re-runnable: `python tools/probes/upstream-posix-and-atomic-free-answers.py` (E, both
+rows), `python tools/probes/upstream-reversed-lookahead-change-position.py` (F) and
+`python tools/probes/upstream-fuzzy-changes-of-the-wrong-kind.py` (G); the second and third exit
+non-zero if upstream stops behaving this way. Pinned by
+`Gaps/Engine/FuzzyCountsAndChangesTests.An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports`,
+`.An_atomic_group_reports_the_change_kinds_the_cut_free_pattern_reports`,
+`.A_reversed_lookahead_reports_its_substitution_where_the_lookahead_tested` and
+`.A_negative_lookahead_s_abandoned_attempt_does_not_re_kind_the_changes_that_follow_it`.
 
 **Related:** entry 7, the other inherited bug on Phase 6's list, and entry 9, whose POSIX
 `fuzzy_changes` crash is mechanism C seen from the C side.

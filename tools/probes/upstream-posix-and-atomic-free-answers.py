@@ -42,6 +42,14 @@ S52 added the last two POSIX rows on 2026-09-15, from the three-seed 2000-row wa
   template that expands to nothing either way, so the text is identical and only the count says so.
   A choosing flag cannot produce a match the flagless engine cannot make.
 
+S52 sitting 9 added the second ATOMIC row on 2026-09-15, from the seed-7 6000-row gate:
+
+* seed 7 row 74510 - the stronger of the two, because it needs no comparison with this port to be
+  wrong. Upstream counts `(1, 2, 0)` and then lists TWO substitutions and ONE insertion, and
+  `fuzzy_changes` is documented as the positions of the changes `fuzzy_counts` counts. The
+  `control` line keeps the span, all five groups and the counts and re-kinds the list to one
+  substitution at 5 and two insertions at 3 and 4, which is this port's answer.
+
 **Reading `fuzzy_changes` on a POSIX fuzzy match SEGFAULTS the interpreter** (ledger entry 9,
 `tools/probes/upstream-posix-fuzzy-crash.py`), so it is GUARDED here rather than caught - a
 segfault is not an exception, and a probe that tries to catch it kills the run instead of
@@ -130,6 +138,23 @@ ATOMIC_ROWS = [
         0x0,
         "AA\U0001D518\U0001D518",
         "search",
+        None,
+        0,
+        {},
+    ),
+    # Added by S52 sitting 9 (2026-09-15), from the seed-7 6000-row gate. The STRONGER of the two:
+    # here upstream's drawn change list is of the wrong KIND for upstream's OWN counts - it counts
+    # one substitution and two insertions and then lists TWO substitutions and ONE insertion - so
+    # the row is a contradiction before this port is consulted at all. The `(?:` control keeps the
+    # span, all five groups and the counts and re-kinds the list to this port's answer.
+    (
+        7,
+        74510,
+        r"^(?:(\p{Lu})([\w\s])\W){1i+2d+1s<=3}"
+        r"(?>(?:(\s?)(?:([^\d])){s<=1,i<=1,d<=1:\w}){2i+1d+1s<=2})([a\d]{0,})$",
+        0x400A,
+        "ﬃﬃ ﬃﬃßß",
+        "finditer",
         None,
         0,
         {},
