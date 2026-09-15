@@ -36,5 +36,9 @@ reconciliation, `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`, `record-
 --self-check`, `run-controls.py`, control sites S32-B/S38-A/S35-A/S29-A/D,
 `upstream-reversed-overlapped-skip.py`'s prefilter-on cases, PORTMAP lines, `quantifiers-long`'s
 filler margin - plus NEW: `oracle.yml`'s weekly sweep is red every Thursday until its verdict rule
-tells a known family from a new one. **Open for the owner:** the S52 split; `slice_start` versus
-`text_start` (ledger 24); `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.
+tells a known family from a new one. **Ledger 24 is RULED** (owner, 2026-09-15, Option B: a reversed
+partial runs out at the SLICE start); `S52d-reversed-partial-slice-start.md` is queued after S52c.
+That slice file and its ROADMAP paragraph appeared mid-sitting and were swept into sitting 13's
+commit by `git add -A` - they are the owner's text, not the sitting's, and the ROADMAP paragraph has
+an empty code span where `\b` should be. **Open for the owner:** the S52 split; `slice-log.jsonl`
+marks S26 `failed`; `origin/main` needs a push.
