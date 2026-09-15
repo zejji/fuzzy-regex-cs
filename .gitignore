@@ -31,6 +31,7 @@ __pycache__/
 # Local-only
 *.local.*
 .claude/worktrees/
+.claude/driver/
 
 # The slice driver's own session log. Machine-local operational data, and gitignored on purpose:
 # the budget gate counts slices from it, and `git clean -fd` during a failed-slice rollback would

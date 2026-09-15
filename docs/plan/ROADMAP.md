@@ -422,6 +422,16 @@ row, the ported suite pins `Version0` through one helper, and the one loud edge 
 gets an error that names `Version0`. Before S51 so every later slice tests and measures the shipped
 default. Estimate 13-18 becomes 14-19.
 
+**S52c adds metamorphic invariants (owner, 2026-09-15, spec amendment 25).** The oracle sees
+disagreement, not correctness: a bug the port inherited line for line agrees with upstream and
+hides. Every inherited bug so far was found by upstream contradicting itself, by hand. S52c makes
+the recorder check a fixed list of language-level invariants on upstream's own answers for every
+wave row (search versus anchored match, fullmatch versus a whole-span match, counts versus
+changes, budget monotonicity, group spans inside the match, split re-joining the subject) and on
+the port's, flagging violations for ledger triage. The skill now requires gap-test expected values
+to carry provenance from a real upstream run or a DIVERGENCES row, and S57 audits the ones written
+before the rule. Estimate 14-19 becomes 15-20.
+
 **And S48's own inventory added a fifth: S48b (2026-09-14, spec amendment 25).** S45-S48 were the
 four slices meant to empty the known-bug list. S48 inventoried all fifteen ledger entries, which is
 what its scope asked for, and thirteen are closed: entries 1-4, 6 and 8 are upstream-only with this

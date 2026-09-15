@@ -15,7 +15,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="$REPO/.scratch/driver-$TAG.log"
 START=$(date +%s)
 ALARMED=0
-DEADLINE_FILE="$REPO/.scratch/session-deadline.txt"
+DEADLINE_FILE="$REPO/.claude/driver/session-deadline.txt"   # not .scratch/: sessions clear that
 # Remaining minutes of the CURRENT sitting, from the deadline the driver writes per session, so the
 # alarm tracks the sitting and not the driver run (a checkpointed slice runs several sittings in
 # one driver run, which misled the orchestrator twice on 2026-09-13).

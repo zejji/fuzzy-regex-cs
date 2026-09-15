@@ -21,6 +21,12 @@ coverage - and hands Phase 7 what it regresses against.
   default wave at three seeds, 6000 rows, plus `fuzzy` and `interactions` at 99991 and one fresh
   seed; S55/S56's mutation scores quoted; coverage backstop done. Anything red is judged, not
   deferred.
+- **Gap-test provenance audit** (owner rule 2026-09-15): an independent Opus agent samples the
+  gap tests written before the provenance rule existed (`tests/FuzzyRegex.Tests/Gaps/**`, at least
+  one assertion per file and every assertion in the fuzzy, BESTMATCH, verb and partial files),
+  re-runs each expected value against upstream 2026.9.10, and reports CONFIRMED / DIFFERENT /
+  DELIBERATE (a DIVERGENCES row explains it). Every DIFFERENT is a bug in the test or in the port
+  and is fixed before the phase closes; every sampled assertion gains its provenance comment.
 - **The known-bug list is EMPTY.** Table every ledger entry with its final state - fixed here,
   port right and pinned, upstream-only, or owner decision pending with the evidence - and confirm
   no entry is "inherited, unfixed". If one is, the phase is not closed: park it as a blocker.

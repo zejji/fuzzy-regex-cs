@@ -860,3 +860,17 @@ amended text is inline above; this list is the record of what changed and why.
     1,861 of 11,340 shapes in a hand-built alphabet. That is a measured gap in the generators, it
     is handed to S52, and until S52 closes it a zero control on this family is evidence about the
     generator rather than about the fix.
+
+25. **Correctness beyond agreement: metamorphic invariants and test provenance (2026-09-15, owner
+    questions).** The oracle proves the port AGREES with upstream; it is blind to a bug the port
+    inherited, because then both agree. Every inherited bug found so far surfaced when upstream
+    contradicted itself - `search` versus anchored `match`, a flag turning a match into none,
+    counts versus changes, `$` versus `\Z` - checked by hand on rows a session happened to notice.
+    Phase 6 gains S52c: the recorder evaluates a fixed list of language-level invariants on
+    upstream's own answers for every wave row and flags violations as self-contradiction
+    candidates for ledger triage under amendment 16; the same checker runs on the port's answers.
+    Invariants hold for features no other engine has, which is what a second engine cannot give
+    fuzzy matching. Separately, the skill now requires every gap test's expected value to carry
+    its provenance (a real upstream run and version, or the DIVERGENCES row it follows), the
+    verifier samples them, and S57 audits the gap tests written before the rule. Estimate 14-19
+    becomes 15-20. Decided by the project owner.

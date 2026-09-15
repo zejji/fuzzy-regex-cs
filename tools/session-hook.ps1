@@ -6,7 +6,8 @@
     A `claude -p` session cannot be messaged, and it does not know the driver's deadline. This hook
     runs on every tool call the session makes and returns `additionalContext` the model sees on its
     next step. Two inputs, both written by the driver or the orchestrator into .scratch/:
-      session-deadline.txt      ISO-8601 deadline, written by run-slices.ps1 when a sitting starts.
+      .claude/driver/session-deadline.txt      ISO-8601 deadline, written by run-slices.ps1 when a sitting
+                                               starts (not .scratch/, which slice sessions clear).
       orchestrator-message.txt  free text; injected once, then renamed .delivered so it is not
                                 repeated.
     Silent unless FUZZY_SLICE_SESSION=1 is in the environment, which only the driver sets, so an
@@ -20,7 +21,7 @@ $null = [Console]::In.ReadToEnd()
 $repo = Split-Path -Parent $PSScriptRoot
 $parts = New-Object System.Collections.Generic.List[string]
 
-$deadlineFile = Join-Path $repo '.scratch/session-deadline.txt'
+$deadlineFile = Join-Path $repo '.claude/driver/session-deadline.txt'
 if (Test-Path -LiteralPath $deadlineFile) {
     $deadline = [datetimeoffset]::Parse((Get-Content -LiteralPath $deadlineFile -Raw).Trim())
     $left = [int][Math]::Floor(($deadline - [datetimeoffset]::Now).TotalMinutes)
@@ -30,7 +31,7 @@ if (Test-Path -LiteralPath $deadlineFile) {
     }
 }
 
-$messageFile = Join-Path $repo '.scratch/orchestrator-message.txt'
+$messageFile = Join-Path $repo '.claude/driver/orchestrator-message.txt'
 if (Test-Path -LiteralPath $messageFile) {
     $text = (Get-Content -LiteralPath $messageFile -Raw).Trim()
     if ($text) { $parts.Add("[message from the orchestrator] $text") }

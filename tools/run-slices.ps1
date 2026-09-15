@@ -137,12 +137,14 @@ function Invoke-SliceSession {
         # The session hook (tools/session-hook.ps1, wired in .claude/settings.json) speaks only to
         # sessions carrying this variable, and reads the deadline from the file written here, so
         # an unattended session knows when the driver will kill it and can be sent a one-shot
-        # message through .scratch/orchestrator-message.txt. Added 2026-09-13 (DECISIONS).
+        # message through .claude/driver/orchestrator-message.txt. Added 2026-09-13 (DECISIONS);
+        # moved out of .scratch/ on 2026-09-15 because slice sessions clear that directory and
+        # took the deadline file with it mid-sitting.
         $startInfo.Environment['FUZZY_SLICE_SESSION'] = '1'
         $deadline = [datetimeoffset]::Now.AddMinutes($TimeoutMinutes)
-        New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.scratch') | Out-Null
-        Set-Content -LiteralPath (Join-Path $repoRoot '.scratch/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
-        Remove-Item -LiteralPath (Join-Path $repoRoot '.scratch/orchestrator-message.txt.delivered') -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.claude/driver') | Out-Null
+        Set-Content -LiteralPath (Join-Path $repoRoot '.claude/driver/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
+        Remove-Item -LiteralPath (Join-Path $repoRoot '.claude/driver/orchestrator-message.txt.delivered') -Force -ErrorAction SilentlyContinue
         $arguments = @(
             '-p', '--model', $Model, '--output-format', 'json',
             '--permission-mode', 'acceptEdits', '--allowedTools'

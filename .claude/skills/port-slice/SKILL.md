@@ -251,6 +251,13 @@ rejects, all of which have already burned turns on real slices:
   (what, why, where decided, how a user gets upstream's behaviour). Phase 8 writes the user docs from
   that file. Accidental differences are oracle divergences and go through the ledger instead.
 
+- **Every gap test's expected value carries its provenance** (owner rule 2026-09-15). A gap test
+  asserting a matching answer names, in a comment beside the assertion, the real upstream run it
+  came from (`regex 2026.9.10`, the call, the answer) or, for a deliberate difference, the
+  `docs/DIVERGENCES.md` row or ledger entry it follows. An expected value copied from this port's
+  own output is not evidence; the port is what is under test. The verifier (step 3 above)
+  re-runs a sample of the slice's new gap-test expectations against upstream and reports each
+  CONFIRMED or DIFFERENT, and an expectation with no provenance is COULD NOT RUN.
 - **Never weaken a test to get green.** If a ported test is wrong, prove it against upstream
   (run the Python `regex` module and quote the output) before changing it, and record why in
   DECISIONS.md.
