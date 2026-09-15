@@ -190,6 +190,38 @@ fault with the mechanism, and a DIVERGENCES.md row. Two sittings budgeted.
 If you rule for Option A instead, the port keeps the handlers' reading, the optimiser paths are
 brought into line with them, and the same rows are pinned the other way; the cost is similar.
 
+## 4a. Weight of the arguments, and further sources (added 2026-09-15 on the owner's question)
+
+The recommendation does not rest on symmetry. In order of weight:
+
+1. **The definition of a partial match plus a measured fact.** A partial means the pattern still
+   needs characters and the text it may match has run out. A reversed match may not consume text
+   before `pos` (measured: `(?r)ab` over `"abc"` with `pos=1` finds nothing), so at `pos` the
+   matchable text has run out in the only sense that matters to the engine.
+2. **Upstream's own intent.** Its comment says the slice edge behaves like the string edge; its
+   optimiser and its three reversed string helpers report the partial at `pos`; only the node
+   handlers do not. The changelog shows partial matching added in 2014.4.10 (Hg issue 102) and
+   then repaired seven times (Hg 141, 143, 203, 276, 299; Git 539, 546), always to make a partial
+   be REPORTED where it was being lost; 2015.6.21 in particular keeps the optimiser's partial path
+   working ("Didn't set state->match_pos if search_start returned a partial match status"). No
+   entry ever treats a lost partial as intended.
+3. **The invariants.** Greedy and lazy must agree on whether a match exists; needing more text
+   cannot make it run out less. Only Option B satisfies both.
+4. **Symmetry with the forward direction**, where the caller's `endpos` is the edge.
+5. **External precedent.** No other engine has reverse matching with partials, so no source speaks
+   to the reversed edge directly. Three speak to the general principle that a caller-imposed bound
+   is the end of the text for partial purposes, and all three agree: Boost.Regex defines a partial
+   match as one "that matched one or more characters at the end of the text input", where the text
+   input is the iterator range the caller passed; .NET's substring overload behaves "exactly as if
+   the input was effectively `input.Substring(beginning, length)`"; PCRE2 reports a partial when
+   "the end of the subject string is reached", the subject being whatever the caller handed over.
+   Python `re`'s wording on `pos` is the one source that can be read for Option A, and `re` has
+   neither partial nor reverse matching, so it was never written with this case in mind.
+
+Also checked and found silent: upstream's open issue tracker (five issues mention partial
+matching, none a `pos`; 589 is about a negative lookahead), and the GitHub history, which begins
+in 2025 and cannot show when the two rules were written.
+
 ## 5. Sources
 
 - Upstream README, "Partial matches" (definition and the `\d{4}` example) and "Reverse
@@ -204,6 +236,10 @@ brought into line with them, and the same rows are pinned the other way; the cos
   2026-09-15).
 - PCRE2 `pcre2partial` documentation, definition quoted in Option B
   (https://www.pcre.org/current/doc/html/pcre2partial.html, read 2026-09-15).
+- Upstream `changelog.txt`: 2014.4.10 (Hg 102, partial matches added), 2015.6.10 (Hg 141), 2015.6.21
+  (Hg 143), 2016.4.25 (Hg 203), 2018.2.21 (Hg 276), 2018.11.2 (Hg 299), 2024.7.24 (Git 539),
+  2024.11.6 (Git 546).
+- Boost.Regex, "Partial Matches" (https://www.boost.org/doc/libs/release/libs/regex/doc/html/boost_regex/partial_matches.html, read 2026-09-15).
 - Probes: `tools/probes/upstream-reversed-partial-ignores-the-slice-start.py` (33 cells) and
   `tools/probes/port-reversed-partial-ignores-the-slice-start.ps1`.
 - Measurements made for this briefing on regex 2026.9.10 (2026-09-15):
