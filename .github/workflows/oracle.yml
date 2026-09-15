@@ -9,7 +9,19 @@ on:
   schedule:
     # 03:00 UTC on Mondays.
     - cron: '0 3 * * 1'
+    # 03:00 UTC on Thursdays, for the seed sweep below. A separate day rather than a second job on
+    # Monday so the two never contend for a runner and a red sweep is not read as a red wave.
+    - cron: '0 3 * * 4'
   workflow_dispatch:
+    inputs:
+      seedCount:
+        description: 'Seeds for the sweep job (the schedule uses 6)'
+        required: false
+        default: '6'
+      masterSeed:
+        description: 'Master seed for the sweep job, or blank for the run date'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -23,6 +35,8 @@ jobs:
   oracle:
     name: Oracle vs Python regex
     runs-on: ubuntu-latest
+    # Monday's cron and any manual run. Thursday's cron is the sweep alone.
+    if: github.event.schedule != '0 3 * * 4'
 
     steps:
       - uses: actions/checkout@v4
@@ -120,4 +134,68 @@ jobs:
         with:
           name: oracle-divergences
           path: TestResults/
+          if-no-files-found: ignore
+
+  sweep:
+    name: Seed sweep
+    runs-on: ubuntu-latest
+    # Thursday's cron and any manual run. Monday's cron is the single wave alone.
+    if: github.event.schedule != '0 3 * * 1'
+    # A seed costs about two and a half minutes at 2000 rows a generator, so six is about a quarter
+    # of an hour. Generous rather than tight, because a sweep that times out mid-seed logs nothing
+    # for it and the resumption path is not available to a fresh runner.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the oracle from the pinned upstream source
+        # Same as the job above, and for the same reason: the ground truth must be the commit this
+        # port targets. The table and corpus checks are NOT repeated here - Monday's job owns those,
+        # and a sweep is about seeds rather than about staleness.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./upstream
+
+      - name: The oracle must be the pinned upstream version
+        run: |
+          python - <<'CHECK'
+          import pathlib, re, regex
+          pinned = re.search(r'^version = "(.+)"',
+                             pathlib.Path('upstream/pyproject.toml').read_text(encoding='utf-8'),
+                             re.M).group(1)
+          print(f"oracle {regex.__version__}, pinned upstream {pinned}")
+          assert regex.__version__ == pinned, "the oracle is not the pinned upstream version"
+          CHECK
+
+      - name: Sweep fresh seeds
+        # THE SEED COUNT IS THE INSTRUMENT, not the row count - S43's closing note, and the lesson
+        # S33, S34, S35, S40a and S43 each paid for separately. Six fresh seeds a week is over three
+        # hundred a year that no slice has ever run, and the master seed is the run date, so a red
+        # seed is re-drawn from one number in the log. The bigger sweeps - twenty seeds and up - are
+        # run detached by the orchestrator, not here.
+        run: |
+          MASTER="${{ github.event.inputs.masterSeed }}"
+          if [ -z "$MASTER" ]; then MASTER=$(date -u +%Y%m%d); fi
+          COUNT="${{ github.event.inputs.seedCount }}"
+          if [ -z "$COUNT" ]; then COUNT=6; fi
+          pwsh -File tools/sweep-seeds.ps1 \
+            -SeedCount "$COUNT" -MasterSeed "$MASTER" -Count 2000 -Configuration Release
+
+      - name: Upload the sweep log and every red seed's wave
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-sweep
+          path: TestResults/oracle/
           if-no-files-found: ignore

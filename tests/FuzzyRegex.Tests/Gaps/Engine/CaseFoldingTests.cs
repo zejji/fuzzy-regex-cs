@@ -227,6 +227,57 @@ public sealed class CaseFoldingTests
         FuzzyRegex.Replace("Iİiı", "(?i)i", "-").Should().Be("-İ-ı");
 
     /// <summary>
+    /// A RANGE reaches the dotless small upstream without ever spelling an <c>I</c> - that is what
+    /// <c>0049; T; 0131</c> buys, and it is the shape the grid above cannot show, because every cell
+    /// of it is one literal against one subject.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured 2026-09-15 on regex 2026.9.10, <c>tools/probes/upstream-turkic-without-spans.py</c>:
+    /// upstream matches U+0131 with <c>[A-Z]</c> and with <c>[A-Y]</c> and matches nothing with
+    /// <c>[A-H]</c> or <c>[J-Z]</c>, so it is the <c>I</c> INSIDE the range and not the range's
+    /// breadth. This port matches none of the four, which is what PCRE2 and .NET do.
+    /// </para>
+    /// <para>
+    /// It is pinned because the wave's own classifier turns on it: <c>turkic-default-folding</c>
+    /// accepts a row whose pattern spells no Turkic letter at all as long as it carries a construct
+    /// that can fold into one, and a range is the commonest such construct. Row 29165 of the seed-7
+    /// 2000-row wave of 2026-09-15 is exactly this shape.
+    /// </para>
+    /// </remarks>
+    /// <param name="cls">The class.</param>
+    [Test]
+    [Arguments("[A-Z]")]
+    [Arguments("[A-Y]")]
+    [Arguments("[A-H]")]
+    [Arguments("[J-Z]")]
+    public void A_range_spanning_the_plain_I_does_not_reach_the_dotless_small(string cls) =>
+        FuzzyRegex.FullMatch(_dotlessSmall, "(?i)" + cls).Success.Should().BeFalse();
+
+    /// <summary>
+    /// The three answers that carry NO match position - a replacement, a split and a template that
+    /// throws - diverge here too, and each is pinned because the oracle needed a second fact from
+    /// upstream before it could classify one.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's answers, measured 2026-09-15 on regex 2026.9.10 by
+    /// <c>tools/probes/upstream-turkic-without-spans.py</c>: <c>subn('(?i)I', 'X', 'ı')</c> is
+    /// <c>('X', 1)</c>, <c>split('(?i)(I)', 'aıb')</c> is <c>['a', 'ı', 'b']</c>, and
+    /// <c>subfn('(?i)I', '{1}', 'ı')</c> raises <c>IndexError</c> - it finds the match by the
+    /// <c>T</c> row and only then discovers the template names a group that does not exist. This
+    /// port matches nothing on any of the three, so it replaces nothing, splits nothing and has no
+    /// match to expand a template against.
+    /// </remarks>
+    [Test]
+    public void An_answer_that_carries_no_span_diverges_on_the_dotless_small_as_well()
+    {
+        FuzzyRegex.Replace(_dotlessSmall, "(?i)I", "X").Should().Be(_dotlessSmall);
+        FuzzyRegex.Split("a" + _dotlessSmall + "b", "(?i)(I)").Should().Equal("a" + _dotlessSmall + "b");
+        // No match, so the template is never expanded and the bad group reference never bites.
+        FuzzyRegex.ReplaceFormat(_dotlessSmall, "(?i)I", "{1}").Should().Be(_dotlessSmall);
+    }
+
+    /// <summary>
     /// <c>(?fi)FFI</c> - corpus row #313 - reaches the ligature, and <b>this is the row where the
     /// bytecode moved and the BEHAVIOUR did not</b>. That is what the test is for.
     /// </summary>

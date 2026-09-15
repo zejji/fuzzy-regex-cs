@@ -1,0 +1,5 @@
+{"generator": "rows", "pattern": "(?i)I", "flags": 0, "namedLists": {}, "subject": "ı", "operation": "sub", "template": "X", "count": 0}
+{"generator": "rows", "pattern": "(?i)(I)", "flags": 0, "namedLists": {}, "subject": "aıb", "operation": "split", "count": 0}
+{"generator": "rows", "pattern": "(?i)I", "flags": 0, "namedLists": {}, "subject": "ı", "operation": "subf", "template": "{1}", "count": 0}
+{"generator": "conditionals", "pattern": "(?r)(?(?!s)[A-Z]{2}|(S))$", "flags": 16394, "namedLists": {}, "subject": "s\rSı", "operation": "subf", "template": "{0[2]}", "count": 3}
+{"generator": "interactions", "pattern": "^(?:ﬁİ){e<=2:\\S}([^a-f]+)$", "flags": 16386, "namedLists": {}, "subject": "İİﬁ ﬁﬀ", "operation": "split", "count": 3}

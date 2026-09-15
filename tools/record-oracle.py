@@ -123,12 +123,56 @@ RESERVED_NAMES = ("pattern", "flags", "ignore_unused", "cache_pattern")
 # MemoryError row doing to a whole six-seed wave.
 ENVIRONMENT_FAILURES = ("RecursionError", "MemoryError", "OverflowError")
 
+
+# --------------------------------------------------------------------------------------------
+# All Unicode planes (S52)
+# --------------------------------------------------------------------------------------------
+#
+# ONE PLACE for the astral characters every generator draws, so that "the wave reaches every plane"
+# is a property of this block rather than of twenty scattered string literals that drifted apart.
+#
+# WHAT WAS ACTUALLY MISSING, measured before any of this was written (.scratch/s52-plane-audit.py,
+# 2026-09-15, 1200 rows a generator across seeds 7, 4242 and 20260915). Astral SUBJECTS were already
+# everywhere - 118 to 484 rows a generator, every one of the twenty-one. Three things were not:
+#
+#   * SMP DIGITS reached only `classes` (125 rows) and `reverse` (13). So `\d`, `\p{Nd}`,
+#     `[[:digit:]]` and `\w` over a digit that is two UTF-16 units were barely tested at all.
+#   * EMOJI MODIFIERS and ZWJ reached only `boundaries` (241) and `reverse` (21), and `\X` the same
+#     two - so grapheme clusters were a `boundaries` feature rather than a wave-wide one.
+#   * SEVEN GENERATORS NEVER PUT AN ASTRAL CHARACTER IN THE PATTERN at all - `classes`, `groups`,
+#     `quantifiers`, `backrefs`, `substitution`, `iteration` and `fuzzy` - because each builds its
+#     pattern from a fixed atom list rather than from a slice of its subject. A fuzzy edit over a
+#     surrogate pair, an astral backreference and an astral repeat were therefore unreachable.
+#
+# Every property below is MEASURED rather than asserted (.scratch/s52-chars.py, same day):
+ASTRAL_LETTER = "\U0001d518"  # MATHEMATICAL FRAKTUR CAPITAL U - Lu, \w, \p{L}, folds to itself
+ASTRAL_CASED = "\U00010400"  # DESERET CAPITAL LONG I - Lu, \w, \p{L}, and it HAS a lowercase
+ASTRAL_CASED_LOWER = "\U00010428"  # DESERET SMALL LONG I - the other half of that pair
+ASTRAL_DIGIT = "\U0001d7ee"  # MATHEMATICAL SANS-SERIF BOLD DIGIT TWO - Nd, and \d and \w are true
+ASTRAL_DIGIT_2 = "\U000104a0"  # OSMANYA DIGIT ZERO - Nd in a different block, also \d and \w
+ASTRAL_SYMBOL = "\U0001f600"  # GRINNING FACE - So, and \w is FALSE, so it is not a word character
+EMOJI_MODIFIER = "\U0001f3fb"  # EMOJI MODIFIER FITZPATRICK TYPE-1-2 - Sk, astral, \w false
+ZWJ = "‍"  # ZERO WIDTH JOINER - Cf, BMP, and \w is TRUE, which is the surprise
+
+# Drawn character by character like every other alphabet, so the clusters arise from adjacency
+# rather than from a table of them. That is deliberate: `boundaries` has a table of whole clusters
+# already (BOUNDARY_CLUSTERS), and what no generator had was the AWKWARD SINGLE CHARACTERS - a bare
+# modifier with nothing to modify, a ZWJ at the end of a subject, a digit in a plane the fast paths
+# do not expect. Adjacency still produces real clusters often enough to matter: U+1F600 followed by
+# U+1F3FB is one `\X`, and so is anything either side of a ZWJ.
+ASTRAL_ALPHABET = ASTRAL_SYMBOL + ASTRAL_LETTER + ASTRAL_DIGIT + EMOJI_MODIFIER + ZWJ
+
+# The astral atoms a pattern can be built from, for the generators whose patterns come from a fixed
+# list rather than from the subject. `\X` is here because it is the one construct whose whole job is
+# a multi-codepoint cluster, and because the audit found it in two generators out of twenty-one.
+ASTRAL_PATTERN_ATOMS = (ASTRAL_SYMBOL, ASTRAL_LETTER, ASTRAL_DIGIT, r"\X")
+
 # Two alphabets, alternating row by row: one plain ASCII, one mixing BMP and astral characters so
 # the UTF-16 translation is exercised from the first wave rather than from the first bug. No
 # metacharacter is in either, so a generated pattern needs no escaping and the generators stay
 # what they claim to be - literals. U+1F600 GRINNING FACE and U+1D518 MATHEMATICAL FRAKTUR
 # CAPITAL U are both astral, so each contributes two UTF-16 units and one codepoint.
-ALPHABETS = ("abcde", "ab\U0001f600\U0001d518c")
+ALPHABETS = ("abcde", "ab" + ASTRAL_SYMBOL + ASTRAL_LETTER + "c" + ASTRAL_DIGIT + EMOJI_MODIFIER)
 
 MAX_SUBJECT_LENGTH = 8
 MAX_PATTERN_LENGTH = 4
@@ -568,6 +612,17 @@ def _record_row(regex, row: dict) -> dict:
             "message": e.msg if isinstance(e, regex.error) else str(e),
             "whileMatching": while_matching,
         }
+
+        # S52. An exception is not a span either, and upstream raising WHILE MATCHING means it had
+        # already found the match that a span-keyed entry needs to read - `subfn('(?i)I', '{1}', 'ı')`
+        # matches the dotless i by a `T` row and only then discovers the template names a group that
+        # does not exist. A rejection raised while COMPILING never matched anything, so it is not
+        # asked. See `_needs_a_scan_to_be_classified`.
+        if while_matching and _may_turn_on_a_turkic_rule(pattern, subject, flags):
+            scanned = _scan_matches(compiled, subject)
+            if scanned is not None:
+                recorded["scanMatches"] = scanned
+
         return recorded
 
     def exhausted(exception: str) -> dict:
@@ -644,6 +699,15 @@ def _record_row(regex, row: dict) -> dict:
         recorded["codepointSpan"] = None
         recorded["outcome"] = {"kind": "sub", "text": text, "count": made}
 
+        # S52's third second-fact, for the family that needs the WHOLE scan rather than the replaced
+        # prefix of it: `subMatches` below is truncated to the row's count, so a row that replaces
+        # nothing carries an empty list where the divergence is a match upstream made and this port
+        # did not. See `_needs_a_scan_to_be_classified`.
+        if _needs_a_scan_to_be_classified(operation, pattern, subject, flags):
+            scanned = _scan_matches(compiled, subject)
+            if scanned is not None:
+                recorded["scanMatches"] = scanned
+
         # WHERE UPSTREAM REPLACED, for a `(*SKIP)` pattern only, and a SECOND FACT ABOUT UPSTREAM in
         # the sense `anchoredScan` above is - recorded, never compared.
         #
@@ -702,6 +766,12 @@ def _record_row(regex, row: dict) -> dict:
             # which our `string?[]` spells as null. Losing the distinction between that and an
             # empty string is exactly the mistake Regex.Split makes.
             recorded["outcome"] = {"kind": "split", "parts": parts}
+
+            # A list of strings is not a span either. See `_needs_a_scan_to_be_classified`.
+            if _needs_a_scan_to_be_classified(operation, pattern, subject, flags):
+                scanned = _scan_matches(compiled, subject)
+                if scanned is not None:
+                    recorded["scanMatches"] = scanned
         else:
             offsets = _utf16_offsets(subject)
             described = [
@@ -1061,6 +1131,71 @@ def _anchored_scan(compiled, subject: str, offsets: list[int], reverse: bool = F
     return found
 
 
+# The two codepoints `CaseFolding.txt` marks `T` name, and so the only two a Turkic divergence can
+# turn on. Kept here rather than spelled at the call site because the consumer's own copy of this
+# list - `_turkicI` in ExpectedDivergences.cs - is what reads the field this gate decides to record,
+# and the two have to say the same thing.
+_TURKIC_I = "İı"
+
+
+def _needs_a_scan_to_be_classified(operation: str, pattern: str, subject: str, flags: int) -> bool:
+    """Whether this row's recorded answer will carry no spans AND a span-keyed entry may want them.
+
+    A SECOND FACT ABOUT UPSTREAM in the sense ``subMatches`` and ``anchoredScan`` are - recorded,
+    never compared - and the third of them, added by S52 for the same blind spot S40d hit from the
+    substitution side.
+
+    ``sub``, ``subf`` and ``split`` answer with a STRING (and a count, or a list of parts), and a row
+    that upstream failed *while matching* answers with an exception. None of the four carries a match
+    position, so a divergence on one gives a span-keyed entry in
+    ``tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`` nothing to read and the row reddens the
+    run however well its family is understood. Measured 2026-09-15 on the three-seed 2000-row wave of
+    commit 58977bb, which was RED at all three seeds on exactly three rows - two of them
+    ``turkic-default-folding`` in precisely these shapes:
+
+        subn('(?i)I', 'X', 'ı')          upstream ('X', 1), this port ('ı', 0)
+        split('(?i)(I)', 'aıb')          upstream ['a', 'ı', 'b'], this port ['aıb']
+        subfn('(?i)I', '{1}', 'ı')       upstream IndexError while matching, this port ('ı', 0)
+
+    GATED ON THE FAMILY, like ``subMatches``' own ``"(*SKIP)" in pattern``, because an extra
+    ``finditer`` per row is not free and only one entry keys on spans where the answer has none.
+    IGNORECASE has to be in force - without it no case data is consulted at all - and one of the two
+    ``T`` codepoints has to be somewhere in the row, which is the same pair of clauses the consumer's
+    predicate opens with. Widening this gate is a recorder change, not a predicate change; a row it
+    refuses is reported rather than classified, which is the safe direction.
+    """
+    if operation not in LIMIT_OPERATIONS and operation not in SUB_OPERATIONS:
+        # Every other operation either carries its own spans (`match`, `finditer`) or has none to
+        # record. An error row reaches this function through its own call site below instead.
+        return False
+
+    return _may_turn_on_a_turkic_rule(pattern, subject, flags)
+
+
+def _may_turn_on_a_turkic_rule(pattern: str, subject: str, flags: int) -> bool:
+    """Whether IGNORECASE is in force and a `T` codepoint is anywhere in the row."""
+    if not (flags & IGNORECASE or "(?i" in pattern):
+        return False
+
+    return any(c in _TURKIC_I for c in pattern) or any(c in _TURKIC_I for c in subject)
+
+
+def _scan_matches(compiled, subject: str) -> list | None:
+    """Upstream's own ``finditer`` over the whole subject, described the way every match is.
+
+    ``None`` where upstream cannot answer the second question - which is recorded as the field being
+    absent, never as an empty scan, so the consumer can tell "upstream found nothing" from "nobody
+    asked".
+    """
+    try:
+        found = list(compiled.finditer(subject, timeout=ROW_TIMEOUT_SECONDS))
+    except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
+        return None
+
+    offsets = _utf16_offsets(subject)
+    return [dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0))) for m in found]
+
+
 # The zero-width items whose meaning changes when `endpos` truncates the subject, in the spellings a
 # pattern can carry them in. Upstream's POSITION_ESCAPES (upstream/regex/_regex_core.py:4635) minus
 # `\A`, which is bound by `text_start` rather than by the slice and which the walk does not move
@@ -1205,6 +1340,14 @@ CLASS_ATOMS = (
     "a",
     "Z",
     "0",
+    # S52. Every atom above is ASCII or a property name, so before this the `classes` PATTERN never
+    # held a character above U+FFFF at all - measured at 0 of 1200 rows. A set whose member list is
+    # built by codepoint and read by UTF-16 code unit is exactly the mistake these three catch: a
+    # bare astral literal, a class holding one, and a RANGE whose two ends are both surrogate pairs.
+    ASTRAL_LETTER,
+    "[" + ASTRAL_SYMBOL + ASTRAL_DIGIT + "]",
+    "[\U0001d400-\U0001d7ff]",
+    "[^\U0001d400-\U0001d7ff]",
 )
 
 # The four V1 set operators, nested one level, so 'in_set_diff', 'in_set_inter', 'in_set_sym_diff'
@@ -1230,7 +1373,10 @@ CLASS_SUBJECT_ALPHABETS = (
     "aZ0_ -.\t",
     "éÅµß· ",
     "ΓγЖж中٠ ",
-    "\U0001f600\U0001d518\U0001d7ee\U00010400\U0001f4a9",
+    # S52: the modifier, the ZWJ and a second Nd block join the band that was already here. The
+    # modifier and the ZWJ are what a class has to answer about a character that is astral-adjacent
+    # rather than astral - U+200D is BMP, and `\w` is TRUE of it, which is not obvious from `Cf`.
+    ASTRAL_ALPHABET + ASTRAL_CASED + ASTRAL_CASED_LOWER + ASTRAL_DIGIT_2 + "\U0001f4a9",
 )
 
 # How many atoms a generated class pattern holds, and how often. Weighted towards one, because
@@ -1293,14 +1439,14 @@ def _generate_classes(rng: random.Random, count: int):
 # generator that emits an opcode no slice has ported produces `unsupported` rows and tells nobody
 # anything. Kept deliberately narrow - one letter, one class, one dot - so that what the row is
 # really testing is the group and branch structure wrapped round them.
-GROUP_ATOMS = ("a", "b", "c", "x", ".", "[ab]", "[^a]", r"\w", r"\d")
+GROUP_ATOMS = ("a", "b", "c", "x", ".", "[ab]", "[^a]", r"\w", r"\d") + ASTRAL_PATTERN_ATOMS
 
 # The subjects. Short, because a pattern of n atoms can only match n characters without a
 # quantifier, and a subject much longer than the pattern makes every 'fullmatch' row fail for the
 # same uninteresting reason. The astral alphabet is here for the same reason as in the literal
 # generators: a group span reported in codepoints rather than UTF-16 code units has to show up as a
 # divergence from the first wave.
-GROUP_SUBJECT_ALPHABETS = ("abcx", "abx1_", "ab\U0001f600\U0001d518c")
+GROUP_SUBJECT_ALPHABETS = ("abcx", "abx1_", "ab" + ASTRAL_ALPHABET + "c")
 
 MAX_GROUP_SUBJECT_LENGTH = 5
 
@@ -1397,7 +1543,7 @@ def _generate_groups(rng: random.Random, count: int):
 # S19 needed 'StepBy' and 'CountBetween'. A quantified single-character atom compiles to
 # GREEDY_REPEAT_ONE / LAZY_REPEAT_ONE, which is the fast path with its own backtrack sub-switch, so
 # these reach different code from the group shapes below.
-QUANT_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d", r"\s", "[a-c]")
+QUANT_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d", r"\s", "[a-c]") + ASTRAL_PATTERN_ATOMS
 
 # The quantifiers, as (suffix, weight). '{m,n}' forms are drawn separately so m and n vary. Weighted
 # towards '*' and '+' because those are what real patterns hold, and because a wave that is mostly
@@ -1422,7 +1568,7 @@ QUANT_SHAPE_WEIGHTS = (34, 26, 12, 18, 10)
 # Short, because a quantifier already explores many lengths at each start position and a long subject
 # multiplies that by the number of start positions a search tries. The astral alphabet is here so a
 # repeat count reported in codepoints rather than UTF-16 code units diverges from the first wave.
-QUANT_SUBJECT_ALPHABETS = ("ab", "abx", "ab \t", "ab\U0001f600\U0001d518")
+QUANT_SUBJECT_ALPHABETS = ("ab", "abx", "ab \t", "ab" + ASTRAL_ALPHABET)
 
 MAX_QUANT_SUBJECT_LENGTH = 6
 MAX_QUANT_FRAGMENTS = 2
@@ -1554,7 +1700,10 @@ BOUNDARY_SUBJECT_ALPHABETS = (
     "abz09 '.,-_",
     "éÀàİı '",
     "אב\"'カタक्ष٠_　",
-    "\U0001f1ec\U0001f1e7\U0001f600‍\U0001f469\U0001f3fb\U0001d518",
+    # S52 adds the SMP digit: a regional indicator pair, a ZWJ sequence, a modifier and an astral
+    # letter were all here, and the one word-break and grapheme-break class missing was Numeric in a
+    # plane where it is two code units. WB8 and WB11 are about digits specifically.
+    "\U0001f1ec\U0001f1e7\U0001f600‍\U0001f469\U0001f3fb\U0001d518" + ASTRAL_DIGIT,
 )
 
 # Line breaks, inserted rather than drawn, so a row can hold several and so CR/LF lands as a pair -
@@ -1710,14 +1859,14 @@ def _generate_boundaries(rng: random.Random, count: int):
 
 # What a group captures, and what a conditional's branches hold. One character each, as in the
 # `groups` generator: the row is about the reference, not about the atom it reads back.
-BACKREF_ATOMS = ("a", "b", "c", "x", ".", "[ab]", r"\w")
+BACKREF_ATOMS = ("a", "b", "c", "x", ".", "[ab]", r"\w") + ASTRAL_PATTERN_ATOMS
 
 # The subjects. Small alphabets, because a backreference can only match when the subject repeats
 # something, and 'abcde' at length 6 almost never repeats a two-character run. The astral alphabet
 # is here for the reason it is in every other generator: a span reported in codepoints rather than
 # UTF-16 code units has to show up as a divergence, and a reference is the one construct that walks
 # the *subject* twice, so a stepping bug on the second walk shows up here and nowhere else.
-BACKREF_SUBJECT_ALPHABETS = ("ab", "abc", "aabbx", "ab\U0001f600\U0001d518")
+BACKREF_SUBJECT_ALPHABETS = ("ab", "abc", "aabbx", "ab" + ASTRAL_ALPHABET)
 
 MAX_BACKREF_SUBJECT_LENGTH = 8
 
@@ -2362,7 +2511,7 @@ def _generate_reverse(rng: random.Random, count: int):
 # What a capture group is wrapped round. Every one is a single character or a class matching one,
 # so a group's span is predictable and a `*` on it can match empty - which is where the empty-match
 # advance policy, and therefore most substitution bugs, live.
-SUB_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d")
+SUB_ATOMS = ("a", "b", "x", ".", "[ab]", "[^a]", r"\w", r"\d") + ASTRAL_PATTERN_ATOMS
 
 # The shapes a pattern fragment takes, and how many capture groups each opens. Weighted towards the
 # plain and starred group: the first is the ordinary case a template references, and the second is
@@ -2619,6 +2768,10 @@ ITER_ATOMS = (
     "a|", "|a", "a|b", ":|a",
     r"\b", r"\B",
     "a{0,2}", "a{1,2}?", "a{2,}",
+    # S52. A split and an overlapped scan both report positions, so an astral separator is where a
+    # codepoint index and a UTF-16 one part company most visibly. `\X` is here because a scan over
+    # grapheme clusters is the one iteration whose step is not one character.
+    ASTRAL_SYMBOL, ASTRAL_SYMBOL + "*", ASTRAL_DIGIT, r"\X", r"\X+",
 )
 
 # The group wrappers, because a split interleaves every group's capture and findall/finditer report
@@ -2644,7 +2797,7 @@ ITER_LIMITS = (0, 0, 0, 1, 2, 3, -1)
 # The subjects. Short, because what matters is the number of positions a scan visits rather than the
 # length of any one match, and adjacency is the interesting case: ':::' gives a run of three, 'a:a'
 # gives matches separated by one character, and '' gives the single zero-width position.
-ITER_SUBJECT_ALPHABETS = ("ab:", "a:\U0001f600")
+ITER_SUBJECT_ALPHABETS = ("ab:", "a:" + ASTRAL_ALPHABET)
 ITER_MAX_SUBJECT = 6
 
 
@@ -2756,6 +2909,11 @@ INTERACTION_V1_CLASS_ATOMS = (
 # two UTF-16 code units and a plain ASCII letter, so a row can reach the expanding-fold path and the
 # surrogate-stepping path in one match.
 INTERACTION_SUBJECT_ALPHABETS = (
+    # S52, and FIRST in the tuple only because every caller picks with `rng.choice`. The composed
+    # generator had astral LETTERS and the Deseret case pair, and no astral digit, no emoji modifier
+    # and no ZWJ at all - so nothing it composes, a verb beside a fuzzy section or a lookaround
+    # inside a recursion, ever ran over one. Five generators draw from this tuple, not one.
+    "aA" + ASTRAL_ALPHABET + ASTRAL_CASED,
     "aAbB0_ .",
     "aAsSß\ufb00\ufb01\u0130\u0131",
     "aA\U0001f600\U0001d518\U00010400\U00010428",
@@ -4133,6 +4291,9 @@ def _generate_verbs(rng: random.Random, count: int):
 # The last two carry an astral character and an expanding fold, so a call can step over a surrogate
 # pair and a called group can reach the folding path.
 RECURSION_SUBJECT_ALPHABETS = (
+    # S52. A balanced-bracket subject whose payload is two UTF-16 units, so a recursive call has to
+    # step over a surrogate pair to find its own closing bracket.
+    "()" + ASTRAL_ALPHABET,
     "()ab",
     "()()ab",
     "[]<>ab",
@@ -4435,7 +4596,7 @@ POSIX = 0x10000
 # one, and a wide alphabet makes that collision rare. The third band holds a BMP and an astral
 # character so `check_posix_match`'s length comparison is asked about a surrogate pair - it counts
 # UTF-16 code units in this port and codepoints upstream, and the two must order the same way.
-POSIX_SUBJECT_ALPHABETS = ("ab", "abc", "aé\U0001f600")
+POSIX_SUBJECT_ALPHABETS = ("ab", "abc", "aé\U0001f600", "ab" + ASTRAL_ALPHABET)
 
 MAX_POSIX_SUBJECT_LENGTH = 6
 
@@ -4740,18 +4901,30 @@ FUZZY_ATOMS = (
     r"\s",
     r"\p{L}",
     r"\p{Nd}",
+    # S52. The `fuzzy` PATTERN held nothing above U+FFFF at all - 0 of 1200 rows - so the question
+    # this generator exists to ask had never been asked about a surrogate pair: does ONE edit buy a
+    # whole astral character, or does it buy one code unit and leave half a pair behind? A literal
+    # and a class, so both the CHARACTER and the SET arms of the fuzzy matcher get one.
+    ASTRAL_SYMBOL,
+    ASTRAL_DIGIT,
+    "[" + ASTRAL_SYMBOL + ASTRAL_LETTER + "]",
 )
 
 # Which of those are single literal characters. S38 refused to put two in a row so that no STRING
 # node could be built; S39 delivers the fuzzy STRING arms, so the rule is gone and the set is kept
 # only to say what an atom's exact subject text is.
-FUZZY_LITERAL_ATOMS = frozenset({"a", "b", "x", "0"})
+FUZZY_LITERAL_ATOMS = frozenset({"a", "b", "x", "0", ASTRAL_SYMBOL, ASTRAL_DIGIT})
 
 # S39's widening, part one: multi-character literals, which `Sequence.pack_characters`
 # (upstream/regex/_regex_core.py:3526) packs into a STRING node. These reach `fuzzy_match_string`
 # (upstream/src/_regex.c:10431) and, once the whole string has matched, `fuzzy_insert` (:10346) -
 # the one place an insertion can be charged next to a string.
-FUZZY_STRING_ATOMS = ("ab", "ba", "abx", "fo", "oba", "a0", "x0b")
+FUZZY_STRING_ATOMS = (
+    "ab", "ba", "abx", "fo", "oba", "a0", "x0b",
+    # S52. A STRING node holding a surrogate pair, which is where a length counted in code units
+    # rather than in characters would show up as a miscounted edit rather than as a crash.
+    "a" + ASTRAL_SYMBOL, ASTRAL_SYMBOL + "b", ASTRAL_SYMBOL + ASTRAL_DIGIT,
+)
 
 # S39's widening, part two: repeat bodies. These do NOT reach the fuzzy *_REPEAT_ONE loops - a
 # repeat inside a fuzzy section is always a GREEDY_REPEAT, never a GREEDY_REPEAT_ONE, because
@@ -4928,7 +5101,7 @@ FUZZY_TEST_PROBABILITY = 0.35
 # and it needs no astral character at all - 'XX8QbaY' does it. Deciding how the divergence list
 # should hold that family is a ranking question and belongs beside the rest of them; changing which
 # subject a row draws would only move the day it fires. See STATE.md.
-FUZZY_SUBJECT_ALPHABETS = ("abx", "ab0 x", "abf\U0001f600\U0001d518")
+FUZZY_SUBJECT_ALPHABETS = ("abx", "ab0 x", "abf" + ASTRAL_ALPHABET)
 
 # How many atoms a fuzzy section holds. Three is the sweet spot: one atom cannot show an error in
 # the middle, and a long section against a short subject makes every row fail for the same
@@ -5072,9 +5245,13 @@ def _fuzzy_one_char_text(rng: random.Random, atom: str, alphabet: str) -> str:
     if atom == r"\W":
         return rng.choice(" -.")
     if atom in (r"\d", r"\p{Nd}"):
-        return rng.choice("0123456789")
+        # S52 puts the two SMP digits in the pool: both are `Nd` and both satisfy `\d`, measured
+        # 2026-09-15, so a `\d` inside a fuzzy section now sometimes matches two UTF-16 code units.
+        return rng.choice("0123456789" + ASTRAL_DIGIT + ASTRAL_DIGIT_2)
     if atom == r"\s":
         return " "
+    if atom == "[" + ASTRAL_SYMBOL + ASTRAL_LETTER + "]":
+        return rng.choice((ASTRAL_SYMBOL, ASTRAL_LETTER))
     return rng.choice(alphabet)
 
 

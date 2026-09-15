@@ -142,8 +142,9 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The nine rows of <c>bestmatch-loses-a-candidate</c>, recorded by
-    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c> on 2026-09-14.
+    /// The eleven rows of <c>bestmatch-loses-a-candidate</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c> -
+    /// rows 1 to 9 on 2026-09-14, rows 10 and 11 on 2026-09-15.
     /// </summary>
     /// <remarks>
     /// <b>These rows are the entry's KEY as well as its staleness alarm since S47b</b>, so a row is
@@ -170,8 +171,35 @@ internal static class ExpectedDivergences
     /// <para>
     /// Every one carries a recorded <c>bestmatchFreeOutcome</c>, which is the second half of the
     /// entry's <see cref="ExpectedDivergence.Applies"/>, so the staleness alarm re-tests the
-    /// discriminator and not only the divergence - and on all nine this port's answer is upstream's
-    /// own flagless answer exactly, groups, counts and change positions included.
+    /// discriminator and not only the divergence - and on all of them this port's answer is
+    /// upstream's own flagless answer exactly, groups, counts and change positions included.
+    /// </para>
+    /// <para>
+    /// <b>Rows 10 and 11 are S52's, and they are the trade this entry's Reason names being paid
+    /// rather than anything new about the mechanism.</b> Widening the generators to every Unicode
+    /// plane (2026-09-15) drew two fresh questions of the same shape, and the owner's 2026-09-14
+    /// ruling says such a row reds the wave until someone judges it with the probe and adds it. Both
+    /// were judged that way, <c>.scratch</c>-free, and both are exact:
+    /// <list type="bullet">
+    /// <item>
+    /// Row 10, seed 7 row 41035 of the 2000-row <c>fuzzy</c> wave:
+    /// <c>(?b)(?fi)(?:(?:[𝔘😀][ab]){e&lt;=1}){s&lt;=1,i&lt;=1,d&lt;=1}</c> over <c>𝔘S🏻</c>. Upstream
+    /// refuses the match outright; with the <c>(?b)</c> deleted it answers (0, 5) with one
+    /// substitution at 2 and one insertion at 3, which is this port's answer to the code unit.
+    /// <b>The first row of this family whose subject and pattern are both astral</b>, which is why
+    /// it had never been drawn - before S52 the <c>fuzzy</c> generator put nothing above U+FFFF in a
+    /// pattern at all.
+    /// </item>
+    /// <item>
+    /// Row 11, seed 20260915 row 24462 of the same wave, from <c>interactions</c>: a <c>finditer</c>
+    /// over a subject carrying an emoji modifier, two ZERO WIDTH JOINERs and a Deseret capital.
+    /// Upstream finds NO match under the flag and one at (4, 5) without it, groups, counts and the
+    /// substitution at 5 all matching this port. <b>The first row of the family drawn by a composed
+    /// generator rather than by <c>fuzzy</c>.</b>
+    /// </item>
+    /// </list>
+    /// Neither is a new mechanism and neither needed a new argument: the flagless control is the
+    /// entry's own discriminator and it answers on both.
     /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
@@ -184,6 +212,8 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy", "pattern": "(?b)(?:[a-f][a-f][^a-f]){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "badyf", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 4], "deletions": []}}}
         {"generator": "fuzzy", "pattern": "(?b)(?:\\s[ab]+){i<=2}", "flags": 0, "namedLists": {}, "subject": "a bax", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0, 4], "deletions": []}}}
         {"generator": "fuzzy", "pattern": "(?b)(?:\\W(?:b\\B){d<=1:\\d}){e}", "flags": 0, "namedLists": {}, "subject": ".ba", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}, "codepointSpan": [2, 2]}]}, "leakFreeFuzzy": [null, null], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2, 3]}, "codepointSpan": [2, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 2], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": [2, 3]}, "codepointSpan": [2, 3]}]}}
+        {"generator": "fuzzy", "pattern": "(?b)(?fi)(?:(?:[\ud83d\ude00\ud835\udd18][ab]){e<=1}){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "\ud835\udd18S\ud83c\udffb", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [3], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?:(?P<g1>\\S)\ud83c\udffb){s<=1,i<=1,d<=1}(?:\\p{Ll}(*SKIP)[\\p{L}\\p{N}]|[a-f])", "flags": 16386, "namedLists": {}, "subject": "a\ud83c\udffba\u200d\u200da\ud801\udc00", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 5, "captures": [[4, 5]]}, {"number": 1, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [5], "insertions": [], "deletions": []}, "codepointSpan": [3, 7]}]}}
         """;
 
     /// <summary>
@@ -351,8 +381,78 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The three rows of <c>partial-retry-reversed-slice</c>, each copied out of
-    /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> on 2026-09-13 rather than retyped.
+    /// The five rows of <c>turkic-default-folding-without-spans</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/turkic-without-spans-rows.jsonl</c> on
+    /// 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// Rows 1 to 3 are the minimal form of each span-less shape - a <c>sub</c>, a <c>split</c> and a
+    /// <c>subf</c> whose template blows up only because upstream found a match. Rows 4 and 5 are the
+    /// two real wave rows that made the shape matter: seed 7 row 29165 (<c>conditionals</c>) and seed
+    /// 4242 row 24416 (<c>interactions</c>) of the three-seed 2000-row wave of commit 58977bb, which
+    /// was red at all three seeds before this entry existed.
+    /// <para>
+    /// Every one carries the recorder's <c>scanMatches</c>, which is upstream's own <c>finditer</c>
+    /// over the row and the only thing on any of these rows that has a span at all; the entry's
+    /// <see cref="ExpectedDivergence.Applies"/> reads it, so the staleness alarm re-tests the
+    /// evidence and not only the divergence.
+    /// </para>
+    /// </remarks>
+    private const string _turkicWithoutSpansRows = """
+        {"generator": "rows", "pattern": "(?i)I", "flags": 0, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "X", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "X", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
+        {"generator": "rows", "pattern": "(?i)(I)", "flags": 0, "namedLists": {}, "subject": "a\u0131b", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a", "\u0131", "b"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}
+        {"generator": "rows", "pattern": "(?i)I", "flags": 0, "namedLists": {}, "subject": "\u0131", "operation": "subf", "template": "{1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "Replacement index 1 out of range for positional args tuple", "whileMatching": true}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
+        {"generator": "conditionals", "pattern": "(?r)(?(?!s)[A-Z]{2}|(S))$", "flags": 16394, "namedLists": {}, "subject": "s\rS\u0131", "operation": "subf", "template": "{0[2]}", "count": 3, "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}
+        {"generator": "interactions", "pattern": "^(?:\ufb01\u0130){e<=2:\\S}([^a-f]+)$", "flags": 16386, "namedLists": {}, "subject": "\u0130\u0130\ufb01 \ufb01\ufb00", "operation": "split", "count": 3, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", " \ufb01\ufb00", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [2], "deletions": []}, "codepointSpan": [0, 6]}]}
+        """;
+
+    /// <summary>
+    /// The rows of <c>turkic-default-folding-without-spans</c>, so a test can assert that each is
+    /// classified by THAT entry rather than by its predicate-keyed sibling.
+    /// </summary>
+    internal static string SpanlessTurkicRows => _turkicWithoutSpansRows;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_turkicWithoutSpansRows"/>, in the same
+    /// order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Keying on the question ALONE was a defect, found by S52's second blind pass and reproduced
+    /// before it was fixed.</b> Without this array the entry read nothing from the port's answer at
+    /// all, so on these five questions ANY answer - a fabricated total failure included - was tallied
+    /// EXPECTED, which is the widest possible pin on exactly the rows a pin is meant to be narrow on.
+    /// Every other row-keyed entry in this file already demanded the judged answer;
+    /// <c>_partialRetryReversedOurs</c> is the pattern this now follows.
+    /// </remarks>
+    /// <remarks>
+    /// <b>Written with DOUBLED BACKSLASHES rather than as a verbatim string, and that is not a
+    /// style choice.</b> <see cref="OracleWave.Printable"/> renders a non-ASCII character as the
+    /// six-character text <c>ı</c>, so these strings must hold a literal backslash; a verbatim
+    /// <c>@"...ı..."</c> written into this file was silently normalised into the CHARACTER
+    /// U+0131 by an editing tool, and the entry then matched nothing at all while every clause of it
+    /// looked right. Found while writing this array.
+    /// </remarks>
+    private static readonly string[] _turkicWithoutSpansOurs =
+    [
+        "sub 0 '\\u0131'",
+        "split 1 'a\\u0131b'",
+        "sub 0 '\\u0131'",
+        "sub 0 's\\u000dS\\u0131'",
+        "split 3 '' '\\ufb01 \\ufb01\\ufb00' ''",
+    ];
+
+    /// <summary>
+    /// <see cref="_turkicWithoutSpansRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _turkicWithoutSpans = OracleWave
+        .ParseRows(_turkicWithoutSpansRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _turkicWithoutSpansOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The five rows of <c>partial-retry-reversed-slice</c>, each copied out of
+    /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> rather than retyped - rows 1 to 4 on
+    /// 2026-09-13, row 5 on 2026-09-15.
     /// </summary>
     /// <remarks>
     /// Rows 101560 (seed 7), 96397 and 99556 (seed 20260913) of the gate, all on the
@@ -385,12 +485,34 @@ internal static class ExpectedDivergences
     /// substitution at 3, which is this port's answer to the code unit. Deleting the verb gives
     /// upstream (0, 3) COMPLETE with the same substitution. Measured 2026-09-13 on regex 2026.7.19.
     /// </para>
+    /// <para>
+    /// <b>Row 5 is S52's, row 33858 of the seed-20260915 2000-row default wave, and its SYMPTOM IS
+    /// THE OTHER WAY UP - which is said here rather than left for a reader to trip over.</b> Rows 1
+    /// to 4 are upstream answering a SHORTER partial than this port; here upstream answers a LONGER
+    /// one, the whole subject:
+    /// <code>
+    /// (?r)(?:[A-Z](*SKIP).|\d)([^\p{L}])\B   over '00a .', partial search
+    ///   as drawn, (*SKIP)     upstream (0, 5) partial, group 1 (1, 2)
+    ///   verb -&gt; (*PRUNE)      upstream (0, 2) partial, group 1 (1, 2)   &lt;- this port's answer
+    ///   verb deleted          upstream (0, 2) COMPLETE, group 1 (1, 2)
+    /// </code>
+    /// A moved <c>slice_end</c> can lengthen an answer as readily as shorten one - the second pass
+    /// searches a region the first pass's verb redrew, and which way the answer moves depends on
+    /// where the anchors fall in it - so the mechanism is unchanged and only the direction of the
+    /// consequence differs. <b>Like row 4, the anchored sweep does not judge this row</b>: upstream's
+    /// own <c>match(0, endpos, partial=True)</c> is None at every endpos from 5 down to 1 and (0, 0)
+    /// at 0, so it names neither answer. The <c>(*PRUNE)</c> control is the whole of the evidence,
+    /// and it is decisive: <c>(*PRUNE)</c> prunes identically and moves no bound, and it gives this
+    /// port's span, its group and its partial flag exactly. Measured 2026-09-15 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-partial-retry-reversed-longer.py</c>.
+    /// </para>
     /// </remarks>
     private const string _partialRetryReversedRows = """
         {"generator": "partial", "pattern": "(?r)\\b(?:[^a-f](*SKIP)[\\p{L}\\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})", "flags": 8, "namedLists": {}, "subject": "a\n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial", "pattern": "(?r)\\M(?:[^[\\p{L}--[a-z]]](*SKIP)[a-f]|[A-Z])", "flags": 16642, "namedLists": {}, "subject": "A𐐨", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "partial", "pattern": "(?r)(?:[^a-f](*SKIP)\\S|[\\p{L}\\p{N}])(?(?<![\\w--[0-9]])[\\p{L}\\p{N}]|[\\w--[0-9]])", "flags": 256, "namedLists": {}, "subject": "𐐀_  ", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
         {"generator": "interactions", "pattern": "(?r)\\b(?:\\D(*SKIP)[\\p{L}\\p{N}]|[^a])(?:\\p{Ll}{0,2}?İ(?:\\p{Nd}){2i+1d+1s<=2}){1i+2d+1s<=3}", "flags": 0, "namedLists": {}, "subject": "ıİﬀ", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
+        {"generator": "partial", "pattern": "(?r)(?:[A-Z](*SKIP).|\\d)([^\\p{L}])\\B", "flags": 0, "namedLists": {}, "subject": "00a .", "operation": "search", "partial": true, "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         """;
 
     /// <summary>
@@ -412,6 +534,8 @@ internal static class ExpectedDivergences
         // Row 4. NOT upstream's anchored answer - see the remark above - but upstream's own answer
         // to the same pattern with the verb spelled (*PRUNE), substitution and all.
         "match 0:(0,3)[(0,3)] last=-1/- partial fuzzy=(1,0,0)[s:3][i:][d:]",
+        // Row 5, S52's, and upstream's (*PRUNE) answer again - group and all.
+        "match 0:(0,2)[(0,2)] 1:(1,1)[(1,1)] last=1/- partial",
     ];
 
     /// <summary>
@@ -2167,7 +2291,32 @@ internal static class ExpectedDivergences
                 + "four codepoints are in FOLD_TURKIC and in no other alphabet, so only about a "
                 + "sixth of its rows can reach them and both members of a pair must line up within "
                 + "one. So the examples, not the wave, are what keep this entry honest at the "
-                + "default count; widening FOLD_TURKIC's share is owed maintenance, not this slice.",
+                + "default count; widening FOLD_TURKIC's share is owed maintenance, not this slice.\n"
+                + "AN ANSWER THAT CARRIES NO SPANS AT ALL WAS INVISIBLE TO THIS ENTRY UNTIL S52, and "
+                + "the rule below did not change to fix it - the EVIDENCE did. `sub`, `subf` and "
+                + "`split` answer with a string, a list of parts and a count; a row upstream failed "
+                + "WHILE MATCHING answers with an exception. The span test reads none of them, so a "
+                + "row belonging to this family as plainly as any other reddened the run. Measured "
+                + "2026-09-15 on the three-seed 2000-row wave of commit 58977bb, which was red at "
+                + "all three seeds on three rows and two were this, at 42,000 rows a seed:\n"
+                + "  seed 7    row 29165 `conditionals` subf  (?r)(?(?!s)[A-Z]{2}|(S))$ over "
+                + "'s\\rS\\u0131'\n"
+                + "  seed 4242 row 24416 `interactions` split ^(?:\\ufb01\\u0130){e<=2:\\S}"
+                + "([^a-f]+)$ over '\\u0130\\u0130\\ufb01 \\ufb01\\ufb00'\n"
+                + "BOTH WERE PROVED TO BE THE `T` ROWS BY AN ISOLATING CONTROL, not by resemblance "
+                + "(tools/probes/upstream-turkic-without-spans.py and its port half "
+                + "tools/probes/port-turkic-without-spans.ps1, 2026-09-15, regex 2026.9.10). On "
+                + "the first, upstream matches 'S\\u0131' at (2,4) and only a range SPANNING `I` "
+                + "reaches the dotless i: `[A-Z]` and `[A-Y]` both match it, `[A-H]` and `[J-Z]` "
+                + "match nothing, and replacing the U+0131 kills the match outright. On the second, "
+                + "upstream's fuzzy section eats three characters where this port eats two - and "
+                + "swapping the U+0130 for `h` or for U+00C5, neither of which has a `T` row, moves "
+                + "upstream onto this port's span in both cases.\n"
+                + "THE FIX IS THE RECORDER'S `scanMatches`, upstream's own `finditer` over the row, "
+                + "recorded as a second fact the way `subMatches` and `anchoredScan` are and read "
+                + "here as a third source of spans. It is UPSTREAM'S SIDE ONLY, because this port's "
+                + "`Replace` and `Split` hand back no spans either, so a row where only THIS port's "
+                + "answer covers a Turkic letter is still reported and judged by hand.",
             PinnedBy: "Gaps.Engine.CaseFoldingTests, which asserts the whole 25-cell grid under "
                 + "(?i) and (?fi) against the definitive source, plus "
                 + "Gaps.Unicode.UnicodeCasingTests.The_four_turkic_codepoints_carry_the_default_"
@@ -2178,6 +2327,58 @@ internal static class ExpectedDivergences
             {"generator": "rows", "pattern": "İ", "flags": 16386, "namedLists": {}, "subject": "i̇", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
             """,
             Applies: static (row, ours) => DivergenceStartsOnATurkicI(row, ours)
+        ),
+        new(
+            Id: "turkic-default-folding-without-spans",
+            Reason: "THE SAME UPSTREAM DEFECT AS THE ENTRY ABOVE - `CaseFolding.txt`'s two `T` rows "
+                + "merged into both default tables - on the four answers that carry NO MATCH POSITION "
+                + "AT ALL, and a SEPARATE, ROW-KEYED entry because the predicate above cannot safely "
+                + "reach them. S52, 2026-09-15.\n"
+                + "WHY THE SHAPE NEEDED ANYTHING NEW. `sub`, `subf` and `split` answer with a string, "
+                + "a list of parts and a count, and a row upstream failed WHILE MATCHING answers with "
+                + "an exception. The entry above narrows by asking which Turkic letters the "
+                + "divergence's SPANS cover, and on these four there are none to read - so a row "
+                + "belonging to the family as plainly as any other reddened the run. The three-seed "
+                + "2000-row wave of commit 58977bb was red at all three seeds on three rows, and two "
+                + "of them were exactly this:\n"
+                + "  seed 7    row 29165 `conditionals` subf  (?r)(?(?!s)[A-Z]{2}|(S))$ over "
+                + "'s\\rS\\u0131'\n"
+                + "  seed 4242 row 24416 `interactions` split ^(?:\\ufb01\\u0130){e<=2:\\S}"
+                + "([^a-f]+)$ over '\\u0130\\u0130\\ufb01 \\ufb01\\ufb00'\n"
+                + "BOTH WERE PROVED TO BE THE `T` ROWS BY AN ISOLATING CONTROL, not by resemblance "
+                + "(tools/probes/upstream-turkic-without-spans.py and its port half "
+                + "tools/probes/port-turkic-without-spans.ps1, 2026-09-15, regex 2026.9.10). On the "
+                + "first, upstream matches 'S\\u0131' at (2,4) and only a range SPANNING `I` reaches "
+                + "the dotless i - `[A-Z]` and `[A-Y]` both match it, `[A-H]` and `[J-Z]` match "
+                + "nothing - and replacing the U+0131 kills the match outright. On the second, "
+                + "upstream's fuzzy section eats three characters where this port eats two, and "
+                + "swapping the U+0130 for `h` or for U+00C5, neither of which has a `T` row, moves "
+                + "upstream onto this port's span in both cases.\n"
+                + "KEYED ON ROWS, LIKE `bestmatch-loses-a-candidate`, AND THAT IS THE WHOLE POINT OF "
+                + "THE SPLIT. A DRAFT OF S52 INSTEAD FED THE RECORDER'S `scanMatches` INTO THE ENTRY "
+                + "ABOVE, and its blind review reproduced the false positive S45 and S47b each spent "
+                + "a pass closing: a fabricated total failure on `(?i)\\w` over 'x\\u0131' was "
+                + "tallied EXPECTED. `\\w` matches U+0131 in every engine without consulting a `T` "
+                + "row at all, but `CanFoldIntoALetterItDoesNotSpell` short-circuits on the `\\`, and "
+                + "the WHOLE SCAN rather than the diverging match was supplying the covered letter - "
+                + "so the widest possible defect on such a row would have been silenced. The row is "
+                + "pinned in `OracleWaveTests._turkicRowsToRefuse`. Widening this entry means judging "
+                + "another row with the probe and adding it, never loosening a condition; that is the "
+                + "owner's 2026-09-14 ruling for this file and it costs a red wave until someone "
+                + "looks, which is the right way round.\n"
+                + "THE RECORDED `scanMatches` IS STILL THE EVIDENCE and the second half of `Applies`: "
+                + "upstream's own `finditer` over the row, recorded by the recorder because the "
+                + "answer has no spans, so a listed row whose scan stops touching a Turkic letter "
+                + "stops being classified rather than silently staying pinned.",
+            PinnedBy: "Gaps.Engine.CaseFoldingTests.An_answer_that_carries_no_span_diverges_on_the_"
+                + "dotless_small_as_well and .A_range_spanning_the_plain_I_does_not_reach_the_"
+                + "dotless_small, plus the whole 25-cell grid the entry above names",
+            Example: _turkicWithoutSpansRows,
+            Applies: static (row, ours) =>
+                _turkicWithoutSpans.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                && row.ScanMatches is { } scan
+                && TurkicLettersCovered(row.Subject, scan).Any()
         ),
         new(
             Id: "fuzzy-changes-leaked-from-an-abandoned-attempt",
@@ -2414,6 +2615,14 @@ internal static class ExpectedDivergences
         // side of a `T` pair where the answer landed on the other - or a construct that folds. A
         // pattern that writes U+0131 and an answer that lands on U+0131 pair the letter with itself,
         // which every engine matches without reading the case data at all.
+        // A ROW WHOSE ANSWER CARRIES NO SPANS IS NOT CLASSIFIED HERE - see the sibling entry
+        // `turkic-default-folding-without-spans`, which is keyed on rows for a measured reason. A
+        // draft of S52 fed the recorder's `scanMatches` into this union instead, and its blind review
+        // reproduced exactly the false positive S45 and S47b each spent a pass closing: a fabricated
+        // total failure on `(?i)\w` over 'xı' - where `\w` matches U+0131 in every engine without
+        // consulting a `T` row at all - was tallied EXPECTED, because `CanFoldIntoALetterItDoesNot
+        // Spell` short-circuits on the `\` and the whole SCAN, rather than the diverging match, was
+        // supplying the covered letter.
         char[] covered =
         [
             .. TurkicLettersCovered(row.Subject, row.Expected).Concat(TurkicLettersCovered(row.Subject, ours)),

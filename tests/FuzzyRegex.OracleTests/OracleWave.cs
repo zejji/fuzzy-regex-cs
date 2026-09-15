@@ -201,6 +201,7 @@ internal static class OracleWave
                 && searchOnly.ValueKind == JsonValueKind.True,
             ReadMatchList(row, "anchoredScan"),
             ReadMatchList(row, "subMatches"),
+            ReadMatchList(row, "scanMatches"),
             row.TryGetProperty("bestmatchFreeOutcome", out JsonElement bestmatchFree)
                 ? ReadOutcome(bestmatchFree)
                 : null,
@@ -228,12 +229,14 @@ internal static class OracleWave
             : null;
 
     /// <summary>
-    /// One of the recorder's second-fact match lists - <c>anchoredScan</c> or <c>subMatches</c> - or
-    /// <see langword="null"/> when the row does not carry that one. A row carries an
-    /// <c>anchoredScan</c> only when it is an overlapped <c>finditer</c> whose pattern contains
-    /// <c>(*SKIP)</c> and, if reversed, reads nothing at the end of the subject; it carries
-    /// <c>subMatches</c> only when it is a substitution whose pattern contains <c>(*SKIP)</c>. Every
-    /// other row, and every wave recorded before the field existed, reads as <see langword="null"/>.
+    /// One of the recorder's second-fact match lists - <c>anchoredScan</c>, <c>subMatches</c> or
+    /// <c>scanMatches</c> - or <see langword="null"/> when the row does not carry that one. A row
+    /// carries an <c>anchoredScan</c> only when it is an overlapped <c>finditer</c> whose pattern
+    /// contains <c>(*SKIP)</c> and, if reversed, reads nothing at the end of the subject; it carries
+    /// <c>subMatches</c> only when it is a substitution whose pattern contains <c>(*SKIP)</c>; and it
+    /// carries <c>scanMatches</c> only when its answer holds no spans at all and the row could turn
+    /// on a Turkic <c>T</c> rule. Every other row, and every wave recorded before the field existed,
+    /// reads as <see langword="null"/>.
     /// </summary>
     /// <param name="row">The row.</param>
     /// <param name="name">The field.</param>
@@ -598,6 +601,20 @@ internal sealed record OracleHeader(
 /// <see cref="ExpectedDivergences"/> reads on a scan apply unchanged. Never compared, and read only
 /// after its length is checked against the recorded replacement count.
 /// </param>
+/// <param name="ScanMatches">
+/// A third of the same kind (S52), and the one that exists because an answer can carry no spans AT
+/// ALL: upstream's own <c>finditer</c> over the whole subject, recorded on a <c>sub</c>, <c>subf</c>
+/// or <c>split</c> row, and on a row upstream failed WHILE MATCHING, when the row could turn on a
+/// Turkic <c>T</c> rule. Those four answers are a string, a list of parts or an exception, so a
+/// span-keyed entry has nothing to read and the row reddens the run however well its family is
+/// understood - which is what the 2000-row three-seed wave of 2026-09-15 was red on, twice.
+/// <see cref="SubMatches"/> does not serve: it is truncated to the row's replacement count, so a row
+/// that replaced NOTHING carries an empty list exactly where the divergence is a match upstream made
+/// and this port did not. <see langword="null"/> on every other row, on any row upstream would not
+/// answer the second question on, and on any wave recorded before S52 - never an empty list, so
+/// "upstream found nothing" stays distinguishable from "nobody asked". Never compared; only
+/// <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 /// <param name="BestmatchFree">
 /// Recorded only on a row that carries <c>BESTMATCH</c>, and only when upstream could answer the
 /// question: upstream's own answer to the SAME row with the flag deleted. <c>BESTMATCH</c> is
@@ -665,6 +682,7 @@ internal sealed record OracleRow(
     bool SearchOnlyPartial = false,
     MatchesOutcome? AnchoredScan = null,
     MatchesOutcome? SubMatches = null,
+    MatchesOutcome? ScanMatches = null,
     IOracleOutcome? BestmatchFree = null,
     IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null,
     IOracleOutcome? PosixFree = null,

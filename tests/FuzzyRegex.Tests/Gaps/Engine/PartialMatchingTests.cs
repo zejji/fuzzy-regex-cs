@@ -724,6 +724,52 @@ public sealed class PartialMatchingTests
         (pruned.Index, pruned.Length).Should().Be((0, 1));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reversed_skip_that_moves_the_slice_end_can_lengthen_upstreams_partial_too()
+    {
+        // S52, row 33858 of the seed-20260915 2000-row default wave
+        // (`tools/run-oracle.ps1 -Count 2000`, 42,000 rows a seed). The SAME moved `slice_end` as the
+        // test above, and worth its own test because the SYMPTOM IS INVERTED: there upstream answers
+        // a SHORTER partial than this port, here it answers a LONGER one - the whole subject. A bound
+        // the verb redrew changes which region the second pass searches, and which way the answer
+        // then moves depends on where the anchors fall in it, so one direction of symptom is not the
+        // mechanism's signature and a test that only ever saw the short one would say it was.
+        //
+        // Measured on regex 2026.9.10, 2026-09-15,
+        // tools/probes/upstream-partial-retry-reversed-longer.py:
+        //
+        //   as drawn, (*SKIP)   search(partial=True)  (0, 5) partial, g1 (1, 2)  <- upstream
+        //   verb -> (*PRUNE)    search(partial=True)  (0, 2) partial, g1 (1, 2)  <- this port
+        //   verb deleted        search(partial=True)  (0, 2) COMPLETE, g1 (1, 2)
+        //   match(0, endpos, partial=True)            None at 5..1, (0, 0) at 0
+        //
+        // THE ANCHORED SWEEP DOES NOT JUDGE THIS ROW - upstream's own matcher names neither answer -
+        // so unlike the test above the `(*PRUNE)` control is the whole of the evidence rather than a
+        // corroboration. It is decisive on its own: `(*PRUNE)` prunes backtracking exactly as
+        // `(*SKIP)` does and moves NO bound, and it gives this port's span, group and partial flag
+        // to the code unit. Classified as row 5 of `partial-retry-reversed-slice` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        var skipped = new FuzzyRegex(@"(?r)(?:[A-Z](*SKIP).|\d)([^\p{L}])\B");
+
+        Match search = skipped.Match("00a .", partial: true);
+        search.PartialMatch.Should().BeTrue();
+        (search.Index, search.Length).Should().Be((0, 2), "upstream answers (0, 5), the whole subject");
+        (search.Groups[1].Index, search.Groups[1].Length).Should().Be((1, 1));
+
+        // The control, and here the entire argument: the same pruning with no bound moved is what
+        // upstream answers this port's way.
+        Match pruned = new FuzzyRegex(@"(?r)(?:[A-Z](*PRUNE).|\d)([^\p{L}])\B").Match("00a .", partial: true);
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 2));
+
+        // And with no verb at all the span is the same again and the match is COMPLETE, on both
+        // engines - so the verb costs the completeness and the moved bound costs the span.
+        Match noVerb = new FuzzyRegex(@"(?r)(?:[A-Z].|\d)([^\p{L}])\B").Match("00a .", partial: true);
+        noVerb.PartialMatch.Should().BeFalse();
+        (noVerb.Index, noVerb.Length).Should().Be((0, 2));
+    }
+
     [Test]
     public void A_forward_skip_does_not_move_the_slice_start_the_partial_pass_searches()
     {

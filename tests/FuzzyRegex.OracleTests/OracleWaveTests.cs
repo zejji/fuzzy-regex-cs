@@ -372,6 +372,8 @@ public sealed class OracleWaveTests
         {"generator": "rows", "pattern": "(?#I)\u0131.", "flags": 2, "namedLists": {}, "subject": "\u0131x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
         {"generator": "rows", "pattern": "(?P<i>\u0130).", "flags": 2, "namedLists": {}, "subject": "\u0130x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "i", "partial": false}}
         {"generator": "rows", "pattern": "(?<I>\u0131).", "flags": 2, "namedLists": {}, "subject": "\u0131x", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": "I", "partial": false}}
+        {"generator": "rows", "pattern": "(?i)\u0131", "flags": 0, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "X", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "X", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}
+        {"generator": "rows", "pattern": "(?i)\\w", "flags": 0, "namedLists": {}, "subject": "x\u0131", "operation": "sub", "template": "Q", "count": -1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "QQ", "count": 2}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}
         """;
 
     /// <summary>
@@ -414,11 +416,20 @@ public sealed class OracleWaveTests
         // and U+0131 is in play here against ITSELF, which every engine matches without consulting
         // a `T` row at all.
         //
-        // ALL SIX, in one loop, because each of the first two fixes closed the spelling in front of
-        // it and left its twin open - `(?i)İ.` after `(?i)ı.`, then four group-name and comment
+        // ALL OF THEM, in one loop, because each of the first two fixes closed the spelling in front
+        // of it and left its twin open - `(?i)İ.` after `(?i)ı.`, then four group-name and comment
         // spellings after those. Every row here is the identical trap and a fix that passes some of
         // them is the bug; the port is fabricated to fail outright on each, which is what an
         // unrelated engine defect landing on such a row would look like.
+        //
+        // THE LAST TWO ARE S52's, and the second of them is why that slice has a SEPARATE row-keyed
+        // entry for span-less answers instead of widening the predicate. Its draft fed the
+        // recorder's `scanMatches` into this rule's covered-letter union, and the blind review
+        // reproduced the whole trap again on a `sub`: `(?i)\w` over 'xı' reaches U+0131 through a
+        // `\w`, which every engine matches without consulting a `T` row, and the pattern's `\`
+        // short-circuits the pairing test - so a total engine failure was tallied EXPECTED. Keep
+        // both rows: the first is the shape that MUST still be refused with the scan present, and
+        // the second is the shape the scan itself introduced.
         foreach (OracleRow row in OracleWave.ParseRows(_turkicRowsToRefuse))
         {
             ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("{0}", row.Pattern);
@@ -445,6 +456,37 @@ public sealed class OracleWaveTests
                 .And.Subject.As<ExpectedDivergence>()
                 .Id.Should()
                 .Be("turkic-default-folding");
+        }
+    }
+
+    [Test]
+    public void An_answer_with_no_spans_is_classified_by_the_row_keyed_turkic_entry()
+    {
+        // S52. The three span-less shapes - a `sub`, a `split` and a `subf` whose template throws -
+        // plus the two real wave rows that made them matter. Each goes through the LIVE engine, so
+        // this fails the day this port stops diverging on one as well as the day the entry stops
+        // reaching it, and it asserts the ID so that a row quietly migrating to the predicate-keyed
+        // sibling - which is what S52's blind review proved is unsafe here - shows up as a failure.
+        foreach (OracleRow row in OracleWave.ParseRows(ExpectedDivergences.SpanlessTurkicRows))
+        {
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull("{0} -> [{1}]", row.Pattern, ours.Describe())
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("turkic-default-folding-without-spans");
+
+            // AND THE OTHER HALF, which the first version of this test did not have and which S52's
+            // second blind pass reproduced as a defect: being one of the five listed QUESTIONS must
+            // not be enough. The entry read nothing from the port's answer, so a total engine failure
+            // on a listed row was tallied EXPECTED - the widest possible pin on exactly the rows a
+            // pin exists to keep narrow. `NoMatchOutcome` is the same fabrication
+            // `_turkicRowsToRefuse` uses above.
+            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("{0}", row.Pattern);
         }
     }
 
