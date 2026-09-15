@@ -4,16 +4,21 @@
 # what was searched - and upstream's own 'match' over that span denies it. This port answers the
 # partial its slow path actually reached.
 #
-# ON THREE OF THE FOUR ROWS that is upstream's own answer, once upstream is asked at that position
-# instead. NOT on the fourth. Seed 20260912's row 2689 is reversed, where 'match(pos=...)' anchors at
+# ON FIVE OF THE SIX ROWS that is upstream's own answer, once upstream is asked at that position
+# instead. NOT on the third. Seed 20260912's row 2689 is reversed, where 'match(pos=...)' anchors at
 # the END, so the sweep below varies 'endpos' on a '(?r)' row: upstream then answers (0, 1) partial
 # and (0, 2) and (0, 3) COMPLETE, and never this port's zero-width partial at (0, 0). That row is
 # judged on the verb evidence alone - delete the '(*SKIP)' and upstream's search gives this port's
 # answer - which is why the entry in ExpectedDivergences.cs lists judged ROWS rather than
 # predicating on a rule. The S37 blind review found the claim stated as a rule and it was not one.
 #
+# S52 (2026-09-15) added the last two, from the LONG-subject generators, and they are the cleanest
+# of the six: on both, all four controls agree on this port's answer. Note that the arm in
+# ExpectedDivergences.cs carries SEVEN rows - S43's row 5, '(?r)^(?(?<![^\p{L}])\p{L}|...' on '\r.',
+# has never been in this probe and is evidenced in S43's own notes instead.
+#
 # Three rows of a 6000-row 'interactions' wave - one at seed 4242 and TWO at seed 20260912, none at
-# seed 7 - every one with a '(*SKIP)', plus the family minimised by hand.
+# seed 7 - every one with a '(*SKIP)', plus the family minimised by hand, plus S52's two.
 import sys
 
 import regex
@@ -25,6 +30,13 @@ CASES = [
     ('seed 4242 row 3497', r'\b(?:.+(*SKIP)[^\d]|\p{Lu})([^[\p{L}--[a-z]]])+(?(?=\W)[\w--[0-9]])', 'ﬃ\nﬃaa', 0x410A),
     ('seed 20260912 row 2689', r'(?r)[a](\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\b', 'AA\U0001D518\U00010400', 0x4102),
     ('seed 20260912 row 4313', r'\m(?:[\p{L}\p{N}]{2,}(*SKIP)\p{ASCII}|\w)\B', 'a\U0001F600Aa', 0x108),
+    # S52 sitting 7's two, from the LONG-subject generators - and the length is not what found them.
+    # Both were drawn on subjects of 3,363 and 18,759 characters and both delta-debug down to THREE
+    # codepoints with the whole signature intact, so what the 'partial-long' wrapper contributed is
+    # its astral alphabet and these pattern shapes, not its length. Every character of both minima is
+    # astral or a line break.
+    ('seed 7 row 6997', r'(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\p{Nd}(*SKIP)\s|\p{L})', '\U0001D518\U0001F600\n', 0x0),
+    ('seed 20260915 row 7094', r'(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)(?:(?(2)(?=(?P>g2))\p{Nd}|.))', '\U00010400\U0001F3FB\U00010400', 0x8),
 ]
 
 

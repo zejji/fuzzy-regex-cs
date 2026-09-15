@@ -466,6 +466,135 @@ public sealed class PartialMatchingTests
         (complete.Index, complete.Length).Should().Be((2, 1));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reversed_skip_partial_answers_where_upstreams_own_anchored_matcher_does()
+    {
+        // S52 found this at 300 rows a generator of the `partial-long` wave, seed 7 - and the length
+        // is not what found it. Drawn on a 3,363-character subject, it delta-debugs to the THREE
+        // codepoints below with the whole signature intact, so what the long wrapper contributed is
+        // its astral alphabet over this pattern shape, not its length.
+        //
+        // The same `search_start` prefilter as the test above, in reverse. Upstream (2026.9.10):
+        //
+        //   pat = regex.compile(r'(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])'
+        //                       r'(?:\p{Nd}(*SKIP)\s|\p{L})')
+        //   pat.search(s, partial=True)         -> (0, 3) codepoints, partial   <- the WHOLE region
+        //   pat.match(s, 0, 3, partial=True)    -> None       <- upstream denies its own answer
+        //   pat.match(s, 0, 1, partial=True)    -> (0, 1) codepoints, partial   <- and this is ours
+        //   verb deleted,  search(partial=True) -> (0, 1)                       <- ours again
+        //   verb -> (*PRUNE), search(partial)   -> (0, 1)                       <- and again
+        //
+        // A reversed match anchors at the END, so the sweep that finds this port's answer varies the
+        // slice end rather than the start - `MatchAtStart(subject, 0, length: n)` here, upstream's
+        // `match(s, 0, n)` there. This row and the forward one below are the only two in the arm on
+        // which EVERY control returns this port's answer exactly, span and partial flag both: on the
+        // rows S37 judged the verb-free spelling answers a COMPLETE match instead, and on one of
+        // them the anchor sweep never lands on this port's answer at all.
+        //
+        // PERMANENT: a Phase 7 slice that ports `search_start` and turns this red has imported the
+        // prefilter's answers along with the prefilter. Classified as `search-start-partial` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs. Measured 2026-09-15 on regex
+        // 2026.9.10 by tools/probes/upstream-search-start-whole-region-partial.py. Spans below are
+        // UTF-16 and the probe's are codepoints: every character here is astral or a line break, so
+        // codepoint 1 is UTF-16 offset 2.
+        const string pattern = @"(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\p{Nd}(*SKIP)\s|\p{L})";
+        const string subject = "\U0001D518\U0001F600\n";
+
+        Match skipped = new FuzzyRegex(pattern, FuzzyRegexOptions.Version0).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length).Should().Be((0, 2), "upstream answers the whole region, (0, 5)");
+
+        // The anchored control, on the bound a reversed match actually anchors on. This is upstream's
+        // own answer at that slice end, which is what makes the prefilter the only thing left.
+        Match anchored = new FuzzyRegex(pattern, FuzzyRegexOptions.Version0).MatchAtStart(
+            subject,
+            beginning: 0,
+            length: 2,
+            partial: true
+        );
+
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((0, 2), "upstream's own match(s, 0, 1) answers this");
+
+        // And the verb is not what makes this port's answer: a verb that moves no bound, and no verb
+        // at all, both leave it where it was - which is upstream's own answer on both spellings too.
+        foreach (
+            string spelling in new[]
+            {
+                pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal),
+                pattern.Replace("(*SKIP)", "", StringComparison.Ordinal),
+            }
+        )
+        {
+            Match other = new FuzzyRegex(spelling, FuzzyRegexOptions.Version0).Match(subject, partial: true);
+
+            other.PartialMatch.Should().BeTrue();
+            (other.Index, other.Length).Should().Be((0, 2), $"the verb moves no bound in '{spelling}'");
+        }
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_forward_skip_partial_answers_at_the_leftmost_position_anything_matches()
+    {
+        // S52's second `partial-long` row, seed 20260915, and the forward twin of the one above. It
+        // was drawn on an 18,759-character subject and delta-debugs to THREE astral codepoints, so
+        // again the long wrapper's alphabet found it rather than its length.
+        //
+        //   pat = regex.compile(r'(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)'
+        //                       r'(?:(?(2)(?=(?P>g2))\p{Nd}|.))', regex.M)
+        //   pat.search(s, partial=True)         -> (0, 3) codepoints, partial   <- the WHOLE region
+        //   pat.match(s, 0, 3, partial=True)    -> None       <- upstream denies its own answer
+        //   pat.match(s, 2, partial=True)       -> (2, 3) codepoints, partial   <- and this is ours
+        //   pat.match(s, 3, partial=True)       -> (3, 3) zero-width partial
+        //   verb deleted,  search(partial=True) -> (2, 3)                       <- ours again
+        //   verb -> (*PRUNE), search(partial)   -> (2, 3)                       <- and again
+        //
+        // PERMANENT, same reason and same classification as the reversed row above. Measured
+        // 2026-09-15 on regex 2026.9.10. Spans are UTF-16; every character is astral, so codepoint 2
+        // is UTF-16 offset 4.
+        const string pattern = @"(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)(?:(?(2)(?=(?P>g2))\p{Nd}|.))";
+        const string subject = "\U00010400\U0001F3FB\U00010400";
+        const FuzzyRegexOptions options = FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version0;
+
+        Match skipped = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length).Should().Be((4, 2), "upstream answers the whole region, (0, 6)");
+
+        // A forward search anchors at the start, so this is the sweep that finds our answer - and 4
+        // is the LEFTMOST position at which anything matches, which is what the search owes.
+        foreach (int beginning in new[] { 0, 2 })
+        {
+            new FuzzyRegex(pattern, options)
+                .MatchAtStart(subject, beginning, partial: true)
+                .Success.Should()
+                .BeFalse($"nothing matches at {beginning}, so the search owes its answer at 4");
+        }
+
+        Match anchored = new FuzzyRegex(pattern, options).MatchAtStart(subject, beginning: 4, partial: true);
+
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((4, 2), "upstream's own match(s, 2) answers this");
+
+        // And again the verb is not what makes this port's answer.
+        foreach (
+            string spelling in new[]
+            {
+                pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal),
+                pattern.Replace("(*SKIP)", "", StringComparison.Ordinal),
+            }
+        )
+        {
+            Match other = new FuzzyRegex(spelling, options).Match(subject, partial: true);
+
+            other.PartialMatch.Should().BeTrue();
+            (other.Index, other.Length).Should().Be((4, 2), $"the verb moves no bound in '{spelling}'");
+        }
+    }
+
     [Test]
     public void A_reverse_partial_at_the_left_edge_of_a_narrowed_slice_is_found()
     {

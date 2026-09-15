@@ -73,29 +73,59 @@ def main(argv=None) -> int:
     header = ("generator", "rows", "match", "walked", "dist", "len", "long", "subject")
     print(f"{header[0]:<18}{header[1]:>6}{header[2]:>7}{header[3]:>8}{header[4]:>8}{header[5]:>7}{header[6]:>6}{header[7]:>9}")
     for name in LONG_GENERATORS:
-        mine = [row for row in rows if row["generator"] == name]
-        subjects = [len(row["subject"]) for row in mine]
-        distances, lengths = [], []
-        for row in mine:
-            span = row.get("codepointSpan")
-            if not span:
-                continue
-            reverse = "(?r)" in row["pattern"]
-            distances.append(len(row["subject"]) - span[1] if reverse else span[0])
-            lengths.append(span[1] - span[0])
-        median = lambda xs: round(statistics.median(xs)) if xs else 0  # noqa: E731
-        print(
-            f"{name:<18}{len(mine):>6}{len(distances):>7}"
-            f"{sum(1 for d in distances if d >= WALKED):>8}{median(distances):>8}"
-            f"{median(lengths):>7}{sum(1 for n in lengths if n >= WALKED):>6}"
-            f"{median(subjects):>9}"
-        )
+        print(line_for(name, [row for row in rows if row["generator"] == name]))
 
     every = [row for row in rows if row.get("codepointSpan")]
     print(f"\n`walked` counts matches beginning {WALKED}+ characters into the scan and `long` counts")
     print(f"matches {WALKED}+ characters long; `dist`, `len` and `subject` are medians.")
     print(f"{len(every)} of {len(rows)} rows answered a match.")
+
+    # AND THE SAME SPLIT BY DIRECTION, because the aggregate above cannot carry the padding-side
+    # control. The filler goes on the side the pattern does not run off, so that rule only ever
+    # applies to a REVERSED row - and `literals-long` and `quantifiers-long` draw none at all
+    # (measured 2026-09-15 at --count 200 --seed 7: 0 of 200 each, against 90 of 200 for
+    # `partial-long` and 31 for `fuzzy-long`). Pad every row on the left and the aggregate `walked`
+    # column barely moves, which reads as "the side rule buys nothing" and is an artefact of
+    # averaging a rule in with the rows it cannot reach. Judge the control on the `reversed` lines
+    # below, and see tools/probes/long-subject-padding-side-control.py, which runs it.
+    print("\nby direction\n")
+    print(f"{'generator':<18}{'dir':>10}{'rows':>6}{'match':>7}{'walked':>8}{'dist':>8}{'len':>7}{'long':>6}{'subject':>9}")
+    for name in LONG_GENERATORS:
+        mine = [row for row in rows if row["generator"] == name]
+        for label, wanted in (("forward", False), ("reversed", True)):
+            group = [row for row in mine if is_reversed(row) == wanted]
+            if group:
+                print(f"{name:<18}{label:>10}" + line_for(name, group)[18:])
     return 0
+
+
+def is_reversed(row) -> bool:
+    """As `tools/record-oracle.py` decides which side to pad: inline `(?r`, or the REVERSE flag."""
+    return "(?r" in row["pattern"] or bool(row["flags"] & 0x400)
+
+
+def line_for(name: str, mine: list) -> str:
+    """One table row: the reach figures for a set of recorded rows."""
+    subjects = [len(row["subject"]) for row in mine]
+    distances, lengths = [], []
+    for row in mine:
+        span = row.get("codepointSpan")
+        if not span:
+            continue
+        # A reversed row is padded on the right and scans leftwards, so its distance is measured
+        # back from the right-hand end; a forward one is padded on the left and scans rightwards.
+        distances.append(len(row["subject"]) - span[1] if is_reversed(row) else span[0])
+        lengths.append(span[1] - span[0])
+
+    def median(xs):
+        return round(statistics.median(xs)) if xs else 0
+
+    return (
+        f"{name:<18}{len(mine):>6}{len(distances):>7}"
+        f"{sum(1 for d in distances if d >= WALKED):>8}{median(distances):>8}"
+        f"{median(lengths):>7}{sum(1 for n in lengths if n >= WALKED):>6}"
+        f"{median(subjects):>9}"
+    )
 
 
 if __name__ == "__main__":

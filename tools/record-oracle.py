@@ -5545,11 +5545,27 @@ LONG_FILLER_ALPHABET = "qQ§"
 # `quantifiers-long` takes its filler from the BASE ALPHABET instead, and the reason is that its
 # path is a different one. The other three want the match to begin far from where the scan started,
 # so they want filler the pattern steps over; a repeat guard is reached by ITERATIONS, and a repeat
-# cannot iterate over text it cannot consume. Measured, which is why this line exists: with the
-# unmatchable filler, `tools/probes/generator-long-subject-reach.py --count 200 --seed 7` put the
-# median match length at 1 and 9 of 148 matches past 100 characters - a nullable quantifier answers
-# a zero-width match at offset 0 and never looks at the text, whatever the filler is spelled with.
+# cannot iterate over text it cannot consume - so the column that matters for this generator is
+# `long` (matches 100+ characters long), not `walked` (matches beginning 100+ characters in).
+#
+# RE-MEASURED 2026-09-15, and the margin is much smaller than S52 sitting 4 recorded. Setting
+# `LONG_REPEAT_FILLER_GENERATORS = ()` and running
+# `tools/probes/generator-long-subject-reach.py --count 200 --seed 7` both ways gives:
+#
+#   unmatchable filler   match 148   walked 9   dist 0   len 0   long 28
+#   base alphabet        match 155   walked 5   dist 0   len 1   long 32
+#
+# So the base alphabet buys 4 rows on `long` (28 -> 32) and COSTS 4 on `walked` (9 -> 5), and it
+# moves the median match length from 0 to 1. Sitting 4's notes claimed it took `long` "from 0 to
+# 32" and put the median length at 1 with the unmatchable filler; both were misreadings of the
+# table's columns, caught by the blind review re-running it. The line stays because 28 -> 32 is
+# still the right direction on the right column and changing it would invalidate every recorded
+# long wave - but it rests on a thin margin, and whether `quantifiers-long` needs a filler rule of
+# its own at all is worth re-deciding rather than inheriting.
 LONG_REPEAT_FILLER_GENERATORS = ("quantifiers-long",)
+
+# regex.REVERSE, the flag form of `(?r)`. Which side the filler goes on depends on it.
+REVERSE = 0x400
 
 
 def _generate_long(name: str, rng: random.Random, count: int):
@@ -5577,7 +5593,13 @@ def _generate_long(name: str, rng: random.Random, count: int):
             rng.choice(alphabet)
             for _ in range(rng.randrange(MIN_LONG_SUBJECT, MAX_LONG_SUBJECT + 1))
         )
-        reverse = "(?r)" in row["pattern"]
+        # `(?r` rather than `(?r)`, and the REVERSE flag too: `(?ri)` is reversed and so is a row
+        # whose flags carry 0x400, and either spelling padded as though it were forward is the
+        # "just a `literals` row with a long prefix" failure the docstring warns about. Measured
+        # 2026-09-15 over 2,400 long rows at seeds 7 and 20260915: NO row is reversed by either of
+        # those spellings today, so this widening changes no recorded wave. It is here so that a
+        # later generator emitting one cannot silently pad it on the wrong side.
+        reverse = "(?r" in row["pattern"] or bool(row["flags"] & REVERSE)
         row["subject"] = row["subject"] + filler if reverse else filler + row["subject"]
         row["generator"] = name
         row["operation"] = "search"

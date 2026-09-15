@@ -347,6 +347,9 @@ written for", so the reach was measured rather than assumed, by
 **`tools/probes/generator-long-subject-reach.py`** (committed, re-runnable). The first run said
 `quantifiers-long` **did not reach its path**: 9 of 148 matches began 100+ characters into the
 scan, median distance 0, median match length 1.
+**[CORRECTED IN SITTING 7 - the median match length was 0, not 1, and 28 of 148 matches were
+already 100+ characters LONG. See sitting 7's notes; the conclusion survives, the margin does
+not.]**
 
 The cause is not the filler alphabet, and no spelling of it would have helped: a nullable
 quantifier (`a*`, `.{0,2}`) answers a zero-width match at offset 0 without looking at the text.
@@ -369,7 +372,8 @@ fuzzy-long           200    148     115    8516      4     0    10304
 `walked` counts matches beginning 100+ characters into the scan, `long` counts matches 100+
 characters long. Three of the four reach a distant start on about 70% of their matches;
 `quantifiers-long` reaches a 100+ iteration repeat on 32 of 155, **up from 0** before the filler
-change. Its median length stays 1 because the base grammar draws many `?` and `{0,2}` quantifiers,
+change. **[CORRECTED IN SITTING 7: up from 28, not from 0. The filler change is worth +4 on this
+column and -4 on `walked`.]** Its median length stays 1 because the base grammar draws many `?` and `{0,2}` quantifiers,
 and widening that is a change to the base grammar rather than to this wrapper - deliberately not
 done here.
 
@@ -487,7 +491,8 @@ own flags and its header says why, because this is a trap the next person will f
 
 ### The judgement, and the proof
 
-`run-oracle.ps1` defaults to `-Configuration Debug` (`:210`). Consuming **the identical rows**,
+`run-oracle.ps1` defaults to `-Configuration Debug` (`:210`). **[Both halves of that are now stale:
+sitting 6 made the default Release, and the parameter is at `:246`.]** Consuming **the identical rows**,
 changing nothing but the configuration:
 
 ```
@@ -648,3 +653,214 @@ the reviewer's own correction of prose. It is small and it is unreviewed.
 **Still not run** - sitting 4's padding-side gap is carried for a third sitting. Nothing this
 sitting changed is engine behaviour, and the control it owes belongs to the generator, not to the
 default list. It must be run in **Release**.
+
+---
+
+## Sitting 7 (2026-09-15) - CHECKPOINT, not closed
+
+STATE.md made sitting 7's first job the two unjudged `partial-long` rows, and named the blind review
+and independent verifier owed for sittings 4, 5 and 6. Both are done. What is NOT done, and is now
+the largest single item left in this slice, is the **6000-row three-seed gate, run here for the first
+time and RED at all three seeds with 29 diverging rows**.
+
+### The two rows are judged: both are `search-start-partial`, and the port is right
+
+They are the same family S37 found and S43 added to, measured with that family's own controls in its
+own probe. On each row, upstream's `search(partial=True)` covers the whole searched region, upstream's
+own `match` over that very span answers **None**, and every other way of asking gives THIS PORT'S
+answer:
+
+```
+== seed 7 row 6997  '(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\p{Nd}(*SKIP)\s|\p{L})' on '𝔘😀\n' flags 0x0
+   search(partial=True)                ((0, 3), 'partial')      <- the whole region
+   match over that span                None                     <- upstream denies its own answer
+   match(endpos=1, partial=True)       ((0, 1), 'partial')      <- ours
+   verb deleted         search(partial)  ((0, 1), 'partial')    <- ours
+   verb -> (*PRUNE)     search(partial)  ((0, 1), 'partial')    <- ours
+
+== seed 20260915 row 7094  '(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)(?:(?(2)(?=(?P>g2))\p{Nd}|.))' on '𐐀🏻𐐀' flags 0x8
+   search(partial=True)                ((0, 3), 'partial')      <- the whole region
+   match over that span                None
+   match(pos=2, partial=True)          ((2, 3), 'partial')      <- ours
+   verb deleted         search(partial)  ((2, 3), 'partial')    <- ours
+   verb -> (*PRUNE)     search(partial)  ((2, 3), 'partial')    <- ours
+```
+
+A reversed match anchors at the END, so row 6997's sweep varies `endpos` where row 7094's varies
+`pos`. Both are now rows 6 and 7 of `_searchStartElsewhereRows` in `ExpectedDivergences.cs`, both are
+cases in `tools/probes/upstream-search-start-whole-region-partial.py`, and both have a permanent gap
+test in `Gaps/Engine/PartialMatchingTests.cs`. Sitting 6's warning not to assume they were
+`partial-retry-carried-slice-forward` was right - they are not that family.
+
+**They are the only two rows in the arm on which every control returns this port's answer exactly,
+span AND partial flag.** On rows 1, 2 and 4 the verb-free spelling answers a COMPLETE match instead;
+on row 3 the anchor sweep never lands on this port's answer at all. (A first draft of that sentence
+said rows 3 and 5 both rested on the verb evidence alone. The blind review killed it by running row
+5's sweep, which gives its judged answer at endpos 1 - as the file's own S43 paragraph already said.)
+
+### The length was NOT what found them, and that is the finding about the generator
+
+Both rows were drawn on subjects of **3,363 and 18,759 characters** and both **delta-debug down to
+THREE codepoints** with the whole signature intact - `𝔘😀\n` and `𐐀🏻𐐀`, every character astral or a
+line break. So what the `partial-long` wrapper contributed is its **astral alphabet over these
+pattern shapes, not its length**; the short `partial` generator could in principle have drawn either
+and never did. That is worth carrying: the long generators are earning their keep as an alphabet
+widening at least as much as a length widening.
+
+### The 6000-row three-seed gate: RED at all three seeds, 29 rows, all unjudged
+
+Run for the first time in this slice, on the commit-ready tree, in Release:
+
+```
+pwsh -File tools/run-oracle.ps1 -Count 6000          # 8m29s here, 10m35s under concurrent load
+seed 7          agree 125828  expected 85  timeout 2  resource 71  diverge 14  of 126000
+seed 4242       agree 125852  expected 74  timeout 1  resource 68  diverge  5  of 126000
+seed 20260915   agree 125826  expected 79  timeout 1  resource 84  diverge 10  of 126000
+```
+
+**The default wave at 300 rows a generator is GREEN at the same three seeds** (`agree 6286/6293/6293,
+diverge 0 of 6300`), so this is the S40a/S43 lesson again: the row count finds what the seed count
+does not, and neither substitutes for the other.
+
+The 29 are NOT transcribed here, because a transcription rots and this one can be regenerated. Re-run
+the gate and then `python tools/probes/gate-divergence-triage.py`, which reads the gitignored
+`TestResults/oracle/report-<seed>.txt` files the run leaves behind and prints row, generator,
+operation, flags, shape tags and both engines' answers. Measured shape of the 29:
+
+| by generator | | by shape | |
+|---|---:|---|---:|
+| `partial` | 11 | carries a `(*SKIP)` | 21 |
+| `interactions` | 10 | reversed `(?r)` | 16 |
+| `partial-sliced` | 4 | fuzzy section | 9 |
+| `verbs` | 2 | upstream ERRORED | 1 |
+| `conditionals` | 1 | | |
+| `fuzzy` | 1 | | |
+
+**One row is not a wrong answer but an upstream crash**, and it is the one to look at first: seed 7
+row 118133, `verbs` `subf`, pattern
+`[A-Z]{1,3}(?<![a\d](*SKIP))[\w\s]\d*+(?=(*PRUNE))[^a][^a]*(?!(*SKIP)ı)\S` over
+`'Aİﬀı\r\nS'` with template `{0}{0[-2]}` - **upstream raises `IndexError: list index
+out of range`** where this port answers `sub 0`. S40a judged a sibling of this (`{1[2]}` naming a capture a group never made) as
+upstream's legitimate error rather than a divergence, so check that reasoning before assuming a bug.
+
+### The negative control, finally run - and sitting 4's prediction was backwards
+
+Carried unrun for three sittings. It is now a committed probe rather than a scratch script, because
+a control nobody can re-run is not evidence:
+
+> Control A, `padding-side`: in `tools/record-oracle.py`, `_generate_long`, replace
+> ```
+>         reverse = "(?r" in row["pattern"] or bool(row["flags"] & REVERSE)
+>         row["subject"] = row["subject"] + filler if reverse else filler + row["subject"]
+> ```
+> with `        row["subject"] = filler + row["subject"]` so every row is padded on the left
+> regardless of direction. Generators `partial-long,fuzzy-long`, 200 rows each, REVERSED rows only.
+> Run it with `python tools/probes/long-subject-padding-side-control.py <seed>`, which applies the
+> mutation, records both ways and restores the file in a `finally`.
+> Result, **seed 7**: `fuzzy-long` walked **21 -> 1**, spans starting at text 0 **17 -> 1**, spans
+> ending at the text end **4 -> 20**; `partial-long` walked **27 -> 24**, spans starting at text 0
+> **29 -> 26**.
+> Re-run at **seed 31337**: `fuzzy-long` walked **22 -> 3**, spans starting at text 0 **16 -> 3**,
+> spans ending at the text end **9 -> 23**; `partial-long` walked **19 -> 10**, spans starting at
+> text 0 **14 -> 13**.
+
+**The side rule is load-bearing, and `fuzzy-long` is where it shows** - padded on the wrong side its
+reversed rows match at once in the original subject now sitting at the right-hand end, which is what
+the "spans ending at the text end" column rising 4->20 and 9->23 says.
+
+**Sitting 4 predicted the collapse would be in `partial-long`'s `walked` column, and it is not.**
+Two reasons, both measured. First, two of the four generators draw **no reversed row at all** (0 of
+200 each at seed 7, against 90 for `partial-long` and 31 for `fuzzy-long`), so the aggregate table
+averages a rule in with rows it cannot reach - which is why `generator-long-subject-reach.py` now
+prints a by-direction table. Second, a reversed PARTIAL runs off the left end by construction, so it
+walks the whole filler whichever side the filler is on; those rows' spans still start at text 0 under
+the control. Judge this control on the `fuzzy-long` lines.
+
+Sitting 5's note that the control "must be run in Release" does not apply: the reach measurement is
+pure Python against upstream and never builds or runs this port, so the configuration cannot reach it.
+
+### One latent generator trap closed, measured to change nothing
+
+`_generate_long` decided direction with `"(?r)" in row["pattern"]`, which misses `(?ri)` and misses
+the REVERSE flag (0x400) entirely - either would be padded on the wrong side silently, the exact
+failure its own docstring warns about. Now `"(?r" in pattern or flags & REVERSE`, matching what
+`upstream-search-start-whole-region-partial.py` already did. **Measured over 2,400 long rows at seeds
+7 and 20260915: 398 of them ARE reversed and every one of the 398 spells it `(?r)` - not one uses
+`(?ri)` or the REVERSE flag.** So the old predicate and the new one classify all 2,400 identically,
+no recorded wave changes, and the reach table is cell-for-cell identical before and after. (The
+first draft of this paragraph said "no row is reversed by either spelling", which the independent
+verifier read the only way it can be read on its own - as "no row is reversed at all" - and
+reported as DIFFERENT. It was the sentence that was wrong, not the measurement.)
+
+### Numbers
+
+- Ratchet **GREEN**, **6111 / 6111 / 0 skipped**, baseline **6001 -> 6003**. Tool tests 81/81.
+- Default wave, Release, three seeds, 300 rows a generator: **GREEN, diverge 0 of 6300 at each**.
+- 6000-row gate, Release, three seeds: **RED, 14 + 5 + 10 = 29 of 126,000 each**.
+- The two minimised rows replayed through `--rows`: **expected 2, diverge 0 of 2**. The runner still
+  prints `Oracle: RED` on that replay, from the unrelated guard
+  `Our_own_change_positions_always_agree_with_our_own_counts` ("a wave with no fuzzy match in it
+  discriminates nothing") rather than from any divergence - read the `diverge` count, not the banner.
+- Two new gap tests, 13 assertions, each mutated one at a time and watched go red.
+
+### Review
+
+**One blind pass over the whole unreviewed delta - `git diff bdeefac`, 957 lines across sittings 4,
+5, 6 and 7 - dispatched inside the turn and read as a tool result. Findings raised: four.
+Reproduced: four. Fixed: four.** None was a defect in the port; all four were defects in the
+evidence, which is what most of this delta IS.
+
+1. **Sitting 4's justification for `LONG_REPEAT_FILLER_GENERATORS` misread its own table.** It
+   recorded the unmatchable filler as giving "median match length 1" and the base alphabet as taking
+   the generator "from 0 to 32" matches 100+ characters long. Re-running it with
+   `LONG_REPEAT_FILLER_GENERATORS = ()`: the median length was **0**, and 100+ character matches were
+   already **28**, not 0. The real effect is **28 -> 32 on `long` and 9 -> 5 on `walked`** - the right
+   direction on the right column, but a far thinner margin than recorded, and whether that generator
+   needs a filler rule of its own is now flagged as worth re-deciding rather than inheriting. The
+   `record-oracle.py` comment carries the corrected table; sitting 4's two claims are marked in place.
+2. **My own "rows 3 and 5 rested on the verb evidence alone" was false** and contradicted the same
+   file twenty lines up. Row 5's sweep gives its judged answer at endpos 1. Corrected in
+   `ExpectedDivergences.cs` and in the gap test, with the real distinction stated instead.
+3. **`gate-divergence-triage.py` summed generator names and shape tags in one dict**, so the one
+   `fuzzy`-generator row and the nine `fuzzy`-tagged rows were reported as an uninterpretable 10.
+   Two dicts now, and the generator counts sum to 29 as they must.
+4. **A citation this slice made stale.** Sitting 5 wrote "`run-oracle.ps1` defaults to
+   `-Configuration Debug` (`:210`)" and sitting 6 then changed both facts: the default is Release and
+   the parameter is at `:246`. Marked in place.
+
+The reviewer also checked and CLEARED: every figure the new probe cases and gap tests quote, both
+padding-control tables at both seeds, the recorder left byte-identical by the control, both projects
+building with no CRLF damage, all 13 new assertions mutated individually to red, the two new oracle
+rows replayed and one flipped to `diverge` by a one-character change, the UTF-16/codepoint conversion
+on both astral subjects, sitting 6's 13-row gate claim reproduced exactly, and the carried `_regex.c`
+citations in STATE.md.
+
+**A second blind pass ran over the fix delta**, since finding 3's repair is code the first reviewer
+never saw and the other three changed text it had read. **It raised one finding, reproduced and
+fixed:** `gate-divergence-triage.py` hardcoded `DEFAULT_SEEDS = (7, 4242, 20260915)`, but
+`run-oracle.ps1`'s own default is `"7,4242,$(Get-Date -Format 'yyyyMMdd')"` (`:243`) - so from
+2026-09-16 the default invocation would have skipped the date seed's report and printed "the seed
+was GREEN" about a file it never looked for. The seeds are computed now. It also cleared the
+control's restore-on-failure path by making the recorder subprocess raise mid-run and confirming the
+file came back byte-identical.
+
+**And the independent verifier ran** (amendment 16 limb (d)), a fresh Opus subagent briefed with
+nothing but this tree, re-running every runnable claim in these notes. **Two came back DIFFERENT and
+both are fixed above**: the gate's wall clock (10m35s under concurrent load, not 8m29s), and "no row
+is reversed by either spelling today", which as written reads as "no row is reversed at all" and is
+false - 398 of the 2,400 are, all spelling it `(?r)`. Everything else was CONFIRMED, including all
+nine gate figures, the triage table, both control tables at both seeds, the two probe blocks, the
+ratchet, the tool tests, the `--rows` replay, both minimisations and all 13 mutated assertions. It
+also sharpened two things now corrected here: row 118133's subject elided a CR LF, and the `--rows`
+replay's misleading `Oracle: RED` banner.
+
+### Still owed on S52
+
+- **The 29 gate divergences, every one unjudged.** This is the slice's largest remaining item.
+- The **timeout rows** generator (scope item, depends on S51's `timeout` comparison) - untouched.
+- The **20-seed sweep run**. `tools/sweep-seeds.ps1` and the `oracle.yml` Thursday cron job both
+  exist and are committed; what has never happened is a recorded 20-seed run with its output in the
+  notes. STATE.md listed "the `oracle.yml` CI job" as untouched and that was stale.
+- The long generators remain **off** `run-oracle.ps1`'s default `-Generator` list. Sitting 6's reason
+  stands: 11 of their 13 divergences are this port exceeding the row timeout in Release, which is a
+  Phase 7 performance question and not a correctness one.

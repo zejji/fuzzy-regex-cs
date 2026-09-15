@@ -308,9 +308,9 @@ internal static class ExpectedDivergences
         """{"generator": "partial", "pattern": "(?r)\\b$", "flags": 0, "namedLists": {}, "subject": "", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}""";
 
     /// <summary>
-    /// The five rows of <c>search-start-partial</c>'s second symptom - upstream's prefilter reports
+    /// The seven rows of <c>search-start-partial</c>'s second symptom - upstream's prefilter reports
     /// a partial covering the whole searched region, and this port reports its OWN partial somewhere
-    /// else - as <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12.
+    /// else - as <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-12 and 2026-09-15.
     /// </summary>
     /// <remarks>
     /// Row 1 is the family minimised by hand; rows 2, 3 and 4 are rows 3497 (seed 4242), 2689 and
@@ -329,6 +329,34 @@ internal static class ExpectedDivergences
     /// <c>(*PRUNE)</c>, which moves no bound, gives upstream's own search (0, 1) too. Measured
     /// 2026-09-13 on regex 2026.7.19.
     /// </para>
+    /// <para>
+    /// <b>Rows 6 and 7 are S52 sitting 7's, from the LONG-subject generators, and they are the only
+    /// two on which every control returns this port's answer EXACTLY - span and partial flag
+    /// both.</b> Upstream's <c>search(partial=True)</c> covers the whole searched region on each,
+    /// its own <c>match</c> over that span is None, the anchor sweep on the bound that actually
+    /// moves (endpos on the reversed row 6, pos on the forward row 7) gives this port's answer, and
+    /// so do the verb-free and <c>(*PRUNE)</c> spellings.
+    /// </para>
+    /// <para>
+    /// The other rows each lose one control, which is why the arm lists judged rows rather than
+    /// predicating on a rule. On rows 1, 2 and 4 the VERB-FREE spelling answers a COMPLETE match -
+    /// (2, 3), (0, 2) and (2, 3) in codepoints - rather than this port's partial, so it agrees about
+    /// the verb without agreeing about the answer. On row 3 it is the SWEEP that never lands: it
+    /// gives (0, 1) partial and (0, 2) and (0, 3) complete, and never this port's zero-width partial
+    /// at (0, 0), so that row rests on the verb evidence alone. Row 5's sweep DOES give its judged
+    /// answer at endpos 1, as the S43 paragraph above says. Re-measured 2026-09-15 on regex
+    /// 2026.9.10; an earlier draft of this paragraph said rows 3 and 5 both rested on the verb
+    /// evidence and the blind review killed it with the run.
+    /// </para>
+    /// <para>
+    /// <b>The long generators found them but their length is not what makes them.</b> They were
+    /// drawn on subjects of 3,363 and 18,759 characters and both delta-debug to THREE codepoints
+    /// with the whole signature intact, every character astral or a line break. So what the
+    /// <c>partial-long</c> wrapper contributed is its astral alphabet over these pattern shapes,
+    /// not its length, and the short <c>partial</c> generator could in principle have drawn either.
+    /// Measured 2026-09-15 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-search-start-whole-region-partial.py</c>.
+    /// </para>
     /// </remarks>
     private const string _searchStartElsewhereRows = """
         {"generator": "interactions", "pattern": "(?:\\w{2,}(*SKIP)\\w|\\w)\\B", "flags": 0, "namedLists": {}, "subject": "a.Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
@@ -336,6 +364,8 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?r)[a](\\D)*(?:[a-f](*SKIP)[^a-f]|[[a-f]~~[d-k]])\\b", "flags": 16642, "namedLists": {}, "subject": "AA𝔘𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         {"generator": "interactions", "pattern": "\\m(?:[\\p{L}\\p{N}]{2,}(*SKIP)\\p{ASCII}|\\w)\\B", "flags": 264, "namedLists": {}, "subject": "a😀Aa", "operation": "search", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         {"generator": "interactions", "pattern": "(?r)^(?(?<![^\\p{L}])\\p{L}|[[:alpha:]])(?:\\.(\\S)){e<=2,i<=1}(?:[\\w--[0-9]](*SKIP)[^\\d]|[abz])", "flags": 256, "namedLists": {}, "subject": "\r.", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "partial-long", "pattern": "(?r)(?:[a-f](*PRUNE)\\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\\p{Nd}(*SKIP)\\s|\\p{L})", "flags": 0, "namedLists": {}, "subject": "𝔘😀\n", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
+        {"generator": "partial-long", "pattern": "(?:[\\p{L}\\p{N}](*SKIP)\\p{Nd}|\\p{Ll})(\\S)*?(?P<g2>\\S?)(?:(?(2)(?=(?P>g2))\\p{Nd}|.))", "flags": 8, "namedLists": {}, "subject": "𐐀🏻𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true}
         """;
 
     /// <summary>
@@ -369,6 +399,13 @@ internal static class ExpectedDivergences
         // Row 5, S43's. Upstream's own match at endpos 1, which is the first anchor a reversed
         // search tries, and the answer its own search gives once the verb is gone.
         "match 0:(0,1)[(0,1)] 1:unset last=-1/- partial",
+        // Rows 6 and 7, S52 sitting 7's, and the two cleanest in the arm: on BOTH of them all four
+        // controls converge on this port's answer, where rows 3 and 5 had only the verb evidence.
+        // Row 6 is reversed, so its anchor sweep varies endpos and lands on (0, 1) codepoints - the
+        // astral U+1D518, UTF-16 (0, 2). Row 7 is forward, swept on pos, and lands on codepoint
+        // (2, 3) - the trailing U+10400, UTF-16 (4, 2).
+        "match 0:(0,2)[(0,2)] last=-1/- partial",
+        "match 0:(4,2)[(4,2)] 1:unset 2:unset last=-1/- partial",
     ];
 
     /// <summary>
