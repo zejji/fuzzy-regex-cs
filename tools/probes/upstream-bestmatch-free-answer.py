@@ -4,7 +4,9 @@ The claim `bestmatch-loses-a-candidate` rests on, and the thing that makes the f
 judgeable at all: **on every row, this port's answer under the flag is upstream's OWN
 answer with the flag deleted** - groups, counts and change positions included.
 
-Written by S46 on 2026-09-14. The nine rows are carried INLINE rather than read out of
+Written by S46 on 2026-09-14 with nine rows, extended to fourteen by S52 sitting 16 on
+2026-09-15.
+The rows are carried INLINE rather than read out of
 `TestResults/oracle/wave-<seed>.jsonl`, because those waves are not committed and a probe
 that needs one is a probe nobody can re-run - which is why S18's controls are
 permanently lost. Each is quoted as the wave drew it, with the seed and row number beside
@@ -53,6 +55,35 @@ ROWS = [
     (4242, 123683, r"(?b)(?:[ab]*?[^a-f]){e<=2}", 0, "0aya", "fullmatch", True),
     (7, 121774, r"(?b)(?:\W(?:b\B){d<=1:\d}){e}", 0, ".ba", "finditer", False),
     (4242, 125716, r"(?b)(?i)(?:x\A){e<=3}", 0, "aX", "sub", False),
+    # S52 sitting 16's four, from the eight-seed seed sweep (`tools/probes/
+    # sweep-divergence-rows.jsonl` rows 3, 17, 23 and 37). Each was ATTRIBUTED to this
+    # family by a port-side control rather than by its shape: restoring upstream's doubled
+    # `END_FUZZY` term in `Matcher.cs` makes this port refuse these four and no others of
+    # the eight - see the slice notes. ALL FOUR are the counter-example to entry 12's old
+    # headline: the flagless fit needs ONE insertion on every one of them, spent beside a
+    # deletion on the first and third and a substitution on the second and fourth.
+    (31256406, 40339, r"(?b)(?:\s(?:[^a-f]ab){e<=2:\s}){1<=e<=2}", 0, " abb", "fullmatch", True),
+    (523701539, 41539, r"(?b)(a0)(?:(?:\1)){e<=3}", 0, "a0\U0001d5180\U0001f600", "fullmatch", False),
+    (655924813, 41563, r"(?b)(?i)(?:(?:aba){1<=e<=2:[0-9]}){e<=3}", 0, "AB\U0001d518", "fullmatch", True),
+    (793244924, 40595, r"(?b)(?i)(a0)(?:(?:\p{L}(?:\1)){s<=1}){1<=e<=2:\d}", 0, "a0xax0", "fullmatch", False),
+    # And the fifth, found BY that control rather than by the signature: sweep row 20 does
+    # not look like this family at all - both engines match, at the same span and the same
+    # error count - and the control moves it with the other four. What differs is WHERE the
+    # errors fall. IN THE CODEPOINTS THIS PROBE PRINTS, upstream substitutes at 0 and 4 and
+    # inserts at 3, and its own flagless answer substitutes at 0 and 3 and inserts at 4,
+    # which is this port's answer; the subject is astral, so in the UTF-16 indices the
+    # recorded row and `ExpectedDivergences` carry, those read 0 and 7 against 0 and 6,
+    # with the insertion at 6 against 7.
+    (
+        655924813,
+        25002,
+        "(?b)(?e)^(?:[[:digit:]][\\w\\s](?:[^\\p{L}]){e<=1}){s<=1,i<=1,d<=1}"
+        "(?:\U0001d518\\d){s<=1,i<=1,d<=1}(?!(?:(\\p{ASCII})\\p{Lu}{0,}){e<=2,s<=1})$",
+        8,
+        "\U00010428\U00010428\U0001d518aa",
+        "match",
+        False,
+    ),
 ]
 
 

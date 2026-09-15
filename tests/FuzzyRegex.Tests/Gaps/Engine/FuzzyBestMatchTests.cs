@@ -290,6 +290,59 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
+    public void Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error()
+    {
+        // THE SAME DEFECT, AND IT CORRECTS THE TEST ABOVE'S HEADLINE - ledger entry 12 said two
+        // trailing insertions were needed; ONE is enough when the fit spends another error too.
+        // S52 sitting 16, 2026-09-15. This is the minimised, all-ASCII form of seed 523701539 row
+        // 41539 of the eight-seed sweep, whose subject was 'a0' + U+1D518 + '0' + U+1F600 and
+        // whose astral characters turn out to have nothing to do with it. Upstream,
+        // regex 2026.9.10, block 6 of
+        //   python tools/probes/upstream-bestmatch-trailing-insertions.py
+        //
+        //   regex.fullmatch(r'(?b)(a0)(?:(?:\1)){e<=3}', 'a0x0y')  ->  None
+        //   regex.fullmatch(r'(a0)(?:(?:\1)){e<=3}',     'a0x0y')  ->  (0, 5) counts=(1, 1, 0)
+        //
+        // The same probe's ablations say what the fit needs: over 'a0xy' (two substitutions, no
+        // insertion) and 'a0x0' (one substitution) upstream answers under the flag, so it is the
+        // trailing insertion that is refused and not the error count. It also says this entry does
+        // not yet know its own law - spell the section body as the literal 'a0' instead of the
+        // backreference and '(?b)' answers the very same subject, and a width-2 body survives
+        // trailing insertions a width-1 body does not.
+        //
+        // What attributes the row to THIS defect is a port-side control rather than its shape:
+        // restoring upstream's doubled term in 'Matcher.cs' - the one line S46 dropped - makes this
+        // port refuse this row and the three like it, and none of the other four rows the sweep
+        // drew with the same signature. Those four are a different defect.
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // 'bestmatch-loses-a-candidate' in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs,
+        // rows 14 to 17.
+        Match m = new FuzzyRegex(@"(?b)(a0)(?:(?:\1)){e<=3}").FullMatch("a0x0y");
+
+        m.Success.Should().BeTrue("upstream answers None here and its own flagless engine does not");
+        (m.Index, m.Index + m.Length).Should().Be((0, 5));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(2);
+        m.FuzzyChanges.Insertions.Should().Equal(4);
+
+        // The control, and upstream's own answer: with the flag deleted both engines agree.
+        Match plain = new FuzzyRegex(@"(a0)(?:(?:\1)){e<=3}").FullMatch("a0x0y");
+
+        plain.Success.Should().BeTrue();
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 5));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+
+        // And the ablation that says it is the trailing insertion: drop it and upstream answers
+        // under the flag as well, at the same two-error cost.
+        Match noInsertion = new FuzzyRegex(@"(?b)(a0)(?:(?:\1)){e<=3}").FullMatch("a0xy");
+
+        noInsertion.Success.Should().BeTrue();
+        (noInsertion.Index, noInsertion.Index + noInsertion.Length).Should().Be((0, 4));
+        noInsertion.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+    }
+
+    [Test]
     public void Bestmatch_and_enhancematch_together_keep_the_match_bestmatch_alone_would_lose()
     {
         // THE SAME DEFECT WITH BOTH FLAGS ON, and the ablation that says which flag loses it - which
@@ -352,11 +405,11 @@ public sealed class FuzzyBestMatchTests
     [Test]
     public void Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget()
     {
-        // THE MEASURED BOUNDARY, and it corrects ledger entry 12's own statement of the symptom.
-        // The entry said n trailing insertions need 'max_errors' above 2n-1, which reads as though a
-        // large enough budget buys the match. It does not: under '(?b)' the second pass sets
-        // 'max_errors' to 'fewest_errors' = n itself, so the doubled guard needs n > 2n-2, which is
-        // false for every n >= 2 AT EVERY BUDGET. Measured on regex 2026.9.10, 2026-09-14,
+        // THE BOUNDARY FOR THIS PATTERN, and it corrects ledger entry 12's first statement of the
+        // symptom. The entry said n trailing insertions need 'max_errors' above 2n-1, which reads as
+        // though a large enough budget buys the match. It does not: under '(?b)' the second pass
+        // sets 'max_errors' to 'fewest_errors' = n itself, so on '(?:x)' the doubled guard needs
+        // n > 2n-2, false for every n >= 2 AT EVERY BUDGET. Measured on regex 2026.9.10, 2026-09-14,
         // tools/probes/upstream-bestmatch-trailing-insertions.py - re-runnable from the closing notes of S46:
         //
         //   fullmatch (?:x){e<=N} over 'x' + k trailing chars     matches exactly when N >= k
@@ -364,6 +417,12 @@ public sealed class FuzzyBestMatchTests
         //   fullmatch (?b)(?:x){e<=N}   same subject              matches only for k <= 1, any N
         //
         // So this test is the (?b) row of that matrix, which must now read like the other two.
+        //
+        // 'k <= 1, any N' IS THIS BODY'S BOUNDARY AND NOT THE DEFECT'S (S52 sitting 16, 2026-09-15).
+        // Block 7 of the same probe gives a width-2 body, '(?:xy)', surviving every k it reaches,
+        // and .Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error below
+        // loses a fit needing ONE insertion. The shape that bites is open; what attributes a row to
+        // this defect is the port-side control named in that test.
         for (int k = 0; k <= 4; ++k)
         {
             string subject = "x" + "yzwvu"[..k];

@@ -8079,12 +8079,18 @@ internal static class Matcher
                     // The double count is invisible wherever 'max_errors' is unbounded, which is
                     // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
                     // upstream's ':18027' sets PY_SSIZE_T_MAX). It bites in 'DoBestFuzzyMatch',
-                    // whose second pass climbs 'max_errors' only to 'fewest_errors' - so a match
-                    // needing n trailing insertions needs 'n > 2n-2', which is false for every
-                    // n >= 2 AT EVERY BUDGET, and '(?b)' loses a match the same engine finds the
-                    // moment the flag is deleted. Held by 'Gaps.Engine.FuzzyBestMatchTests
-                    // .Bestmatch_keeps_a_match_that_needs_two_trailing_insertions' and the (k, N)
-                    // matrix beside it.
+                    // whose second pass climbs 'max_errors' only to 'fewest_errors' - so the budget
+                    // the guard is tested against is the match's own cost, the caller cannot raise
+                    // it, and '(?b)' loses a match the same engine finds the moment the flag is
+                    // deleted. On '(?:x){e<=N}' that reads 'n > 2n-2', false for every n >= 2 at
+                    // every budget, WHICH IS THAT PATTERN'S BOUNDARY AND NOT THE DEFECT'S: a fit
+                    // needing ONE insertion beside one other error is lost too, and a width-2
+                    // section body survives counts a width-1 body does not (S52 sitting 16, blocks
+                    // 6 and 7 of tools/probes/upstream-bestmatch-trailing-insertions.py). Held by
+                    // 'Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_keeps_a_match_that_needs_two_trailing_insertions', the (k, N)
+                    // matrix beside it, and
+                    // '.Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error'.
                     //
                     // The third test is this port's, for the reason the second test at 'END_FUZZY'
                     // spells out: 'InsertionPermitted' bounds the cost of the section it is handed,

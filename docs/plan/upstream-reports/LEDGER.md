@@ -1742,17 +1742,50 @@ non-zero if upstream stops behaving this way. Pinned by
 
 ---
 
-## 12. `BESTMATCH` loses a match that plain fuzzy matching finds, when the best fit needs two trailing insertions - FIXED HERE (S46)
+## 12. `BESTMATCH` loses a match that plain fuzzy matching finds, when the best fit ends in a trailing insertion - FIXED HERE (S46)
 
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**THE HEADLINE SAID "TWO TRAILING INSERTIONS" UNTIL 2026-09-15 AND THAT IS NOT THE BOUNDARY (S52
+sitting 16).** One is enough when the fit spends another error as well, and the five sweep rows this
+entry gained that day include none that needs two. Measured on `regex` 2026.9.10, blocks 6 and 7 of
+`tools/probes/upstream-bestmatch-trailing-insertions.py`:
+
+```python
+>>> regex.fullmatch(r'(?b)(a0)(?:(?:\1)){e<=3}', 'a0x0y')   # one insertion, one substitution
+None
+>>> regex.fullmatch(r'(a0)(?:(?:\1)){e<=3}', 'a0x0y').fuzzy_counts
+(1, 1, 0)
+```
+
+**And the same two blocks say this entry does not know its own law.** Spell that section's body as
+the literal `a0` rather than as the backreference and `(?b)` answers the identical subject; a
+width-2 body such as `(?:xy)` survives every trailing-insertion count the probe reaches while the
+width-1 `(?:x)` refuses from two. So the section's body moves the boundary and the insertion count
+alone does not describe it. **A report must say that**, because the maintainer will try the
+two-insertion case first and a wrong universal is how a report stalls - that is the same mistake
+entry 9 made and had corrected.
+
+**What survives the correction is the ATTRIBUTION, which is now measured rather than reasoned.**
+Restoring upstream's doubled term in this port's `Matcher.cs` - the single line S46 dropped - moves
+exactly five of the 37 rows the seed sweep drew, and they are the five now admitted to
+`bestmatch-loses-a-candidate`: `pwsh -File tools/run-oracle.ps1 -Rows
+tools/probes/sweep-divergence-rows.jsonl` answers `agree 5, diverge 32 of 37` with that one line
+changed back, agreeing on rows 3, 17, 20, 23 and 37 and on nothing else. Four of the sweep's eight
+rows with this entry's signature move; the other four are a different defect, two of them entry 16's
+`POSIX`-and-`BESTMATCH` conjunction and two still open. **And row 20 has none of the signature** -
+both engines match, at the same span and the same error count - so the control finds a member the
+symptom description would have missed, which is the argument for running it over every row rather
+than over the ones that look right.
 
 **FIXED IN THIS PORT ON 2026-09-14 (S46), AND ONE SENTENCE BELOW WAS WRONG ABOUT THE SYMPTOM.** The
 mechanism this entry names is right to the line and was confirmed on the pinned release; what was
 wrong is "*n* trailing insertions need `max_errors` above *2n-1*", which reads as though a large
 enough budget buys the match back. It does not. Under `(?b)` the user never sets `max_errors`: the
-second pass sets it to `fewest_errors` = *n* itself, so the doubled guard needs *n > 2n-2*, which is
-false for every *n >= 2* **at every budget**. Measured on `regex` 2026.9.10, 2026-09-14,
+second pass sets it to `fewest_errors` = *n* itself, so **on `(?:x){e<=N}`** the doubled guard needs
+*n > 2n-2*, which is false for every *n >= 2* **at every budget** - one pattern's arithmetic, and not
+the defect's, as the correction above this one says. Measured on `regex` 2026.9.10, 2026-09-14,
 `tools/probes/upstream-bestmatch-trailing-insertions.py`, over `fullmatch` of `(?:x){e<=N}` against `'x'` plus *k* trailing
 characters:
 
@@ -1791,7 +1824,8 @@ all of this**: a maintainer who reads "no second engine" as "nobody checked" wil
 default seeds of the 6000-row gate - four where upstream lost the match outright, three where both
 engines match and the error mix differs, one `sub` and one `finditer` - and on all nine this port's
 answer is upstream's BESTMATCH-free answer EXACTLY, groups, counts and change positions included
-(`tools/probes/upstream-bestmatch-free-answer.py`, 2026-09-14). Pinned by
+(`tools/probes/upstream-bestmatch-free-answer.py`, 2026-09-14; five more rows were added to that
+probe in 2026-09-15's sitting 16, making fourteen). Pinned by
 `Gaps/Engine/FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_insertions`, the
 `(k, N)` matrix test beside it and
 `.Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford`; accounted for in the oracle
@@ -1813,7 +1847,8 @@ None
 none, while the same pattern without the flag matches the whole subject with two insertions. The
 budget is not the limit - `{i<=2}` and `{e<=3}` both fail, and `{e<=9}` fails too.
 
-**The boundary is exactly two**, which is what names the mechanism:
+**On THIS pattern the boundary is exactly two** - which is what first named the mechanism, and which
+the correction at the top of this entry says is a property of `(?:x)` rather than of the defect:
 
 ```python
 >>> regex.fullmatch(r'(?b)(?:x){e<=1}', 'xy').fuzzy_counts   # one insertion: (0, 1, 0)
@@ -1831,7 +1866,10 @@ if (insertion_permitted(state, inner_node, inner_counts) &&
 
 and it DOUBLE-COUNTS. For a pattern with a single fuzzy section, `END_FUZZY` has already merged the
 inner counts into `state->fuzzy_counts` (`:12473-12484`), so the two terms are the same errors added
-twice: *n* trailing insertions need `max_errors` above *2n-1* rather than above *n-1*.
+twice, so the arm demands roughly twice the budget the section's own limits demand. On `(?:x){e<=N}`
+that comes out as *n* trailing insertions needing `max_errors` above *2n-1* rather than above *n-1*;
+the correction at the top of this entry is that the arithmetic for a section body of any other shape
+is not known, so this line is an example rather than the law.
 
 The first pass never sees it, because it runs with `max_errors` at `PY_SSIZE_T_MAX`; it finds the
 two-insertion match and records `fewest_errors = 2`. The second pass then climbs `max_errors` only
@@ -2328,6 +2366,37 @@ was not used here.
 **What this port answers.** `(0, 9)` at all four doors and at `fullmatch`, with counts `(1, 0, 0)`
 and the substitution at 6 - which is upstream's own answer on the three doors that give one.
 `pwsh -File tools/probes/port-fuzzy-counts-and-changes.ps1` prints both halves side by side.
+
+**A STRONGER REPRODUCTION EXISTS AND IT IS NOT A SCAN (S52 sitting 16, 2026-09-15).** Two rows of
+the eight-seed sweep - rows 18 and 35 of `tools/probes/sweep-divergence-rows.jsonl` - lose the match
+ENTIRELY on a plain anchored call, `fullmatch` on one and `match` on the other, with no
+`overlapped=True` and no scan anywhere. Both answer the moment either flag is deleted, measured on
+`regex` 2026.9.10:
+
+| row | operation | as drawn | `(?b)` deleted | POSIX removed |
+|---|---|---|---|---|
+| 18 | `fullmatch` | `None` | (0, 5) counts (2, 2, 1) | (0, 5) counts (2, 2, 1), the `(?p)` deleted |
+| 35 | `match` | `None` | (0, 0) g1 (1, 3) | (0, 0) g1 (1, 3), the POSIX FLAG bit cleared |
+
+Spans are codepoints, as upstream reports them; both subjects are astral.
+`python tools/probes/upstream-bestmatch-sweep-group-a.py` prints the whole table, reading the four
+rows out of the committed sweep file rather than carrying them inline.
+
+So neither flag alone destroys the match and the conjunction does, which is this entry's four-way
+self-refutation on a simpler subject than the one above. **And the suspected area is now measured
+rather than suspected, on this port's side at least**: deleting the two running-total lines from
+`RestoreBestMatch` in `Matcher.cs` - S48b's fix, which gave the POSIX restore the `TotalErrors` and
+`TotalCost` upstream leaves stale - makes this port lose these two rows and no row that the other
+control moves. Over all 37 sweep rows it moves **four**: 18 and 35 here, plus rows 10 and 12, which
+are a `subf` and a `sub` whose outcome is not a match object and which nobody has looked at yet -
+and **row 10 carries POSIX without BESTMATCH at all**, so it cannot be this entry's conjunction; it
+belongs to entry 9's family, which is the other half of what these two lines restore
+(`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl`, `agree 4,
+expected 5, diverge 28 of 37` against `agree 0, expected 5, diverge 32` on the committed tree). That
+is evidence about the mechanism in THIS port and a strong hypothesis about upstream's C, not proof
+about upstream's C; the `/Od /Zi` MSVC build is still the instrument that would settle it.
+**None of the four is judged into an oracle entry yet** - that is the next sitting's work, and until
+it happens all four show red.
 
 **Related:** entry 11 (mechanism C, the fix that exposed this), entry 9 (the stale running totals
 that this port shared), entry 12 and entry 13 (the other two ways `BESTMATCH` loses a candidate).

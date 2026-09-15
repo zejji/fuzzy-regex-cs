@@ -11,3 +11,8 @@
 {"generator": "interactions", "pattern": "(?b)(?:(?P<g1>\\S)🏻){s<=1,i<=1,d<=1}(?:\\p{Ll}(*SKIP)[\\p{L}\\p{N}]|[a-f])", "flags": 16386, "namedLists": {}, "subject": "a🏻a‍‍a𐐀", "operation": "finditer"}
 {"generator": "interactions", "pattern": "(?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\\b", "flags": 264, "namedLists": {}, "subject": "bab_.bB", "operation": "match"}
 {"generator": "fuzzy", "pattern": "(?b)(?e)(?:😀𝟮(?:😀bx){1i+1d+1s<=1:[a-s]}){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "😀𝟮😀xa", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?:\\s(?:[^a-f]ab){e<=2:\\s}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": " abb", "operation": "fullmatch", "partial": true}
+{"generator": "fuzzy", "pattern": "(?b)(a0)(?:(?:\\1)){e<=3}", "flags": 0, "namedLists": {}, "subject": "a0𝔘0😀", "operation": "fullmatch"}
+{"generator": "fuzzy", "pattern": "(?b)(?i)(?:(?:aba){1<=e<=2:[0-9]}){e<=3}", "flags": 0, "namedLists": {}, "subject": "AB𝔘", "operation": "fullmatch", "partial": true}
+{"generator": "fuzzy", "pattern": "(?b)(?i)(a0)(?:(?:\\p{L}(?:\\1)){s<=1}){1<=e<=2:\\d}", "flags": 0, "namedLists": {}, "subject": "a0xax0", "operation": "fullmatch"}
+{"generator": "interactions", "pattern": "(?b)(?e)^(?:[[:digit:]][\\w\\s](?:[^\\p{L}]){e<=1}){s<=1,i<=1,d<=1}(?:𝔘\\d){s<=1,i<=1,d<=1}(?!(?:(\\p{ASCII})\\p{Lu}{0,}){e<=2,s<=1})$", "flags": 8, "namedLists": {}, "subject": "𐐨𐐨𝔘aa", "operation": "match"}

@@ -46,6 +46,8 @@ already swept at higher row counts. A new seed costs about a minute.
       Long: sitting 4. Timeout: sitting 14. The sweep's 37 red rows are box 2's problem, not this
       box's - the instrument exists and has been run.)
 - [ ] Every divergence judged, fixed or entered with a control; nothing unjudged.
+      (Sitting 16: 5 of the 37 sweep rows judged into `bestmatch-loses-a-candidate`, 4 more
+      attributed to a second mechanism by a control and awaiting their entry, 28 to go.)
 - [ ] Ratchet GREEN, blind review (hunt: an astral row whose index is converted twice; a long-subject
       generator that never reaches the path it was written for), commit.
 
@@ -2791,3 +2793,234 @@ sitting 14's corrected arithmetic, 20.3 x 300/80 = 76.1.
 
 It used no git command but `status`, `diff` and `diff --stat`, reverted Control A by hand, and left
 the tree byte-identical to the snapshot it started from.
+
+---
+
+## Sitting 16 (2026-09-15) - CHECKPOINT, and group A is two defects, not one
+
+Sitting 15 handed over group A - eight sweep rows with one signature, upstream answering `None` and
+its own `(?b)`-free answer being this port's exactly - with the warning that ledger entry 12's
+mechanism could not explain seven of them. **It is two mechanisms, the split is 4/4, and a fifth row
+outside group A belongs to the first one.** Five rows are judged and pinned, four more are attributed
+to the second defect and left, two are open.
+
+### What settled it: asking the PORT, not the shape
+
+Every earlier attempt at this family reasoned from the row's shape - how many insertions, where they
+fall, which flags are present - and sitting 15's notes record two drafts of that reasoning being
+wrong in opposite directions. The shape is the wrong instrument here, because **this port has already
+fixed both candidate mechanisms**, so each fix can be put back one line at a time and the rows sorted
+by which one moves them. That is what the two controls below are, and it is why they are re-runs of
+this port's own fixes rather than injected faults.
+
+| tree | the eight group-A rows | all 37 sweep rows |
+|---|---|---|
+| as committed | `expected 4  diverge 4` | `expected 5  diverge 32` |
+| control A, `end-fuzzy-doubled-guard` | `agree 4  diverge 4` | `agree 5  diverge 32` |
+| control B, `posix-restore-stale-totals` | `agree 2  expected 4  diverge 2` | `agree 4  expected 5  diverge 28` |
+
+Neither control moves a row the other moves, and neither moves rows 4 or 15.
+
+### The five that ARE ledger entry 12
+
+Rows 3, 17, 23 and 37 of the sweep file (all `fuzzy` `fullmatch`), **and row 20**. Control A is the
+argument: restoring upstream's doubled `END_FUZZY` term - `TotalErrors(state.FuzzyCounts) +
+TotalErrors(innerCounts) < state.MaxErrors`, the single line S46 dropped - makes this port agree with
+upstream on exactly those five of the 37 and on nothing else.
+
+**Row 20 is the one the signature would have missed, and it is why the control was run over all 37
+rows rather than over the eight.** It has none of the family's signature - both engines match, at the
+same span and the same counts (2, 1, 1). What differs is WHERE the errors fall. The subject is
+astral, so the indices have two spellings and both are given here: in the **codepoints upstream
+reports**, span (0, 5), upstream substituting at 0 and 4 and inserting at 3 against its own flagless
+answer's 0 and 3 and 4; in the **UTF-16 the recorded row carries**, span (0, 8), 0 and 7 with the
+insertion at 6 against 0 and 6 with it at 7. The flagless answer is this port's. So the guard does
+not only lose matches, it also moves an error one position. Sitting 15's table filed it under group E; that table is right about what it
+looks like and wrong about what it is.
+
+**None of the five needs two trailing insertions, which is what entry 12's headline said the defect
+needed.** Rows 3 and 23 lose a fit costing one insertion and one deletion, rows 17 and 37 one
+insertion and one substitution, and row 20 loses no match at all. The headline is corrected in
+LEDGER.md, in PORTMAP.md, in the oracle entry's `Reason`, in the `Matcher.cs` comment and in the two
+older gap test's comments that repeated it - the blind review found all five of those files and they were
+wrong in the same words. The correction is measurable, not asserted: block 6 of
+`tools/probes/upstream-bestmatch-trailing-insertions.py` now carries the minimised, all-ASCII form of
+row 17, where nothing about the sweep row's astral subject turns out to matter:
+
+```
+regex.fullmatch(r'(?b)(a0)(?:(?:\1)){e<=3}', 'a0x0y')   ->  None
+regex.fullmatch(r'(a0)(?:(?:\1)){e<=3}',     'a0x0y')   ->  (0, 5) counts=(1, 1, 0)
+```
+
+**And the same probe says the entry still does not know its own law, which is recorded rather than
+papered over.** Spell that section's body as the literal `a0` instead of the backreference and `(?b)`
+answers the identical subject; block 7 shows a width-1 body refusing from two trailing insertions
+while a width-2 body survives every count the probe reaches. So neither the insertion count nor the
+error total is the boundary. A report that states a false universal is the kind that stalls, which is
+the lesson sitting 15 paid for on ledger 9, so the entry now says what it knows and what it does not.
+
+Landed: the five rows in `tools/probes/bestmatch-loses-a-candidate-rows.jsonl` and, recorded by
+`python tools/record-oracle.py --rows`, in `ExpectedDivergences._bestmatchLostCandidateRows` as rows
+14 to 18 - **in append order, which is sweep 3, 17, 23, 37 and then 20**, not the numerical order
+this section lists them in; the five in `upstream-bestmatch-free-answer.py`'s inline table; a new gap test
+`FuzzyBestMatchTests.Bestmatch_keeps_a_match_whose_single_trailing_insertion_is_not_its_only_error`.
+
+### The two that are ledger entry 16, and are a STRONGER reproduction of it
+
+Rows 18 and 35. Control B is one half of the argument and upstream's own ablations are the other:
+
+| row | operation | as drawn | `(?b)` deleted | POSIX removed |
+|---|---|---|---|---|
+| 18 | `fullmatch` | `None` | (0, 5) counts (2, 2, 1) | (0, 5) counts (2, 2, 1) |
+| 35 | `match` | `None` | (0, 0) g1 (1, 3) | (0, 0) g1 (1, 3) |
+
+Codepoints, both subjects astral. Neither flag alone destroys the match; the conjunction does. That
+is entry 16's four-way self-refutation **on a plain anchored call with no scan anywhere**, where the
+entry's own reproduction needs `finditer(overlapped=True)`. Control B names the same place S48b fixed
+here - the two running totals `RestoreBestMatch` gives back after a POSIX restore, which upstream
+leaves stale. Both facts are now in entry 16, with
+`tools/probes/upstream-bestmatch-sweep-group-a.py` printing the table from the committed rows file.
+
+**Control B moves two more rows nobody has looked at: 10, a `subf`, and 12, a `sub`**, which
+sitting 15 filed in group F because their outcome is not a match object. So the stale-totals
+mechanism reaches four of the 37, not two. **They are not all one entry**: rows 12, 18 and 35 carry
+POSIX and BESTMATCH together, which is entry 16, and **row 10 carries POSIX with no BESTMATCH at
+all** (flags `0x1408a`, no `(?b)`), which puts it in entry 9's family instead. The control restores
+both halves of one `RestoreBestMatch` at once, so it cannot separate them and does not claim to.
+
+**None of the four is pinned, deliberately.** The right home is one of two existing entries and
+choosing needs the discriminator checked rather than guessed:
+`posix-fuzzy-contradicts-its-own-flagless-answer` keys on `posixFreeOutcome` AND on this port's
+answer matching it, and row 18's recorded posix-free answer carries change positions that the drawn
+side has none of (ledger 9 - a POSIX row's `fuzzy_changes` cannot be read). **Sitting 17 opens
+there**, with the control already run.
+
+### The two that are neither
+
+Rows 4 and 15, both `(?b)(?r)` partial searches. Row 4 keeps its `None` with POSIX cleared and row 15
+carries no POSIX at all, so entry 16 is not it; neither control moves either, so entry 12 is not it.
+Both flagless answers are PARTIALs, which is ledger entry 13's shape, and sitting 15's `endpos=0`
+worry about them is untouched. Open.
+
+### Numbers
+
+- Ratchet **GREEN**, **6120 / 6120 / 0 skipped**, **6012 distinct ids**, baseline **6012** - one new
+  test, the gap test above; `Matcher.cs`'s only change is a comment.
+- The eight group-A rows: **expected 4, diverge 4** of 8, where sitting 15 left `diverge 8 of 8`.
+- All 37 sweep rows: **expected 5, diverge 32** of 37.
+- `upstream-bestmatch-free-answer.py`: 14 rows. Four of the five new ones answer `None` under `(?b)`
+  with the flagless and `(?e)` lines identical, which is the family's usual shape; **the fifth, sweep
+  row 20, matches on all three lines** and differs only in where the errors fall. The independent
+  verifier caught this sentence claiming all five behave alike.
+
+### The negative controls, run last against the code committed here
+
+Both were applied and reverted by hand, `git status --porcelain` clean of each afterwards. Neither is
+an injected fault: each is one of this port's own fixes put back, which is what makes them evidence
+about the attribution and not only about the generator.
+
+> **Control A, `end-fuzzy-doubled-guard`**: in `src/FuzzyRegex/Engine/Matcher.cs`, the `END_FUZZY`
+> backtrack arm, replace
+> ```
+>                         && TotalErrors(state.FuzzyCounts) < state.MaxErrors
+> ```
+> with
+> ```
+>                         && TotalErrors(state.FuzzyCounts) + TotalErrors(innerCounts) < state.MaxErrors
+> ```
+> Runs: `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl`, and the
+> same command over a scratch file of the eight group-A rows, rebuilt with
+> `python -c "import io;ls=list(io.open('tools/probes/sweep-divergence-rows.jsonl',encoding='utf-8'));io.open('.scratch/groupA.jsonl','w',encoding='utf-8',newline='\n').writelines(ls[i-1] for i in (3,4,15,17,18,23,35,37))"`.
+> Result: **agree 4, diverge 4 of 8**, and **agree 5, expected 0, diverge 32 of 37** with the
+> agreeing rows being 3, 17, 20, 23 and 37 exactly. `dotnet test tests/FuzzyRegex.Tests --
+> --treenode-filter "/*/*/FuzzyBestMatchTests/*"` goes from 30 passing to **4 failed, 26 passed**,
+> the four being this sitting's new test and the three older ones the same line holds.
+
+> **Control B, `posix-restore-stale-totals`**: in the same file, `RestoreBestMatch`, delete
+> ```
+>         state.TotalErrors = state.BestTotalErrors;
+>         state.TotalCost = state.BestTotalCost;
+> ```
+> Runs: the same two.
+> Result: **agree 2, expected 4, diverge 2 of 8** and **agree 4, expected 5, diverge 28 of 37**, the
+> four agreeing rows being 10, 12, 18 and 35.
+
+**No second seed, and the reason is sitting 15's**: both controls run over explicit rows rather than
+a generator draw, so there is no seed to vary. **What stands in for it is the wider row set**, and it
+earned its keep rather than being a formality - run over the eight rows, control A looks like a
+clean four-for-four; run over all 37 it turns up row 20, a member of the family that the signature
+these rows were grouped by would never have found.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results.**
+
+**Pass one, over the diff as it stood before row 20 was found: six findings raised, five reproduced,
+five fixed, one killed.** Every one of the five was the same defect wearing five hats - the
+superseded sentence "a match needing n trailing insertions needs n > 2n-2, false for every n >= 2 at
+every budget" left standing in the oracle entry's own `Reason`, in `PORTMAP.md`, in the `Matcher.cs`
+comment, in an older gap test's comments, and (as "rows 2 and 4 of the four") in a comment this
+sitting had just written. The correction had been applied where it was noticed and missed everywhere
+else, which is exactly what a blind pass is for. **The one that did not survive** was the claim that
+pin rows 15 and 16 are not byte-identical to their sweep rows, the astral subjects being written as
+surrogate escapes: they ARE byte-identical to `record-oracle.py --rows`'s own output, which is what
+the file documents them as and what writes the escapes, checked by substring match on all five rows.
+
+**Pass two, a first pass over the row-20 delta and the notes, STATE and DECISIONS the first pass
+never saw: nine findings raised, nine reproduced, nine fixed.** Three were real errors of fact rather
+than stale wording. (1) **Row 20's indices were given as upstream's and are UTF-16** - the probe that
+prints them prints codepoints, (0, 5) with substitutions at 0 and 4, where the notes said (0, 8) and
+0 and 7; both spellings are now given in both places. (2) **Row 10 carries POSIX with NO BESTMATCH**
+(flags `0x1408a`), so calling all four of control B's rows entry 16's conjunction was wrong - row 10
+is entry 9's family, and the control restores both halves of one function at once and cannot separate
+them. (3) **Rows 10 and 12 are a `subf` and a `sub`, in that order**, not the other way round. The
+remaining six were counts and cross-references: "thirteen rows" for a probe holding fourteen, "nine
+at S46, thirteen since" matching no artifact, "the four sweep rows this entry gained" where five were
+added, "all five places" for six locations, a `tools/probes/upstream-bestmatch-sweep-group-a.py`
+recommended for rows it does not carry, and two more copies of the superseded sentence inside the
+entry that corrects it.
+
+**No third pass.** Pass two's fixes are wording inside text pass two had just read, plus two index
+spellings it supplied itself; every probe was re-run afterwards and the ratchet re-checked, and the
+independent verifier below re-ran all of it again.
+
+### The independent verifier
+
+A fresh agent (amendment 16 limb (d)), briefed with nothing but this tree and `docs/VERIFICATION.md`'s
+do-not-use-git clause. It re-ran every tally, both controls by hand, all three probes, the ratchet,
+the gap test's expected values against upstream and the byte-identity of the five pinned rows.
+**Everything was CONFIRMED except one DIFFERENT and two COULD NOT RUN.**
+
+**DIFFERENT, and folded in above.** The "Numbers" section said the five new probe rows all behave as
+the family requires; four answer `None` under `(?b)` and the fifth, row 20, matches on all three
+lines - which this section's own row-20 paragraph says and that sentence contradicted.
+
+**Narrowed rather than contradicted.** The pin's rows 14 to 18 are in APPEND order, sweep 3, 17, 23,
+37, 20, where the prose lists them numerically; said explicitly now. And the byte-identity of the
+five holds under the second half of its own disjunction: the `.jsonl` carries only the input fields,
+so each line is a verbatim substring of its sweep row rather than the whole of it, and the recorded
+form the verifier regenerated with `record-oracle.py --rows` is JSON-equal to the sweep row minus
+`comment` on all five.
+
+**COULD NOT RUN, two, neither a gap in the measurement.** STATE.md's relayed scope ruling about the
+gate's three rows, which has no artifact to re-run against; and this section's own Review paragraph,
+which reports what two dispatched agents did - though every OUTCOME it names is in the tree and was
+verified (row 20's codepoint spelling, row 10's flags, the `subf`/`sub` order, the probe's fourteen
+rows, the five corrected files).
+
+**CONFIRMED:** the ratchet (GREEN, 6120/6120/0 skipped, 6012 distinct ids, baseline 6012) and that
+`tests/parity-baseline.json` gains exactly the one new test id; that `Matcher.cs`'s diff is 12
+insertions and 6 deletions and every one a `//` line; both controls at their exact sites, applied and
+re-edited back verbatim, with all six tallies and the four failing test names; the committed tree's
+two tallies and the identity of the five EXPECTED rows; that neither control moves a row the other
+moves nor rows 4 or 15; the `.scratch/groupA.jsonl` rebuild command run verbatim; the five pinned
+rows in both files; the per-row error mixes; **both index spellings for row 20**, codepoint and
+UTF-16, with the 5-codepoint to 8-unit mapping; all three probes running, blocks 6 and 7, and the
+literal-body and body-width findings; ledger 16's ablation table on both rows; rows 4 and 15's flags
+and partialness; row 10's flags and the absence of `(?b)` from it; row 18's posix-free change
+positions; and all three of the new gap test's expected values, two as direct upstream runs and one
+as the recorded deliberate divergence.
+
+It used no `git checkout`, `restore`, `stash`, `reset` or `clean`, reverted both controls by
+re-editing, proved the restoration by re-running the 37-row oracle and the ratchet afterwards,
+deleted its own scratch, and left the tree byte-identical to the snapshot it started from.

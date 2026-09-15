@@ -2,47 +2,44 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52 IS A CHECKPOINT (2026-09-15, sitting 15). Ratchet GREEN, 6119 / 6119 / 0 skipped, 6011 distinct
-ids, baseline 6011** - unchanged, because **no `.cs` file was touched at all**. Tool tests 81/81.
+**S52 IS A CHECKPOINT (2026-09-15, sitting 16). Ratchet GREEN, 6120 / 6120 / 0 skipped, 6012 distinct
+ids, baseline 6012** - one new test. `Matcher.cs`'s only change is a comment.
 
 **THE OWNER HAS RULED AND S52 IS NOT SPLIT AND NOT CAPPED** (orchestrator, 2026-09-15). "No unjudged
 row" means the rows S52 has ALREADY produced: the sweep's 37 and the gate's 3, of which 104366 goes
 to S52c/S52d and counts as judged. **Run no further sweeps inside S52** - the 20-seed sweep and the
 6000-row gate are S57's. Multiple sittings are fine. Then close S52.
 
-**The 37 sweep rows are now `tools/probes/sweep-divergence-rows.jsonl`** and no longer live only in
-gitignored `TestResults/`. Replay: `pwsh -File tools/run-oracle.ps1 -Rows
-tools/probes/sweep-divergence-rows.jsonl` gives **diverge 37 of 37, expected 0** - none is classified
-by any entry. Table of all 37 in eight groups: sitting 15's notes. Open every family's door with
-`python tools/probes/gate-divergence-doors.py --rows tools/probes/sweep-divergence-rows.jsonl`.
+**GROUP A IS SETTLED AND IT WAS TWO DEFECTS. Five of the 37 rows are judged and pinned** into
+`bestmatch-loses-a-candidate` (sweep rows 3, 17, 20, 23, 37). Replay: `pwsh -File
+tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl` gives **expected 5, diverge 32**.
 
-**SITTING 16's FIRST JOB IS GROUP A, and the warning matters more than the rows.** Eight rows (3, 4,
-15, 17, 18, 23, 35, 37) where upstream answers `None` under `(?b)` and its own `(?b)`-free answer is
-this port's answer exactly. That is `bestmatch-loses-a-candidate`'s discriminator - **and ledger 12's
-mechanism cannot explain SEVEN of them**: its guard is `n > 2n-2`, true at n=1 and false from n=2, and
-these flagless answers carry one insertion (3, 4, 17, 23, 37) or NONE AT ALL (15, 35). Row 18, with
-two, is the only one it could have refused, and not demonstrated even there. Rows 4 and
-15 meet `bestmatch-loses-a-partial`'s four conditions and are reversed, so `endpos` IS that entry's
-natural door - but the only bound either answers at is `endpos=0`, an EMPTY slice, where its other
-reversed rows answer at 1, 2, 4 and 5. Unsettled, not disqualified. **Do not widen either pin on the
-flagless control alone** - probably a new ledger entry.
+**What settled it is a PORT-SIDE control, and sitting 17 should reach for the same instrument first.**
+This port has already fixed both candidate mechanisms, so each fix goes back one line at a time and
+the rows sort themselves. Control A (restore upstream's doubled `END_FUZZY` term) moves exactly rows
+3, 17, 20, 23, 37. Control B (delete the two running-total lines from `RestoreBestMatch`) moves
+exactly rows 10, 12, 18, 35. Both are written out in the sitting-16 notes with their exact tallies.
+Reasoning from a row's SHAPE is what went wrong three sittings running: row 20 has none of group A's
+signature and is group A's defect, and four rows that have the signature are not.
 
-**Two instrument defects fixed, both proven by the run:** `gate-divergence-doors.py` read
-`fuzzy_changes` unguarded and SIGSEGVed inside row 32 of 37, losing rows 32 to 37 (ledger 9); it now
-guards on POSIX as `record-oracle.py:1019` does, and prints 37 of 37. **Ledger 9's condition "every
-row with a non-zero count faults, POSIX present" is FALSE** - sweep rows 4, 18 and 32 satisfy it and
-answer, row 32 giving two safe ablations and one faulting one from ONE pattern; corrected in
-LEDGER.md and in the probe, real condition unknown. **Carried:**
-`upstream-bestmatch-free-answer.py` has the same unguarded read, and sweep row 18 carries POSIX, so
-fix it in the change that adds that row.
+**SITTING 17's FIRST JOB: pin rows 18 and 35, then look at 12 and 10.** All four are control B's -
+the stale running totals after a POSIX restore. 18 and 35 are the STRONGER reproduction of ledger
+entry 16: `None` under POSIX-and-BESTMATCH together, the same match back when either flag alone
+goes, on a plain `fullmatch`/`match` with no scan (`python
+tools/probes/upstream-bestmatch-sweep-group-a.py` prints every ablation for those two, and for the
+open 4 and 15; rows 10 and 12 are not in it). **12 is POSIX and BESTMATCH too; 10 carries POSIX with
+no BESTMATCH at all**, so it is entry 9's family rather than 16's. The open question for 18 and 35 is
+which entry hosts them: `posix-fuzzy-contradicts-its-own-flagless-answer` keys on `posixFreeOutcome`
+AND on this port's answer matching it, and row 18's posix-free answer carries change positions the
+drawn side has none of (ledger 9). Check that before choosing.
 
-**A wedged VBCSCompiler blocked every build**; `tools/find-lock-holder.ps1 -Path <the obj file>` named
-it and stopping it cleared it. `Stop-Process`/`taskkill` need approval - go via `pwsh -File
-.scratch/*.ps1`. **`-Rows <file> -SkipRecord` IGNORES the file.** **Paste the verifier brief.**
+**Rows 4 and 15 are open and neither control moves them.** Both `(?b)(?r)` partial searches whose
+flagless answer is a PARTIAL - entry 13's shape - and sitting 15's `endpos=0` worry stands.
 
-**Also owed on S52:** groups B-G of the 37. **Carried** (full list in sitting 10's notes): the
-`_regex.c` citation reconciliation, `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`,
-`record-oracle.py --self-check`, `run-controls.py`, control sites S32-B/S38-A/S35-A/S29-A/D, PORTMAP
-lines, `quantifiers-long`'s filler margin, `oracle.yml`'s weekly sweep verdict rule, the `pos`/`endpos`
--versus-`codepointSlice` fix. **Open for the owner:** `slice-log.jsonl` marks S26 `failed`;
-`origin/main` needs a push.
+**Also owed on S52:** the other 28 rows (sitting 15's groups B, C, D, F, G less the judged). **Carried**
+(full list in sitting 10's notes): `upstream-bestmatch-free-answer.py`'s unguarded `fuzzy_changes`
+read, which sweep row 18 would trip; the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s
+stale `FuzzyRegex.Search(...)`; `record-oracle.py --self-check`; `run-controls.py`; control sites
+S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `quantifiers-long`'s filler margin; `oracle.yml`'s weekly
+sweep verdict rule; the `pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:**
+`slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.

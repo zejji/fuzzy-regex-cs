@@ -218,6 +218,33 @@ internal static class ExpectedDivergences
     /// than the seed form, because a judged row is no longer in a gate report for the seed form to
     /// read.
     /// </para>
+    /// <para>
+    /// <b>Rows 14 to 18 are S52 sitting 16's, and they are the first of this family admitted
+    /// on a PORT-SIDE control rather than on their shape.</b> Rows 14 to 17 are rows 3, 17, 23 and 37 of
+    /// <c>tools/probes/sweep-divergence-rows.jsonl</c>, four of the eight rows the seed sweep drew
+    /// whose signature is this entry's - upstream answering <c>None</c> under <c>(?b)</c> and its own
+    /// flagless answer being this port's exactly. Signature alone was not enough, because the
+    /// mechanism ledger entry 12 names could not explain all eight. What separates them is a
+    /// control: restoring upstream's doubled term in <c>Matcher.cs</c>'s <c>END_FUZZY</c> backtrack
+    /// arm - the single line S46 fixed - makes this port refuse THESE FOUR and no others of the
+    /// eight, 4 of 8 agreeing where 0 of 8 did (<c>pwsh -File tools/run-oracle.ps1 -Rows</c> over the
+    /// eight, 2026-09-15). The other four are a different defect and are not here.
+    /// <b>All four also correct this entry's own headline.</b> Entry 12 said the fault needed two
+    /// trailing insertions; not one of these four does. Rows 14 and 16 lose a fit costing one
+    /// insertion plus one deletion, rows 15 and 17 one insertion plus one substitution. So what
+    /// bites is the budget the second pass caps at <c>fewest_errors</c>, and the insertion count is
+    /// not the boundary. Rows 15 and 17 carry a backreference inside the fuzzy section, which is a
+    /// shape the generators had never drawn against this guard before.
+    /// <b>Row 18 was found BY the control and not by the signature</b>, which is the point of
+    /// running it over every sweep row rather than over the eight. Sweep row 20, an
+    /// <c>interactions</c> <c>match</c>: it does not look like this family at all - both engines
+    /// match, at the same span and the same error count - and the control moves it with the other
+    /// four. What differs is WHERE the errors fall. Upstream substitutes at 0 and 7 and inserts at
+    /// 6; its own flagless answer substitutes at 0 and 6 and inserts at 7, which is this port's
+    /// answer (UTF-16; in the codepoints upstream reports, [0, 4] and 3 against [0, 3] and 4).
+    /// So the guard does not only lose matches, it also moves an error one position, and no row of
+    /// this family had shown that before.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -233,6 +260,11 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(?:(?P<g1>\\S)\ud83c\udffb){s<=1,i<=1,d<=1}(?:\\p{Ll}(*SKIP)[\\p{L}\\p{N}]|[a-f])", "flags": 16386, "namedLists": {}, "subject": "a\ud83c\udffba\u200d\u200da\ud801\udc00", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 5, "captures": [[4, 5]]}, {"number": 1, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [5], "insertions": [], "deletions": []}, "codepointSpan": [3, 7]}]}}
         {"generator": "interactions", "pattern": "(?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\\b", "flags": 264, "namedLists": {}, "subject": "bab_.bB", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 3], "deletions": []}}}
         {"generator": "fuzzy", "pattern": "(?b)(?e)(?:😀𝟮(?:😀bx){1i+1d+1s<=1:[a-s]}){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "😀𝟮😀xa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [7], "deletions": [6]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?:\\s(?:[^a-f]ab){e<=2:\\s}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": " abb", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": [1]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(a0)(?:(?:\\1)){e<=3}", "flags": 0, "namedLists": {}, "subject": "a0\ud835\udd180\ud83d\ude00", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [5], "deletions": []}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?i)(?:(?:aba){1<=e<=2:[0-9]}){e<=3}", "flags": 0, "namedLists": {}, "subject": "AB\ud835\udd18", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": [2]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?i)(a0)(?:(?:\\p{L}(?:\\1)){s<=1}){1<=e<=2:\\d}", "flags": 0, "namedLists": {}, "subject": "a0xax0", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [5], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?e)^(?:[[:digit:]][\\w\\s](?:[^\\p{L}]){e<=1}){s<=1,i<=1,d<=1}(?:\ud835\udd18\\d){s<=1,i<=1,d<=1}(?!(?:(\\p{ASCII})\\p{Lu}{0,}){e<=2,s<=1})$", "flags": 8, "namedLists": {}, "subject": "\ud801\udc28\ud801\udc28\ud835\udd18aa", "operation": "match", "codepointSpan": [0, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 7], "insertions": [6], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 7], "insertions": [6], "deletions": [4]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 1], "fuzzyChanges": {"substitutions": [0, 6], "insertions": [7], "deletions": [4]}}}
         """;
 
     /// <summary>
@@ -2803,8 +2835,16 @@ internal static class ExpectedDivergences
                 + "at PY_SSIZE_T_MAX (`do_simple_fuzzy_match` :18027) so the guard never bites. "
                 + "`do_best_fuzzy_match` is where it becomes finite - the second pass climbs it only "
                 + "to `fewest_errors` (:17732) and the widened-slice fallback uses `fewest_errors` "
-                + "too (:17823) - so a match needing n trailing insertions needs `n > 2n-2`, false "
-                + "for every n >= 2 AT EVERY BUDGET.\n"
+                + "too (:17823), so the budget the guard is tested against is the match's own cost "
+                + "and the caller cannot raise it.\n"
+                + "THE SHAPE THAT BITES IS NOT KNOWN, AND SAYING SO IS PART OF THIS ENTRY (S52 "
+                + "sitting 16, 2026-09-15). It was first stated as `n > 2n-2`, false for every "
+                + "n >= 2 - which is the boundary for `(?:x){e<=N}` and is NOT the defect's. Rows 14 "
+                + "to 17 below each lose a fit needing ONE insertion, spent beside a deletion or a "
+                + "substitution, and a width-2 section body survives trailing-insertion counts a "
+                + "width-1 body does not: blocks 6 and 7 of "
+                + "`tools/probes/upstream-bestmatch-trailing-insertions.py`. What attributes a row "
+                + "to this defect is therefore the port-side control and not its shape.\n"
                 + "THERE IS NO SECOND ENGINE TO ASK, AND THAT WAS MEASURED RATHER THAN ASSERTED - "
                 + "amendment 16 asks for a real run of one, so the absence has to be evidence too. "
                 + "`python tools/probes/pcre2-has-no-fuzzy-matching.py`, pcre2 0.7.1 over libpcre2 "
