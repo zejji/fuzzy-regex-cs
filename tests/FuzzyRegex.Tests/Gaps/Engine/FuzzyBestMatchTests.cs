@@ -290,6 +290,66 @@ public sealed class FuzzyBestMatchTests
     }
 
     [Test]
+    public void Bestmatch_and_enhancematch_together_keep_the_match_bestmatch_alone_would_lose()
+    {
+        // THE SAME DEFECT WITH BOTH FLAGS ON, and the ablation that says which flag loses it - which
+        // the family's own discriminator, upstream's flagless answer, cannot say. Seed 7 row 76930
+        // of the 6000-row three-seed gate, S52 sitting 8. Upstream, regex 2026.9.10, measured
+        // 2026-09-15, rows 12 and 13 of
+        //   python tools/probes/gate-divergence-doors.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl
+        // (the seed form of that probe reads a gate REPORT, and a judged row is no longer in one):
+        //
+        //   (?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\b   match 'bab_.bB'  ->  None
+        //   (?e)     same pattern, (?b) deleted             same subject     ->  (0, 4) i at 2, 3
+        //   (?b)     same pattern, (?e) deleted             same subject     ->  None
+        //   neither  both deleted                           same subject     ->  (0, 4) i at 2, 3
+        //
+        // So it is '(?b)' that destroys the match and not the pair, and '(?e)' neither causes nor
+        // rescues it. That matters because 'bestmatch-loses-a-candidate' keys on the FLAGLESS
+        // answer, which is the same on both middle lines and therefore cannot tell the two apart.
+        //
+        // It is ledger entry 12's doubled 'END_FUZZY' guard again, reached through a fuzzy section
+        // whose two insertions are trailing with respect to the section: one iteration of the group
+        // matches 'ba' at no cost, '\b' is false at 2, and the only way to a boundary is to insert
+        // through '_' to 4 - two trailing insertions, which is exactly the k >= 2 the guard refuses
+        // at every budget.
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // 'bestmatch-loses-a-candidate' in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        const string pattern = @"(?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\b";
+        const string subject = "bab_.bB";
+        const FuzzyRegexOptions options = FuzzyRegexOptions.Version1 | FuzzyRegexOptions.Multiline;
+
+        // ANCHORED, because the row's operation is `match`. Unanchored it is not the same question
+        // at all: `(?b)` searching answers (1, 4) in codepoints on both engines, having found a
+        // cheaper one-insertion match further in. The defect only shows where position 0 is the
+        // only start on offer and the two trailing insertions are the only way to a boundary.
+        Match both = new FuzzyRegex(pattern, options).MatchAtStart(subject);
+
+        both.Success.Should().BeTrue("upstream answers None here, under (?b) alone");
+        (both.Index, both.Length).Should().Be((0, 4));
+        both.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+        both.FuzzyChanges.Insertions.Should().Equal(2, 3);
+
+        // The two ablations, and note what they are NOT: only the '(?b)'-deleted one is a line
+        // upstream agrees with. Upstream answers the match on the two spellings without '(?b)' and
+        // None on the two with it, while this port answers it on all four - so the two engines
+        // differ on BOTH '(?b)' lines, the drawn one above and the '(?e)'-deleted one here, and
+        // agree on both lines without it. That asymmetry is the finding; asserting it on the port's
+        // side is what would go red if '(?b)' ever started destroying a match here too.
+        foreach (string dropped in new[] { "(?b)", "(?e)" })
+        {
+            Match m = new FuzzyRegex(pattern.Replace(dropped, "", StringComparison.Ordinal), options).MatchAtStart(
+                subject
+            );
+
+            m.Success.Should().BeTrue($"without {dropped}");
+            (m.Index, m.Length).Should().Be((0, 4));
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 0));
+        }
+    }
+
+    [Test]
     public void Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget()
     {
         // THE MEASURED BOUNDARY, and it corrects ledger entry 12's own statement of the symptom.

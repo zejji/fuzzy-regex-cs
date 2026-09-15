@@ -596,8 +596,39 @@ def _record_row(regex, row: dict) -> dict:
     # `text_start`/`text_end`, and the two are only distinguishable once the slice is narrower than
     # the subject. Raised by the S31 blind review, which found `(?r)a(bc)*` over `'abc'[1:1]` -
     # a partial upstream, no match here - on an axis no generator could reach.
-    pos = row.get("pos")
-    endpos = row.get("endpos")
+    # A RECORDED row carries its slice TWICE - `pos`/`endpos` in UTF-16 and `codepointSlice` in
+    # codepoints - and `--rows` reads codepoints. Both halves of what `--rows` is for run through
+    # here and they pull opposite ways:
+    #
+    #   round-trip   a recorded row fed straight back is how an entry's `Example` is made, and
+    #                re-reading its UTF-16 pair as codepoints records a DIFFERENT SLICE. Measured
+    #                2026-09-15 on S52's seed 20260915 row 105880, whose subject leads with astral
+    #                characters: the slice came back [2, 10] where the wave recorded [1, 7], and the
+    #                answer with it. The three sliced `Example` rows already in
+    #                `ExpectedDivergences.cs` survived only because nothing astral sits before their
+    #                slices, which is luck and not a rule.
+    #   minimisation cutting a row means EDITING the slice and re-recording, and a reader cuts
+    #                whichever of the two fields they looked at first.
+    #
+    # `codepointSlice` WINS WHEREVER IT IS PRESENT, because it is right on two of the three ways a
+    # row gets here and `pos`/`endpos` is right on one:
+    #
+    #   fed back unchanged   codepointSlice right, pos/endpos wrong (UTF-16 read as codepoints)
+    #   subject cut          codepointSlice right - it indexes the NEW subject - pos/endpos now stale
+    #   slice cut            whichever field the reader edited
+    #
+    # SO THE ONE SHARP EDGE LEFT IS A SLICE CUT MADE IN `pos`/`endpos` OF A RECORDED ROW: it is
+    # silently ignored, and the row records the un-cut slice. Cut `codepointSlice` instead, or delete
+    # it and give `pos`/`endpos` in CODEPOINTS, which is the unit a hand-written `--rows` row uses.
+    # Both blind passes of S52 sitting 8 hit this from opposite sides - one reproduced the silent
+    # discard, the other reproduced a legitimate subject cut being refused by a guard written to stop
+    # it - which is what says the two cases are indistinguishable here rather than merely unhandled.
+    # The real fix is for the recorder to stop echoing the UTF-16 pair under the same key names the
+    # INPUT uses (`utf16Slice`, say); that is a wave-format change reaching the C# consumer, every
+    # committed rows file and every wave on disk, so it is a slice of its own and not this one's.
+    sliced = row.get("codepointSlice")
+    pos = sliced[0] if sliced is not None else row.get("pos")
+    endpos = sliced[1] if sliced is not None else row.get("endpos")
     if pos is not None or endpos is not None:
         if operation not in OPERATIONS:
             raise SystemExit(
@@ -5944,14 +5975,52 @@ def _self_check() -> int:
             if got != expected:
                 failures.append(f"out-of-subject span {span} translates to {got}, expected {expected}")
 
+    # A RECORDED ROW FED BACK IN MUST RECORD THE SAME ROW. `--rows` is how an entry's `Example` is
+    # made and how a divergence is minimised one cut at a time, and both copy a row out of a wave.
+    # A recorded row's `pos`/`endpos` are UTF-16 while the pair `--rows` reads is in CODEPOINTS, so
+    # without `codepointSlice` winning, a sliced row with anything astral before its slice comes
+    # back as a DIFFERENT QUESTION - silently, and with a plausible answer. Found 2026-09-15 on
+    # S52's seed 20260915 row 105880, whose slice came back [2, 10] where the wave recorded [1, 7].
+    sliced = row(pattern="(\\D)\\1", subject="\U00010400ab\U0001d518c", operation="search",
+                 pos=1, endpos=4)
+    once = _record_row(regex, sliced)
+    twice = _record_row(regex, dict(once))
+    for key in ("pos", "endpos", "codepointSlice", "codepointSpan", "outcome"):
+        if once.get(key) != twice.get(key):
+            failures.append(
+                f"a recorded row fed back through --rows changes its {key}: "
+                f"{once.get(key)!r} became {twice.get(key)!r}"
+            )
+
+    # AND A SUBJECT CUT, the other half of the minimisation loop and the case that rules out
+    # guarding this with "the two slices must agree": cutting a character out of the subject leaves
+    # the recorded UTF-16 `pos`/`endpos` stale while `codepointSlice` still indexes the new subject.
+    # Such a row has to RECORD, and it has to record the codepoint slice it was given. The second
+    # blind pass of S52 sitting 8 reproduced exactly this being refused by such a guard.
+    # Cut from the END, past the slice, so the slice it was given still FITS: a cut that removes
+    # text the slice covered is clamped, and clamping is correct rather than a regression.
+    shorter = dict(once)
+    shorter["subject"] = once["subject"][:-1]
+    try:
+        cut = _record_row(regex, shorter)
+    except SystemExit as e:
+        failures.append(f"cutting a character from a recorded row's subject made it unrecordable: {e}")
+    else:
+        if cut.get("codepointSlice") != once.get("codepointSlice"):
+            failures.append(
+                "cutting a character past the slice of a recorded row's subject changed its "
+                f"codepointSlice from {once.get('codepointSlice')!r} to "
+                f"{cut.get('codepointSlice')!r}, so the cut row no longer asks the slice it was given"
+            )
+
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
     if failures:
         return 1
 
     print(
-        "self-check: the reserved-name, interpreter-limit, per-generator-seed and index-translation "
-        "guards all fire"
+        "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation "
+        "and slice-round-trip guards all fire"
     )
     return 0
 

@@ -968,6 +968,65 @@ public sealed class PartialMatchingTests
             .BeFalse();
     }
 
+    [Test]
+    public void A_forward_skip_does_not_cost_the_partial_its_start()
+    {
+        // THE SAME MECHANISM WITH A SYMPTOM THE TEST ABOVE DOES NOT COVER, and the test above says
+        // so in as many words - "BOTH engines answer a partial at the same span". Here they do not.
+        // Seed 7 row 99850 of the 6000-row three-seed gate, S52 sitting 8: upstream answers the
+        // ZERO-WIDTH partial at the far end of what it searched, where its own bound-free spellings
+        // answer the wider partial this port answers. So the moved `slice_start` costs a START
+        // here, which is the reversed entry's symptom appearing on a forward pattern - the one
+        // thing the split-by-direction convention did not predict.
+        //
+        // Measured 2026-09-15 on regex 2026.9.10, tools/probes/gate-divergence-doors.py, in
+        // codepoints (the subject opens with two astral characters, so the spans below are UTF-16):
+        //
+        //   as the wave drew it       (5, 5) partial, group 1 unset        <- upstream
+        //   (*SKIP) -> (*PRUNE)       (3, 5) partial, group 1 at (4, 4)    <- this port's
+        //   verb deleted              (3, 5) partial, group 1 at (4, 4)    <- this port's
+        //   match(pos=3, partial)     (3, 5) partial                       <- this port's
+        //   no partial asked for      None                                 <- both engines
+        //
+        // `(*PRUNE)` prunes the same backtracking and moves no bound, so the bound move is the
+        // cause; the anchor sweep says upstream's own matcher reaches this port's start; and the
+        // last line says there is no divergence without the second pass to carry a bound into.
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // `partial-retry-carried-slice-forward` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        const string pattern = @"^A([^a-f]*)(?:\D(*SKIP)\p{ASCII}|\s)";
+        const string subject = "\U00010400\U00010400\nAA";
+        const FuzzyRegexOptions options =
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.FullCase;
+
+        Match skipped = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length)
+            .Should()
+            .Be((5, 2), "upstream reports the zero-width partial at UTF-16 7 instead");
+        (skipped.Groups[1].Index, skipped.Groups[1].Length)
+            .Should()
+            .Be((6, 0), "upstream leaves group 1 unset, never entering the branch that fills it");
+
+        // The control: a verb that moves no bound, and upstream then answers what this port answers.
+        Match pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options).Match(
+            subject,
+            partial: true
+        );
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((5, 2));
+        (pruned.Groups[1].Index, pruned.Groups[1].Length).Should().Be((6, 0));
+
+        // And with no partial asked for there is no second pass to carry a bound into.
+        new FuzzyRegex(pattern, options)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+    }
+
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer - which is also upstream
     // 2026.7.19's answer and PCRE2 10.47's.
     [Test]

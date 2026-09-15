@@ -854,7 +854,7 @@ ratchet, the tool tests, the `--rows` replay, both minimisations and all 13 muta
 also sharpened two things now corrected here: row 118133's subject elided a CR LF, and the `--rows`
 replay's misleading `Oracle: RED` banner.
 
-### Still owed on S52
+### Still owed on S52 (as sitting 7 left it)
 
 - **The 29 gate divergences, every one unjudged.** This is the slice's largest remaining item.
 - The **timeout rows** generator (scope item, depends on S51's `timeout` comparison) - untouched.
@@ -864,3 +864,302 @@ replay's misleading `Oracle: RED` banner.
 - The long generators remain **off** `run-oracle.ps1`'s default `-Generator` list. Sitting 6's reason
   stands: 11 of their 13 divergences are this port exceeding the row timeout in Release, which is a
   Phase 7 performance question and not a correctness one.
+
+---
+
+## Sitting 8 (2026-09-15) - CHECKPOINT, not closed
+
+STATE.md made sitting 8's first job the 29 unjudged gate divergences, and that is what this sitting
+did. **Sixteen of the 29 are now judged, classified and pinned, and the gate is down from 29 to 13.**
+No engine code changed - every one of the sixteen is upstream diverging in a family this port has
+already been judged right about, and the port's answer was not touched on any of them.
+
+### The 29 were triaged in one batch, not one row at a time, and that is the sitting's method
+
+Sitting 7 left the 29 regenerable rather than transcribed, which is what made a batch possible: the
+gate's reports and waves were still on disk, so `python tools/probes/gate-divergence-triage.py`
+reproduced sitting 7's table exactly - 29 rows, `partial` 11, `interactions` 10, `partial-sliced` 4,
+`verbs` 2, `conditionals` 1, `fuzzy` 1 - without re-running the nine-minute gate.
+
+The new artefact is **`tools/probes/gate-divergence-doors.py`**, which puts every judged family's own
+control to every diverging row in one run. It reads the row out of `wave-<seed>.jsonl` and this
+port's answer out of `report-<seed>.txt`, so **nothing is transcribed and it cannot drift from the
+run**. The doors are the verb ablations (`(*SKIP)` deleted, `(*SKIP)` to `(*PRUNE)`), the same call
+with `partial=True` dropped, upstream's own anchored `match` over the span its `search` reported, the
+anchor sweep on the bound that actually moves, the stepwise walk, and where upstream's own `$` holds.
+One run over three seeds, about four minutes, and sixteen rows classified out of it.
+
+**Two things it cost, both worth carrying:**
+
+- **Every upstream call needs a `timeout=`.** An ablation is not the drawn row: deleting a `(*SKIP)`
+  deletes the pruning that made the drawn pattern cheap. Seed 7 row 76160's `(*PRUNE)` ablation runs
+  past five seconds where the row itself answers instantly, and the first two runs of this probe were
+  killed by it having reported nothing about any other row.
+- **The probe must honour the row's own slice.** The first version asked `partial-sliced` rows over
+  the whole subject and got a different answer on all four - seed 20260915 row 105880 answered
+  (9, 10) where the row is (7, 7). Caught because `as drawn` stopped matching the report.
+
+### The sixteen, and what judges each
+
+`searchOnlyPartial` - the recorder's own discriminator, written per row since S33 - **splits the
+fourteen partial rows cleanly in two, and the ablation battery agrees with it on every one.** The two
+were derived independently, which is what makes the split evidence rather than a reading.
+
+**Six into `search-start-partial`** (seed 7 rows 98092, 99757, 100168; seed 4242 row 105103; seed
+20260915 rows 99718, 100141). `searchOnlyPartial` true on all six: upstream's partial covers the
+whole searched region and **its own anchored `match` over that very span answers None**. On five of
+the six all four controls converge on this port's answer, as they do on sitting 7's rows 6 and 7; row
+99718 loses the verb-free one, which answers a COMPLETE match instead. These are also the first rows
+of that arm drawn by `partial` and `partial-sliced` rather than by `interactions`, and row 105103 is
+the first whose question carries a pos/endpos at all - its slice is what makes "the whole searched
+region" (0, 4) rather than the whole subject.
+
+**Six into `partial-retry-reversed-slice`** (seed 7 rows 98857, 99490, 100234; seed 20260915 rows
+98719, 99223, 105625). `searchOnlyPartial` false on all six, and every one is that entry's own
+printed shape line for line: upstream's `search` answers the zero-width partial at (0, 0) - the LAST
+anchor a reversed search would try - while its own `match(0, 1, partial=True)`, its `(*PRUNE)`
+spelling and its verb-free spelling all answer this port's (0, 1). Row 99223 loses the verb-free
+control, which answers a complete match at (5, 7) instead.
+
+**Two into `partial-retry-carried-slice-forward`** (seed 7 row 99850, seed 20260915 row 105880), and
+**they widen that entry's symptom**. Its own text says "the two engines agree on the SPAN"; on these
+they do not. Upstream answers a ZERO-WIDTH partial at the far end of what it searched - codepoints
+(5, 5) and (7, 7) - where its own bound-free spellings answer the wider partial (3, 5) and (5, 7)
+that this port answers, group and all. So the moved `slice_start` costs a START here rather than an
+alternative, which is the reversed entry's symptom appearing on a forward pattern - the one thing the
+split-by-direction convention did not predict.
+
+**Two into `bestmatch-loses-a-candidate`** (seed 7 row 76930, seed 4242 row 122115), which is exactly
+what that entry's own text predicts: "this family fires about three times per three-seed gate ... so
+a new draw of the same mechanism now reds the wave until someone judges it and adds it." Both were
+judged with the ablation the family's own discriminator cannot make, and it is the sharper half:
+
+```
+(?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\b   match 'bab_.bB'  ->  None
+(?e)     same pattern, (?b) deleted             same subject     ->  (0, 4) insertions at 2, 3
+(?b)     same pattern, (?e) deleted             same subject     ->  None
+neither  both deleted                           same subject     ->  (0, 4) insertions at 2, 3
+```
+
+**It is `(?b)` that destroys the match, not the pair.** The flagless control the entry keys on is the
+same on both middle lines and cannot tell them apart; this can. Both rows are ledger entry 12's
+doubled `END_FUZZY` guard reached through trailing insertions - row 76930 needs two of them to reach
+a word boundary, which is the k >= 2 the guard refuses at every budget.
+
+### Two rows that look like this work and are NOT pinned
+
+Left deliberately unjudged, with the measurement recorded so sitting 9 does not start from raw rows:
+
+- **Seed 4242 row 76778.** Its recorded `bestmatchFreeOutcome` equals the DRAWN answer, so `(?b)` is
+  not what moves it, while `pruneOutcome` is this port's answer - so it is a `(*SKIP)` slice row. But
+  it is a reversed anchored `match`, and no entry here covers that: a `match` is ONE attempt, so the
+  argument has to be that the two verbs must prune identically within it, not that a retry skipped an
+  anchor. That is a real judgement and it needs its own paragraph.
+- **Seed 4242 row 77119.** `bestmatchFreeOutcome` **and** `pruneOutcome` BOTH equal this port's
+  answer, so two mechanisms share one fingerprint on this row. Pinning it under either would be a
+  guess, and this file spends three paragraphs on why S46 doing exactly that was wrong.
+
+### The thirteen that remain, with the doors already put to them
+
+Re-derive with `pwsh -File tools/run-oracle.ps1 -Count 6000` then
+`python tools/probes/gate-divergence-doors.py`. What that run already says:
+
+| seed | row | generator, operation | what the battery says |
+|---|---|---|---|
+| 7 | 74345 | `interactions` search partial, rev | same span and counts (0,2,0); upstream's own CHANGES contradict its own counts - it lists a substitution and a deletion under a two-insertion count - and this port's agree with the counts |
+| 7 | 74510 | `interactions` finditer | same span, groups and counts (1,2,0); upstream lists two subs and one insertion under a one-sub two-insertion count |
+| 7 | 75921 | `interactions` search partial | counts differ too (upstream (0,1,0) s:[2], port (0,1,1) i:[4] d:[4]), and upstream's own `match` over its own span gives a THIRD answer. Not the same question as the two above |
+| 7 | 74413 | `interactions` subf, rev, `(*SKIP)` | `(*PRUNE)` and verb-free both give this port's `sub 0`; upstream's own scan span ends at 3 where its own `$` holds only at 4 and 5. `end-of-line-reads-a-skip-moved-slice`'s signature - but 3 IS a `(?w)$` position, so that entry's `(?w)` control cannot isolate here |
+| 7 | 76160 | `interactions` split, `(?b)`, `(*SKIP)` | verb-free gives this port's parts; the `(*PRUNE)` ablation TIMES OUT at five seconds, so this row needs a control that terminates |
+| 7 | 118133 | `verbs` subf, `(*SKIP)` | upstream raises `IndexError` from its template on a match it found at (3, 7); this port finds none. **The error is downstream of the disagreement, so S40a's template ruling is not the question** - the question is whether `[A-Z]{1,3}` under IGNORECASE reaches the dotless `ı` at position 3, which is the Turkic shape |
+| 4242 | 76778 | `interactions` match partial, rev, `(?b)`, `(*SKIP)` | see above |
+| 4242 | 77119 | `interactions` finditer-overlapped, `(?b)(?e)`, `(*SKIP)` | see above |
+| 4242 | 119927 | `verbs` finditer-overlapped, rev, `(*SKIP)` | first match identical; the second match's group 1 differs by one character; `(*PRUNE)` and verb-free both give this port's. An `overlapped-skip-*` family, but which one needs deciding |
+| 20260915 | 74889 | `interactions` search partial, rev, `(*SKIP)` | upstream answers a COMPLETE match (0, 6); `(*PRUNE)` and verb-free give this port's zero-width PARTIAL at (0, 0). A `(*SKIP)` slice family with a symptom none of them records - complete against partial rather than a moved span |
+| 20260915 | 75528 | `interactions` split, `(?p)`, `\L<w1>` fuzzy | upstream drops `İ` from the parts where this port keeps it, over `İﬁ\r\nı`. Turkic, and probably `turkic-default-folding-without-spans` |
+| 20260915 | 88716 | `conditionals` sub, rev, IGNORECASE, `ı` literals | upstream substitutes 2 where this port substitutes 1, over four dotless `ı`. Turkic |
+| 20260915 | 104366 | `partial-sliced` match partial, rev, EMPTY slice (2, 2) | **no verb at all.** Upstream answers a zero-width partial over an empty slice where this port answers no match. Its own question, and the only one of the thirteen that is not about a verb, a fuzzy cost or a Turkic fold |
+
+Three of the thirteen look Turkic and three look like fuzzy change-position accounting, so sitting 9
+should expect to close them in groups rather than one at a time - which is the same bet this sitting
+made and won on the fourteen partial rows.
+
+### One harness bug found and fixed, and it was latent rather than theoretical
+
+**`--rows` read a recorded row's slice in the wrong units.** A recorded row's `pos`/`endpos` are
+UTF-16 and its `codepointSlice` is the codepoint pair; `--rows` read `pos`/`endpos` and treated them
+as codepoints. So feeding a wave row back in - **which is exactly how an entry's `Example` is made,
+and how a divergence is minimised one cut at a time** - recorded a DIFFERENT SLICE, silently and with
+a plausible answer. Seed 20260915 row 105880's slice came back `[2, 10]` where the wave recorded
+`[1, 7]`, and its answer with it.
+
+Found by re-recording the sixteen judged rows through `--rows` and diffing them field by field
+against the wave they came out of: 12 differences, all on the two `partial-sliced` rows. The fix is
+three lines - `codepointSlice` wins wherever it is present - and after it **all 16 rows round-trip
+with 0 field differences**.
+
+**The three sliced `Example` rows already in `ExpectedDivergences.cs` survived only because nothing
+astral sits before their slices** (`pos` equals `codepointSlice[0]` on all three), which is luck and
+not a rule. Guarded now by two new `--self-check` cases. Reverting the three-line preference and
+re-running prints all four of these lines - the first three from the round-trip guard, the fourth
+from the subject-cut guard beside it:
+
+```
+self-check: a recorded row fed back through --rows changes its pos: 2 became 3
+self-check: a recorded row fed back through --rows changes its endpos: 6 became 7
+self-check: a recorded row fed back through --rows changes its codepointSlice: [1, 4] became [2, 5]
+self-check: cutting a character past the slice of a recorded row's subject changed its
+            codepointSlice from [1, 4] to [2, 4], so the cut row no longer asks the slice it was given
+```
+
+(An earlier draft of this paragraph quoted the first three and called them the whole output. The
+independent verifier re-ran the revert and reported the fourth, which is the subject-cut guard doing
+its job - so the quote now shows what the command actually prints.)
+
+`--self-check` still exits 1 on the interpreter-limit guard, which STATE.md has carried as
+pre-existing since S43 and which this sitting did not touch. Both new guards are separate lines and
+both pass.
+
+### The negative control, run against the code committed here
+
+No control this sitting mutates the engine - no engine code changed. What this sitting can and did
+control is **the keying**, because all four touched entries are keyed on the row and on an answer,
+and a judged answer that is wrong classifies nothing while a key that is too wide classifies
+everything. Run last, after the final code change, on the tree being committed:
+
+> Control A, `entry-keying`: in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, change one
+> character in one answer of each of the four touched entries -
+> `_searchStartElsewhereOurs[7]` `match 0:(0,0)[(0,0)] last=-1/- partial` to `0:(0,1)[(0,1)]`;
+> `_partialRetryReversedOurs[5]` `match 0:(0,2)[(0,2)] 1:unset last=-1/- partial` to `0:(0,3)[(0,3)]`;
+> `_partialRetryForwardOurs[3]` `match 0:(5,2)[(5,2)] 1:(6,0)[(6,0)] last=1/- partial` to `0:(5,3)[(5,3)]`;
+> and in `_bestmatchLostCandidateRows`, row 12's `bestmatchFreeOutcome` `"length": 4, "captures": [[0, 4]]`
+> to `"length": 5, "captures": [[0, 5]]`.
+> Rows: the sixteen themselves, written out of the waves by seed and row number, and run with
+> `pwsh -File tools/run-oracle.ps1 -Rows <file> -SkipRecord`. No seed - these are explicit rows.
+> Result: **16 expected / 0 diverge** unbroken, **13 expected / 3 diverge** broken, and the three
+> that flip are exactly the three whose judged answer was changed.
+
+**The fourth mutation does NOT flip its row, and that is the control working rather than failing.**
+`bestmatch-loses-a-candidate` keys on the LIVE row's own recorded `bestmatchFreeOutcome`, not on a
+judged-answer string, so editing the `Example` copy cannot change how a row is classified. What it
+does instead is fail `Every_expected_divergence_still_diverges` - the staleness alarm - which is the
+instrument that guards that entry. Both halves of the list are therefore live, and the run that
+proves it reports `failed: 2` (`The_wave_agrees_with_upstream` and the alarm) against `failed: 0`
+unbroken. Anyone re-running this should expect a DIFFERENT failure from the fourth mutation than
+from the other three, and that difference is the point.
+
+The second seed this control asks for does not apply: it runs on sixteen explicit rows rather than
+on a generator, so there is no seed to vary. What stands in for it is the gate itself, which drew
+these sixteen at three different seeds.
+
+### Numbers
+
+- Ratchet **GREEN**, **6113 / 6113 / 0 skipped**, baseline **6003 -> 6005**. Tool tests 81/81.
+- Default wave, Release, three seeds, 300 rows a generator: **GREEN, diverge 0 of 6300 at each**
+  (agree 6286 / 6293 / 6293), measured earlier in this sitting.
+  **Its reports do not survive on disk and re-running it would DESTROY the gate's**, because
+  `run-oracle.ps1` writes one `TestResults/oracle/report-<seed>.txt` per seed whatever the row count.
+  So the order matters: run the default wave FIRST and the 6000-row gate LAST, or the thirteen rows
+  the handover above says are regenerable stop being regenerable. The independent verifier reported
+  this figure COULD NOT RUN for exactly that reason, and it is the harness's shape rather than a gap
+  in the measurement.
+- **The 6000-row three-seed gate, re-run here on the commit-ready tree: 29 -> 13 diverging rows**,
+  and the accounted-for count rises by exactly the sixteen judged:
+
+  | seed | before (sitting 7) | after | expected before -> after |
+  |---|---:|---:|---|
+  | 7 | 14 | **6** | 85 -> 93 |
+  | 4242 | 5 | **3** | 74 -> 76 |
+  | 20260915 | 10 | **4** | 79 -> 85 |
+  | total | 29 | **13** | 238 -> 254 |
+
+  `agree 125828 / 125852 / 125826`, `timeout 2 / 1 / 1`, `resource 71 / 68 / 84` of 126,000 a seed.
+  Run as `pwsh -File tools/run-oracle.ps1 -Count 6000`, about 21 minutes of wall clock here with
+  other work running alongside it - slower than sitting 7's 8m29s and 10m35s, and the load is why.
+  (Wall clock is an observation, not something the reports carry; the verifier could not re-derive
+  it and nothing rests on it.)
+- The thirteen remaining rows are row-for-row the thirteen in the table above: the gate at a fixed
+  seed and row count draws the same questions, so the handover is checkable rather than a claim.
+- The sixteen judged rows replayed through `--rows`: **expected 16, diverge 0 of 16**, each
+  classified by the entry it was judged into and by no other.
+- Two new gap tests, each mutated once and watched go red. Both carry their provenance beside the
+  assertion, as the owner rule added to the skill on 2026-09-15 requires: the upstream call, the
+  version (regex 2026.9.10) and the answer, and the command that reproduces it.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results, and an independent
+verifier.**
+
+**Pass one, over the whole diff: five findings raised, five reproduced, five fixed.** None was a
+defect in the port; four were defects in the evidence and one was a defect in code this sitting
+wrote.
+
+1. **The `(?b)`/`(?e)` ablation table was cited to a probe that could not produce it.** The probe had
+   no flag door at all - the table had been measured in a scratch script that no longer exists, which
+   is exactly the "a probe nobody can re-run is not evidence" failure. The door is in the probe now,
+   and because a JUDGED row leaves the gate report the seed form reads, the probe grew a `--rows`
+   mode and the two rows were appended to `tools/probes/bestmatch-loses-a-candidate-rows.jsonl` so
+   the citation names something runnable for the life of the entry.
+2. **The bestmatch gap test claimed upstream answers both its controls.** It answers one: upstream is
+   None on the `(?e)`-deleted spelling too, as the table twenty lines above in the same comment says.
+   The two engines differ on both `(?b)` lines and agree on both without it, which is what the
+   comment says now.
+3. **`--rows` silently discarded a slice cut made in `pos`/`endpos`** - see below; this one took two
+   passes to settle.
+4. **The wrong rows were named as astral** in the reversed entry's comment: rows 6 and 8, not 6 and
+   11. The spans themselves were right.
+5. **`partial-retry-carried-slice-forward`'s `Reason` still defined the family as "the two engines
+   agree on the SPAN"**, which rows 4 and 5 contradict - and the `Reason` is the text the oracle
+   report prints for a classified row, so it was stating the narrow claim to every future reader.
+
+**Pass two, a first pass over the fix delta** (the recorder guard, the probe's extracted `doors()`,
+its `--rows` mode and flag door, and the two appended jsonl rows): **four findings raised, four
+reproduced, three fixed and one recorded as pre-existing.**
+
+- **The fix for finding 3 was wrong, and this pass proved it by running the other half of the same
+  workflow.** Pass one showed a `pos`/`endpos` edit being silently ignored, so the first fix REFUSED
+  a row whose two slices disagree. Pass two then showed that a SUBJECT cut - the commonest
+  minimisation step there is - leaves the recorded UTF-16 pair stale while `codepointSlice` stays
+  correct, so the guard refused a legitimate row, and the escape its own message offered (delete one
+  field) produced a silently wrong slice. **The two cases are indistinguishable from inside the
+  recorder**, so the guard is gone: `codepointSlice` wins, which is right on the round trip and on a
+  subject cut and wrong only on a slice cut made in the other field. That residual sharp edge is
+  written into the code beside it, with the real fix named - stop echoing the UTF-16 pair under the
+  key names the INPUT uses - and left as a slice of its own, because it is a wave-format change
+  reaching the C# consumer, every committed rows file and every wave on disk.
+- **The probe's `--rows` mode ignored a hand-written row's `pos`/`endpos`**, which are codepoints
+  there, so a sliced hand-written row was asked over the whole subject - the same mis-ask the
+  recorded rows had had. Fixed in `slice_of`.
+- **The probe crashed with `KeyError: 'flags'` on a minimal row**, which the recorder accepts
+  (`row.get("flags", 0)`). Both `flags` and `generator` default now.
+- `--self-check` exiting 1 was confirmed pre-existing at HEAD and untouched here.
+
+**And the independent verifier ran** (amendment 16 limb (d)), a fresh agent briefed with nothing but
+this tree, re-running every claim. **One came back DIFFERENT and is fixed above**: the quoted
+`--self-check` output for the reverted fix was three lines where the command prints four, because the
+subject-cut guard fires as well. Two came back COULD NOT RUN and both are now annotated in place
+rather than left as bare numbers - the default-wave figures, whose reports a later gate run
+overwrites, and the gate's wall clock, which no report carries. **Everything else was CONFIRMED**,
+including all fifteen gate figures, the thirteen remaining rows one by one, the 16-row replay and its
+6/6/2/2 split, the four-mutation keying control and which three rows flip, the `(?b)`/`(?e)` table on
+both rows, the `searchOnlyPartial` split, the ratchet, the tool tests, the baseline moving by exactly
+two, and - under the new owner rule - both gap tests' expected values re-derived from upstream.
+
+### Owed, found here
+
+- **A concurrent session committed this sitting's `DECISIONS.md` lines.** Commit `5eabf44` (the
+  owner's S52c authoring) swept in the three sitting-8 entries along with its own, so they are in
+  the history under someone else's message. The content is correct and nothing is lost; it is
+  recorded because the diff of this commit will not contain them and a reader would otherwise look
+  for them here. The driver-runs-concurrently hazard, in its mildest form.
+- **The `pos`/`endpos` versus `codepointSlice` ambiguity is narrowed, not closed.** See above; the
+  fix is a wave-format change and wants its own slice.
+
+### Still owed on S52 after this sitting
+
+- **The thirteen remaining gate divergences**, with the doors already put to them in the table above.
+- The **timeout rows** generator (scope item, depends on S51's `timeout` comparison) - untouched.
+- The **20-seed sweep run**; `tools/sweep-seeds.ps1` and the `oracle.yml` cron both exist, the run
+  does not.
+- The long generators remain **off** the default `-Generator` list, for sitting 6's reason.

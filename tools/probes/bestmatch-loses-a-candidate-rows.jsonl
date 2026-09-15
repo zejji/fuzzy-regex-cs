@@ -9,3 +9,5 @@
 {"generator": "fuzzy", "pattern": "(?b)(?:\\W(?:b\\B){d<=1:\\d}){e}", "flags": 0, "namedLists": {}, "subject": ".ba", "operation": "finditer"}
 {"generator": "fuzzy", "pattern": "(?b)(?fi)(?:(?:[😀𝔘][ab]){e<=1}){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "𝔘S🏻", "operation": "fullmatch"}
 {"generator": "interactions", "pattern": "(?b)(?:(?P<g1>\\S)🏻){s<=1,i<=1,d<=1}(?:\\p{Ll}(*SKIP)[\\p{L}\\p{N}]|[a-f])", "flags": 16386, "namedLists": {}, "subject": "a🏻a‍‍a𐐀", "operation": "finditer"}
+{"generator": "interactions", "pattern": "(?b)(?e)(?:[[:alpha:]][[a-f]~~[d-k]]){e<=2}\\b", "flags": 264, "namedLists": {}, "subject": "bab_.bB", "operation": "match"}
+{"generator": "fuzzy", "pattern": "(?b)(?e)(?:😀𝟮(?:😀bx){1i+1d+1s<=1:[a-s]}){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "😀𝟮😀xa", "operation": "fullmatch"}
