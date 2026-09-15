@@ -565,6 +565,23 @@ def _record_row(regex, row: dict) -> dict:
         "subject": subject,
         "operation": operation,
     }
+
+    # The row's own deadline, and part of the QUESTION rather than of the answer - see
+    # `_generate_timeout`. Absent on every generator but `timeout`, and then the blanket
+    # ROW_TIMEOUT_SECONDS applies as a safety net rather than as a question.
+    #
+    # Threaded through the PRIMARY question only, and that is sufficient rather than sloppy: every
+    # second fact below (`scanMatches`, `leakFreeFuzzy`, `searchOnlyPartial`, `anchoredScan`) is
+    # reached only AFTER upstream answered, because a TimeoutError returns `timed_out()` from the
+    # call itself. A row that runs out of its budget reaches none of them, so none of them can spend
+    # ten seconds on a row whose budget is a quarter of one.
+    deadline = row.get("timeout")
+    if deadline is not None:
+        deadline = float(deadline)
+        recorded["timeout"] = deadline
+    else:
+        deadline = ROW_TIMEOUT_SECONDS
+
     if operation in SUB_OPERATIONS:
         if "template" not in row:
             raise SystemExit(
@@ -745,7 +762,7 @@ def _record_row(regex, row: dict) -> dict:
         direction.
         """
         recorded["codepointSpan"] = None
-        recorded["outcome"] = {"kind": "timeout", "seconds": ROW_TIMEOUT_SECONDS}
+        recorded["outcome"] = {"kind": "timeout", "seconds": deadline}
         return recorded
 
     try:
@@ -757,7 +774,7 @@ def _record_row(regex, row: dict) -> dict:
         method = compiled.subn if operation == "sub" else compiled.subfn
         try:
             text, made = method(
-                recorded["template"], subject, count=recorded["count"], timeout=ROW_TIMEOUT_SECONDS
+                recorded["template"], subject, count=recorded["count"], timeout=deadline
             )
         except TimeoutError:
             return timed_out()
@@ -819,10 +836,10 @@ def _record_row(regex, row: dict) -> dict:
     if operation in ITER_OPERATIONS:
         try:
             if operation == "split":
-                parts = compiled.split(subject, maxsplit=recorded["count"], timeout=ROW_TIMEOUT_SECONDS)
+                parts = compiled.split(subject, maxsplit=recorded["count"], timeout=deadline)
             else:
                 overlapped = operation == "finditer-overlapped"
-                found = list(compiled.finditer(subject, overlapped=overlapped, timeout=ROW_TIMEOUT_SECONDS))
+                found = list(compiled.finditer(subject, overlapped=overlapped, timeout=deadline))
         except TimeoutError:
             return timed_out()
         except Exception as e:  # noqa: BLE001
@@ -877,7 +894,7 @@ def _record_row(regex, row: dict) -> dict:
 
     # Pattern.match/search/fullmatch take (string, pos, endpos, concurrent, partial, timeout), so
     # the slice goes positionally and `partial` by keyword.
-    kwargs = {"timeout": ROW_TIMEOUT_SECONDS}
+    kwargs = {"timeout": deadline}
     if partial:
         kwargs["partial"] = True
     args = (subject,) if pos is None else (subject, pos, endpos)
@@ -1333,6 +1350,7 @@ GENERATORS = (
     "quantifiers-long",
     "partial-long",
     "fuzzy-long",
+    "timeout",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -5599,6 +5617,108 @@ LONG_REPEAT_FILLER_GENERATORS = ("quantifiers-long",)
 REVERSE = 0x400
 
 
+# --------------------------------------------------------------------------------------------
+# Timeout rows (S52)
+# --------------------------------------------------------------------------------------------
+#
+# The one generator whose rows are MEANT to run out, and the only one whose `timeout` outcome the
+# consumer compares instead of skipping. What makes that legitimate is the margin, and the margin is
+# measured rather than assumed: `tools/probes/timeout-row-margin.py` and its port half put every
+# shape below to both engines and report how far past the budget each one is still running.
+#
+# WHY A CURATED TABLE RATHER THAN A GRAMMAR. A timeout row is only evidence if BOTH engines
+# certainly blow through the budget; a generator that composed catastrophic shapes at random would
+# draw rows near the knee, where the verdict turns on the machine rather than on the engine, and
+# those rows would flap. Every shape here was measured, and so was the length the table draws above.
+#
+# WHAT IS NOT IN THE TABLE IS THE INTERESTING HALF (measured 2026-09-15, regex 2026.9.10 and this
+# port at Release, .scratch/s14-catastrophic.py and s14-family.py). Upstream is NOT vulnerable to
+# the textbook shapes: `(a+)+$`, `(a*)*$`, `(.*,)*z`, `(a+)+\1$` and `(?=(a+)+$)a` all answer in
+# milliseconds at every length tried, because a nested repeat over a single-character body collapses.
+# What does blow up is an AMBIGUOUS ALTERNATION under a repeat - two branches that can match the same
+# text - and the ambiguity has to survive compilation: `(?:ab|a)+$` and `(?:[ab]|a)+$` are both fast.
+# So is `(?i)(a|A)+$`, and so is the reversed `(?r)(a|a)+^`. This family is narrower than it looks,
+# which is why widening it means re-running the probe rather than editing the table.
+TIMEOUT_SHAPES = (
+    ("alt-same", r"(a|a)+$"),
+    ("alt-same-star", r"(a|a)*$"),
+    ("alt-prefix", r"(?:a|aa)+$"),
+    ("alt-prefix-3", r"(?:a|aa|aaa)+$"),
+    ("alt-groups", r"((a)|(a))+$"),
+    ("alt-nested", r"(?:(?:a|a)+)+$"),
+    ("alt-same-word", r"(a|a)+\b\d"),
+    ("alt-same-lookahead", r"(?=(a|a)+$)a"),
+    ("alt-same-atomic-free", r"(a|a)+x"),
+    ("alt-backref", r"(a|a)+(\1)$"),
+)
+
+# A quarter of a second, against shapes still running after five on both engines - a margin over
+# twenty times. Small because every row of this generator spends its whole budget by construction:
+# at 2000 rows that is eight minutes of wall clock on each side, and at ten seconds it would be five
+# hours. Raising it buys nothing - the shapes do not finish at five seconds either.
+TIMEOUT_ROW_BUDGET_SECONDS = 0.25
+
+# Above every shape's measured knee, with room to spare. `timeout-row-margin.py --knee` reports the
+# shortest subject each shape is still running 5 seconds on, and they range from 24 to 36 - the floor
+# is set by the slowest-to-blow-up shape, `(?:a|aa)+$` at 36, and not by the average. Longer is free
+# rather than costly: the row stops at its budget either way, so the only thing length buys is how
+# certain the timeout is.
+MIN_TIMEOUT_REPEATS = 40
+MAX_TIMEOUT_REPEATS = 56
+
+
+def _generate_timeout(rng: random.Random, count: int):
+    """Yields ``count`` rows drawn from shapes measured catastrophic on BOTH engines.
+
+    The question a row asks is not what the pattern matches - neither engine will ever find out -
+    but whether the engine HONOURS A DEADLINE on the path this operation takes. That is why the
+    operation is drawn across all of `ALL_OPERATIONS` rather than fixed: `Replace`, `Split`,
+    `Matches` and `Match` each hand the budget to a different loop in this port, and a loop that
+    never polls it is a hang the ported suite cannot see. Measured 2026-09-15: all ten shapes
+    against all eight operations are still running after five seconds on upstream, 80 of 80 cells
+    (.scratch/s14-ops.py, reproduced by the committed probe).
+
+    NO FLAGS, and that is a measured constraint rather than a simplification - `(?i)` makes
+    `(a|A)+$` fast, and `(?r)` makes `(a|a)+^` fast. A generator that composed this family with the
+    flag alphabet every other generator uses would draw rows that answer, and a timeout row that
+    answers is a divergence. See `TIMEOUT_SHAPES` for what else drops out of the family.
+
+    **`count` IS A CEILING HERE, NOT A TARGET, and this is the one generator where that is right.**
+    Its question space is FINITE - ten shapes against eight operations is eighty questions, and the
+    subject length moves nothing but how certain the timeout is - so the grid is enumerated and
+    shuffled rather than sampled. Any `count` of eighty or more therefore draws every cell exactly
+    once, which is both cheaper and STRONGER than sampling: a random draw of eighty from eighty
+    cells with replacement misses about a third of them, and the cells are the point. It matters
+    because every row of this generator spends its whole budget by construction, on both engines:
+    at the default 300 a seed the recording alone took 75 seconds (measured 2026-09-15), against
+    20 for the capped grid, and a 2000-row sweep would have spent eight minutes a seed re-asking
+    eighty questions twenty-five times each.
+    """
+    grid = [(pattern, operation) for _, pattern in TIMEOUT_SHAPES for operation in ALL_OPERATIONS]
+    rng.shuffle(grid)
+    for pattern, operation in grid[:count]:
+        subject = "a" * rng.randrange(MIN_TIMEOUT_REPEATS, MAX_TIMEOUT_REPEATS + 1) + "!"
+        row = {
+            # Every generator sets this, and without it `_record_row` falls back to "rows" - the tag
+            # reserved for a hand-written `--rows` file. It is not cosmetic: it is what a divergence
+            # block names in the report, and what `_compile_upstream` keys PREFILTER_FREE_GENERATORS
+            # off.
+            "generator": "timeout",
+            "pattern": pattern,
+            "flags": 0,
+            "subject": subject,
+            "operation": operation,
+            "timeout": TIMEOUT_ROW_BUDGET_SECONDS,
+        }
+        if operation in SUB_OPERATIONS:
+            # Never reached - the scan runs out first - but a substitution row without one is
+            # refused by `_record_row` before upstream is asked at all.
+            row["template"] = "z"
+        if operation in LIMIT_OPERATIONS:
+            row["count"] = 0
+        yield row
+
+
 def _generate_long(name: str, rng: random.Random, count: int):
     """Yields ``count`` rows from the base generator with each subject padded into a long text.
 
@@ -5654,6 +5774,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name in LONG_BASES:
         yield from _generate_long(name, rng, count)
+        return
+
+    if name == "timeout":
+        yield from _generate_timeout(rng, count)
         return
 
     if name == "classes":

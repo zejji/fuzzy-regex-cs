@@ -67,7 +67,13 @@ internal static class OracleComparer
             // is no answer to compare against - and putting the question to this port anyway would
             // spend RowTimeout on a row whose verdict is already decided, which on a wave carrying
             // several of them is minutes of wall clock for no information.
-            if (row.Expected is TimeoutOutcome)
+            //
+            // UNLESS THE ROW CARRIES ITS OWN DEADLINE (S52). Then not finishing IS the recorded
+            // answer, because the shape was measured catastrophic on both engines at more than twenty
+            // times that budget, and the row is put to this port like any other. The cost objection
+            // does not apply either: the budget is a fraction of a second by construction, where
+            // RowTimeout is ten.
+            if (row.Expected is TimeoutOutcome && row.Timeout is null)
             {
                 tally[OracleVerdict.Timeout] = tally.GetValueOrDefault(OracleVerdict.Timeout) + 1;
                 continue;
@@ -116,7 +122,18 @@ internal static class OracleComparer
     /// of an unported seam, or <see cref="CompiledButUnmatched"/> if it compiled and the seam is in
     /// the matcher. The two are not interchangeable: only the first knows nothing at all.
     /// </returns>
-    public static IOracleOutcome? Run(OracleRow row) => Run(row, RowTimeout);
+    /// <remarks>
+    /// The row's own budget where it has one, and <see cref="RowTimeout"/> otherwise. A timeout row's
+    /// budget is the QUESTION upstream was asked, so giving this port a different one would compare
+    /// two answers to two questions - and giving it ten seconds would spend ten seconds a row on a
+    /// generator every one of whose rows is meant to run out.
+    /// </remarks>
+    public static IOracleOutcome? Run(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(row, row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout);
+    }
 
     /// <summary>Puts a row's question to this port, with an explicit deadline.</summary>
     /// <remarks>
@@ -254,6 +271,27 @@ internal static class OracleComparer
     public static OracleVerdict Compare(OracleRow row, IOracleOutcome? actual)
     {
         ArgumentNullException.ThrowIfNull(row);
+
+        // S52's timeout rows, and they have to be decided BEFORE the blanket rule below, which would
+        // otherwise swallow them. Upstream was given a budget it was measured to blow through by more
+        // than twenty times, so what is compared is whether this port also ran out of it.
+        if (row.Expected is TimeoutOutcome && row.Timeout is not null)
+        {
+            // Nothing else counts. `WhileMatching` because a REJECTION of the pattern is not running
+            // out of time - upstream compiled this one and started matching it - and the exception
+            // type by name because `_rejections` deliberately excludes this one: a port that times
+            // out where upstream ANSWERED is a divergence, and that rule must not be weakened here.
+            bool ranOutToo =
+                actual is ErrorOutcome error
+                && error.WhileMatching
+                && string.Equals(
+                    error.Exception,
+                    nameof(System.Text.RegularExpressions.RegexMatchTimeoutException),
+                    StringComparison.Ordinal
+                );
+
+            return ranOutToo ? OracleVerdict.Agree : OracleVerdict.Diverge;
+        }
 
         // First, and before anything is read off `actual`. Upstream gave no answer at all, so no
         // answer this port gives can agree or disagree with it - including no answer, which would

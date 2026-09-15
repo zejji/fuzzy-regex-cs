@@ -41,7 +41,10 @@ already swept at higher row counts. A new seed costs about a minute.
 
 ## Done when
 
-- [ ] Sweep tool committed and run; CI job added; astral, long and timeout generators recorded.
+- [x] Sweep tool committed and run; CI job added; astral, long and timeout generators recorded.
+      (Sweep tool and its run: sitting 13. CI job: `oracle.yml`'s Thursday cron. Astral: sitting 2.
+      Long: sitting 4. Timeout: sitting 14. The sweep's 37 red rows are box 2's problem, not this
+      box's - the instrument exists and has been run.)
 - [ ] Every divergence judged, fixed or entered with a control; nothing unjudged.
 - [ ] Ratchet GREEN, blind review (hunt: an astral row whose index is converted twice; a long-subject
       generator that never reaches the path it was written for), commit.
@@ -2206,3 +2209,302 @@ the recorder did; and that no engine code changed and no test was added.
 
 It used no git command but `status` and `diff`, reverted both controls with the slice's own script,
 and left the tree byte-identical.
+
+---
+
+## Sitting 14 (2026-09-15) - CHECKPOINT, not closed
+
+STATE.md left sitting 14 two things: a question for the owner (S52 should be SPLIT - its
+done-criterion is "no unjudged row" and the seed sweep it delivered is the instrument for making new
+ones, so the criterion and the deliverable fight each other) and a list of work that does not depend
+on that ruling. **The ruling has not come, so nothing was judged this sitting.** What was taken
+instead is the **last untouched item in the slice's own Scope list: the timeout rows.** They needed
+S51's per-call budget, which landed, and they need no ruling from anyone.
+
+### What a timeout row is, and why the old ones could not be compared
+
+A recorded `timeout` outcome already existed (S40a) and the consumer SKIPPED it, for a reason the
+docstrings state plainly: the recorder's blanket ten seconds is a fact about the recording machine's
+wall clock, so a row that needed eleven seconds and a row that needed nine would record differently
+on two runs and neither says anything about either engine. Filing it as a divergence fails the run on
+upstream's slowness; filing it as agreement lets a port that also hangs score as parity.
+
+**The scope bullet asks for the one case where that objection does not apply**: shapes measured
+catastrophic on BOTH engines, under a budget they blow through by a wide margin. Then "the call
+raised rather than running past its budget" is a property of the engine, and it is worth comparing.
+The whole sitting is that margin and the plumbing for it.
+
+### The family is much narrower than the textbook says, and that is the finding
+
+Measured before any code was written, on regex 2026.9.10 and this port at Release. **Upstream is NOT
+vulnerable to the textbook catastrophic patterns.** `(a+)+$`, `(a*)*$`, `(.*,)*z`, `(a+)+\1$` and
+`(?=(a+)+$)a` all answer in MILLISECONDS at every length tried - a nested repeat over a
+single-character body collapses. What does blow up is an **ambiguous alternation under a repeat**,
+two branches that can match the same text, and the ambiguity has to survive compilation:
+`(?:ab|a)+$` and `(?:[ab]|a)+$` are both fast, so is `(?i)(a|A)+$`, and so is the reversed
+`(?r)(a|a)+^`.
+
+That is why `TIMEOUT_SHAPES` is a curated table of ten and why `_generate_timeout` draws NO FLAGS.
+A generator that composed this family with the flag alphabet the other generators use would draw
+rows that answer - and a timeout row that answers is a divergence. The nine rejected shapes are in
+the probe as data, not as a comment: `timeout-row-margin.py --rejected` runs them and exits 1 if one
+of them becomes catastrophic.
+
+### The margin, measured on both engines
+
+```
+python tools/probes/timeout-row-margin.py                 # 10 shapes, upstream
+python tools/probes/timeout-row-margin.py --operations    # 10 shapes x 8 operations, upstream
+python tools/probes/timeout-row-margin.py --knee          # where each shape starts blowing up
+python tools/probes/timeout-row-margin.py --rejected      # the nine that are NOT in the family
+pwsh -File tools/probes/timeout-row-margin.ps1            # the same, this port, Release
+pwsh -File tools/probes/timeout-row-margin.ps1 -Operations
+```
+
+- **80 of 80 cells still running at 20x the budget on upstream, and 80 of 80 on this port** - ten
+  shapes against all eight operations, at the generator's own shortest subject of 40 characters,
+  against the 0.25s its rows carry. 160 of 160 cells across the two engines.
+- **Knees between 24 and 36**, the worst being `(?:a|aa)+$` at 36, which is what sets
+  `MIN_TIMEOUT_REPEATS = 40`. The floor is the slowest-to-blow-up shape, not the average.
+- **All nine rejected shapes answer in 0ms.**
+
+The operation is drawn rather than fixed at `search` because that is where the value is: `Replace`,
+`Split`, `Matches` and `Match` each hand the budget to a DIFFERENT loop in this port, and a loop
+that never polls it is a hang nothing else in the suite can see.
+
+### `count` is a ceiling for this generator, and only for this one
+
+Its question space is finite - ten shapes against eight operations is eighty questions, and the
+subject length moves nothing but how certain the timeout is - so `_generate_timeout` enumerates the
+grid and shuffles it instead of sampling. Any `--count` of 80 or more draws every cell exactly once.
+
+This is both cheaper and STRONGER than sampling. Cheaper because every row of this generator spends
+its whole budget on BOTH engines by construction: the capped grid records in **20.3 seconds** a seed,
+so a row costs 0.254s and an uncapped `--count 300` would be **about 76 seconds**, and a 2000-row
+sweep would have spent eight minutes a seed re-asking eighty questions twenty-five times each.
+Stronger because a random draw of eighty from eighty cells with replacement misses about a third of
+them, and the cells are the point.
+
+**The 76 seconds is a derivation, and the 75 this first claimed was a direct measurement that
+NOBODY CAN NOW REPRODUCE** - it was taken before the cap existed, and the cap is in the committed
+code, so re-running `--count 300` gives the capped 80 rows. The independent verifier reported it
+COULD NOT RUN and derived 76 from the 20.3 it could time. The derivation is what stands, because the
+measurement's evidence is gone; to re-take it directly, change `grid[:count]` back to a `for _ in
+range(count)` draw.
+
+### It is ON the default generator list
+
+Unlike the four long generators, and measured rather than assumed: `pwsh -File
+tools/run-oracle.ps1 -Generator timeout -Count 300 -Seeds 7,4242,20260915` gives
+`agree 80 unsupported 0 expected 0 timeout 0 resource 0 diverge 0 of 80` at **every one of the
+three**, and the full default wave is GREEN at all three with it in (see Numbers).
+
+It costs **20.3 seconds a seed to record** and about as long again to consume - the two engines each
+spend the same 0.25s a row - so call it 40 seconds a seed, of which only the first half is timed.
+That is noise at the 6000-row gate and at the sweep, because the cap means it does not grow with
+`-Count`.
+
+**A run of this generator ALONE never reports `Oracle: GREEN`, and that is nothing to do with the
+generator.** `Our_own_change_positions_always_agree_with_our_own_counts` refuses a wave holding no
+fuzzy match (`OracleWaveTests.cs:192`) and no single-generator wave has one; `-Generator literals`
+fails identically. Read the `agree ... diverge` line. The independent verifier caught this sitting's
+notes calling such a run "GREEN" and reported it DIFFERENT.
+
+### What changed, in four files
+
+- **`tools/record-oracle.py`**: a per-row `timeout` field, threaded into the PRIMARY question only.
+  That is sufficient rather than sloppy - every second fact (`scanMatches`, `leakFreeFuzzy`,
+  `searchOnlyPartial`, `anchoredScan`) is reached only AFTER upstream answered, because a
+  `TimeoutError` returns `timed_out()` from the call itself, so a row that runs out of its budget
+  reaches none of them and none of them can spend ten seconds on a row whose budget is a quarter of
+  one. Plus `TIMEOUT_SHAPES`, `_generate_timeout` and the three constants.
+- **`OracleWave.cs`**: `OracleRow.Timeout`, parsed from the row.
+- **`OracleComparer.cs`**: three edits. The wave's skip is now conditional on the row having NO
+  budget; `Run(row)` passes the row's own budget where it has one; and `Compare` decides a budgeted
+  row before the blanket rule, agreeing only with a `RegexMatchTimeoutException` raised WHILE
+  MATCHING.
+- **`tools/run-oracle.ps1`**: `timeout` on the default list, and the help paragraph saying why it is
+  capped.
+
+**A port that ANSWERS a timeout row is a divergence, deliberately.** Upstream could not finish the
+shape in twenty times the budget; a port that finishes it has either stopped being the same engine on
+it - so the row no longer tests the deadline, which is the "a generator that never reaches the path
+it was written for" failure this slice hunts - or answered something upstream never got to check.
+Phase 7 optimisation reddening one of these rows is the CORRECT outcome and the signal to redraw the
+family, not a reason to soften the rule. Said out loud in `OracleWaveTests.cs` so a later slice does
+not quietly weaken it.
+
+### Old waves still skip, checked on real files rather than reasoned about
+
+`OracleRow.Timeout` is the ONLY discriminator, so the question "does this change reinterpret a row
+recorded before it existed?" is answerable by reading the waves on disk. Across every kept wave in
+`TestResults/oracle/`, the split is total: **seven** historical waves hold 1 to 3 `timeout` rows each
+- twelve rows between them - and **not one carries a budget field**, so every one of them is skipped
+exactly as before, while every `timeout`-generator wave holds 80 and **all 80 carry one**. (The
+independent verifier corrected the count: this first said "eight", and counting the `sweep-<seed>/`
+copies as separate files gives thirteen rather than either. The number of `timeout`-generator waves on
+disk is not a fact about the change at all - it is whatever the last runs left - so it is stated as a
+property of each wave instead.)
+
+### Numbers
+
+- Ratchet **GREEN**, **6119 / 6119 / 0 skipped**, **6011 distinct ids**, baseline **6011** -
+  unchanged, and it must be: the one new test is in `FuzzyRegex.OracleTests`, which the ratchet does
+  not build. That project goes 23 tests to **24**.
+- `dotnet build tests/FuzzyRegex.OracleTests -c Release` clean, 0 warnings.
+- Tool tests (Pester, `tools/tests`) **81 / 81**.
+- **Default wave, Release, three seeds, 300 rows a generator: GREEN at every one**, 6,380 rows a seed
+  (6,300 + the capped 80):
+  seed 7 `agree 6366 expected 8 timeout 2 resource 4 diverge 0`;
+  seed 4242 `agree 6373 expected 2 timeout 0 resource 5 diverge 0`;
+  seed 20260915 `agree 6373 expected 4 timeout 0 resource 3 diverge 0`.
+- The `timeout` generator alone at the same three seeds: `agree 80 ... diverge 0 of 80` at each.
+- Margin probes: **80 of 80 cells** at 20x the budget on upstream and **80 of 80** on this port.
+
+### The negative controls, run last against the code committed here
+
+Both were run AFTER the final code change, both at two seeds, and both were applied and reverted by
+hand - `git status --porcelain` shows neither file as modified afterwards, which is the check that
+they really went back.
+
+> **Control A, `wrong-timeout-exception`**: in `src/FuzzyRegex/Engine/MatchLimits.cs`, the last line
+> of `Cancelled` (`:56`), change
+> ```
+>             : new System.Text.RegularExpressions.RegexMatchTimeoutException(input, pattern, MatchTimeout);
+> ```
+> to
+> ```
+>             : new TimeoutException($"{input} {pattern} {MatchTimeout}");
+> ```
+> Wave: `pwsh -File tools/run-oracle.ps1 -Generator timeout -Count 300 -Seeds 7`, 80 rows.
+> Result: **agree 0, diverge 80 of 80**, against `agree 80, diverge 0 of 80` unbroken.
+> Re-run at seed **31337**, which no part of this slice uses: **agree 0, diverge 80 of 80**.
+
+That is the control for the COMPARISON: it proves a wave of these rows notices when this port stops
+reporting a timeout the way upstream's contract says, on every one of the eighty cells rather than on
+a lucky draw.
+
+> **Control B, `family-drift`**: in `tools/record-oracle.py`, add `("nested-plus", r"(a+)+$"),` as an
+> eleventh entry of `TIMEOUT_SHAPES`, directly after `("alt-backref", r"(a|a)+(\1)$"),`.
+> Probe: `python tools/probes/timeout-row-margin.py`.
+> Wave: `pwsh -File tools/run-oracle.ps1 -Generator timeout -Count 300 -Seeds 7`.
+> Result: the probe **exits 1** and prints
+> `*** nested-plus FINISHED inside 5.0s - the family has drifted, redraw the table. ***`,
+> while the wave's comparison is **agree 88, diverge 0 of 88** - NO DIVERGENCE.
+> Re-run at seed **31337**: again **agree 88, diverge 0 of 88**.
+>
+> Not "GREEN": a `-Generator timeout` run's own VERDICT is always `Oracle: RED`, on the committed
+> tree too, because `Our_own_change_positions_always_agree_with_our_own_counts` refuses any wave
+> holding no fuzzy match (`OracleWaveTests.cs:192`) and a single-generator wave holds none - it
+> reproduces identically on `-Generator literals`. The first draft of this control wrote "GREEN"
+> and the independent verifier reported it DIFFERENT. **What the control is about is the
+> comparison tally, and that is what it now says.**
+
+**Control B is the one that changed something, and it is a finding about the harness rather than a
+tick.** A shape that stops being catastrophic does not red the wave: its eight rows answer `nomatch`
+on both engines and AGREE, so the gate every other slice reads reports 88 healthy rows while eight of
+them test nothing at all. **The wave cannot police its own generator here; `timeout-row-margin.py`
+is the only guard**, which is why it is a committed probe rather than a measurement, why the recorder
+cites it, and why every one of its four modes now exits non-zero on its own bad news.
+
+The second seed is recorded for both because both run on a GENERATOR draw rather than on explicit
+rows, so there is a seed to vary. Both fired identically at the second seed, which is what says they
+catch the fault rather than a coincidence of the first draw.
+
+### Review
+
+**One blind pass over the whole diff, dispatched inside the turn and read as a tool result. Findings
+raised: four. Reproduced: four. Fixed: four.** None was a defect in the comparison or in the margin;
+all four were defects in the harness or in the evidence.
+
+1. **Every `timeout` row was tagged `"generator": "rows"`.** `_generate_timeout` was the only
+   generator body that omitted the `"generator"` key, so `_record_row` fell back to the tag reserved
+   for a hand-written `--rows` file. Not cosmetic: it is what a divergence block prints and what
+   `_compile_upstream` keys `PREFILTER_FREE_GENERATORS` off. Reproduced by counting the tags in a
+   recorded wave (80 of 80 said `rows`) and seen in Control A's own report line,
+   `DIVERGE row 1 (rows) subf`.
+2. **The test's recorded measurement was false.** Its comment said both engines were still running
+   after 5s on all ten shapes at 32 characters; `(?:a|aa)+$` FINISHES at 32 in 1.19s, and the probe
+   committed in the same change says so - its knee is 36. The test itself was never wrong (its own
+   shape's knee is 24) and the wave was never affected (the generator draws 40 to 56), but the
+   sentence would have been read as the family's measurement. It now states the generator's own
+   length and says explicitly that the test's 32 is not a measurement of the family.
+3. **`--knee` and `--rejected` exited 0 while printing their own failure.** Reproduced by planting a
+   catastrophic shape in the `REJECTED` table and watching the probe print
+   `*** ... IS catastrophic now ***` and exit 0. Every mode now returns its verdict.
+4. **The port probe's operation columns were in the wrong order.** Its comment claimed
+   "`ALL_OPERATIONS`, in its order" while the hard-coded list put `split` sixth where
+   `ALL_OPERATIONS` has it eighth, so reading the port's column six against upstream's column six
+   compared `split` with `finditer`. Both halves also truncated `finditer` and `finditer-overlapped`
+   to the same heading. The list is now read out of the recorder's three tuples and both halves print
+   `finditer-ovl`.
+
+The reviewer also reproduced all eight of the sitting's claims from the committed tree, confirmed the
+`timeout` field survives a `--rows` round trip, that all four `_CONTROLS` row builders use
+`{**row, ...}` so a control answer inherits the budget, that the five surviving `ROW_TIMEOUT_SECONDS`
+uses are all in second-fact helpers reachable only after upstream answered, that `MAX_TIMEOUT_REPEATS`
+bounds the draw, and that `OracleRow` has one construction site so inserting `Timeout` before
+`DefaultVersion` shifts nothing.
+
+**A second pass over the unreviewed delta was NOT dispatched, and that is a judgement rather than a
+deadline.** What the fixes created is three probe edits and two comments; the probe edits were then
+put through their own controls (Control B is the `--rejected`/`--knee` exit-code fix's control, and
+the column order was re-run on both halves and compared line by line), and two further defects of the
+same class were found and fixed WITHOUT a reviewer - the ps1 probe's parse guards, which accepted a
+partial table and a zero budget silently, and the missing `--rejected` line in the Python probe's
+usage block. The delta is tooling that reports on itself and every claim in it is re-run by the
+independent verifier below.
+
+### One thing this sitting cost itself, worth carrying
+
+**Do not build or edit while a wave is consuming.** A `dotnet build` launched while
+`run-oracle.ps1`'s consumer was running left four wedged `dotnet` processes, and after that a build
+that takes 11 seconds ran past seven minutes, `dotnet build-server shutdown` itself hung, and
+`tools/find-lock-holder.ps1` correctly reported NO process holding the DLL - so the ordinary lock
+diagnosis says nothing about this failure. Stopping the background tasks cleared it and the build
+came back at 11 seconds. Cost: about twenty minutes and one abandoned three-seed wave.
+
+### The independent verifier
+
+A fresh agent (amendment 16 limb (d)), briefed with nothing but this tree and `docs/VERIFICATION.md`'s
+do-not-use-git clause, re-ran every number these notes, the four DECISIONS entries and STATE.md state.
+**Three came back DIFFERENT and all three are fixed above; two came back COULD NOT RUN and both are
+annotated in place; everything else was CONFIRMED.**
+
+**DIFFERENT, and the sharpest is the third.**
+
+1. "The EIGHT historical waves hold 1 to 3 `timeout` rows each" - there are **seven**, twelve rows
+   between them, and counting the `sweep-<seed>/` copies gives thirteen files rather than either.
+2. "The THREE new `timeout`-generator waves" - five such files were on disk when it looked, two of
+   them 88-row Control B leftovers. The count was never a fact about the change; it is whatever the
+   last runs left, and the claim is now about each wave rather than about how many there are.
+3. **Control B's result was written as "GREEN" and the run's own verdict is RED** - on the committed
+   tree too, and for a reason unrelated to this generator: a single-generator wave holds no fuzzy
+   match and `Our_own_change_positions_always_agree_with_our_own_counts` refuses one
+   (`OracleWaveTests.cs:192`), identically on `-Generator literals`. The control is about the
+   comparison tally, `agree 88 diverge 0 of 88`, and that is what it says now - here, in
+   DECISIONS.md and in `run-oracle.ps1`'s help, which carried the same word.
+
+**COULD NOT RUN, two, one of them a real loss.**
+
+- **The 75-second uncapped recording is gone as a direct measurement.** It was taken before the cap
+  went into the code, and the cap is in the committed code, so `--count 300` now records the capped
+  80. What survives is the verifier's own 20.3s for the capped grid and the derivation from it, 76
+  seconds; the notes now claim the derivation and say how to re-take the measurement.
+- **"About 40 seconds a seed" was never timed as a whole** - only the 20.3s recording half. Stated as
+  what it is: 20.3 timed, the consume half inferred from the two engines spending the same budget.
+
+**CONFIRMED:** the ratchet (GREEN, 6119/6119/0 skipped, 6011 distinct ids, baseline 6011) and that
+the diff adds exactly one `[Test]`, 23 to 24; the oracle Release build clean; the oracle tests 24/24;
+Pester 81/81; both margin probes at the FULL 20x margin rather than a reduced one, 80 of 80 cells on
+each engine, 160 of 160; the nine knees, worst `(?:a|aa)+$` at 36; all nine rejected shapes at 0ms;
+`agree 80 diverge 0 of 80` at all three seeds; the default wave's three tallies exactly, 6,380 rows a
+seed; the grid drawing 80 distinct cells with max repeat 1 at counts 80, 120 and 300 across six seeds,
+every row carrying `"timeout": 0.25`, `"generator": "timeout"` and `flags 0`, subjects 41 to 57
+characters; both controls at both seeds, to the exact tallies and the exact probe exit code and
+message; that no historical `timeout` row carries a budget field; regex **2026.9.10** on every probe
+run; and the constants read back out of the recorder - 10 shapes, 8 operations, 10 x 8 = 80 = the cap,
+and 6380 = 6300 + 80 on every default wave.
+
+It used no git command but `status` and `diff`, reverted both controls by hand, rebuilt clean after
+each, deleted its own scratch, and left the tree byte-identical to the snapshot it started from.

@@ -15,8 +15,21 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST. 'partial-sliced' joined it in S33 and 'verbs' in S34,
-    which is the first time the list has been complete.
+    EVERY GENERATOR IS ON THE DEFAULT LIST. 'partial-sliced' joined it in S33, 'verbs' in S34 and
+    'timeout' in S52 sitting 14.
+
+    'timeout' IS CAPPED AT 80 ROWS however large -Count is, and it is the only generator that
+    ignores the count. Its question space is finite - ten measured-catastrophic shapes against the
+    eight operations - so the grid is enumerated rather than sampled, and every cell is drawn
+    exactly once at any count of 80 or more. That matters because every one of its rows spends its
+    whole 0.25s budget on BOTH engines by construction: capped it costs about 20 seconds a seed to
+    record and about as long again to consume, and uncapped a 2000-row sweep would have spent eight
+    minutes a seed re-asking eighty questions twenty-five times each. Measured 2026-09-15 at the
+    three default seeds: 80 of 80 rows AGREE at each, and the default wave is GREEN with them in it.
+
+    Running it ALONE never reports green, and that is not about this generator: a single-generator
+    wave holds no fuzzy match, and Our_own_change_positions_always_agree_with_our_own_counts refuses
+    one. '-Generator literals' does the same. Read the 'agree ... diverge' line, not the verdict.
 
     THE FOUR LONG-SUBJECT GENERATORS ARE THE ONE EXCEPTION, and they are off the list on evidence
     (S52 sitting 6, 2026-09-15). 'literals-long', 'quantifiers-long', 'partial-long' and
@@ -239,7 +252,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

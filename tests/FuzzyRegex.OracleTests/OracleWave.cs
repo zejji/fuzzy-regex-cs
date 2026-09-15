@@ -208,7 +208,8 @@ internal static class OracleWave
             ReadLeakFreeFuzzy(row),
             row.TryGetProperty("posixFreeOutcome", out JsonElement posixFree) ? ReadOutcome(posixFree) : null,
             row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null,
-            row.TryGetProperty("pruneOutcome", out JsonElement pruneOutcome) ? ReadOutcome(pruneOutcome) : null
+            row.TryGetProperty("pruneOutcome", out JsonElement pruneOutcome) ? ReadOutcome(pruneOutcome) : null,
+            row.TryGetProperty("timeout", out JsonElement budget) ? budget.GetDouble() : null
         );
     }
 
@@ -667,6 +668,17 @@ internal sealed record OracleHeader(
 /// and on any wave recorded before this slice. Never compared; only
 /// <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="Timeout">
+/// The deadline in seconds this row's question was put to upstream under, and part of the QUESTION
+/// rather than of the answer (S52). <see langword="null"/> on every row of every generator but
+/// <c>timeout</c>, which means the recorder's blanket <c>ROW_TIMEOUT_SECONDS</c> - a safety net
+/// against a drawn row hanging the whole wave, and a statement about the recording machine's wall
+/// clock rather than about the pattern. A row that carries one instead names a budget the shape was
+/// MEASURED to blow through on both engines by more than twenty times, which is what turns "it did
+/// not finish" from a missing answer into an answer: see <see cref="TimeoutOutcome"/> and
+/// <see cref="OracleComparer.RunWave"/>, where the presence of this field is the whole difference
+/// between a row that is skipped and a row that is compared.
+/// </param>
 /// <param name="DefaultVersion">
 /// The <c>DEFAULT_VERSION</c> the RECORDER resolved this row's pattern under, stamped onto every row
 /// by <see cref="OracleWave.Load"/> from the wave header. Part of the question: a pattern naming no
@@ -699,6 +711,7 @@ internal sealed record OracleRow(
     IOracleOutcome? PosixFree = null,
     IOracleOutcome? AtomicFree = null,
     IOracleOutcome? PruneOutcome = null,
+    double? Timeout = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0
 );
 
@@ -717,8 +730,11 @@ internal sealed record NoMatchOutcome : IOracleOutcome
     public string Describe() => "no match";
 }
 
-/// <summary>Upstream ran out of its deadline on this row, so there is no ground truth for it.</summary>
-/// <param name="Seconds">The deadline upstream was given, which the recorder writes as a constant.</param>
+/// <summary>Upstream ran out of its deadline on this row.</summary>
+/// <param name="Seconds">
+/// The deadline upstream was given. The recorder's blanket constant on every row that carries no
+/// <see cref="OracleRow.Timeout"/>, and that row's own budget when it does.
+/// </param>
 /// <remarks>
 /// <para>
 /// Recorded by <c>tools/record-oracle.py</c> from S40a on, and never produced by this port: it is a
@@ -732,6 +748,16 @@ internal sealed record NoMatchOutcome : IOracleOutcome
 /// also hangs as agreeing, which is both halves of the comparison backwards. The row is skipped the
 /// way an unsupported one is, and counted separately so a generator that starts drawing hanging
 /// shapes shows up in the summary line instead of going quiet.
+/// </para>
+/// <para>
+/// S52 ADDED THE ONE CASE WHERE THIS IS AN ANSWER, and <see cref="OracleRow.Timeout"/> is what marks
+/// it. The reasoning above rests entirely on the deadline being arbitrary: ten seconds is a fact
+/// about the recording machine, so a row that needed eleven and a row that needed nine would record
+/// differently on two runs and neither says anything about the engine. The <c>timeout</c> generator
+/// removes exactly that objection - its shapes were measured to be still running after TWENTY TIMES
+/// the budget its rows carry, on upstream and on this port alike - so on those rows "it raised rather
+/// than running past its budget" is a property of the engine, and a port that ANSWERS one is
+/// diverging.
 /// </para>
 /// </remarks>
 internal sealed record TimeoutOutcome(double Seconds) : IOracleOutcome

@@ -639,6 +639,78 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_carrying_its_own_deadline_is_compared_rather_than_skipped()
+    {
+        // S52's timeout rows, and the one place in the wave where a `timeout` outcome is an ANSWER
+        // instead of a missing one. The difference is the row's own `timeout` field.
+        //
+        // Without it, a timeout says only that upstream did not finish inside the recorder's blanket
+        // ten seconds - a statement about wall clock on the recording machine, which is why
+        // `A_row_upstream_never_finished_is_skipped_counted_and_never_put_to_this_port` skips it. WITH
+        // it, the row was drawn from a family measured catastrophic on BOTH engines at a length far
+        // past the knee, and "the call raises rather than running past its budget" is then a property
+        // of the engine rather than of the machine. Measured 2026-09-15 on regex 2026.9.10 and this
+        // port at Release, at the generator's own shortest subject of 40 'a's: all ten shapes against
+        // all eight operations are still running after 5s on both engines, 80 of 80 cells each,
+        // against the 0.25s the rows carry - a margin over 20x, so no plausible machine turns one
+        // verdict into the other. See `tools/probes/timeout-row-margin.py` and its port half.
+        //
+        // THE SUBJECT BELOW IS 32 'a's, which is SHORTER than the generator draws and is not a
+        // measurement of the family: `--knee` puts the shapes' knees between 24 and 36, so 32 is
+        // past this pattern's (24) and short of `(?:a|aa)+$`'s (36). It is chosen to keep this test
+        // cheap, and it is sound here only because the one shape it uses blows up well below it.
+        OracleRow budgeted = OracleWave.ParseRows(
+            """
+            {"generator": "timeout", "pattern": "(a|a)+$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.05, "outcome": {"kind": "timeout", "seconds": 0.05}}
+            """
+        )[0];
+
+        budgeted.Timeout.Should().Be(0.05);
+        budgeted.Expected.Should().BeOfType<TimeoutOutcome>().Which.Seconds.Should().Be(0.05);
+
+        // This port running out of the same budget is the agreement. `ErrorOutcome` rather than a
+        // `TimeoutOutcome` of our own, because that is what the engine actually produces and inventing
+        // a second shape for it here would hide which of the two the port really gave.
+        ErrorOutcome ranOut = ErrorOutcome.From(
+            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)+$", TimeSpan.FromSeconds(0.05)),
+            whileMatching: true
+        );
+        OracleComparer.Compare(budgeted, ranOut).Should().Be(OracleVerdict.Agree);
+
+        // The same exception raised while COMPILING does not, which keeps the phase rule the rest of
+        // this comparison rests on: upstream compiled this pattern and then ran out of time matching
+        // it, so a port that failed before it started matching has not done the same thing. Not a
+        // shape the engine can currently produce - the constructor is handed InfiniteMatchTimeout -
+        // which is exactly why it is pinned rather than left to a future edit to notice.
+        OracleComparer.Compare(budgeted, ranOut with { WhileMatching = false }).Should().Be(OracleVerdict.Diverge);
+
+        // And answering is a DIVERGENCE, which is the arm that makes this row worth recording at all.
+        // Upstream could not finish this shape in twenty times the budget; a port that finishes it has
+        // either stopped being the same engine on it - so the row no longer tests the deadline, which
+        // is the "a generator that never reaches the path it was written for" failure this slice is
+        // hunting - or answered something upstream never got to check. Phase 7 optimisation reddening
+        // this row is the correct outcome and the signal to redraw the family, not a reason to soften it.
+        OracleComparer.Compare(budgeted, new NoMatchOutcome()).Should().Be(OracleVerdict.Diverge);
+
+        // The port IS asked, unlike every other timeout row, and it is asked with the ROW'S budget
+        // rather than `RowTimeout`. The wall clock is the only thing that can tell those apart, and
+        // this pattern does not stop on its own: at `RowTimeout` the call takes ten seconds, so
+        // returning well inside that is the proof the row's own field reached the engine.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        OracleRunSummary run = OracleComparer.RunWave([budgeted], OracleComparer.Run);
+        watch.Stop();
+
+        watch
+            .Elapsed.Should()
+            .BeLessThan(
+                OracleComparer.RowTimeout / 2,
+                "the row's own deadline reached the engine, not the comparer's blanket one"
+            );
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Agree] = 1 });
+        run.Divergences.Should().BeEmpty();
+    }
+
+    [Test]
     public void A_row_upstream_ran_out_of_memory_on_is_skipped_counted_and_never_put_to_this_port()
     {
         // S43's half of the same problem, reached by running out of heap rather than out of time.
