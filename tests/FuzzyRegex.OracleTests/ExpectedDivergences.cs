@@ -836,10 +836,11 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The two rows of <c>end-of-line-reads-a-skip-moved-slice</c>, as <c>tools/record-oracle.py
+    /// The three rows of <c>end-of-line-reads-a-skip-moved-slice</c>, as <c>tools/record-oracle.py
     /// --rows</c> wrote them on 2026-09-15.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Seed 20260915 rows 24224 (<c>interactions</c>, a reversed <c>split</c>) and 38101
     /// (<c>verbs</c>, a reversed <c>subf</c>) of the three-seed 2000-row wave of commit 407c0cb. Both
     /// are operations no <c>(*SKIP)</c> entry here had reached before: a <c>split</c> renders as a
@@ -847,10 +848,21 @@ internal static class ExpectedDivergences
     /// because upstream's template holds <c>{0[-1]}</c> and a match object has no group -1 - so
     /// upstream raises exactly when it finds a match and answers the subject unchanged when it does
     /// not.
+    /// </para>
+    /// <para>
+    /// The third is seed 7 row 74413 of the 6000-row gate, added by S52 sitting 11 (<c>interactions</c>,
+    /// a reversed <c>subf</c>, MULTILINE, taken verbatim out of <c>wave-7.jsonl</c>). It is the same
+    /// shape as row 38101 and needed no new argument: upstream replaces once over a span that ENDS AT
+    /// codepoint 3, where its own <c>$</c> is true only at 4 and 5, and spelling <c>$</c> out as
+    /// <c>(?:(?=\n)|(?!\n|.))</c> - as well as <c>(*PRUNE)</c> and the verb deleted - answers the
+    /// <c>sub 0</c> this port answers. The <c>(?w)</c> control cannot run on it: 3 IS a <c>(?w)$</c>
+    /// position, so this is a SECOND row where the phantom end is one the twin would create anyway.
+    /// </para>
     /// </remarks>
     private const string _endOfLineReadsMovedSliceRows = """
         {"generator": "interactions", "pattern": "(?r)(?:\\s*?(*SKIP)\\W|[^a])(\\S{1,})$", "flags": 8, "namedLists": {}, "subject": "ﬀﬀ\r\nﬀﬀss\rS", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "S", "", "ﬀﬀss", "ﬀﬀ\r"]}, "pruneOutcome": {"kind": "split", "parts": ["", "S", "ﬀﬀ\r\nﬀﬀss"]}}
         {"generator": "verbs", "pattern": "(?r)(\\D+(*PRUNE)[^\\p{L}])(?:[^a-f](*PRUNE)){1,3}?((?>\\p{Lu}{1,3}?(*SKIP)\\D))$", "flags": 10, "namedLists": {}, "subject": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "operation": "subf", "template": "-{0[0]}{0[-1]}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "pruneOutcome": {"kind": "sub", "text": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "count": 0}}
+        {"generator": "interactions", "pattern": "(?r)^(?P<g1>\\D)(?:[^\\d](*SKIP)\\p{ASCII}|\\W)$", "flags": 8, "namedLists": {}, "subject": "𐐨𐐨a\r\n", "operation": "subf", "template": "-}}{g1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "-}𐐨\r\n", "count": 1}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 3]}], "pruneOutcome": {"kind": "sub", "text": "𐐨𐐨a\r\n", "count": 0}}
         """;
 
     /// <summary>
@@ -858,15 +870,18 @@ internal static class ExpectedDivergences
     /// same order, as the report renders it.
     /// </summary>
     /// <remarks>
-    /// Both are upstream's own <c>pruneOutcome</c> - its answer to the same row with every
-    /// <c>(*SKIP)</c> spelled <c>(*PRUNE)</c> - and both are also upstream's answer when the trailing
-    /// <c>$</c> is spelled out as what <c>$</c> is defined to be. Measured 2026-09-15,
-    /// <c>tools/probes/upstream-skip-carried-slice-doors.py</c>.
+    /// Every one is upstream's own <c>pruneOutcome</c> - its answer to the same row with every
+    /// <c>(*SKIP)</c> spelled <c>(*PRUNE)</c> - and every one is also upstream's answer when the
+    /// trailing <c>$</c> is spelled out as what <c>$</c> is defined to be. Measured 2026-09-15 -
+    /// rows 1 and 2 by <c>tools/probes/upstream-skip-carried-slice-doors.py</c>, which holds those
+    /// two and not the third, and row 3 by
+    /// <c>tools/probes/upstream-gate-drawn-skip-rows.py</c>.
     /// </remarks>
     private static readonly string[] _endOfLineReadsMovedSliceOurs =
     [
         "split 3 '' 'S' '\\ufb00\\ufb00\\u000d\\u000a\\ufb00\\ufb00ss'",
         "sub 0 'a\\u000d\\u000aa\\ud835\\udd18\\ud835\\udd18\\ud801\\udc28\\u000d\\ud801\\udc28\\ud835\\udd18'",
+        "sub 0 '\\ud801\\udc28\\ud801\\udc28a\\u000d\\u000a'",
     ];
 
     /// <summary>
@@ -1307,29 +1322,41 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The five rows of <c>bestmatch-walk-truncated-by-a-skip</c>: a <c>(*SKIP)</c> ends upstream's
+    /// The seven rows of <c>bestmatch-walk-truncated-by-a-skip</c>: a <c>(*SKIP)</c> ends upstream's
     /// own <c>(?b)</c> walk on its first successful candidate, so a better match further along the
     /// subject is never attempted.
     /// </summary>
     /// <remarks>
-    /// Not drawn by a wave. The mechanism was found by reading <c>do_best_fuzzy_match</c>'s loop
-    /// guard (<c>upstream/src/_regex.c:17625</c>) while S48 inventoried ledger entry 5, and then
-    /// hunted for over a small alphabet - 11,340 shapes, 1,861 of which answer differently with
-    /// <c>(*SKIP)</c> than with <c>(*PRUNE)</c>. Row 1 is the minimisation, four ASCII characters
-    /// and no flags; rows 2 to 5 are the first larger shapes the hunt drew, kept because each one
-    /// spends a different error kind.
+    /// The first five were not drawn by a wave. The mechanism was found by reading
+    /// <c>do_best_fuzzy_match</c>'s loop guard (<c>upstream/src/_regex.c:17625</c>) while S48
+    /// inventoried ledger entry 5, and then hunted for over a small alphabet - 11,340 shapes, 1,861
+    /// of which answer differently with <c>(*SKIP)</c> than with <c>(*PRUNE)</c>. Row 1 is the
+    /// minimisation, four ASCII characters and no flags; rows 2 to 5 are the first larger shapes the
+    /// hunt drew, kept because each one spends a different error kind.
+    /// <para>
+    /// Rows 6 and 7 ARE drawn, by S52's 6000-row three-seed gate and judged by its eleventh sitting -
+    /// seed 4242 rows 76778 and 77119, taken verbatim out of <c>wave-4242.jsonl</c> and so carrying
+    /// the recorder's own <c>bestmatchFreeOutcome</c> and <c>pruneOutcome</c> beside the drawn
+    /// answer. That the hunt's authored shapes and a generator drawing 126,000 rows a seed land on
+    /// one mechanism is the first evidence this family is reachable by a GENERATOR rather than only
+    /// by someone already looking for it.
+    /// </para>
     /// <para>
     /// Re-recordable in full:
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-walk-truncated-rows.jsonl</c>,
     /// or straight through the runner as
-    /// <c>pwsh -File tools/run-oracle.ps1 -Rows &lt;that file&gt;</c>. That file carries a SIXTH row
+    /// <c>pwsh -File tools/run-oracle.ps1 -Rows &lt;that file&gt;</c>. Its first seven rows are this
+    /// entry's seven in this order, and it carries an EIGHTH
     /// which is deliberately not in this entry: <c>(?b)(?:\w(*SKIP)a|a){e&lt;=1}</c> over
-    /// <c>'a b c'</c>, on which both engines answer <c>(0, 2)</c> with one substitution at 1. It is
-    /// there because the five rows above are all PERFECT matches, and a wave holding no fuzzy match
-    /// with an error in it fails
+    /// <c>'a b c'</c>, on which both engines answer <c>(0, 2)</c> with one substitution at 1. It was
+    /// put there when rows 1 to 5 were the whole entry and all five were PERFECT matches, because a
+    /// wave holding no fuzzy match with an error in it fails
     /// <c>OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts</c>'s
-    /// non-degeneracy guard - so without it the artifact cannot be replayed through the runner at
-    /// all. It doubles as the family's agreeing control.
+    /// non-degeneracy guard - so without it the artifact could not be replayed through the runner at
+    /// all. Row 7's judged answer carries an error of its own now, so that is no longer the only
+    /// thing keeping the eighth row here; it doubles as the family's agreeing control, which is
+    /// reason enough. The whole file replays <c>agree 1, expected 7, diverge 0 of 8</c>
+    /// (S52 sitting 13, 2026-09-15).
     /// </para>
     /// </remarks>
     private const string _bestmatchWalkTruncatedRows = """
@@ -1338,6 +1365,8 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?b)(?:b(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "bbbab", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": []}}}
         {"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=1}", "flags": 0, "namedLists": {}, "subject": "abcabc", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1]}}}
         {"generator": "interactions", "pattern": "(?b)(?:\\w(*SKIP)ab){e<=2}", "flags": 0, "namedLists": {}, "subject": "qqxyab", "operation": "search", "codepointSpan": [2, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 4, "captures": [[2, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [1, 2], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?b)(?r)(?:[a-f]\\D*){e<=1}(?:\\S*(*SKIP)\\p{Lu}|[^a-f])(?(?=[a-f])[[:digit:]])\\b", "flags": 8, "namedLists": {}, "subject": "😀aa_\r\n_A", "operation": "match", "partial": true, "codepointSpan": [0, 8], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 7, "captures": [[2, 7]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "interactions", "pattern": "(?b)(?e)^(?:\\p{Ll}\\p{ASCII}(?:A){e<=2:\\w}){e<=1}(?:[^\\d]?(*SKIP)[^a]|[abz])$", "flags": 16394, "namedLists": {}, "subject": "00AA ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "anchoredScan": [], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [0], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}]}}
         """;
 
     /// <summary>
@@ -1345,10 +1374,19 @@ internal static class ExpectedDivergences
     /// same order, as the report renders it.
     /// </summary>
     /// <remarks>
-    /// Every one is a PERFECT match - no errors at all, which is why none of them carries a
+    /// <para>
+    /// The first five are PERFECT matches - no errors at all, which is why none of them carries a
     /// <c>fuzzy=</c> field - and on every one it is the answer the same compiled pattern's own
     /// anchored <c>match</c> gives at that position, on upstream as well as here. It is also what
     /// upstream answers with the verb replaced by <c>(*PRUNE)</c> and with the verb deleted.
+    /// </para>
+    /// <para>
+    /// The two S52 sitting 11 added are upstream's own <c>pruneOutcome</c> and nothing else, and
+    /// row 7 is the first in this entry whose judged answer CARRIES an error. What the family
+    /// promises is the fewest errors among the matches that exist, not zero of them: on row 7
+    /// upstream finds no match at all where its own <c>(*PRUNE)</c>, verb-free and
+    /// <c>(?b)</c>-free spellings all find the one substitution this port answers.
+    /// </para>
     /// </remarks>
     private static readonly string[] _bestmatchWalkTruncatedOurs =
     [
@@ -1357,6 +1395,8 @@ internal static class ExpectedDivergences
         "match 0:(2,3)[(2,3)] last=-1/-",
         "match 0:(2,3)[(2,3)] last=-1/-",
         "match 0:(3,3)[(3,3)] last=-1/-",
+        "match 0:(2,7)[(2,7)] last=-1/-",
+        "matches 1 | match 0:(0,5)[(0,5)] last=-1/- fuzzy=(1,0,0)[s:0][i:][d:]",
     ];
 
     /// <summary>
@@ -2059,7 +2099,17 @@ internal static class ExpectedDivergences
                 + "extra span ends where `$` is false' already exists one entry up and is not "
                 + "loosened here; what these rows lack is a SPAN for it to read - a split renders as "
                 + "parts and an error renders as a traceback - and inventing one from the parts would "
-                + "be a new inference rather than a recorded fact.",
+                + "be a new inference rather than a recorded fact.\n"
+                + "S52 SITTING 11 ADDED A THIRD ROW, seed 7 row 74413 of the 6000-row gate, and it "
+                + "needed one line rather than an argument because it is row 38101's shape on a "
+                + "second draw: a reversed `subf` whose replaced span ENDS AT 3 where upstream's own "
+                + "`$` is true only at 4 and 5, with `$` spelled out, `(*PRUNE)` and the verb deleted "
+                + "all answering the `sub 0` this port answers. It is the SECOND row on which the "
+                + "`(?w)` control cannot run - `(?w)$` is true at [3, 5] here, so the phantom end 3 "
+                + "is a line end the twin would create anyway, exactly the condition stated above "
+                + "for row 24224. Measured 2026-09-15 on regex 2026.9.10, and re-runnable from the "
+                + "committed tree with no gate run: "
+                + "`python tools/probes/upstream-gate-drawn-skip-rows.py`.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_"
                 + "the_line_does_not_end and .A_reversed_substitution_of_a_skip_replaces_nothing_"
                 + "where_the_line_does_not_end",
@@ -2504,7 +2554,35 @@ internal static class ExpectedDivergences
                 + "ranking defect in this port's own cost walk would also look like, and this port "
                 + "has shipped two of those in Phase 5 (S42's two hangs). Widening means judging "
                 + "another row with the probe and adding it, not loosening a condition. Phase 7 must "
-                + "not import upstream's answer here along with the prefilter.",
+                + "not import upstream's answer here along with the prefilter.\n"
+                + "S52 SITTING 11 ADDED ROWS 6 AND 7, the first drawn rows of this family rather "
+                + "than authored ones, and what classifies each is one line - the `(?b)`-free pair. "
+                + "Measured 2026-09-15 on regex 2026.9.10, the wave rows themselves, prefilter on as "
+                + "`interactions` is recorded, and re-runnable from the committed tree with no gate "
+                + "run: `python tools/probes/upstream-gate-drawn-skip-rows.py`, which reads the four "
+                + "drawn rows out of `tools/probes/gate-drawn-skip-rows.jsonl` beside it:\n"
+                + "  row 6  seed 4242 row 76778, a REVERSED anchored `match`, `(?b)` + `(*SKIP)`\n"
+                + "    (?b) + (*SKIP)   (0, 8) one deletion     <- upstream, and (?b) improved NOTHING\n"
+                + "    (?b) + (*PRUNE)  (1, 8) NO errors        <- ours\n"
+                + "    no (?b), either verb  (0, 8) one deletion\n"
+                + "  row 7  seed 4242 row 77119, a forward overlapped `finditer`, `(?b)(?e)` + `(*SKIP)`\n"
+                + "    (?b)(?e) + (*SKIP)   NO MATCH AT ALL     <- upstream\n"
+                + "    (?b)(?e) + (*PRUNE)  (0, 5) one substitution   <- ours\n"
+                + "    verb deleted, and (?e) + (*SKIP) with (?b) gone, both find it too\n"
+                + "THE `(?b)`-FREE PAIR IS WHAT MAKES THE VERB'S PRUNING INNOCENT on both. Without "
+                + "`(?b)` the two verbs answer IDENTICALLY - so the pruning `(*SKIP)` does is not "
+                + "what moves either row - and with `(?b)` they do not. A verb that only matters "
+                + "when a `(?b)` walk is running is a verb acting on the walk, which is this entry. "
+                + "Row 6 is the sharpest statement of the family in the file: `(?b)`'s whole job is "
+                + "to improve on the non-best answer, and with the verb present it improves by "
+                + "nothing at all.\n"
+                + "A THIRD ROW WAS RULED OUT BY THIS ENTRY'S OWN DOOR and is deliberately not here: "
+                + "seed 7 row 76160. Its `(*PRUNE)` spelling does not terminate - 5 seconds at "
+                + "sitting 8, 300 at sitting 11 and 300 again at sitting 13 - and "
+                + "the anchored door that stands in for it points the WRONG WAY - upstream's own "
+                + "`match(4, 7)` on the drawn object costs (1, 0, 1) where this port answers (4, 7) "
+                + "with no errors, so the candidate the walk is supposed to have missed is worse, "
+                + "not better. It is left on the gate unjudged rather than filed on a resemblance.",
             PinnedBy: "FuzzyBestMatchTests.Bestmatch_looks_past_the_candidate_whose_own_skip_moved_" + "the_slice",
             Example: _bestmatchWalkTruncatedRows,
             Applies: static (row, ours) =>

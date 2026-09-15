@@ -761,6 +761,42 @@ re-runnable from one script: `python tools/probes/upstream-skip-carried-slice-do
 `ExpectedDivergences.end-of-line-reads-a-skip-moved-slice`,
 `.skip-carried-slice-on-a-scan-with-no-walk` and `.partial-retry-carried-slice-forward`.
 
+### What S52's eleventh sitting added, 2026-09-15: three drawn rows and no new symptom
+
+Every figure below is re-runnable from the committed tree with no gate run:
+`python tools/probes/upstream-gate-drawn-skip-rows.py` puts each control to the four drawn rows of
+`tools/probes/gate-drawn-skip-rows.jsonl`, and `pwsh -File tools/probes/port-gate-drawn-skip-rows.ps1`
+is this port's half for the one row that is not judged. (Sitting 11 measured all of this from
+scratch scripts it did not commit; sitting 13 re-derived every cell and committed the probes.)
+
+Three more rows of the 6000-row gate, and the point of recording them is that **none of them needed
+a new argument** - each is a door above answering on a shape the generator drew rather than one a
+hunt authored. That the sixth door in particular was reachable at all by a generator is new: its
+five original rows were all authored by S48's hunt over an 11,340-shape alphabet.
+
+- **Seed 7 row 74413**, `interactions`, a reversed `subf`, MULTILINE, into the `$` door. Upstream
+  replaces once over a span ending at codepoint 3 where its own `$` is true at 4 and 5 alone;
+  `$` spelled out as `(?:(?=\n)|(?!\n|.))`, `(*PRUNE)`, and the verb deleted all answer the
+  `sub 0` this port answers. It is a SECOND row on which the `(?w)` twin cannot be the control -
+  `(?w)$` is true at [3, 5] here, so the phantom end is a line end the twin would create anyway.
+- **Seed 4242 rows 76778 and 77119**, both `interactions`, into the sixth door - the `(?b)` walk.
+  What classifies each is the `(?b)`-free pair rather than a reading: with `(?b)` deleted the two
+  verbs answer IDENTICALLY, so the pruning `(*SKIP)` does is not what moves either row; with `(?b)`
+  present they do not. Row 76778 is a reversed anchored `match` where upstream answers (0, 8) with
+  one deletion under both `(?b)` and no `(?b)` - so `(?b)` improved by nothing at all - while its
+  own `(*PRUNE)` under `(?b)` finds (1, 8) with NO errors. Row 77119 is a forward overlapped
+  `finditer` where upstream finds no match whatsoever and its `(*PRUNE)`, verb-free and
+  `(?b)`-free spellings all find the one this port finds.
+
+**And one row of the same shape that this report does NOT claim**: seed 7 row 76160, a `(?b)` split
+carrying a `(*SKIP)`. Its `(*PRUNE)` spelling does not terminate - 5 seconds at sitting 8, then 300
+at sittings 11 and 13, `python tools/probes/upstream-gate-drawn-skip-rows.py 300` - so the control that
+separates the moved bound from the pruning cannot be run, and the anchored door that would stand in
+for it points the other way - upstream's own `match(4, 7)` on the drawn object costs (1, 0, 1) where
+this port answers (4, 7) with no errors, so the candidate the walk is supposed to have missed is
+WORSE rather than better. It is left on the gate unjudged. A row that resembles a door is not a row
+the door explains, and this report's value is that every row in it was measured through one.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern

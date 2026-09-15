@@ -62,6 +62,19 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
 6. **Docs.** `docs/VERIFICATION.md` gains a paragraph: the oracle proves agreement, the invariants
    prove consistency, and only the two together say anything about correctness where the port
    inherits upstream's answer.
+7. **Gate row 104366 is this slice's worked example, handed over by S52 sitting 11.** A reversed
+   partial over an EMPTY slice at the end of the subject: `(?r)\xdfﬁ(.*?)\b` asked as
+   `match(subject, 2, 2, partial=True)` over `'ﬁı'`, upstream answering a zero-width
+   partial at (2, 2) and this port answering no match. It is not pinned and must not be pinned by
+   agreement, because **NEITHER ENGINE IS SELF-CONSISTENT**: over the 33 cells of
+   `tools/probes/{upstream,port}-reversed-partial-ignores-the-slice-start.*` the two agree on 23 and
+   differ on 10, and the 10 split both ways. That is exactly the shape this slice exists to catch
+   automatically - a row where the oracle's "do they agree" question has no useful answer and only a
+   metamorphic invariant ("a partial call may not deny what the same engine's greedy and lazy
+   spellings of one pattern both allow") separates right from wrong. Ledger entry 24 holds the
+   reading; the owner's ruling on whether the reversed run-out should read `slice_start` rather than
+   `text_start` is still open, and this slice should NOT wait for it - the invariant is worth having
+   either way, and if it fires on both engines that is the finding.
 
 ## Verification
 
@@ -76,5 +89,6 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
 - [ ] Invariant list committed with a reason per item; checker in the recorder and the comparer.
 - [ ] Three-seed wave run with violations triaged; ledger entries for real ones.
 - [ ] Fuzzy second engine tried and the result recorded in OPERATIONS.
+- [ ] Gate row 104366 run through the invariants, and what they say about it recorded.
 - [ ] VERIFICATION.md paragraph; DECISIONS entry.
 - [ ] Ratchet GREEN, blind review, verifier, commit.

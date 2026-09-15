@@ -432,6 +432,14 @@ the port's, flagging violations for ledger triage. The skill now requires gap-te
 to carry provenance from a real upstream run or a DIVERGENCES row, and S57 audits the ones written
 before the rule. Estimate 14-19 becomes 15-20.
 
+**S52d fixes ledger 24 on the owner's ruling (2026-09-15, Option B of
+`docs/plan/upstream-reports/ledger-24-briefing.md`).** A reversed match with `partial=True` runs
+out of text at the slice start and reports a partial there; `^`, `\A`, `` and lookbehind keep
+Python `re`'s whole-string view of `pos`. Upstream holds both rules and picks one by optimisation
+path; the port inherited both. Amendment 16 outcome (c): fixed here at the nine partial run-out
+sites through one shared helper, proven over the wave with S52c's invariant checker, pinned
+narrowly, not filed. After S52c. Estimate 15-20 becomes 16-21.
+
 **And S48's own inventory added a fifth: S48b (2026-09-14, spec amendment 25).** S45-S48 were the
 four slices meant to empty the known-bug list. S48 inventoried all fifteen ledger entries, which is
 what its scope asked for, and thirteen are closed: entries 1-4, 6 and 8 are upstream-only with this

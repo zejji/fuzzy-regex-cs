@@ -2,44 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52 IS STILL A CHECKPOINT (2026-09-15, sitting 10) - the TENTH.** Ratchet GREEN, **6119 / 6119 /
-0 skipped, 6011 distinct ids, baseline 6011**. Default wave GREEN at three seeds. **Sitting 10
-judged two of the eight gate divergences and the 6000-row gate is 8 -> 6** (3 / 2 / 1 at seeds
-7 / 4242 / 20260915; expected 259 -> 261). No engine code changed. Seed 4242 row 119927 joined
-`overlapped-skip-stale-slice-reversed` through a NEW second arm - upstream's own stepwise walk, for
-a row whose match count is unchanged and only a CAPTURE'S END moved. Seed 20260915 row 74889 is a
-new entry, `reversed-skip-invents-a-match`: upstream's `(*SKIP)` finds a complete match its own
-`(*PRUNE)` and verb-free spellings both miss, and pruning cannot create a match.
+**S52 IS STILL A CHECKPOINT (2026-09-15, sitting 13).** Ratchet GREEN, **6119 / 6119 / 0 skipped,
+6011 distinct ids, baseline 6011**; `dotnet build tests/FuzzyRegex.OracleTests -c Release` clean.
+Sittings 11 and 12 were both killed before committing; sitting 13 applied the orchestrator's stash,
+re-derived every claim in it and committed it. **The gate is 6 -> 3:** seed 7 74413 joined
+`end-of-line-reads-a-skip-moved-slice`, seed 4242 76778 and 77119 joined
+`bestmatch-walk-truncated-by-a-skip`, the first rows a GENERATOR has drawn into that family. No
+engine code changed, no new gap test (all three joined families that already pin).
 
-**FOR THE OWNER, and sitting 11 should not touch row 104366 until this is answered: it is NOT pinned
-because THIS PORT is inconsistent too.** Upstream holds two rules for a reversed partial that runs
-out of text - node handlers read `text_start` (0), `search_start` reads `slice_start`
-(`_regex.c:18442`, `:6747`, `:8400`) - and so does this port: over the two probes' 33 cells the
-engines differ on 10, 3 of them the port's own way. Probable reading: `text_start = 0` is the
-`^`/`\A` open-start rule and the partial handlers reuse it for a different question; if so it is an
-INHERITED BUG to fix (some thirty sites), not a divergence to pin. Ledger entry 24; both probes are
-committed as `tools/probes/{upstream,port}-reversed-partial-ignores-the-slice-start.*`.
+**FOR THE OWNER - S52 SHOULD BE SPLIT, and sitting 14 should not start judging without the ruling.**
+The seed sweep ran for the first time (8 seeds, 2,000 rows a generator, 336,000 rows;
+`pwsh -File tools/sweep-seeds.ps1 -SeedCount 8 -Count 2000 -MasterSeed 20260915` re-draws the same
+eight) and it is **RED at all eight, 37 diverging rows** - interactions 21, verbs 5, fuzzy 4,
+partial 4, partial-sliced 2, conditionals 1. S52's done-criterion is "no unjudged row" and a sweep at
+fresh seeds is the instrument for making them, so as written S52 can never close. Recommended: close
+S52 on the hardening tooling and generators it delivered, give the sweep's triage its own slice.
+Tallies in `TestResults/oracle/sweep.jsonl`, waves under `TestResults/oracle/sweep-<seed>/`.
 
-**SITTING 11'S FIRST JOB: the five remaining `(*SKIP)`-family rows** - seed 7 74413, 76160 and
-75921, seed 4242 76778 and 77119. Sitting 8's table still describes four of them; 75921 is sitting
-9's, measured and deliberately unpinned. Regenerate with
-`pwsh -File tools/run-oracle.ps1 -Count 6000` then `python tools/probes/gate-divergence-doors.py`.
+**STILL ON THE GATE, 3 rows.** Seed 7 75921 (sitting 9's, deliberately unpinned); seed 7 76160 (the
+`bestmatch` family's OWN door rules it out - `(*PRUNE)` still times out at 300s, anchored door points
+the wrong way); seed 20260915 104366, now scope item 7 of S52c. All four drawn rows re-run without a
+gate: `python tools/probes/upstream-gate-drawn-skip-rows.py`, port half
+`port-gate-drawn-skip-rows.ps1`.
 
-**RUN THE DEFAULT WAVE BEFORE THE GATE, never after** (one `report-<seed>.txt` per seed whatever the
-row count). **`-Rows <file> -SkipRecord` IGNORES the file**; a rows control is `-Rows <file>` alone.
-**Probe a `verbs` or `partial-sliced` row PREFILTER-FREE** or upstream gives this port's answer.
-**The verifier brief carries a do-not-use-git clause - paste it** (`docs/VERIFICATION.md`).
+**RUN THE DEFAULT WAVE BEFORE THE GATE, never after.** **`-Rows <file> -SkipRecord` IGNORES the
+file.** **Probe a `verbs` or `partial-sliced` row PREFILTER-FREE.** **Paste the verifier brief - it
+carries a do-not-use-git clause** (`docs/VERIFICATION.md`).
 
-**Also owed on S52:** the `timeout` rows generator (needs S51's `timeout`), the recorded 20-seed
-sweep run, the `pos`/`endpos`-versus-`codepointSlice` fix (its own slice). Long generators stay OFF
-the default `-Generator` list. **Carried:** the repo-wide `_regex.c` citation reconciliation
-(`:14545`/`:14551`/`:20903`/`:18160` stale, `:14553`/`:14555`/`:20927-20928`/`:18159` right); never
-write a tracked file from a Python helper on Windows without `newline=""`, and re-escape `\uXXXX`
-after an edit, because the editing tool resolves them; `port-tests/SKILL.md` still teaches
-`FuzzyRegex.Search(...)`; `record-oracle.py --self-check` exits 1 on the interpreter-limit guard
-(pre-existing since S43); `tools/run-controls.py` cannot measure a control that mutates the
-recorder; broken control sites S32-B and S38-A; S35-A and S29-A/D thin;
-`upstream-reversed-overlapped-skip.py`'s three original `verbs` cases compile WITH the prefilter, so
-two entries' 2026-09-12 facts are untested prefilter-free; PORTMAP `_regex.c` lines stale;
-`quantifiers-long`'s filler margin 28 -> 32, worth re-deciding.
-**Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.
+**Also owed on S52:** the `timeout` rows generator (needs S51's); the 20-seed sweep and 6000-row gate
+(S57); the `pos`/`endpos`-versus-`codepointSlice` fix (own slice); long generators stay OFF the
+default list. **Carried** (unchanged, full list in sitting 10's notes): the `_regex.c` citation
+reconciliation, `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`, `record-oracle.py
+--self-check`, `run-controls.py`, control sites S32-B/S38-A/S35-A/S29-A/D,
+`upstream-reversed-overlapped-skip.py`'s prefilter-on cases, PORTMAP lines, `quantifiers-long`'s
+filler margin - plus NEW: `oracle.yml`'s weekly sweep is red every Thursday until its verdict rule
+tells a known family from a new one. **Open for the owner:** the S52 split; `slice_start` versus
+`text_start` (ledger 24); `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.

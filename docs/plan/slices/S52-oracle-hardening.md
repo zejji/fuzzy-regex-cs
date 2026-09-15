@@ -1826,3 +1826,383 @@ It used no git undo command and left the tree byte-for-byte as it found it, chec
   still a wave-format change wanting its own slice.
 - Sitting 8's Control A's `-SkipRecord`, and the three prefilter-on cases in
   `upstream-reversed-overlapped-skip.py`, both above.
+
+---
+
+## Sitting 11 (2026-09-15) - CHECKPOINT, landed and verified by sitting 13
+
+Sitting 11 judged three of the six remaining gate rows, measured a fourth and deliberately left it
+unjudged, and ran the seed sweep for the first time. **It was killed before it committed**, and
+sitting 12 was killed at 16:12 before it committed either; the orchestrator stashed the work and
+sitting 13 applied it, re-derived every claim in it and committed it. This section is sitting 11's
+finding; the sitting 13 section below says which of its claims survived measurement and which did
+not. No engine code changed, and no new gap test was written: all three rows joined families that
+already carry a pinning test.
+
+### The three rows, and the one line that classifies each
+
+`(*PRUNE)` answers this port's answer on all three, which is the ordinary case on a scan and judges
+nothing on its own. What each row needed is one further line, and in each case the family it joins
+already had that line written down.
+
+**Seed 7 row 74413 -> `end-of-line-reads-a-skip-moved-slice`.** A reversed `subf`, MULTILINE.
+Upstream replaces once over a span ENDING AT codepoint 3, where its own `$` is true at 4 and 5
+alone. The family's own control - `$` spelled out as what `$` is defined to be - gives this port's
+`sub 0`, as do `(*PRUNE)` and the deleted verb:
+
+```
+as drawn            ('-}<U+10428>\r\n', 1)             <- upstream
+$ spelled out       ('<U+10428><U+10428>a\r\n', 0)     <- ours
+(*SKIP)->(*PRUNE)   ('<U+10428><U+10428>a\r\n', 0)     <- ours
+verb deleted        ('<U+10428><U+10428>a\r\n', 0)     <- ours
+(?w)$               ('-}<U+10428>\r\n', 1)             <- upstream: the twin CANNOT isolate here
+```
+
+`(?w)$` is true at [3, 5] where `$` is true at [4, 5], so the phantom end 3 is a line end the twin
+would create anyway. That is the second row on which the `(?w)` control cannot run, and it is
+exactly the condition the entry already states for row 24224 rather than a new limitation.
+
+**Seed 4242 rows 76778 and 77119 -> `bestmatch-walk-truncated-by-a-skip`, and they are the first
+rows a GENERATOR has ever drawn into that family** - its five existing rows were all authored by
+S48's hunt over an 11,340-shape alphabet. What classifies both is the `(?b)`-FREE PAIR, which is
+one line and not a reading:
+
+```
+row 76778   a REVERSED anchored `match`, (?b) + (*SKIP)
+  (?b) + (*SKIP)        (0, 8) one deletion   <- upstream
+  (?b) + (*PRUNE)       (1, 8) NO errors      <- ours
+  no (?b) + (*SKIP)     (0, 8) one deletion
+  no (?b) + (*PRUNE)    (0, 8) one deletion
+
+row 77119   a forward overlapped `finditer`, (?b)(?e) + (*SKIP)
+  (?b)(?e) + (*SKIP)    NO MATCH AT ALL       <- upstream
+  (?b)(?e) + (*PRUNE)   (0, 5) one substitution  <- ours
+  verb deleted          (0, 5) one substitution
+  no (?b) + (*SKIP)     (0, 5) one substitution
+```
+
+**With `(?b)` deleted the two verbs answer identically, and with `(?b)` present they do not.** So
+the pruning `(*SKIP)` does - the thing it shares with `(*PRUNE)`, and the thing it is entitled to do
+- is not what moves either row; a verb that only matters while a `(?b)` walk is running is a verb
+acting on the walk, which is this entry's whole mechanism. Row 76778 is the sharpest statement of
+the family anywhere in the file: `(?b)`'s entire promise is to improve on the non-best answer, and
+with the verb present it improves by NOTHING - the drawn line and the `(?b)`-free line are the same
+one-deletion match - while its own `(*PRUNE)` spelling under `(?b)` finds a zero-error one.
+
+Row 77119's judged answer is the first in that entry that CARRIES an error, so the array's remark
+that "every one is a perfect match" was corrected rather than left to rot. What the family promises
+is the fewest errors among the matches that exist, not zero of them.
+
+### The row that resembles the family and is NOT filed under it
+
+**Seed 7 row 76160**, a `(?b)` `split` carrying a `(*SKIP)`, has the same fingerprint at a glance -
+`(?b)`, a verb, and the verb-free spelling landing on a different answer from the drawn one - and
+the family's OWN DOOR rules it out. Two measurements:
+
+- **Its `(*PRUNE)` spelling does not terminate.** Sitting 8 gave it 5 seconds, sitting 11 gave it
+  300, and sitting 13 gave it 300 again on the committed probe and got the same
+  `TimeoutError: regex timed out`. So the one control that separates the moved bound from the
+  pruning cannot be run on this row at all.
+- **The anchored door that stands in for it points the OTHER WAY.** On row 1 of the family,
+  upstream's own `match` at the candidate the walk never reached finds a PERFECT match where its
+  `search` found a one-error one. Here upstream's own `match(4, 7)` on the drawn object costs
+  `(1, 0, 1)` - two errors - where this port's own unanchored answer is (4, 7) with none. The
+  candidate the truncated walk is supposed to have missed is WORSE than the answer upstream gave,
+  which is the opposite of the family's signature.
+
+And this port's own two answers differ in the same way: its unanchored search gives (4, 7) with no
+errors and its own `MatchAtStart(4, ...)` gives (4, 7) with `(1, 0, 1)` and different groups -
+`g1=(6, 6) g2=(6, 7)` where the search gives `g1=(5, 5) g2=(5, 6)` - which is upstream's anchored
+answer span for span and group for group. So both engines agree completely on the anchored question
+and disagree only on the scan, and nothing either of them says settles which scan is right.
+
+It stays on the gate, unjudged, with the measurement recorded. Filing it on the resemblance would
+have been the guess this file already spends three paragraphs on.
+
+### One thing found while measuring it, worth three lines and no more
+
+Row 76160 with `(?b)` deleted, asked as a single `search`, reports a change POSITION that is a
+pointer-sized integer in a seven-character subject, where the same ablation with `(*PRUNE)` reports
+an in-range one. It is an ablation rather than the drawn row and nothing here rests on it, but it is
+a fresh symptom of ledger entry 11's change-stack pollution and the first with an out-of-range value
+rather than a merely wrong one. The value is a machine address and differs per run, so what
+reproduces is that it is out of range, not the number.
+
+### Row 104366 is handed to S52c, as the orchestrator directed
+
+Sitting 10 measured the empty-slice reversed partial to the bottom and left it for the owner. It is
+now scope item 7 of `S52c-metamorphic-invariants.md` with a "Done when" box, and the reason it
+belongs there rather than in a gate triage is the whole of sitting 10's finding: **neither engine is
+self-consistent** - 33 cells, 23 agree, 10 differ, and the 10 split both ways - so the oracle's "do
+they agree" question has no useful answer on it and only an invariant can separate right from wrong.
+The owner's ruling on `slice_start` against `text_start` is still open and S52c should not wait for
+it: the invariant is worth having either way, and if it fires on both engines that is the finding.
+
+### The seed sweep ran for the first time, and it is RED at every seed
+
+`tools/sweep-seeds.ps1` and `oracle.yml`'s Thursday cron (`0 3 * * 4`, the `sweep` job) were both
+built by an earlier sitting; the RUN was still owed. Eight seeds at 2,000 rows a generator in
+Release, 336,000 rows:
+
+```
+pwsh -File tools/sweep-seeds.ps1 -SeedCount 8 -Count 2000 -MasterSeed 20260915
+```
+
+**`-MasterSeed 20260915` is what makes this reproducible**: the eight seeds are drawn from it and
+printed, so the same command re-draws the same list. Every one of the eight is RED, 37 diverging
+rows in all, and the log (`TestResults/oracle/sweep.jsonl`, one JSON object a seed) holds the tally
+and the per-generator split for each:
+
+| seed | diverging | by generator |
+|---|---:|---|
+| 655924813 | 4 | interactions 2, partial 1, fuzzy 1 |
+| 523701539 | 3 | interactions 1, verbs 1, fuzzy 1 |
+| 31256406 | 3 | interactions 1, verbs 1, fuzzy 1 |
+| 678716286 | 7 | interactions 3, verbs 1, conditionals 1, partial-sliced 1, partial 1 |
+| 432860808 | 6 | interactions 4, verbs 2 |
+| 793244924 | 7 | interactions 5, partial 1, fuzzy 1 |
+| 613157220 | 2 | interactions 2 |
+| 520159961 | 5 | interactions 3, partial 1, partial-sliced 1 |
+| **total** | **37** | interactions 21, verbs 5, fuzzy 4, partial 4, partial-sliced 2, conditionals 1 |
+
+Each red seed kept its own wave and report under `TestResults/oracle/sweep-<seed>/`, so the rows can
+be triaged without re-running anything.
+
+**The slice's own done-criterion is that no divergence is left unjudged, and a sweep at eight fresh
+seeds is precisely the instrument for producing new ones.** Sitting 11's recommendation, which the
+owner has to rule on: **S52 should be SPLIT** - closed on the hardening tooling and generators it
+delivered, with the sweep's triage given a slice of its own.
+
+### And the sweep says something about the CI job that nobody could know before it ran
+
+`oracle.yml`'s Thursday job sweeps six fresh seeds every week at the same 2,000 rows, master seed
+the run date (`.github/workflows/oracle.yml:191`, `COUNT=6` when the input is empty). The rate
+measured here is **4.6 diverging rows a seed** (37 over 8), so that job will be **RED every Thursday
+with something like 28 unjudged rows**, none of which can be judged inside a week. (Sitting 11 wrote
+"three or four each time", which is the PER-SEED rate applied to a six-seed run - the blind review
+caught it.) A weekly red that nobody can clear is a weekly red that stops being read, which is worse
+than no job at all.
+
+This is not an argument for deleting it - the sweep is doing exactly what it was built to do, and
+what it has found is real. It is an argument that **the job needs a verdict that distinguishes "a
+new seed drew a known family" from "a new seed drew something nobody has seen"**, and that belongs
+to whoever owns the sweep's triage. Recorded rather than acted on: changing the CI verdict rule is
+not this sitting's scope and should not be decided by the sitting that happens to have run the first
+sweep.
+
+---
+
+## Sitting 13 (2026-09-15) - the verification sittings 11 and 12 never ran
+
+Sitting 11 was killed before it committed and sitting 12 was killed at 16:12 before it committed;
+what survived was a stash of four files - `ExpectedDivergences.cs`, `LEDGER.md`, `DECISIONS.md` and
+the `S52c` slice file - and a scratch directory. **None of it had been through a ratchet, a review or
+a verifier, and every measurement it quoted had been made by a script in `.scratch/` that was never
+committed.** The orchestrator's instruction was to apply it and treat every claim in it as a
+hypothesis. That is this sitting.
+
+### What was re-derived, and what it cost to make it re-derivable
+
+The hypotheses were all upstream-side ablations, so they could be put to upstream again directly. Two
+probes now carry them, and **the point of committing them is that a probe the next reader cannot run
+is not evidence** - the verifier's own rule:
+
+- **`tools/probes/upstream-gate-drawn-skip-rows.py`**, with its rows in
+  `tools/probes/gate-drawn-skip-rows.jsonl` beside it. It reuses `gate-divergence-doors.py`'s
+  `compile_row`/`answer` rather than re-implementing "ask upstream this row's own operation", and it
+  reads its four rows from the committed file rather than from `wave-<seed>.jsonl`, so it does not
+  need a ten-minute gate run and a later run cannot overwrite its input. Sitting 11's scratch version
+  read the wave.
+- **`tools/probes/port-gate-drawn-skip-rows.ps1`**, this port's half for row 76160 - the only
+  port-side claim in the ledger that the wave replay does not already show, because a `split` renders
+  as parts and hides both the span and the error counts.
+
+Every cell of every table in the sitting 11 section above was re-measured from those two probes
+against regex 2026.9.10 and **all of them reproduce**. The rows file doubles as the replay control:
+`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/gate-drawn-skip-rows.jsonl`.
+
+### The gate rows themselves, re-run through the comparer
+
+`pwsh -File tools/run-oracle.ps1 -Rows .scratch/six-rows.jsonl` - the six rows the gate still had
+after sitting 10, written out of the waves by seed and row number:
+
+```
+agree 0  unsupported 0  expected 3  timeout 0  resource 0  diverge 3  of 6 rows
+```
+
+and the three that are now EXPECTED are exactly 74413 (`end-of-line-reads-a-skip-moved-slice`),
+76778 and 77119 (`bestmatch-walk-truncated-by-a-skip`), each classified by the entry sitting 11
+claimed and by no other. The three still diverging are 75921 (sitting 9's, measured and deliberately
+unpinned), 76160 and 104366. **So the gate is 6 -> 3 and the claim survives measurement.**
+
+### One real defect in the stash, and it was in the evidence
+
+**`bestmatch-walk-truncated-by-a-skip` claimed to be "re-recordable in full" from
+`tools/probes/bestmatch-walk-truncated-rows.jsonl`, and after sitting 11 it was not.** The entry grew
+from five rows to seven; the rows file still held six (the five plus the family's agreeing control).
+Anyone following that instruction would have re-recorded five of the seven and found nothing wrong.
+The two drawn rows are now in the file at positions 6 and 7, so the file's order IS the entry's
+order and the agreeing control moves to eighth, and the whole file replays
+
+```
+pwsh -File tools/run-oracle.ps1 -Rows tools/probes/bestmatch-walk-truncated-rows.jsonl
+agree 1  unsupported 0  expected 7  timeout 0  resource 0  diverge 0  of 8 rows
+```
+
+which is the stronger check of the two rows sitting 11 added: their upstream answers are RE-RECORDED
+here rather than read out of the `Example` copy, and they still diverge and still classify. The
+remark's reason for the eighth row was corrected too - it says the five rows were all perfect
+matches, and row 7 now carries an error of its own, so the non-degeneracy guard is no longer the only
+thing keeping it.
+
+### Two claims narrowed rather than kept as written
+
+- **The 300-second non-termination.** Sitting 11 wrote that row 76160's `(*PRUNE)` spelling "does not
+  terminate at 300 seconds". Re-run here at 300 seconds through the committed probe
+  (`python tools/probes/upstream-gate-drawn-skip-rows.py 300`) it is the same
+  `TimeoutError: regex timed out`, so the claim is CONFIRMED - and the probe takes the timeout as an
+  argument rather than hard-coding five minutes, because the other three rows have to stay
+  measurable while this one hangs.
+- **The garbage change position.** Sitting 11 quoted the literal integer
+  `substitutions=[1, 140726012121968]`. It is a machine address: the probe here printed
+  `[1, 140735613342576]` for the same cell and the independent verifier `[1, 140735381672816]`, three
+  values from three processes. (The verifier's two runs inside ONE session gave the same value twice,
+  so it is stable within a process and not across them - "differs per run" was too strong and this is
+  what replaced it.) Quoting the integer would have sent the next reader looking for a number they
+  will never see; what reproduces is that the position is outside the seven-character subject, and
+  that is what the text says now.
+
+### The negative controls, run against the code committed here
+
+No control mutates the engine, because no engine code changed. What there is to control is the
+KEYING of the three rows sitting 11 judged: each entry classifies a row by the row's question AND by
+this port's judged answer, and an answer that is wrong classifies nothing while a predicate that is
+too wide classifies everything. Both were run last, after the final edit, over
+`.scratch/six-rows.jsonl` - the six gate rows written out of the waves by seed and row number by
+`.scratch/s11-rowsfile.py` - with `pwsh -File tools/run-oracle.ps1 -Rows <file>`. **No
+`-SkipRecord`**: with it the runner ignores the file and eats whatever wave is on disk.
+`.scratch/s13-control.py break-A` / `restore-A` (and `-B`) applies and reverts each by exact
+re-edit, never by git, and `ExpectedDivergences.cs` has the same md5 before and after both.
+
+> **Control A, the `end-of-line-reads-a-skip-moved-slice` answer**: in
+> `_endOfLineReadsMovedSliceOurs`, change the third and last entry of the array - seed 7 row 74413's
+> judged answer, `ExpectedDivergences.cs:884`, the second of the two lines beginning `sub 0` - from
+> `sub 0` to `sub 1`, leaving its quoted subject exactly as it is. (That subject is written in the
+> file as `\uXXXX` escapes and is deliberately NOT quoted here: every editing tool in this harness
+> RESOLVES those escapes, which is how the first draft of this paragraph came to name a string that
+> appears nowhere in the file. `.scratch/s13-control.py break-A` applied it here and refuses unless
+> the line matches exactly once, but `.scratch` is gitignored: the edit named above is the record.)
+> Result: **expected 2, diverge 4 of 6**; the row that stops being classified is 74413 and only
+> 74413, the two `bestmatch` rows still classifying.
+>
+> **Control B, the `bestmatch-walk-truncated-by-a-skip` answer**: in
+> `_bestmatchWalkTruncatedOurs`, change the seventh entry - seed 4242 row 77119's judged answer -
+> from `"matches 1 | match 0:(0,5)[(0,5)] last=-1/- fuzzy=(1,0,0)[s:0][i:][d:]"` to `0:(0,6)[(0,6)]`.
+> Result: **expected 2, diverge 4 of 6**; the row that stops being classified is 77119 and only
+> 77119.
+>
+> Unbroken, before and after both: **expected 3, diverge 3 of 6**.
+
+The second seed these controls ask for does not apply - they run on six explicit rows rather than on
+a generator, so there is no seed to vary. What stands in for it is the gate itself, which drew the
+three judged rows at two different seeds, and the family rows file replay above, which re-records
+the two `bestmatch` rows from upstream rather than reading the `Example` copy.
+
+### Numbers
+
+- Ratchet **GREEN**, **6119 / 6119 / 0 skipped**, **6011 distinct ids**, baseline **6011** -
+  unchanged, as it must be: no `.cs` file outside `FuzzyRegex.OracleTests` was touched and no test
+  was added.
+- `dotnet build tests/FuzzyRegex.OracleTests -c Release` clean, 0 warnings - sitting 3's lesson, that
+  the parity ratchet builds `tests/FuzzyRegex.Tests` alone and cannot see a broken oracle project.
+- The six-row replay above: **expected 3, diverge 3 of 6**.
+- The family rows file replay above: **expected 7, agree 1, diverge 0 of 8**.
+- The seed sweep's eight seeds and 37 rows, read back out of `TestResults/oracle/sweep.jsonl` rather
+  than transcribed from a terminal.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results.**
+
+**Pass one, over the whole diff: five findings raised, five reproduced, five fixed.** None was a
+defect in the port or in either judgement; all five were defects in the EVIDENCE, and two of them
+were mine rather than sitting 11's.
+
+1. **The weekly-CI prediction was the PER-SEED rate applied to a six-seed job.** Sitting 11 wrote
+   that `oracle.yml`'s Thursday sweep would be red "with three or four unjudged rows each time"; the
+   measured rate is 4.6 a seed over eight seeds and the job runs six, so the figure is about 28 a
+   run. The reviewer derived it from `sweep.jsonl` and from the job's own `COUNT=6` default.
+2. **Control A named a string that appears nowhere in the file.** The judged answer it says to break
+   is written in `ExpectedDivergences.cs` as `\uXXXX` escapes, and the editing tool RESOLVED them
+   when this file was written - so the quoted string had a real astral pair and a real line break in
+   it. This is the standing lesson STATE.md already carries, walked into anyway. The control now
+   names the file, the line and the one-word edit instead of quoting the string.
+3. **The new probe's own comment said sitting 8 gave row 76160's `(*PRUNE)` line 300 seconds.** It
+   gave it five; the three other copies of that claim in this diff all say so.
+4. **The ledger said "300 seconds at two sittings on two days".** Both 300-second runs are
+   2026-09-15.
+5. **`_endOfLineReadsMovedSliceOurs`'s remark was widened from "Both are" to "Every one is" without
+   widening its citation.** It cited `upstream-skip-carried-slice-doors.py`, which holds the first
+   two rows and not the third. The citation is now split between the two probes that actually hold
+   each row.
+
+The reviewer also reproduced, from the committed tree, every cell of both sitting-11 tables, the
+300-second timeout, the port half's two answers, all four replays, the ratchet and the oracle build;
+confirmed the four probe rows are byte-identical in their question fields to the wave rows they were
+taken from and that the family rows file's rows 6 and 7 match the entry's `Example` constant; checked
+that `interactions` is not a prefilter-free generator, so the probe asks the same way the recorder
+did; and found no UTF-16-versus-codepoint error, which was the first thing on its hunt list.
+
+**Pass two, a first pass over the fix delta: three findings raised, three reproduced, three fixed.**
+All three were in the repairs themselves, and the first is the same class of defect as the finding it
+was repairing. (1) Control A's new line citation was two lines out - fixing the remark above the
+array had moved it - so it pointed at the FIRST entry, and the "from `sub 0`" instruction is
+ambiguous between two lines of the array; following it literally would have broken a row that is not
+in the control's input and measured nothing. It now names line 884, says it is the third and last
+entry and says which of the two `sub 0` lines it is. (2) The parenthetical that replaced the quoted
+string miscounted the escapes ("five", where the subject is six `\uXXXX` escapes and a literal `a`);
+the count is gone rather than corrected, because it bought nothing. (3) `oracle.yml:190` is the input
+read, not the `COUNT=6` default, which is `:191`.
+
+Pass two independently re-derived the sweep arithmetic (4+3+3+7+6+7+2+5 = 37, 37/8 = 4.625, times six
+= 27.75), the cron expression and row count, the three timings, and the split probe citation, and
+found those clean.
+
+**No third pass.** The fixes after pass two are three line-number and wording corrections inside text
+pass two had just read, and nothing in them is a new claim.
+
+**And the independent verifier ran** (amendment 16 limb (d)), a fresh agent briefed with nothing but
+this tree and `docs/VERIFICATION.md`'s do-not-use-git clause. It re-ran every claim these two
+sections, the ledger sub-section, DECISIONS and STATE.md make. **One came back DIFFERENT and is
+fixed above; two came back COULD NOT RUN and both are annotated in place; everything else was
+CONFIRMED.**
+
+**DIFFERENT.** "The garbage change position differs per run" was too strong: the verifier's two runs
+inside one session printed the same address twice, and a third value across processes. Stated now as
+what it is - stable within a process, not across them - with all three values named.
+
+**COULD NOT RUN, two, neither a gap in the measurement.** The sweep itself, because re-running
+`sweep-seeds.ps1` would overwrite the per-seed waves the tree cites as kept evidence and its
+resumption key would skip all eight seeds anyway; instead the verifier read every tally and split
+back out of `sweep.jsonl` and **re-derived the eight drawn seeds independently** from
+`[System.Random]::new(20260915)`, getting the table's list in the table's order. And sitting 11's own
+300-second run and the two killed sittings, because no artefact of either survives - sitting 13's
+300-second run reproduces, which is what the text now rests on.
+
+**CONFIRMED:** every cell of both sitting-11 tables, re-derived TWICE - through the committed probe
+and by importing `regex 2026.9.10` directly; the `$` and `(?w)$` position lists and the drawn span;
+the 300-second timeout; the anchored door on both engines, group for group; all four replays
+including which entry classifies which row and which three rows are still diverging, with each of the
+six matched back to its wave row by question fields rather than assumed; both controls, to the exact
+`expected`/`diverge` pair and the exact row that stops classifying, with the file's md5 identical
+after each restore; the ratchet and the oracle build; the two entries' row constants being
+field-for-field identical to the wave rows they were taken from, `pruneOutcome` and
+`bestmatchFreeOutcome` included; the three judged answers being the rows' own `pruneOutcome`s; the
+`_regex.c` citations `:14553`, `:14555`, `:7110` and `:17625`, the `_regex_core.py:506-510` dispatch,
+`oracle.yml:191` and the Thursday cron, and `ExpectedDivergences.cs:884` as Control A's line; the
+sweep arithmetic; that `upstream-skip-carried-slice-doors.py` really does not hold row 74413, which
+is what the split citation says; that `interactions` is not prefilter-free, so the probe asks the way
+the recorder did; and that no engine code changed and no test was added.
+
+It used no git command but `status` and `diff`, reverted both controls with the slice's own script,
+and left the tree byte-identical.
