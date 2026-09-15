@@ -1,8 +1,9 @@
-"""The two `turkic-default-folding` rows whose answers carry no spans, and the controls that judge them.
+"""The `turkic-default-folding` rows whose answers carry no spans, and the controls that judge them.
 
 S52, 2026-09-15. The three-seed 2000-row wave of commit 58977bb was RED at all three seeds; two of
 the three rows were this family in a `subf` and a `split`, where upstream's answer is an exception
-and a list of parts and so holds no match position for `ExpectedDivergences` to read.
+and a list of parts and so holds no match position for `ExpectedDivergences` to read. S52's second
+sitting added a third, seed 4242 row 24256 of the 2000-row wave of commit 407c0cb.
 
 What this probe shows is that each row IS the `T` rows of `CaseFolding.txt` and not something else,
 by taking the Turkic pairing away and watching the divergence go with it. Run:
@@ -55,6 +56,21 @@ for pat, sub, label in [
 ]:
     show(f"    {label}", lambda p=pat, s=sub: (lambda m: (m.span(), m.group(), m.fuzzy_counts))(
         regex.compile(p, I | F).match(s)))
+
+print()
+print("=== seed 4242 row 24256 (interactions, split), added by S52's second sitting 2026-09-15")
+pat42, sub42 = r"\b(?P<g1>[^a-f])*?(?P<g2>[A-Z]{1}?)", "ßßıı"
+show("  upstream split (the recorded answer)",
+     lambda: regex.compile(pat42, I | F).split(sub42))
+show("  the match behind it",
+     lambda: [(m.span(), m.span(2)) for m in regex.compile(pat42, I | F).finditer(sub42)])
+print("  CONTROL: swap the two U+0131 for a letter whose DEFAULT fold reaches A-Z and the")
+print("  divergence goes with it - upstream splits four ways and so does this port, because the")
+print("  `[A-Z]` is now matching something every engine agrees it matches")
+show("    U+0131 -> z", lambda: regex.compile(pat42, I | F).split("ßßzz"))
+print("  CONTROL: again only a range SPANNING `I` reaches the dotless i - 0049; T; 0131")
+for cls in ("[A-Z]", "[A-Y]", "[A-H]", "[J-Z]"):
+    show(f"    {cls} vs U+0131", lambda c=cls: regex.compile(c, I | F).match("ı"))
 
 print()
 print("=== the minimal forms the entry's rows are pinned as, one per span-less shape")

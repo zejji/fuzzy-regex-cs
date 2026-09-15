@@ -240,4 +240,46 @@ public sealed class FuzzyPosixTests
         (m.Groups[2].Index, m.Groups[2].Length).Should().Be((7, 0));
         (m.Groups[3].Index, m.Groups[3].Length).Should().Be((8, 1));
     }
+
+    /// <summary>
+    /// POSIX does not create a match the flagless engine cannot make, so a bounded substitution
+    /// replaces once here and not twice.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Row 24916 of the seed-7 2000-row wave of commit <c>407c0cb</c> (2026-09-15), and the third
+    /// shape the entry <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> covers. It is the one
+    /// where neither the cost nor the span moves. Upstream's <c>subn</c> with <c>count=2</c> reports
+    /// <b>two</b> replacements under POSIX and <b>one</b> without it, and because the template
+    /// <c>\1</c> expands to the empty group either way the two answers carry the same text - the
+    /// count is the only field that says what happened, which is why no predicate over the rendered
+    /// answer could have found this and the entry is keyed on rows.
+    /// </para>
+    /// <para>
+    /// POSIX is documented as leftmost-longest CHOOSING among the matches the ordinary engine can
+    /// make, so an extra zero-width match that only appears when the flag is set breaks the contract
+    /// as plainly as charging a span more errors does. Measured 2026-09-15 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-posix-and-atomic-free-answers.py</c>; this port answers upstream's own
+    /// POSIX-free count.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void Posix_does_not_add_a_match_the_flagless_engine_cannot_make()
+    {
+        // The flag bits the wave drew it at, 0x1400A: POSIX, FULLCASE, MULTILINE, IGNORECASE. The
+        // recorder resolves a version-less pattern under upstream's own default, so Version0 here.
+        FuzzyRegex pattern = new(
+            @"(?b)(?:([a]*)[a]*){s<=1}\g<1>\K$",
+            FuzzyRegexOptions.Posix
+                | FuzzyRegexOptions.FullCase
+                | FuzzyRegexOptions.Multiline
+                | FuzzyRegexOptions.IgnoreCase
+                | FuzzyRegexOptions.Version0
+        );
+
+        string replaced = pattern.Replace("\rA\n", "\\1", 2, out int replacements);
+
+        replacements.Should().Be(1);
+        replaced.Should().Be("\rA\n");
+    }
 }

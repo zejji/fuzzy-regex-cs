@@ -3,3 +3,4 @@
 {"generator": "rows", "pattern": "(?i)I", "flags": 0, "namedLists": {}, "subject": "ı", "operation": "subf", "template": "{1}", "count": 0}
 {"generator": "conditionals", "pattern": "(?r)(?(?!s)[A-Z]{2}|(S))$", "flags": 16394, "namedLists": {}, "subject": "s\rSı", "operation": "subf", "template": "{0[2]}", "count": 3}
 {"generator": "interactions", "pattern": "^(?:ﬁİ){e<=2:\\S}([^a-f]+)$", "flags": 16386, "namedLists": {}, "subject": "İİﬁ ﬁﬀ", "operation": "split", "count": 3}
+{"generator": "interactions", "pattern": "\\b(?P<g1>[^a-f])*?(?P<g2>[A-Z]{1}?)", "flags": 16386, "namedLists": {}, "subject": "ßßıı", "operation": "split", "count": 0}

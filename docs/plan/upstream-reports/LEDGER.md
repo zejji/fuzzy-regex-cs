@@ -2533,3 +2533,51 @@ The retry then re-derives the default flags from the version it actually resolve
 `Gaps/Parsing/DefaultVersionTests.cs`, whose `Version_0_means_simple_folding_however_it_is_asked_for`
 puts all three spellings side by side; all 1,659 compile-parity rows are unmoved, which is the
 evidence that the reordering is a no-op under version 0.
+
+---
+
+## 23. `POSIX` adds a zero-width match the flagless engine does not make
+
+**Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
+2026-09-12); this entry is drafted here and re-verified against the then-current release first.
+
+**Found by the oracle**, seed 7 row 24916 of the three-seed 2000-row wave of commit `407c0cb`
+(S52, 2026-09-15). It is the third way `POSIX` has been seen to break the same contract, and the
+first where neither a cost nor a span moves: entry 9 is upstream charging a span more errors under
+the flag than its own flagless engine needs, entry 16 is the flag dropping the leftmost-LONGEST
+match, and this is the flag producing a match that is not there without it.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-15
+(`python tools/probes/upstream-posix-and-atomic-free-answers.py`, the last POSIX row). Flags
+`0x1400A` - `POSIX | FULLCASE | MULTILINE | IGNORECASE`:
+
+```python
+>>> import regex
+>>> pat, subj = r"(?b)(?:([a]*)[a]*){s<=1}\g<1>\K$", "\rA\n"
+>>> regex.compile(pat, 0x1400A).subn(r"\1", subj, count=2)
+('\rA\n', 2)          # POSIX: two replacements
+>>> regex.compile(pat, 0x1400A & ~0x10000).subn(r"\1", subj, count=2)
+('\rA\n', 1)          # the same question without POSIX: one
+```
+
+**Why the count is the only field that says so.** The template `\1` expands to a group that
+matched nothing, and both matches are zero-width, so the two answers carry the same text. A
+differential oracle keyed on the rendered answer would see nothing; this row was caught because the
+recorder writes the replacement COUNT down as well.
+
+**Why it is a defect rather than a choice.** `POSIX` is documented as leftmost-longest matching -
+it chooses among the matches the ordinary engine can already make. Producing one the flagless
+engine cannot is outside anything the flag is defined to do, in the same way entry 16's dropping of
+the longest match is.
+
+**Where it comes from: NOT ESTABLISHED, and a report must say so rather than guess.** Nothing here
+has been traced to a line of `_regex.c`; the only thing measured is that the flag is what moves the
+count. Entry 16 names `check_posix_match` (`:11602`) as the suspected area for its own symptom and
+this entry does not inherit that claim. The `/Od /Zi` MSVC build S47c installed is the instrument
+that would settle it and was not used here.
+
+**What this port answers.** One replacement, which is upstream's own POSIX-free count. Pinned by
+`Gaps/Engine/FuzzyPosixTests.Posix_does_not_add_a_match_the_flagless_engine_cannot_make` and
+classified in the oracle by `posix-fuzzy-contradicts-its-own-flagless-answer`.
+
+**Related:** entry 9 (the cost half, whose port side S48b fixed), entry 16 (the longest-match half).

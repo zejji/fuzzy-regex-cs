@@ -207,7 +207,8 @@ internal static class OracleWave
                 : null,
             ReadLeakFreeFuzzy(row),
             row.TryGetProperty("posixFreeOutcome", out JsonElement posixFree) ? ReadOutcome(posixFree) : null,
-            row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null
+            row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null,
+            row.TryGetProperty("pruneOutcome", out JsonElement pruneOutcome) ? ReadOutcome(pruneOutcome) : null
         );
     }
 
@@ -656,6 +657,16 @@ internal sealed record OracleHeader(
 /// <see langword="null"/> on every pattern without an atomic group and on any wave recorded before
 /// this slice. Never compared; only <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="PruneOutcome">
+/// A seventh (S52). The whole row asked again with every <c>(*SKIP)</c> spelled <c>(*PRUNE)</c> -
+/// the same backtracking pruned, neither slice bound moved (<c>upstream/src/_regex.c:14545</c> and
+/// <c>:14551</c> are the two lines <c>(*SKIP)</c> has and <c>(*PRUNE)</c> has not). Four entries in
+/// <see cref="ExpectedDivergences"/> already rest their judgement on this control and each quoted a
+/// probe run by hand; recording it per row is what lets an entry read it. <see langword="null"/> on
+/// every pattern without a <c>(*SKIP)</c>, on any row upstream will not answer with the verb swapped,
+/// and on any wave recorded before this slice. Never compared; only
+/// <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 /// <param name="DefaultVersion">
 /// The <c>DEFAULT_VERSION</c> the RECORDER resolved this row's pattern under, stamped onto every row
 /// by <see cref="OracleWave.Load"/> from the wave header. Part of the question: a pattern naming no
@@ -687,6 +698,7 @@ internal sealed record OracleRow(
     IReadOnlyList<OracleFuzzy?>? LeakFreeFuzzy = null,
     IOracleOutcome? PosixFree = null,
     IOracleOutcome? AtomicFree = null,
+    IOracleOutcome? PruneOutcome = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0
 );
 

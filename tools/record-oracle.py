@@ -361,6 +361,11 @@ _POSIX_INLINE = "(?p)"
 _ATOMIC_OPEN = "(?>"
 _ATOMIC_FREE_OPEN = "(?:"
 
+# The two backtracking verbs, for the control that swaps one for the other. Both prune the same
+# backtracking; only `(*SKIP)` moves a slice bound (`upstream/src/_regex.c:14545`, `:14551`).
+_SKIP_VERB = "(*SKIP)"
+_PRUNE_VERB = "(*PRUNE)"
+
 # Which outcome kinds are an ANSWER to a second question. Anything else - an error, a timeout, a
 # resource blowup - says nothing about what the construct did, so the key is left off entirely.
 _ANSWERED = ("match", "nomatch", "sub", "split", "matches")
@@ -427,6 +432,37 @@ def _without_atomic_groups(row: dict, pattern: str, flags: int) -> dict | None:
     return {**row, "pattern": pattern.replace(_ATOMIC_OPEN, _ATOMIC_FREE_OPEN)} if _ATOMIC_OPEN in pattern else None
 
 
+def _with_prune_instead_of_skip(row: dict, pattern: str, flags: int) -> dict | None:
+    """The same row with every ``(*SKIP)`` made a ``(*PRUNE)``, or ``None`` where there is none.
+
+    THE ONE CONTROL THIS FILE ALREADY RELIES ON IN PROSE AND HAS NEVER RECORDED. Four entries in
+    ``tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`` - ``search-start-partial``,
+    ``partial-retry-reversed-slice``, ``partial-retry-carried-slice-forward`` and
+    ``skip-blocks-a-repeat-retreat-partial`` - rest their judgement on it, each quoting a probe run
+    by hand: ``(*PRUNE)`` prunes exactly the backtracking ``(*SKIP)`` prunes and moves NO bound
+    (``upstream/src/_regex.c:14545`` and ``:14551`` are the two lines that move ``slice_start`` and
+    ``slice_end``, and the ``(*PRUNE)`` arm has neither), so an answer that changes between the two
+    changed because of the bound and not because of what the pattern means. Recording it makes that
+    a per-row fact the consumer can read instead of a paragraph a reader has to trust.
+
+    NOT A JUDGEMENT AND NOT A GATE, exactly like the three controls above. ``(*SKIP)`` is documented
+    to do something ``(*PRUNE)`` does not - "the next attempt at a match will start at the position
+    in the string where ``(*SKIP)`` was encountered" - so the two answering differently is the
+    ordinary case, and on the great majority of rows both engines follow upstream's ``(*SKIP)``
+    together and nothing here fires. What the key supplies is the OTHER half of a row-keyed entry:
+    which of the two answers this port gave.
+
+    GATED ON THE TEXT, like ``subMatches`` and ``anchoredScan``'s own ``"(*SKIP)" in pattern``. A
+    ``(*SKIP)`` inside a character class is literal text and the edit would ask a different
+    question there - but no generator writes one, and a row whose key is useless is still REPORTED
+    rather than classified, because every entry that reads this is keyed on rows as well.
+
+    Unused ``flags``, kept so every control has one signature.
+    """
+    del flags
+    return {**row, "pattern": pattern.replace(_SKIP_VERB, _PRUNE_VERB)} if _SKIP_VERB in pattern else None
+
+
 # Each control's recorded key, and how to take its construct away. Every one is A SECOND FACT
 # ABOUT UPSTREAM, never compared against anything, exactly as `searchOnlyPartial` and
 # `anchoredScan` are: only the consumer's `ExpectedDivergences` reads them.
@@ -443,6 +479,7 @@ _CONTROLS = (
     ("bestmatchFreeOutcome", _without_bestmatch),
     ("posixFreeOutcome", _without_posix),
     ("atomicFreeOutcome", _without_atomic_groups),
+    ("pruneOutcome", _with_prune_instead_of_skip),
 )
 
 

@@ -335,4 +335,113 @@ public sealed class CaseFoldingTests
     [Arguments("ı", "ı", true)]
     public void The_ascii_encoding_folds_only_the_plain_pair(string pattern, string subject, bool expected) =>
         FuzzyRegex.FullMatch(subject, "(?ai)" + pattern).Success.Should().Be(expected);
+
+    /// <summary>
+    /// A leading literal whose full fold is longer than one character loses the zero-width partial at
+    /// the end of an empty slice, and the dotted capital is one of those letters here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Row 34508 of the seed-20260915 2000-row wave of commit <c>407c0cb</c>, and the shape where the
+    /// <c>T</c> rows are visible with NO Turkic letter in the subject at all - the U+0130 is the
+    /// pattern's own leading literal. Under <c>(?fiV1)</c> such a literal compiles to a folded STRING,
+    /// and neither engine reports a partial for one when the slice it would start in is empty:
+    /// U+00DF (<c>ss</c>), U+FB00 (<c>ff</c>) and U+01F0 (<c>j</c> + U+030C) all answer None on both
+    /// sides. Upstream answers the partial for U+0130 alone, because <c>0130; T; 0069</c> makes its
+    /// fold a single <c>i</c>, which is what <c>h</c>, <c>i</c> and U+0131 - the one-character folds -
+    /// answer on both sides too.
+    /// </para>
+    /// <para>
+    /// <b>Upstream's own <c>match</c> answers it, not only its <c>search</c></b>, so this is its slow
+    /// path and not the <c>search_start</c> prefilter the entry <c>search-start-partial</c> covers:
+    /// <c>search_start</c> is called only when searching (<c>upstream/src/_regex.c:11816</c>), and
+    /// the row's recorded <c>searchOnlyPartial</c> is <see langword="false"/> for exactly that reason.
+    /// Measured 2026-09-15 on regex 2026.9.10 by
+    /// <c>tools/probes/upstream-turkic-from-the-pattern-side.py</c> and its port half
+    /// <c>tools/probes/port-turkic-from-the-pattern-side.ps1</c>, which print the whole grid.
+    /// </para>
+    /// </remarks>
+    /// <param name="literal">The pattern's leading literal.</param>
+    /// <param name="partialExpected">Whether a zero-width partial is reported.</param>
+    [Test]
+    // Folds longer than one character: no partial. upstream agrees on all three.
+    [Arguments("İ", false)]
+    [Arguments("ß", false)]
+    [Arguments("ﬀ", false)]
+    [Arguments("ǰ", false)]
+    // Folds of exactly one character: the partial. upstream agrees on all three.
+    [Arguments("h", true)]
+    [Arguments("i", true)]
+    [Arguments("ı", true)]
+    public void A_leading_literal_that_folds_longer_than_itself_reports_no_partial_on_an_empty_slice(
+        string literal,
+        bool partialExpected
+    )
+    {
+        // The row's own flags, 0x410A: FULLCASE, VERSION1, MULTILINE, IGNORECASE. The subject is the
+        // row's; the slice is empty at its end, so only the pattern decides the answer.
+        Match m = new FuzzyRegex(
+            "^" + literal + @"\K\b",
+            FuzzyRegexOptions.FullCase
+                | FuzzyRegexOptions.Version1
+                | FuzzyRegexOptions.Multiline
+                | FuzzyRegexOptions.IgnoreCase
+        ).MatchAtStart("sﬁﬀıİ", 5, 0, partial: true);
+
+        m.Success.Should().Be(partialExpected);
+        if (partialExpected)
+        {
+            (m.Index, m.Length).Should().Be((5, 0));
+            m.PartialMatch.Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// A <c>\L&lt;name&gt;</c> word beginning with the dotted capital costs what a word beginning with
+    /// any other expanding fold costs, and not what a one-character fold costs.
+    /// </summary>
+    /// <remarks>
+    /// Row 25482 of the seed-20260915 2000-row wave of commit <c>407c0cb</c>: the Turkic letter is in
+    /// neither the subject nor the pattern text but in a named list, which is the third place the
+    /// entry <c>turkic-default-folding</c>'s span test cannot look. The fuzzy section reaches the
+    /// two-codepoint fold one codepoint sooner, so the first match it finds ends at 2 having spent one
+    /// substitution; a word whose first letter folds to a single character ends at 3 having spent two.
+    /// Upstream answers the SECOND for U+0130 and the first for U+00DF, U+FB00 and U+01F0, which is
+    /// <c>0130; T; 0069</c> and nothing else - measured 2026-09-15 on regex 2026.9.10 by
+    /// <c>tools/probes/upstream-turkic-from-the-pattern-side.py</c>.
+    /// </remarks>
+    /// <param name="first">The list word's first letter.</param>
+    /// <param name="end">Where the zero-width answer lands.</param>
+    /// <param name="substitutions">What it cost to get there.</param>
+    [Test]
+    // Folds longer than one character. upstream answers this for all but U+0130.
+    [Arguments("İ", 2, 1)]
+    [Arguments("ß", 2, 1)]
+    [Arguments("ﬀ", 2, 1)]
+    [Arguments("ǰ", 2, 1)]
+    // Folds of exactly one character, which is what upstream makes U+0130.
+    [Arguments("h", 3, 2)]
+    [Arguments("i", 3, 2)]
+    public void A_named_list_word_starting_on_an_expanding_fold_costs_one_substitution_not_two(
+        string first,
+        int end,
+        int substitutions
+    )
+    {
+        Dictionary<string, IReadOnlyCollection<string>> lists = new(StringComparer.Ordinal)
+        {
+            ["w1"] = [first + "ı", "ﬀ"],
+        };
+
+        // The row's own flags, 0x4102: FULLCASE, VERSION1, IGNORECASE.
+        Match m = new FuzzyRegex(
+            @"(?(?=\D)[\p{L}||\p{N}])\L<w1>{e<=2}\K",
+            FuzzyRegexOptions.FullCase | FuzzyRegexOptions.Version1 | FuzzyRegexOptions.IgnoreCase,
+            lists
+        ).MatchAtStart("ﬀ\r ﬀ", partial: true);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((end, 0));
+        m.FuzzyCounts.Substitutions.Should().Be(substitutions);
+    }
 }
