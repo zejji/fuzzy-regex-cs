@@ -21,7 +21,7 @@
     Both had been held out because a handful of their rows diverge for a reason already judged, and
     holding a whole generator out for a few per cent of its rows trades all of its coverage for
     none. What replaced that is an accounted-for list,
-    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: nine named families, each with the reason,
+    tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs: a named family per divergence, each with the reason,
     the engine that is right, the permanent test that pins this port's answer, and the minimised row
     it was found on. A row one of them accounts for is printed in the report as 'EXPECTED <id>' and
     tallied separately; every other divergence still reds the run.
@@ -31,8 +31,11 @@
     'Every_expected_divergence_still_diverges', which runs each entry's minimised row through the
     live engine on every oracle run and fails when one stops diverging.
 
-    The nine families, in short - plus the one S35 deleted, kept here because how it went is the
-    whole argument for the list being strict:
+    THE FAMILIES BELOW ARE A SELECTION, NOT THE LIST. They are the ones whose history a reader of
+    this file needs - the scan and prefilter families, and the two that were deleted - and they stop
+    at S40b. The file itself is the list, and it is the only thing that is ever complete; every entry
+    added since carries its own reasoning there. Plus the one S35 deleted, kept here because how it
+    went is the whole argument for the list being strict:
 
     'search-start-partial' - upstream's 'search_start' prefilter (upstream/src/_regex.c:8385) gives
     every scanner a partial arm of its own; the slow path this port runs has none, and neither does

@@ -593,32 +593,53 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The one row of <c>partial-retry-carried-slice-forward</c> - the entry above's mechanism in a
-    /// pattern that runs LEFT TO RIGHT - copied out of
-    /// <c>TestResults/oracle/wave-99991.jsonl</c> on 2026-09-13 rather than retyped.
+    /// The three rows of <c>partial-retry-carried-slice-forward</c> - the entry above's mechanism in
+    /// a pattern that runs LEFT TO RIGHT - copied out of the wave files rather than retyped: row 1
+    /// from <c>TestResults/oracle/wave-99991.jsonl</c> on 2026-09-13, rows 2 and 3 from a
+    /// <c>--rows</c> re-record on 2026-09-15.
     /// </summary>
     /// <remarks>
-    /// Row 6897 of <c>pwsh -File tools/run-oracle.ps1 -Count 6000 -Generator fuzzy,interactions
-    /// -Seeds 99991</c>. One row, because one is all any wave has drawn: the forward half of this
-    /// mechanism needs a <c>(*SKIP)</c> whose moved <c>slice_start</c> changes which ALTERNATIVE the
-    /// partial pass can still enter, and that is a narrower accident than the reversed half, which
-    /// only needs the bound to hide an anchor.
+    /// <para>
+    /// Row 1 is row 6897 of <c>pwsh -File tools/run-oracle.ps1 -Count 6000 -Generator
+    /// fuzzy,interactions -Seeds 99991</c>. It was the only row any wave had drawn until S52's third
+    /// sitting, because the forward half of this mechanism needs a <c>(*SKIP)</c> whose moved
+    /// <c>slice_start</c> changes which ALTERNATIVE the partial pass can still enter, and that is a
+    /// narrower accident than the reversed half, which only needs the bound to hide an anchor.
+    /// </para>
+    /// <para>
+    /// Rows 2 and 3 are seed 7 rows 24018 and 24737 of the three-seed 2000-row <c>interactions</c>
+    /// wave of commit 407c0cb, and they widen the SYMPTOM rather than the predicate: on both,
+    /// upstream's partial call answers a match that is not partial at all, and its own non-partial
+    /// call to the same compiled pattern over the same subject answers <c>None</c>. Row 2 is a
+    /// <c>match</c>, which is one attempt, so <c>(*SKIP)</c> has no next attempt to move the start of
+    /// and must prune exactly what <c>(*PRUNE)</c> prunes; row 3 is a <c>search</c>.
+    /// </para>
     /// </remarks>
     private const string _partialRetryForwardRows = """
         {"generator": "interactions", "pattern": "\\b(?:(?:\\ _(\\W)){e<=1}(*SKIP)[A-Z]|[^a])(?:.?(?:(\\w+?)){i<=1:.}){e<=2,s<=1:[^a-z]}(?:(?:[abz]([abz])){2i+1d+1s<=2}(*PRUNE)[\\w\\s]|\\W)", "flags": 8, "namedLists": {}, "subject": "😀ß_ ", "operation": "search", "partial": true, "codepointSpan": [1, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 3, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}, "searchOnlyPartial": false}
+        {"generator": "interactions", "pattern": "\\L<w1>{e<=2}(?:\\D(*SKIP)\\S|\\p{Lu})", "flags": 0, "namedLists": {"w1": ["sı", "İ", "ﬁ", "ﬁı"]}, "subject": "ßß", "operation": "match", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0, 1]}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": true, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [0, 1], "insertions": [], "deletions": []}}}
+        {"generator": "interactions", "pattern": "(?:(?:a[\\p{L}\\p{N}]?(?:(.+?)){e<=2:\\s}){1i+2d+1s<=3}(*SKIP)\\W|\\w)(\\p{Ll}{3,3}?)+\\K", "flags": 8, "namedLists": {}, "subject": "😀😀aa𐐨𐐨 ", "operation": "search", "partial": true, "codepointSpan": [5, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 8, "length": 0, "captures": [[8, 0]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": true, "index": 4, "length": 4, "captures": [[4, 4]]}], "lastIndex": 2, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 0], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": []}}], "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 6, "captures": [[5, 6]]}, {"number": 1, "success": true, "index": 8, "length": 2, "captures": [[8, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
-    /// This port's judged answer to <see cref="_partialRetryForwardRows"/>, as the report renders it.
+    /// This port's judged answer to each row of <see cref="_partialRetryForwardRows"/>, in the same
+    /// order, as the report renders it.
     /// </summary>
     /// <remarks>
-    /// Upstream's own answer to the same row with the first verb spelled <c>(*PRUNE)</c>, and with it
-    /// deleted: both give the substitution at 1 and the capture at (3, 4) in codepoints, which is
-    /// UTF-16 (4, 1) on this astral subject. Measured 2026-09-13, the probe named in the entry.
+    /// Every one is upstream's own answer to the same row with the <c>(*SKIP)</c> spelled
+    /// <c>(*PRUNE)</c>, which prunes the same backtracking and moves no bound. On row 1 deleting the
+    /// verb gives the same answer again; the substitution at 1 and the capture at (3, 4) are in
+    /// codepoints, which is UTF-16 (4, 1) on that astral subject. Measured 2026-09-13 and
+    /// 2026-09-15, the two probes named in the entry.
     /// </remarks>
     private static readonly string[] _partialRetryForwardOurs =
     [
         "match 0:(2,3)[(2,3)] 1:(4,1)[(4,1)] 2:unset 3:unset last=1/- partial fuzzy=(1,0,0)[s:2][i:][d:]",
+        // Row 2, seed 7 row 24018, and upstream's own `(*PRUNE)` answer - two substitutions where
+        // its `(*SKIP)` answer spends two deletions and drops the partial flag.
+        "match 0:(0,2)[(0,2)] last=-1/- partial fuzzy=(2,0,0)[s:0,1][i:][d:]",
+        // Row 3, seed 7 row 24737, and upstream's own `(*PRUNE)` answer again, group and all.
+        "match 0:(5,6)[(5,6)] 1:(8,2)[(8,2)] 2:unset last=1/- partial",
     ];
 
     /// <summary>
@@ -627,6 +648,89 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _partialRetryForward = OracleWave
         .ParseRows(_partialRetryForwardRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _partialRetryForwardOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The two rows of <c>end-of-line-reads-a-skip-moved-slice</c>, as <c>tools/record-oracle.py
+    /// --rows</c> wrote them on 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// Seed 20260915 rows 24224 (<c>interactions</c>, a reversed <c>split</c>) and 38101
+    /// (<c>verbs</c>, a reversed <c>subf</c>) of the three-seed 2000-row wave of commit 407c0cb. Both
+    /// are operations no <c>(*SKIP)</c> entry here had reached before: a <c>split</c> renders as a
+    /// list of parts with no span in it at all, and row 38101's recorded outcome is an EXCEPTION,
+    /// because upstream's template holds <c>{0[-1]}</c> and a match object has no group -1 - so
+    /// upstream raises exactly when it finds a match and answers the subject unchanged when it does
+    /// not.
+    /// </remarks>
+    private const string _endOfLineReadsMovedSliceRows = """
+        {"generator": "interactions", "pattern": "(?r)(?:\\s*?(*SKIP)\\W|[^a])(\\S{1,})$", "flags": 8, "namedLists": {}, "subject": "ﬀﬀ\r\nﬀﬀss\rS", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "S", "", "ﬀﬀss", "ﬀﬀ\r"]}, "pruneOutcome": {"kind": "split", "parts": ["", "S", "ﬀﬀ\r\nﬀﬀss"]}}
+        {"generator": "verbs", "pattern": "(?r)(\\D+(*PRUNE)[^\\p{L}])(?:[^a-f](*PRUNE)){1,3}?((?>\\p{Lu}{1,3}?(*SKIP)\\D))$", "flags": 10, "namedLists": {}, "subject": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "operation": "subf", "template": "-{0[0]}{0[-1]}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "pruneOutcome": {"kind": "sub", "text": "a\r\na𝔘𝔘𐐨\r𐐨𝔘", "count": 0}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_endOfLineReadsMovedSliceRows"/>, in the
+    /// same order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Both are upstream's own <c>pruneOutcome</c> - its answer to the same row with every
+    /// <c>(*SKIP)</c> spelled <c>(*PRUNE)</c> - and both are also upstream's answer when the trailing
+    /// <c>$</c> is spelled out as what <c>$</c> is defined to be. Measured 2026-09-15,
+    /// <c>tools/probes/upstream-skip-carried-slice-doors.py</c>.
+    /// </remarks>
+    private static readonly string[] _endOfLineReadsMovedSliceOurs =
+    [
+        "split 3 '' 'S' '\\ufb00\\ufb00\\u000d\\u000a\\ufb00\\ufb00ss'",
+        "sub 0 'a\\u000d\\u000aa\\ud835\\udd18\\ud835\\udd18\\ud801\\udc28\\u000d\\ud801\\udc28\\ud835\\udd18'",
+    ];
+
+    /// <summary>
+    /// <see cref="_endOfLineReadsMovedSliceRows"/> by its question, mapped to this port's judged
+    /// answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _endOfLineReadsMovedSlice = OracleWave
+        .ParseRows(_endOfLineReadsMovedSliceRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _endOfLineReadsMovedSliceOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The two rows of <c>skip-carried-slice-on-a-scan-with-no-walk</c>, as
+    /// <c>tools/record-oracle.py --rows</c> wrote them on 2026-09-15.
+    /// </summary>
+    /// <remarks>
+    /// Seed 7 rows 25854 (<c>interactions</c>, a forward <c>finditer</c>) and 38151 (<c>verbs</c>, a
+    /// reversed <c>finditer-overlapped</c>) of the three-seed 2000-row wave of commit 407c0cb. Both
+    /// are the carried-slice defect the four <c>overlapped-skip-*</c> entries above judge, and
+    /// neither can be judged BY one of them, because neither row carries an <c>anchoredScan</c> - see
+    /// the entry for the two separate reasons the recorder refuses it.
+    /// </remarks>
+    private const string _skipCarriedSliceNoWalkRows = """
+        {"generator": "interactions", "pattern": "(?b)(?:(?:\\W{2,}[^\\d]*?){1<=e<=2}(*SKIP)\\D|\\w)(\\p{Lu}{2,3}){0,0}", "flags": 2, "namedLists": {}, "subject": "b\r\nabA\n_", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}]}, "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 0, 0], "fuzzyChanges": {"substitutions": [0, 3], "insertions": [], "deletions": []}, "codepointSpan": [0, 5]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 4]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [4, 5]}]}}
+        {"generator": "verbs", "pattern": "(?r)\\p{ASCII}{1,3}(?![a](*SKIP))s(?:[^\\p{L}]*+(*SKIP)\\W|s)[^a]*(?<=\\W(*PRUNE))[A-Z]", "flags": 16386, "namedLists": {}, "subject": "aas\rs\r\ns", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 8]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 8]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}]}}
+        """;
+
+    /// <summary>
+    /// This port's judged answer to each row of <see cref="_skipCarriedSliceNoWalkRows"/>, in the
+    /// same order, as the report renders it.
+    /// </summary>
+    /// <remarks>
+    /// Both are upstream's own <c>pruneOutcome</c>, and both are upstream's own scan taken one match
+    /// at a time from a fresh state. Measured 2026-09-15,
+    /// <c>tools/probes/upstream-skip-carried-slice-doors.py</c>.
+    /// </remarks>
+    private static readonly string[] _skipCarriedSliceNoWalkOurs =
+    [
+        "matches 3 | match 0:(0,1)[(0,1)] 1:unset last=-1/- || match 0:(3,1)[(3,1)] 1:unset last=-1/-"
+            + " || match 0:(4,1)[(4,1)] 1:unset last=-1/-",
+        "matches 2 | match 0:(0,8)[(0,8)] last=-1/- || match 0:(0,5)[(0,5)] last=-1/-",
+    ];
+
+    /// <summary>
+    /// <see cref="_skipCarriedSliceNoWalkRows"/> by its question, mapped to this port's judged answer.
+    /// </summary>
+    private static readonly Dictionary<string, string> _skipCarriedSliceNoWalk = OracleWave
+        .ParseRows(_skipCarriedSliceNoWalkRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _skipCarriedSliceNoWalkOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
@@ -1577,6 +1681,160 @@ internal static class ExpectedDivergences
                 && string.Equals(ourLongerScan.Describe(), walked.Describe(), StringComparison.Ordinal)
         ),
         new(
+            Id: "end-of-line-reads-a-skip-moved-slice",
+            Reason: "Upstream bug, the SAME `$` tell `overlapped-skip-extra-match-reversed` reads, "
+                + "and a separate entry because on these two rows the tell is the WHOLE argument "
+                + "rather than one of two, the operations are ones no entry here had reached, and on "
+                + "row 38101 nothing crosses between matches at all. S52's third sitting, "
+                + "2026-09-15.\n"
+                + "WHAT UPSTREAM'S OWN SOURCE SAYS, and it is the cleanest statement of this defect "
+                + "anywhere in this file. Upstream has eight predicates that ask whether a position "
+                + "is at an edge of the text, and SEVEN of them read a TEXT bound - including `$`'s "
+                + "own Unicode twin, so upstream's `$` disagrees with ITSELF in one file:\n"
+                + "  try_match_START_OF_LINE        :7360  text_pos <= state->text_start\n"
+                + "  try_match_START_OF_LINE_U      :7367  -> {ascii,unicode}_at_line_start,\n"
+                + "                                        :902 / :1945, text_pos <= text_start\n"
+                + "  try_match_START_OF_STRING      :7373  text_pos <= state->text_start\n"
+                + "  try_match_END_OF_STRING        :7123  text_pos >= state->text_end\n"
+                + "  try_match_END_OF_STRING_LINE   :7129  text_pos >= state->text_end\n"
+                + "  try_match_END_OF_STRING_LINE_U :7136  text_pos >= state->text_end\n"
+                + "  try_match_END_OF_LINE_U        :7117  -> {ascii,unicode}_at_line_end,\n"
+                + "                                        :922 / :1966, text_pos >= text_end\n"
+                + "  try_match_END_OF_LINE          :7110  text_pos >= state->SLICE_END  <- odd one\n"
+                + "(`try_match_START_OF_WORD` and `try_match_END_OF_WORD` are word edges, not text "
+                + "edges, and are not in the count.) `RE_OP_SKIP` under `(?r)` writes exactly the "
+                + "field the odd one reads - `state->slice_end = state->text_pos` (:14553). So a "
+                + "`(*SKIP)` in a reversed pattern makes `$` TRUE at the position the verb ran at, "
+                + "wherever the subject actually ends. S35 made every assertion in this port read the "
+                + "text bound; the DECISIONS entry of 2026-09-11 recorded the same `slice_end` "
+                + "against `text_end` split between upstream's fast and slow paths without noticing "
+                + "that every sibling predicate agrees with `text_end` and only `$` does not.\n"
+                + "EVERY LINE NUMBER ABOVE IS AGAINST THE 2026.9.10 PIN and was re-read out of the "
+                + "file. Older text in this repo cites :14545 and :14551 for the two `RE_OP_SKIP` "
+                + "writes and :20903 for the scanner's step; today those are a TRACE call, a blank "
+                + "line and a comment terminator. Reconciling them repo-wide is a maintenance job.\n"
+                + "AND WHAT THE TWO ROWS SAY, each on its own, measured 2026-09-15 on regex 2026.9.10 "
+                + "with tools/probes/upstream-skip-carried-slice-doors.py:\n"
+                + "  row 24224  (?r)(?:\\s*?(*SKIP)\\W|[^a])(\\S{1,})$ over "
+                + "'\\ufb00\\ufb00\\r\\n\\ufb00\\ufb00ss\\rS', MULTILINE, split\n"
+                + "    upstream's own `$` is true at 3 and 10 ALONE, asked one anchored position at a "
+                + "time\n"
+                + "    upstream's split takes TWO separators, (8,10) and (3,8) - the second ENDS AT 8\n"
+                + "    `$` written out as (?:(?=\\n)|(?!\\n|.))  one separator, this port's answer\n"
+                + "    (*SKIP) -> (*PRUNE), or deleted          one separator, this port's answer\n"
+                + "  row 38101  the same shape on a reversed `subf`, IGNORECASE|MULTILINE\n"
+                + "    upstream's own `$` is true at 2 and 10 alone\n"
+                + "    upstream finds one match, (0,5) - it ENDS AT 5\n"
+                + "    `$` written out                          no match, this port's answer\n"
+                + "    (*SKIP) -> (*PRUNE), or deleted          no match, this port's answer\n"
+                + "    `$` written as (?w)$, the TWIN           no match, this port's answer\n"
+                + "THE `(?w)` CONTROL IS THE SHARPEST ONE AND IT RUNS ON ONE ROW ONLY, and the reason "
+                + "is narrower than it first looks. `(?w)` compiles `$` to `END_OF_LINE_U` "
+                + "(regex/_regex_core.py:506-510), the twin that reads `text_end` - but it is NOT a "
+                + "clean swap of one bound for another, because it also changes WHICH POSITIONS ARE "
+                + "LINE ENDS, on both rows and in both directions:\n"
+                + "  row 24224   `$` true at [3, 10]   `(?w)$` true at [2, 8, 10]   phantom end 8\n"
+                + "  row 38101   `$` true at [2, 10]   `(?w)$` true at [1, 7, 10]   phantom end 5\n"
+                + "So 'it moves the line ends' does not separate the two rows - it is true of both. "
+                + "What separates them is whether it moves THE PHANTOM POSITION. On row 24224 the "
+                + "phantom end 8 becomes a genuine `(?w)` line end, so a `(?w)` run that stops "
+                + "reporting the separator cannot tell a bound that stopped being read from a line "
+                + "end that started existing; on row 38101 the phantom end 5 is not a line end under "
+                + "either spelling, so a `(?w)` run that answers None says the bound was the only "
+                + "thing holding the match up. The probe derives that condition per row rather than "
+                + "listing it, and prints both position lists either way.\n"
+                + "WHY THE STEPWISE WALK IS NOT THE CONTROL HERE, said out loud because it looks like "
+                + "one and points the wrong way. `search(subject, 0, 8)` on row 24224 gives (3, 8) on "
+                + "EVERY line including the verb-free one, and `search(subject, 0, 5)` on row 38101 "
+                + "gives (0, 5) on every line too - because passing an `endpos` sets `slice_end` to "
+                + "it legitimately, which is the very bound this defect leaves stale. A walk that "
+                + "moves `endpos` reproduces the bug instead of testing it. That is the refusal "
+                + "`_reads_the_end_of_the_subject` already encodes in tools/record-oracle.py, and it "
+                + "is why neither row carries an `anchoredScan` to key on.\n"
+                + "THE TWO ROWS ARE DIFFERENT DISTANCES, which is the other reason they are here "
+                + "rather than in the entry above. On row 24224 the stale bound crosses BETWEEN the "
+                + "matches of one scan: upstream's own single `search` over the whole subject gives "
+                + "(8, 10), the same as its `(*PRUNE)` line, and only the second separator diverges. "
+                + "On row 38101 nothing crosses - a SINGLE `search(subject, 0, 10)` gives (0, 5) as "
+                + "drawn and None with the verb spelled `(*PRUNE)`, so the bound a FAILED attempt "
+                + "moved is read by a later attempt inside one call. The fix upstream needs is the "
+                + "same either way, and it is not `init_match`: `$` should read `text_end`.\n"
+                + "ROW 38101's RECORDED OUTCOME IS AN EXCEPTION, and that is incidental. Its template "
+                + "holds `{0[-1]}`, which a match object answers with IndexError, so upstream raises "
+                + "precisely when it finds a match and returns the subject unchanged when it does "
+                + "not. The divergence is whether a match exists; the traceback is what upstream does "
+                + "about one.\n"
+                + "KEYED ON THE TWO ROWS AND ON THIS PORT'S ANSWER TO EACH, the owner's 2026-09-14 "
+                + "ruling for this file. A predicate over 'the pattern ends in `$` and upstream's "
+                + "extra span ends where `$` is false' already exists one entry up and is not "
+                + "loosened here; what these rows lack is a SPAN for it to read - a split renders as "
+                + "parts and an error renders as a traceback - and inventing one from the parts would "
+                + "be a new inference rather than a recorded fact.",
+            PinnedBy: "BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_"
+                + "the_line_does_not_end and .A_reversed_substitution_of_a_skip_replaces_nothing_"
+                + "where_the_line_does_not_end",
+            Example: _endOfLineReadsMovedSliceRows,
+            Applies: static (row, ours) =>
+                _endOfLineReadsMovedSlice.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "skip-carried-slice-on-a-scan-with-no-walk",
+            Reason: "Upstream bug, the same carried slice as the four `overlapped-skip-*` entries "
+                + "above, on two rows that none of them can judge because the recorder writes no "
+                + "`anchoredScan` for either - and for two DIFFERENT reasons, each already argued in "
+                + "tools/record-oracle.py rather than invented here. S52's third sitting, "
+                + "2026-09-15.\n"
+                + "ROW 25854 IS A FORWARD, NON-OVERLAPPED `finditer`, and a non-overlapped walk needs "
+                + "`must_advance`, which no Python call carries: after a zero-width match at p the "
+                + "scanner re-attempts AT p with the flag set (upstream/src/_regex.c:20932), which "
+                + "`search(subject, p)` cannot express and `search(subject, p + 1)` skips past. So "
+                + "`_anchored_scan` is recorded for overlapped rows only, and this row has none.\n"
+                + "ROW 38151 IS REVERSED AND OVERLAPPED, and would carry a walk but for its "
+                + "lookahead: `_reads_the_end_of_the_subject` refuses `(?=` and `(?!` along with `$` "
+                + "and the boundary escapes, because a reversed walk moves `endpos` and every one of "
+                + "them changes meaning on a truncated subject. The refusal is deliberately crude and "
+                + "costs a classification here, which is the direction that cannot hide a defect.\n"
+                + "WHAT JUDGES THEM, measured 2026-09-15 on regex 2026.9.10 with "
+                + "tools/probes/upstream-skip-carried-slice-doors.py, which computes the walk by hand "
+                + "for exactly these two rows and says in its docstring why each is legitimate there:\n"
+                + "  row 25854  (?b)(?:(?:\\W{2,}[^\\d]*?){1<=e<=2}(*SKIP)\\D|\\w)(\\p{Lu}{2,3}){0,0}\n"
+                + "             over 'b\\r\\nabA\\n_', IGNORECASE, forward finditer\n"
+                + "    upstream's scan            1 match,  (0,1)\n"
+                + "    upstream's stepwise scan   3 matches, (0,1) (3,4) (4,5)  <- this port\n"
+                + "    (*SKIP) -> (*PRUNE)        3 matches, the same three     <- this port\n"
+                + "    verb deleted               5 matches, so both verbs really do prune two\n"
+                + "  row 38151  (?r)\\p{ASCII}{1,3}(?![a](*SKIP))s(?:[^\\p{L}]*+(*SKIP)\\W|s)[^a]*\n"
+                + "             (?<=\\W(*PRUNE))[A-Z] over 'aas\\rs\\r\\ns', reversed overlapped\n"
+                + "    upstream's scan            1 match,  (0,8)\n"
+                + "    upstream's stepwise scan   2 matches, (0,8) (0,5)        <- this port\n"
+                + "    (*SKIP) -> (*PRUNE)        2 matches, the same two       <- this port\n"
+                + "    verb deleted               2 matches, the same two\n"
+                + "The walk is sound on row 25854 because no match in it is zero-width, and "
+                + "`must_advance` is set only when one is - `state->must_advance = state->text_pos == "
+                + "state->match_pos` (:20932) - so `search(subject, m.end())` IS the scanner's own "
+                + "step on this row. It is sound on row 38151 because the walk takes upstream's own "
+                + "reversed overlapped step, `state->text_pos = state->match_pos + step` with a step "
+                + "of -1 under `(?r)` (:20927-20928), and the lookahead the refusal fires on sits at "
+                + "a position both questions read identically. Neither argument generalises, which "
+                + "is why neither was written into the recorder. (Older text in this repo cites "
+                + ":20903 for that step; against the 2026.9.10 pin that line is a comment "
+                + "terminator.)\n"
+                + "KEYED ON THE TWO ROWS AND ON THIS PORT'S ANSWER TO EACH. The recorder's two "
+                + "refusals are correct and stay: widening `_anchored_scan` to a forward "
+                + "non-overlapped row would write a walk that is wrong the moment a row draws a "
+                + "zero-width match, and S34's blind review built that row and watched the list "
+                + "absorb an engine mutation because of it. Widening this entry means judging another "
+                + "row with the probe and adding it.",
+            PinnedBy: "BacktrackingVerbTests.A_forward_scan_of_a_skip_keeps_the_matches_upstreams_own_"
+                + "stepwise_door_still_finds and .A_reversed_overlapped_scan_behind_a_lookahead_keeps_"
+                + "its_second_match",
+            Example: _skipCarriedSliceNoWalkRows,
+            Applies: static (row, ours) =>
+                _skipCarriedSliceNoWalk.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
             Id: "group-call-loses-the-match",
             Reason: "Upstream bug, NOT fixed by issue 614 and still present in 2026.9.10 (the wave "
                 + "rows replayed against .venvs/regex-2026.9.10 on 2026-09-12 and 2026-09-13, "
@@ -1713,10 +1971,12 @@ internal static class ExpectedDivergences
                 + "RIGHT. Split by direction rather than widened, which is the convention this file "
                 + "already uses for `overlapped-skip-stale-slice` and its `-reversed` twin: the "
                 + "bound a `(*SKIP)` moves is `slice_start` forwards and `slice_end` under `(?r)` "
-                + "(upstream/src/_regex.c:14551), the symptoms differ accordingly, and one entry "
+                + "(upstream/src/_regex.c:14555 forwards, :14553 reversed), the symptoms differ "
+                + "accordingly, and one entry "
                 + "spanning both would have to state each half separately anyway.\n"
                 + "THE SAME TWO PASSES. A `partial` search runs a non-partial pass and then a "
-                + "partial one from the same `text_pos` (upstream do_match, :18160). Upstream "
+                + "partial one from the same `text_pos` (upstream do_match, the save at :18159). "
+                + "Upstream "
                 + "restores `text_pos` and nothing else, so a bound the verb moved in the first pass "
                 + "is still moved in the second. S40b restores both bounds here; upstream does not.\n"
                 + "WHAT THE MOVED BOUND COSTS IS DIFFERENT THIS WAY ROUND, and it is worth saying "
@@ -1738,14 +1998,43 @@ internal static class ExpectedDivergences
                 + "says the OTHER verb in the pattern is not involved, which is a control this "
                 + "family has not had before. Measured 2026-09-13 on regex 2026.7.19, "
                 + "tools/probes/upstream-skip-carried-slice-forward.py.\n"
-                + "KEYED ON ITS ROW, like every sibling named above. No predicate over 'the two "
+                + "TWO MORE ROWS, AND A TELL THIS FAMILY DID NOT HAVE, added by S52's third sitting "
+                + "on 2026-09-15 from the three-seed 2000-row wave of commit 407c0cb. On seed 7 rows "
+                + "24018 and 24737 the second pass does not merely enter a different alternative - it "
+                + "returns a match that IS NOT PARTIAL, and upstream's own non-partial call to the "
+                + "same compiled pattern over the same subject returns None:\n"
+                + "  row 24018  \\L<w1>{e<=2}(?:\\D(*SKIP)\\S|\\p{Lu}) over '\\xdf\\xdf'\n"
+                + "    match(partial=True)  (0,2) NOT partial, two deletions   <- upstream\n"
+                + "    match()              None                               <- upstream\n"
+                + "    (*PRUNE), partial    (0,2) PARTIAL, two substitutions   <- this port\n"
+                + "    verb deleted, either (0,2) NOT partial, two deletions\n"
+                + "  row 24737  the same shape on a `search`\n"
+                + "    search(partial=True) (5,5) NOT partial, one deletion    <- upstream\n"
+                + "    search()             None                               <- upstream\n"
+                + "    (*PRUNE), partial    (3,7) PARTIAL                      <- this port\n"
+                + "`partial=True` is documented to ALSO allow a partial match (upstream/README.rst); "
+                + "it cannot conjure a complete one the same engine denies without it, so upstream "
+                + "refutes itself on each row in two calls, with no model of a scan needed. What the "
+                + "rows add beyond that is the pruning: with no partial asked for, the `(*SKIP)` and "
+                + "the `(*PRUNE)` line AGREE (both None) and only the verb-free line matches, so both "
+                + "verbs do prune the match in one pass and the `(*SKIP)` line gets it back in the "
+                + "other - and what it gets back is the VERB-FREE answer, character for character. "
+                + "ROW 24018 CLOSES THE SCAN QUESTION for this family: a `match` is a single attempt, "
+                + "so there is no next attempt for `(*SKIP)` to move the start of, and the two verbs "
+                + "MUST agree within it. Measured 2026-09-15 on regex 2026.9.10, "
+                + "tools/probes/upstream-skip-carried-slice-doors.py.\n"
+                + "KEYED ON ITS ROWS, like every sibling named above. No predicate over 'the two "
                 + "engines agree on the span and disagree on which error they spent' is safe here - "
                 + "that is also what a genuine fuzzy-path defect looks like, and this port has "
                 + "shipped one in Phase 5 already (S43's own SaveBestMatch fix, which reported the "
-                + "errors a POSIX fuzzy match spent as zero). Widening means judging another row "
-                + "with the probe and adding it. Phase 7 must not import upstream's answer here.",
+                + "errors a POSIX fuzzy match spent as zero). Nor is the new tell safe as a "
+                + "predicate: 'upstream answered a non-partial match where its own non-partial call "
+                + "answers None' is also exactly what `bestmatch-loses-a-partial` looks like from the "
+                + "other side. Widening means judging another row with the probe and adding it. "
+                + "Phase 7 must not import upstream's answer here.",
             PinnedBy: "PartialMatchingTests.A_forward_skip_does_not_move_the_slice_start_the_partial_"
-                + "pass_searches",
+                + "pass_searches, .A_partial_match_of_a_skip_is_not_the_verb_free_answer and "
+                + ".A_partial_search_of_a_skip_is_not_the_verb_free_answer",
             Example: _partialRetryForwardRows,
             Applies: static (row, ours) =>
                 _partialRetryForward.TryGetValue(Question(row), out string? judged)

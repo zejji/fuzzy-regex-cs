@@ -904,4 +904,106 @@ public sealed class PartialMatchingTests
         unreachable.PartialMatch.Should().BeTrue();
         (unreachable.Index, unreachable.Length).Should().Be((5, 0));
     }
+
+    /// <summary>
+    /// Seed 7 row 24018 of S52's wave: a partial <c>match</c> whose <c>(*SKIP)</c> upstream answers
+    /// with its VERB-FREE answer, and with the partial flag clear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same two-pass carry as
+    /// <see cref="A_forward_skip_does_not_move_the_slice_start_the_partial_pass_searches"/>, and the
+    /// row that closes the "but a <c>(*SKIP)</c> is allowed to differ on a scan" objection for the
+    /// whole family: a <c>match</c> is ONE attempt, so there is no next attempt for the verb to move
+    /// the start of, and inside one attempt <c>(*SKIP)</c> prunes exactly what <c>(*PRUNE)</c>
+    /// prunes.
+    /// </para>
+    /// <para>
+    /// Upstream refutes itself in two calls, with no model of the engine needed. Measured 2026-09-15
+    /// on regex 2026.9.10, <c>tools/probes/upstream-skip-carried-slice-doors.py</c>:
+    /// <code>
+    /// match(partial=True)   (0, 2) NOT partial, two deletions   &lt;- upstream
+    /// match()               None                                &lt;- upstream
+    /// (*PRUNE), partial     (0, 2) PARTIAL, two substitutions   &lt;- this port
+    /// verb deleted, either  (0, 2) NOT partial, two deletions
+    /// </code>
+    /// `partial=True` is documented to ALSO allow a partial match, so it cannot answer a COMPLETE
+    /// one the same engine denies without it. Classified by
+    /// <c>ExpectedDivergences.partial-retry-carried-slice-forward</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_partial_match_of_a_skip_is_not_the_verb_free_answer()
+    {
+        // The wave drew it with no flags at all; the recorder resolves a version-less pattern under
+        // upstream's own default, so Version0 here.
+        Dictionary<string, IReadOnlyCollection<string>> lists = new(StringComparer.Ordinal)
+        {
+            ["w1"] = ["sı", "İ", "ﬁ", "ﬁı"],
+        };
+        FuzzyRegex pattern = new(@"\L<w1>{e<=2}(?:\D(*SKIP)\S|\p{Lu})", FuzzyRegexOptions.Version0, lists);
+
+        Match m = pattern.MatchAtStart("ßß", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(0, 1);
+
+        // The control, run here rather than only quoted: with the verb spelled (*PRUNE) - the same
+        // pruning, no bound moved - this port answers the identical thing, so the two verbs agree
+        // inside one attempt exactly as they must.
+        Match pruned = new FuzzyRegex(
+            @"\L<w1>{e<=2}(?:\D(*PRUNE)\S|\p{Lu})",
+            FuzzyRegexOptions.Version0,
+            lists
+        ).MatchAtStart("ßß", partial: true);
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 2));
+        pruned.FuzzyChanges.Substitutions.Should().Equal(0, 1);
+
+        // And the other half of upstream's contradiction, asked of this port: with no partial
+        // requested there is no match, which is upstream's own answer on all three of its lines.
+        pattern.MatchAtStart("ßß").Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Seed 7 row 24737 of S52's wave: the same defect as
+    /// <see cref="A_partial_match_of_a_skip_is_not_the_verb_free_answer"/> on a <c>search</c>.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's partial search answers a complete match at codepoints (5, 5) - the pattern ends in
+    /// <c>\K</c>, so its reported start is reset - and its own non-partial search answers
+    /// <c>None</c>. This port answers upstream's own <c>(*PRUNE)</c> line, codepoints (3, 7) partial
+    /// with group 1 at (5, 6), which is UTF-16 (5, 11) and (8, 10) on this astral subject. Measured
+    /// 2026-09-15, <c>tools/probes/upstream-skip-carried-slice-doors.py</c>.
+    /// </remarks>
+    [Test]
+    public void A_partial_search_of_a_skip_is_not_the_verb_free_answer()
+    {
+        const string subject = "\U0001F600\U0001F600aa\U00010428\U00010428 ";
+        FuzzyRegex pattern = new(
+            @"(?:(?:a[\p{L}\p{N}]?(?:(.+?)){e<=2:\s}){1i+2d+1s<=3}(*SKIP)\W|\w)(\p{Ll}{3,3}?)+\K",
+            FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version0
+        );
+
+        Match m = pattern.Match(subject, partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((5, 6));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((8, 2));
+        m.Groups[2].Success.Should().BeFalse();
+
+        // The same two controls as the row above.
+        Match pruned = new FuzzyRegex(
+            @"(?:(?:a[\p{L}\p{N}]?(?:(.+?)){e<=2:\s}){1i+2d+1s<=3}(*PRUNE)\W|\w)(\p{Ll}{3,3}?)+\K",
+            FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version0
+        ).Match(subject, partial: true);
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((5, 6));
+
+        pattern.Match(subject).Success.Should().BeFalse();
+    }
 }

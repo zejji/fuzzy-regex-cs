@@ -591,6 +591,109 @@ classified by `ExpectedDivergences.bestmatch-walk-truncated-by-a-skip`. Re-runna
 `python tools/probes/upstream-bestmatch-walk-truncated-by-a-skip.py` and
 `pwsh -File tools/probes/port-bestmatch-walk-cases.ps1`.
 
+### What S52's third sitting added, 2026-09-15, and the one line to put at the top of this report
+
+Six more rows, no new door, and **one fact that says the whole thing more plainly than any of the
+six doors above**: upstream has eight predicates that ask whether a position is at an edge of the
+text, seven read a TEXT bound, and the eighth reads a SLICE bound - and the seven include the
+eighth's OWN Unicode twin, so upstream's `$` disagrees with itself in one file.
+
+```c
+try_match_START_OF_LINE         :7360   text_pos <= state->text_start
+try_match_START_OF_LINE_U       :7367   -> {ascii,unicode}_at_line_start, :902 / :1945
+                                           text_pos <= state->text_start
+try_match_START_OF_STRING       :7373   text_pos <= state->text_start
+try_match_END_OF_STRING         :7123   text_pos >= state->text_end
+try_match_END_OF_STRING_LINE    :7129   text_pos >= state->text_end
+try_match_END_OF_STRING_LINE_U  :7136   text_pos >= state->text_end
+try_match_END_OF_LINE_U         :7117   -> {ascii,unicode}_at_line_end, :922 / :1966
+                                           text_pos >= state->text_end
+try_match_END_OF_LINE           :7110   text_pos >= state->slice_end     <- the odd one out
+```
+
+(`try_match_START_OF_WORD` and `try_match_END_OF_WORD` are word edges rather than text edges and are
+not in the count.) `RE_OP_SKIP` under `(?r)` writes exactly the field the odd one reads
+(`state->slice_end = state->text_pos`, `:14553`), so `$` is TRUE wherever a reversed `(*SKIP)` last
+fired. That is not a consequence of the carried slice this report is about - it is a second,
+independent defect that the carried slice makes reachable, and a maintainer who fixes only
+`init_match` will leave it. **`$` should read `text_end`, which is what its own `_U` twin already
+does.** This port's own `$` has read the text bound since S35; the earlier note about
+`search_start_END_OF_LINE_rev` disagreeing with `try_match_END_OF_LINE` (DECISIONS, 2026-09-11)
+recorded the same split between upstream's fast and slow paths without noticing that every sibling
+predicate agrees with `text_end` and only `$` does not.
+
+**The twin is also the sharpest control, and it runs on one of the two rows - for a narrower reason
+than it first looks.** `(?w)` compiles `$` to `END_OF_LINE_U` (`regex/_regex_core.py:506-510`), but
+it is not a clean swap of one bound for another: it also changes which positions are line ends, on
+both rows and in both directions.
+
+```
+row 24224   $ true at [3, 10]    (?w)$ true at [2, 8, 10]    phantom end 8
+row 38101   $ true at [2, 10]    (?w)$ true at [1, 7, 10]    phantom end 5
+```
+
+So "`(?w)` moves the line ends" does not separate the two rows; it is true of both. What separates
+them is whether it moves THE PHANTOM POSITION. On row 24224 the phantom end 8 becomes a genuine
+`(?w)` line end, so a `(?w)` run that stops reporting the separator cannot tell a bound that stopped
+being read from a line end that started existing. On row 38101 the phantom end 5 is a line end under
+neither spelling, so `(?w)` + the drawn pattern answering `('a\r\na𝔘𝔘𐐨\r𐐨𝔘', 0)` - this port's
+answer - says the bound was the only thing holding the match up. The probe derives that condition
+per row and prints both position lists either way.
+
+**Every line number above is against the 2026.9.10 pin and was re-read out of the file.** Other
+entries in this ledger cite `:14545` and `:14551` for the two `RE_OP_SKIP` writes and `:20903` for
+the scanner's overlapped step; against this pin those lines are a `TRACE` call, a blank line and a
+comment terminator, and the correct ones are `:14553`, `:14555` and `:20927-20928`. Reconciling the
+repo is a maintenance job and is recorded as one.
+
+Two rows show it, and they are different distances apart, which is why both are here. Seed
+20260915 row 24224, a reversed **`split`**: upstream's own `$` is true at 3 and 10 alone and its
+split takes separators (8, 10) and (3, 8), the second ending at 8. Seed 20260915 row 38101, a
+reversed **`subf`**: `$` true at 2 and 10 alone, one match reported ending at 5 - and here nothing
+crosses between matches at all, because a SINGLE `search(subject, 0, 10)` gives (0, 5) as drawn and
+`None` with the verb spelled `(*PRUNE)`. So the bound a FAILED attempt moved is read by a later
+attempt inside one call.
+
+**A caution for anyone reproducing these two.** `search(subject, 0, endpos)` sets `slice_end` to
+`endpos` legitimately, so asking upstream for the phantom span with an explicit `endpos` brings it
+back on the VERB-FREE pattern too. A stepwise walk reproduces this defect instead of testing it.
+What does test it is spelling `$` out as what `$` is defined to be - `(?:(?=\n)|(?!\n|.))` - which
+gives this port's answer on both rows, and the `(?w)` twin above where it isolates.
+
+**And a sharper statement of the fifth door**, from seed 7 rows 24018 and 24737: the two-pass
+partial does not merely enter a different alternative, it can return a match **that is not partial
+at all**, where upstream's own non-partial call to the same compiled pattern over the same subject
+returns `None`.
+
+```python
+>>> p = regex.compile(r'\L<w1>{e<=2}(?:\D(*SKIP)\S|\p{Lu})', w1=['sı', 'İ', 'ﬁ', 'ﬁı'])
+>>> p.match('ßß', partial=True)
+<regex.Match object; span=(0, 2), match='ßß', fuzzy_counts=(0, 0, 2)>
+>>> p.match('ßß')
+None
+```
+
+The first repr carries no `partial=` field, which is upstream's own way of saying the match is
+COMPLETE: `Match.__repr__` prints `partial=True` only when it is partial.
+
+`partial=True` is documented to ALSO allow a partial match, so it cannot answer a complete one the
+same engine denies without it. Row 24018 is a `match`, which is ONE attempt - there is no next
+attempt for `(*SKIP)` to move the start of, so within it the two verbs must prune identically, and
+that closes the "a `(*SKIP)` is allowed to differ on a scan" objection for this whole report. With
+no partial requested the `(*SKIP)` and `(*PRUNE)` lines agree (both `None`) and only the verb-free
+line matches; what the partial pass gets back is the VERB-FREE answer, character for character.
+
+**Verified 2026-09-15** against `regex` 2026.9.10. All six rows and every control above are
+re-runnable from one script: `python tools/probes/upstream-skip-carried-slice-doors.py`. Pinned by
+`BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_the_line_does_not_end`,
+`.A_reversed_substitution_of_a_skip_replaces_nothing_where_the_line_does_not_end`,
+`.A_forward_scan_of_a_skip_keeps_the_matches_upstreams_own_stepwise_door_still_finds`,
+`.A_reversed_overlapped_scan_behind_a_lookahead_keeps_its_second_match`,
+`PartialMatchingTests.A_partial_match_of_a_skip_is_not_the_verb_free_answer` and
+`.A_partial_search_of_a_skip_is_not_the_verb_free_answer`; classified by
+`ExpectedDivergences.end-of-line-reads-a-skip-moved-slice`,
+`.skip-carried-slice-on-a-scan-with-no-walk` and `.partial-retry-carried-slice-forward`.
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern

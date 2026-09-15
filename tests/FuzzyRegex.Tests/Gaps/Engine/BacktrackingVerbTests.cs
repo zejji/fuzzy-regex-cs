@@ -648,4 +648,262 @@ public sealed class BacktrackingVerbTests
             .Success.Should()
             .BeFalse();
     }
+
+    /// <summary>
+    /// Seed 20260915 row 24224 of S52's wave: a reversed <c>split</c> whose second separator
+    /// upstream ends where its own <c>$</c> is false.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Seven of upstream's eight text-edge predicates read a TEXT bound and
+    /// <c>try_match_END_OF_LINE</c> (<c>upstream/src/_regex.c:7110</c>) alone reads
+    /// <c>slice_end</c> - which is the field <c>RE_OP_SKIP</c> writes under <c>(?r)</c>
+    /// (<c>:14553</c>). The seven include <c>$</c>'s own Unicode twin,
+    /// <c>try_match_END_OF_LINE_U</c> (<c>:7117</c>, through <c>at_line_end</c> at <c>:922</c> and
+    /// <c>:1966</c>), so upstream's <c>$</c> disagrees with itself in one file. S35 made every
+    /// assertion here read the text bound.
+    /// </para>
+    /// <para>
+    /// Measured 2026-09-15 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-skip-carried-slice-doors.py</c>: upstream's own <c>$</c> is true at
+    /// 3 and 10 alone, asked one anchored position at a time, and its split takes separators (8, 10)
+    /// and (3, 8) - the second ending at 8. Spelling <c>$</c> out as what <c>$</c> is defined to be,
+    /// or spelling the verb <c>(*PRUNE)</c>, or deleting it, each leaves upstream with the one
+    /// separator this port finds. Classified by
+    /// <c>ExpectedDivergences.end-of-line-reads-a-skip-moved-slice</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_reversed_split_of_a_skip_does_not_end_a_separator_where_the_line_does_not_end()
+    {
+        // Flags 0x8, MULTILINE, and Version0 because the recorder resolves a version-less pattern
+        // under upstream's own default.
+        const string subject = "ﬀﬀ\r\nﬀﬀss\rS";
+        FuzzyRegexOptions options = FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version0;
+
+        new FuzzyRegex(@"(?r)(?:\s*?(*SKIP)\W|[^a])(\S{1,})$", options)
+            .Split(subject, -1)
+            .Should()
+            .Equal("", "S", "ﬀﬀ\r\nﬀﬀss");
+
+        // Control one: the verb spelled (*PRUNE), which prunes the same backtracking and moves no
+        // bound. Upstream answers this too, which is what says the bound is the cause.
+        new FuzzyRegex(@"(?r)(?:\s*?(*PRUNE)\W|[^a])(\S{1,})$", options)
+            .Split(subject, -1)
+            .Should()
+            .Equal("", "S", "ﬀﬀ\r\nﬀﬀss");
+
+        // Control two, and the one that names the defect: `$` written out as end-of-text-or-before-
+        // a-line-terminator, in a spelling no slice bound can answer. Upstream agrees here.
+        new FuzzyRegex(@"(?r)(?:\s*?(*SKIP)\W|[^a])(\S{1,})(?:(?=\n)|(?!\n|.))", options)
+            .Split(subject, -1)
+            .Should()
+            .Equal("", "S", "ﬀﬀ\r\nﬀﬀss");
+
+        // Control three: this port's own `$` is false at 8, so the separator upstream reports is
+        // one this engine could not have made whatever the scan did. The subject is all BMP, so
+        // these indices are both codepoints and UTF-16 code units.
+        new FuzzyRegex("$", options)
+            .MatchAtStart(subject, 8, -1)
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("$", options).MatchAtStart(subject, 3, -1).Success.Should().BeTrue();
+
+        // AND THE CONTROL THAT DOES NOT WORK HERE, asserted rather than described so nobody adds it
+        // later. `(?w)` swaps `$` for END_OF_LINE_U, the twin that reads `text_end`, which is the
+        // sharpest control this family has - see
+        // A_reversed_substitution_of_a_skip_replaces_nothing_where_the_line_does_not_end. It moves
+        // the line ends on that row too, so that is not what disqualifies it here; what does is
+        // that on THIS row the phantom separator's own end, 8, is one of the positions it moves.
+        // `(?w)` makes 8 a genuine line end, so a `(?w)` run could not tell a bound that stopped
+        // being read from a line end that started existing.
+        new FuzzyRegex("(?w)$", options)
+            .MatchAtStart(subject, 8, -1)
+            .Success.Should()
+            .BeTrue();
+    }
+
+    /// <summary>
+    /// Seed 20260915 row 38101 of S52's wave: the same <c>$</c> defect on a reversed substitution,
+    /// and inside a SINGLE search rather than across the matches of a scan.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's own <c>$</c> is true at 2 and 10 alone, and it reports one match ending at 5.
+    /// Nothing crosses between matches here: a single <c>search(subject, 0, 10)</c> gives (0, 5) as
+    /// drawn and <c>None</c> with the verb spelled <c>(*PRUNE)</c>, so the bound a FAILED attempt
+    /// moved is read by a later attempt inside one call.
+    /// </para>
+    /// <para>
+    /// The wave recorded upstream's answer as an <c>IndexError</c>, and that is incidental: the
+    /// drawn template holds <c>{0[-1]}</c>, which a match object answers with one, so upstream
+    /// raises precisely when it finds a match and returns the subject unchanged when it does not.
+    /// The divergence is whether a match exists. Measured 2026-09-15,
+    /// <c>tools/probes/upstream-skip-carried-slice-doors.py</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_reversed_substitution_of_a_skip_replaces_nothing_where_the_line_does_not_end()
+    {
+        // Flags 0xA: IGNORECASE and MULTILINE, plus Version0 for the recorder's default.
+        const string subject = "a\r\na\U0001D518\U0001D518\U00010428\r\U00010428\U0001D518";
+        const string drawn = @"(?r)(\D+(*PRUNE)[^\p{L}])(?:[^a-f](*PRUNE)){1,3}?((?>\p{Lu}{1,3}?(*SKIP)\D))$";
+        FuzzyRegexOptions options =
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version0;
+
+        string replaced = new FuzzyRegex(drawn, options).ReplaceFormat(
+            subject,
+            "-{0[0]}{0[-1]}{0[-2]}",
+            -1,
+            out int replacements
+        );
+
+        replacements.Should().Be(0);
+        replaced.Should().Be(subject);
+
+        // There is no match to replace, which is the whole of it - and the three controls say why.
+        new FuzzyRegex(drawn, options)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+
+        // Control one: the (*SKIP) spelled (*PRUNE). Upstream answers None here too.
+        new FuzzyRegex(drawn.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+
+        // Control two: `$` spelled out. Upstream answers None here too.
+        new FuzzyRegex(drawn.Replace("$", "(?:(?=\n)|(?!\n|.))", StringComparison.Ordinal), options)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+
+        // Control three: this port's `$` is false where upstream's only match ends, and true at the
+        // two positions upstream's own anchored `$` agrees with. UPSTREAM'S (0, 5) IS IN CODEPOINTS
+        // and this subject is astral, so the end to ask about is UTF-16 6 - index 5 is the low
+        // surrogate of the first U+1D518 and would be false for a reason that is not the finding.
+        // Upstream's `$` is true at codepoints 2 and 10, which are UTF-16 2 and 15.
+        new FuzzyRegex("$", options)
+            .MatchAtStart(subject, 6, -1)
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("$", options).MatchAtStart(subject, 2, -1).Success.Should().BeTrue();
+        new FuzzyRegex("$", options).MatchAtStart(subject, 15, -1).Success.Should().BeTrue();
+
+        // Control four, the sharpest and the one that names the predicate: `(?w)` compiles `$` to
+        // END_OF_LINE_U, the twin that reads `text_end` - and upstream then answers None, this
+        // port's answer, where its plain `$` found the phantom.
+        //
+        // WHY IT IS A CONTROL HERE AND NOT ON THE REVERSED SPLIT ABOVE, because the obvious reason
+        // is the wrong one. `(?w)` moves the line ends on BOTH rows: here `(?w)$` is true at
+        // codepoints 1, 7 and 10 where `$` is true at 2 and 10, and on the split row it is true at
+        // 2, 8 and 10 where `$` is true at 3 and 10. What decides it is the PHANTOM POSITION alone -
+        // there, 8 becomes a genuine `(?w)` line end and the control cannot tell a bound that
+        // stopped being read from a line end that started existing; here, codepoint 5 is a line end
+        // under neither spelling, so None means the bound was the only thing holding the match up.
+        // The two assertions below are that fact rather than the prose: UTF-16 6 is codepoint 5.
+        new FuzzyRegex("(?w)$", options)
+            .MatchAtStart(subject, 6, -1)
+            .Success.Should()
+            .BeFalse();
+        new FuzzyRegex("(?w)" + drawn, options).Match(subject).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Seed 7 row 25854 of S52's wave: a FORWARD, non-overlapped scan that upstream ends four
+    /// matches early because the <c>(*SKIP)</c> left <c>slice_start</c> above them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The carried-slice defect the <c>overlapped-skip-*</c> entries judge, on a row none of them
+    /// can key on: the recorder writes <c>anchoredScan</c> for overlapped rows only, because a
+    /// non-overlapped walk needs <c>must_advance</c> and no Python call carries it.
+    /// </para>
+    /// <para>
+    /// The walk is sound on THIS row and the reason is narrow: <c>must_advance</c> is set only after
+    /// a zero-width match (<c>state-&gt;must_advance = state-&gt;text_pos == state-&gt;match_pos</c>,
+    /// <c>upstream/src/_regex.c:20932</c>) and no match here is zero-width, so
+    /// <c>search(subject, m.end())</c> is the scanner's own step. Measured 2026-09-15: upstream's
+    /// scan finds one match, its stepwise scan finds the three this port finds, the
+    /// <c>(*PRUNE)</c> line finds the same three, and deleting the verb finds five - so both verbs
+    /// really do prune two. Classified by
+    /// <c>ExpectedDivergences.skip-carried-slice-on-a-scan-with-no-walk</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void A_forward_scan_of_a_skip_keeps_the_matches_upstreams_own_stepwise_door_still_finds()
+    {
+        // Flags 0x2, IGNORECASE, plus Version0 for the recorder's default.
+        const string subject = "b\r\nabA\n_";
+        FuzzyRegexOptions options = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0;
+
+        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}(*SKIP)\D|\w)(\p{Lu}{2,3}){0,0}", options)
+            .Matches(subject)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 1), (3, 1), (4, 1));
+
+        // Control one: the verb spelled (*PRUNE). Upstream answers these same three.
+        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}(*PRUNE)\D|\w)(\p{Lu}{2,3}){0,0}", options)
+            .Matches(subject)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 1), (3, 1), (4, 1));
+
+        // Control two: the verb deleted, which upstream and this port both answer with FIVE. That
+        // is what says both verbs prune two real matches, so this port is not simply ignoring the
+        // verb - the divergence is about the two upstream prunes beyond them.
+        new FuzzyRegex(@"(?b)(?:(?:\W{2,}[^\d]*?){1<=e<=2}\D|\w)(\p{Lu}{2,3}){0,0}", options)
+            .Matches(subject)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 1), (3, 1), (4, 1), (5, 1), (7, 1));
+    }
+
+    /// <summary>
+    /// Seed 7 row 38151 of S52's wave: a reversed overlapped scan whose second match upstream loses,
+    /// on a pattern whose lookahead is why the recorder records no walk for it.
+    /// </summary>
+    /// <remarks>
+    /// <c>_reads_the_end_of_the_subject</c> in <c>tools/record-oracle.py</c> refuses <c>(?=</c> and
+    /// <c>(?!</c> along with <c>$</c> and the boundary escapes, because a reversed walk moves
+    /// <c>endpos</c> and every one of them changes meaning on a truncated subject. The refusal is
+    /// deliberately crude and costs a classification here. Computed by hand for this row on
+    /// 2026-09-15: upstream's scan finds (0, 8) alone, its own stepwise reversed overlapped scan -
+    /// each step <c>state-&gt;text_pos = state-&gt;match_pos + step</c> with a step of -1 under
+    /// <c>(?r)</c>, <c>upstream/src/_regex.c:20927-20928</c> - finds (0, 8) and (0, 5),
+    /// and so do the <c>(*PRUNE)</c> and verb-free lines. Classified by
+    /// <c>ExpectedDivergences.skip-carried-slice-on-a-scan-with-no-walk</c>.
+    /// </remarks>
+    [Test]
+    public void A_reversed_overlapped_scan_behind_a_lookahead_keeps_its_second_match()
+    {
+        // Flags 0x4002: FULLCASE and IGNORECASE, plus Version0 for the recorder's default.
+        const string subject = "aas\rs\r\ns";
+        const string drawn = @"(?r)\p{ASCII}{1,3}(?![a](*SKIP))s(?:[^\p{L}]*+(*SKIP)\W|s)[^a]*(?<=\W(*PRUNE))[A-Z]";
+        FuzzyRegexOptions options =
+            FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0;
+
+        new FuzzyRegex(drawn, options)
+            .Matches(subject, overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 8), (0, 5));
+
+        // The two controls, both of which upstream answers with the same two matches: the verbs
+        // spelled (*PRUNE), and deleted. The pattern carries a (*PRUNE) of its own already, so the
+        // second control leaves that one alone and only removes the two (*SKIP)s.
+        new FuzzyRegex(drawn.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options)
+            .Matches(subject, overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 8), (0, 5));
+
+        new FuzzyRegex(drawn.Replace("(*SKIP)", "", StringComparison.Ordinal), options)
+            .Matches(subject, overlapped: true)
+            .Select(static m => (m.Index, m.Length))
+            .Should()
+            .Equal((0, 8), (0, 5));
+    }
 }
