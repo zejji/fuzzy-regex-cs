@@ -13,8 +13,26 @@ THE CONDITION IS TWO THINGS AND NOTHING ELSE, and the table below is the evidenc
 
 Any error kind does it - substitution, insertion or deletion alike. No alternation is needed; a
 first draft of this probe thought one was, because every negative control it happened to try was
-also a zero-error match. Every row whose ``fuzzy_counts`` are ``(0, 0, 0)`` is safe and every row
-with a non-zero count faults, POSIX present.
+also a zero-error match. Every row whose ``fuzzy_counts`` are ``(0, 0, 0)`` is safe.
+
+**"AND NOTHING ELSE" IS TOO STRONG, MEASURED S52 SITTING 15, AND THE CONDITION IS OPEN.** Every case
+below still answers exactly as it did. But three rows of
+``tools/probes/sweep-divergence-rows.jsonl`` have ablations that carry POSIX, spend an error and DO
+NOT fault: row 4's
+``(*PRUNE)`` ablation (compiled flags ``0x1b42a``, a partial match, counts ``(0, 1, 0)``, changes
+``([], [1], [])``), row 18's ``(?b)``-free ablation (a complete ``fullmatch``, counts ``(2, 2, 1)``,
+changes ``([0, 1, 2], [3, 1], [])``), and **row 32, which gives a safe pair and a faulting one from
+ONE pattern** - its ``as drawn`` and ``(*PRUNE)`` spellings both answer their changes, and only the
+verb-deleted spelling faults. So neither "partial versus complete", nor the kind of error, nor the
+pattern separates them, and what the real condition is remains UNKNOWN. See all three by removing
+the POSIX guard in ``gate-divergence-doors.py``'s ``describe`` and running it over that rows file;
+S52 sitting 15's notes carry it as Control A (the slice file is
+``docs/plan/slices/S52-oracle-hardening.md`` while S52 is open, and moves under ``done/`` when it
+closes).
+
+Nothing rests on the wide statement: ``record-oracle.py:1019`` and ``gate-divergence-doors.py`` both
+guard on POSIX ALONE, which is conservative in the safe direction and cannot crash whatever the
+condition turns out to be.
 
 ``m.span()`` and ``m.fuzzy_counts`` answer correctly on the very same match - the child below prints
 them BEFORE touching the changes, which is why the crashing rows still report them. That is what
@@ -29,7 +47,10 @@ report owns confirming it in the C.
 
 THIS PORT IS RIGHT AND ANSWERS ALL OF IT. Pinned in Gaps/Engine/FuzzyPosixTests.cs.
 
-Measured 2026-09-13 against regex 2026.7.19.
+Measured 2026-09-13 against regex 2026.7.19; the two "nested fuzzy, reversed, astral" cases (seventh
+and eighth of the sixteen, beside the other faulting rows rather than at the end) and the narrowing
+above were measured 2026-09-15 against regex 2026.9.10, on which every earlier case still answers as
+its label says.
 """
 
 import json
@@ -48,6 +69,15 @@ CASES = [
     (r"(?p)(?:abc){i<=1}", 0, "abxc", "POSIX, 1 insertion - FAULTS"),
     (r"(?p)(?:a|aa){e<=1}", 0, "aa", "POSIX, an alternation, 1 insertion - FAULTS"),
     (r"(?:abc){e<=1}", 0x10000, "axc", "POSIX as the FLAG rather than inline - FAULTS"),
+    # S52 sitting 15, reached from the opposite direction: a REVERSED pattern with one fuzzy section
+    # nested inside another, drawn by `interactions` rather than written by hand. It is row 32 of
+    # `sweep-divergence-rows.jsonl` with its `(*SKIP)` deleted, reduced to the inner section, and it
+    # is here with its POSIX-free twin because that pair is the cleanest thing this file has: the
+    # SAME pattern and subject, the one bit changed, crash against answer.
+    (r"(?r)(?:\U00010428\U00010428(?:\U00010400){1i+2d+1s<=3}){1i+2d+1s<=3}", 0x10000,
+     "\U00010400a\U00010428\U00010428\U00010428", "POSIX, nested fuzzy, reversed, astral - FAULTS"),
+    (r"(?r)(?:\U00010428\U00010428(?:\U00010400){1i+2d+1s<=3}){1i+2d+1s<=3}", 0,
+     "\U00010400a\U00010428\U00010428\U00010428", "the same, POSIX bit cleared - safe"),
     # POSIX and no error spent: safe. This is the half a first draft got wrong.
     (r"(?p)(?:abc){e<=1}", 0, "abc", "POSIX, 0 errors - safe"),
     (r"(?p)(?:aa|a){e<=1}", 0, "aa", "POSIX, an alternation, 0 errors - safe"),

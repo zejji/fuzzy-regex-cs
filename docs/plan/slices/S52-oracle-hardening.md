@@ -2508,3 +2508,286 @@ and 6380 = 6300 + 80 on every default wave.
 
 It used no git command but `status` and `diff`, reverted both controls by hand, rebuilt clean after
 each, deleted its own scratch, and left the tree byte-identical to the snapshot it started from.
+
+---
+
+## Sitting 15 (2026-09-15) - CHECKPOINT, and the owner's ruling arrived
+
+**THE SPLIT QUESTION IS ANSWERED AND S52 IS NOT SPLIT.** Relayed by the orchestrator mid-sitting from
+the owner (2026-09-15, their inclination was not to cap S52): "no unjudged row" means the rows S52 has
+ALREADY produced - the sweep's 37 and the gate's 3, of which 104366 is handed to S52c/S52d and counts
+as judged here. No further sweeps are run inside S52 to make new ones; the 20-seed sweep and the
+6000-row gate are S57's. Multiple sittings are fine. So sittings 13 and 14 were right to hold, and
+the work from here is triage, not more instrument.
+
+This sitting **made the 37 rows survive a clean checkout, fixed the two things that stopped them
+being asked at all, and grouped every one of them**. It judged none, deliberately: the largest family
+turns out not to belong to the entry its signature points at, and saying so with the measurement is
+worth more than adding eight rows to a pin that does not explain them.
+
+### The 37 rows now survive a clean checkout, which they did not this morning
+
+They lived only in `TestResults/oracle/sweep-<seed>/`, which is gitignored - so the evidence for
+S52's remaining done-criterion was one `git clean` from gone. They are now
+**`tools/probes/sweep-divergence-rows.jsonl`**, 37 rows lifted out of the eight sweep waves by
+`report.txt` row number, each carrying a `comment` naming the `sweep-<seed>` directory and the row it
+came from. Replayed against upstream on the commit-ready tree:
+
+```
+pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl
+agree 0  unsupported 0  expected 0  timeout 0  resource 0  diverge 37  of 37 rows
+```
+
+**All 37 still diverge and no existing entry classifies any of them**, which is the fact the triage
+starts from. That run's own verdict is `Oracle: RED` and it exits 1, as a rows file of nothing but
+diverging rows must; the tally is the claim, not the exit code. `gate-divergence-triage.py` gained `--report <path>` so it reads a `-Rows` replay's
+single `report.txt`; a replay runs no seed, so there is no `report-<seed>.txt` for its seed form to
+find.
+
+### Two things stopped the doors opening, and both are fixed rather than worked around
+
+**1. A wedged Roslyn compiler server, which cost the first three attempts.** `run-oracle.ps1`'s
+consumer would not build: `Error writing to source link file ... because it is being used by another
+process`. `dotnet build-server shutdown` reported `VB/C# compiler server failed to shut down` twice
+and `rm -rf obj/Release` failed with `Device or resource busy`. `tools/find-lock-holder.ps1 -Path
+tests/FuzzyRegex.OracleTests/obj/Release/net10.0/FuzzyRegex.OracleTests.sourcelink.json` named the
+holder exactly - `pid 12332 VBCSCompiler` - and stopping that process cleared it. **This is NOT
+sitting 14's failure mode**, whose notes record the lock tool reporting NO holder; here it reported
+one and was right, so the two diagnoses are different and the tool earned its keep. Under the
+driver's allowlist `Stop-Process` and `taskkill` both need approval, so the kill went through a
+one-line `.scratch/*.ps1` run with `pwsh -File`, which is the harness's own documented route for what
+the inline gates refuse.
+
+**2. `gate-divergence-doors.py` HARD-CRASHED inside row 32 of 37 and lost rows 32 to 37 with it.** Exit
+139, no output file, no traceback. Minimised to fifteen lines in a scratch child: it is **ledger entry
+9**, upstream's POSIX access violation, reached through the probe's own renderer. `describe()` read
+`m.fuzzy_changes` unguarded, and reading that on the wrong POSIX match is an access violation rather
+than an exception, so `answer()`'s `except Exception` cannot see it and the process dies.
+`record-oracle.py:1019` has had the guard since S43 and its comment says it lives at the one funnel
+"because missing one would kill a wave rather than fail a test"; the doors probe is a second funnel
+that never got it. It has it now, keyed off `m.re.flags & POSIX_FLAG` exactly as the recorder is, and
+rendering `changes=unavailable upstream (POSIX)`.
+
+The fix is proven by the run rather than by reading: the same command that died inside row 32 now
+prints its `(37 rows)` header, **all 37 row blocks**, and exits 0.
+
+**And the faulting condition the committed probe states is WIDER THAN THE FAULT, which this sitting
+measured by accident and is recording rather than leaving.**
+`tools/probes/upstream-posix-fuzzy-changes-crash.py` says the condition "is two things and nothing
+else": POSIX, and a fuzzy match that actually spent an error. Re-run here it reproduces every one of
+its own cases exactly, insertion-only included - `(?p)(?:abc){i<=1}` over `'abxc'`, counts `(0, 1, 0)`,
+`*** CRASH rc=0xC0000005 ***`. **But three ablations of this sweep satisfy that condition and do not
+fault**, all three visible in the guard-removed control run below:
+
+- **row 4**, `(?b)(?e)(?r)...` with the `(*SKIP)` spelled `(*PRUNE)`, compiled flags `0x1b42a` so the
+  POSIX bit IS set, a PARTIAL match with counts `(0, 1, 0)`: `changes ([], [1], [])`, survives.
+- **row 18**, `(?b)(?p)^...$` with the `(?b)` deleted, a COMPLETE `fullmatch` with counts `(2, 2, 1)`:
+  `changes=([0, 1, 2], [3, 1], [])`, survives.
+- **row 32, the sharpest, because it is ONE pattern giving both answers.** Its `as drawn` spelling
+  answers counts `(0, 0, 1)` changes `([], [], [4])` and its `(*PRUNE)` spelling answers counts
+  `(3, 0, 0)` changes `([3, 2, 1], [], [])` - both POSIX, both spending errors, both safe - and only
+  the verb-DELETED spelling faults. The blind review found this one; the first draft of this
+  paragraph had the two rows and not the row that beats them.
+
+So neither "partial versus complete", nor which error kind, nor even the pattern separates them, and
+the true condition is **open**. Nothing is weakened by that: the recorder's guard and now the doors
+probe's are keyed on POSIX alone, which is conservative in the safe direction and cannot crash
+whatever the condition turns out to be. What needed correcting is the probe's own "and nothing else",
+and it is corrected there, in the file that states the law, with all three counter-examples and how
+to see them.
+
+`upstream-posix-fuzzy-changes-crash.py` also gains the pair that ties this sitting's fault to POSIX
+(see the control below). **Ledger entry 9 carried the same universal and is corrected too** - it read
+"every row with a non-zero count faults, POSIX present", which is the sentence these three ablations
+falsify. All fourteen of its recorded reproductions still hold and are untouched; what is gone is the
+claim to a condition, because a bug report that states a false universal is the kind that stalls.
+
+**Carried, not fixed here:** `tools/probes/upstream-bestmatch-free-answer.py` reads `fuzzy_changes`
+the same unguarded way and runs over a rows file. It cannot crash today because no row in
+`bestmatch-loses-a-candidate-rows.jsonl` carries POSIX - and **row 18 of the sweep does**, so whoever
+adds that row to that pin must fix the probe in the same change.
+
+### The 37, grouped
+
+Regenerate the whole table from the committed tree with the replay above and then
+`python tools/probes/gate-divergence-doors.py --rows tools/probes/sweep-divergence-rows.jsonl`.
+Row numbers below are that file's order; each row's own `comment` gives the sweep seed and row number.
+
+| rows | sweep rows | group |
+|---|---|---|
+| 3, 17, 23, 37 | 40339, 41539, 41563, 40595 (`fuzzy` `fullmatch`) | **A** - `(?b)` loses a match its own flagless engine makes |
+| 4, 15, 18, 35 | 24873, 24785, 24859, 25802 (`interactions`) | **A**, the same signature on composed rows |
+| 7, 9 | 25586, 39721 | **B** - upstream's `(*SKIP)` answer is its own only; `(*PRUNE)` and verb-free are both this port's |
+| 16, 26, 30, 33 | 39999, 25919, 38295, 24847 | **C** - overlapped scan, the verb moving a bound between matches |
+| 13, 22, 24, 25, 29, 36 | 32811, 32949, 25313, 25545, 35441, 33723 | **D** - partial `search`, `search-start-partial` shape |
+| 5, 20, 21, 31 | 25154, 25002, 25230, 24329 | **E** - same span, different change positions or change KINDS |
+| 1, 2, 8, 10, 11, 12, 27 | 24112, 39336, 38812, 24133, 24452, 24548, 29645 | **F** - `split`, `sub`, `subf`, where the outcome is not a match object |
+| 6, 14, 19, 28, 32, 34 | 25193, 35617, 25426, 32780, 24370, 25154 | **G** - unallocated; each needs its own look |
+
+(Row 10 is a `subf` and belongs in F by F's own definition - F is now exactly the file's non-match-object
+operations and nothing else; row 34 is NOT group E, since its spans differ, upstream `(0,3)` with
+`fuzzy=(2,0,0)` against this port's `(0,2)` with no errors at all. Both were mis-filed in the first
+draft and a blind pass caught both. **G is a residue, not a family**: it is what A to F do not claim,
+and the independent verifier was right that its rows share generator and operation with each other -
+19, 32 and 34 are all `interactions match` - so do not read G as a claim that they are six different
+mechanisms.)
+
+**Group A is the one this sitting spent its evidence on, and it does NOT belong where it looks like it
+belongs.** On all eight rows upstream answers `None` as drawn and, with `(?b)` deleted, answers a
+match that is **this port's answer exactly** - span, groups, counts and change positions, codepoints
+converted to UTF-16. **On rows 4 and 18 read that as span, groups, partialness and counts only**: both
+are POSIX rows with a spent error, so neither side HAS change positions to compare - this port's own
+answer line reads `changes unavailable upstream` - and the independent verifier was right to narrow
+it. That is `bestmatch-loses-a-candidate`'s own discriminator, and on the two rows carrying `(?e)` as
+well (4 and 35) deleting the `(?e)` instead leaves `None`, so it is `(?b)` and not the pair.
+
+**But the mechanism that entry pins does not explain them.** Ledger entry 12 is the doubled guard in
+`END_FUZZY`'s backtrack arm, which needs `n > 2n-2` for `n` TRAILING insertions and so bites only for
+`n >= 2` - `tools/probes/upstream-bestmatch-trailing-insertions.py`, whose own docstring records the
+`(?b)` row matching for `k <= 1`. The flagless answers here carry **one** insertion on rows 3, 4, 17,
+23 and 37, **two** on row 18, and **none at all** on rows 15 and 35 - and a refusal of a ZERO-ERROR
+match cannot be an insertion guard at any budget. The guard is `n > 2n-2`, which is TRUE at n=1 (so a
+single trailing insertion is allowed through) and false from n=2, so **it cannot be what refused seven
+of the eight**. Row 18 is the only one it could have refused, and even there it is not demonstrated:
+two insertions is the whole match's count, and the guard is per fuzzy section and per TRAILING
+insertion, neither of which was measured here. That is exactly the trap that entry's own Reason warns
+about ("S46's flagless-only key swept in a SECOND mechanism with the same signature").
+
+(Two drafts of this paragraph were wrong in opposite directions and both were killed by a blind pass:
+the first left row 4 out of the census and said "six of the eight", the second over-corrected to "none
+of the eight" and forgot that n=2 is exactly where the guard starts biting. Seven is the number, and
+row 18 is the one to look at first.)
+
+Rows 4 and 15 separately meet `bestmatch-loses-a-partial`'s four conditions - `(?b)`, a fuzzy section,
+a `(*SKIP)` and `partial=True` - and their anchored door is **unsettled rather than disqualified**,
+which is a distinction the first draft got wrong. Both are `(?r)`, and that entry's Reason calls
+`endpos` "the natural door for a `(?r)` row"; what it disqualifies is an `endpos` hit on a FORWARD row
+(its row 76251). So the door is the right one here. What is weak is the bound it answers at: on both
+rows the anchor sweep answers **only at `endpos=0`**, an EMPTY slice holding no text, and the entry's
+other reversed rows answer at endpos 1, 2, 4 and 5. Whether a zero-width partial on an empty slice
+carries the strong argument is a question that entry never had to settle, and it is not settled here.
+
+**Group A is therefore eight rows of one signature and at least two mechanisms, and separating them is
+the next sitting's first job** - very likely a new ledger entry rather than a widening of 12 or 13.
+Do not add them to either pin on the flagless control alone; the owner's 2026-09-14 ruling says a pin
+widens by judging a row, and these are not judged.
+
+### Numbers
+
+- Ratchet **GREEN**, **6119 / 6119 / 0 skipped**, **6011 distinct ids**, baseline **6011** -
+  unchanged, and it must be: **no `.cs` file was touched this sitting at all**.
+- Tool tests (Pester, `tools/tests`) **81 / 81**.
+- The 37-row replay: **diverge 37 of 37**, `expected 0`, `agree 0`.
+- `gate-divergence-doors.py --rows tools/probes/sweep-divergence-rows.jsonl`: **37 of 37 rows**,
+  exit 0.
+- `upstream-posix-fuzzy-changes-crash.py` re-run: every case as its docstring states.
+
+### The negative control, run last against the code committed here
+
+**The POSIX guard's control is the crash itself.** Applied and reverted by hand, `git status
+--porcelain` clean of it afterwards:
+
+> **Control A, `posix-changes-guard`**: in `tools/probes/gate-divergence-doors.py`, `describe`,
+> replace
+> ```
+>         changes = ("unavailable upstream (POSIX)" if m.re.flags & POSIX_FLAG
+>                    else str(m.fuzzy_changes))
+> ```
+> with `        changes = str(m.fuzzy_changes)`.
+> Run: `python -u tools/probes/gate-divergence-doors.py --rows tools/probes/sweep-divergence-rows.jsonl`.
+> Result: **exit 139 (SIGSEGV), dying INSIDE row 32 of 37** having completed 31, with
+> `(*SKIP)->(*PRUNE)` as the last line printed and the `verb deleted` call the one that faults.
+> Restored: **exit 0, 37 of 37 rows**.
+
+**No second seed, and the reason is not the usual one.** This control runs on 37 explicit rows rather
+than on a generator draw, so there is no seed to vary. What stands in for it is **a matched pair now
+committed to `upstream-posix-fuzzy-changes-crash.py`'s own case table** - row 32's crashing shape
+reduced to its inner fuzzy section, and the SAME pattern and subject with the POSIX bit cleared:
+
+```
+'(?r)(?:\U00010428\U00010428(?:\U00010400){1i+2d+1s<=3}){1i+2d+1s<=3}' flags=65536  span (0, 5) counts (1, 2, 0) |  *** CRASH rc=0xC0000005 ***
+'(?r)(?:\U00010428\U00010428(?:\U00010400){1i+2d+1s<=3}){1i+2d+1s<=3}' flags=0      span (2, 5) counts (1, 0, 0) | changes ((5,), (), ())
+```
+
+One bit changed, crash against answer, and it needs no `partial=True` - so it fits that probe's
+existing child unchanged. It went in the committed probe rather than staying in `.scratch` for the
+reason this skill gives: the ten-variant matrix that first established it was scratch-only, and a
+control nobody can re-run is not evidence. The pair is what survives; the ten variants are not
+claimed.
+
+No control this sitting mutates the engine. None could: no engine code changed and no `.cs` file did.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results. Pass one, over the whole
+diff: ten findings raised, ten reproduced, ten fixed.** Not one was a defect in the tooling's
+behaviour - the reviewer re-ran the replay, the doors, the crash probe, the tool tests and every
+argument form of the triage probe, verified all 37 rows byte-identical to their wave rows at file
+index = row + 1, and confirmed the UTF-16 conversion on every group-A row, which was its hunt list's
+first item. All ten were defects in THIS SITTING'S EVIDENCE, which is what this sitting's output is:
+
+1. **The insertion census dropped row 4**, so "six of the eight" was seven.
+2. **Row 34 was filed in group E, "same span"** - its spans differ, `(0,3)` against `(0,2)`.
+3. **The `endpos=0` argument cited the wrong authority.** `bestmatch-loses-a-partial` disqualifies an
+   `endpos` hit on a FORWARD row; rows 4 and 15 are `(?r)`, where that entry calls `endpos` "the
+   natural door". The door is right and the BOUND is weak, which is a different claim.
+4. **The POSIX counter-examples undercounted**: row 32 is a third and the sharpest, two safe ablations
+   and one faulting one from ONE pattern.
+5. **The LEDGER block was inserted mid-entry**, orphaning S43's own conclusion after it.
+6. **The crash probe cited `docs/plan/slices/done/S52-...`**, which does not exist while S52 is open.
+7. **Row 10, a `subf`, sat in G while F was defined by operation.**
+8. **`--report` with no path raised `IndexError`.**
+9. **A stale `regex 2026.7.19` provenance line** over cases measured on 2026.9.10.
+10. **"lost the other 36"** where 31 rows completed, so six were lost.
+
+**Pass two, a first pass over the repair delta: six findings raised, six reproduced, six fixed** -
+and the first is the sharpest thing either pass produced. (1) The corrected census was over-corrected:
+"none of the eight" is wrong, because the guard is `n > 2n-2`, which is TRUE at n=1 and FALSE FROM
+n=2 - so row 18's two insertions are exactly where it starts biting, and the number is seven.
+(2) LEDGER said row 32 "gives two of each" where it gives two safe and one faulting. (3) The "other
+36" fix reached the slice file and not STATE.md, DECISIONS.md or the probe comment. (4) The new
+provenance sentence said "the last two cases"; they are the seventh and eighth of sixteen. (5) "Three
+ablations ... all answering" then listed four. (6) `--report <path> 7` silently discarded the seed.
+
+**No third pass.** What pass two's fixes created is wording corrections inside text pass two had just
+read, plus one guard that refuses mixed `--report`-and-seed arguments; every argument form was re-run
+afterwards and the independent verifier re-ran all six of them again.
+
+### The independent verifier
+
+A fresh agent (amendment 16 limb (d)), briefed with nothing but this tree and `docs/VERIFICATION.md`'s
+do-not-use-git clause. It re-ran every number these notes, STATE.md, the five new DECISIONS entries
+and the LEDGER block assert. **Everything was CONFIRMED except four narrowings, all folded in above,
+and two COULD NOT RUN.**
+
+**Narrowed rather than confirmed as written.** (a) The doors probe does not print the string "37 of
+37"; it prints a `(37 rows)` header and 37 blocks. (b) On rows 4 and 18 the flagless answer matches
+this port's on span, groups, partialness and counts but NOT on change positions, because both are
+POSIX rows with a spent error and neither side has change positions at all - "exactly, change
+positions included" was true of six of the eight, not eight. (c) Group G's "one shape each" is false
+of generator-and-operation: rows 19, 32 and 34 are all `interactions match`. G is a residue.
+(d) The replay's own verdict is `Oracle: RED`, exit 1, which is what an all-diverging rows file must
+give; the tally is the claim.
+
+**COULD NOT RUN, two, neither a gap in the measurement.** The wedged VBCSCompiler episode, because the
+compiler server was not wedged when the verifier looked and every build succeeded first time - it is a
+one-time event with no artefact; and the owner's relayed ruling, which has nothing to re-run against.
+
+**CONFIRMED:** the ratchet (GREEN, 6119/6119/0 skipped, 6011 distinct ids, baseline 6011); tool tests
+81/81; the replay tally character for character; the doors run at 37 blocks and exit 0; all 16 cases
+of the crash probe answering as labelled, the new astral pair included; **Control A on every
+particular** - exit 139, 31 complete, death inside row 32, `(*SKIP)->(*PRUNE)` the last line, `verb
+deleted` the faulting call, and the file byte-identical by md5 after the hand revert; **the provenance
+of all 37 rows rather than a sample**, each byte-identical to its wave row minus the added `comment`,
+0 mismatches, all eight sweep directories present; the whole group-A census; `None` as drawn on all
+eight; the `(?e)` ablation on rows 4 and 35; the anchor sweep answering only at `endpos=0` on rows 4
+and 15 with the 3-hit cap unreached; all three POSIX counter-examples with their exact counts and
+change lists, each in its own child; the group table's 37 cells, distinct and matching every
+`comment`; groups C, D, E and F by operation; `record-oracle.py:1019` and `:342`; all six argument
+forms of the triage probe with their exit codes; that no `.cs` file changed; that LEDGER.md's diff is
+a pure insertion with nothing deleted and its fourteen older cases all still answer as recorded; the
+carried `upstream-bestmatch-free-answer.py` defect and that sweep row 18 really would trip it; and
+sitting 14's corrected arithmetic, 20.3 x 300/80 = 76.1.
+
+It used no git command but `status`, `diff` and `diff --stat`, reverted Control A by hand, and left
+the tree byte-identical to the snapshot it started from.

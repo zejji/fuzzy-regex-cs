@@ -1171,6 +1171,32 @@ The probe prints the span and the counts BEFORE touching the changes and flushes
 faulting rows above still report them. Those are upstream's own values, and they are what makes this
 port's expected answers measured rather than derived.
 
+**S52 SITTING 15 NARROWS IT AGAIN, AND THE "EVERY ROW" IS FALSE, 2026-09-15.** All fourteen rows
+above still answer exactly as recorded, and the probe gained a pair of cases - the same reversed
+nested-fuzzy pattern with the POSIX bit set and cleared, crash against answer, which is the tightest
+positive/negative pair this entry has. (They sit seventh and eighth of the sixteen, with the other
+faulting cases, not at the end of the table.) **But "every row with a non-zero count faults, POSIX
+present" is contradicted by three rows of `tools/probes/sweep-divergence-rows.jsonl`**, whose
+ablations are POSIX, spend an error, and answer their change positions normally:
+
+- row 4's `(*PRUNE)` ablation - compiled flags `0x1b42a`, PARTIAL, counts `(0, 1, 0)`, changes
+  `([], [1], [])`;
+- row 18's `(?b)`-free ablation - a complete `fullmatch`, counts `(2, 2, 1)`, changes
+  `([0, 1, 2], [3, 1], [])`;
+- **row 32, which is the sharpest of the three because it is one row and three ablations**: `as
+  drawn` answers counts `(0, 0, 1)` changes `([], [], [4])` and the `(*PRUNE)` spelling answers
+  counts `(3, 0, 0)` changes `([3, 2, 1], [], [])`, and only the verb-DELETED spelling faults.
+
+So neither partialness, nor the kind of error, nor even the pattern separates the faulting rows from
+the safe ones - row 32 gives two safe ablations and one faulting one from a single pattern. **The
+real condition is UNKNOWN and this
+entry must not claim one in an upstream report**: report the reproductions, which all hold, and not
+the universal. Seen by removing the POSIX guard in `tools/probes/gate-divergence-doors.py`'s
+`describe` and running it over that rows file; S52 sitting 15's notes carry it as Control A.
+
+Nothing this port does rests on the universal: `record-oracle.py:1019` and
+`gate-divergence-doors.py` both guard on POSIX ALONE, which is safe whatever the condition is.
+
 **S41 narrowed the faulting access, 2026-09-13, and it makes `match` affected too.** The crash is in
 reading `Match.fuzzy_changes`, not in matching. Each of these runs in its own interpreter:
 

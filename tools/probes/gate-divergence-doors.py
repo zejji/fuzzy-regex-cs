@@ -82,6 +82,11 @@ _REQ_OFFSET_ARG, _REQ_CHARS_ARG = 7, 8
 _inner = regex._regex.compile
 REVERSE = 0x400
 
+# Upstream's POSIX flag bit (`regex.P`), read off the COMPILED pattern because an inline `(?p)`
+# never reaches the row's own flags - `tools/probes/upstream-posix-flag-is-visible-on-compiled.py`.
+# Spelled out here for the same reason `record-oracle.py:342` spells it out.
+POSIX_FLAG = 0x10000
+
 # Every upstream call here carries a timeout, because AN ABLATION IS NOT THE DRAWN ROW. Deleting a
 # `(*SKIP)` deletes the pruning that made the drawn pattern cheap, and on a `(?b)` best-match row the
 # verb-free spelling can run for minutes where the row itself answers instantly (seed 7 row 76160 is
@@ -121,7 +126,17 @@ def describe(m) -> str:
         bits.append(f"g{n}={m.span(n)}" if m.span(n) != (-1, -1) else f"g{n}=unset")
     bits.append("PARTIAL" if m.partial else "not-partial")
     if any(m.fuzzy_counts):
-        bits.append(f"counts={m.fuzzy_counts} changes={m.fuzzy_changes}")
+        # NEVER `m.fuzzy_changes` ON A POSIX MATCH THAT SPENT AN ERROR. It is an access violation
+        # that kills this process (0xC0000005 on Windows, SIGSEGV under Git Bash) rather than an
+        # exception, so `answer`'s `except` cannot see it and ONE such row takes the whole run with
+        # it - which is what it did to S52's 37-row triage, dying inside row 32 of 37 after
+        # completing 31, so rows 32 to 37 were never asked.
+        # Ledger entry 9; the same guard and the same reason as `record-oracle.py:1019`, keyed off
+        # POSIX rather than off the spent error because nothing in the pattern or the subject
+        # predicts one. The counts on the same match answer correctly and are kept.
+        changes = ("unavailable upstream (POSIX)" if m.re.flags & POSIX_FLAG
+                   else str(m.fuzzy_changes))
+        bits.append(f"counts={m.fuzzy_counts} changes={changes}")
     return " ".join(bits)
 
 

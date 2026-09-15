@@ -8,6 +8,18 @@ is the second option:
     pwsh -File tools/run-oracle.ps1 -Count 6000          # about 8.5 minutes, writes the reports
     python tools/probes/gate-divergence-triage.py        # reads them, prints the table
 
+A `-Rows` replay writes ONE report, `report.txt`, because it runs no seed at all (`run-oracle.ps1`
+gives it the pseudo-seed -1). That is the shape S52's sweep triage uses, so the same table is
+reachable over an explicit rows file rather than over a seed list:
+
+    pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl
+    python tools/probes/gate-divergence-triage.py --report TestResults/oracle/report.txt
+
+That rows file holds the 37 rows S52's first seed sweep diverged on, each carrying a `comment` of
+the `sweep-<seed>` directory and the row number it was lifted from. It exists BECAUSE those
+directories are under `TestResults/`, which is gitignored: the sweep is where the rows came from
+and the file is the only copy that survives a clean checkout.
+
 It renders no judgement. It reports each diverging row's generator, operation, flags and the shape
 features that decide which family to try first - whether the pattern carries a `(*SKIP)`, whether
 it is reversed, whether it has a fuzzy section, and whether either engine ERRORED rather than
@@ -59,20 +71,36 @@ def features(pattern: str, upstream: str, port: str) -> list[str]:
 
 
 def main(argv=None) -> int:
-    seeds = [int(a) for a in (argv or sys.argv[1:])] or default_seeds()
+    argv = list(argv if argv is not None else sys.argv[1:])
+    # An explicit report path, for a `-Rows` replay, which has no seed to name its file after.
+    reports = []
+    while "--report" in argv:
+        at = argv.index("--report")
+        if at + 1 >= len(argv):
+            print("--report needs a path, e.g. --report TestResults/oracle/report.txt")
+            return 2
+        reports.append((argv[at + 1], Path(argv[at + 1])))
+        del argv[at:at + 2]
+    if reports and argv:
+        # Refusing rather than ignoring: `--report <path> 7` reads as "this report AND seed 7", and
+        # silently dropping the 7 prints a table that looks like the answer to a question nobody asked.
+        print(f"--report and seeds cannot be mixed; leftover arguments: {' '.join(argv)}")
+        return 2
+    if not reports:
+        reports = [(f"seed {seed}", REPORTS / f"report-{seed}.txt")
+                   for seed in ([int(a) for a in argv] or default_seeds())]
     # Two dicts, not one: `fuzzy` is BOTH a generator name and a shape tag, so a single dict sums
     # the one `fuzzy` row with the nine `fuzzy`-tagged ones and reports 10 of neither.
     generators: dict[str, int] = {}
     tags: dict[str, int] = {}
     seen = 0
-    for seed in seeds:
-        report = REPORTS / f"report-{seed}.txt"
+    for label, report in reports:
         if not report.exists():
-            print(f"\n=== seed {seed}: no report - the seed was GREEN, or the gate has not run")
+            print(f"\n=== {label}: no report - the seed was GREEN, or the gate has not run")
             continue
         lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
         starts = [i for i, line in enumerate(lines) if HEAD.match(line)]
-        print(f"\n=== seed {seed}  ({len(starts)} diverging rows)")
+        print(f"\n=== {label}  ({len(starts)} diverging rows)")
         for n, start in enumerate(starts):
             end = starts[n + 1] if n + 1 < len(starts) else len(lines)
             row, generator, operation, flags = HEAD.match(lines[start]).groups()
@@ -96,7 +124,7 @@ def main(argv=None) -> int:
             print(f"          up  {upstream[:70]}")
             print(f"          us  {port[:70]}")
 
-    print(f"\n=== {seen} diverging rows over {len(seeds)} seeds")
+    print(f"\n=== {seen} diverging rows over {len(reports)} report(s)")
     print("  by generator:")
     for key in sorted(generators):
         print(f"    {key:<20}{generators[key]}")
