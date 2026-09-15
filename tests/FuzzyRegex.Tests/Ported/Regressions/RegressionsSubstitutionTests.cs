@@ -12,7 +12,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.Regressions;
 /// only as a (harmlessly large) replacement count and the WORD flag is never applied. Verified
 /// against the local oracle 2026-08-30: the same call with no fourth argument, and with
 /// <c>flags=regex.WORD</c>, both give the identical result. It is ported as a plain
-/// <see cref="FuzzyRegex.Replace(string, string, string, FuzzyRegexOptions)"/> with no options, so
+/// <see cref="FuzzyRegex.Replace(string, string, string, FuzzyRegexOptions, TimeSpan?, CancellationToken)"/> with no options, so
 /// nobody "restores" a WORD flag this API does not have.
 /// </remarks>
 public sealed class RegressionsSubstitutionTests

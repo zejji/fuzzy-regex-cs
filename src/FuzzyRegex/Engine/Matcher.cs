@@ -3084,13 +3084,22 @@ internal static class Matcher
                 or Opcode.SetUnionIgnRev;
 
     /// <summary>
-    /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266) less the
-    /// <c>PyErr_CheckSignals</c> half, which is CPython's Ctrl-C handling and has no counterpart in
-    /// a library call.
+    /// Upstream <c>safe_check_cancel</c> (<c>upstream/src/_regex.c</c> line 2266). Upstream's two
+    /// halves are <c>check_timed_out</c> and <c>PyErr_CheckSignals</c>, which is how a Python caller
+    /// interrupts a long match; the second half is the caller's <see cref="CancellationToken"/>
+    /// here, which is the only way a .NET caller has to do the same thing (S51).
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if matching should be abandoned.</returns>
-    private static bool SafeCheckCancel(MatchState state) => state.CheckTimedOut();
+    /// <remarks>
+    /// This is the ONLY site either is read, and the three callers all reach it through the same
+    /// <c>state.Iterations == 0</c> gate - upstream's <c>iterations</c>, a <see cref="ushort"/>
+    /// stepped by <c>0x100</c> so that it wraps to zero once every 256 turns. So the token costs one
+    /// predictable null test per 256 iterations of the matching or backtracking loop, on top of the
+    /// <see cref="System.Diagnostics.Stopwatch"/> read that was already there.
+    /// </remarks>
+    private static bool SafeCheckCancel(MatchState state) =>
+        state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
 
     /// <summary>
     /// One codepoint along in the direction the pattern runs: upstream's

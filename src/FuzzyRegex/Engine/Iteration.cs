@@ -54,6 +54,7 @@ internal static class Iteration
     /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="overlapped">Whether matches may overlap.</param>
     /// <param name="partial">Upstream's <c>partial</c>, which the scanner takes (<c>:21089</c>).</param>
+    /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
     /// <returns>The matches.</returns>
     internal static List<Match> FindAll(
         FuzzyRegex regex,
@@ -61,7 +62,8 @@ internal static class Iteration
         int start,
         int end,
         bool overlapped,
-        bool partial
+        bool partial,
+        MatchLimits limits
     )
     {
         List<Match> matches = [];
@@ -77,7 +79,8 @@ internal static class Iteration
             overlapped,
             partial,
             visibleCaptures: true,
-            onMatch: (state, status) => matches.Add(regex.NewMatch(state, input, status))
+            onMatch: (state, status) => matches.Add(regex.NewMatch(state, input, status)),
+            limits
         );
 
         return matches;
@@ -93,14 +96,21 @@ internal static class Iteration
     /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
     /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
     /// <returns>The number of matches.</returns>
     /// <remarks>
     /// No <c>partial</c> argument, deliberately: this counts what <c>findall</c> returns, and
     /// <c>findall</c> refuses one - <c>regex.findall('abc', 'xab', partial=True)</c> raises
     /// <c>ValueError: unused keyword argument 'partial'</c> (measured 2026-09-12, regex 2026.7.19).
     /// </remarks>
-    internal static int Count(FuzzyRegex regex, string input, int start, int end, bool overlapped) =>
-        Scan(regex, input, start, end, overlapped, partial: false, visibleCaptures: false, onMatch: null);
+    internal static int Count(
+        FuzzyRegex regex,
+        string input,
+        int start,
+        int end,
+        bool overlapped,
+        MatchLimits limits
+    ) => Scan(regex, input, start, end, overlapped, partial: false, visibleCaptures: false, onMatch: null, limits);
 
     /// <summary>
     /// The scan itself: <c>scanner_search_or_match</c> (<c>upstream/src/_regex.c</c> line 20874)
@@ -115,11 +125,13 @@ internal static class Iteration
     /// <param name="partial">Whether to report a trailing partial match.</param>
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
     /// <param name="onMatch">Called once per match, with the state holding it and its status.</param>
+    /// <param name="limits">The time budget and cancellation token bounding the whole scan.</param>
     /// <returns>How many matches there were.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The scan as a whole ran out of time. Upstream times the scan, not each match, and one state
     /// carries one start time, so this is the same budget.
     /// </exception>
+    /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
     private static int Scan(
         FuzzyRegex regex,
         string input,
@@ -128,7 +140,8 @@ internal static class Iteration
         bool overlapped,
         bool partial,
         bool visibleCaptures,
-        Action<MatchState, int>? onMatch
+        Action<MatchState, int>? onMatch,
+        MatchLimits limits
     )
     {
         using var state = MatchState.Create(
@@ -140,7 +153,7 @@ internal static class Iteration
             partial: partial,
             visibleCaptures: visibleCaptures,
             matchAll: false,
-            timeout: regex.TimeoutTicks
+            limits
         );
 
         int count = 0;
@@ -153,7 +166,7 @@ internal static class Iteration
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
-                throw Timeout(regex, input);
+                throw limits.Cancelled(input, regex.Pattern);
             }
 
             // scanner_search_or_match builds a match for PARTIAL exactly as it does for SUCCESS
@@ -215,7 +228,11 @@ internal static class Iteration
     /// <param name="overlapped">Whether the scan it came from allowed matches to overlap.</param>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
-    /// The search ran out of time.
+    /// The search ran out of time, against the PATTERN's budget. This is the one matching
+    /// operation that takes no per-call timeout and no token, because it takes no arguments at all
+    /// - the built-in <c>Regex</c>'s <c>Match.NextMatch</c> is in exactly the same position and
+    /// likewise runs under the pattern's <c>MatchTimeout</c>. A caller who needs to bound or cancel
+    /// a walk should use <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>, which takes both (S51).
     /// </exception>
     internal static Match Next(
         FuzzyRegex regex,
@@ -227,6 +244,8 @@ internal static class Iteration
         bool overlapped
     )
     {
+        MatchLimits limits = regex.PatternLimits;
+
         using var state = MatchState.Create(
             regex.PatternObject,
             input,
@@ -237,7 +256,7 @@ internal static class Iteration
             // The Match object, and therefore repeated captures, will be visible.
             visibleCaptures: true,
             matchAll: false,
-            timeout: regex.TimeoutTicks
+            limits
         );
 
         // Put the state back where the given match left it. A reverse match reports its two ends
@@ -251,7 +270,7 @@ internal static class Iteration
         int status = Matcher.DoMatch(state, search: true);
         if (status == MatchStatus.Cancelled)
         {
-            throw Timeout(regex, input);
+            throw limits.Cancelled(input, regex.Pattern);
         }
 
         return regex.NewMatch(state, input, status);
@@ -264,11 +283,13 @@ internal static class Iteration
     /// <param name="regex">Upstream's <c>self</c>: the pattern being split on.</param>
     /// <param name="input">The subject.</param>
     /// <param name="maxSplits">The most splits to make, or a negative number for no limit.</param>
+    /// <param name="limits">The time budget and cancellation token bounding the whole split.</param>
     /// <returns>The pieces, with <see langword="null"/> for a group that took no part in a match.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The split ran out of time.
     /// </exception>
-    internal static string?[] Split(FuzzyRegex regex, string input, int maxSplits)
+    /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
+    internal static string?[] Split(FuzzyRegex regex, string input, int maxSplits, MatchLimits limits)
     {
         // Upstream spells "no limit" as maxsplit=0 and reads a negative maxsplit as "no splits at
         // all" (regex.split(',', 'a,b,c', maxsplit=-1) is ['a,b,c'], measured 2026-09-01). This
@@ -289,7 +310,7 @@ internal static class Iteration
             partial: false,
             visibleCaptures: false,
             matchAll: false,
-            timeout: regex.TimeoutTicks
+            limits
         );
 
         List<string?> list = [];
@@ -301,7 +322,7 @@ internal static class Iteration
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
-                throw Timeout(regex, input);
+                throw limits.Cancelled(input, regex.Pattern);
             }
 
             if (status != MatchStatus.Success)
@@ -356,10 +377,7 @@ internal static class Iteration
         return input[span.Start..span.End];
     }
 
-    /// <summary>The exception a cancelled scan reports, which for this port only ever means a timeout.</summary>
-    /// <param name="regex">The pattern being run.</param>
-    /// <param name="input">The subject.</param>
-    /// <returns>The exception to throw.</returns>
-    private static System.Text.RegularExpressions.RegexMatchTimeoutException Timeout(FuzzyRegex regex, string input) =>
-        new(input, regex.Pattern, regex.MatchTimeout);
+    // The local Timeout helper this file used to carry is gone: a cancelled scan can now mean the
+    // clock OR the caller's token, and deciding between them lives on MatchLimits.Cancelled, which
+    // is the one place that holds both.
 }

@@ -38,7 +38,12 @@ internal static class Substitution
     /// <param name="isFormat">Whether the template is a <c>str.format</c> one (upstream's <c>RE_SUBF</c>).</param>
     /// <param name="count">The most replacements to make, or a negative number for no limit.</param>
     /// <param name="replacements">Receives how many replacements were made.</param>
+    /// <param name="limits">The time budget and cancellation token bounding the whole operation.</param>
     /// <returns>The subject with the matches replaced.</returns>
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// The operation ran out of time.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
     internal static string Subx(
         FuzzyRegex regex,
         string input,
@@ -46,7 +51,8 @@ internal static class Substitution
         MatchEvaluator? evaluator,
         bool isFormat,
         int count,
-        out int replacements
+        out int replacements,
+        MatchLimits limits
     )
     {
         PatternObject pattern = regex.PatternObject;
@@ -100,7 +106,7 @@ internal static class Substitution
             // replacement is callable or subf is used."
             visibleCaptures: evaluator is not null || isFormat,
             matchAll: false,
-            timeout: regex.TimeoutTicks
+            limits
         );
 
         // Upstream's join list (init_join_list, :19686), which a garbage-collected heap reduces to
@@ -115,11 +121,7 @@ internal static class Substitution
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
-                throw new System.Text.RegularExpressions.RegexMatchTimeoutException(
-                    input,
-                    regex.Pattern,
-                    regex.MatchTimeout
-                );
+                throw limits.Cancelled(input, regex.Pattern);
             }
 
             if (status != MatchStatus.Success)

@@ -421,7 +421,7 @@ public sealed class Match : Group
     /// <remarks>
     /// The search resumes inside the same slice this match was found in, and under the same
     /// <c>overlapped</c> setting, so walking a subject with <see cref="NextMatch"/> gives the same
-    /// sequence as <see cref="FuzzyRegex.Matches(string, int, int, bool, bool)"/> over it. A zero-width
+    /// sequence as <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/> over it. A zero-width
     /// match is not allowed to repeat at the same position, which is upstream's
     /// <c>must_advance</c> - see <c>MatchState.AdvancePastMatch</c>, the one place that rule lives.
     /// <para>

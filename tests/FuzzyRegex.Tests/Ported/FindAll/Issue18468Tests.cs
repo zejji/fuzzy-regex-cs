@@ -9,7 +9,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Ported.FindAll;
 /// <remarks>
 /// <para>
 /// There is no <c>findall</c> on this API; every assertion here uses
-/// <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}})"/> instead, per the same convention as <c>FindAllTests</c>.
+/// <see cref="FuzzyRegex.Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}}, TimeSpan?, CancellationToken)"/> instead, per the same convention as <c>FindAllTests</c>.
 /// </para>
 /// <para>
 /// Upstream loops <c>for string in "a:b::c:::d", StrSubclass("a:b::c:::d"):</c>; both iterations

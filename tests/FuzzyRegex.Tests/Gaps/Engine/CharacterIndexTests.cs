@@ -92,7 +92,7 @@ public sealed class CharacterIndexTests
             partial: false,
             visibleCaptures: false,
             matchAll: false,
-            timeout: MatchState.NoTimeout
+            new MatchLimits(MatchState.NoTimeout, FuzzyRegex.InfiniteMatchTimeout, CancellationToken.None)
         );
     }
 

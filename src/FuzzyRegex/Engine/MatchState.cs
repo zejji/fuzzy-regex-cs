@@ -393,6 +393,14 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal long Timeout;
 
+    /// <summary>
+    /// The caller's cancellation token, polled at the same site as the clock. Upstream has no
+    /// counterpart field: its equivalent is the interpreter's own signal state, which
+    /// <c>safe_check_cancel</c> reads through <c>PyErr_CheckSignals</c> (<c>:2253</c>) rather than
+    /// carrying on the state. See <see cref="MatchLimits"/>.
+    /// </summary>
+    internal CancellationToken Cancellation;
+
     /// <summary>Upstream <c>start_time</c>.</summary>
     internal long StartTime;
 
@@ -505,7 +513,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="partial">Whether a partial match is wanted.</param>
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
     /// <param name="matchAll">Whether the match must cover the whole slice.</param>
-    /// <param name="timeout">The timeout in <see cref="Stopwatch"/> ticks, or <see cref="NoTimeout"/>.</param>
+    /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
     /// <returns>The state, ready to match.</returns>
     internal static MatchState Create(
         PatternObject pattern,
@@ -516,7 +524,7 @@ internal sealed class MatchState : IDisposable
         bool partial,
         bool visibleCaptures,
         bool matchAll,
-        long timeout
+        MatchLimits limits
     )
     {
         // The capture groups (state_init_2, upstream/src/_regex.c:18327). Upstream caches the block
@@ -626,8 +634,9 @@ internal sealed class MatchState : IDisposable
         state.Version0 = (pattern.Flags & RegexFlags.Version1) == 0;
         state.MustAdvance = false;
 
-        state.Timeout = timeout;
-        state.StartTime = timeout == NoTimeout ? 0 : Stopwatch.GetTimestamp();
+        state.Timeout = limits.TimeoutTicks;
+        state.StartTime = limits.TimeoutTicks == NoTimeout ? 0 : Stopwatch.GetTimestamp();
+        state.Cancellation = limits.Cancellation;
 
         // NOT PORTED: search_positions, which only search_start reads (Phase 7).
 

@@ -265,16 +265,28 @@ public sealed class ApiSurfaceTests
         // exactly the moment the ported suite would have stopped building too.
         Type surface = typeof(FuzzyRegex);
 
+        // The trailing (TimeSpan?, CancellationToken) pair is S51's per-call timeout and token,
+        // which every input-dependent method carries. The lookups are by exact signature, so they
+        // name it; what each assertion pins is unchanged - that the operation exists at all.
         surface
-            .GetMethod(nameof(FuzzyRegex.FullMatch), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .GetMethod(
+                nameof(FuzzyRegex.FullMatch),
+                [typeof(string), typeof(int), typeof(int), typeof(bool), typeof(TimeSpan?), typeof(CancellationToken)]
+            )
             .Should()
             .NotBeNull("upstream fullmatch is used 71 times in test_regex.py");
         surface
-            .GetMethod(nameof(FuzzyRegex.MatchAtStart), [typeof(string), typeof(int), typeof(int), typeof(bool)])
+            .GetMethod(
+                nameof(FuzzyRegex.MatchAtStart),
+                [typeof(string), typeof(int), typeof(int), typeof(bool), typeof(TimeSpan?), typeof(CancellationToken)]
+            )
             .Should()
             .NotBeNull("upstream match is anchored at pos and is not our Match");
         surface
-            .GetMethod(nameof(FuzzyRegex.ReplaceFormat), [typeof(string), typeof(string), typeof(int)])
+            .GetMethod(
+                nameof(FuzzyRegex.ReplaceFormat),
+                [typeof(string), typeof(string), typeof(int), typeof(TimeSpan?), typeof(CancellationToken)]
+            )
             .Should()
             .NotBeNull("upstream subf uses str.format templates, not $1 templates");
 

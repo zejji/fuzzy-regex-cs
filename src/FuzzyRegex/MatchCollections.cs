@@ -100,7 +100,7 @@ public sealed class GroupCollection : IReadOnlyList<Group>
 }
 
 /// <summary>
-/// The matches found by <see cref="FuzzyRegex.Matches(string, int, int, bool, bool)"/>. Shaped after
+/// The matches found by <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>. Shaped after
 /// <see cref="System.Text.RegularExpressions.MatchCollection"/>.
 /// </summary>
 /// <remarks>

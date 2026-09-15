@@ -141,7 +141,11 @@ internal static class OracleComparer
             compiled = new FuzzyRegex(
                 row.Pattern,
                 (FuzzyRegexOptions)row.Flags,
-                timeout,
+                // NOT the row deadline: it is passed PER CALL below instead, so that every row of
+                // every wave exercises S51's per-call budget rather than the constructor's. The
+                // deadline itself is unchanged, and so is every verdict - measured, see the closing
+                // notes for S51 - which is the point: the same waves, through the new plumbing.
+                FuzzyRegex.InfiniteMatchTimeout,
                 row.NamedLists.ToDictionary(
                     static entry => entry.Key,
                     static entry => (IReadOnlyCollection<string>)entry.Value,
@@ -175,8 +179,14 @@ internal static class OracleComparer
             if (row.Operation is "sub" or "subf")
             {
                 string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
-                    ? compiled.Replace(row.Subject, row.Template!, OurLimit(row.Count), out int replacements)
-                    : compiled.ReplaceFormat(row.Subject, row.Template!, OurLimit(row.Count), out replacements);
+                    ? compiled.Replace(row.Subject, row.Template!, OurLimit(row.Count), out int replacements, timeout)
+                    : compiled.ReplaceFormat(
+                        row.Subject,
+                        row.Template!,
+                        OurLimit(row.Count),
+                        out replacements,
+                        timeout
+                    );
 
                 return new SubOutcome(replaced, replacements);
             }
@@ -187,14 +197,14 @@ internal static class OracleComparer
 
                 return new MatchesOutcome([
                     .. compiled
-                        .Matches(row.Subject, overlapped: overlapped)
+                        .Matches(row.Subject, overlapped: overlapped, timeout: timeout)
                         .Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
                 ]);
             }
 
             if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
             {
-                return new SplitOutcome(compiled.Split(row.Subject, OurLimit(row.Count)));
+                return new SplitOutcome(compiled.Split(row.Subject, OurLimit(row.Count), timeout));
             }
 
             // Upstream's (pos, endpos) as this surface's (beginning, length). Both absent means the
@@ -217,10 +227,10 @@ internal static class OracleComparer
 
             Match match = row.Operation switch
             {
-                "search" => compiled.Match(row.Subject, beginning, length, row.Partial),
-                "match" => compiled.MatchAtStart(row.Subject, beginning, length, row.Partial),
+                "search" => compiled.Match(row.Subject, beginning, length, row.Partial, timeout),
+                "match" => compiled.MatchAtStart(row.Subject, beginning, length, row.Partial, timeout),
                 // The operation is validated when the row is read, so there is no other case.
-                _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial),
+                _ => compiled.FullMatch(row.Subject, beginning, length, row.Partial, timeout),
             };
 
             return Describe(match, PositionsUnavailableUpstream(compiled));
