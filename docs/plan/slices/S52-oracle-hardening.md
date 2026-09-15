@@ -411,3 +411,143 @@ question a control would answer is whether these four generators can detect a fa
 `row["subject"] + filler if reverse else filler + row["subject"]` to pad the same side regardless,
 which should collapse `partial-long`'s `walked` column and is the cheapest proof that the
 side rule is load-bearing.
+
+---
+
+## Sitting 5 (2026-09-15) - CHECKPOINT, and a SHORT one
+
+A 45-minute sitting under a hard laptop-off deadline, scoped by the orchestrator to one item.
+The item taken is **the two unjudged `partial-long` divergences**, because nothing else in the
+remaining list can proceed past them: the four long generators cannot join `run-oracle.ps1`'s
+default list while the wave they produce is red.
+
+**They are judged, and neither is a divergence at all. Both are a Debug build meeting a 10-second
+row timeout.** No `.cs` file was touched, no engine behaviour changed, and the suite is exactly
+sitting 3's.
+
+### Sitting 4's hypothesis was wrong, and the report said so on the line nobody read
+
+Sitting 4 recorded these as two rows "both end-reading", hypothesised sitting 3's
+`end-of-line-reads-a-skip-moved-slice`, and told sitting 5 to judge them to amendment 16. The
+hypothesis cannot have been right, and the evidence was already in the report it was written from:
+
+```
+DIVERGE row 305 (partial-long) search flags=0x102 version=V0
+  upstream match 0:(0,1)[(0,1)] 1:(0,1)[(0,1)] 2:unset last=1/-
+  port     error while matching RegexMatchTimeoutException: ...
+```
+
+**The port does not answer differently. It does not answer.** `\K` and `\M` reading a stale bound
+would have produced a wrong span; what is actually there is this port spending more than
+`OracleComparer.RowTimeout` (10s, `OracleComparer.cs:22`). There was no correctness question to
+judge, so amendment 16's four outcomes never applied - the row is not "the port is wrong", "upstream
+is wrong", "both are wrong" or "not conclusive", because the two engines were never asked the same
+question to the end.
+
+### What the two engines actually do, measured
+
+Two probes, both committed and re-runnable: `tools/probes/port-long-subject-cost.ps1` and
+`tools/probes/upstream-long-subject-cost.py`. They take the same rows of the same recorded wave and
+time each engine at truncated subject lengths, so the shape of the cost is visible instead of one
+pass/fail bit. Reproduce the wave first:
+
+```
+python tools/record-oracle.py --generator literals-long,quantifiers-long,partial-long,fuzzy-long --count 150 --seed 20260915
+```
+
+Row 307, `(?r)^(?P<g1>[^a]*?)(.*?)*\M`, flags `0x4102`, milliseconds:
+
+| n | 800 | 1600 | 3200 | 6400 | 12800 | 13391 (full) |
+|---|---:|---:|---:|---:|---:|---:|
+| upstream | 4 | 15 | 53 | 217 | 861 | 947 |
+| port, Debug | 254 | 1,007 | 4,029 | 16,124 | 64,403 | - |
+| port, Release | 32 | 120 | 369 | 1,304 | 5,214 | 5,757 |
+
+Row 305, `(?r)^(\p{Lu}+?)+?(.)??\K`, flags `0x102`, partial: upstream 1,170 ms at its full 19,896;
+port 15,129 ms in Debug and 1,820 ms in Release. **Every cell of both rows answers what upstream
+answers** - `(0,13389)` and `(0,1)` - once the engine is allowed to finish.
+
+Two things fall out, and the second is the one that matters:
+
+- **The engines are in the same complexity class.** Both are quadratic on row 307: each doubling of
+  `n` quadruples the time, upstream's 4/15/53/217/861 as plainly as the port's. So there is no
+  algorithmic defect here to find, and the "nested quantifier" reading the exception text invites is
+  wrong about the difference between the two engines even though it is right about the pattern.
+- **The port is a constant factor slower, and in Debug that factor crosses the row timeout.**
+  Roughly 5-8x in Release and up to 75x in Debug.
+
+### The first measurement was wrong, and the flags are why
+
+The first pass of the port probe built the pattern with `FuzzyRegexOptions.None` and found both rows
+answering in **milliseconds at full length** - which would have said the wave was lying. It was the
+probe that was lying: `OracleComparer` compiles with `(FuzzyRegexOptions)row.Flags`
+(`OracleComparer.cs:143`) and `0x102` is `IgnoreCase, Version1`. Without `IgnoreCase`, `\p{Lu}` and
+`[^a]` walk a fraction of the text and the cost never appears. The committed probe passes the row's
+own flags and its header says why, because this is a trap the next person will fall into too.
+
+### The judgement, and the proof
+
+`run-oracle.ps1` defaults to `-Configuration Debug` (`:210`). Consuming **the identical rows**,
+changing nothing but the configuration:
+
+```
+pwsh -File tools/run-oracle.ps1 -SkipRecord -Configuration Release
+agree 599  unsupported 0  expected 0  timeout 1  resource 0  diverge 0  of 600 rows
+```
+
+against Debug's `agree 597 ... diverge 2 of 600`. `-SkipRecord` is what makes this a control rather
+than a second sample: the rows are the ones already on disk, so the seed, the subjects and upstream's
+recorded answers are byte-identical and the build is the only variable.
+
+**So no entry goes in `ExpectedDivergences.cs` and no test pins anything.** Keying an entry on a
+row the port answers correctly would be wrong, and keying one on a wall-clock measurement would be
+a flaky test in a file whose whole value is that `Every_expected_divergence_still_diverges` is
+strict. Nothing is owed upstream either: upstream is not wrong about anything here.
+
+### What this says about the long generators, and what sitting 6 has to decide
+
+**The four long generators still do NOT join `run-oracle.ps1`'s default `-Generator` list**, and the
+reason has changed from "two rows are unjudged" to a sharper one: **their verdict depends on the
+build configuration, and the default wave runs Debug.** Adding them would red the gate every other
+slice depends on, for a reason that is not about that slice and not about correctness.
+
+That is a genuine finding about the harness rather than a fact about these two rows. Every
+generator before these produced short subjects, where a 5-8x constant factor is invisible against a
+10-second budget; at 20,000 characters it is not. The options for sitting 6, none of them taken here
+because the sitting was 45 minutes:
+
+- run the long generators in Release only, and say so where the default list is documented;
+- give the long generators their own longer row timeout, which means `RowTimeout` stops being one
+  constant;
+- default `run-oracle.ps1` to Release, which is the smallest change and the one the sweep tool
+  already recommends for its own runs ("Release for an overnight sweep - the consumer is the slow
+  half") - but it changes every slice's gate, so it is not a 45-minute decision.
+
+**Whichever is chosen, the Debug/Release sensitivity is now a property of the wave that has to be
+written down somewhere a slice will read**, or the next long-subject red gets triaged as a
+correctness bug exactly as this one was.
+
+### Numbers
+
+- Ratchet **GREEN**; suite unchanged from sitting 3 (no `.cs` file was touched this sitting).
+- Long wave, seed 20260915, 150 rows a generator: Debug `diverge 2 of 600`,
+  Release `diverge 0 of 600`, same rows via `-SkipRecord`.
+- Both probes re-run from the committed tree; `upstream-long-subject-cost.py --rows 307` reproduces
+  the table above to within a millisecond or two.
+
+### Review
+
+**No blind review ran this sitting, and no independent verifier.** There was not the time for
+either, and the deadline was the whole reason. Both remain OWED before this slice closes, and the
+delta they have to cover is now sitting 4's **and** sitting 5's: `_generate_long` and its two
+constants in `tools/record-oracle.py`, `tools/probes/generator-long-subject-reach.py`, and this
+sitting's `tools/probes/port-long-subject-cost.ps1` and
+`tools/probes/upstream-long-subject-cost.py`. The verifier's job on this sitting is the
+`-SkipRecord` Release run and the two cost tables, all three of which are one command each.
+
+### The negative control
+
+**Still not run - sitting 4's gap is carried, not closed.** The padding-side control sitting 4
+specified is still the right one and still unrun. Note for whoever runs it: it must be run in
+**Release**, or a collapsed `walked` column cannot be told from a row that merely timed out, which
+is the same confusion this sitting spent its 45 minutes undoing.
