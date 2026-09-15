@@ -46,7 +46,11 @@
     would have them skip each other's seeds; give each its own.
 
 .PARAMETER Configuration
-    Debug or Release. Release for an overnight sweep - the consumer is the slow half.
+    Debug or Release. RELEASE IS THE DEFAULT, for run-oracle.ps1's reason as well as this one: the
+    consumer is the slow half of a sweep, AND a Debug consumer makes OracleComparer's 10s row
+    timeout measure the build instead of the engine (S52 sitting 6). This splat always passes the
+    value on, so run-oracle.ps1's own default never reaches a sweep - the two have to agree by
+    hand.
 
 .EXAMPLE
     pwsh -File tools/sweep-seeds.ps1
@@ -62,7 +66,7 @@ param(
     [int]$Count = 2000,
     [string]$Generator,
     [string]$Log = 'TestResults/oracle/sweep.jsonl',
-    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug'
+    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release'
 )
 
 Set-StrictMode -Version Latest

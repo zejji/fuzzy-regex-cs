@@ -18,6 +18,20 @@
     EVERY GENERATOR IS ON THE DEFAULT LIST. 'partial-sliced' joined it in S33 and 'verbs' in S34,
     which is the first time the list has been complete.
 
+    THE FOUR LONG-SUBJECT GENERATORS ARE THE ONE EXCEPTION, and they are off the list on evidence
+    (S52 sitting 6, 2026-09-15). 'literals-long', 'quantifiers-long', 'partial-long' and
+    'fuzzy-long' were added to this default and the wave run at its three seeds in Release: RED at
+    all three, 13 diverging rows (5 + 4 + 4 of 7,500 a seed), and EVERY ONE of them in
+    'quantifiers-long' or 'partial-long' - the other 21 generators contributed no divergence at any
+    of the three seeds. ELEVEN of the 13 are this port
+    exceeding OracleComparer.RowTimeout in RELEASE, so Release alone does not make these generators
+    gateable; the remaining TWO are unjudged partial rows and are named in the slice's sitting-6
+    notes. Adding them back needs the timeout question answered first (a longer budget for these
+    four, or the start optimisations Phase 7 brings), not another configuration switch.
+
+    Run them explicitly - '-Generator literals-long,quantifiers-long,partial-long,fuzzy-long' -
+    and read a RegexMatchTimeoutException in the report as a cost measurement, not a divergence.
+
     Both had been held out because a handful of their rows diverge for a reason already judged, and
     holding a whole generator out for a few per cent of its rows trades all of its coverage for
     none. What replaced that is an accounted-for list,
@@ -185,6 +199,28 @@
     Comma-separated, like -Generator: `-Seeds 7,31,4242`. Not an [int[]], because `pwsh -File`
     passes every argument as a string and would bind the second seed to the next parameter.
 
+.PARAMETER Configuration
+    The build configuration the CONSUMER runs in. RELEASE IS THE DEFAULT, and that is a correctness
+    decision rather than a speed one (S52, 2026-09-15).
+
+    The comparer abandons a row after OracleComparer.RowTimeout (10s) and records the port's
+    RegexMatchTimeoutException, so wall-clock time decides which rows are compared at all. This port
+    is a constant factor slower than upstream - measured at 5-8x in Release and up to 75x in Debug,
+    same complexity class on both (tools/probes/port-long-subject-cost.ps1 and
+    upstream-long-subject-cost.py) - and on a 20,000-character subject the Debug factor crosses that
+    budget where the Release one does not. Under -Configuration Debug the long wave gave
+    'diverge 2 of 600'; over the IDENTICAL rows via -SkipRecord, Release gave 'diverge 0 of 600'.
+    Both "divergences" were this port timing out, and given time it answers upstream's exact answer.
+
+    So a Debug default makes the row timeout measure the build instead of the engine, and a slice
+    triages the result as a correctness bug - which is exactly what S52's sitting 4 did, and what
+    sitting 5 spent 45 minutes undoing. Nothing in src/ is conditioned on DEBUG (no Debug.Assert, no
+    #if DEBUG), so the two configurations differ in speed alone and a Release wave answers the same
+    questions.
+
+    Pass -Configuration Debug to get a debugger-friendly consumer when minimising one row; do not
+    read a timeout it produces as a divergence.
+
 .PARAMETER Count
     Rows per generator.
 
@@ -207,7 +243,7 @@ param(
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,
-    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
+    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
     [switch]$SkipRecord
 )
 

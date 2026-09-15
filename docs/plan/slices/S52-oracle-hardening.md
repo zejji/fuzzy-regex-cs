@@ -551,3 +551,100 @@ sitting's `tools/probes/port-long-subject-cost.ps1` and
 specified is still the right one and still unrun. Note for whoever runs it: it must be run in
 **Release**, or a collapsed `walked` column cannot be told from a row that merely timed out, which
 is the same confusion this sitting spent its 45 minutes undoing.
+
+---
+
+## Sitting 6 (2026-09-15) - CHECKPOINT, and a SHORT one
+
+A 47-minute sitting, scoped by the orchestrator to one item: **the Debug/Release decision sitting 5
+left open**, which STATE.md named as sitting 6's first job. No `.cs` file was touched, so the suite
+is again exactly sitting 3's 6,109 / 6,109 / 0 skipped, baseline 6001, ratchet GREEN.
+
+### The decision: `run-oracle.ps1` and `sweep-seeds.ps1` now default to Release
+
+Of sitting 5's three options this is the third, and what makes it the right one is that **the two
+configurations differ in speed alone**. Nothing under `src/` is conditioned on `DEBUG` - no
+`#if DEBUG`, no `[Conditional("DEBUG")]`, no `Debug.Assert` - and no `.csproj`, `Directory.Build.props`
+or `.editorconfig` varies `DefineConstants`, overflow checking, nullability or analyzers by
+configuration. So a Release wave asks the same questions, and a Debug one merely answers fewer of
+them: `OracleComparer.RowTimeout` is 10 seconds of wall clock
+(`tests/FuzzyRegex.OracleTests/OracleComparer.cs:22`), so the configuration decides which rows are
+compared at all. Sitting 5 measured the factor at 5-8x in Release and up to 75x in Debug.
+
+The other two options were rejected on the same evidence: a Release-only rule for the long
+generators leaves every other generator's gate measuring the build, and a second row timeout makes
+`RowTimeout` stop being one constant to buy the same thing.
+
+CI already passed `-Configuration Release` explicitly at all three call sites
+(`ci.yml:69`, `oracle.yml:129`, `:193`), so the default now agrees with what CI has always run and
+only a local run changes.
+
+### And the measurement overturned the other half of the decision
+
+Sitting 5's open question was really two: which configuration, and whether the four long generators
+then join the default `-Generator` list. **They do not, and this is measured rather than deferred.**
+Added to the default and run at the three default seeds in Release,
+`pwsh -File tools/run-oracle.ps1` is **RED at all three**:
+
+```
+seed 7         agree 7479  unsupported 0  expected 8  timeout 4  resource 4  diverge 5  of 7500 rows
+seed 4242      agree 7482  unsupported 0  expected 2  timeout 7  resource 5  diverge 4  of 7500 rows
+seed 20260915  agree 7483  unsupported 0  expected 6  timeout 4  resource 3  diverge 4  of 7500 rows
+```
+
+All 13 diverging rows are in `quantifiers-long` (8) or `partial-long` (5); **the 21 short generators
+contributed no divergence at any seed**, which is the independent evidence that defaulting to Release
+reds nothing that was green. **Eleven of the 13 are this port exceeding the row timeout in RELEASE**
+- `port error while matching RegexMatchTimeoutException`, against an upstream that answers - so
+Release moves the threshold without clearing it, and sitting 5's "Release fixes the long wave" held
+only for the two rows it measured. The long generators are back off the default list, and
+`run-oracle.ps1`'s `.PARAMETER Generator` now records why in the file a slice actually reads.
+
+### The two rows that are NOT timeouts, and are sitting 7's
+
+Both `partial-long`, both a partial `search`, both carrying a verb, and on both upstream reports a
+partial spanning almost the whole subject where this port answers a short match at the far end:
+
+- seed 7, row 6997, flags `0x0`, V0:
+  `(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\p{Nd}(*SKIP)\s|\p{L})`
+  upstream `0:(0,3365)` partial; port `0:(0,2)` partial.
+- seed 20260915, row 7094, flags `0x8`, V0:
+  `(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)(?:(?(2)(?=(?P>g2))\p{Nd}|.))`
+  upstream `0:(1,18763)` partial; port `0:(18762,2)` partial.
+
+They are UNJUDGED. Reproduce with
+`pwsh -File tools/run-oracle.ps1 -Generator literals-long,quantifiers-long,partial-long,fuzzy-long -Count 300 -Seeds 7,20260915`.
+Do not assume they are one of the existing partial families: the reversed `(*PRUNE)`/`(*SKIP)` shape
+invites `partial-retry-carried-slice-forward`, and the second row is forward, so that is a
+hypothesis and not a classification.
+
+### Numbers
+
+- Ratchet **GREEN**, 6109 / 6109 / 0 skipped, baseline 6001. No `.cs` file touched.
+- Default wave, Release, three seeds, 300 rows a generator: the three lines above.
+- Diff is `tools/run-oracle.ps1` (default, and two help paragraphs) and `tools/sweep-seeds.ps1`
+  (default and its help paragraph).
+
+### Review
+
+**One blind pass, dispatched inside the turn and read as a tool result, over the whole diff.
+Findings raised: two. Reproduced: two. Fixed: two.** (1) The help text credited "7,479 / 7,482 /
+7,483 agreeing rows" to the 21 short generators; those totals are the whole 25-generator wave, and
+the 21-generator wave is 6,300 rows - the reviewer proved it from `report-20260914.txt`. The claim
+is now stated as the 21 contributing no divergence, which is what the reports actually show.
+(2) `sweep-seeds.ps1` splats `Configuration` on every call, so `run-oracle.ps1`'s new default could
+never reach a sweep and the 2,000-row sweep would have kept running Debug - the exact state this
+sitting's own text calls wrong. Its default is Release too now, and its help says the two have to
+agree by hand. The reviewer also checked and cleared the load-bearing claim (no `DEBUG`
+conditioning anywhere in `src/` or the build files), the three CI call sites, and that the consumer
+honours `-Configuration` (`:316`).
+
+**No second pass ran over the two fixes**, and that is a deadline, not a judgement: the sweep-seeds
+default is the same one-word change the first pass approved in its sibling, and the other fix is
+the reviewer's own correction of prose. It is small and it is unreviewed.
+
+### The negative control
+
+**Still not run** - sitting 4's padding-side gap is carried for a third sitting. Nothing this
+sitting changed is engine behaviour, and the control it owes belongs to the generator, not to the
+default list. It must be run in **Release**.
