@@ -300,3 +300,114 @@ scanner step, where `:20903` has 22 uses against `:20927`'s 7. The stale spellin
 comments, probes, done slice notes, PORTMAP and DECISIONS. Only the text this sitting wrote is
 correct, and two of the four were corrected inside the entry this sitting edited rather than
 left to contradict its neighbours. This is a maintenance commit of its own, not a slice job.
+
+---
+
+## Sitting 4 (2026-09-15) - CHECKPOINT, and a SHORT one
+
+A 65-minute sitting under a hard laptop-off deadline, scoped by the orchestrator to one item of the
+remaining list finished properly rather than several started. The item taken is **the long-subject
+generators**. The timeout rows, the `oracle.yml` CI job, the 20-seed sweep run and the 6000-row
+three-seed gate are untouched and remain sitting 5's.
+
+**No blind review ran this sitting**, and no independent verifier. There was not the time for
+either, and the deadline was the whole reason. Both are OWED before this slice closes, and the
+delta they have to cover is exactly this sitting's diff: `_generate_long` and its two constants in
+`tools/record-oracle.py`, and `tools/probes/generator-long-subject-reach.py`. Nothing else was
+touched - **no `.cs` file changed at all**, which is why the ratchet result below is the same
+suite sitting 3 left green.
+
+### What landed
+
+**Four long-subject generators - `literals-long`, `quantifiers-long`, `partial-long`,
+`fuzzy-long`** - as a WRAPPER over the base generator rather than as four new grammars. The
+pattern a long row carries is drawn by the base generator unchanged, so a long row and a short row
+differ in the one variable under test; four bespoke long grammars would have made every divergence
+a question about which grammar found it. Two rules, both about not destroying the base row's
+question:
+
+- **The filler goes on the side the pattern does not run off.** Forward patterns are padded on the
+  LEFT, so the scan has text to walk and the subject's own right-hand edge - where a `partial` row
+  runs out of text - is still the edge. A `(?r)` pattern reads right to left and runs out at the
+  LEFT end, so it is padded on the RIGHT. Pad the wrong side and `partial-long` is just `literals`
+  with a long prefix.
+- **The operation is forced to `search`.** Every path the variant exists to reach is a scan, and
+  `match`/`fullmatch` are anchored - on a padded subject they answer at 0 or not at all, and
+  `fullmatch` cannot match. It also bounds the cost: `fuzzy` cycles ALL_OPERATIONS, and one
+  `finditer`, `split` or `sub` over 20,000 characters can spend the whole 10s row timeout. The
+  row's `partial` flag is left exactly as the base generator set it, because a partial `search`
+  over a long text IS the interesting row.
+
+Subjects are 1,000 to 20,000 characters, as the scope asks; measured medians are about 10,000.
+
+### The measurement that changed the design, made BEFORE any review asked for it
+
+The slice's own review hunt names "a long-subject generator that never reaches the path it was
+written for", so the reach was measured rather than assumed, by
+**`tools/probes/generator-long-subject-reach.py`** (committed, re-runnable). The first run said
+`quantifiers-long` **did not reach its path**: 9 of 148 matches began 100+ characters into the
+scan, median distance 0, median match length 1.
+
+The cause is not the filler alphabet, and no spelling of it would have helped: a nullable
+quantifier (`a*`, `.{0,2}`) answers a zero-width match at offset 0 without looking at the text.
+**The metric was wrong for that generator.** The other three want the match to begin far from
+where the scan started; a repeat guard is reached by ITERATIONS, and a repeat cannot iterate over
+text it cannot consume. So `quantifiers-long` alone draws its filler from the base alphabet
+(`LONG_REPEAT_FILLER_GENERATORS`), and the probe reports distance AND length so each generator is
+judged on the column its path lives in.
+
+`python tools/probes/generator-long-subject-reach.py --count 200 --seed 7`, on the committed tree:
+
+```
+generator           rows  match  walked    dist    len  long  subject
+literals-long        200    147     103    6408      1     0    10902
+quantifiers-long     200    155       5       0      1    32    11064
+partial-long         200    119      83    5142      0     7    10050
+fuzzy-long           200    148     115    8516      4     0    10304
+```
+
+`walked` counts matches beginning 100+ characters into the scan, `long` counts matches 100+
+characters long. Three of the four reach a distant start on about 70% of their matches;
+`quantifiers-long` reaches a 100+ iteration repeat on 32 of 155, **up from 0** before the filler
+change. Its median length stays 1 because the base grammar draws many `?` and `{0,2}` quantifiers,
+and widening that is a change to the base grammar rather than to this wrapper - deliberately not
+done here.
+
+### The divergences, and why they are NOT judged
+
+`pwsh -File tools/run-oracle.ps1 -Generator literals-long,quantifiers-long,partial-long,fuzzy-long
+-Count 150` is **RED**: `agree 597 unsupported 0 expected 0 timeout 1 resource 0 diverge 2 of 600`
+at seed 20260915. Both diverging rows are `partial-long`, both reversed, and both carry a
+construct from `_END_SENSITIVE_ITEMS`:
+
+- row 305, `search`, flags `0x102`, V0: `(?r)^(\p{Lu}+?)+?(.)??\K`
+- row 307, `search`, flags `0x4102`, V0: `(?r)^(?P<g1>[^a]*?)(.*?)*\M`
+
+**Sitting 5 must judge both to amendment 16 and must not assume they are sitting 3's family.**
+`\K` and `\M` reading a stale bound is the obvious hypothesis given
+`end-of-line-reads-a-skip-moved-slice`, and it is a hypothesis: there is no `(*SKIP)` in either
+pattern, so whatever moves the bound here is something else. Sitting 3 also proved that a stepwise
+walk is not a control for a row whose pattern reads the end of the subject, and both of these do -
+so the control has to come from somewhere other than an `endpos`.
+
+**The four long generators are therefore NOT in `run-oracle.ps1`'s default `-Generator` list**, and
+must not be added until both rows are judged. Adding a red generator to the default wave would turn
+the gate every other slice depends on red for a reason unrelated to that slice.
+
+### Numbers
+
+- Ratchet **GREEN**; suite unchanged from sitting 3 (no `.cs` file was touched this sitting).
+- `python tools/record-oracle.py --generator literals-long,quantifiers-long,partial-long,fuzzy-long
+  --count 200 --seed 7` records 800 rows in about a minute: 569 match, 229 nomatch, 1 error,
+  1 timeout, 287 with an astral subject. So the 10s row timeout bounds these rows adequately and a
+  long wave is not the forty-minute risk S40's hanging row was.
+
+### The negative control
+
+**None was run, and that is a gap, not a "not applicable".** No control this sitting mutates the
+engine - nothing in the engine changed - but the generator itself is the new artefact and the
+question a control would answer is whether these four generators can detect a fault at all. Sitting
+5 should run one: the natural site is the wrapper's own padding side, changing
+`row["subject"] + filler if reverse else filler + row["subject"]` to pad the same side regardless,
+which should collapse `partial-long`'s `walked` column and is the cheapest proof that the
+side rule is load-bearing.

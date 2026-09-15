@@ -1298,6 +1298,10 @@ GENERATORS = (
     "partial-sliced",
     "posix",
     "fuzzy",
+    "literals-long",
+    "quantifiers-long",
+    "partial-long",
+    "fuzzy-long",
 )
 
 # The zero-width assertions the S16 spine implements, as (prefix, suffix) pairs wrapped round a
@@ -5504,6 +5508,87 @@ def _generate_fuzzy(rng: random.Random, count: int):
         yield row
 
 
+# --------------------------------------------------------------------------------------------
+# The long-subject variants
+# --------------------------------------------------------------------------------------------
+#
+# Every generator above draws a subject of at most MAX_SUBJECT_LENGTH (8) characters, so no wave
+# this project has ever run has asked either engine to walk a text. Three paths only a long subject
+# reaches: the scan that steps position by position looking for a start (upstream's `search_start`
+# family, and this port's equivalent loop), the repeat guards that only bite after many iterations,
+# and a fuzzy insert budget spent far from where the match began.
+#
+# These are a WRAPPER rather than four new grammars, which is the whole design: the pattern a long
+# row carries is drawn by the base generator unchanged, so a long row and a short row differ in the
+# one variable under test. Writing four long-subject grammars would have made every divergence a
+# question about which grammar found it.
+
+LONG_BASES = {
+    "literals-long": "literals",
+    "quantifiers-long": "quantifiers",
+    "partial-long": "partial",
+    "fuzzy-long": "fuzzy",
+}
+
+# The span the filler brings the subject up to. The floor is well past any buffer or unrolled-loop
+# size either engine uses, and the ceiling is what one `search` answers inside the 10s row timeout.
+MIN_LONG_SUBJECT = 1000
+MAX_LONG_SUBJECT = 20000
+
+# Drawn from characters no generator above puts in a pattern's literals - the base alphabets are
+# `abcde` plus the astral letter/digit/symbol set, and the anchor generator's line breaks. It is
+# NOT a guarantee that the filler cannot match: `.`, `\w`, `[^a]` and a fuzzy substitution all
+# reach it, and a fuzzy pattern can match anywhere. It is a bias, and the closing notes measure how
+# far the bias actually carried rather than asserting it.
+LONG_FILLER_ALPHABET = "qQ§"
+
+# `quantifiers-long` takes its filler from the BASE ALPHABET instead, and the reason is that its
+# path is a different one. The other three want the match to begin far from where the scan started,
+# so they want filler the pattern steps over; a repeat guard is reached by ITERATIONS, and a repeat
+# cannot iterate over text it cannot consume. Measured, which is why this line exists: with the
+# unmatchable filler, `tools/probes/generator-long-subject-reach.py --count 200 --seed 7` put the
+# median match length at 1 and 9 of 148 matches past 100 characters - a nullable quantifier answers
+# a zero-width match at offset 0 and never looks at the text, whatever the filler is spelled with.
+LONG_REPEAT_FILLER_GENERATORS = ("quantifiers-long",)
+
+
+def _generate_long(name: str, rng: random.Random, count: int):
+    """Yields ``count`` rows from the base generator with each subject padded into a long text.
+
+    Two rules, and both are about not destroying the question the base row asked.
+
+    **The filler goes on the side the pattern does not run off.** A forward pattern is padded on
+    the LEFT, so the scan has a text to walk before it can match and the subject's own right-hand
+    edge - which is where a `partial` row runs out of text - is still the edge. A reversed one
+    reads right to left and runs out at the LEFT end, so it is padded on the RIGHT instead. Pad the
+    wrong side and a `partial-long` row is just a `literals` row with a long prefix.
+
+    **The operation is forced to `search`.** Every path this variant exists to reach is a scan;
+    `match` and `fullmatch` are anchored, so on a padded subject they answer at position 0 or not
+    at all and reach nothing new, and `fullmatch` cannot match at all. It also bounds the cost: a
+    `finditer`, `split` or `sub` over 20,000 characters is one row that can spend the whole 10s
+    timeout, and `fuzzy` cycles ALL_OPERATIONS. `partial` is left exactly as the base row set it,
+    because a partial `search` over a long text IS the interesting row here.
+    """
+    base = LONG_BASES[name]
+    alphabet = ALPHABETS[0] if name in LONG_REPEAT_FILLER_GENERATORS else LONG_FILLER_ALPHABET
+    for row in _generate(base, rng, count):
+        filler = "".join(
+            rng.choice(alphabet)
+            for _ in range(rng.randrange(MIN_LONG_SUBJECT, MAX_LONG_SUBJECT + 1))
+        )
+        reverse = "(?r)" in row["pattern"]
+        row["subject"] = row["subject"] + filler if reverse else filler + row["subject"]
+        row["generator"] = name
+        row["operation"] = "search"
+        # Only OPERATIONS rows carry these, and `search` is one; a row whose operation was a
+        # substitution or an iteration brought its template and limit with it, and they are not
+        # fields a `search` row has.
+        row.pop("template", None)
+        row.pop("count", None)
+        yield row
+
+
 def _generate(name: str, rng: random.Random, count: int):
     """Yields ``count`` unrecorded rows from the named generator.
 
@@ -5513,6 +5598,10 @@ def _generate(name: str, rng: random.Random, count: int):
     """
     if name not in GENERATORS:
         raise SystemExit(f"unknown generator {name!r}; expected one of {', '.join(GENERATORS)}")
+
+    if name in LONG_BASES:
+        yield from _generate_long(name, rng, count)
+        return
 
     if name == "classes":
         yield from _generate_classes(rng, count)
