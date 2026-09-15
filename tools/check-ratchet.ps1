@@ -60,6 +60,15 @@ if (-not $SkipTestRun) {
     Write-Host "Running tests ($Configuration)..." -ForegroundColor Cyan
     # A non-zero exit here just means tests failed; the ratchet still needs the report to say
     # which ones, so the exit code is deliberately not treated as fatal.
+    # The oracle test project is built too, because the ratchet only RUNS FuzzyRegex.Tests and a
+    # change that breaks the oracle build (S52 sitting 3: three files flipped to CRLF, 14 IDE0055
+    # errors) would otherwise land green. Build only; the oracle waves are run by tools/run-oracle.ps1.
+    dotnet build (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') --configuration $Configuration --nologo -v quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Ratchet: RED - tests/FuzzyRegex.OracleTests does not build.' -ForegroundColor Red
+        exit 1
+    }
+
     $proc = Start-Process -FilePath 'dotnet' -PassThru -NoNewWindow -ArgumentList @(
         'test', (Join-Path $repoRoot 'tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj'),
         '--configuration', $Configuration,
