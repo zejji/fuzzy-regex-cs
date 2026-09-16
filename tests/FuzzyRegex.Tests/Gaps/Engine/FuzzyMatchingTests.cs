@@ -633,7 +633,7 @@ public sealed class FuzzyMatchingTests
         // The rows are the seven upstream contradicts itself on, gathered from the two doors that
         // reach the defect: a verb that cuts the backtracking without unwinding the fuzzy frames,
         // and a nested section whose trailing insertions are counted back out and never unrecorded.
-        // `OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` applies the
+        // `OracleWaveTests.Our_own_answers_never_contradict_themselves` applies the
         // same property to every fuzzy row of a whole wave.
         ChangesAgreeWithCounts(new FuzzyRegex("(?:[ab][bc](*PRUNE)[wx]){e<=2}").Match("qab"));
         ChangesAgreeWithCounts(new FuzzyRegex("(?:[ab](*SKIP)[bc][wx]){e<=2}").Match("qab"));

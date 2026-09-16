@@ -1571,7 +1571,7 @@ internal static class ExpectedDivergences
     /// <c>'a b c'</c>, on which both engines answer <c>(0, 2)</c> with one substitution at 1. It was
     /// put there when rows 1 to 5 were the whole entry and all five were PERFECT matches, because a
     /// wave holding no fuzzy match with an error in it fails
-    /// <c>OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts</c>'s
+    /// <c>OracleWaveTests.Our_own_answers_never_contradict_themselves</c>'s
     /// non-degeneracy guard - so without it the artifact could not be replayed through the runner at
     /// all. Row 7's judged answer carries an error of its own now, so that is no longer the only
     /// thing keeping the eighth row here; it doubles as the family's agreeing control, which is
@@ -3724,7 +3724,7 @@ internal static class ExpectedDivergences
                 + "the RIGHT two insertion positions. The KIND is settled and the positions are not, "
                 + "and this is the same weak arm `fuzzy-changes-leaked-from-an-abandoned-attempt` "
                 + "already names. The instrument that covers it is not this list - it is "
-                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` over "
+                + "`OracleWaveTests.Our_own_answers_never_contradict_themselves` over "
                 + "every fuzzy match of a whole wave, plus the gap test named below.\n"
                 + "KEYED ON THE ROW AND ON THIS PORT'S EXACT ANSWER TO IT, the shape "
                 + "`reversed-lookahead-change-at-the-match-start` uses, and for its reason: a "
@@ -4188,7 +4188,7 @@ internal static class ExpectedDivergences
                 + "shapes, where the counts and everything else are right, is classified rather than "
                 + "reported. It fires about 1.3 times per 126,000-row seed. The instrument that "
                 + "covers it is not this list - it is "
-                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts`, a "
+                + "`OracleWaveTests.Our_own_answers_never_contradict_themselves`, a "
                 + "property of this port's answers alone over every fuzzy match of a whole wave, plus "
                 + "the minimised rows in the test named below.\n"
                 + "BOTH ARMS ALSO DEMAND that everything but the fuzzy half already agrees, that the "
@@ -4237,7 +4237,7 @@ internal static class ExpectedDivergences
                 + "empty one and the entry accepts whatever positions this port reports on that "
                 + "match. That is the price of comparing against an engine whose answer is a "
                 + "truncation of the truth, and the instruments that cover it are "
-                + "`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` and "
+                + "`OracleWaveTests.Our_own_answers_never_contradict_themselves` and "
                 + "the three partial rows of the test named below, not this list. The entry still "
                 + "demands the span, the groups, `lastindex`, `lastgroup` and the partial flag agree "
                 + "exactly, that BOTH engines called the match partial, that this port's counts are "
@@ -4245,7 +4245,7 @@ internal static class ExpectedDivergences
                 + "own counts.",
             PinnedBy: "Gaps.Engine.FuzzyMatchingTests.The_reported_changes_agree_with_the_counts_on_"
                 + "every_shape_that_used_to_contradict_them, whose last three rows are partials, and "
-                + "OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts",
+                + "OracleWaveTests.Our_own_answers_never_contradict_themselves",
             // One row per shape the entry has to survive: upstream reporting a shorter prefix of the
             // real script, and upstream reporting nothing at all. Recorded by
             // `python tools/record-oracle.py --rows`, 2026-09-14.

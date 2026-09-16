@@ -1664,8 +1664,22 @@ section inside a LOOKAHEAD, which has to read past `endpos`; a `\K`, whose repor
 where the attempt began; and a scan's second match at a position an earlier match already used. On
 those the entry accepts this port's positions with nothing to hold them to. It fires about 1.3 times
 per 126,000-row seed, and what covers it instead is
-`OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts` and the minimised rows in
+`OracleWaveTests.Our_own_answers_never_contradict_themselves` and the minimised rows in
 `FuzzyMatchingTests`.
+
+**S52c, 2026-09-16: this entry is now found AUTOMATICALLY, on upstream, with nobody looking.**
+`fuzzy-counts-match-changes` (`docs/ORACLE-INVARIANTS.md` group B) is checked by
+`tools/record-oracle.py` on every wave row at no extra upstream call, and it fired on **6 of 1,774
+eligible rows** across 126,240 rows - 22 generators at 2,000 rows a generator, seeds 7, 4242 and
+20260916. Every one is this entry's shape: counts and change positions describing different edit
+scripts, such as `counts=[0, 1, 0]` beside a single substitution position. All six are rows no
+sitting had seen, so each is a further door on top of the seven found by hand.
+
+**The entry is NOT re-opened for them** - it is already open and already reported, and a seven-door
+entry gains nothing from thirteen. What is worth carrying instead is a shape none of the seven
+hand-found doors pointed at: **four of the six are PARTIAL matches.** The six rows are listed in
+`docs/plan/slices/notes/S52c-sittings.md`, and minimising one of the partial ones is the strongest
+available next step on this entry.
 
 **The result.** The default wave is GREEN at three seeds, and the 6000-row three-seed gate went from
 24 / 23 / 25 diverging rows to 3 / 2 / 9 - the 14 that remain being exactly the untriaged rows that

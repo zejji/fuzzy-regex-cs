@@ -91,15 +91,25 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
 
 ## Done when
 
-- [ ] Invariant list committed with a reason per item; checker in the recorder and the comparer.
-      *(Sitting 1: list DONE - `docs/ORACLE-INVARIANTS.md`, 22 invariants, a calibration per item.
-      Checker not started.)*
-- [ ] Three-seed wave run with violations triaged; ledger entries for real ones.
-- [ ] TRE (WSL) used on the fuzzy-core violations and `tools/probes/tre-fuzzy-check.py` committed.
-      *(Sitting 1 found nothing reachable from a driver session - `agrep` and Perl `String::Approx`
-      absent, `pip` outside the allowlist; the orchestrator and owner then installed TRE in WSL.)*
-- [ ] Gate row 104366 run through the invariants, and what they say about it recorded.
-      *(Sitting 1: the invariant that handles it is `greedy-lazy-existence-agree`; running the row
-      through it belongs to the checker sitting.)*
-- [ ] VERIFICATION.md paragraph; DECISIONS entry.
-- [ ] Ratchet GREEN, blind review, verifier, commit.
+- [x] Invariant list committed with a reason per item; checker in the recorder and the comparer.
+      *(Sitting 1: list - `docs/ORACLE-INVARIANTS.md`, 22 invariants, a calibration per item.
+      Sitting 3: the FREE tier - seven invariants, not five, because `_CONTROLS` already records the
+      flagless twin - in `tools/record-oracle.py` writing `selfContradiction`, and the four
+      structural ones in `tests/FuzzyRegex.OracleTests/SelfConsistency.cs` over the port's answers.)*
+- [x] Three-seed wave run with violations triaged; ledger entries for real ones.
+      *(Sitting 3: 126,240 rows, 10 firings, all triaged by family. Ledger 11 and ledger 12 both
+      re-found automatically - the calibration the slice asked for. No NEW entry: every firing
+      belongs to an entry that is already open, and ledger 11 records the re-find and the
+      partial-match concentration rather than being re-opened.)*
+- [x] TRE (WSL) used on the fuzzy-core violations and `tools/probes/tre-fuzzy-check.py` committed.
+      *(Sitting 1 found nothing reachable from a driver session; the orchestrator and owner then
+      installed TRE in WSL. Sitting 3: the probe self-tests 4 of 4, CONFIRMS 10 of 10 comparable
+      wave rows, and can answer NONE of this slice's 10 violation rows - each with its reason. That
+      is a dialect ceiling, measured and recorded, not a silence.)*
+- [x] Gate row 104366 run through the invariants, and what they say about it recorded.
+      *(Sitting 3: upstream breaks `greedy-lazy-existence-agree` on 2 of 6 cells and this port on
+      0 of 6, so the port is the self-consistent engine there. Ledger 24's `slice_start` ruling is
+      untouched and the row is NOT pinned on this.)*
+- [x] VERIFICATION.md paragraph; DECISIONS entry.
+      *(Rule 7b, and six DECISIONS entries.)*
+- [x] Ratchet GREEN, blind review, verifier, commit.

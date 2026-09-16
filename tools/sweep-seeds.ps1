@@ -206,7 +206,7 @@ foreach ($seed in $planned) {
 
     # A non-zero exit means EITHER a row diverged OR the harness's own tests failed, and over twenty
     # unattended seeds those need telling apart in the log rather than in a transcript nobody reads.
-    # The second is not hypothetical: `Our_own_change_positions_always_agree_with_our_own_counts`
+    # The second is not hypothetical: `Our_own_answers_never_contradict_themselves`
     # refuses a wave holding no fuzzy match at all, so `-Generator case-folding` reds every seed with
     # `diverge 0` - measured 2026-09-15 while smoke-testing this script.
     $harnessFailed = (-not $green) -and $diverged -eq 0

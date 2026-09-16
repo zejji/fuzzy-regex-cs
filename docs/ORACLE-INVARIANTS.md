@@ -40,6 +40,48 @@ the ledger only records what somebody thought to look for.
 
 ---
 
+## What is implemented, and what it found
+
+**Seven invariants are in the checker, all of them at zero extra upstream calls.** Four are read off
+the recorded row (`_structural_violations` in `tools/record-oracle.py`) and three off the ablation
+twins `_CONTROLS` already records, so the first checker asks upstream nothing it was not already
+being asked. That is not only a budget decision: ledger entry 9 is upstream CRASHING on a question
+asked a particular way, so a checker that asks its own questions can be the thing that faults and
+can take a whole wave with it. The `+1` and `+2` tiers below are a later sitting's.
+
+The same four structural checks run on THIS PORT's answers in `SelfConsistency.Check`
+(`tests/FuzzyRegex.OracleTests/SelfConsistency.cs`), swept over every row of every wave by
+`OracleWaveTests.Our_own_answers_never_contradict_themselves`.
+
+**Measured over 126,240 rows - 22 generators at 2,000 rows a generator, at seeds 7, 4242 and
+20260916 (S52c, 2026-09-16).** `eligible` is how many rows the invariant had something to decide on,
+and it is the number that makes a zero readable: 0 of 34,721 is cheap evidence, 0 of 0 is a check
+that is not running, and the wave summary prints those two identically.
+`tools/probes/invariant-triage.py` is what produces this table.
+
+| Invariant | Cost | Eligible | Fired | What the firings were |
+| --- | --- | ---: | ---: | --- |
+| `fuzzy-counts-match-changes` | FREE | 1,774 | **6** | ledger 11, re-found automatically |
+| `bestmatch-no-worse` | FREE (twin) | 2,123 | **2** | ledger 12's shape, re-found automatically |
+| `group-spans-inside-match` | FREE | 14,142 | **2** | the `overlapped-skip-stale-slice` family |
+| `captures-are-the-texts-of-spans` | FREE | 34,721 | 0 | - |
+| `lastindex-participated` | FREE | 11,684 | 0 | - |
+| `posix-chooses-among-flagless-answers` | FREE (twin) | 5,562 | 0 | - |
+| `no-fault-where-a-twin-answers` | FREE (twin) | 1,800 | 0 | - |
+
+**The calibration the slice asked for came back.** Ledger 11 and ledger 12 were both re-found with
+no hand-written probe and nobody looking, on rows no earlier sitting had seen, which is the claim
+this file existed to make good. Ledger 13 was not re-found and ledger 9, 16 and 23 were not either -
+see "Ledger entries no invariant in this file reaches" at the foot, which now also covers those.
+
+**Ten candidates in 126,240 rows is the number that matters as much as the six.** An instrument that
+fires on one row in 12,624 is one a session can triage in an afternoon; the failure this file was
+most at risk of was an invariant that is false for a documented reason and floods the ledger, which
+is what the blind review is briefed to hunt for. Three narrowings below are why it did not happen,
+and every one of them was forced by a measurement rather than foreseen.
+
+---
+
 ## A. Doors onto the same answer
 
 Upstream implements `search`, `match`, `fullmatch`, `finditer` and the overlapped scan over one
@@ -132,6 +174,14 @@ and deletions counted from the change positions equal the three numbers reported
 counts) - the entry with seven distinct doors found so far, all of one shape. S47 checked this
 property by hand; this generalises it to every row.
 
+**AND THE CALIBRATION CAME BACK: 6 firings of 1,774 eligible rows**, at all three seeds, on six rows
+no earlier sitting had seen, with nobody looking. Every one is ledger 11's shape - counts and
+positions describing different edit scripts, such as `counts=[0, 1, 0]` beside a single
+SUBSTITUTION position. Four of the six are PARTIAL matches, which is a concentration worth the next
+sitting's attention and is not something any of entry 11's seven hand-found doors pointed at. Listed
+in `docs/plan/slices/notes/S52c-sittings.md`; the entry is not re-opened for them because it is
+already open and already reported.
+
 ### `captures-are-the-texts-of-spans` - SHIP, cost FREE
 
 **Statement.** For every group `g`: `len(captures(g)) == len(spans(g))`, and `captures(g)[k]` is the
@@ -139,32 +189,68 @@ subject text of `spans(g)[k]`.
 
 **Ground.** Documented as the text and the position of the same capture list.
 
-**Calibration.** None. Free, total, and one level up from entry 11's shape.
+**Calibration.** None. 0 firings of 34,721 eligible rows - the widest reach in the file.
 
-### `lastindex-participated` - SHIP, cost FREE
+**AND IT IS NOT THE VACUOUS CHECK IT READS AS**, which is worth saying because the obvious objection
+is that upstream computes one from the other. It does, and that is the point: `match_spans` and
+`match_get_captures_by_index` walk the same `group->captures[i]` array (`upstream/src/_regex.c:19115`
+and `:19174`), but the captures arm renders each span through
+`get_slice(self->substring, start - self->substring_offset, ...)`. Nothing else this recorder reads
+exercises that offset at all, so `spans()` cannot see a wrong `substring_offset` and this can.
 
-**Statement.** If `lastindex` is not `None` it names a group whose span is not `(-1, -1)`, and
-`lastgroup` names the same group.
+**No POSIX guard, unlike `fuzzyChanges`, and that is measured.** Reading `fuzzy_changes` on a POSIX
+fuzzy match that spent an error kills the interpreter (entry 9) and
+`tools/probes/upstream-posix-fuzzy-safe-attributes.py` never asked about `captures`. Section 6 of
+`tools/probes/upstream-free-tier-invariant-grounds.py` now does, over three POSIX fuzzy patterns
+including a repeated capturing group, and every read returns normally.
+
+### `lastindex-participated` - SHIP (narrowed), cost FREE
+
+**Statement.** If `lastindex` is not `None` it names a group whose span is not `(-1, -1)`.
 
 **Ground.** Documented as the last group that *participated* in the match.
 
-**Calibration.** None.
+**The second limb this entry used to carry - "and `lastgroup` names the same group" - IS FALSE, and
+is pruned.** Measured in `tools/probes/upstream-free-tier-invariant-grounds.py` section 1 (regex
+2026.9.10, 2026-09-16): `(?P<x>a)(b)` over `'ab'` answers `lastindex=2` and `lastgroup='x'`, and
+group 2 has no name at all. `lastgroup` is the last NAMED group, which is what `_describe_match`'s
+own comment in `tools/record-oracle.py` has said since S14 - so the first draft of this file
+contradicted the recorder, and the recorder was right. The limb is not recoverable from a row in any
+case: a recorded row carries group NUMBERS and no names.
+
+**Calibration.** None. 0 firings of 11,684 eligible rows.
 
 ### `group-spans-inside-match` - SHIP (narrowed), cost FREE
 
-**Statement.** Every participating group's span lies within the match span - **for rows whose
-pattern contains no `\K` and no group call**.
+**Statement.** Every participating group's span, and every one of its captures, lies within the
+match span - **for rows whose pattern contains no `\K` and no lookaround**.
 
 **Ground.** A group matches a part of what the match consumed.
 
-**Why the narrowing, and why it is not a fudge.** `\K` resets the reported match start, so a group
-that matched before the `\K` legitimately lies *outside* the reported span. That is documented
-behaviour, it is in the wave's alphabet (ledger 23's own pattern is `...\g<1>\K$`), and stated
-unnarrowed this invariant would fire on every such row and flood triage - the exact failure mode
-the blind review is told to hunt for. Group calls re-enter a group from elsewhere and have the same
-effect. The slice's starting list stated this one flat; this is the prune, with the reason.
+**Both narrowings are MEASURED**, in `tools/probes/upstream-free-tier-invariant-grounds.py` sections
+3 and 5 (regex 2026.9.10, 2026-09-16):
 
-**Calibration.** None. Kept because it is free and it constrains the field most likely to rot.
+- **`\K`** resets the reported match start, so a group before it legitimately lies outside the span:
+  `(a)\Kb` over `'ab'` is match `(1, 2)` with group 1 at `(0, 1)`. `\K` is in the wave's alphabet -
+  ledger 23's own pattern is `...\g<1>\K$`.
+- **A lookaround** consumes nothing, so a group inside one matches text the match never covered:
+  `a(?=(b))` over `'ab'` is match `(0, 1)` with group 1 at `(1, 2)`, and `(?:(?=(bc))b)` over `'bc'`
+  is match `(0, 1)` with group 1 at `(0, 2)`. **This file's first draft did not have this
+  narrowing**, and without it the invariant would have fired on a large share of the `lookaround`,
+  `interactions` and `conditionals` generators - the flood the blind review is briefed to hunt for,
+  caught by running the probe before the checker rather than by reading the wave afterwards.
+
+**A GROUP CALL IS NOT NARROWED AROUND, and this file's first draft said it was.** The same probe's
+section 3 measured both spellings - `(a)b(?1)` and `(?P<g>a)b(?&g)` over `'aba'` - and each records
+group 1 at `(0, 1)`, INSIDE the match. A call re-enters a group; it does not move the span reported
+for it. The claim was plausible and wrong, and excluding those rows would have been a hole for no
+reason. What the ledger actually records under a group call (entry 8, and the `group-call-direction`
+family in `run-oracle.ps1`) is a call inside a LOOKAROUND, which the narrowing above already covers.
+
+**Calibration.** 2 firings of 14,142 eligible rows, both of them the `overlapped-skip-stale-slice`
+family already in `ExpectedDivergences.cs` - an overlapped `(*SKIP)` scan reporting a capture
+outside its own match. Not predicted as a calibration for this invariant and found anyway, which is
+the first evidence that the free tier reaches a family nobody aimed it at.
 
 ---
 
@@ -240,6 +326,23 @@ direction).
 **Note the strengthening.** The slice's starting list had only limb (b), the error count. Limb (a),
 existence, is what entries 12 and 13 actually are.
 
+**COST FREE IN PRACTICE, not `+1`.** `_CONTROLS` in `tools/record-oracle.py` has recorded
+`bestmatchFreeOutcome` since S48b, so the flagless twin is already on the row and this invariant
+asks upstream nothing. The same is true of `posix-chooses-among-flagless-answers` below, which is
+how the first checker reaches ledger 12 and ledger 9's families at no call budget at all.
+
+**CALIBRATION CAME BACK: 2 firings of 2,123 eligible rows, both limb (a).** The clearer of the two
+is `(?b)(?fi)(?:(?:[\U0001f600\U0001d518][ab]){e<=1}){s<=1,i<=1,d<=1}` asked as a `fullmatch` over
+`'\U0001d518S\U0001f3fb'`: upstream answers NO MATCH, and the same row without `(?b)` matches
+`(0, 5)` at a cost of `[1, 1, 0]`. That is ledger 12 exactly - `BESTMATCH` selecting nothing from a
+non-empty set - found by machine on a row nobody had looked at.
+
+**ONE NARROWING, forced by the first three-seed wave and guarded in `_self_check`.** Three of the
+four firings of that first wave were rows upstream TIMED OUT on: `_matches_of` renders a timeout as
+"no matches", the existence limb read that as the flag choosing nothing, and a row where upstream
+merely ran out of its ten seconds was filed as `BESTMATCH` losing a match. The checker now compares
+only two ANSWERS. The fault case belongs to `no-fault-where-a-twin-answers` and is handled there.
+
 ### `enhancematch-no-worse` - SHIP, cost +1
 
 **Statement.** Under `ENHANCEMATCH`, a match exists wherever the plain fuzzy call finds one, and its
@@ -289,6 +392,21 @@ engine needs, and crashes the C engine).
 **This is the highest-yield invariant in the file** and it is cheap: the recorder already records a
 flagless twin for several controls.
 
+**IT FIRED ON NOTHING: 0 of 5,562 eligible rows**, and the sitting that predicted it would re-find
+ledger 9, 16 and 23 was wrong about that. Two reasons, and only the first is a limit of this file:
+
+1. **What is implemented is weaker than the statement.** A `search` reports only its FIRST match, so
+   a flagless answer at a different start says nothing about whether the flagless engine could also
+   match where POSIX did - the checker therefore compares only rows where the two answered at the
+   SAME start, and treats a different start as ambiguity rather than as a finding. Ledger 16 is an
+   overlapped SCAN dropping its longest match, which this shape does not reach at all.
+2. **Ledger 9 is a crash**, which is `no-fault-where-a-twin-answers`'s business and not this one's.
+
+So this remains the highest-yield invariant *by calibration* and has yet to earn it by firing. What
+would change that is limb (b) over a scan rather than over one match, which needs the position
+sampling `search-none-anchored-none` also wants; that is the strongest single candidate for the
+`+1` tier's first sitting.
+
 ### `inline-version-equals-flag` - SHIP, cost +1
 
 **Statement.** `(?V0)` at the head of a pattern gives the same answer as compiling that pattern with
@@ -329,6 +447,35 @@ right from wrong there is exactly this one: a partial call may not deny what the
 greedy and lazy spellings of one pattern both allow. Ledger 24 holds the reading; the owner's
 ruling on `slice_start` versus `text_start` is still open and **this invariant does not wait for
 it** - if it fires on both engines, that is the finding.
+
+**IT FIRED ON ONE ENGINE, AND THAT IS THE RESULT.** Run over a six-cell grid by
+`tools/probes/upstream-gate-row-greedy-lazy.py` and `tools/probes/port-gate-row-greedy-lazy.ps1`
+(2026-09-16, regex 2026.9.10 against a Debug build of this port):
+
+| Cell | Upstream lazy / greedy | Port lazy / greedy |
+| --- | --- | --- |
+| **the gate row** | `(2, 2) partial` / **no match** | no match / no match |
+| without the reversal | `(2, 2) partial` / `(2, 2) partial` | `(2, 2) partial` / `(2, 2) partial` |
+| **without the `\b`** | `(2, 2) partial` / **no match** | no match / no match |
+| without the unmatchable prefix | complete `(2, 2)` / complete | complete `(2, 2)` / complete |
+| over the whole subject | `(0, 2) partial` / `(0, 2) partial` | `(0, 2) partial` / `(0, 2) partial` |
+| not partial | no match / no match | no match / no match |
+
+**Upstream breaks the invariant on 2 of 6 cells; this port breaks it on 0 of 6.** Greediness orders
+the candidate set and cannot change its membership, so upstream answering a zero-width partial to
+`(.*?)` and no match to `(.*)` over the same empty slice is upstream contradicting itself - and the
+port's "no match", which the differential oracle could only report as a disagreement, is the
+self-consistent answer. On every cell where upstream is self-consistent the two engines agree.
+
+**The ablations attribute it.** Removing the `(?r)` makes the invariant hold AND makes both engines
+agree; removing the `\b` does neither. So the mechanism is the reversed partial path and not the
+boundary: it is upstream's lazy arm reaching a partial its greedy arm does not.
+
+**What this does and does not settle.** It settles that the port is the self-consistent engine on
+gate row 104366, which is what scope item 7 asked for and what the oracle's "do they agree" question
+could not answer. It does NOT settle ledger 24's open question of whether upstream's reversed
+run-out should read `slice_start` or `text_start`; that is the owner's ruling and S52d's slice. No
+row is pinned here on the strength of it - the finding is recorded and handed on.
 
 ### `reverse-mirrors-forward` - DEFER
 
@@ -400,7 +547,38 @@ repetition).
 
 **Warning, from ledger 9.** The checker's own extra calls can be the thing that faults. A violation
 here must name which call faulted, and the blind review is briefed to hunt for a checker that
-crashes upstream by how it asks rather than what it asks.
+crashes upstream by how it asks rather than what it asks. The first checker asks NO extra calls at
+all, so it cannot be the thing that faults - which is the strongest form of this warning being
+heeded rather than merely noted.
+
+**TWO NARROWINGS, BOTH FORCED BY A WAVE, and this invariant is the one that needed them.** Stated
+flat it fired 7 times in 126,240 rows and every one was the invariant being wrong. Both are guarded
+in `_self_check` because each is one predicate deep.
+
+1. **A TIMEOUT beside a RANKING flag's twin is not a fault.** Five of the seven were a `(?b)` row
+   that spent its whole ten seconds while the same row without `(?b)` answered. `BESTMATCH` is
+   documented to do more work - *"By default, fuzzy matching searches for the first match that meets
+   the given constraints ... The BESTMATCH flag will make it search for the best match instead"*
+   (`upstream/README.rst:592`) - and POSIX's leftmost-longest must see every match at a position
+   before picking the longest. Taking either flag away leaves an engine that may stop at the first
+   acceptable answer, so the twin finishing is a COST difference, not a contradiction. **The other
+   two controls keep the timeout case**, and that is why this is a narrowing rather than "drop
+   timeouts": `(?>` to `(?:` and `(*SKIP)` to `(*PRUNE)` both REMOVE pruning, so the twin explores
+   at least as much - a row that hangs WITH the pruning construct and finishes without it cannot be
+   explained by cost, and that is ledger entry 10 itself.
+2. **A substitution twin that REPLACED NOTHING is not an answer.** The remaining two were `subf`
+   rows raising `IndexError` while matching - the shape of ledger 6, and not what it was. Measured
+   in `tools/probes/upstream-free-tier-invariant-grounds.py` section 7: upstream's `subf` renders
+   the template with `str.format` over the GROUP LIST, so `{0[2]}` on a pattern with no group 2 is
+   `IndexError: list index out of range`, and `regex.subf('abcdefgh', '{0[2]}...', 'abcdefgh')`
+   raises it with no verb, no fuzzy section and no reversal in sight. **The template is only
+   rendered where something matched**, which is the whole mechanism: on both rows the twin replaced
+   NOTHING, so it never rendered the template and never reached the question. A twin that DID
+   replace proves the template is fine for the pattern, and then the row's own raise is a real
+   finding again - so the checker tests the replacement count rather than excluding `sub` rows.
+
+**After both: 0 firings of 1,800 eligible rows** (eligible = every row upstream faulted on, which is
+the denominator that makes the zero readable; the violation condition is a strict subset of it).
 
 ---
 
@@ -414,6 +592,38 @@ about correctness on a row where the port inherits upstream's answer, and neithe
 all about a row where both engines are wrong in the same way. That is what `docs/VERIFICATION.md`'s
 paragraph on this file has to say, and why the second engines in `docs/plan/OPERATIONS.md` remain
 the third leg.
+
+## What the second engine can and cannot add here
+
+Amendment 16 wants an independent engine beside a claim, and on a FUZZY row upstream is the only
+engine on Windows that does approximate matching at all - PCRE2, Perl and .NET each answer `{e<=n}`
+with a syntax error. **TRE 0.8.0 in WSL is the second fuzzy engine** (`docs/plan/OPERATIONS.md`),
+asked by `tools/probes/tre-fuzzy-check.py`, and what it measured is worth stating plainly because
+the number is small:
+
+- **Over the three 2,000-row waves: 10 rows of 126,240 are in TRE's dialect, and TRE CONFIRMED all
+  10** - same existence, and a cheapest cost never above what upstream reported.
+- **Of this slice's 10 violation rows, TRE could answer NONE**, each with its reason recorded: four
+  `fullmatch`, three scans, one `partial`, two carrying flags TRE has no form for.
+
+**That is the honest ceiling, and it is a fact about dialects rather than about TRE.** TRE offers a
+SEARCH and nothing else, so every anchored operation is out; its syntax is POSIX ERE, so `\p{...}`,
+backreferences, lookarounds, verbs and `\K` are out; and it has no BESTMATCH, no ENHANCEMATCH, no
+per-section budget and no `fuzzy_changes`. The generators that produce violations are exactly the
+ones - `interactions`, `verbs`, composed `fuzzy` - whose alphabet is furthest from that core.
+
+So on the rows this file is for, **the invariants are the instrument and the second engine is not
+available**, which is the reverse of the usual arrangement and is why this file exists. The 10
+CONFIRMED rows are not the point; that the probe answers them at all is what says a zero elsewhere
+is a dialect gap and not a broken instrument, and `--self-test` is there for the same reason.
+
+**Two of TRE's answers were this probe's own bugs before they were evidence**, which is worth
+recording as a method note. The first dialect gate let `(?i)`-prefixed and lazily-quantified
+patterns through and TRE refused seven of them; the corrected gate then reported one DIFFERENT row,
+which turned out to be the probe defaulting an unnamed error kind to *unbounded* where upstream
+documents it as *forbidden* (`upstream/README.rst:561`, "If a certain type of error is specified,
+then any type not specified will **not** be permitted"). A second engine's disagreement is a
+hypothesis about the harness before it is one about either engine.
 
 ## Ledger entries no invariant in this file reaches
 

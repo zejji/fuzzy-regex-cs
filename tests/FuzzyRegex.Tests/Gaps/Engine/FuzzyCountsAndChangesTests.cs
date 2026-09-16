@@ -22,7 +22,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// upstream.</b> Both engines agree on C and D, so no oracle wave can see either: a bug both
 /// engines share reports as agreement. What can see it is the pair of attributes contradicting each
 /// other, which is what
-/// <c>OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts</c> asserts over a
+/// <c>OracleWaveTests.Our_own_answers_never_contradict_themselves</c> asserts over a
 /// whole wave and what these rows assert one at a time.
 /// </para>
 /// <para>
@@ -91,7 +91,7 @@ public sealed class FuzzyCountsAndChangesTests
     /// <remarks>
     /// Measured on the committed engine, 2026-09-14, before the fix: <c>(6, 8)</c> with counts
     /// <c>(1, 0, 0)</c> against changes <c>del[7]</c>. Found by
-    /// <c>OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts</c> at seed 4242
+    /// <c>OracleWaveTests.Our_own_answers_never_contradict_themselves</c> at seed 4242
     /// on its first run, which is what that property is for.
     /// </remarks>
     [Test]

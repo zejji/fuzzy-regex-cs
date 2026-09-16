@@ -483,9 +483,293 @@ _CONTROLS = (
 )
 
 
+# --------------------------------------------------------------------------------------------
+# Metamorphic invariants - docs/ORACLE-INVARIANTS.md, S52c scope item 2
+# --------------------------------------------------------------------------------------------
+#
+# The oracle asks "do the two engines agree?" and is blind to a bug the port inherited line for
+# line, because then they do. Every serious inherited bug in LEDGER.md was found instead by
+# UPSTREAM CONTRADICTING ITSELF, by hand, when a session happened to look. These checks make that
+# automatic: a row whose own recorded answers contradict each other carries the invariant's id in
+# `selfContradiction`, with no port involved and no judgement applied.
+#
+# EVERY INVARIANT HERE COSTS ZERO EXTRA UPSTREAM CALLS, which is not only a budget decision. Ledger
+# entry 9 is upstream crashing on a question asked a particular way, so a checker that asks its own
+# questions can be the thing that faults and can take a whole wave with it. Four of these are read
+# off the recorded row; three read the ablation twins `_CONTROLS` already records. The `+1` and `+2`
+# tiers in ORACLE-INVARIANTS.md are a later sitting's.
+#
+# WHAT FIRES IS A CANDIDATE, NEVER A VERDICT. An invariant firing means the engine is wrong or the
+# invariant is; scope item 3 triages every one and prunes this list when it is the invariant.
+
+# The two constructs measured to put a group's span OUTSIDE the reported match span, which is what
+# `group-spans-inside-match` is narrowed around. BOTH NARROWINGS ARE MEASURED, not reasoned:
+# `tools/probes/upstream-free-tier-invariant-grounds.py` sections 3 and 5 (regex 2026.9.10,
+# 2026-09-16).
+#
+#   `\K`        resets the reported match start, so a group before it lies outside the span:
+#               `(a)\Kb` over 'ab' is match (1, 2) with group 1 at (0, 1).
+#   lookaround  consumes nothing, so a group inside one matches text the match never covered:
+#               `a(?=(b))` over 'ab' is match (0, 1) with group 1 at (1, 2), and `(?:(?=(bc))b)`
+#               over 'bc' is match (0, 1) with group 1 at (0, 2).
+#
+# A GROUP CALL IS **NOT** NARROWED AROUND, and ORACLE-INVARIANTS.md's first draft said it was. The
+# probe's section 3 measured both spellings - `(a)b(?1)` over 'aba' and `(?P<g>a)b(?&g)` over 'aba' -
+# and each records group 1 at (0, 1), INSIDE the match. A call re-enters a group; it does not move
+# the span that is reported for it. Excluding those rows would have been a hole for no reason. What
+# the ledger actually records under a group call (entry 8, and the `group-call-direction` family in
+# run-oracle.ps1) is a call inside a LOOKAROUND, which the lookaround narrowing already covers.
+#
+# GATED ON THE TEXT, like `_without_posix` and `subMatches`: `(?=` inside a character class is
+# literal text, and a pattern written that way is skipped when it need not be. That direction loses
+# a check; the other invents a violation, which is the one that wastes triage.
+_SPAN_ESCAPES_THE_MATCH = re.compile(r"\\K|\(\?=|\(\?!|\(\?<[=!]")
+
+# The two controls whose construct only ever REMOVES backtracking, so their twin cannot be cheaper
+# to run than the row itself. See `no-fault-where-a-twin-answers` below, which uses these and not
+# the ranking flags when the row's fault is a timeout.
+_PRUNING_CONTROLS = ("atomicFreeOutcome", "pruneOutcome")
+
+
+def _matches_of(outcome: dict) -> list[dict]:
+    """Every described match in an outcome - one for a single-match row, the list for a scan.
+
+    A `sub`, `split`, `nomatch`, `error`, `timeout` or `resource` outcome describes no match, so
+    the structural invariants below have nothing to read and the row is silently not checked.
+    """
+    kind = outcome.get("kind")
+    if kind == "match":
+        return [outcome]
+    if kind == "matches":
+        return outcome.get("matches") or []
+    return []
+
+
+def _structural_violations(recorded: dict) -> list[str]:
+    """The invariants decidable from the recorded row alone - ORACLE-INVARIANTS.md group B.
+
+    `captures-are-the-texts-of-spans` is NOT here: the row records the capture spans and not their
+    texts, so it is collected at record time by `_describe_match`, where the match object still is.
+    """
+    violations: list[str] = []
+    spans_are_inside = not _SPAN_ESCAPES_THE_MATCH.search(recorded["pattern"])
+
+    for match in _matches_of(recorded["outcome"]):
+        # `fuzzy-counts-match-changes`. Ledger 11, the entry with seven distinct doors found so far,
+        # all of one shape: a fuzzy match reporting change positions that contradict its own change
+        # counts. S47 checked this by hand on the rows it minimised; this is the same property on
+        # every row of every wave. A POSIX row records counts and no positions (ledger 9), so the
+        # check simply has nothing to compare there and is skipped.
+        counts = match.get("fuzzyCounts")
+        changes = match.get("fuzzyChanges")
+        if counts is not None and changes is not None:
+            tally = [
+                len(changes["substitutions"]),
+                len(changes["insertions"]),
+                len(changes["deletions"]),
+            ]
+            if tally != counts:
+                violations.append("fuzzy-counts-match-changes")
+
+        groups = match.get("groups") or []
+
+        # `lastindex-participated`, PARTICIPATION LIMB ONLY. `lastindex` is documented as the last
+        # group that *participated*, so a `lastindex` naming a group whose span is (-1, -1) is the
+        # match object contradicting itself.
+        #
+        # THE SECOND LIMB ORACLE-INVARIANTS.md STATED - "and `lastgroup` names the same group" - IS
+        # FALSE, and the probe's section 1 measures it: `(?P<x>a)(b)` over 'ab' answers lastindex=2
+        # and lastgroup='x', and group 2 has no name at all. `lastgroup` is the last NAMED group,
+        # which is what `_describe_match`'s own comment has said since S14. The limb is pruned in
+        # the file with this measurement beside it.
+        last = match.get("lastIndex", -1)
+        if last != -1 and not (0 <= last < len(groups) and groups[last]["success"]):
+            violations.append("lastindex-participated")
+
+        # `group-spans-inside-match`, narrowed - see `_SPAN_ESCAPES_THE_MATCH`. Every capture is
+        # checked and not only the group's own span, because a repeated group's earlier captures are
+        # the half most likely to rot and cost nothing extra to read.
+        if spans_are_inside and groups:
+            start = groups[0]["index"]
+            end = start + groups[0]["length"]
+            for group in groups[1:]:
+                if not group["success"]:
+                    continue
+                spans = [[group["index"], group["length"]], *group["captures"]]
+                if any(index < start or index + length > end for index, length in spans):
+                    violations.append("group-spans-inside-match")
+                    break
+
+    return violations
+
+
+def _choosing_flag_violations(invariant: str, flagged: dict, free: dict) -> list[str]:
+    """One CHOOSING flag against its own flagless twin - ORACLE-INVARIANTS.md groups D and E.
+
+    `BESTMATCH` and `POSIX` are both documented as SELECTING among the matches the ordinary engine
+    can already make, so each is checkable against that engine with no reference to any other
+    implementation - and the twin is already on the row, recorded by `_CONTROLS`. Three limbs:
+
+    existence  the flag chose nothing from a non-empty set. Ledger 12 and 13 (`BESTMATCH` loses a
+               match plain fuzzy matching finds) and 23 (`POSIX` adds a zero-width match the
+               flagless engine does not make - the other direction of the same limb).
+    longest    POSIX only, and POSIX only because `BESTMATCH` is defined to choose the BEST and not
+               the longest. Ledger 16.
+    cost       the flag's answer at the same start costs more errors than the flagless engine needs.
+               Ledger 9 for POSIX; `bestmatch-no-worse` limb (b) for BESTMATCH.
+
+    WHAT IS DELIBERATELY NOT A VIOLATION: the two answering at DIFFERENT starts. A `search` reports
+    only its first match, so a flagless answer at another start says nothing about whether the
+    flagless engine could also match where the flag did - the invariant's own wording is "one the
+    flagless engine can also make AT THE SAME START". Flagging it would report ambiguity as a
+    finding, and ambiguity is what the confounder note in ORACLE-INVARIANTS.md exists to keep out.
+
+    NEITHER IS A ROW THE FLAGGED SIDE DID NOT ANSWER, and the first three-seed wave of S52c is why
+    this guard is written down rather than assumed. Without it, `_matches_of` renders a TIMEOUT as
+    "no matches", the existence limb reads that as "the flag chose nothing from a non-empty set",
+    and a row where upstream merely ran out of its ten seconds is filed as `BESTMATCH` losing a
+    match. Three of the four `bestmatch-no-worse` firings and the single
+    `posix-chooses-among-flagless-answers` firing were exactly that - upstream had no answer at all
+    on the flagged side. The fault case is `no-fault-where-a-twin-answers`'s business, and it fires
+    on those rows already.
+    """
+    violations: list[str] = []
+    if flagged["kind"] not in _ANSWERED or free["kind"] not in _ANSWERED:
+        return violations
+
+    flagged_matches = _matches_of(flagged)
+    free_matches = _matches_of(free)
+
+    # Existence, in both directions and for a scan as well as a single match.
+    if not flagged_matches and free_matches:
+        return [invariant]
+    if flagged_matches and not free_matches:
+        return [invariant]
+    if flagged["kind"] != "match" or free["kind"] != "match":
+        return violations
+
+    ours, theirs = flagged_matches[0], free_matches[0]
+    if not ours.get("groups") or not theirs.get("groups"):
+        return violations
+    if ours["groups"][0]["index"] != theirs["groups"][0]["index"]:
+        return violations
+
+    same_length = ours["groups"][0]["length"] == theirs["groups"][0]["length"]
+    if invariant == "posix-chooses-among-flagless-answers":
+        if ours["groups"][0]["length"] < theirs["groups"][0]["length"]:
+            violations.append(invariant)
+
+        # THE COST LIMB NEEDS THE SAME SPAN, NOT MERELY THE SAME START, and reading ledger 9 as
+        # "the same start" makes this invariant FALSE. Entry 9 is upstream "charging a SPAN more
+        # errors than its own flagless engine needs for the same span"; POSIX leftmost-longest is
+        # defined to buy LENGTH, and a longer match at the same start legitimately costs more.
+        # Measured 2026-09-16, and this is a legal answer the first version of this check reported:
+        #
+        #     (?p)(?:abc){e<=2}  over 'abxxyc'  ->  span (0, 4), counts (1, 1, 0)
+        #         (?:abc){e<=2}  over 'abxxyc'  ->  span (0, 3), counts (1, 0, 0)
+        #
+        # POSIX is both longer (the limb above holds) and therefore dearer. Found by the blind
+        # review; the wave had not drawn one, because only 29 of the 1,122 rows that reach this
+        # comparison carry fuzzy counts on either side at all.
+        if not same_length:
+            return violations
+
+    # BESTMATCH takes the cost limb at the same START, deliberately, and the asymmetry above is not
+    # an oversight. BESTMATCH is defined to minimise ERRORS and is free to choose any length to do
+    # it, so a dearer answer at the same start is a contradiction whatever its length; POSIX is
+    # defined to maximise LENGTH and buys it with errors.
+    if sum(ours.get("fuzzyCounts") or []) > sum(theirs.get("fuzzyCounts") or []):
+        violations.append(invariant)
+
+    return violations
+
+
+def _twin_answered(free: dict | None, kind: str) -> bool:
+    """Whether an ablation twin's answer actually says the row's question is answerable.
+
+    A control's key is only written when the twin answered (`_ANSWERED`), so the key being present
+    is nearly the whole of it. THE ONE EXCEPTION IS A SUBSTITUTION THAT REPLACED NOTHING, and S52c's
+    second corrected wave is what forced it, on both of the two rows the fault limb fired on.
+
+    Both were `subf` rows raising `IndexError` while matching, each beside a twin that answered - the
+    shape of ledger entry 6, and not what it actually was. Measured in section 7 of
+    `tools/probes/upstream-free-tier-invariant-grounds.py` (regex 2026.9.10, 2026-09-16): upstream's
+    `subf` renders the template with `str.format` over the GROUP LIST, so `{0[2]}` on a pattern with
+    no group 2 is `IndexError: list index out of range` - a property of the pattern and the template,
+    not of the matcher. `regex.subf('abcdefgh', '{0[2]}...', 'abcdefgh')` raises it with no verb, no
+    fuzzy section and no reversal anywhere in sight.
+
+    THE TEMPLATE IS ONLY RENDERED WHERE SOMETHING MATCHED, which is the whole mechanism: on both
+    rows the twin replaced NOTHING, so it never rendered the template and never reached the question.
+    Reading "the twin answered" off it filed a bad template as an engine fault. A twin that DID
+    replace proves the template is fine for this pattern, and then the row's own raise is a real
+    finding again - so this is a narrowing of one predicate and not an exclusion of `sub` rows.
+
+    Applied to the `error` limb ONLY. A twin that completes a scan with nothing to replace has still
+    done the searching, so it remains a perfectly good answer to "does this row hang".
+    """
+    if free is None:
+        return False
+    if kind == "error" and free.get("kind") == "sub":
+        return free.get("count", 0) > 0
+    return True
+
+
+def _control_violations(recorded: dict) -> list[str]:
+    """The invariants decidable from the ablation twins `_CONTROLS` already recorded."""
+    violations: list[str] = []
+    outcome = recorded["outcome"]
+    kind = outcome["kind"]
+
+    # `no-fault-where-a-twin-answers` - ORACLE-INVARIANTS.md group H, and the five ledger entries
+    # that are not "two answers disagree" but "one door falls over while another answers": 9, 6, 10,
+    # 14, 18. A control's key is only written when the twin ANSWERED (`_ANSWERED`, above), so the
+    # key being present is the whole of the second half of this check.
+    #
+    # A COMPILE-TIME REJECTION IS NOT A FAULT and is excluded by `whileMatching`. Upstream deciding
+    # a pattern is invalid is an answer, and a control that removes a construct can legitimately
+    # make an invalid pattern valid. Only a call that got as far as matching and then raised, timed
+    # out, or exhausted the interpreter is the shape the ledger entries above are.
+    #
+    # AND A TIMEOUT BESIDE A RANKING FLAG IS NOT A FAULT EITHER - the narrowing S52c's first
+    # three-seed wave forced, where five of the seven firings were one shape: a `(?b)` row that
+    # spent its whole ten seconds while the same row without `(?b)` answered. `BESTMATCH` is
+    # DOCUMENTED to do more work - "By default, fuzzy matching searches for the first match that
+    # meets the given constraints ... The BESTMATCH flag will make it search for the best match
+    # instead" (upstream/README.rst:592) - and POSIX's leftmost-longest has to see every match at a
+    # position before it can pick the longest. Taking either flag away leaves an engine that may
+    # stop at the first acceptable answer, so the twin finishing where the flagged row does not is
+    # a COST difference and not a contradiction.
+    #
+    # THE OTHER TWO CONTROLS ARE THE OPPOSITE AND KEEP THE TIMEOUT CASE, which is the whole reason
+    # this is a narrowing rather than "drop timeouts". `(?>` to `(?:` and `(*SKIP)` to `(*PRUNE)`
+    # both REMOVE pruning, so the twin explores at least as much as the original: a row that hangs
+    # WITH the pruning construct and finishes without it cannot be explained by cost. That is
+    # exactly ledger entry 10 - `(*SKIP)` inside an atomic group after an optional item loops for
+    # ever - and narrowing any wider would have thrown that calibration away.
+    faulted = kind in ("timeout", "resource") or (kind == "error" and outcome.get("whileMatching"))
+    twins = (
+        _PRUNING_CONTROLS if kind == "timeout" else tuple(key for key, _ in _CONTROLS)
+    )
+    if faulted and any(_twin_answered(recorded.get(key), kind) for key in twins):
+        violations.append("no-fault-where-a-twin-answers")
+
+    for key, invariant in (
+        ("bestmatchFreeOutcome", "bestmatch-no-worse"),
+        ("posixFreeOutcome", "posix-chooses-among-flagless-answers"),
+    ):
+        free = recorded.get(key)
+        if free is not None:
+            violations += _choosing_flag_violations(invariant, outcome, free)
+
+    return violations
+
+
 def _record_row_and_its_control_answers(regex, row: dict) -> dict:
     """Records one row, and the same row again with each construct a control takes away."""
-    recorded = _record_row(regex, row)
+    violations: list[str] = []
+    recorded = _record_row(regex, row, violations)
+    violations += _structural_violations(recorded)
 
     pattern = row["pattern"]
     flags = int(row.get("flags", 0))
@@ -502,6 +786,14 @@ def _record_row_and_its_control_answers(regex, row: dict) -> dict:
         # the direction that reports a row rather than hiding it.
         if free["kind"] in _ANSWERED:
             recorded[key] = free
+
+    violations += _control_violations(recorded)
+    if violations:
+        # Sorted and de-duplicated: a scan whose every match breaks one invariant is ONE candidate
+        # to triage, not forty, and the field is a set of ids by contract. The detail a triage needs
+        # is on the row itself - the groups, the counts, the twins - so nothing is lost by not
+        # writing it twice.
+        recorded["selfContradiction"] = sorted(set(violations))
 
     return recorded
 
@@ -538,8 +830,13 @@ def _compile_upstream(regex, recorded: dict, pattern: str, flags: int, named_lis
         regex._regex.compile = inner
 
 
-def _record_row(regex, row: dict) -> dict:
-    """Runs one row against upstream and returns it with its recorded outcome attached."""
+def _record_row(regex, row: dict, violations: list | None = None) -> dict:
+    """Runs one row against upstream and returns it with its recorded outcome attached.
+
+    ``violations`` collects the one metamorphic invariant that cannot be read back off the recorded
+    row - `captures-are-the-texts-of-spans`, which needs the live match object. Left ``None`` by the
+    control twins and by ``_self_check``, whose answers are not the row being judged.
+    """
     pattern = row["pattern"]
     flags = int(row.get("flags", 0))
     named_lists = _canonical_named_lists(row.get("namedLists") or {})
@@ -863,7 +1160,10 @@ def _record_row(regex, row: dict) -> dict:
                 # The untranslated codepoint span per match, for the same reason the top-level
                 # one exists: it makes the recorder's index translation visible in the file
                 # rather than merely trusted. The consumer never reads it.
-                dict(_describe_match(compiled, m, offsets), codepointSpan=list(m.span(0)))
+                dict(
+                    _describe_match(compiled, m, offsets, violations),
+                    codepointSpan=list(m.span(0)),
+                )
                 for m in found
             ]
             recorded["outcome"] = {"kind": "matches", "matches": described}
@@ -913,7 +1213,7 @@ def _record_row(regex, row: dict) -> dict:
 
     recorded["codepointSpan"] = list(match.span(0))
     offsets = _utf16_offsets(subject)
-    described = _describe_match(compiled, match, offsets)
+    described = _describe_match(compiled, match, offsets, violations)
     recorded["outcome"] = {"kind": "match", **described}
 
     leak_free = _leak_free_fuzzy(
@@ -951,11 +1251,17 @@ def _record_row(regex, row: dict) -> dict:
     return recorded
 
 
-def _describe_match(compiled, match, offsets: list[int]) -> dict:
+def _describe_match(compiled, match, offsets: list[int], violations: list | None = None) -> dict:
     """One match's groups and its two last-group fields, in UTF-16 ``[Index, Length]``.
 
     Shared by the single-match operations and by ``finditer``, whose answer is a list of these, so
     the two shapes cannot drift apart.
+
+    ``violations`` is where `captures-are-the-texts-of-spans` is collected, and it is collected HERE
+    rather than in `_structural_violations` because it is the one FREE invariant whose evidence does
+    not survive into the row: the row records a capture's SPAN and never its text. Passed by the
+    primary question's two call sites only - `subMatches` and `_anchoredScan` are second facts about
+    upstream rather than the answer being judged, so they leave it ``None``.
     """
     groups = []
     for number in range(compiled.groups + 1):
@@ -971,6 +1277,29 @@ def _describe_match(compiled, match, offsets: list[int]) -> dict:
             # group, not just for one inside a repeat, and Group.Captures has to match.
             "captures": [_to_index_length(offsets, s) for s in match.spans(number)],
         })
+
+    # `captures-are-the-texts-of-spans` - ORACLE-INVARIANTS.md group B, and NOT the vacuous check it
+    # reads as. Upstream's `match_spans` and `match_get_captures_by_index` walk the SAME
+    # `group->captures[i]` array (upstream/src/_regex.c:19115 and :19174), but the captures arm
+    # renders each one through `get_slice(self->substring, start - self->substring_offset, ...)`,
+    # so this is the only check that exercises that offset bookkeeping at all. `spans()` cannot see
+    # a wrong `substring_offset`; this can.
+    #
+    # NO POSIX GUARD, unlike `fuzzyChanges` below, and that is measured rather than assumed. Reading
+    # `fuzzy_changes` on a POSIX fuzzy match that spent an error kills the interpreter (ledger 9),
+    # and `tools/probes/upstream-posix-fuzzy-safe-attributes.py` never asked about `captures`.
+    # Section 6 of `tools/probes/upstream-free-tier-invariant-grounds.py` now does, over three POSIX
+    # fuzzy patterns including a repeated capturing group, and every read returns normally
+    # (regex 2026.9.10, 2026-09-16).
+    if violations is not None:
+        for number in range(compiled.groups + 1):
+            spans = match.spans(number)
+            captures = match.captures(number)
+            if len(captures) != len(spans) or any(
+                text != match.string[start:end] for text, (start, end) in zip(captures, spans)
+            ):
+                violations.append("captures-are-the-texts-of-spans")
+                break
 
     described = {
         "groups": groups,
@@ -6137,14 +6466,152 @@ def _self_check() -> int:
                 f"{cut.get('codepointSlice')!r}, so the cut row no longer asks the slice it was given"
             )
 
+    # THE METAMORPHIC CHECKER MUST FIRE ON A ROW THAT CONTRADICTS ITSELF, and must not fire on one
+    # that does not. It is the only thing in this file whose failure mode is SILENCE: a checker that
+    # stops firing records a clean wave and nobody can tell it from a wave with nothing wrong in it,
+    # which is the exact failure S52c exists to remove. Each case is a hand-corrupted recorded row,
+    # so no upstream call is needed and the guard cannot itself flake.
+    contradictory = {
+        "fuzzy-counts-match-changes": {
+            "pattern": "(?:ab){e<=1}", "outcome": {"kind": "match", "groups": [
+                {"number": 0, "success": True, "index": 0, "length": 2, "captures": [[0, 2]]}],
+                "lastIndex": -1, "fuzzyCounts": [1, 0, 0],
+                "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": []}}},
+        "lastindex-participated": {
+            "pattern": "(a)?b", "outcome": {"kind": "match", "groups": [
+                {"number": 0, "success": True, "index": 0, "length": 1, "captures": [[0, 1]]},
+                {"number": 1, "success": False, "index": 0, "length": 0, "captures": []}],
+                "lastIndex": 1}},
+        "group-spans-inside-match": {
+            "pattern": "a(b)", "outcome": {"kind": "match", "groups": [
+                {"number": 0, "success": True, "index": 0, "length": 1, "captures": [[0, 1]]},
+                {"number": 1, "success": True, "index": 1, "length": 1, "captures": [[1, 1]]}],
+                "lastIndex": 1}},
+    }
+    for invariant, corrupt in contradictory.items():
+        got = _structural_violations(corrupt)
+        if invariant not in got:
+            failures.append(f"the checker did not fire {invariant} on a row that breaks it: {got}")
+
+    # And the narrowing: the SAME group-span row with a `\K` or a lookaround in its pattern is
+    # legitimate, measured in tools/probes/upstream-free-tier-invariant-grounds.py sections 3 and 5.
+    for pattern in ("a\\K(b)", "a(?=(b))"):
+        narrowed = {**contradictory["group-spans-inside-match"], "pattern": pattern}
+        if "group-spans-inside-match" in _structural_violations(narrowed):
+            failures.append(f"the checker fires group-spans-inside-match on {pattern!r}, which is legitimate")
+
+    # A CHOOSING flag that chose nothing from a non-empty set, and one that did not.
+    lost = _choosing_flag_violations("bestmatch-no-worse", {"kind": "nomatch"},
+                                     {"kind": "match", "groups": [], "lastIndex": -1})
+    if "bestmatch-no-worse" not in lost:
+        failures.append("the checker did not fire bestmatch-no-worse where the flagless twin matched")
+    kept = _choosing_flag_violations("bestmatch-no-worse", {"kind": "nomatch"}, {"kind": "nomatch"})
+    if kept:
+        failures.append(f"the checker fires bestmatch-no-worse where neither answer matched: {kept}")
+
+    # THE TWO NARROWINGS S52c's FIRST THREE-SEED WAVE FORCED, both of which turned a row upstream
+    # simply did not answer into a reported contradiction. Guarded because each is one predicate
+    # deep and would go back to over-reporting on a careless edit, silently and only on a wave.
+    unanswered = _choosing_flag_violations(
+        "bestmatch-no-worse",
+        {"kind": "timeout", "seconds": 10.0},
+        {"kind": "match", "groups": [], "lastIndex": -1},
+    )
+    if unanswered:
+        failures.append(
+            f"the checker reads a row upstream timed out on as BESTMATCH losing a match: {unanswered}"
+        )
+
+    ranked = _control_violations({
+        "outcome": {"kind": "timeout", "seconds": 10.0},
+        "bestmatchFreeOutcome": {"kind": "match"},
+        "posixFreeOutcome": {"kind": "match"},
+    })
+    if ranked:
+        failures.append(f"the checker calls a timeout beside a RANKING flag's twin a fault: {ranked}")
+    pruned = _control_violations({
+        "outcome": {"kind": "timeout", "seconds": 10.0},
+        "pruneOutcome": {"kind": "sub", "text": "x", "count": 0},
+    })
+    if "no-fault-where-a-twin-answers" not in pruned:
+        failures.append("the checker no longer fires where a row hangs and its (*PRUNE) twin answers")
+
+    # A twin that REPLACED NOTHING never rendered the template, so it is no answer to a row whose
+    # error came out of one - see `_twin_answered`. Both rows the fault limb fired on in S52c's
+    # second corrected wave were exactly this.
+    empty_twin = _control_violations({
+        "outcome": {"kind": "error", "exception": "IndexError", "message": "", "whileMatching": True},
+        "pruneOutcome": {"kind": "sub", "text": "unchanged", "count": 0},
+    })
+    if empty_twin:
+        failures.append(f"a substitution twin that replaced nothing counts as an answer: {empty_twin}")
+    real_twin = _control_violations({
+        "outcome": {"kind": "error", "exception": "IndexError", "message": "", "whileMatching": True},
+        "pruneOutcome": {"kind": "sub", "text": "replaced", "count": 2},
+    })
+    if "no-fault-where-a-twin-answers" not in real_twin:
+        failures.append("a substitution twin that DID replace no longer counts as an answer")
+
+    # POSIX BUYS LENGTH WITH ERRORS, so its cost limb needs the same SPAN and not merely the same
+    # start - `(?p)(?:abc){e<=2}` over 'abxxyc' is (0, 4) at a cost of 2 where the flagless engine's
+    # (0, 3) costs 1, and that is leftmost-longest working. Raised by S52c's blind review on a shape
+    # no wave had drawn. BESTMATCH keeps the same-start form, because it minimises errors rather
+    # than length, and both directions are guarded so a later edit cannot quietly swap them.
+    longer = {"kind": "match", "lastIndex": -1, "fuzzyCounts": [1, 1, 0],
+              "groups": [{"number": 0, "success": True, "index": 0, "length": 4, "captures": []}]}
+    shorter = {"kind": "match", "lastIndex": -1, "fuzzyCounts": [1, 0, 0],
+               "groups": [{"number": 0, "success": True, "index": 0, "length": 3, "captures": []}]}
+    if _choosing_flag_violations("posix-chooses-among-flagless-answers", longer, shorter):
+        failures.append("POSIX buying length with errors is reported as a contradiction")
+    if "bestmatch-no-worse" not in _choosing_flag_violations("bestmatch-no-worse", longer, shorter):
+        failures.append("BESTMATCH answering at a greater cost is no longer a contradiction")
+
+    # `captures-are-the-texts-of-spans` IS THE ONE INVARIANT `_describe_match` COLLECTS RATHER THAN
+    # reading off a row, so it is the one a guard over `_structural_violations` cannot reach - and
+    # the blind review found it was therefore the only id with no guard at all, in a file whose
+    # stated failure mode is silence. Dropping the check was a one-token edit that nothing noticed.
+    #
+    # A stub stands in for the match object because the point is a match whose `captures` and
+    # `spans` DISAGREE, which upstream will not produce to order.
+    class _Stub:
+        """A match object whose captures do not match its spans, and a pattern with one group."""
+
+        groups = 1
+        flags = 0
+        string = "abc"
+        lastindex = None
+        lastgroup = None
+        partial = False
+        fuzzy_counts = (0, 0, 0)
+
+        def __init__(self, captures):
+            self._captures = captures
+
+        def span(self, number):
+            return (0, 3) if number == 0 else (1, 2)
+
+        def spans(self, number):
+            return [(0, 3)] if number == 0 else [(1, 2)]
+
+        def captures(self, number):
+            return ["abc"] if number == 0 else self._captures
+
+    honest, lying = [], []
+    _describe_match(_Stub(["b"]), _Stub(["b"]), [0, 1, 2, 3], honest)
+    _describe_match(_Stub(["X"]), _Stub(["X"]), [0, 1, 2, 3], lying)
+    if honest:
+        failures.append(f"the captures check fires on a match whose captures ARE its spans: {honest}")
+    if "captures-are-the-texts-of-spans" not in lying:
+        failures.append("the captures check no longer fires on a capture text that is not its span")
+
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
     if failures:
         return 1
 
     print(
-        "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation "
-        "and slice-round-trip guards all fire"
+        "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation, "
+        "slice-round-trip and metamorphic-checker guards all fire"
     )
     return 0
 
@@ -6192,6 +6659,21 @@ def main(argv=None) -> int:
           f"regex {header['regexVersion']} ({header['versionSource']})")
     print("  " + ", ".join(f"{count} {kind}" for kind, count in sorted(kinds.items()))
           + f", {astral} with an astral subject")
+
+    # The metamorphic invariants, counted per id. A ROW IS COUNTED ONCE PER ID, not once per
+    # violating match, so this line is the number of candidates a triage has to judge. Printed even
+    # at zero, because "no invariant fired" and "the checker did not run" are different facts and a
+    # missing line cannot tell them apart.
+    contradictions: dict[str, int] = {}
+    for row in rows:
+        for invariant in row.get("selfContradiction", ()):
+            contradictions[invariant] = contradictions.get(invariant, 0) + 1
+    rows_with = sum(1 for row in rows if row.get("selfContradiction"))
+    if contradictions:
+        print(f"  {rows_with} rows contradict themselves: "
+              + ", ".join(f"{count} {name}" for name, count in sorted(contradictions.items())))
+    else:
+        print("  no row contradicts itself")
     return 0
 
 

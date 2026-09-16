@@ -853,7 +853,7 @@ amended text is inline above; this list is the record of what changed and why.
     Two facts the slice inherits and should not have to re-derive. **The oracle cannot see C or
     D** - both engines agree on them, which is the blindness the ROADMAP's own bug-sweep paragraph
     exists for - so the instrument is
-    `OracleWaveTests.Our_own_change_positions_always_agree_with_our_own_counts`, not a wave. And
+    `OracleWaveTests.Our_own_answers_never_contradict_themselves`, not a wave. And
     **a negative control on this family may legitimately fire zero**: S48's own S48-A, which puts
     the fixed `(?b)` walk back to reading the verb-moved slice, moved nothing at all across 24,000
     `interactions` rows at four seeds, while the fault it restores changes upstream's answer on

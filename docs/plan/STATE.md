@@ -2,41 +2,39 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52c IS OPEN - this is a CHECKPOINT after sitting 1 (2026-09-16), a short sitting the
-orchestrator scoped to two scope items and told not to start the checker, a wave or a review.**
-Ratchet GREEN, 6144 / 6144 / 0 skipped, unchanged: nothing in `src/` or `tests/` was touched. This
-commit is four documents. Per-sitting notes: `docs/plan/slices/notes/S52c-sittings.md`.
+**S52c IS CLOSED (sitting 3, 2026-09-16).** Ratchet GREEN 6144 / 6144 / 0 - nothing in `src/`
+changed. Oracle GREEN at all three default seeds, `diverge 0` of 6,380 each. Notes:
+`docs/plan/slices/notes/S52c-sittings.md`; the list and its results: `docs/ORACLE-INVARIANTS.md`.
 
-**DONE: scope item 1, the invariant list - `docs/ORACLE-INVARIANTS.md`, 22 invariants in eight
-groups.** Each carries an ID (the string the recorder writes into `selfContradiction`), a statement
-in terms of calls the recorder can make, a ground, a cost tier and a **calibration**: the numbered
-`LEDGER.md` entries it would have caught automatically. The list was derived by walking all 24
-ledger entries, so it is checkable against them; 16 are reached and the 8 that are not are named at
-the foot of the file. Four of the slice's starting bullets were narrowed or rejected with reasons -
-`group-spans-inside-match` is false unnarrowed because of `\K`, `fuzzy-budget-monotone-cost` is
-false outside `BESTMATCH`, the V0/V1 item has an open-ended exception list, and
-`reverse-mirrors-forward` is deferred in favour of `greedy-lazy-existence-agree`, which is also the
-invariant that handles gate row 104366.
+**THE CHECKER SHIPS AND THE CALIBRATION CAME BACK.** Seven invariants at ZERO extra upstream calls -
+four read off the row, three off the ablation twins `_CONTROLS` already records - writing
+`selfContradiction` per row in `tools/record-oracle.py`; the four structural ones also run on the
+PORT in `SelfConsistency.cs`, swept by the renamed
+`OracleWaveTests.Our_own_answers_never_contradict_themselves`. Over **126,240 rows at three seeds:
+10 firings.** Ledger 11 (6 rows) and ledger 12's shape (2) were re-found automatically on rows
+nobody had seen. No NEW ledger entry - every firing belongs to one already open. Four of the six
+ledger-11 rows are PARTIAL matches, which none of its seven hand-found doors pointed at.
 
-**DONE: scope item 5, the fuzzy second engine - NONE IS REACHABLE, and the wall is permissions.**
-`agrep` and Perl `String::Approx` are genuinely ABSENT. `fuzzysearch` is merely BLOCKED: `pip`,
-`winget` and `choco` are all installed and all outside the driver's allowlist, so a non-interactive
-session cannot even query them. Do not record that as "fails on Windows" - it is untested.
-`docs/plan/OPERATIONS.md` has the table and the one command the owner runs to settle it.
+**Gate row 104366:** upstream breaks `greedy-lazy-existence-agree` on 2 of 6 cells, this port on
+0 of 6, so the port is the self-consistent engine. **Ledger 24's `slice_start`-versus-`text_start`
+ruling is untouched and the row is NOT pinned on this** - still the owner's call and S52d's.
 
-**NEXT SITTING, in this order:** scope item 2, the checker in `tools/record-oracle.py`, taking the
-five `FREE`-tier invariants first (no extra upstream calls, and one of them reaches ledger 11's
-seven doors); then scope item 4, the same checker in `OracleComparer`; then item 3's three-seed
-2000-row wave and its triage; then item 7's second half and item 6's VERIFICATION paragraph.
+**TRE is real but narrow, measured not assumed.** `tools/probes/tre-fuzzy-check.py` self-tests 4/4
+and CONFIRMS 10 of 10 comparable wave rows; it can answer NONE of the 10 violation rows, each with
+its reason. On the rows the invariants are for, the second engine is not available.
 
-**THE REVIEW DEBT IS REAL AND MUST BE PAID BY THE NEXT SITTING.** No blind review and no verifier
-ran here, by instruction. These four documents have had no pass over them, so the checker sitting's
-review covers this delta as well as its own.
+**Review: 4 findings, 4 reproduced, 4 fixed, no second pass** (it covered sitting 1's unreviewed
+documents, so that debt is paid). Worst: `posix-chooses-among-flagless-answers` compared costs at
+the same START where ledger 9 means the same SPAN. **Verifier: 11 of 12 CONFIRMED** - including an
+independent re-record of seed 4242 - and claim 12, the three-seed oracle, was COULD NOT RUN on time
+and was then re-run by the slice itself, GREEN.
 
-**Carried** (unchanged by this sitting; full list in S52 sitting 10's notes):
-`upstream-bestmatch-free-answer.py`'s unguarded `fuzzy_changes` read; the `_regex.c` citation
-reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`; `record-oracle.py
---self-check`; `run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines;
-`quantifiers-long`'s filler margin; `oracle.yml`'s weekly sweep verdict rule; the
-`pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:** ledger 24's `slice_start` versus
-`text_start` ruling (S52d); `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.
+**NEXT: S52d** (ledger 24's ruling, open for the owner). Then S53.
+
+**Carried:** `record-oracle.py --self-check` is RED on ONE PRE-EXISTING guard (a 2,000-deep
+nested-group recursion limit Python 3.14 no longer raises) - identical at HEAD, not this slice's.
+Plus S52 sitting 10's list: `upstream-bestmatch-free-answer.py`'s unguarded `fuzzy_changes` read;
+the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`;
+`run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `quantifiers-long`'s
+filler margin; `oracle.yml`'s weekly sweep verdict rule. **Open for the owner:** `slice-log.jsonl`
+marks S26 `failed`; `origin/main` needs a push.

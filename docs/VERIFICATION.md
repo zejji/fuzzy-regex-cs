@@ -26,6 +26,22 @@ design spec section 8 and amendments 9-10.
    divergence families stayed hidden from S14 to S33: every slice ran one, each happened to be
    clean, and "the wave is green" was concluded from it every time. A single-seed run is for
    minimising a row you already have, never for believing a result.
+7b. **The oracle proves agreement; only the metamorphic invariants prove consistency, and neither
+   alone says anything about correctness where the port inherits upstream's answer.** A wave asks
+   "do the two engines agree?" and is blind by construction to a bug the port inherited line for
+   line, because then they do - ledger entry 11's mechanisms C and D are exactly that. The
+   invariants of `docs/ORACLE-INVARIANTS.md` ask the other question, of ONE engine at a time: does
+   this answer contradict another answer the same engine gives? The recorder applies them to
+   upstream on every wave row and writes `selfContradiction` into the row;
+   `OracleWaveTests.Our_own_answers_never_contradict_themselves` applies the same checks to this
+   port. **On a row where the port inherits, read both** - agreement with a self-contradictory
+   upstream is not evidence of anything, and gate row 104366 is the worked example: over its
+   six-cell grid upstream breaks `greedy-lazy-existence-agree` on two cells and this port breaks it
+   on none, so the oracle's "they disagree" had no useful reading and the invariant settled which
+   engine was self-consistent. The two together are still not proof: both engines can be wrong in
+   the same way and satisfy every invariant, which is what the second engines in
+   `docs/plan/OPERATIONS.md` are the third leg for - and what makes the FUZZY rows the thin ice,
+   since TRE answered 10 of 126,240 wave rows and none of this slice's violations.
 8. **Prove the test fails without the fix.** A test that cannot go red is not a test. Mutate it once
    and watch it fail.
 9. **Verify on real output**, not just on green tests: the actual rows, the rendered file, the built

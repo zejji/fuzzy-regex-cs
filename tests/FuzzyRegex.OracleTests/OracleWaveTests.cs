@@ -118,14 +118,19 @@ public sealed class OracleWaveTests
     }
 
     [Test]
-    public void Our_own_change_positions_always_agree_with_our_own_counts()
+    public void Our_own_answers_never_contradict_themselves()
     {
-        // S47, ledger entry 11. A property of THIS PORT'S answers alone - upstream is not consulted
-        // - so it says something about every row it reaches whatever upstream says, where the wave
-        // run above can only compare. `fuzzy_counts` and `fuzzy_changes` are two views of one edit
-        // script, so each list holds exactly as many positions as its own count; upstream breaks
-        // that on four mechanisms and this port reproduced all four. The minimised rows for the two
-        // S47 fixed are pinned by
+        // S47 for the fuzzy limb (ledger entry 11), WIDENED BY S52c to every metamorphic invariant
+        // of `docs/ORACLE-INVARIANTS.md` that one answer can break on its own - see
+        // `SelfConsistency`. A property of THIS PORT'S answers alone, with upstream not consulted,
+        // so it says something about every row it reaches whatever upstream says, where the wave run
+        // above can only compare. That is the whole point: the oracle is blind to a bug the port
+        // inherited line for line, because then the two engines agree.
+        //
+        // The fuzzy limb is the one with history. `fuzzy_counts` and `fuzzy_changes` are two views
+        // of one edit script, so each list holds exactly as many positions as its own count;
+        // upstream breaks that on four mechanisms and this port reproduced all four. The minimised
+        // rows for the two S47 fixed are pinned by
         // `The_reported_changes_agree_with_the_counts_on_every_shape_that_used_to_contradict_them`
         // in `Gaps.Engine.FuzzyMatchingTests`, and this is the same property over a whole wave,
         // which is what catches a shape nobody minimised - it found mechanism D at seed 4242 on its
@@ -135,12 +140,13 @@ public sealed class OracleWaveTests
         // `finditer-overlapped` are about a fifth of a default wave and the leak mechanisms show up
         // between the matches of one scan, which a single-match-only sweep would never see.
         //
-        // WHAT IT CANNOT REACH IS A POSIX PATTERN, and that is a limit of the comparison shape
-        // rather than a choice. Upstream cannot be asked for the change positions of a POSIX fuzzy
-        // match at all - reading them kills the interpreter, ledger entry 9 - so
-        // `OracleComparer.Run` drops this port's positions as well, and there is nothing here left
+        // WHAT THE FUZZY LIMB CANNOT REACH IS A POSIX PATTERN, and that is a limit of the comparison
+        // shape rather than a choice. Upstream cannot be asked for the change positions of a POSIX
+        // fuzzy match at all - reading them kills the interpreter, ledger entry 9 - so
+        // `OracleComparer.Run` drops this port's positions as well, and there is nothing there left
         // to count. Ledger entry 11 mechanism C lives exactly there, which is why that entry
-        // carries its reproduction by hand instead of relying on this.
+        // carries its reproduction by hand instead of relying on this. The other two limbs have no
+        // such hole and run on every row.
         OracleWaveFile wave = OracleWave.Load();
         wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
 
@@ -167,30 +173,82 @@ public sealed class OracleWaveTests
                 _ => [],
             };
 
-            foreach (MatchOutcome match in matches)
+            // STILL COUNTED SEPARATELY FROM THE OTHER MATCHES, and the floor below is still the
+            // FUZZY one. S52c widened what is checked; it must not quietly widen what counts as a
+            // wave worth believing. `tools/run-oracle.ps1`'s own documentation rests on this test
+            // refusing a single-generator wave, because such a wave holds no fuzzy match at all.
+            checkedMatches += matches.Count(static match => match.Fuzzy is { PositionsUnavailable: false });
+
+            IReadOnlyList<string> broken = SelfConsistency.Check(row.Pattern, ours);
+            if (broken.Count == 0)
             {
-                if (match.Fuzzy is not { PositionsUnavailable: false } fuzzy)
-                {
-                    continue;
-                }
-
-                ++checkedMatches;
-
-                if (
-                    fuzzy.Substitutions != fuzzy.SubstitutionPositions!.Count
-                    || fuzzy.Insertions != fuzzy.InsertionPositions!.Count
-                    || fuzzy.Deletions != fuzzy.DeletionPositions!.Count
-                )
-                {
-                    contradictions.Add(OracleWave.Describe(row, ours));
-                }
+                continue;
             }
+
+            // WHICH INVARIANTS UPSTREAM BROKE ON THE SAME ROW IS PART OF THE FAILURE, because the
+            // two cases need completely different work: an invariant this port breaks where
+            // upstream's own recorded answer is consistent is a PORT BUG to minimise and fix, and
+            // one both engines break is the port reproducing an inherited contradiction, which is a
+            // ledger entry and a judgement about which engine is right. Reading that off the row
+            // costs nothing and having to re-derive it by hand is what S52c exists to stop.
+            string alsoUpstream = row.SelfContradiction is { Count: > 0 } theirs
+                ? " (upstream breaks " + string.Join(", ", theirs) + " on this row too)"
+                : " (upstream's own answer to this row is consistent)";
+            contradictions.Add(string.Join(", ", broken) + alsoUpstream + "\n" + OracleWave.Describe(row, ours));
         }
 
         // Without this the test would pass on a wave with no fuzzy row in it at all, which is what
         // every wave recorded before S38 was - and what a `-Generator rows` run still is.
         checkedMatches.Should().BeGreaterThan(0, "a wave with no fuzzy match in it discriminates nothing");
         contradictions.Should().BeEmpty();
+    }
+
+    [Test]
+    public void The_self_consistency_checker_fires_on_a_contradiction_and_not_on_a_narrowing()
+    {
+        // THE SWEEP ABOVE CANNOT TEST THIS. It runs the checker over whatever a wave happens to
+        // hold, and a checker that silently stopped firing would leave it green - which is the one
+        // failure mode the whole of S52c exists to remove. These are hand-built answers, so each
+        // case is the checker's own behaviour and nothing else's. The recorder's Python twin is
+        // guarded the same way, in `_self_check` in `tools/record-oracle.py`.
+        static MatchOutcome Match(params OracleGroup[] groups) => new(groups, -1, null);
+        static OracleGroup Group(int number, int index, int length) =>
+            new(number, true, index, length, [new OracleSpan(index, length)]);
+
+        // A group whose span is not inside the match span, on a pattern with nothing that excuses
+        // it. Match (0, 1), group 1 at (1, 1).
+        MatchOutcome escaped = Match(Group(0, 0, 1), Group(1, 1, 1));
+        SelfConsistency.Check("a(b)", escaped).Should().Equal("group-spans-inside-match");
+
+        // And the two narrowings, each measured in
+        // `tools/probes/upstream-free-tier-invariant-grounds.py` sections 3 and 5: `\K` moves the
+        // reported start, and a lookaround consumes nothing, so on those patterns the SAME answer
+        // is legitimate and the checker must stay silent.
+        SelfConsistency.Check(@"a\K(b)", escaped).Should().BeEmpty();
+        SelfConsistency.Check("a(?=(b))", escaped).Should().BeEmpty();
+
+        // A `lastindex` naming a group that did not participate.
+        MatchOutcome absent = new([Group(0, 0, 1), new OracleGroup(1, false, 0, 0, [])], 1, null);
+        SelfConsistency.Check("(a)?b", absent).Should().Equal("lastindex-participated");
+
+        // Counts and change positions that describe different edit scripts - ledger entry 11.
+        MatchOutcome miscounted = Match(Group(0, 0, 2)) with
+        {
+            Fuzzy = new OracleFuzzy(1, 0, 0, [], [], []),
+        };
+        SelfConsistency.Check("(?:ab){e<=1}", miscounted).Should().Equal("fuzzy-counts-match-changes");
+
+        // A POSIX row records counts and no positions at all (ledger entry 9), so there is nothing
+        // to contradict and the checker must not read the missing lists as three empty ones.
+        MatchOutcome unavailable = Match(Group(0, 0, 2)) with
+        {
+            Fuzzy = new OracleFuzzy(1, 0, 0, null, null, null),
+        };
+        SelfConsistency.Check("(?p)(?:ab){e<=1}", unavailable).Should().BeEmpty();
+
+        // And an answer that breaks nothing, so a checker that fires on everything fails here.
+        SelfConsistency.Check("a(b)", Match(Group(0, 0, 2), Group(1, 1, 1))).Should().BeEmpty();
+        SelfConsistency.Check("a(b)", new NoMatchOutcome()).Should().BeEmpty();
     }
 
     [Test]

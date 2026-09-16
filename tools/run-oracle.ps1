@@ -28,7 +28,7 @@
     three default seeds: 80 of 80 rows AGREE at each, and the default wave is GREEN with them in it.
 
     Running it ALONE never reports green, and that is not about this generator: a single-generator
-    wave holds no fuzzy match, and Our_own_change_positions_always_agree_with_our_own_counts refuses
+    wave holds no fuzzy match, and Our_own_answers_never_contradict_themselves refuses
     one. '-Generator literals' does the same. Read the 'agree ... diverge' line, not the verdict.
 
     THE FOUR LONG-SUBJECT GENERATORS ARE THE ONE EXCEPTION, and they are off the list on evidence

@@ -210,8 +210,28 @@ internal static class OracleWave
             row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null,
             row.TryGetProperty("pruneOutcome", out JsonElement pruneOutcome) ? ReadOutcome(pruneOutcome) : null,
             row.TryGetProperty("timeout", out JsonElement budget) ? budget.GetDouble() : null
-        );
+        )
+        {
+            SelfContradiction = ReadSelfContradiction(row),
+        };
     }
+
+    /// <summary>
+    /// The metamorphic invariants UPSTREAM's own answer to this row broke, by id, or an empty list.
+    /// </summary>
+    /// <param name="row">The recorded row.</param>
+    /// <returns>The ids the recorder wrote.</returns>
+    /// <remarks>
+    /// Written by <c>_record_row_and_its_control_answers</c> in <c>tools/record-oracle.py</c>, and
+    /// read here for one purpose: a port answer that breaks an invariant on a row where upstream
+    /// broke the same one is the port reproducing an inherited contradiction, which is a ledger
+    /// entry, where the same violation on a row upstream answers consistently is a port bug. See
+    /// <see cref="SelfConsistency" />.
+    /// </remarks>
+    private static IReadOnlyList<string> ReadSelfContradiction(JsonElement row) =>
+        row.TryGetProperty("selfContradiction", out JsonElement ids)
+            ? [.. ids.EnumerateArray().Select(static id => id.GetString()!)]
+            : [];
 
     /// <summary>
     /// The recorder's <c>leakFreeFuzzy</c>: upstream's own fuzzy half per recorded match, asked
@@ -687,6 +707,13 @@ internal sealed record OracleHeader(
 /// answer to one question against an answer to another. Upstream's <c>Version0</c> is the default
 /// here so that a row built by hand in a test reads as upstream's recorder would have read it.
 /// </param>
+/// <param name="SelfContradiction">
+/// The metamorphic invariants UPSTREAM's own answer to this row broke, by id, from the recorder's
+/// <c>selfContradiction</c> field - empty on almost every row. A SECOND FACT ABOUT UPSTREAM in the
+/// sense <see cref="BestmatchFree"/> and <see cref="AnchoredScan"/> are: recorded, never compared.
+/// What reads it is <see cref="SelfConsistency"/>'s consumer, to tell a port that breaks an
+/// invariant on its own from a port reproducing a contradiction upstream already has.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -712,7 +739,8 @@ internal sealed record OracleRow(
     IOracleOutcome? AtomicFree = null,
     IOracleOutcome? PruneOutcome = null,
     double? Timeout = null,
-    int DefaultVersion = (int)FuzzyRegexOptions.Version0
+    int DefaultVersion = (int)FuzzyRegexOptions.Version0,
+    IReadOnlyList<string>? SelfContradiction = null
 );
 
 /// <summary>What a matching operation answered.</summary>
