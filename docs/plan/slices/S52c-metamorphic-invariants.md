@@ -7,6 +7,9 @@ delivers: []
 
 # S52c - Metamorphic invariants over upstream, and over the port
 
+**Per-sitting notes: `docs/plan/slices/notes/S52c-sittings.md`. The list itself, once written, lives
+in `docs/ORACLE-INVARIANTS.md`.**
+
 The differential oracle detects DISAGREEMENT between the port and upstream. It cannot see a bug the
 port inherited line for line, because then the two agree; ledger 11's mechanisms C and D were
 exactly that ("both engines agree, so the oracle is blind"). Every serious inherited bug in the
@@ -87,8 +90,14 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
 ## Done when
 
 - [ ] Invariant list committed with a reason per item; checker in the recorder and the comparer.
+      *(Sitting 1: list DONE - `docs/ORACLE-INVARIANTS.md`, 22 invariants, a calibration per item.
+      Checker not started.)*
 - [ ] Three-seed wave run with violations triaged; ledger entries for real ones.
-- [ ] Fuzzy second engine tried and the result recorded in OPERATIONS.
+- [x] Fuzzy second engine tried and the result recorded in OPERATIONS. *(Sitting 1: none reachable.
+      `agrep` and Perl `String::Approx` are absent; `fuzzysearch` is blocked by permissions, not
+      proven to fail. The invariants are the fuzzy instrument, as this scope item provides for.)*
 - [ ] Gate row 104366 run through the invariants, and what they say about it recorded.
+      *(Sitting 1: the invariant that handles it is `greedy-lazy-existence-agree`; running the row
+      through it belongs to the checker sitting.)*
 - [ ] VERIFICATION.md paragraph; DECISIONS entry.
 - [ ] Ratchet GREEN, blind review, verifier, commit.

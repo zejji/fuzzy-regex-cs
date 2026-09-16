@@ -2,45 +2,41 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52b IS CLOSED (2026-09-16, one sitting), and the slice file is in `done/`. Ratchet GREEN,
-6144 / 6144 / 0 skipped, 6036 distinct ids, baseline 6036** (+17 tests). Default oracle wave GREEN
-at all three seeds. Two `src/` changes, both small and both explained below.
+**S52c IS OPEN - this is a CHECKPOINT after sitting 1 (2026-09-16), a short sitting the
+orchestrator scoped to two scope items and told not to start the checker, a wave or a review.**
+Ratchet GREEN, 6144 / 6144 / 0 skipped, unchanged: nothing in `src/` or `tests/` was touched. This
+commit is four documents. Per-sitting notes: `docs/plan/slices/notes/S52c-sittings.md`.
 
-**THE SLICE FOUND A REAL DEFECT, AND IT WAS IN `Match`, NOT IN THE PATTERN.**
-`Match.FuzzyChanges` cached into a `FuzzyChanges?` - a flag plus three list references, four fields
-wide - published with `??=`. Not an atomic write, so a second thread could see the flag set and a
-list still null. Reproduced, then fixed to a `StrongBox<FuzzyChanges>`: one reference, one atomic
-publication. The pattern graph itself was already correct, and is now measured rather than assumed.
+**DONE: scope item 1, the invariant list - `docs/ORACLE-INVARIANTS.md`, 22 invariants in eight
+groups.** Each carries an ID (the string the recorder writes into `selfContradiction`), a statement
+in terms of calls the recorder can make, a ground, a cost tier and a **calibration**: the numbered
+`LEDGER.md` entries it would have caught automatically. The list was derived by walking all 24
+ledger entries, so it is checkable against them; 16 are reached and the 8 that are not are named at
+the foot of the file. Four of the slice's starting bullets were narrowed or rejected with reasons -
+`group-spans-inside-match` is false unnarrowed because of `\K`, `fuzzy-budget-monotone-cost` is
+false outside `BESTMATCH`, the V0/V1 item has an open-ended exception list, and
+`reverse-mirrors-forward` is deferred in favour of `greedy-lazy-existence-agree`, which is also the
+invariant that handles gate row 104366.
 
-**THE PATTERN-GRAPH TESTS ARE PERMANENT AND THEY ARE AIMED AT PHASE 7.** Forty fields reachable
-from a compiled `FuzzyRegex` are mutable, all written only by `PatternObject.Compile` inside the
-constructor; they are allowlisted, and a snapshot of the whole graph taken **before any match** and
-compared after two workloads is what proves the claim. A Phase 7 slice that adds a start
-optimisation or a prefilter cache will turn these red on the day it lands. **Remove the shared
-state or publish it as one reference - never add a line to the allowlist.**
+**DONE: scope item 5, the fuzzy second engine - NONE IS REACHABLE, and the wall is permissions.**
+`agrep` and Perl `String::Approx` are genuinely ABSENT. `fuzzysearch` is merely BLOCKED: `pip`,
+`winget` and `choco` are all installed and all outside the driver's allowlist, so a non-interactive
+session cannot even query them. Do not record that as "fails on Windows" - it is untested.
+`docs/plan/OPERATIONS.md` has the table and the one command the owner runs to settle it.
 
-**WHAT THE BLIND REVIEW CAUGHT IS THE LESSON WORTH CARRYING.** Both its findings were one mistake:
-my snapshot tests warmed up *before* taking the baseline, which hid every first-match-only write -
-exactly the shape of the Phase 7 cache the tests exist to catch. Both reproduced, both fixed
-(snapshot before any match; salted subjects between the two static readings so a per-subject memo
-cannot saturate). Six controls, A-F, are recorded in the slice file with the exact source edit and
-the exact failure each must produce.
+**NEXT SITTING, in this order:** scope item 2, the checker in `tools/record-oracle.py`, taking the
+five `FREE`-tier invariants first (no extra upstream calls, and one of them reaches ledger 11's
+seven doors); then scope item 4, the same checker in `OracleComparer`; then item 3's three-seed
+2000-row wave and its triage; then item 7's second half and item 6's VERIFICATION paragraph.
 
-**ONE SCOPE ITEM WAS DELIBERATELY NARROWED:** the suite-wide debug pool wrapper would have needed a
-settable static on the library, which this slice's own static audit forbids. `ByteStack` took an
-instance-level pool parameter instead and is tested exhaustively; every `ArrayPool` call in `src/`
-is inside that one class, verified twice.
+**THE REVIEW DEBT IS REAL AND MUST BE PAID BY THE NEXT SITTING.** No blind review and no verifier
+ran here, by instruction. These four documents have had no pass over them, so the checker sitting's
+review covers this delta as well as its own.
 
-**PROCESS: never tell a verifier to `git checkout -- <file>` while the slice's work is uncommitted.**
-Mine did, discarding uncommitted `Match.cs` work; it reconstructed it and I checked both diffs line
-by line. Commit a checkpoint first next time.
-
-**NEXT: S52c (metamorphic invariants)**, then S52d. Nothing is blocked.
-
-**Carried** (full list in S52 sitting 10's notes, untouched by this slice):
+**Carried** (unchanged by this sitting; full list in S52 sitting 10's notes):
 `upstream-bestmatch-free-answer.py`'s unguarded `fuzzy_changes` read; the `_regex.c` citation
 reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`; `record-oracle.py
 --self-check`; `run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines;
 `quantifiers-long`'s filler margin; `oracle.yml`'s weekly sweep verdict rule; the
-`pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:** `slice-log.jsonl` marks S26
-`failed`; `origin/main` needs a push.
+`pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:** ledger 24's `slice_start` versus
+`text_start` ruling (S52d); `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.

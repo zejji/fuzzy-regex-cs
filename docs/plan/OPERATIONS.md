@@ -235,3 +235,50 @@ of one. Installed on this machine, 2026-09-14:
 
 Quote the version and the flags in the slice notes, as S45 did.
 
+### There is no second FUZZY engine on this machine, and the wall is permissions, not availability
+
+**None of the four engines above does approximate matching.** Every one of them answers `(?e)`,
+`{e<=n}`, `fuzzy_counts` and `fuzzy_changes` with a syntax error, so on any fuzzy row upstream is
+currently the only engine in the room and amendment 16's "run a second engine" cannot be satisfied.
+
+Measured 2026-09-16 (S52c sitting 1, scope item 5, inside the thirty-minute box the slice set):
+
+| Candidate | Result | The decisive line |
+| --- | --- | --- |
+| `tre` PyPI binding 0.8.0 | FAILS | `Failed to build 'tre' when getting requirements to build wheel` (measured 2026-09-15, not retried) |
+| `fuzzysearch` (pure-Python fallback, no C toolchain) | NOT TESTED | `pip install` is refused: `This command requires approval`, from the driver session and from a subagent alike |
+| `agrep` / `tre-agrep` binary | ABSENT | no match under `C:\Program Files\Git\usr\bin`, `C:\ProgramData\chocolatey\bin`; scoop is not installed |
+| Perl `String::Approx` | ABSENT | `Can't locate String/Approx.pm in @INC` |
+| `rapidfuzz`, `python-Levenshtein` | ABSENT and NOT INSTALLABLE | not in Python312 `site-packages` nor in either repo venv; same `pip` refusal |
+
+**Read the second row carefully before repeating this.** `winget`, `choco` and `pip` are all
+present on the machine and all three are outside the driver's Bash allowlist, so a non-interactive
+session cannot install anything - installs and read-only queries are refused alike. That is a
+statement about this session's permission scope, **not** evidence that `fuzzysearch` fails to build
+here. It is the one candidate with a documented pure-Python fallback and it remains untested.
+
+**To settle it, the owner runs one command in an interactive session:**
+
+```
+.venvs/regex-2026.9.10/Scripts/python.exe -m pip install fuzzysearch
+```
+
+Then `find_near_matches('PATTERN', 'SUBJECT', max_l_dist=N)` is the call. Its ceiling, worth knowing
+before spending the grant: `fuzzysearch` does approximate **substring** search, not regex, so it can
+cross-check an edit distance and a change count on a literal pattern and can say nothing at all
+about `{e<=n}` applied to a class, a group or a repeat.
+
+**Until then the invariants in `docs/ORACLE-INVARIANTS.md` are the fuzzy instrument**, which is what
+S52c scope item 5 says to fall back to. Three of them are fuzzy-specific and rest on upstream's own
+documented contract rather than on a second implementation: `fuzzy-counts-match-changes`,
+`fuzzy-budget-monotone-existence` and `bestmatch-no-worse`. That is weaker than a second engine -
+it catches self-contradiction, not a shared misreading - and the gap should be stated in any report
+that rests on a fuzzy row.
+
+**A cheaper instrument exists and was deliberately NOT built here.** An edit-distance DP is about
+fifteen lines of stdlib Python, needs no dependency and would independently confirm that a reported
+`fuzzy_counts` really is achievable between a literal pattern and the matched text. The slice's
+scope item 5 asks for a second engine or an honest "nothing does", not for a new instrument, so
+this is recorded as the recommendation for whoever writes the checker rather than smuggled into
+this sitting.
+
