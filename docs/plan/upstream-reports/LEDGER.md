@@ -3009,12 +3009,19 @@ classified in the oracle by `posix-fuzzy-contradicts-its-own-flagless-answer`.
 
 ---
 
-## 24. A reversed partial match reports running out of text at the slice start, or does not, depending on which optimisation ran
+## 24. A reversed partial match reports running out of text at the slice start, or does not, depending on which optimisation ran - RULED AND FIXED HERE (S52d)
 
-**Status: upstream's inconsistency is conclusive; WHICH answer is right is NOT settled, and THIS
-PORT carries both rules too.** Recorded here rather than pinned as a divergence for exactly that
-reason - see the closing paragraph, which is what the owner is being asked to rule on. Found by
-S52's tenth sitting, 2026-09-15, judging seed 20260915 row 104366 of the 6000-row gate.
+**Status: CLOSED. Upstream's inconsistency is conclusive; the owner ruled for the slice start on
+2026-09-15 (Option B of `ledger-24-briefing.md`), and S52d fixed this port to it on 2026-09-16.**
+Spec amendment 16 outcome (c): upstream is wrong, this port inherited the fault, so it is fixed
+here and **nothing is filed until Phase 8**. Found by S52's tenth sitting, 2026-09-15, judging seed
+20260915 row 104366 of the 6000-row gate.
+
+**Reproduce:** `python tools/probes/upstream-reversed-partial-ignores-the-slice-start.py` and
+`pwsh -File tools/probes/port-reversed-partial-ignores-the-slice-start.ps1` - the same 33 cells in
+seven blocks, one per engine. `python tools/probes/upstream-s33-per-opcode-cells.py` re-measures the
+five cells S33 had pinned the other way, and `python tools/probes/upstream-non-zero-pos-guards.py`
+the seven the fix must NOT move.
 
 ### The contradiction
 
@@ -3098,14 +3105,15 @@ them passes a `pos`. That is why the two rules have never met.
 Re-runnable: `python tools/probes/upstream-reversed-partial-ignores-the-slice-start.py`, thirty-three
 cells in seven blocks.
 
-### Why this is not pinned as a divergence, and what the owner is asked
+### What this port carried, and what the grid said before the fix
 
-This port carries `text_start = 0` as `MatchState.TextStart` and asks the same question at every
-site (`Engine/Matcher.cs:3273`, `:5788`, `:6644`, `:6705`, `:6787`, `:7393`, `:7458`, `:7556` and the
-rest) - **and it has an equivalent of the second rule as well**, because on the sliced single
-character it answers the same partial to `(?r)ya(.*?)\b` that upstream does.
+This port carried `text_start = 0` as `MatchState.TextStart` and asked the same question at the
+node handlers - **and it had an equivalent of the second rule as well**, because on the sliced
+single character it answered the same partial to `(?r)ya(.*?)\b` that upstream does. That second
+rule turned out to be `IsStringTestPartial`'s two reversed arms and the reversed bound of the scan
+loop in `BasicMatch`, all three of which already read `SliceStart`.
 `tools/probes/port-reversed-partial-ignores-the-slice-start.ps1` runs the same grid, and over its 33
-cells in 7 blocks the two engines agree on 23 and differ on 10 - **and the 10 split BOTH ways**:
+cells in 7 blocks the two engines agreed on 23 and differed on 10 - **and the 10 split BOTH ways**:
 
 ```
 3 cells   this port reports a partial and upstream does not
@@ -3116,19 +3124,56 @@ cells in 7 blocks the two engines agree on 23 and differ on 10 - **and the 10 sp
           (?r)ab(.*?)\b and (?r)abc(.*?)\b at the empty slice (2, 2) of 'xyz'
 ```
 
-So "upstream contradicts itself" is true and does not settle it: each engine reports a reversed
-partial at a non-zero slice start in SOME shapes and refuses it in others, the shapes do not line
-up, and neither engine's set of partials contains the other's. Pinning row 104366 under either
-reading would be a guess.
+So "upstream contradicts itself" was true and did not settle it: each engine reported a reversed
+partial at a non-zero slice start in SOME shapes and refused it in others, the shapes did not line
+up, and neither engine's set of partials contained the other's. A rule had to be chosen first,
+which is why this went to the owner rather than being pinned.
 
-**The probable reading, for the owner to rule on.** `text_start = 0` exists to make `^` and `\A`
-refuse a non-zero `pos` - Python `re`'s documented open-start bound, which is what the comment
-beside it is about. The partial handlers reuse that field for a DIFFERENT question, "have we run out
-of text on the left", whose correct bound is `slice_start`; upstream's own `search_start` and its
-own forward side both answer the run-out question with the slice. If that is right, the
-slice-honouring answer is correct and **this port has inherited the bug**, which the owner's
-2026-09-12 rule says must be fixed before 1.0 - an engine change wherever that question is asked,
-which is 38 sites in upstream and the 9 in this port's `Engine/Matcher.cs` that mirror them
-(`:967`, `:3273`, `:5788`, `:6644`, `:6705`, `:6787`, `:7393`, `:7458`, `:7556`), plus whatever this
-port's own second rule turns out to be - so a slice of its own. Nothing was changed in
-S52 sitting 10.
+### The ruling, and the fix (S52d, 2026-09-16)
+
+`text_start = 0` exists to make `^` and `\A` refuse a non-zero `pos` - Python `re`'s documented
+open-start bound, which is what the comment beside it is about. The partial handlers reuse that
+field for a DIFFERENT question, "have we run out of text on the left", whose correct bound is
+`slice_start`; upstream's own `search_start`, its three reversed string helpers and its whole
+forward side all answer the run-out question with the slice, and a reversed match may not consume
+text below `pos` at all (measured: `regex.compile('(?r)ab').search('abc', 1)` is `None`), so at
+`pos` the matchable text really has run out. The owner ruled for that reading on 2026-09-15.
+
+**One helper now owns the question**, `Matcher.RanOutOnTheLeft(state, textPos)`, with
+`SteppedPastTheLeft` for the two sites whose position has already been moved by an error or a scan
+step and so compare strictly. Both read `SliceStart` and nothing else does, which is what stops the
+two rules parting company again. Fifteen sites changed from `TextStart` to the helper:
+
+| Site (`Engine/Matcher.cs`, post-fix lines) | What asks |
+|---|---|
+| `:968` | the repeat walk in `MatchMany`, reversed, having consumed everything there was |
+| `:1760`, `:1774`, `:1788` | `TryMatchAnyRev`, `TryMatchAnyAllRev`, `TryMatchAnyURev` |
+| `:1986` | `TryMatchOneRev` - the eight `try_match_*_REV` one-character tests |
+| `:3031`, `:3034` | `IsTailPartial`'s `CharacterRev` and `StringRev` arms |
+| `:3336` | `CheckFuzzyPartial` (strict: `SteppedPastTheLeft`) |
+| `:5851` | the reversed one-character opcode arm in `BasicMatch` |
+| `:6707`, `:6768`, `:6850` | `RefGroupRev`, `RefGroupIgnRev`, `RefGroupFldRev` |
+| `:7456`, `:7521`, `:7619` | `StringRev`, `StringIgnRev`, `StringFldRev` |
+
+and three sites that already read `SliceStart` were routed through the same helper rather than
+left spelling the question themselves: `IsStringTestPartial`'s reversed string arms (`:2907`,
+`:2956`) and the reversed bound of `BasicMatch`'s scan loop (`:4802`, `SteppedPastTheLeft`).
+
+**Reads of `TextStart` that were deliberately NOT touched**, because they serve the anchors and
+assertions Python `re` defines against the whole string and the fix must not move:
+`AtLineStart` and `AtLineEnd` (`(?m)^`, `(?m)$`); `WordLeft` (the character before, for `\b`,
+`\B`, `\m`, `\M`); `AtDefaultBoundary` and its WB-rule helpers; `AtGraphemeBoundary` and the
+extended-pictographic walk inside it; `CountRegionalIndicatorsLeft`, which is a helper of those two
+boundary functions and of nothing else; `TryMatchStartOfLine` (`^`); `TryMatchStartOfString`
+(`\A`); `BasicMatch`'s `StartOfString` arm, which anchors the search; and the two
+`state.SliceStart = state.TextStart` assignments that widen the slice for a lookaround so it can
+see outside it. Eighteen reads, every one accounted for.
+`tools/probes/upstream-non-zero-pos-guards.py` pins seven of those against upstream and the tests
+assert them.
+
+**Tests.** `Gaps/Engine/ReversedPartialSliceStartTests.cs` is the whole 33-cell grid, red first on
+17 cells. `Gaps/Engine/PartialMatchingTests.The_narrowed_slice_partial_is_one_rule_about_the_slice_start_and_upstream_holds_two`
+is S33's old pin, rewritten: it asserted upstream's `None` on five cells as "a per-opcode answer,
+not a general rule about slice_start", and the ruling is that it IS one rule about the slice start,
+so it now records those five as a deliberate divergence with upstream's measured answers beside
+them.

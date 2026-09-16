@@ -477,6 +477,25 @@ could not answer. It does NOT settle ledger 24's open question of whether upstre
 run-out should read `slice_start` or `text_start`; that is the owner's ruling and S52d's slice. No
 row is pinned here on the strength of it - the finding is recorded and handed on.
 
+**S52d moved the port's row of that table, and the invariant still holds on 6 of 6 (2026-09-16).**
+The owner ruled for `slice_start` and S52d applied it, so the port now answers `(2, 2) partial` to
+every one of the first three cells rather than no match:
+
+| Cell | Upstream lazy / greedy | Port lazy / greedy, AFTER S52d |
+| --- | --- | --- |
+| **the gate row** | `(2, 2) partial` / **no match** | `(2, 2) partial` / `(2, 2) partial` |
+| without the reversal | `(2, 2) partial` / `(2, 2) partial` | `(2, 2) partial` / `(2, 2) partial` |
+| **without the `\b`** | `(2, 2) partial` / **no match** | `(2, 2) partial` / `(2, 2) partial` |
+| without the unmatchable prefix | complete `(2, 2)` / complete | complete `(2, 2)` / complete |
+| over the whole subject | `(0, 2) partial` / `(0, 2) partial` | `(0, 2) partial` / `(0, 2) partial` |
+| not partial | no match / no match | no match / no match |
+
+**Upstream still breaks it on 2 of 6 and this port still breaks it on 0 of 6** - and the port now
+matches upstream's SELF-CONSISTENT arm on both broken cells rather than its other one, which is a
+strictly better place to be self-consistent from. Re-run:
+`python tools/probes/upstream-gate-row-greedy-lazy.py` and
+`pwsh -File tools/probes/port-gate-row-greedy-lazy.ps1` after a Debug build.
+
 ### `reverse-mirrors-forward` - DEFER
 
 **Statement as the slice had it.** `(?r)` on the reversed subject mirrors the forward answer for a

@@ -961,10 +961,18 @@ internal static class Matcher
 
         // Upstream's 'count == (size_t)(state->text_end - text_pos)' forwards and
         // 'count == (size_t)(text_pos)' backwards: the walk consumed everything there was, which in
-        // code-unit indices is the walk having stopped at 'text_end' or at 'text_start' - and
-        // 'text_start' is always 0, which is the number upstream compares against.
+        // code-unit indices is the walk having stopped at 'text_end' or at 'text_start'. Backwards,
+        // 'RanOutOnTheLeft' asks 'slice_start' rather than upstream's always-zero 'text_start'.
+        //
+        // The EQUALITY is upstream's and is kept deliberately, where the opcode arms that ask the
+        // same helper spell the test '<='. In codepoints the two cannot differ, because this walk
+        // stops at 'slice_start'; in UTF-16 they can, because a 'beginning' that SPLITS a surrogate
+        // pair lets 'PrevPos' step two code units and land one BELOW 'SliceStart'. S52d moves the
+        // bound and not the comparison, so that case answers exactly what it did before the ruling.
+        // Raised by S52d's blind review and reproduced: '(?r)\A[\s\S]*' over "a\U0001F600" at the
+        // slice (2, 3), which splits the pair.
         isPartial = reverse
-            ? pos == state.TextStart && count < maxCount && state.PartialSide == MatchState.PartialLeft
+            ? count < maxCount && pos == state.SliceStart && RanOutOnTheLeft(state, pos)
             : pos == state.TextEnd && count < maxCount && state.PartialSide == MatchState.PartialRight;
 
         return count;
@@ -1756,9 +1764,9 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchAnyRev(MatchState state, int textPos)
     {
-        if (textPos <= state.TextStart)
+        if (RanOutOnTheLeft(state, textPos))
         {
-            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+            return MatchStatus.Partial;
         }
 
         return MatchStatus.From(textPos > state.SliceStart && MatchesAny(state.CharBefore(textPos)));
@@ -1770,9 +1778,9 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchAnyAllRev(MatchState state, int textPos)
     {
-        if (textPos <= state.TextStart)
+        if (RanOutOnTheLeft(state, textPos))
         {
-            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+            return MatchStatus.Partial;
         }
 
         return MatchStatus.From(textPos > state.SliceStart);
@@ -1784,9 +1792,9 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchAnyURev(MatchState state, int textPos)
     {
-        if (textPos <= state.TextStart)
+        if (RanOutOnTheLeft(state, textPos))
         {
-            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+            return MatchStatus.Partial;
         }
 
         return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(state.Encoding, state.CharBefore(textPos)));
@@ -1982,9 +1990,9 @@ internal static class Matcher
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     internal static int TryMatchOneRev(MatchState state, Node node, int textPos)
     {
-        if (textPos <= state.TextStart)
+        if (RanOutOnTheLeft(state, textPos))
         {
-            return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+            return MatchStatus.Partial;
         }
 
         return MatchStatus.From(
@@ -2903,7 +2911,7 @@ internal static class Matcher
                 {
                     if (pos <= state.SliceStart)
                     {
-                        return state.PartialSide == MatchState.PartialLeft;
+                        return RanOutOnTheLeft(state, pos);
                     }
 
                     if (!SameStringChar(state, test.Op, state.CharBefore(pos), test.Values[length - sPos - 1]))
@@ -2952,7 +2960,7 @@ internal static class Matcher
                     {
                         if (pos <= state.SliceStart)
                         {
-                            return state.PartialSide == MatchState.PartialLeft;
+                            return RanOutOnTheLeft(state, pos);
                         }
 
                         foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(pos), folded);
@@ -3008,12 +3016,14 @@ internal static class Matcher
     /// upstream leaves to the default arm must keep reaching its own opcode's partial arm later.
     /// </para>
     /// <para>
-    /// <c>text_end</c> and <c>text_start</c>, not <c>slice_end</c> and <c>slice_start</c>: the
-    /// guards ask whether the SUBJECT has run out, where a narrowed slice ends the repeat by its own
-    /// <c>limit</c>. A character tail is about to test the character one step on, so it guards a
-    /// step further out than a string tail, which guards at <paramref name="pos"/> itself; upstream's
-    /// <c>pos + 1</c> and <c>pos - 1</c> are codepoint steps, hence
-    /// <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
+    /// Forwards the guard is <c>text_end</c> and not <c>slice_end</c> - it asks whether the SUBJECT
+    /// has run out, where a narrowed slice ends the repeat by its own <c>limit</c> - and the two are
+    /// the same number anyway, because <c>text_end</c> IS the slice end. Backwards the reversed arms
+    /// go through <see cref="RanOutOnTheLeft"/>, which asks <c>slice_start</c> rather than
+    /// upstream's always-zero <c>text_start</c>. A character tail is about to test the character one
+    /// step on, so it guards a step further out than a string tail, which guards at
+    /// <paramref name="pos"/> itself; upstream's <c>pos + 1</c> and <c>pos - 1</c> are codepoint
+    /// steps, hence <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -3025,12 +3035,10 @@ internal static class Matcher
         {
             Opcode.Character or Opcode.CharacterIgn => state.NextPos(pos) >= state.TextEnd
                 && state.PartialSide == MatchState.PartialRight,
-            Opcode.CharacterRev or Opcode.CharacterIgnRev => state.PrevPos(pos) <= state.TextStart
-                && state.PartialSide == MatchState.PartialLeft,
+            Opcode.CharacterRev or Opcode.CharacterIgnRev => RanOutOnTheLeft(state, state.PrevPos(pos)),
             Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos >= state.TextEnd
                 && state.PartialSide == MatchState.PartialRight,
-            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => pos <= state.TextStart
-                && state.PartialSide == MatchState.PartialLeft,
+            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
             _ => false,
         };
 
@@ -3263,6 +3271,67 @@ internal static class Matcher
         return TotalCost(fuzzyCounts, fuzzyNode) <= values[FuzzyValue.MaxCost];
     }
 
+    /// <summary>
+    /// Whether a reversed match has run out of the text it is allowed to match, which is the
+    /// question every left-hand partial match turns on. <b>This is the one place the left edge is
+    /// decided</b>; every site that reports a partial on the left asks it here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The edge is <see cref="MatchState.SliceStart"/> - the caller's <c>pos</c> - and deliberately
+    /// NOT <see cref="MatchState.TextStart"/>, which is always 0. Upstream holds both rules and
+    /// picks between them by optimisation path: its node handlers ask <c>text_start</c>
+    /// (<c>upstream/src/_regex.c</c> <c>:12173</c>, <c>:13854</c>, <c>:13964</c>, <c>:14206</c> and
+    /// the rest) while <c>search_start</c> (<c>:8400-8405</c>) and the three reversed string helpers
+    /// (<c>:8335-8382</c>) ask <c>slice_start</c>, so upstream contradicts itself and this port
+    /// inherited both. Upstream's own comment beside the bounds settles which is meant:
+    /// </para>
+    /// <code>
+    /// /* init_match, :18435-18446 */
+    /// /* The documentation says that the end of the slice behaves like the end of
+    ///  * the string. */
+    /// state-&gt;text_start = 0;          /* the real string start */
+    /// state-&gt;text_end = end;          /* the SLICE end */
+    /// state-&gt;slice_start = start;
+    /// state-&gt;slice_end = end;
+    /// </code>
+    /// <para>
+    /// For a reversed pattern the slice's end is its start, and a match may not consume text below
+    /// <c>pos</c> at all, so at <c>pos</c> the matchable text really has run out. Owner's ruling of
+    /// 2026-09-15, Option B of <c>docs/plan/upstream-reports/ledger-24-briefing.md</c>; spec
+    /// amendment 16 outcome (c), ledger entry 24, and the <c>docs/DIVERGENCES.md</c> row "Reversed
+    /// partial matches run out of text at the slice start". Nothing else about <c>pos</c> moves:
+    /// <c>^</c>, <c>\A</c>, <c>\b</c>, <c>\B</c> and lookbehind keep reading
+    /// <see cref="MatchState.TextStart"/> and the character before <c>pos</c>, exactly as Python
+    /// <c>re</c> documents.
+    /// </para>
+    /// <para>
+    /// The forward direction has no such split and needs no helper: <c>text_end</c> IS the slice
+    /// end, so a forward partial has always fired at <c>endpos</c> on every path.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position the match has reached.</param>
+    /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
+    private static bool RanOutOnTheLeft(MatchState state, int textPos) =>
+        state.PartialSide == MatchState.PartialLeft && textPos <= state.SliceStart;
+
+    /// <summary>
+    /// The same edge as <see cref="RanOutOnTheLeft"/>, for a position that has already stepped PAST
+    /// it rather than reached it.
+    /// </summary>
+    /// <remarks>
+    /// Upstream spells this distinction too - <c>check_fuzzy_partial</c> and <c>search_start</c> use
+    /// <c>&lt;</c> where the node handlers use <c>&lt;=</c> - because their positions have already
+    /// been moved by an error or by a scan step, so being at the edge is still legal and only being
+    /// below it is running out.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position the match has been moved to.</param>
+    /// <returns><see langword="true"/> if that is a partial match on the left.</returns>
+    private static bool SteppedPastTheLeft(MatchState state, int textPos) =>
+        state.PartialSide == MatchState.PartialLeft && textPos < state.SliceStart;
+
     /// <summary>Upstream <c>check_fuzzy_partial</c> (line 9751).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="textPos">The position the error would have moved to.</param>
@@ -3270,7 +3339,8 @@ internal static class Matcher
     private static int CheckFuzzyPartial(MatchState state, int textPos) =>
         state.PartialSide switch
         {
-            MatchState.PartialLeft when textPos < state.TextStart => MatchStatus.Partial,
+            // 'slice_start', not upstream's 'text_start': see 'SteppedPastTheLeft'.
+            MatchState.PartialLeft when SteppedPastTheLeft(state, textPos) => MatchStatus.Partial,
             MatchState.PartialRight when textPos > state.TextEnd => MatchStatus.Partial,
             _ => MatchStatus.Failure,
         };
@@ -4736,7 +4806,7 @@ internal static class Matcher
             {
                 if (state.TextPos < state.SliceStart)
                 {
-                    return state.PartialSide == MatchState.PartialLeft ? MatchStatus.Partial : MatchStatus.Failure;
+                    return SteppedPastTheLeft(state, state.TextPos) ? MatchStatus.Partial : MatchStatus.Failure;
                 }
             }
             else
@@ -5785,7 +5855,7 @@ internal static class Matcher
                 case Opcode.SetSymDiffIgnRev: // Set symmetric difference, backwards, ignoring case.
                 case Opcode.SetUnionRev: // Set union, backwards.
                 case Opcode.SetUnionIgnRev: // Set union, backwards, ignoring case.
-                    if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                    if (RanOutOnTheLeft(state, state.TextPos))
                     {
                         return MatchStatus.Partial;
                     }
@@ -6641,7 +6711,7 @@ internal static class Matcher
                     // Try comparing.
                     while (stringPos > span.Start)
                     {
-                        if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                        if (RanOutOnTheLeft(state, state.TextPos))
                         {
                             return MatchStatus.Partial;
                         }
@@ -6702,7 +6772,7 @@ internal static class Matcher
                     // Try comparing.
                     while (stringPos > span.Start)
                     {
-                        if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                        if (RanOutOnTheLeft(state, state.TextPos))
                         {
                             return MatchStatus.Partial;
                         }
@@ -6784,7 +6854,7 @@ internal static class Matcher
                         // Case-fold at current position in text.
                         if (foldedPos <= 0)
                         {
-                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            if (RanOutOnTheLeft(state, state.TextPos))
                             {
                                 return MatchStatus.Partial;
                             }
@@ -7390,7 +7460,7 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos > 0)
                         {
-                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            if (RanOutOnTheLeft(state, state.TextPos))
                             {
                                 return MatchStatus.Partial;
                             }
@@ -7455,7 +7525,7 @@ internal static class Matcher
                         // Try comparing.
                         while (stringPos > 0)
                         {
-                            if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                            if (RanOutOnTheLeft(state, state.TextPos))
                             {
                                 return MatchStatus.Partial;
                             }
@@ -7553,7 +7623,7 @@ internal static class Matcher
                         {
                             if (foldedPos <= 0)
                             {
-                                if (state.TextPos <= state.TextStart && state.PartialSide == MatchState.PartialLeft)
+                                if (RanOutOnTheLeft(state, state.TextPos))
                                 {
                                     return MatchStatus.Partial;
                                 }

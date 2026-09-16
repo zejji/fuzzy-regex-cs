@@ -2,39 +2,38 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52c IS CLOSED (sitting 3, 2026-09-16).** Ratchet GREEN 6144 / 6144 / 0 - nothing in `src/`
-changed. Oracle GREEN at all three default seeds, `diverge 0` of 6,380 each. Notes:
-`docs/plan/slices/notes/S52c-sittings.md`; the list and its results: `docs/ORACLE-INVARIANTS.md`.
+**S52d IS CLOSED (one sitting, 2026-09-16).** Ratchet GREEN 6153 / 6153 / 0, baseline updated with
+one accepted removal (a rename). Default oracle wave GREEN at seeds 7, 4242 and 20260916,
+`diverge 0` of 6,380 each. Closing notes are in the slice file, `docs/plan/slices/done/`.
 
-**THE CHECKER SHIPS AND THE CALIBRATION CAME BACK.** Seven invariants at ZERO extra upstream calls -
-four read off the row, three off the ablation twins `_CONTROLS` already records - writing
-`selfContradiction` per row in `tools/record-oracle.py`; the four structural ones also run on the
-PORT in `SelfConsistency.cs`, swept by the renamed
-`OracleWaveTests.Our_own_answers_never_contradict_themselves`. Over **126,240 rows at three seeds:
-10 firings.** Ledger 11 (6 rows) and ledger 12's shape (2) were re-found automatically on rows
-nobody had seen. No NEW ledger entry - every firing belongs to one already open. Four of the six
-ledger-11 rows are PARTIAL matches, which none of its seven hand-found doors pointed at.
+**LEDGER 24 IS RULED AND CLOSED.** A reversed match with `partial: true` now runs out of text at the
+SLICE START, one rule, asked in one place - `Matcher.RanOutOnTheLeft`, plus `SteppedPastTheLeft` for
+the two sites whose position has already been moved. Owner's Option B, spec amendment 16 outcome (c),
+not filed until Phase 8. `docs/DIVERGENCES.md` has the SHIPPED behaviour row.
 
-**Gate row 104366:** upstream breaks `greedy-lazy-existence-agree` on 2 of 6 cells, this port on
-0 of 6, so the port is the self-consistent engine. **Ledger 24's `slice_start`-versus-`text_start`
-ruling is untouched and the row is NOT pinned on this** - still the owner's call and S52d's.
+**Fifteen sites, not the ledger's nine**, and the six extra were the same question in a different
+SPELLING (`TryMatchAny*Rev`, `TryMatchOneRev`, `IsTailPartial`). Grep the PREDICATE (`PartialLeft`),
+never the field. Three sites that already read `SliceStart` were routed through the same helper. The
+18 remaining `TextStart` reads all serve `^`, `\A`, `(?m)^`, `(?m)$`, `\b`, `\B`, the grapheme walks
+or the lookaround widening, and are listed in ledger 24.
 
-**TRE is real but narrow, measured not assumed.** `tools/probes/tre-fuzzy-check.py` self-tests 4/4
-and CONFIRMS 10 of 10 comparable wave rows; it can answer NONE of the 10 violation rows, each with
-its reason. On the rows the invariants are for, the second engine is not available.
+**The fix also REMOVED four pre-existing divergences** - rows where upstream answered a partial and
+this port did not - so it moves the port into agreement with upstream wherever upstream uses its own
+Rule B. 44 rows now diverge the other way and all 44 fit one narrow pin,
+`reversed-partial-runs-out-at-the-slice-start`. Gate row 104366's invariant still holds 0 of 6 here
+against upstream's 2 of 6, with the port now on upstream's self-consistent arm.
 
-**Review: 4 findings, 4 reproduced, 4 fixed, no second pass** (it covered sitting 1's unreviewed
-documents, so that debt is paid). Worst: `posix-chooses-among-flagless-answers` compared costs at
-the same START where ledger 9 means the same SPAN. **Verifier: 11 of 12 CONFIRMED** - including an
-independent re-record of seed 4242 - and claim 12, the three-seed oracle, was COULD NOT RUN on time
-and was then re-run by the slice itself, GREEN.
+**Review: 2 findings, 2 reproduced, 1 fixed, 1 out of scope, no second pass.** The fix: a
+`beginning` that SPLITS a surrogate pair made `<=` fire where upstream's `==` does not; the slice
+moves the bound and not the comparison. **Verifier: 10 of 12 CONFIRMED**, both DIFFERENTs being the
+claim's wording rather than the code.
 
-**NEXT: S52d** (ledger 24's ruling, open for the owner). Then S53.
+**NEXT: S53** (the AOT dynamic gate).
 
-**Carried:** `record-oracle.py --self-check` is RED on ONE PRE-EXISTING guard (a 2,000-deep
-nested-group recursion limit Python 3.14 no longer raises) - identical at HEAD, not this slice's.
-Plus S52 sitting 10's list: `upstream-bestmatch-free-answer.py`'s unguarded `fuzzy_changes` read;
-the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`;
-`run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `quantifiers-long`'s
-filler margin; `oracle.yml`'s weekly sweep verdict rule. **Open for the owner:** `slice-log.jsonl`
-marks S26 `failed`; `origin/main` needs a push.
+**Carried:** two unjudged oracle rows, both proven PRE-EXISTING by the negative control and neither
+S52d's - seed 99991 row 3825 and seed 31415 row 3756, both `interactions`. Plus S52c's carried list:
+`record-oracle.py --self-check` RED on one pre-existing guard; `upstream-bestmatch-free-answer.py`'s
+unguarded `fuzzy_changes` read; the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale
+`FuzzyRegex.Search(...)`; `run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines;
+`quantifiers-long`'s filler margin; `oracle.yml`'s weekly sweep verdict rule. **Open for the owner:**
+`slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.

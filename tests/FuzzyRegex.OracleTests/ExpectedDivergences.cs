@@ -2069,6 +2069,65 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
+            Id: "reversed-partial-runs-out-at-the-slice-start",
+            Reason: "Upstream bug, RULED AND FIXED HERE (ledger entry 24, slice S52d, 2026-09-16). "
+                + "Upstream asks 'has this reversed match run out of text on the left?' against TWO "
+                + "different bounds and picks between them by optimisation path: its node handlers "
+                + "read `text_start`, which `init_match` sets to 0 (:18442), while `search_start` "
+                + "(:8400-8405) and its three reversed string helpers (:8335-8382) read "
+                + "`slice_start`. So whether a reversed partial is reported at a non-zero `pos` "
+                + "depends on whether the optimiser picked the pattern's leading string as its "
+                + "search test - a decision about SPEED, which must not change an answer.\n"
+                + "IT CONTRADICTS ITSELF TWO WAYS, and both are metamorphic invariants of "
+                + "docs/ORACLE-INVARIANTS.md. Greedy against lazy: over the slice (2, 3) of 'xya', "
+                + "`(?r)ya(.*?)\\b` answers a partial and `(?r)ya(.*)\\b` answers None, although the "
+                + "two differ only in which of several matches is PREFERRED and over one character "
+                + "both can only match empty - a preference cannot decide whether a match exists. "
+                + "Minimum width: at the empty slice (2, 2) of 'xyz', `(?r)a` needs one character "
+                + "and answers None while `(?r)ab(.*?)\\b` needs two and answers a partial - needing "
+                + "more text cannot make it run out less. Upstream's own suite makes 72 "
+                + "`partial=True` calls and NOT ONE passes a `pos`, which is why the two rules have "
+                + "never met there.\n"
+                + "THE OWNER RULED FOR THE SLICE START on 2026-09-15 (Option B of "
+                + "docs/plan/upstream-reports/ledger-24-briefing.md), so this is spec amendment 16 "
+                + "outcome (c): upstream is wrong, this port inherited both rules, and it is fixed "
+                + "here rather than filed until Phase 8. The grounds, in order of weight: a partial "
+                + "means the pattern still needs characters and the text it MAY MATCH has run out, "
+                + "and a reversed match may not consume text below `pos` at all (measured, "
+                + "`regex.compile('(?r)ab').search('abc', 1)` is None); upstream's own comment beside "
+                + "the bounds says 'the end of the slice behaves like the end of the string', and its "
+                + "optimiser, its three string helpers and its whole forward side all agree with it; "
+                + "and .NET's `Regex.Match(input, beginning, length)`, Boost.Regex and PCRE2 all "
+                + "treat a caller-imposed bound as the end of the text for this purpose.\n"
+                + "THE PREDICATE IS THE MECHANISM AND NOTHING WIDER. A reversed pattern, partial "
+                + "matching asked for, a non-zero `pos`, upstream answering no match, and this port "
+                + "answering a PARTIAL whose match starts exactly at `pos`. A forward partial, a "
+                + "non-partial reversed row and a reversed partial anywhere but at `pos` all fall "
+                + "outside it. Measured over the default wave at seeds 7, 4242 and 20260916: 44 rows "
+                + "diverge, ALL 44 fit all five limbs and all 44 come from `partial-sliced`, which is "
+                + "the only generator that passes a non-zero `pos` with a partial. Re-runnable: "
+                + "`python tools/probes/reversed-partial-divergence-triage.py "
+                + "TestResults/oracle/report-<seed>.txt`, which prints any row that does not fit.",
+            PinnedBy: "ReversedPartialSliceStartTests (the whole 33-cell grid) and "
+                + "PartialMatchingTests.The_narrowed_slice_partial_is_one_rule_about_the_slice_start_"
+                + "and_upstream_holds_two",
+            // Seed 7, and deliberately NOT one of the empty-slice rows: this one's slice holds a
+            // character, the port consumes it and runs out one step later, so the pinned answer is a
+            // partial of non-zero width and the entry cannot be read as being about empty slices.
+            Example: """
+            {"generator": "partial-sliced", "pattern": "(?r)([a\\d]+?)([a-f]){1}\\2([^a]*)$", "flags": 16394, "namedLists": {}, "subject": " a A0.a", "operation": "search", "partial": true, "pos": 5, "endpos": 6, "codepointSlice": [5, 6], "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            """,
+            Applies: static (row, ours) =>
+                row.Partial
+                && IsReversed(row)
+                && row.Pos > 0
+                && row.Expected is NoMatchOutcome
+                // `Pos` and a group's `Index` are both UTF-16 code units - the recorder converts
+                // upstream's codepoint pair at the boundary - so this comparison is like for like.
+                && ours is MatchOutcome { Partial: true, Groups: [{ Success: true, Index: int start }, ..] }
+                && start == row.Pos
+        ),
+        new(
             Id: "reversed-partial-its-own-pattern-cannot-produce",
             Reason: "Upstream bug, and a partial that promises something no text could keep. S52 "
                 + "sitting 19, 2026-09-16, sweep row 6 - the last of the seed sweep's 37 rows to be "

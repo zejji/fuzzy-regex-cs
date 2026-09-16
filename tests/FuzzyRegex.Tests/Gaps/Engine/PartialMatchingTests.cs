@@ -640,39 +640,61 @@ public sealed class PartialMatchingTests
     }
 
     [Test]
-    public void The_narrowed_slice_partial_is_a_per_opcode_answer_and_not_a_general_rule()
+    public void The_narrowed_slice_partial_is_one_rule_about_the_slice_start_and_upstream_holds_two()
     {
-        // The trap in the S33 fix, pinned so nobody "simplifies" it into one rule about slice_start.
-        // Upstream's CHARACTER_REV opcode arm (:12190) and its try_match_CHARACTER_REV (:7137) both
-        // bound by text_start, so a single reversed character at the left edge of a narrowed slice is
-        // NO match; only the STRING family's try_match arms bound by slice_start. Measured
-        // 2026-09-12, .scratch/up-rev-partial.py and .scratch/up-rev-partial2.py:
+        // S33 read these five cells as "a per-opcode answer, not a general rule about slice_start"
+        // and pinned upstream's None. Ledger entry 24 read the SAME numbers as upstream contradicting
+        // itself - its CHARACTER_REV arms bound by text_start (upstream/src/_regex.c:12190, :7137)
+        // while the STRING family's try_match arms bound by slice_start - and the owner ruled on
+        // 2026-09-15 for Option B of docs/plan/upstream-reports/ledger-24-briefing.md: there is one
+        // rule, and the bound is the slice start. So the five now answer a partial here, DELIBERATELY
+        // and against upstream, which is the DIVERGENCES.md row "Reversed partial matches run out of
+        // text at the slice start". S52d, 2026-09-16.
         //
+        // Upstream, re-measured on 2026.9.10 by tools/probes/upstream-s33-per-opcode-cells.py:
         //   compile(r'(?r)a').match('abc', 1, 1, partial=True)      -> None
-        //   compile(r'(?r)a').match('abc', 0, 0, partial=True)      -> ((0, 0), partial)
         //   compile(r'(?r)ab*').match('abc', 1, 1, partial=True)    -> None   (REPEAT_ONE, not STRING)
         //   compile(r'(?r)a(b)*').match('abc', 1, 1, partial=True)  -> None   (one-character body)
         //   compile(r'(?r)a(bc)+').match('abc', 1, 1, partial=True) -> None   (min 1, tail never tried)
         //   compile(r'(?r)qz|qzzz').match('qz', 1, 2, partial=True) -> None   (common suffix 'z' is
         //                                                   factored out, so the test is CHARACTER_REV)
+        // and the same four at a slice that starts where the subject does, where upstream's two rules
+        // cannot part company, ALL of them partial at (0, 0):
+        //   compile(r'(?r)a').match('abc', 0, 0, partial=True)      -> ((0, 0), partial)
+        //   compile(r'(?r)ab*')/(r'(?r)a(b)*')/(r'(?r)a(bc)+')      -> ((0, 0), partial)
+        // That second block is what makes the first a contradiction rather than a design: moving an
+        // empty slice from 0 to 1 cannot decide whether the pattern could still be completed.
         foreach (string pattern in new[] { "(?r)a", "(?r)ab*", "(?r)a(b)*", "(?r)a(bc)+" })
         {
-            new FuzzyRegex(pattern)
-                .MatchAtStart("abc", beginning: 1, length: 0, partial: true)
-                .Success.Should()
-                .BeFalse($"upstream answers None for {pattern} on abc[1:1]");
+            Match narrowed = new FuzzyRegex(pattern).MatchAtStart("abc", beginning: 1, length: 0, partial: true);
+
+            narrowed
+                .PartialMatch.Should()
+                .BeTrue($"the ruling answers a partial for {pattern} on abc[1:1], where upstream answers None");
+            (narrowed.Index, narrowed.Length).Should().Be((1, 0));
+
+            // The unnarrowed twin, which upstream and this port have always agreed on.
+            Match atZero = new FuzzyRegex(pattern).MatchAtStart("abc", beginning: 0, length: 0, partial: true);
+
+            atZero.PartialMatch.Should().BeTrue();
+            (atZero.Index, atZero.Length).Should().Be((0, 0));
         }
 
+        // The branch whose common suffix is factored out, so the test node is CHARACTER_REV: the 'z'
+        // matches inside the slice and the 'q' then runs out at the slice start.
+        Match branch = new FuzzyRegex("(?r)qz|qzzz").MatchAtStart("qz", beginning: 1, length: 1, partial: true);
+
+        branch.PartialMatch.Should().BeTrue("the 'q' runs out at the slice start, where upstream answers None");
+        (branch.Index, branch.Index + branch.Length).Should().Be((1, 2));
+
+        // The control that says this is a run-out and not a match invented out of nothing: at the
+        // slice (0, 1) of "qz" the reversed 'z' meets a 'q', which is a real mismatch and not a
+        // shortage of text, and BOTH engines answer None.
+        //   compile(r'(?r)qz|qzzz').match('qz', 0, 1, partial=True) -> None
         new FuzzyRegex("(?r)qz|qzzz")
-            .MatchAtStart("qz", beginning: 1, length: 1, partial: true)
+            .MatchAtStart("qz", beginning: 0, length: 1, partial: true)
             .Success.Should()
-            .BeFalse("the branches share the suffix 'z', so the test node is CHARACTER_REV");
-
-        // At pos 0 the slice starts where the subject does, and the character arm answers a partial.
-        Match atZero = new FuzzyRegex("(?r)a").MatchAtStart("abc", beginning: 0, length: 0, partial: true);
-
-        atZero.PartialMatch.Should().BeTrue();
-        (atZero.Index, atZero.Length).Should().Be((0, 0));
+            .BeFalse("the 'z' meets a 'q', so there is nothing to complete");
     }
 
     [Test]
