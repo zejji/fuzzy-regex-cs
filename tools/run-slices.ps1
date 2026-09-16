@@ -38,6 +38,9 @@
 [CmdletBinding()]
 param(
     [int]$MaxSlices = [int]::MaxValue,
+    # Restrict the run to one phase's slices, so a driver in a worktree (Phase 7 optimisation) can
+    # skip the earlier phase's files that main is still working through. 0 = any phase.
+    [int]$Phase = 0,
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
     [switch]$DryRun
 )
@@ -91,6 +94,7 @@ $allowedTools = @(
 function Get-PendingSlice {
     Get-ChildItem -LiteralPath $slicesDir -Filter 'S*.md' -File -ErrorAction SilentlyContinue |
         Sort-Object Name |
+        Where-Object { $Phase -eq 0 -or (Get-SlicePhase -SliceFile $_) -eq $Phase } |
         Select-Object -First 1
 }
 

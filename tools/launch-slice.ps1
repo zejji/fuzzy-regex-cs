@@ -15,8 +15,9 @@
 
 .EXAMPLE
     pwsh -File tools/launch-slice.ps1 s25
+    pwsh -File tools/launch-slice.ps1 s58 -Phase 7   # from a worktree: only that phase's slices
 #>
-param([Parameter(Mandatory)][string]$Tag)
+param([Parameter(Mandatory)][string]$Tag, [int]$Phase = 0)
 
 $repo = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $repo ".scratch/driver-$Tag.log"
@@ -25,7 +26,7 @@ $err = Join-Path $repo ".scratch/driver-$Tag.err"
 New-Item -ItemType Directory -Force -Path (Join-Path $repo '.scratch') | Out-Null
 
 $proc = Start-Process -FilePath 'pwsh' `
-    -ArgumentList '-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1' `
+    -ArgumentList '-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1', '-Phase', $Phase `
     -WorkingDirectory $repo `
     -RedirectStandardOutput $log `
     -RedirectStandardError $err `

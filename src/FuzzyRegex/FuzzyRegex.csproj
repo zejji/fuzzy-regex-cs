@@ -4,7 +4,14 @@
     <IsAotCompatible>true</IsAotCompatible>
     <!-- The shipped public API must carry XML docs (design spec section 7). -->
     <WarningsNotAsErrors></WarningsNotAsErrors>
-    <NoWarn></NoWarn>
+    <!--
+      RS0026 (multiple overloads with optional parameters) is disapplied on the merits, 2026-09-16:
+      the string/span overload pairs mirror Python's keyword arguments (pos, endpos, timeout) and are
+      disambiguated by the first parameter's type; the rule guards against overloads ADDED later,
+      and after the S53b freeze any addition is a PublicAPI.Unshipped.txt change reviewed on its own.
+      Revisit if an overload with a different optional-parameter set is ever proposed.
+    -->
+    <NoWarn>RS0026</NoWarn>
     <IsPackable>true</IsPackable>
     <PackageId>FuzzyRegex</PackageId>
     <Description>A .NET port of mrab-regex: a full-featured regex engine with fuzzy (approximate) matching and per-error-type budgets.</Description>
@@ -19,6 +26,21 @@
     <None Include="$(MSBuildThisFileDirectory)../../LICENSE" Pack="true" PackagePath="/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)../../NOTICE" Pack="true" PackagePath="/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    The public API is frozen after S53b (owner decision 2026-09-16): Phase 7 optimisation, Phase 8
+    docs and Phase 9 demo run in parallel worktrees, so any change to the public surface must be
+    deliberate and visible. RS0016/RS0017 fail the build until PublicAPI.Unshipped.txt names the
+    change; the docs stream reads that file's diff to learn what to document.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <ItemGroup>
