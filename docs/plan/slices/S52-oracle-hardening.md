@@ -46,9 +46,10 @@ already swept at higher row counts. A new seed costs about a minute.
       Long: sitting 4. Timeout: sitting 14. The sweep's 37 red rows are box 2's problem, not this
       box's - the instrument exists and has been run.)
 - [ ] Every divergence judged, fixed or entered with a control; nothing unjudged.
-      (Sitting 17: 9 of the 37 sweep rows judged - 5 into `bestmatch-loses-a-candidate`, and
-      sitting 16's other 4 into `posix-fuzzy-contradicts-its-own-flagless-answer` once the
-      ablation had sorted them into two families rather than one. 28 to go, plus the gate's
+      (Sitting 18: 15 of the 37 sweep rows judged. Sitting 16's and 17's nine, plus group D's six -
+      rows 25, 29 and 36 into `search-start-partial`, 13 and 22 into
+      `partial-retry-carried-slice-forward`, 24 into `partial-retry-reversed-slice`, split by the
+      reachability instrument rather than by the shape they share. 22 to go, plus the gate's
       104366 which the owner's ruling sends to S52c/S52d.)
 - [ ] Ratchet GREEN, blind review (hunt: an astral row whose index is converted twice; a long-subject
       generator that never reaches the path it was written for), commit.
@@ -3193,3 +3194,199 @@ against a live upstream run, with the (start, end) to (index, length) conversion
 
 It used no `git checkout`, `restore`, `stash`, `reset` or `clean`, reverted the control by
 re-editing, and deleted its own scratch.
+
+---
+
+## Sitting 18 (2026-09-16) - CHECKPOINT, and group D is three families, not one
+
+STATE.md made sitting 18's first job "pick the next group from sitting 15's table and judge it the
+same way - ablate upstream, then pin". The group taken is **D**, sitting 15's six "partial `search`,
+`search-start-partial` shape" rows. **The shape is not the classification: the six are THREE
+families, split 3/2/1, and all six are now judged and pinned. The sweep file reads
+`expected 15, diverge 22`.** `src/` is untouched this sitting.
+
+### The instrument, and why the existing two could not do it
+
+Both doors the repo already had ask ONE question each, and neither separates these six.
+
+**`searchOnlyPartial` (`tools/record-oracle.py:947`) asks one cell of a grid**: does upstream's own
+`match` over the span its `search` reported answer the same partial THERE. It is `search-start-
+partial`'s recorded discriminator and it is right, but it is a single point.
+
+**`gate-divergence-doors.py`'s anchor sweep stops after three hits** (`:212`, `if len(hits) >= 3`).
+That is the leftmost `pos` on a forward row and it is NOT the highest `endpos` on a reversed one -
+and the whole argument for a reversed row is about the highest, because a reversed match anchors at
+its END. **Row 24 answers at endpos 0, 1 and 3, so the anchor its own search tries first is the
+THIRD hit**, printed on the capped sweep's last line. Reading that line as the third-best inverts
+the argument.
+
+**`tools/probes/upstream-partial-anchor-reachability.py`** (new, committed) adds both halves: an
+UNCAPPED sweep on the bound the row's own search moves, and a walk of every `(pos, endpos)` pair in
+the searched region collecting every span upstream's own matcher will produce. Run it with
+`python tools/probes/upstream-partial-anchor-reachability.py`; the rows are read out of
+`tools/probes/sweep-divergence-rows.jsonl` by index, so nothing is transcribed.
+
+### The split, and what decides it
+
+| sweep rows | `searchOnlyPartial` | upstream's own answer | entry |
+|---|---|---|---|
+| 25, 29, 36 | true | **reachable by NO anchored call** in the region | `search-start-partial` |
+| 13, 22 | false | reachable, at the wrong anchor, forward | `partial-retry-carried-slice-forward` |
+| 24 | false | reachable, at the wrong anchor, reversed | `partial-retry-reversed-slice` |
+
+On rows 25, 29 and 36 upstream's search answers (0,5), (0,5) and (0,2) against matcher grids that do
+not contain them - its search door and its match door disagree, over the whole region rather than at
+one point. On 13, 22 and 24 upstream's answer IS a span its own matcher makes; it is just not the one
+at the anchor its own search must try first.
+
+**On all six this port's answer is upstream's own answer at the first anchor its search is defined to
+try THAT ANSWERS AT ALL** - lowest `pos` forwards, highest `endpos` reversed - span, groups and
+partial flag, codepoints converted to UTF-16. **And on all six the `(*PRUNE)` spelling gives the same
+thing**, which each row's own recorded `pruneOutcome` already carried. `(*PRUNE)` prunes the
+backtracking `(*SKIP)` prunes and moves no slice bound (`upstream/src/_regex.c:14553` reversed,
+`:14555` forwards), so the bound move is the cause rather than what the pattern means.
+
+**The verb-free spelling is NOT a control and is not asserted anywhere**, which is new wording this
+sitting put in all three entries: deleting the verb prunes nothing, so it may legitimately reach a
+match the pruned spellings cannot - and on 13, 22 and 24 it does, answering a COMPLETE match at
+codepoints (2,4), (1,5) and (0,3).
+
+### A negative result kept, because the entry's own NAME invites the wrong reading
+
+**Neutralising upstream's required-string prefilter changes not one of the six answers.** The probe
+asks every row both ways and prints both lines. So whatever in `search_start` (`:8385`) answers rows
+25, 29 and 36, it is not the required string - which is worth having written down beside a family
+called `search-start-partial`, and beside ledger entry 1, whose whole mechanism IS the required
+string. Nothing in the ledger states a universal these six falsify, so no ledger entry is corrected
+here; the three ExpectedDivergences entries carry the evidence.
+
+### Two symptoms widened, and both get a permanent test
+
+**`partial-retry-carried-slice-forward` said upstream answers "a zero-width partial at the far end of
+what it searched"**, which sitting 8 wrote from rows 4 and 5 and which was true of every row until
+now. Sweep row 22 is not zero-width: upstream answers the ONE-CODEPOINT partial (5,6) where the first
+answering anchor is pos 4 and gives (4,6) with g1 (4,5) and g2 (5,6). So the moved `slice_start` can
+cost a START without costing the whole match. New gap test
+`PartialMatchingTests.A_forward_skip_costs_the_partial_its_start_without_costing_the_match`.
+
+**`search-start-partial`'s second arm said upstream's partial covers "the whole searched region"**,
+true of rows 1 to 15. Sweep row 36 is (0,2) of a region (0,4) - the first row of the arm without the
+prefilter's usual fingerprint, and it meets the discriminator anyway. New gap test
+`PartialMatchingTests.A_search_only_partial_need_not_cover_the_whole_searched_region`. Its `(?a)` is
+written inline because ASCII is not a public `FuzzyRegexOptions` member; upstream compiles the two
+spellings to the identical flag word `0x2488` and answers identically, checked on 2026.9.10.
+
+### Three stale row counts corrected, found by counting rather than by reading
+
+`_searchStartElsewhereRows` said "seven rows" and held 13; `_partialRetryReversedRows` said "five"
+and held 11; `_partialRetryForwardRows` said "three" and held 5. All three were left behind by
+sitting 8's additions. They now read sixteen, twelve and seven, and each says what it drifted past.
+
+### Numbers
+
+- Ratchet **GREEN**, **6123 / 6123 / 0 skipped**, **6015 distinct ids**, baseline **6013 -> 6015** -
+  the two new tests. `src/` untouched.
+- All 37 sweep rows: **expected 15, diverge 22**, where sitting 17 left `expected 9, diverge 28`.
+- `dotnet build tests/FuzzyRegex.OracleTests` 0 warnings 0 errors; Pester tool tests **81 / 81**.
+- The six row literals **re-record byte-identically** through `record-oracle.py --rows`, key by key.
+
+### The negative control, run last against the code committed here
+
+It is sitting 3's and 17's keying control on this sitting's three entries, because all three are
+keyed on a row AND on this port's exact answer, and a judged answer that is wrong classifies nothing.
+Applied and reverted by re-editing; `git diff --stat` on the file unchanged afterwards and its md5
+back to `aa0b37f465372b6110e8aa8fc6213fa8`.
+
+> **Control A, `entry-keying`**: in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, change one
+> character in one judged answer of each of the three touched entries. The lines read, in the file:
+> ```
+>         "match 0:(0,1)[(0,1)] last=-1/- partial",
+>     ];
+> ```
+> (the LAST element of `_searchStartElsewhereOurs`) to `0:(0,2)[(0,2)]`;
+> ```
+>         "match 0:(7,3)[(7,3)] 1:(7,2)[(7,2)] 2:(9,1)[(9,1)] last=2/g1 partial",
+> ```
+> (in `_partialRetryForwardOurs`) to `0:(7,4)[(7,4)]`;
+> ```
+>         "match 0:(0,4)[(0,4)] 1:(1,2)[(1,2)] last=1/g1 partial",
+> ```
+> (in `_partialRetryReversedOurs`) to `0:(0,5)[(0,5)]`.
+> Rows: the committed `tools/probes/sweep-divergence-rows.jsonl`, all 37, run with
+> `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl`. No seed - these
+> are explicit rows.
+> Result: **expected 12, diverge 25 of 37** broken, against **expected 15, diverge 22** restored. The
+> three that flip are exactly sweep rows 22, 24 and 36 - one per touched entry - and 13, 25 and 29
+> stay EXPECTED, which is what says the control reached the answer it aimed at and not the entry.
+
+**No second seed, and the reason is sittings 15's, 16's and 17's**: the control runs over an explicit
+rows file rather than a generator draw, so there is no seed to vary. What stands in for it here is
+that each of the three entries is hit separately and the two rows of the entry NOT broken stay put.
+
+No control this sitting mutates the engine. None could: no `src/` file changed.
+
+### Review
+
+**One blind pass, dispatched inside the turn and read as a tool result, over the whole diff. Findings
+raised: one. Reproduced: one. Fixed: one.** The new comment over `_searchStartElsewhereOurs` rows 14
+to 16 said the answers are upstream's "at the FIRST anchor its search is defined to try - lowest
+`pos` forwards, highest `endpos` reversed", dropping the qualifier the probe and the other two new
+comment blocks both keep. Without "that answers at all" the sentence is false on all three rows: the
+literal first anchor is pos 0, pos 0 and endpos 4, and upstream answers `None` at each; the answers
+listed come from pos 5, pos 2 and endpos 1. Fixed by restoring the qualifier and naming the three
+anchors outright.
+
+The reviewer worked the hunt list rather than only reading: it re-derived every asserted span from
+upstream's own codepoint answer independently (`lastindex`/`lastgroup` included), re-recorded all six
+row literals and found them identical key by key, ran the replay to `expected 15, diverge 22`,
+confirmed `searchOnlyPartial` true on 25/29/36 and false on 13/22/24, checked `git diff -U0` for any
+loosened predicate and found the only `Applies`-shaped hit to be a Reason string, mutated both gap
+tests and watched each go red, and checked `(?a)` against flag bit 0x80.
+
+**No second pass.** The one fix is a prose correction inside text the first pass had just read; it
+added no API, changed no tooling and created no unreviewed code.
+
+### The independent verifier
+
+A fresh agent (amendment 16 limb (d)), briefed with nothing but this tree and `docs/VERIFICATION.md`'s
+do-not-use-git clause. **Twenty-two claims across nine groups: twenty-two CONFIRMED, none DIFFERENT,
+none COULD NOT RUN.**
+
+**CONFIRMED:** the ratchet (GREEN, 6123/6123, 6015 distinct ids, baseline 6015) and that
+`tests/parity-baseline.json` gains exactly the two new test ids and loses none; the replay tally
+character for character and the entry each of the six rows lands under, by report line; the probe at
+exit 0 with every one of its claimed lines on all six rows, the "required string gone" line included;
+the row literals re-recorded key by key; **all six judged answers on BOTH legs** - equal to the
+report's own `port` line, and equal to the verifier's own anchor sweep and codepoint-to-UTF-16
+conversion against live upstream; the two gap tests at 27/27 and **every expected value in them
+against a live upstream run**, the (start, end) to (index, length) conversion and the `(?a)` flag
+word included; **Control A on every particular** - `expected 12, diverge 25`, the three flipped rows
+being exactly 22, 24 and 36, the md5 after the hand revert and the restored tally; that no file under
+`src/` changed; the oracle build at 0 warnings 0 errors and Pester at 81/81; all four citations; and
+the row-16 claim checked over all sixteen rows rather than sampled.
+
+It used no `git checkout`, `restore`, `stash`, `reset` or `clean` and reverted the control by
+re-editing. Cleaning up it removed the whole of `.scratch/` rather than only its own files; `.scratch`
+is gitignored throwaway and nothing outside it moved, so the tree is unaffected.
+
+### What sitting 19 inherits
+
+**22 of the 37 to go**, and they are sitting 15's groups B, C, E, F and G less the judged, plus
+group A's two strays:
+
+| rows | group |
+|---|---|
+| 4, 15 | **A**'s residue - still the two nobody can place (both `(?b)(?r)` partial searches whose flagless answer is a PARTIAL, entry 13's shape; neither port-side control moves either; sitting 15's `endpos=0` worry stands) |
+| 7, 9 | **B** - upstream's `(*SKIP)` answer is its own only |
+| 16, 26, 30, 33 | **C** - overlapped scan, the verb moving a bound between matches |
+| 5, 21, 31 | **E** - same span, different change positions or KINDS |
+| 1, 2, 8, 11, 27 | **F** - `split`, `sub`, `subf`, no match object |
+| 6, 14, 19, 28, 32, 34 | **G** - a residue, not a family |
+
+**Group C is the natural next one**: four rows, one shape, and four `overlapped-skip-*` entries plus
+`skip-carried-slice-on-a-scan-with-no-walk` already carry its argument and its probes. Take the
+uncapped sweep with you - this sitting's row 24 is the proof that a capped sweep can name the right
+anchor by luck and the wrong one just as easily.
+
+**Also still untouched and still not S52's**: the 20-seed sweep run and the 6000-row three-seed gate
+are S57's by the owner's ruling, and S52 runs no further sweeps.

@@ -1027,6 +1027,125 @@ public sealed class PartialMatchingTests
             .BeFalse();
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_forward_skip_costs_the_partial_its_start_without_costing_the_match()
+    {
+        // THE SAME MECHANISM AGAIN, and the symptom one step past the test above's. That test's own
+        // comment says upstream answers "the ZERO-WIDTH partial at the far end of what it searched",
+        // and until S52's eighteenth sitting every row of this family did. This one does not:
+        // upstream answers a ONE-CODEPOINT partial at a LATER START, so the moved `slice_start` costs
+        // a start without costing the whole match, and "a zero-width partial at the far end" is a
+        // symptom this family often shows rather than one it always shows.
+        //
+        // Row 22 of tools/probes/sweep-divergence-rows.jsonl - row 32949 of the eight-seed seed
+        // sweep's seed 655924813. Measured 2026-09-15 on regex 2026.9.10 by
+        // tools/probes/upstream-partial-anchor-reachability.py, IN CODEPOINTS (the subject's four
+        // middle characters are astral, so the spans asserted below are UTF-16):
+        //
+        //   as the wave drew it       (5, 6) partial, g1 (5, 5), g2 (5, 6)   <- upstream
+        //   (*SKIP) -> (*PRUNE)       (4, 6) partial, g1 (4, 5), g2 (5, 6)   <- this port's
+        //   match(pos=4, partial)     (4, 6) partial, g1 (4, 5), g2 (5, 6)   <- this port's
+        //   no partial asked for      None                                   <- both engines
+        //
+        // WHAT JUDGES IT is the UNCAPPED anchor sweep. A forward search tries the lowest `pos`
+        // first, so the answer it owes is the first anchor at which its own anchored matcher answers
+        // at all; upstream's answers at pos 4, 5 and 6, and its search returns pos 5's. `(*PRUNE)`
+        // prunes the same backtracking and moves no bound, so the bound move is the cause rather
+        // than what the pattern means. The verb-free spelling is NOT a control and is not asserted
+        // here: deleting the verb prunes nothing, so it may reach a match the pruned spellings
+        // cannot, and here it answers a COMPLETE match at codepoints (1, 5).
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // `partial-retry-carried-slice-forward` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        const string pattern = @"(?P<g1>\w{0,1}){1,3}?([^[\p{L}--[a-z]]]?)(?:\p{Lu}(*SKIP)[[a-f]~~[d-k]]|\p{Ll})\b";
+        const string subject = " \U0001D7EE\U0001D7EE\U00010400\U00010400 ";
+        const FuzzyRegexOptions options =
+            FuzzyRegexOptions.IgnoreCase
+            | FuzzyRegexOptions.Multiline
+            | FuzzyRegexOptions.Version1
+            | FuzzyRegexOptions.FullCase;
+
+        Match skipped = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length)
+            .Should()
+            .Be((7, 3), "upstream starts at UTF-16 9 instead, one codepoint further in");
+        (skipped.Groups[1].Index, skipped.Groups[1].Length)
+            .Should()
+            .Be((7, 2), "upstream's group 1 is the empty span at UTF-16 9");
+
+        // The control: a verb that moves no bound, and upstream then answers what this port answers.
+        Match pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options).Match(
+            subject,
+            partial: true
+        );
+
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((7, 3));
+        (pruned.Groups[1].Index, pruned.Groups[1].Length).Should().Be((7, 2));
+
+        // And with no partial asked for there is no second pass to carry a bound into.
+        new FuzzyRegex(pattern, options)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_search_only_partial_need_not_cover_the_whole_searched_region()
+    {
+        // `search-start-partial`'s second arm, and the first row of it whose span is NOT the whole
+        // searched region. Every row of that arm from S37 to S52's eighth sitting had upstream
+        // reporting a partial over the entire region - which is the prefilter's usual fingerprint,
+        // and which the entry's own prose called the shape of the family. Here the region is
+        // codepoints (0, 4) and upstream answers (0, 2). The DISCRIMINATOR still holds and it is the
+        // recorded one: upstream's own anchored matcher denies the span its search reported.
+        //
+        // Row 36 of tools/probes/sweep-divergence-rows.jsonl - row 33723 of the eight-seed seed
+        // sweep's seed 793244924. Measured 2026-09-15 on regex 2026.9.10 by
+        // tools/probes/upstream-partial-anchor-reachability.py:
+        //
+        //   as the wave drew it        (0, 2) partial            <- upstream
+        //   match over (0, 2)          None                      <- upstream denies its own answer
+        //   every (pos, endpos) pair   only (0, 0) and (0, 1)    <- (0, 2) is reachable NOWHERE
+        //   match(endpos=1, partial)   (0, 1) partial            <- this port's
+        //   (*SKIP) -> (*PRUNE)        (0, 1) partial            <- this port's
+        //
+        // A reversed match anchors at its END, so the anchor a reversed search tries first is the
+        // HIGHEST `endpos` that answers - here 1, and its answer is this port's. The subject is
+        // CRLF followed by a zero-width joiner and an astral emoji modifier, and this port's answer
+        // is the CR alone.
+        //
+        // `(?a)` is written inline rather than passed as an option because ASCII is not a public
+        // FuzzyRegexOptions member; upstream compiles the two spellings to the identical flag word
+        // 0x2488 and answers both calls identically, checked 2026-09-15 on regex 2026.9.10.
+        //
+        // PERMANENT, and judged in this port's favour. Classified as `search-start-partial` in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        const string pattern = @"(?a)(?r)\m(?:\d?(*SKIP)[\w\s]|\w)";
+
+        // U+200D ZERO WIDTH JOINER as a char code rather than in the literal: it is invisible in a
+        // source file, and S2479 refuses a control character in a string literal for that reason.
+        string subject = "\r\n" + (char)0x200D + "\U0001F3FB";
+
+        Match skipped = new FuzzyRegex(pattern, FuzzyRegexOptions.Multiline).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length)
+            .Should()
+            .Be((0, 1), "upstream reports (0, 2), a span its own anchored matcher never produces");
+
+        // The control: a verb that moves no bound, and upstream then answers what this port answers.
+        new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), FuzzyRegexOptions.Multiline)
+            .Match(subject, partial: true)
+            .Should()
+            .Match<Match>(static m => m.PartialMatch && m.Index == 0 && m.Length == 1);
+    }
+
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer - which is also upstream
     // 2026.7.19's answer and PCRE2 10.47's.
     [Test]
