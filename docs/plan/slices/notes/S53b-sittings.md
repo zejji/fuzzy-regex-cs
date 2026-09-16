@@ -152,3 +152,34 @@ Two things the reviewer surfaced that are not findings and are worth carrying:
    their four numbers. It had not reported when the deadline landed. Re-dispatch it against the
    committed tree; the brief is reproducible from this file.
 2. Then move the slice file to `done/`, copy the closing notes into it, and tick its five boxes.
+
+**Correction, read this before the section above.** The verifier DID report before the sitting-1
+commit was made, and the commit message records what this file does not: it confirmed ten of the
+eleven claims, both negative controls at both seeds included, and only the full three-seed oracle
+was out of reach of its deadline. This file was written earlier in the sitting and was left stale.
+
+## Sitting 2 - 2026-09-16
+
+**One claim, then the close.** No code changed; no test changed; no instrument changed.
+
+1. **Ratchet on the closing tree** (which had moved on from the checkpoint - the public API freeze,
+   `f3c1135`, and the planning commits after it): GREEN, 6226 / 6226 / 0, 6118 distinct ids against
+   a baseline of 6118. No baseline update was needed.
+2. **The outstanding verifier claim.** A fresh Opus verifier, briefed with nothing but the committed
+   tree and forbidden to pass `-Seed`, `-Seeds`, `-Generator`, `-Count` or `-SkipRecord`, ran
+   `pwsh -File tools/run-oracle.ps1` end to end and reported **CONFIRMED**:
+
+   ```
+   ===== seed 7 =====        agree 6342  unsupported 0  expected 32  timeout 2  resource 4  diverge 0  of 6380 rows
+   ===== seed 4242 =====     agree 6347  unsupported 0  expected 28  timeout 0  resource 5  diverge 0  of 6380 rows
+   ===== seed 20260916 ===== agree 6354  unsupported 0  expected 21  timeout 0  resource 5  diverge 0  of 6380 rows
+   Oracle: GREEN - no row diverged from upstream, at all 3 seeds.
+   ```
+
+   All eleven claims are now CONFIRMED across the two sittings, so nothing was removed or weakened.
+3. Slice file moved to `done/` with the closing notes and its five boxes ticked; STATE.md rewritten.
+
+**One process lesson worth carrying.** Sitting 1 left two records that disagreed - this file said
+the verifier never reported, the commit message said it confirmed ten of eleven - and sitting 2 had
+to read both to find out which was true. The commit message is written last, so it is the one to
+trust; but the cheap fix is to update the notes file in the same edit that writes the message.
