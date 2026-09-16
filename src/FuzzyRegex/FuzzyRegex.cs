@@ -51,6 +51,12 @@ public delegate string MatchEvaluator(Match match);
 /// one that had to be renamed.
 /// </para>
 /// <para>
+/// <b><c>Match</c> means upstream's <c>search</c>; upstream's anchored <c>match</c> is
+/// <c>MatchAtStart</c>.</b> Every static convenience on this class takes
+/// <c>(input, pattern, options)</c>, the built-in <c>Regex</c>'s parameter order, where
+/// upstream's module-level functions take the pattern before the subject.
+/// </para>
+/// <para>
 /// Upstream's <c>pos</c> and <c>endpos</c> arguments are expressed the .NET way, as a
 /// <c>beginning</c> and a <c>length</c>: <c>endpos</c> is <c>beginning + length</c>. Positions and
 /// lengths are UTF-16 code units throughout (design spec section 4).
@@ -114,6 +120,30 @@ public sealed class FuzzyRegex
         : this(pattern, options, InfiniteMatchTimeout, namedLists) { }
 
     /// <summary>Compiles a pattern with the given options and match timeout.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Version 1 is the default</b>. A pattern that names neither version, in the flags or
+    /// inline, compiles under version 1: nested sets and set operations inside a character
+    /// class, full case-folding under <see cref="FuzzyRegexOptions.IgnoreCase"/>, and a
+    /// backreference to a still-open group all work, where upstream defaults to version 0.
+    /// Pass <see cref="FuzzyRegexOptions.Version0"/>, or write <c>(?V0)</c>, for upstream's
+    /// default instead.
+    /// </para>
+    /// <para>
+    /// <b><c>(?V0)</c> really means version 0, where upstream's own algorithm would leave
+    /// version 1's <c>FULLCASE</c> on.</b> Under this port's version-1 default, an inline
+    /// <c>(?V0)</c> compiles bit-for-bit as <see cref="FuzzyRegexOptions.Version0"/> would.
+    /// Upstream's own two-pass parser instead leaks its default version's flags into a leading
+    /// <c>(?V0)</c>, so <c>compile('(?V0)a')</c> keeps full case-folding on there - unreachable
+    /// upstream, where the default is version 0 already.
+    /// </para>
+    /// <para>
+    /// <b>The "unterminated character set" parse error names
+    /// <see cref="FuzzyRegexOptions.Version0"/> and the <c>\[</c> escape.</b> It does so only
+    /// for a pattern that version 0 itself accepts, such as <c>[[a-z]--[aeiou]]</c>; upstream
+    /// raises the bare message with no such detail.
+    /// </para>
+    /// </remarks>
     /// <param name="pattern">The pattern to compile.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
     /// <param name="matchTimeout">
@@ -215,10 +245,19 @@ public sealed class FuzzyRegex
     /// <see cref="FuzzyRegexOptions.IgnoreCase"/> even though the caller passed none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The upstream flags this port does not expose - <c>LOCALE</c>, <c>DEBUG</c> and
     /// <c>TEMPLATE</c> - are masked off rather than surfaced as numbers with no name.
     /// <see cref="FuzzyRegexOptions.Unicode"/> is therefore on every pattern that named no
     /// encoding, because upstream puts it there.
+    /// </para>
+    /// <para>
+    /// <b>Version 1 is the default</b>. A plain pattern that names neither version reports
+    /// <see cref="FuzzyRegexOptions.Version1"/> plus <see cref="FuzzyRegexOptions.FullCase"/>
+    /// here, not nothing: <c>new FuzzyRegex("a").Options</c> is
+    /// <c>Version1 | FullCase | Unicode</c>, because the version-implied defaults are folded
+    /// into the compiled flags rather than kept as a separate, unreported field.
+    /// </para>
     /// </remarks>
     public FuzzyRegexOptions Options => (FuzzyRegexOptions)(_compiled.Flags & ~_unexposedFlags);
 
@@ -750,6 +789,23 @@ public sealed class FuzzyRegex
     /// The call ran out of time.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Upstream's <c>pos</c>/<c>endpos</c> are reshaped to <c>beginning</c>/<c>length</c>.</b>
+    /// <paramref name="length"/> counts code units from <paramref name="beginning"/>, and
+    /// <c>-1</c> means "the rest of the subject" - not upstream's Python-slice reading of a
+    /// negative <c>endpos</c>, which counts back from the end. Measured 2026-09-12:
+    /// <c>regex.search('abc', 0, -1)</c> searches <c>[0, 2)</c> upstream, where this port's
+    /// <c>length: -1</c> means unlimited.
+    /// </para>
+    /// <para>
+    /// <b>Reversed partial matches run out of text at the slice start.</b> With <c>(?r)</c> and
+    /// <paramref name="partial"/>: <see langword="true"/>, a match that still needs characters
+    /// reports a partial at <paramref name="beginning"/> - upstream answers no match on some
+    /// shapes there instead. Nothing else about <paramref name="beginning"/> moves: an anchor
+    /// or a lookbehind still sees it as the edge of the text.
+    /// </para>
+    /// </remarks>
     public Match Match(
         string input,
         int beginning = 0,
@@ -772,6 +828,10 @@ public sealed class FuzzyRegex
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match there.</returns>
+    /// <remarks>
+    /// See <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks for
+    /// how a reversed partial match behaves at the slice start under <paramref name="partial"/>.
+    /// </remarks>
     public Match MatchAtStart(
         string input,
         int beginning = 0,
@@ -794,6 +854,10 @@ public sealed class FuzzyRegex
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The match, or an unsuccessful match if the pattern does not match all of it.</returns>
+    /// <remarks>
+    /// See <see cref="Match(string, int, int, bool, TimeSpan?, CancellationToken)"/>'s remarks for
+    /// how a reversed partial match behaves at the slice start under <paramref name="partial"/>.
+    /// </remarks>
     public Match FullMatch(
         string input,
         int beginning = 0,
@@ -827,6 +891,26 @@ public sealed class FuzzyRegex
     /// The scan ran out of time. The whole scan shares one budget, as upstream's does.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>There is no <c>findall</c>.</b> Upstream's <c>findall</c> returns the text of the
+    /// pattern's single capturing group when it has exactly one, and a tuple of group texts when
+    /// it has more - not the match text. This method returns <see cref="RegularExpressions.Match"/>
+    /// objects instead, so a caller after upstream's group-text shape reads
+    /// <c>Match.Groups[1].Value</c> over the result. See
+    /// <see cref="Count(string, int, int, bool, TimeSpan?, CancellationToken)"/> for a count with
+    /// no per-match allocation, and
+    /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// for a lazy projection.
+    /// </para>
+    /// <para>
+    /// <b>A lazy walk times each STEP, where <c>Matches</c> times the whole scan.</b> This method
+    /// holds one engine state for the entire scan, so <paramref name="timeout"/> bounds the
+    /// whole scan, matching upstream's <c>finditer</c>. See
+    /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// for a walk whose clock restarts per match instead.
+    /// </para>
+    /// </remarks>
     public MatchCollection Matches(
         string input,
         int beginning = 0,
@@ -981,6 +1065,14 @@ public sealed class FuzzyRegex
     /// The call ran out of time.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Replace's <c>count</c> is inverted the same way</b> as
+    /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/>'s <c>maxSplits</c>: here
+    /// <c>-1</c> means "no limit" and <c>0</c> means "replace nothing", where upstream's
+    /// <c>count=0</c> means "no limit" and a negative count replaces nothing.
+    /// </para>
+    /// </remarks>
     public string Replace(
         string input,
         string replacement,
@@ -1160,6 +1252,13 @@ public sealed class FuzzyRegex
     /// The split ran out of time.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Split spells "no limit" as <c>maxSplits = -1</c>.</b> Upstream spells it
+    /// <c>maxsplit=0</c>, and reads a negative number as "no splits" - the opposite
+    /// convention, applied at the boundary only.
+    /// </para>
+    /// </remarks>
     public string?[] Split(
         string input,
         int maxSplits = -1,
@@ -1234,6 +1333,11 @@ public sealed class FuzzyRegex
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
+    /// <remarks>
+    /// See <see cref="Replace(string, string, int, int, int, TimeSpan?, CancellationToken)"/>'s
+    /// remarks: <b>Replace's <c>count</c> is inverted the same way</b> applies here too -
+    /// <c>-1</c> is "no limit" and <c>0</c> is "replace nothing".
+    /// </remarks>
     public string ReplaceFormat(
         string input,
         string format,
