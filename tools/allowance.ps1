@@ -24,7 +24,8 @@ if (-not (Test-Path -LiteralPath $file)) { Write-Host 'allowance: no statusline 
 $age = [int]((Get-Date) - (Get-Item -LiteralPath $file).LastWriteTime).TotalMinutes
 $d = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
 $rl = $d.rate_limits
-$fmt = { param($w) if ($w) { '{0:N0}% (resets {1})' -f $w.used_percentage, $w.resets_at } else { 'n/a' } }
+# resets_at arrives as Unix seconds (observed 2026-09-16, e.g. 1789585200), not the ISO string the docs show.
+$fmt = { param($w) if ($w) { $t = $w.resets_at; if ($t -is [long] -or $t -is [int] -or $t -is [double]) { $t = [DateTimeOffset]::FromUnixTimeSeconds([long]$t).ToLocalTime().ToString('ddd HH:mm') }; '{0:N0}% (resets {1})' -f $w.used_percentage, $t } else { 'n/a' } }
 Write-Host ("allowance ({0} min old): 5h {1} | 7d {2} | extra {3}" -f $age, (& $fmt $rl.five_hour), (& $fmt $rl.seven_day), (& $fmt $rl.spend_limit))
 if ($age -gt $MaxAgeMinutes) { Write-Host "  snapshot is stale; ask the owner to press Enter in the interactive session to refresh it" -ForegroundColor Yellow }
 $block = ($rl.five_hour -and $rl.five_hour.used_percentage -ge $FiveHourFloor) -or
