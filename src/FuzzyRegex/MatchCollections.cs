@@ -51,8 +51,10 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// <c>Regex.Match("ab", "(?&lt;a&gt;a)(b)(?&lt;c&gt;c)?").Groups</c> has <c>Count</c> 4 and
 /// <c>Keys</c> <c>[0, 1, a, c]</c>, so every group is in it and an unnamed one is keyed by its
 /// number as text. This port does the same, which makes <see cref="Keys"/> exactly
-/// <see cref="FuzzyRegex.GroupNames"/> - in ascending group number, which is the order
-/// <c>Keys</c> came back in there. Upstream's <c>groupdict</c> is the named-only view instead, and
+/// <see cref="FuzzyRegex.GroupNames"/> in ascending group number, the order <c>Keys</c> came
+/// back in there; the same pattern gives <c>[0, a, 2, c]</c> here (measured 2026-09-16), because
+/// this port numbers groups left to right as upstream does, where the built-in numbers unnamed
+/// groups first. Upstream's <c>groupdict</c> is the named-only view instead, and
 /// it is a filter over this one. <b>The cost is a source break</b>: a type with two
 /// <see cref="IEnumerable{T}"/> faces makes <c>Groups.Select(...)</c> ambiguous, exactly as it
 /// is on the built-in collection.

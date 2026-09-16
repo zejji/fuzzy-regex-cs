@@ -68,6 +68,12 @@ jobs:
         shell: pwsh
         run: ./tools/check-ratchet.ps1 -Configuration Release
 
+      - name: Documentation examples must compile and print what they claim
+        # Every ```csharp block in README.md and docs/COMPARISON.md is built against the library
+        # and run; its trailing `// ` lines are the expected output. Phase 8's convention test.
+        shell: pwsh
+        run: ./tools/check-doc-examples.ps1
+
       - name: The generated status board must be up to date
         shell: pwsh
         run: |
