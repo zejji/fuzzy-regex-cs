@@ -33,6 +33,12 @@ public enum FuzzyRegexOptions
     None = 0x0,
 
     /// <summary>Case-insensitive matching. Upstream <c>IGNORECASE</c> / <c>I</c>.</summary>
+    /// <remarks>
+    /// <b>The Turkic <c>I</c> pairings are not applied by default</b>. <c>(?i)</c> and
+    /// <c>(?fi)</c> do not pair <c>I</c> with <c>ı</c>, or <c>i</c> with <c>İ</c>, where
+    /// upstream does. No Turkic mode is offered: PCRE2, Perl and .NET all agree with this port,
+    /// and upstream exposes no locale a caller could ask for the pairing with.
+    /// </remarks>
     IgnoreCase = 0x2,
 
     /// <summary>
@@ -106,12 +112,25 @@ public enum FuzzyRegexOptions
     /// <summary>
     /// Find the best fuzzy match rather than the first one. Upstream <c>BESTMATCH</c> / <c>B</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>(?e)</c> and <c>(?b)</c> rank candidates by fuzzy COST</b> (cheapest, then fewer
+    /// errors, then earliest); upstream ranks by error count only. The divergence applies only
+    /// where the pattern has exactly one fuzzy section and a weighted cost equation - with unit
+    /// costs, or a nested second section, this falls back to upstream's error-count budget and
+    /// the two engines agree exactly.
+    /// </para>
+    /// </remarks>
     BestMatch = 0x1000,
 
     /// <summary>
     /// After finding a fuzzy match, try to improve its fit. Upstream <c>ENHANCEMATCH</c> /
     /// <c>E</c>.
     /// </summary>
+    /// <remarks>
+    /// Ranks candidates by fuzzy cost rather than upstream's error count under the same
+    /// conditions as <see cref="BestMatch"/>; see its remarks.
+    /// </remarks>
     EnhanceMatch = 0x8000,
 
     /// <summary>
@@ -151,12 +170,28 @@ public enum FuzzyRegexOptions
     /// Upstream <c>VERSION0</c> / <c>V0</c>, and upstream's own default.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Pass this to compile a pattern written for <c>Regex</c> or for <c>re</c> unchanged. The two
     /// live differences from <see cref="Version1"/> are the ones named above; measured on
     /// <c>regex</c> 2026.9.10 and .NET 10 (<c>tools/probes/upstream-version-defaults.py</c> and its
     /// <c>.ps1</c> twin), the zero-width and inline-flag differences upstream's README also lists
     /// no longer exist. There is a third, undocumented one: a backreference to a group that is
     /// still open is a compile error here and is accepted under <see cref="Version1"/>.
+    /// </para>
+    /// <para>
+    /// <b><c>(?V0)</c> really means version 0, where upstream's own algorithm would leave version
+    /// 1's <c>FULLCASE</c> on</b>. A leading global flag makes upstream parse the pattern twice,
+    /// seeding the second parse with the default version's flags already folded in; this port
+    /// keeps the version-implied defaults out of that seed, so an inline <c>(?V0)</c> behaves
+    /// exactly like passing this value from the start.
+    /// </para>
+    /// <para>
+    /// <b>The "unterminated character set" parse error names <c>FuzzyRegexOptions.Version0</c>
+    /// and the <c>\[</c> escape</b>, but only for a pattern version 0 actually accepts: under
+    /// <see cref="Version1"/> (the default) an unescaped <c>[</c> inside a set, such as
+    /// <c>[[]</c>, stops compiling, and the message tells a caller arriving from <c>Regex</c> how
+    /// to get back the literal.
+    /// </para>
     /// </remarks>
     Version0 = 0x2000,
 
@@ -165,11 +200,13 @@ public enum FuzzyRegexOptions
     /// folding when matching case-insensitively. Upstream <c>VERSION1</c> / <c>V1</c>.
     /// </summary>
     /// <remarks>
-    /// <b>This is the one place this library deliberately does not follow mrab-regex's default.</b>
-    /// Upstream's front end sets <c>DEFAULT_VERSION = VERSION0</c> so that <c>regex</c> stays a
-    /// drop-in replacement for Python's <c>re</c>; this library has no such users to protect, and
-    /// the two behaviours version 1 adds are the reason to use it over
-    /// <c>System.Text.RegularExpressions</c>. See <c>docs/DIVERGENCES.md</c>.
+    /// <para>
+    /// <b>Version 1 is the default</b> (nested sets and set operations; full case-folding under
+    /// <see cref="IgnoreCase"/>). Upstream defaults to <c>VERSION0</c> for <c>re</c>
+    /// compatibility; this library has no such users to protect, and the two behaviours version
+    /// 1 adds are the reason to use it over <c>System.Text.RegularExpressions</c>. See
+    /// <c>docs/DIVERGENCES.md</c>.
+    /// </para>
     /// <para>
     /// The one pattern that changes meaning is an unescaped <c>[</c> inside a set: <c>[[]</c> is a
     /// set containing <c>[</c> under <see cref="Version0"/> and an unterminated nested set here.

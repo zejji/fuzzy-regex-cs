@@ -41,8 +41,10 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// spans the engine recorded - see <c>Match.GroupAt</c>.
 /// </para>
 /// <para>
-/// It is also an <see cref="IReadOnlyDictionary{TKey, TValue}"/> keyed by group name, as the
-/// built-in <c>GroupCollection</c> has been since .NET 5, so a caller can ask
+/// <b><c>Match.Groups</c> is an <c>IReadOnlyDictionary&lt;string, Group&gt;</c> as well as a
+/// list</b>, keyed by every group's name - or its number as text where it has none. It is also
+/// an <see cref="IReadOnlyDictionary{TKey, TValue}"/> keyed that way, as the built-in
+/// <c>GroupCollection</c> has been since .NET 5, so a caller can ask
 /// <see cref="TryGetValue"/> about a name the pattern may not have without catching anything.
 /// Measured on .NET 10.0.10 (<c>tools/probes/dotnet-groupcollection-dictionary.ps1</c>,
 /// 2026-09-16), the built-in's dictionary face is TOTAL rather than named-only:
@@ -51,7 +53,9 @@ public sealed class CaptureCollection : IReadOnlyList<Capture>
 /// number as text. This port does the same, which makes <see cref="Keys"/> exactly
 /// <see cref="FuzzyRegex.GroupNames"/> - in ascending group number, which is the order
 /// <c>Keys</c> came back in there. Upstream's <c>groupdict</c> is the named-only view instead, and
-/// it is a filter over this one.
+/// it is a filter over this one. <b>The cost is a source break</b>: a type with two
+/// <see cref="IEnumerable{T}"/> faces makes <c>Groups.Select(...)</c> ambiguous, exactly as it
+/// is on the built-in collection.
 /// </para>
 /// <para>
 /// Two places where the built-in's dictionary contract and this port's older behaviour differ, and
