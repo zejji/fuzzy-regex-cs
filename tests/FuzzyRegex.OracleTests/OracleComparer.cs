@@ -128,11 +128,20 @@ internal static class OracleComparer
     /// two answers to two questions - and giving it ten seconds would spend ten seconds a row on a
     /// generator every one of whose rows is meant to run out.
     /// </remarks>
-    public static IOracleOutcome? Run(OracleRow row)
+    public static IOracleOutcome? Run(OracleRow row) => Run(row, lazy: false);
+
+    /// <summary>Puts a row's question to this port, eagerly or through the lazy twin.</summary>
+    /// <param name="row">The row to run.</param>
+    /// <param name="lazy">
+    /// Ask an iteration row through <c>EnumerateMatches</c>/<c>EnumerateSplits</c> (S53b). No other
+    /// operation has a lazy twin, so no other operation reads it.
+    /// </param>
+    /// <returns>This port's answer.</returns>
+    public static IOracleOutcome? Run(OracleRow row, bool lazy)
     {
         ArgumentNullException.ThrowIfNull(row);
 
-        return Run(row, row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout);
+        return Run(row, row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout, lazy);
     }
 
     /// <summary>Puts a row's question to this port, with an explicit deadline.</summary>
@@ -142,8 +151,14 @@ internal static class OracleComparer
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <param name="timeout">How long the matching call may take.</param>
+    /// <param name="lazy">
+    /// Ask an iteration row through <c>EnumerateMatches</c>/<c>EnumerateSplits</c> rather than
+    /// through <c>Matches</c>/<c>Split</c> (S53b). Every other operation ignores it, having no
+    /// lazy twin. The wave itself is always run eagerly; this is for the test that runs each row
+    /// both ways and requires the same answer.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
-    internal static IOracleOutcome? Run(OracleRow row, TimeSpan timeout)
+    internal static IOracleOutcome? Run(OracleRow row, TimeSpan timeout, bool lazy = false)
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -193,37 +208,6 @@ internal static class OracleComparer
 
         try
         {
-            if (row.Operation is "sub" or "subf")
-            {
-                string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
-                    ? compiled.Replace(row.Subject, row.Template!, OurLimit(row.Count), out int replacements, timeout)
-                    : compiled.ReplaceFormat(
-                        row.Subject,
-                        row.Template!,
-                        OurLimit(row.Count),
-                        out replacements,
-                        timeout
-                    );
-
-                return new SubOutcome(replaced, replacements);
-            }
-
-            if (row.Operation is "finditer" or "finditer-overlapped")
-            {
-                bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
-
-                return new MatchesOutcome([
-                    .. compiled
-                        .Matches(row.Subject, overlapped: overlapped, timeout: timeout)
-                        .Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
-                ]);
-            }
-
-            if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
-            {
-                return new SplitOutcome(compiled.Split(row.Subject, OurLimit(row.Count), timeout));
-            }
-
             // Upstream's (pos, endpos) as this surface's (beginning, length). Both absent means the
             // whole subject, which this surface spells as a length of -1.
             //
@@ -236,11 +220,67 @@ internal static class OracleComparer
             //
             // Each end is read on its own, so a row carrying only one of the pair still narrows the
             // slice at that end. The same pass found `endpos` without `pos` being dropped entirely.
+            //
+            // Hoisted above the operation switch by S53b, which gave `sub` and `subf` the same pair:
+            // the recorder now draws `pos`/`endpos` on a substitution row too, and one reading of
+            // the slice serves every operation that takes one.
             int beginning = row.Pos ?? 0;
             int length =
                 row.Pos is null && row.EndPos is null
                     ? -1
                     : Math.Max(0, (row.EndPos ?? row.Subject.Length) - beginning);
+
+            if (row.Operation is "sub" or "subf")
+            {
+                string replaced = string.Equals(row.Operation, "sub", StringComparison.Ordinal)
+                    ? compiled.Replace(
+                        row.Subject,
+                        row.Template!,
+                        OurLimit(row.Count),
+                        out int replacements,
+                        beginning,
+                        length,
+                        timeout
+                    )
+                    : compiled.ReplaceFormat(
+                        row.Subject,
+                        row.Template!,
+                        OurLimit(row.Count),
+                        out replacements,
+                        beginning,
+                        length,
+                        timeout
+                    );
+
+                return new SubOutcome(replaced, replacements);
+            }
+
+            if (row.Operation is "finditer" or "finditer-overlapped")
+            {
+                bool overlapped = string.Equals(row.Operation, "finditer-overlapped", StringComparison.Ordinal);
+
+                // The lazy walk is the SAME QUESTION asked through the other entry point (S53b).
+                // Nothing here compares them - that is
+                // `The_lazy_walks_answer_exactly_what_the_eager_ones_do` in OracleWaveTests, which
+                // runs each row both ways - but routing both through this one method is what makes
+                // the two answers comparable at all.
+                IEnumerable<Match> found = lazy
+                    ? compiled.EnumerateMatches(row.Subject, overlapped: overlapped, timeout: timeout)
+                    : compiled.Matches(row.Subject, overlapped: overlapped, timeout: timeout);
+
+                return new MatchesOutcome([
+                    .. found.Select(match => DescribeGroups(match, PositionsUnavailableUpstream(compiled))),
+                ]);
+            }
+
+            if (string.Equals(row.Operation, "split", StringComparison.Ordinal))
+            {
+                return new SplitOutcome(
+                    lazy
+                        ? [.. compiled.EnumerateSplits(row.Subject, OurLimit(row.Count), timeout)]
+                        : compiled.Split(row.Subject, OurLimit(row.Count), timeout)
+                );
+            }
 
             Match match = row.Operation switch
             {

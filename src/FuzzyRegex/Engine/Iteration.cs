@@ -232,7 +232,9 @@ internal static class Iteration
     /// operation that takes no per-call timeout and no token, because it takes no arguments at all
     /// - the built-in <c>Regex</c>'s <c>Match.NextMatch</c> is in exactly the same position and
     /// likewise runs under the pattern's <c>MatchTimeout</c>. A caller who needs to bound or cancel
-    /// a walk should use <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>, which takes both (S51).
+    /// a walk should use <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// or <see cref="FuzzyRegex.EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>,
+    /// which take both (S51, S53b).
     /// </exception>
     internal static Match Next(
         FuzzyRegex regex,
@@ -242,28 +244,68 @@ internal static class Iteration
         int sliceStart,
         int sliceEnd,
         bool overlapped
+    ) =>
+        Step(
+            regex,
+            input,
+            sliceStart,
+            sliceEnd,
+            overlapped,
+            partial: false,
+            regex.PatternLimits,
+            resumeAfter: (matchStart, matchEnd)
+        );
+
+    /// <summary>
+    /// One turn of <c>scanner_search_or_match</c> on a state of its own: the first match in the
+    /// slice when <paramref name="resumeAfter"/> is <see langword="null"/>, and the match after
+    /// that one when it is not.
+    /// </summary>
+    /// <param name="regex">The pattern being scanned with.</param>
+    /// <param name="input">The subject.</param>
+    /// <param name="sliceStart">Upstream's <c>pos</c>, before clamping.</param>
+    /// <param name="sliceEnd">Upstream's <c>endpos</c>, before clamping.</param>
+    /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Whether a trailing partial match may be reported.</param>
+    /// <param name="limits">The time budget and cancellation token bounding this step.</param>
+    /// <param name="resumeAfter">
+    /// The previous match's (start, end) in the subject, or <see langword="null"/> to start the
+    /// walk.
+    /// </param>
+    /// <returns>The match, or an unsuccessful match if there is none.</returns>
+    private static Match Step(
+        FuzzyRegex regex,
+        string input,
+        int sliceStart,
+        int sliceEnd,
+        bool overlapped,
+        bool partial,
+        MatchLimits limits,
+        (int Start, int End)? resumeAfter
     )
     {
-        MatchLimits limits = regex.PatternLimits;
-
         using var state = MatchState.Create(
             regex.PatternObject,
             input,
             sliceStart,
             sliceEnd,
             overlapped,
-            partial: false,
+            partial: partial,
             // The Match object, and therefore repeated captures, will be visible.
             visibleCaptures: true,
             matchAll: false,
             limits
         );
 
-        // Put the state back where the given match left it. A reverse match reports its two ends
-        // the other way round (pattern_new_match, :20795), so this is that mapping inverted.
-        state.MatchPos = state.Reverse ? matchEnd : matchStart;
-        state.TextPos = state.Reverse ? matchStart : matchEnd;
-        state.AdvancePastMatch();
+        if (resumeAfter is { } previous)
+        {
+            // Put the state back where the given match left it. A reverse match reports its two
+            // ends the other way round (pattern_new_match, :20795), so this is that mapping
+            // inverted.
+            state.MatchPos = state.Reverse ? previous.End : previous.Start;
+            state.TextPos = state.Reverse ? previous.Start : previous.End;
+            state.AdvancePastMatch();
+        }
 
         // No guard here either: this is one turn of the scanner, and `do_match` answers FAILURE when
         // the step landed outside what is left to search.
@@ -274,6 +316,72 @@ internal static class Iteration
         }
 
         return regex.NewMatch(state, input, status);
+    }
+
+    /// <summary>
+    /// Every match in the given part of the subject, produced one at a time. The lazy twin of
+    /// <see cref="FindAll"/>, and what upstream's <c>finditer</c> is - a scanner the caller pulls
+    /// from rather than a list.
+    /// </summary>
+    /// <param name="regex">The pattern being scanned with.</param>
+    /// <param name="input">The subject.</param>
+    /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
+    /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
+    /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Whether the walk may end with a partial match.</param>
+    /// <param name="limits">The time budget and cancellation token bounding each step.</param>
+    /// <returns>The matches, leftmost first.</returns>
+    /// <remarks>
+    /// <para>
+    /// <c>ponytail:</c> <b>One <see cref="MatchState"/> per step, not one per walk</b> - the opposite of
+    /// <see cref="Scan"/>, and deliberately. A state owns rented buffers, so a state held across a
+    /// <c>yield return</c> is a state an abandoned iterator never returns; building one per step
+    /// keeps every rental inside a <c>using</c> that has already run by the time the caller sees
+    /// the match. The cost is the one DECISIONS 2026-09-01 measured for
+    /// <see cref="Match.NextMatch"/>: a vectorised pass over the subject per match, where
+    /// <see cref="Scan"/> pays one in total. See <c>docs/plan/OPTIMISATION-NOTES.md</c>.
+    /// </para>
+    /// <para>
+    /// The same choice makes the time budget PER STEP rather than per walk, because a fresh state
+    /// starts a fresh clock. <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// times the whole scan, as upstream's one state does; this times each match. The
+    /// cancellation token behaves the same way either way.
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<Match> Enumerate(
+        FuzzyRegex regex,
+        string input,
+        int start,
+        int end,
+        bool overlapped,
+        bool partial,
+        MatchLimits limits
+    )
+    {
+        Match match = Step(regex, input, start, end, overlapped, partial, limits, resumeAfter: null);
+
+        while (match.Success)
+        {
+            yield return match;
+
+            // scanner_search_or_match ends the walk on the turn AFTER a partial (:20886), so a
+            // partial is yielded and is always the last thing yielded - the rule Scan runs.
+            if (match.PartialMatch)
+            {
+                yield break;
+            }
+
+            match = Step(
+                regex,
+                input,
+                start,
+                end,
+                overlapped,
+                partial,
+                limits,
+                resumeAfter: (match.Index, match.Index + match.Length)
+            );
+        }
     }
 
     /// <summary>
@@ -354,6 +462,90 @@ internal static class Iteration
         list.Add(state.Reverse ? input[..lastPos] : input[lastPos..]);
 
         return [.. list];
+    }
+
+    /// <summary>
+    /// The pieces <see cref="Split"/> returns, produced one at a time. Upstream's
+    /// <c>splititer</c>, which is <c>pattern_split</c>'s loop behind a <c>Splitter_Type</c>
+    /// instead of a list.
+    /// </summary>
+    /// <param name="regex">Upstream's <c>self</c>: the pattern being split on.</param>
+    /// <param name="input">The subject.</param>
+    /// <param name="maxSplits">The most splits to make, or a negative number for no limit.</param>
+    /// <param name="limits">The time budget and cancellation token bounding each step.</param>
+    /// <returns>The pieces, with <see langword="null"/> for a group that took no part in a match.</returns>
+    /// <remarks>
+    /// <para>
+    /// Written over <see cref="Enumerate"/> rather than over a state of its own, for the reason
+    /// <see cref="Enumerate"/> gives: a splitter holding a state across a <c>yield return</c> is a
+    /// splitter whose rented buffers an abandoned <c>foreach</c> never returns. So this is
+    /// <see cref="Split"/>'s loop with the state's <c>match_pos</c>/<c>text_pos</c> read off a
+    /// finished <see cref="Match"/> instead, which is the same pair - <c>pattern_new_match</c>
+    /// swaps the two for a reverse match (<c>:20795</c>) and this swaps them back.
+    /// </para>
+    /// <para>
+    /// The loop is spelled out a second time rather than shared with <see cref="Split"/>, and that
+    /// is the cost of the two state models sitting side by side. The test that stops them drifting
+    /// is sequence equality over the oracle's own <c>split</c> rows, not the reader's eye.
+    /// Phase 7 collapses the two if the per-step state goes.
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<string?> EnumerateSplits(
+        FuzzyRegex regex,
+        string input,
+        int maxSplits,
+        MatchLimits limits
+    )
+    {
+        // Upstream spells "no limit" as maxsplit=0 and reads a negative maxsplit as "no splits at
+        // all"; this surface spells no limit as -1. Split does the same inversion, in the same
+        // words, because it is the same rule and not a shared helper's worth of code.
+        int maxSplit = maxSplits < 0 ? int.MaxValue : maxSplits;
+
+        // Upstream takes no pos/endpos for split at all - its kwlist is string, maxsplit,
+        // concurrent, timeout - so the slice is always the whole subject.
+        bool reverse = (regex.PatternObject.Flags & Parsing.RegexFlags.Reverse) != 0;
+        int lastPos = reverse ? input.Length : 0;
+        int splitCount = 0;
+
+        // An explicit enumerator rather than a foreach with a guard inside it: a foreach would
+        // have pulled - and so matched - one more time before the count check could stop it, and
+        // that extra engine step is observable through a timeout or a cancellation.
+        using IEnumerator<Match> matches = Enumerate(
+                regex,
+                input,
+                0,
+                input.Length,
+                overlapped: false,
+                partial: false,
+                limits
+            )
+            .GetEnumerator();
+
+        while (splitCount < maxSplit && matches.MoveNext())
+        {
+            Match match = matches.Current;
+            int matchStart = match.Index;
+            int matchEnd = match.Index + match.Length;
+
+            // Get segment before this match. A reverse split walks the subject backwards and
+            // upstream does NOT reverse the list afterwards, unlike pattern_subx's join list:
+            // verified 2026-09-01, regex.split('(?r)x', 'xaxbxc') is ['c', 'b', 'a', ''].
+            yield return reverse ? input[matchEnd..lastPos] : input[lastPos..matchStart];
+
+            // Add groups (if any).
+            for (int g = 1; g <= regex.GroupCount; g++)
+            {
+                Group group = match.Groups[g];
+                yield return group.Success ? group.Value : null;
+            }
+
+            splitCount++;
+            lastPos = reverse ? matchStart : matchEnd;
+        }
+
+        // Get segment following last match (even if empty).
+        yield return reverse ? input[..lastPos] : input[lastPos..];
     }
 
     /// <summary>

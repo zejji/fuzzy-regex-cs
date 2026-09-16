@@ -63,10 +63,11 @@ public sealed class FuzzyRegex
 
     /// <summary>
     /// The flags upstream resolves a pattern to but <see cref="FuzzyRegexOptions"/> has no name
-    /// for, and which <see cref="Options"/> therefore hides. <c>UNICODE</c> in particular is on
-    /// every compiled pattern, because <c>_main._compile</c> ORs it into any <c>str</c> pattern
-    /// that named no encoding (<c>upstream/regex/_main.py</c> lines 570-574); upstream's own
-    /// <c>test_getattr</c> expects to see it and this port's translation of that test does not.
+    /// for, and which <see cref="Options"/> therefore hides: <c>LOCALE</c>, <c>DEBUG</c> and
+    /// <c>TEMPLATE</c>. <c>ASCII</c>, <c>UNICODE</c> and <c>WORD</c> were in this set until S53b
+    /// and are now named members, so <c>UNICODE</c> - which <c>_main._compile</c> ORs into any
+    /// <c>str</c> pattern that named no encoding (<c>upstream/regex/_main.py</c> lines 570-574) -
+    /// is reported on every pattern, which is what upstream's own <c>test_getattr</c> expects.
     /// </summary>
     private static readonly int _unexposedFlags = ~Enum.GetValues<FuzzyRegexOptions>()
         .Aggregate(0, static (mask, option) => mask | (int)option);
@@ -214,9 +215,10 @@ public sealed class FuzzyRegex
     /// <see cref="FuzzyRegexOptions.IgnoreCase"/> even though the caller passed none.
     /// </summary>
     /// <remarks>
-    /// The upstream flags this port does not expose - <c>ASCII</c>, <c>LOCALE</c>, <c>UNICODE</c>,
-    /// <c>WORD</c>, <c>DEBUG</c> and <c>TEMPLATE</c> - are masked off rather than surfaced as
-    /// numbers with no name.
+    /// The upstream flags this port does not expose - <c>LOCALE</c>, <c>DEBUG</c> and
+    /// <c>TEMPLATE</c> - are masked off rather than surfaced as numbers with no name.
+    /// <see cref="FuzzyRegexOptions.Unicode"/> is therefore on every pattern that named no
+    /// encoding, because upstream puts it there.
     /// </remarks>
     public FuzzyRegexOptions Options => (FuzzyRegexOptions)(_compiled.Flags & ~_unexposedFlags);
 
@@ -580,6 +582,10 @@ public sealed class FuzzyRegex
     /// <param name="evaluator">Computes each replacement, or <see langword="null"/> for a template.</param>
     /// <param name="isFormat">Whether the template is a <c>str.format</c> one (upstream's <c>RE_SUBF</c>).</param>
     /// <param name="count">The most replacements to make, or a negative number for no limit.</param>
+    /// <param name="beginning">Where in the subject replacing may start. Upstream's <c>pos</c>.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, or <c>-1</c> for the rest of it.
+    /// </param>
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <param name="timeout">The call's own time budget, or <see langword="null"/> for the pattern's.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
@@ -590,6 +596,8 @@ public sealed class FuzzyRegex
         MatchEvaluator? evaluator,
         bool isFormat,
         int count,
+        int beginning,
+        int length,
         out int replacements,
         TimeSpan? timeout,
         CancellationToken cancellationToken
@@ -601,9 +609,13 @@ public sealed class FuzzyRegex
             ArgumentNullException.ThrowIfNull(template);
         }
 
+        (int start, int end) = Limits(input, beginning, length);
+
         return Engine.Substitution.Subx(
             this,
             input,
+            start,
+            end,
             template,
             evaluator,
             isFormat,
@@ -833,6 +845,72 @@ public sealed class FuzzyRegex
         return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped, partial, limits));
     }
 
+    /// <summary>
+    /// Finds every match in the given part of the subject, one at a time. The lazy twin of
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>, and what
+    /// upstream's <c>finditer</c> is: a scanner the caller pulls from.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="beginning">Where in the subject to start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject to consider, in UTF-16 code units, or <c>-1</c> for the rest of it.
+    /// </param>
+    /// <param name="overlapped">Whether matches may overlap. Upstream's <c>overlapped=True</c>.</param>
+    /// <param name="partial">
+    /// Whether the walk may end with a partial match. Upstream's <c>finditer(partial=True)</c>:
+    /// the partial is yielded like any other match and is always the last one.
+    /// </param>
+    /// <param name="timeout">
+    /// How long ONE step may run, or <see langword="null"/> for the pattern's budget. See the
+    /// remarks: this is not the whole walk's budget, which is what
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/> takes.
+    /// </param>
+    /// <param name="cancellationToken">Stops the walk when it is cancelled.</param>
+    /// <returns>The matches, leftmost first, found as they are asked for.</returns>
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// A step ran out of time.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// Yields the same matches, in the same order, as
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>; the
+    /// difference is that it finds each one only when asked, so
+    /// <c>EnumerateMatches(huge).Take(2)</c> costs two matches rather than all of them. Use it for
+    /// an early exit or an unbounded stream, and <c>Matches</c> when you want a
+    /// <see cref="MatchCollection.Count"/> - which no lazy walk can answer without running to the
+    /// end anyway.
+    /// </para>
+    /// <para>
+    /// <b>Two consequences of being lazy, both worth knowing before you pick it.</b> A step builds
+    /// its own engine state, so a walk costs one pass over the subject per match where
+    /// <c>Matches</c> costs one in total; and because each state starts its own clock,
+    /// <paramref name="timeout"/> bounds each step rather than the walk. A caller who needs the
+    /// whole walk bounded should time it themselves, or use <c>Matches</c>.
+    /// </para>
+    /// </remarks>
+    public IEnumerable<Match> EnumerateMatches(
+        string input,
+        int beginning = 0,
+        int length = -1,
+        bool overlapped = false,
+        bool partial = false,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        // Resolved BEFORE the iterator starts, so a bad timeout or an already-cancelled token is
+        // reported from the call rather than from the first MoveNext. An iterator method's body
+        // does not run until then, and "the argument you passed was invalid" arriving at the
+        // foreach instead of at the call is the classic deferred-execution trap.
+        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
+        (int start, int end) = Limits(input, beginning, length);
+
+        return Engine.Iteration.Enumerate(this, input, start, end, overlapped, partial, limits);
+    }
+
     /// <summary>Counts the matches in the given part of the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="beginning">Where in the subject to start, in UTF-16 code units.</param>
@@ -890,6 +968,11 @@ public sealed class FuzzyRegex
     /// for why this is not <c>Regex</c>'s <c>$1</c> language.
     /// </param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it. See <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/> for what the slice means.
+    /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -902,9 +985,23 @@ public sealed class FuzzyRegex
         string input,
         string replacement,
         int count = -1,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => Subx(input, replacement, evaluator: null, isFormat: false, count, out _, timeout, cancellationToken);
+    ) =>
+        Subx(
+            input,
+            replacement,
+            evaluator: null,
+            isFormat: false,
+            count,
+            beginning,
+            length,
+            out _,
+            timeout,
+            cancellationToken
+        );
 
     /// <summary>
     /// Replaces matches with an expanded replacement template, reporting how many were replaced.
@@ -913,25 +1010,62 @@ public sealed class FuzzyRegex
     /// <param name="input">The subject to search.</param>
     /// <param name="replacement">The replacement template.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it.
+    /// </param>
     /// <param name="replacements">Receives how many replacements were made.</param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
     /// <exception cref="FuzzyRegexParseException">The template is not valid.</exception>
+    /// <remarks>
+    /// <b>What the slice means.</b> Matching happens only inside it, exactly as it does for
+    /// <see cref="Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/> - so an
+    /// anchor or a lookbehind at the edge sees the slice's start as the start - and the text
+    /// OUTSIDE it is copied through unchanged rather than dropped. That is upstream's
+    /// <c>sub(pos, endpos)</c>: measured on <c>regex</c> 2026.9.10, 2026-09-16,
+    /// <c>regex.compile('a').sub('X', 'aaaaa', pos=1, endpos=3)</c> is <c>'aXXaa'</c>, and
+    /// <c>regex.compile('^a').sub('X', 'aaaaa', pos=1)</c> is <c>'aaaaa'</c> because the anchor
+    /// cannot reach position 1. The C says so as well: <c>pattern_subx</c>'s trailing segment runs
+    /// to <c>str_info.length</c> rather than to the slice end
+    /// (<c>upstream/src/_regex.c:22092-22097</c>).
+    /// </remarks>
+    // The slice comes after `replacements` here and before it in every other overload, because an
+    // `out` parameter has to stay where it was: moving it would be a source break for no gain.
     public string Replace(
         string input,
         string replacement,
         int count,
         out int replacements,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        Subx(input, replacement, evaluator: null, isFormat: false, count, out replacements, timeout, cancellationToken);
+        Subx(
+            input,
+            replacement,
+            evaluator: null,
+            isFormat: false,
+            count,
+            beginning,
+            length,
+            out replacements,
+            timeout,
+            cancellationToken
+        );
 
     /// <summary>Replaces matches with text computed per match.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="evaluator">Computes the replacement for each match.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it. See <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/> for what the slice means.
+    /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -939,30 +1073,8 @@ public sealed class FuzzyRegex
         string input,
         MatchEvaluator evaluator,
         int count = -1,
-        TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(evaluator);
-        return Subx(input, template: null, evaluator, isFormat: false, count, out _, timeout, cancellationToken);
-    }
-
-    /// <summary>
-    /// Replaces matches with text computed per match, reporting how many were replaced. Upstream
-    /// <c>Pattern.subn</c> with a callable.
-    /// </summary>
-    /// <param name="input">The subject to search.</param>
-    /// <param name="evaluator">Computes the replacement for each match.</param>
-    /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
-    /// <param name="replacements">Receives how many replacements were made.</param>
-    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
-    /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
-    /// <returns>The subject with the matches replaced.</returns>
-    public string Replace(
-        string input,
-        MatchEvaluator evaluator,
-        int count,
-        out int replacements,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     )
@@ -974,6 +1086,50 @@ public sealed class FuzzyRegex
             evaluator,
             isFormat: false,
             count,
+            beginning,
+            length,
+            out _,
+            timeout,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Replaces matches with text computed per match, reporting how many were replaced. Upstream
+    /// <c>Pattern.subn</c> with a callable.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="evaluator">Computes the replacement for each match.</param>
+    /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
+    /// <param name="replacements">Receives how many replacements were made.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it.
+    /// </param>
+    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
+    /// <returns>The subject with the matches replaced.</returns>
+    public string Replace(
+        string input,
+        MatchEvaluator evaluator,
+        int count,
+        out int replacements,
+        int beginning = 0,
+        int length = -1,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(evaluator);
+        return Subx(
+            input,
+            template: null,
+            evaluator,
+            isFormat: false,
+            count,
+            beginning,
+            length,
             out replacements,
             timeout,
             cancellationToken
@@ -1017,12 +1173,64 @@ public sealed class FuzzyRegex
     }
 
     /// <summary>
+    /// Splits the subject around the matches, producing the pieces one at a time. Upstream
+    /// <c>splititer</c>; the lazy twin of
+    /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="input">The subject to split.</param>
+    /// <param name="maxSplits">The most splits to make, or <c>-1</c> for no limit.</param>
+    /// <param name="timeout">
+    /// How long ONE step may run, or <see langword="null"/> for the pattern's budget. Per step,
+    /// for the reason
+    /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// gives.
+    /// </param>
+    /// <param name="cancellationToken">Stops the split when it is cancelled.</param>
+    /// <returns>
+    /// The same pieces, in the same order, that
+    /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/> returns - including the
+    /// <see langword="null"/> where a capturing group took no part in a match, and including a
+    /// reverse pattern's back-to-front order, which upstream does not undo. Verified against
+    /// upstream 2026-09-16: <c>list(regex.compile('(?r)x').splititer('xaxbxc'))</c> and
+    /// <c>regex.compile('(?r)x').split('xaxbxc')</c> are both <c>['c', 'b', 'a', '']</c>.
+    /// </returns>
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// A step ran out of time.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// There is no <c>beginning</c>/<c>length</c> pair here, because
+    /// <see cref="Split(string, int, TimeSpan?, CancellationToken)"/> has none and upstream has
+    /// none: <c>pattern_split</c>'s keyword list is <c>string, maxsplit, concurrent, timeout</c>,
+    /// so a split is always of the whole subject.
+    /// </remarks>
+    public IEnumerable<string?> EnumerateSplits(
+        string input,
+        int maxSplits = -1,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        // Resolved before the iterator starts, as EnumerateMatches does and for the same reason.
+        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
+
+        return Engine.Iteration.EnumerateSplits(this, input, maxSplits, limits);
+    }
+
+    /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template. Upstream
-    /// <c>Pattern.subf</c>; see <see cref="ReplaceFormat(string, string, string, FuzzyRegexOptions, TimeSpan?, CancellationToken)"/>.
+    /// <c>Pattern.subf</c>; see <see cref="ReplaceFormat(string, string, string, FuzzyRegexOptions, int, int, TimeSpan?, CancellationToken)"/>.
     /// </summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="format">The format template.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it. See <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/> for what the slice means.
+    /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -1030,9 +1238,23 @@ public sealed class FuzzyRegex
         string input,
         string format,
         int count = -1,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => Subx(input, format, evaluator: null, isFormat: true, count, out _, timeout, cancellationToken);
+    ) =>
+        Subx(
+            input,
+            format,
+            evaluator: null,
+            isFormat: true,
+            count,
+            beginning,
+            length,
+            out _,
+            timeout,
+            cancellationToken
+        );
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, reporting how many were
@@ -1042,6 +1264,11 @@ public sealed class FuzzyRegex
     /// <param name="format">The format template.</param>
     /// <param name="count">The most replacements to make, or <c>-1</c> for no limit.</param>
     /// <param name="replacements">Receives how many replacements were made.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, in UTF-16 code units, or <c>-1</c> for the rest
+    /// of it.
+    /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -1050,9 +1277,23 @@ public sealed class FuzzyRegex
         string format,
         int count,
         out int replacements,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => Subx(input, format, evaluator: null, isFormat: true, count, out replacements, timeout, cancellationToken);
+    ) =>
+        Subx(
+            input,
+            format,
+            evaluator: null,
+            isFormat: true,
+            count,
+            beginning,
+            length,
+            out replacements,
+            timeout,
+            cancellationToken
+        );
 
     /// <summary>Whether the pattern matches anywhere in the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -1171,6 +1412,56 @@ public sealed class FuzzyRegex
             cancellationToken: cancellationToken
         );
 
+    /// <summary>
+    /// Finds every match in the subject, one at a time. Upstream <c>regex.finditer</c>; the lazy
+    /// twin of <see cref="Matches(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}}, TimeSpan?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="pattern">The pattern to apply.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">
+    /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
+    /// name, or <see langword="null"/> when the pattern references none.
+    /// </param>
+    /// <param name="timeout">How long one step may run, or <see langword="null"/> for no limit.</param>
+    /// <param name="cancellationToken">Stops the walk when it is cancelled.</param>
+    /// <returns>The matches, leftmost first, found as they are asked for.</returns>
+    public static IEnumerable<Match> EnumerateMatches(
+        string input,
+        string pattern,
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).EnumerateMatches(
+            input,
+            timeout: timeout,
+            cancellationToken: cancellationToken
+        );
+
+    /// <summary>
+    /// Splits the subject around the matches, producing the pieces one at a time. Upstream
+    /// <c>regex.splititer</c>.
+    /// </summary>
+    /// <param name="input">The subject to split.</param>
+    /// <param name="pattern">The pattern to split on.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="timeout">How long one step may run, or <see langword="null"/> for no limit.</param>
+    /// <param name="cancellationToken">Stops the split when it is cancelled.</param>
+    /// <returns>
+    /// The pieces, as <see cref="Split(string, string, FuzzyRegexOptions, TimeSpan?, CancellationToken)"/>
+    /// returns them.
+    /// </returns>
+    public static IEnumerable<string?> EnumerateSplits(
+        string input,
+        string pattern,
+        FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        new FuzzyRegex(pattern, options).EnumerateSplits(input, timeout: timeout, cancellationToken: cancellationToken);
+
     /// <summary>Counts the matches in the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
@@ -1193,6 +1484,11 @@ public sealed class FuzzyRegex
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="replacement">The replacement template.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, or <c>-1</c> for the rest of it. See
+    /// <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/>.
+    /// </param>
     /// <param name="timeout">How long the operation may run, or <see langword="null"/> for no limit.</param>
     /// <param name="cancellationToken">Stops the operation when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -1204,12 +1500,16 @@ public sealed class FuzzyRegex
         string pattern,
         string replacement,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
         new FuzzyRegex(pattern, options).Replace(
             input,
             replacement,
+            beginning: beginning,
+            length: length,
             timeout: timeout,
             cancellationToken: cancellationToken
         );
@@ -1221,6 +1521,11 @@ public sealed class FuzzyRegex
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="evaluator">Computes the replacement for each match.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, or <c>-1</c> for the rest of it. See
+    /// <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/>.
+    /// </param>
     /// <param name="timeout">How long the operation may run, or <see langword="null"/> for no limit.</param>
     /// <param name="cancellationToken">Stops the operation when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -1229,12 +1534,16 @@ public sealed class FuzzyRegex
         string pattern,
         MatchEvaluator evaluator,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
         new FuzzyRegex(pattern, options).Replace(
             input,
             evaluator,
+            beginning: beginning,
+            length: length,
             timeout: timeout,
             cancellationToken: cancellationToken
         );
@@ -1242,13 +1551,18 @@ public sealed class FuzzyRegex
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, where <c>{0}</c> is the
     /// whole match and <c>{1}</c> is group 1. Upstream <c>regex.subf</c>. This is a different
-    /// templating language from the one <see cref="Replace(string, string, int, TimeSpan?, CancellationToken)"/> takes, not a
+    /// templating language from the one <see cref="Replace(string, string, int, int, int, TimeSpan?, CancellationToken)"/> takes, not a
     /// formatting option on it.
     /// </summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
     /// <param name="format">The format template.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="beginning">Where in the subject replacing may start, in UTF-16 code units.</param>
+    /// <param name="length">
+    /// How much of the subject may be replaced in, or <c>-1</c> for the rest of it. See
+    /// <see cref="Replace(string, string, int, out int, int, int, TimeSpan?, CancellationToken)"/>.
+    /// </param>
     /// <param name="timeout">How long the operation may run, or <see langword="null"/> for no limit.</param>
     /// <param name="cancellationToken">Stops the operation when it is cancelled.</param>
     /// <returns>The subject with the matches replaced.</returns>
@@ -1257,12 +1571,16 @@ public sealed class FuzzyRegex
         string pattern,
         string format,
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
+        int beginning = 0,
+        int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
         new FuzzyRegex(pattern, options).ReplaceFormat(
             input,
             format,
+            beginning: beginning,
+            length: length,
             timeout: timeout,
             cancellationToken: cancellationToken
         );

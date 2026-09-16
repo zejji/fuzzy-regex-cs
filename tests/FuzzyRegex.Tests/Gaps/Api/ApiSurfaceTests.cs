@@ -191,18 +191,20 @@ public sealed class ApiSurfaceTests
     [Test]
     public void Options_hides_the_upstream_flags_this_port_does_not_expose()
     {
-        // upstream/regex/_main.py lines 570-574 OR UNICODE (0x20) into every str pattern's flags,
-        // and the version bit is always added, so the raw resolved flags for "a" are 0x4120 under
-        // this port's Version1 default: UNICODE is the 0x20 with no name in FuzzyRegexOptions, and
-        // what a caller sees is the version and the FullCase it implies.
-        new FuzzyRegex("a")
+        // The three still hidden are LOCALE, DEBUG and TEMPLATE; ASCII, UNICODE and WORD became
+        // named members in S53b. None of the three hidden ones is set by a plain compile, so the
+        // way to see the masking is to set one: (?L) turns LOCALE (0x4) on, and it must not come
+        // back out as a number with no name.
+        new FuzzyRegex("(?L)a")
             .Options.Should()
             .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
 
-        // The same masking under upstream's version, where the raw flags are 0x2020.
-        new FuzzyRegex("a", FuzzyRegexOptions.Version0)
+        // And the unmasked bits are reported in full: upstream/regex/_main.py lines 570-574 OR
+        // UNICODE (0x20) into every str pattern's flags, and the version bit is always added, so
+        // the raw resolved flags for "a" are 0x4120 under this port's Version1 default.
+        new FuzzyRegex("a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Version0);
+            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.Unicode);
     }
 
     [Test]
@@ -285,10 +287,43 @@ public sealed class ApiSurfaceTests
         surface
             .GetMethod(
                 nameof(FuzzyRegex.ReplaceFormat),
-                [typeof(string), typeof(string), typeof(int), typeof(TimeSpan?), typeof(CancellationToken)]
+                [
+                    typeof(string),
+                    typeof(string),
+                    typeof(int),
+                    typeof(int),
+                    typeof(int),
+                    typeof(TimeSpan?),
+                    typeof(CancellationToken),
+                ]
             )
             .Should()
             .NotBeNull("upstream subf uses str.format templates, not $1 templates");
+
+        // S53b's lazy twins: upstream's finditer and splititer are scanners, and nothing else on
+        // this surface can express "find the next one only when asked".
+        surface
+            .GetMethod(
+                nameof(FuzzyRegex.EnumerateMatches),
+                [
+                    typeof(string),
+                    typeof(int),
+                    typeof(int),
+                    typeof(bool),
+                    typeof(bool),
+                    typeof(TimeSpan?),
+                    typeof(CancellationToken),
+                ]
+            )
+            .Should()
+            .NotBeNull("upstream finditer is lazy and Matches is not");
+        surface
+            .GetMethod(
+                nameof(FuzzyRegex.EnumerateSplits),
+                [typeof(string), typeof(int), typeof(TimeSpan?), typeof(CancellationToken)]
+            )
+            .Should()
+            .NotBeNull("upstream splititer is lazy and Split is not");
 
         typeof(Match)
             .GetProperty(nameof(Match.LastGroupNumber))

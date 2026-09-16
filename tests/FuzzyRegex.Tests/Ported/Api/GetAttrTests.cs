@@ -23,14 +23,15 @@ public sealed class GetAttrTests
     [Property("Upstream", "RegexTests.test_getattr#2")]
     public void Options_reports_the_inline_flag_and_the_default_version()
     {
-        // Upstream also ORs in regex.U; incidental for a str pattern, which is Unicode by
-        // default. regex.DEFAULT_VERSION resolves to VERSION0 (regex/_main.py:443), which is our
-        // Version0 - verified against the local oracle 2026-08-29: hex(regex.DEFAULT_VERSION) is
-        // 0x2000, the same bit as FuzzyRegexOptions.Version0.
+        // Upstream's answer exactly, since S53b exposed UNICODE: regex.compile('(?i)(a)(b)').flags
+        // is 0x2022 - IGNORECASE, the UNICODE that _main._compile ORs into every str pattern, and
+        // DEFAULT_VERSION. regex.DEFAULT_VERSION resolves to VERSION0 (regex/_main.py:443), which
+        // is our Version0 - verified against the local oracle 2026-08-29: hex(regex.DEFAULT_VERSION)
+        // is 0x2000, the same bit as FuzzyRegexOptions.Version0.
         Upstream
             .Compile("(?i)(a)(b)")
             .Options.Should()
-            .Be(FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0);
+            .Be(FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Unicode | FuzzyRegexOptions.Version0);
     }
 
     // NOT PORTED: regex.compile(b"(?i)(a)(b)").flags - a bytes pattern; our port is char-based.

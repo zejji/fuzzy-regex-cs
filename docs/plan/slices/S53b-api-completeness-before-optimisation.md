@@ -7,6 +7,9 @@ delivers: []
 
 # S53b - API completeness before optimisation
 
+**Per-sitting record: `docs/plan/slices/notes/S53b-sittings.md`.** Sitting 1 landed all five scope
+items green and left only the independent verifier; read that file before re-reading this spec.
+
 Owner decision 2026-09-16 after the Fable review of `docs/DIVERGENCES.md`'s "Upstream members with
 no port equivalent" (`docs/plan/2026-09-16-unported-members-review.md`). Four additive public-API
 changes that are free before 1.0, awkward after, and that S54's baselines must measure in their

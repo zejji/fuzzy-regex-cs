@@ -96,6 +96,14 @@ public sealed class TimeoutAndCancellationTests
             case nameof(FuzzyRegex.Split):
                 _ = pattern.Split(input, timeout: timeout);
                 break;
+            // Enumerated to the end, because a lazy walk does no work until it is pulled from and
+            // the budget it carries is a per-step one (S53b).
+            case nameof(FuzzyRegex.EnumerateMatches):
+                _ = pattern.EnumerateMatches(input, timeout: timeout).ToList();
+                break;
+            case nameof(FuzzyRegex.EnumerateSplits):
+                _ = pattern.EnumerateSplits(input, timeout: timeout).ToList();
+                break;
             case "IsMatchSpan":
                 _ = pattern.IsMatch(input.AsSpan(), timeout);
                 break;
@@ -161,6 +169,12 @@ public sealed class TimeoutAndCancellationTests
             case nameof(FuzzyRegex.Split):
                 _ = pattern.Split(input, cancellationToken: token);
                 break;
+            case nameof(FuzzyRegex.EnumerateMatches):
+                _ = pattern.EnumerateMatches(input, cancellationToken: token).ToList();
+                break;
+            case nameof(FuzzyRegex.EnumerateSplits):
+                _ = pattern.EnumerateSplits(input, cancellationToken: token).ToList();
+                break;
             case "IsMatchSpan":
                 _ = pattern.IsMatch(input.AsSpan(), cancellationToken: token);
                 break;
@@ -188,6 +202,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.ReplaceFormat))]
     [Arguments("ReplaceFormatCounted")]
     [Arguments(nameof(FuzzyRegex.Split))]
+    [Arguments(nameof(FuzzyRegex.EnumerateMatches))]
+    [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
     public void A_per_call_timeout_fires_on_every_input_dependent_method(string method)
@@ -216,6 +232,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.ReplaceFormat))]
     [Arguments("ReplaceFormatCounted")]
     [Arguments(nameof(FuzzyRegex.Split))]
+    [Arguments(nameof(FuzzyRegex.EnumerateMatches))]
+    [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
     public void Cancellation_stops_every_input_dependent_method(string method)

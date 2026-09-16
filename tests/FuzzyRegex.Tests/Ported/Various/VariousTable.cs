@@ -23,7 +23,7 @@ internal static class VariousTable
 
         if (string.Equals(spec, "*", StringComparison.Ordinal))
         {
-            return [.. match.Groups.Select(Value)];
+            return [.. match.Groups.Values.Select(Value)];
         }
 
         return

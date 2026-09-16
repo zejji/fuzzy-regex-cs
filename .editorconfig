@@ -199,6 +199,12 @@ dotnet_diagnostic.S1313.severity = none
 ; no mutable non-public state has crept into the public types, so the accessibility bypass is the
 ; test rather than a risk in it.
 dotnet_diagnostic.S3011.severity = none
+; CA1859 wants a concrete type wherever an interface would cost a dispatch. That is right for
+; production code and backwards for a test whose subject IS an interface implementation:
+; GroupDictionaryViewTests (S53b) exists to check GroupCollection's IReadOnlyDictionary face, and
+; taking the rule's advice there would replace every call under test with the class's own members.
+; Scoped to test code only; src/ still obeys it.
+dotnet_diagnostic.CA1859.severity = none
 
 ; ==========================================================================
 ; Ported table tests only.

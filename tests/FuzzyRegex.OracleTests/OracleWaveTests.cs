@@ -204,6 +204,77 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void The_lazy_walks_answer_exactly_what_the_eager_ones_do()
+    {
+        // S53b's `EnumerateMatches` and `EnumerateSplits` promise the same answer as `Matches` and
+        // `Split`, found as it is asked for. They cannot share an implementation, because the eager
+        // pair keeps ONE engine state across the whole walk and a lazy one cannot - a state owns
+        // rented buffers and an abandoned iterator would never return them - so the two really are
+        // two loops, and "the same answer" is a claim rather than a tautology.
+        //
+        // Upstream is not consulted here, and does not need to be: the eager pair is already
+        // compared against upstream by the wave run above, so an eager-lazy disagreement is a bug
+        // in exactly one of them whichever engine is right. Checked over the wave rather than over
+        // hand-written cases because the shapes that separate the two loops are the awkward ones -
+        // a zero-width match, a `(*SKIP)` that moves the slice, a reversed scan - and a wave holds
+        // thousands of each.
+        OracleWaveFile wave = OracleWave.Load();
+        wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
+
+        List<string> disagreements = [];
+        int compared = 0;
+
+        foreach (OracleRow row in wave.Rows)
+        {
+            if (row.Operation is not ("finditer" or "finditer-overlapped" or "split"))
+            {
+                continue;
+            }
+
+            // Skipped for the reason the self-consistency sweep skips them: upstream ran out of
+            // time or of heap, so asking this engine costs a whole RowTimeout for no information.
+            if (row.Expected is TimeoutOutcome or ResourceOutcome)
+            {
+                continue;
+            }
+
+            IOracleOutcome? eager = OracleComparer.Run(row);
+            IOracleOutcome? lazily = OracleComparer.Run(row, lazy: true);
+
+            compared++;
+
+            // Compared as their rendered descriptions, which is what a reader has to diff anyway:
+            // the outcome records hold lists, so record equality would be reference equality and
+            // would report every row as different.
+            string first = OracleWave.Describe(row, eager);
+            string second = OracleWave.Describe(row, lazily);
+
+            if (!string.Equals(first, second, StringComparison.Ordinal))
+            {
+                disagreements.Add(
+                    $"eager:{Environment.NewLine}{first}{Environment.NewLine}lazy:{Environment.NewLine}{second}"
+                );
+            }
+        }
+
+        compared.Should().BeGreaterThan(0, "a wave with no iteration row in it discriminates nothing");
+
+        // Counted rather than dumped, as the wave run's own assertion is: a break in the lazy walk
+        // disagrees on hundreds of rows at once, and the number is the measurement a control run
+        // needs while the whole list is unreadable.
+        disagreements
+            .Count.Should()
+            .Be(
+                0,
+                "the lazy walk answered differently on {0} of {1} iteration rows. First:{2}{3}",
+                disagreements.Count,
+                compared,
+                Environment.NewLine,
+                disagreements.Count > 0 ? disagreements[0] : ""
+            );
+    }
+
+    [Test]
     public void The_self_consistency_checker_fires_on_a_contradiction_and_not_on_a_narrowing()
     {
         // THE SWEEP ABOVE CANNOT TEST THIS. It runs the checker over whatever a wave happens to

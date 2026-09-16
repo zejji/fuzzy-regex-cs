@@ -14,10 +14,10 @@ namespace Fuzzy.Text.RegularExpressions;
 /// <para>
 /// Where a .NET name and an upstream name exist for the same behaviour, the .NET name is used
 /// and the upstream spelling is given here, so a <c>System.Text.RegularExpressions</c> user needs
-/// no new vocabulary. Upstream flags this port does not yet expose - <c>ASCII</c>, <c>LOCALE</c>,
-/// <c>UNICODE</c>, <c>WORD</c>, <c>DEBUG</c> and <c>TEMPLATE</c> - are simply absent rather than
-/// present and ignored. Every one of them can still be set from inside a pattern, as
-/// <c>(?a)</c>, <c>(?L)</c>, <c>(?u)</c> and <c>(?w)</c>.
+/// no new vocabulary. Upstream flags this port does not expose - <c>LOCALE</c>, <c>DEBUG</c> and
+/// <c>TEMPLATE</c> - are simply absent rather than present and ignored. <c>LOCALE</c> can still be
+/// set from inside a pattern, as <c>(?L)</c>; it is left out here because it asks for the C
+/// library's current locale, which .NET has no equivalent of and which no oracle row could pin.
 /// </para>
 /// <para>
 /// There is no <c>ExplicitCapture</c>. It has no upstream counterpart, so nothing in the
@@ -48,16 +48,60 @@ public enum FuzzyRegexOptions
     Singleline = 0x10,
 
     /// <summary>
+    /// The character classes <c>\w</c>, <c>\W</c>, <c>\s</c>, <c>\S</c>, <c>\d</c>, <c>\D</c> and
+    /// the word boundaries <c>\b</c>, <c>\B</c> cover the whole of Unicode. Upstream
+    /// <c>UNICODE</c> / <c>U</c>, and its default for a text pattern; the inline form is
+    /// <c>(?u)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Already on.</b> Upstream's <c>_main._compile</c> ORs it into every text pattern that
+    /// names no encoding (<c>upstream/regex/_main.py</c> lines 570-574), so this port does too and
+    /// <see cref="FuzzyRegex.Options"/> reports it on every pattern. It is exposed so that a
+    /// caller can say so explicitly and read it back, not because passing it changes anything.
+    /// Combining it with <see cref="Ascii"/> is rejected, as upstream rejects it.
+    /// </remarks>
+    Unicode = 0x20,
+
+    /// <summary>
     /// Unescaped whitespace in the pattern is ignored and <c>#</c> starts a comment. Upstream
     /// <c>VERBOSE</c> / <c>X</c>.
     /// </summary>
     IgnorePatternWhitespace = 0x40,
 
     /// <summary>
+    /// The character classes <c>\w</c>, <c>\W</c>, <c>\s</c>, <c>\S</c>, <c>\d</c>, <c>\D</c> and
+    /// the word boundaries <c>\b</c>, <c>\B</c> cover ASCII only, so everything above U+007F is
+    /// answered as if it were unassigned. Upstream <c>ASCII</c> / <c>A</c>; the inline form is
+    /// <c>(?a)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Mutually incompatible with <see cref="Unicode"/> - and with upstream's <c>LOCALE</c>, which
+    /// this port does not expose - so passing both throws
+    /// <see cref="FuzzyRegexParseException"/> with upstream's own message, "ASCII, LOCALE and
+    /// UNICODE flags are mutually incompatible".
+    /// </remarks>
+    Ascii = 0x80,
+
+    /// <summary>
     /// Search backwards, from the end of the subject towards the start. Upstream
     /// <c>REVERSE</c> / <c>R</c>.
     /// </summary>
     RightToLeft = 0x400,
+
+    /// <summary>
+    /// <c>\b</c> and <c>\B</c> use the default Unicode word-boundary rules (UAX #29) instead of
+    /// the <c>\w</c>-to-<c>\W</c> transition. Upstream <c>WORD</c> / <c>W</c>; the inline form is
+    /// <c>(?w)</c>.
+    /// </summary>
+    /// <remarks>
+    /// The rules join a word across an apostrophe and across other characters a simple
+    /// <c>\w</c> test would break on, so this changes what matches, not just how fast.
+    /// Measured against <c>regex</c> 2026.9.10 on 2026-09-16:
+    /// <c>regex.findall(r'\b\w+\b', "can't", regex.WORD)</c> is <c>[]</c> where the same call
+    /// without the flag is <c>['can', 't']</c> - UAX #29 keeps <c>can't</c> whole, so no boundary
+    /// sits where <c>\w+</c> has to stop.
+    /// </remarks>
+    Word = 0x800,
 
     /// <summary>
     /// Find the best fuzzy match rather than the first one. Upstream <c>BESTMATCH</c> / <c>B</c>.

@@ -97,7 +97,12 @@ public sealed class PatternPropertyTests
         // FullCase that version implies.
         new FuzzyRegex("(?s)a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Singleline | FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+            .Be(
+                FuzzyRegexOptions.Singleline
+                    | FuzzyRegexOptions.Version1
+                    | FuzzyRegexOptions.FullCase
+                    | FuzzyRegexOptions.Unicode
+            );
     }
 
     [Test]
@@ -109,21 +114,22 @@ public sealed class PatternPropertyTests
         //
         // Version 1 also turns FullCase on, because DEFAULT_FLAGS maps VERSION1 to FULLCASE
         // (upstream/regex/_regex_core.py line 167). Verified against the local oracle 2026-08-30:
-        // regex.compile('a', regex.V1).flags is 0x4120 - FULLCASE, VERSION1 and the UNICODE that
-        // Options masks off - against 0x2020 with no flags at all.
+        // regex.compile('a', regex.V1).flags is 0x4120 - FULLCASE, VERSION1 and UNICODE - against
+        // 0x2020 with no flags at all. Since S53b all three bits have a name here, so this is
+        // upstream's number in full.
         new FuzzyRegex("a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.Unicode);
 
         // The caller who wants upstream's reading says so, and gets upstream's flags exactly.
         new FuzzyRegex("a", FuzzyRegexOptions.Version0)
             .Options.Should()
-            .Be(FuzzyRegexOptions.Version0);
+            .Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.Unicode);
 
         // And so does a pattern that asks for it inline.
         new FuzzyRegex("(?V0)a")
             .Options.Should()
-            .Be(FuzzyRegexOptions.Version0);
+            .Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.Unicode);
     }
 
     [Test]

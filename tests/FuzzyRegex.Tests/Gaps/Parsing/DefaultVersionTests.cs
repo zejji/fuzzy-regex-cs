@@ -51,7 +51,9 @@ public sealed class DefaultVersionTests
 
     [Test]
     public void A_pattern_that_names_no_version_gets_Version1_and_the_FullCase_it_implies() =>
-        new FuzzyRegex("a").Options.Should().Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase);
+        new FuzzyRegex("a")
+            .Options.Should()
+            .Be(FuzzyRegexOptions.Version1 | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.Unicode);
 
     /// <summary>
     /// The three ways to ask for upstream's version 0 all mean the same thing, which is the
@@ -64,7 +66,7 @@ public sealed class DefaultVersionTests
     [Arguments("(?V0)a", FuzzyRegexOptions.None)]
     [Arguments("(?V0)a", FuzzyRegexOptions.Version0)]
     public void Version_0_means_simple_folding_however_it_is_asked_for(string pattern, FuzzyRegexOptions options) =>
-        new FuzzyRegex(pattern, options).Options.Should().Be(FuzzyRegexOptions.Version0);
+        new FuzzyRegex(pattern, options).Options.Should().Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.Unicode);
 
     /// <summary>
     /// The same thing where a user would notice it: <c>ß</c> against <c>ss</c> is the
@@ -135,7 +137,7 @@ public sealed class DefaultVersionTests
     /// </summary>
     [Test]
     public void A_version_0_flag_after_the_first_item_resolves_the_same_way() =>
-        new FuzzyRegex("a(?V0)").Options.Should().Be(FuzzyRegexOptions.Version0);
+        new FuzzyRegex("a(?V0)").Options.Should().Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.Unicode);
 
     /// <summary>
     /// The retry must not lose a global flag the pattern set alongside the version, which is the
@@ -143,7 +145,9 @@ public sealed class DefaultVersionTests
     /// </summary>
     [Test]
     public void A_version_0_flag_beside_another_global_flag_keeps_both() =>
-        new FuzzyRegex("(?V0)(?r)a").Options.Should().Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.RightToLeft);
+        new FuzzyRegex("(?V0)(?r)a")
+            .Options.Should()
+            .Be(FuzzyRegexOptions.Version0 | FuzzyRegexOptions.RightToLeft | FuzzyRegexOptions.Unicode);
 
     /// <summary>
     /// The loud edge of the new default: an unescaped <c>[</c> inside a set is a literal under

@@ -459,7 +459,7 @@ public sealed class ThreadSafetyTests
             typeof(GroupCollection),
             typeof(CaptureCollection),
             typeof(MatchCollection),
-            .. match.Groups.Select(static group => group.GetType()),
+            .. match.Groups.Values.Select(static group => group.GetType()),
         ];
 
         return types.Distinct().SelectMany(type => ObjectGraph.InstanceFields(type).Select(field => (field, type)));

@@ -943,11 +943,17 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
     sliced = row.get("codepointSlice")
     pos = sliced[0] if sliced is not None else row.get("pos")
     endpos = sliced[1] if sliced is not None else row.get("endpos")
+    # `sub` and `subf` joined the three single-match operations in S53b, when `Replace` and
+    # `ReplaceFormat` gained a `beginning`/`length` pair. `split` still cannot take one, because
+    # upstream's `pattern_split` has no pos/endpos at all - its kwlist is string, maxsplit,
+    # concurrent, timeout - and neither do the `finditer` shapes, which this recorder asks through
+    # `findall`-shaped calls.
+    _SLICEABLE = OPERATIONS + SUB_OPERATIONS
     if pos is not None or endpos is not None:
-        if operation not in OPERATIONS:
+        if operation not in _SLICEABLE:
             raise SystemExit(
                 f"operation {operation!r} carries no pos/endpos in this recorder (pattern "
-                f"{pattern!r}); only {OPERATIONS} do."
+                f"{pattern!r}); only {_SLICEABLE} do."
             )
         pos = 0 if pos is None else int(pos)
         endpos = len(subject) if endpos is None else int(endpos)
@@ -1069,9 +1075,13 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
 
     if operation in SUB_OPERATIONS:
         method = compiled.subn if operation == "sub" else compiled.subfn
+        # In CODEPOINTS, as every pos/endpos handed to Python is: `recorded["pos"]` is the UTF-16
+        # translation for the consumer and these two locals are what upstream indexes with. Absent
+        # means the whole subject, which is what `sub`'s own defaults mean.
+        sub_slice = {} if pos is None else {"pos": pos, "endpos": endpos}
         try:
             text, made = method(
-                recorded["template"], subject, count=recorded["count"], timeout=deadline
+                recorded["template"], subject, count=recorded["count"], timeout=deadline, **sub_slice
             )
         except TimeoutError:
             return timed_out()
@@ -2097,9 +2107,27 @@ BOUNDARY_AFFIXES = (
 # The three encodings the word predicates dispatch on. `(?w)` is the only one that reaches
 # `unicode_at_default_boundary` and its WB rules at all; `(?a)` is the only one that reaches
 # `ascii_word_left` / `ascii_word_right`, whose whole difference is that everything above U+007F is
-# answered as unassigned. Written inline rather than as a flags integer so both sides of the oracle
-# read the identical row - FuzzyRegexOptions has no WORD or ASCII member (S24 territory).
+# answered as unassigned.
+#
+# S24 wrote these inline only, because FuzzyRegexOptions had no WORD or ASCII member and a flags
+# integer would have been unaskable on our side. S53b added `Ascii`, `Unicode` and `Word`, so half
+# the flagged rows now ask the SAME question through the flags integer instead - which is the one
+# path the corpus cannot check for WORD, upstream's own suite never passing it as a flag. The two
+# spellings compile to identical bytecode (Gaps/Api/EncodingAndWordOptionTests), so a row that
+# diverges one way and not the other is a finding about the option path.
 BOUNDARY_FLAG_PREFIXES = ("", "(?a)", "(?w)", "(?V1)", "(?V1w)", "(?aw)")
+
+# Each prefix as the flags integer that means the same thing: ASCII 0x80, WORD 0x800, VERSION1
+# 0x100, from upstream's RegexFlag table (upstream/regex/_regex_core.py lines 73-90; re-measured
+# 2026-09-16, hex(regex.ASCII) 0x80, hex(regex.WORD) 0x800).
+BOUNDARY_FLAG_VALUES = {
+    "": 0,
+    "(?a)": 0x80,
+    "(?w)": 0x800,
+    "(?V1)": 0x100,
+    "(?V1w)": 0x100 | 0x800,
+    "(?aw)": 0x80 | 0x800,
+}
 
 # The literal an affix pair is wrapped round. Kept to single characters and short runs so the row is
 # about the predicate rather than about whether the literal happened to be present.
@@ -2260,12 +2288,22 @@ def _generate_boundaries(rng: random.Random, count: int):
 
         # `\m` and `\M` are mrab-regex extensions with no V0/V1 difference, and `(?w)` only changes
         # which opcode `\b` compiles to, so every prefix is legal in front of every shape.
-        pattern = rng.choice(BOUNDARY_FLAG_PREFIXES) + pattern
+        prefix = rng.choice(BOUNDARY_FLAG_PREFIXES)
+
+        # Every other flagged row asks through the flags integer instead of the inline prefix
+        # (S53b). Keyed on the row index rather than on a draw of its own, deliberately: the rng
+        # stream stays exactly what S24 and S26 measured their row shapes against, so this widening
+        # changes which SPELLING a flagged row uses and nothing else about the wave.
+        if prefix and i % 2 == 0:
+            flags = BOUNDARY_FLAG_VALUES[prefix]
+        else:
+            pattern = prefix + pattern
+            flags = 0
 
         yield {
             "generator": "boundaries",
             "pattern": pattern,
-            "flags": 0,
+            "flags": flags,
             "namedLists": {},
             "subject": subject,
             "operation": OPERATIONS[i % len(OPERATIONS)],
@@ -2987,6 +3025,12 @@ MAX_SUB_TEMPLATE_PARTS = 4
 SUB_NARROW_EVERY = 12
 SUB_NARROW_ASTRAL = "\U0001f600"
 
+# How often an ordinary substitution row carries a narrowed slice (S53b). A quarter rather than a
+# half, because the whole-subject rows are the ones the earlier seeds measured and the slice is a
+# widening rather than a replacement: what it adds is the rule that the text outside the slice is
+# copied through, and a quarter of a wave is thousands of rows of it.
+SUB_SLICED_PROBABILITY = 0.25
+
 
 
 def _sub_pattern(rng: random.Random) -> tuple[str, int, list[str]]:
@@ -3131,9 +3175,14 @@ def _generate_substitution(rng: random.Random, count: int):
     matching alone and that is a substitution-specific code path.
 
     Measured by `python tools/record-oracle.py --generator substitution --count 600 --seed 1`,
-    after the last change to this generator: 194 rows replace at least once, 327 replace nothing,
-    79 are rejected by upstream, 250 are subf, and 219 have an astral subject. The `sub` share is
-    the larger one because the narrow arm is always a `sub` row.
+    after the last change to this generator (S53b's slice, 2026-09-16): 158 rows replace at least
+    once, 370 replace nothing, 72 are rejected by upstream, 250 are subf, 247 have an astral
+    subject, and 131 carry a narrowed slice - 96 of those starting past the front of the subject.
+    The `sub` share is the larger one because the narrow arm is always a `sub` row.
+
+    Before the slice the same command gave 194 / 327 / 79 / 250 / 219 with no sliced row at all, so
+    a quarter of the wave is now asking a question the generator could not ask, and the shift in
+    the other five figures is the RNG stream moving rather than the row shapes changing.
 
     Re-taken from scratch after every widening, and that is not ceremony: `SUB_COUNTS` gaining a
     `-1` entry shifts the whole RNG stream, so a figure measured before it describes a wave this
@@ -3156,7 +3205,7 @@ def _generate_substitution(rng: random.Random, count: int):
             else _subf_template(rng, groups, names)
         )
 
-        yield {
+        row = {
             "generator": "substitution",
             "pattern": ("(?r)" + pattern) if i % 2 else pattern,
             "flags": 0,
@@ -3166,6 +3215,25 @@ def _generate_substitution(rng: random.Random, count: int):
             "template": template,
             "count": rng.choice(SUB_COUNTS),
         }
+
+        # A NARROWED SLICE, on about a quarter of the rows (S53b, when `Replace` and
+        # `ReplaceFormat` gained a `beginning`/`length` pair). It is the one argument of upstream's
+        # `sub` this generator could not ask about, and it reaches a rule no other generator does:
+        # a substitution keeps the text OUTSIDE its slice and replaces only inside it, so a slip
+        # that dropped either end would be invisible on a whole-subject row and is a wrong string
+        # here. The min-width shortcut moves with it too - `pattern_subx` compares the pattern's
+        # width against the CLAMPED slice, so a narrow slice takes the shortcut on a pattern the
+        # whole subject would have matched.
+        #
+        # Drawn by codepoint index; `_record_row` translates to UTF-16, so a slice edge never falls
+        # inside a surrogate pair. Not on the narrow arm, which is about the shortcut at full width.
+        if subject and rng.random() < SUB_SLICED_PROBABILITY:
+            lo = rng.randrange(len(subject) + 1)
+            hi = rng.randrange(lo, len(subject) + 1)
+            row["pos"] = lo
+            row["endpos"] = hi
+
+        yield row
 
 
 # --------------------------------------------------------------------------------------------

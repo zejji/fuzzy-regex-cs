@@ -439,7 +439,7 @@ public sealed class RegressionsFuzzyTests
                         @"((brown)|(lazy)){1<=e<=3} ((dog)|(fox)){1<=e<=3}",
                         FuzzyRegexOptions.EnhanceMatch
                     )
-                    .Select(static m => m.Groups.Skip(1).Select(static g => g.Value))
+                    .Select(static m => m.Groups.Values.Skip(1).Select(static g => g.Value))
             )
             .Should()
             .Equal(Equivalence.RowLines(expected));

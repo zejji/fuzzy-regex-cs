@@ -56,7 +56,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = Upstream.Match("WWWi", "^([^z]*(?:WWWi|W))?$");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     [Test]
@@ -65,7 +65,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = Upstream.Match("WWWi", "^([^z]*(?:WWWi|w))?$");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     [Test]
@@ -74,7 +74,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = Upstream.Match("WWWi", "^([^z]*?(?:WWWi|W))?$");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("WWWi");
     }
 
     // Hg issue 220: Misbehavior of group capture with OR operand.
@@ -84,7 +84,7 @@ public sealed class RegressionsGroupTests
     {
         Match m = Upstream.MatchAtStart("easier", @"\w*(ea)\w*|\w*e(?!a)\w*");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("ea");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("ea");
     }
 
     // Hg issue 87: Allow duplicate names of groups.

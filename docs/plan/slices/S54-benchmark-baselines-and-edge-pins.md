@@ -34,7 +34,9 @@ Optimisation is where silent behaviour change is likeliest, so Phase 6 pins two 
   against the baseline and fails on a regression beyond a stated threshold. Phase 7's slices run it.
 - **Edge-case pins** in `Gaps/Engine/OptimiserTrapsTests.cs`: zero-width and empty matches at
   every position including the end; anchors under every flag combination; `MatchTimeout` firing
-  inside a long scan; large inputs (1 MB subject) for `Match`, `Matches`, `Replace`, `Split`;
+  inside a long scan; large inputs (1 MB subject) for `Match`, `Matches`, `EnumerateMatches` -
+  walked to the end AND stopped after two, which is the pair that shows what the per-step state
+  costs and what laziness buys (S53b, `OPTIMISATION-NOTES.md`) - `Replace`, `Split`;
   pathological backtracking (`(a+)+b` on a long `a` run) completing or timing out as documented;
   and the Phase 4 rule's tests named as PERMANENT in the closing notes (`BacktrackingVerbTests`,
   `PartialMatchingTests`, `ReverseMatchingTests`).

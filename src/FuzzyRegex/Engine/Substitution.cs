@@ -32,6 +32,8 @@ internal static class Substitution
     /// </summary>
     /// <param name="regex">Upstream's <c>self</c>: the pattern being substituted with.</param>
     /// <param name="input">The subject.</param>
+    /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
+    /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
     /// <param name="template">The replacement or format template, or <see langword="null"/> when
     /// <paramref name="evaluator"/> is given.</param>
     /// <param name="evaluator">Computes each replacement, or <see langword="null"/> for a template.</param>
@@ -47,6 +49,8 @@ internal static class Substitution
     internal static string Subx(
         FuzzyRegex regex,
         string input,
+        int start,
+        int end,
         string? template,
         MatchEvaluator? evaluator,
         bool isFormat,
@@ -57,10 +61,19 @@ internal static class Substitution
     {
         PatternObject pattern = regex.PatternObject;
 
-        // Upstream takes pos and endpos; this overload set does not, so the slice is the whole
-        // subject and get_limits has nothing to clamp.
-        int start = 0;
-        int end = input.Length;
+        // get_limits (:21791) runs BEFORE the shortcut below, so the shortcut compares the
+        // pattern's width against the CLAMPED slice rather than against whatever the caller
+        // passed. Measured against regex 2026.9.10 on 2026-09-16:
+        // `regex.compile('xx').sub(r'\g<bad', 'xxxxx', pos=4)` returns 'xxxxx' - the slice is one
+        // character wide, so the shortcut fires and the malformed template is never compiled.
+        // MatchState.Create clamps the same pair again to the same values, which is what upstream
+        // does too (state_init_2 re-derives nothing).
+        start = MatchState.ClampIndex(start, input.Length);
+        end = MatchState.ClampIndex(end, input.Length);
+        if (end < start)
+        {
+            end = start;
+        }
 
         // "If the pattern is too long for the string, then take a shortcut, unless it's a fuzzy
         // pattern" (:21762). This runs before the template is compiled, so a malformed template is

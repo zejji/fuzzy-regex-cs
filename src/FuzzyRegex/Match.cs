@@ -284,6 +284,14 @@ public sealed class Match : Group
     internal int GroupNumberFromName(string name) => _regex.GroupNumberFromName(name);
 
     /// <summary>
+    /// The name of the group with that number, or its number as text when it has none. What
+    /// <see cref="GroupCollection"/> keys the dictionary view on.
+    /// </summary>
+    /// <param name="number">The group number.</param>
+    /// <returns>The group's name.</returns>
+    internal string GroupNameFromNumber(int number) => _regex.GroupNameFromNumber(number);
+
+    /// <summary>
     /// Whether this is a partial match: the subject ran out before the pattern could either
     /// succeed or fail. Upstream <c>Match.partial</c>, set by matching with <c>partial=True</c>.
     /// </summary>

@@ -15,7 +15,7 @@ public sealed class RegressionsLookaroundTests
     {
         Match m = Upstream.Match("abde", "^(?=ab(de))(abd)(e)");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("de", "abd", "e");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("de", "abd", "e");
     }
 
     // Hg issue 157: regression: segfault on complex lookaround.

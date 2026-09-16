@@ -41,7 +41,7 @@ public sealed class RegressionsBasicMatchingTests
     {
         Match m = Upstream.Match("LtR", "([^L]*)([^R]*R)");
 
-        m.Groups.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("", "LtR");
+        m.Groups.Values.Skip(1).Select(static g => g.Success ? g.Value : null).Should().Equal("", "LtR");
     }
 
     [Test]
