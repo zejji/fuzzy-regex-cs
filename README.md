@@ -3,11 +3,107 @@
 A .NET 10+ port of [mrab-regex](https://github.com/mrabarnett/mrab-regex) (the Python `regex`
 module): a full-featured regex engine whose headline capability is **fuzzy (approximate) matching**
 with per-error-type budgets - insertions, deletions and substitutions inside patterns, e.g.
-`(?:foobar){e<=2}` - which no existing .NET library provides.
+`(?:foobar){e<=2}` - which no existing .NET library provides. The public namespace is
+`Fuzzy.Text.RegularExpressions`, and the main type is `FuzzyRegex`, shaped after
+`System.Text.RegularExpressions.Regex`.
 
 **Status: planning / early implementation.** Not yet usable. See
 [`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`](docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md)
 for the design and [`docs/plan/OPERATIONS.md`](docs/plan/OPERATIONS.md) for how the port is run.
+
+## Install
+
+```console
+dotnet add package FuzzyRegex
+```
+
+## Quick start
+
+Every example below compiles against the public API in
+[`src/FuzzyRegex/PublicAPI.Unshipped.txt`](src/FuzzyRegex/PublicAPI.Unshipped.txt). Add
+`using Fuzzy.Text.RegularExpressions;` before running any of them.
+
+### Exact match with named groups
+
+`FuzzyRegex.Match` is the static convenience for a search, and `Match.Groups` is a dictionary
+as well as a list: it is keyed by every group's name, or by its number as text where it has
+none, in ascending group number.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match match = FuzzyRegex.Match("2026-09-16", @"(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})");
+
+foreach (string key in match.Groups.Keys)
+{
+    Console.WriteLine($"{key}: {match.Groups[key].Value}");
+}
+// 0: 2026-09-16
+// year: 2026
+// month: 09
+// day: 16
+```
+
+### Fuzzy match with an error budget
+
+`(?:pattern){e<=2}` allows up to two errors - substitutions, insertions or deletions - inside
+the group. `Match.FuzzyCounts` reports how many of each kind the match actually used, and is
+`(0, 0, 0)` for an exact match.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(@"(?:foo){e<=2}");
+Match match = regex.MatchAtStart("fou");
+
+(int substitutions, int insertions, int deletions) = match.FuzzyCounts;
+Console.WriteLine(match.Value);
+Console.WriteLine($"{substitutions} substitution(s), {insertions} insertion(s), {deletions} deletion(s)");
+// fou
+// 1 substitution(s), 0 insertion(s), 0 deletion(s)
+```
+
+### Enumerating matches with a timeout
+
+`EnumerateMatches` finds matches lazily, one at a time, so an early exit does not pay for the
+whole subject. Its `timeout` bounds each step, not the whole walk; see the divergence "A per-call
+`timeout` on every input-dependent method" in [`docs/DIVERGENCES.md`](docs/DIVERGENCES.md).
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(@"\w+");
+
+foreach (Match match in regex.EnumerateMatches("one two three", timeout: TimeSpan.FromSeconds(1)))
+{
+    Console.WriteLine(match.Value);
+}
+// one
+// two
+// three
+```
+
+## Coming from Python `regex`
+
+| Python `regex` | FuzzyRegex |
+|---|---|
+| `regex.search(pattern, subject)` | `FuzzyRegex.Match(subject, pattern)` |
+| `regex.match(pattern, subject)` | `FuzzyRegex.MatchAtStart(subject, pattern)` |
+| `regex.fullmatch(pattern, subject)` | `FuzzyRegex.FullMatch(subject, pattern)` |
+| `regex.findall(pattern, subject)` | No direct equivalent. Read `Match.Groups[1].Value` over `FuzzyRegex.Matches(subject, pattern)`, or over `EnumerateMatches` for a lazy projection. |
+| `regex.sub(pattern, replacement, subject)` | `FuzzyRegex.Replace(subject, pattern, replacement)`, with the replacement template in upstream's syntax (`\1`, not `$1`) |
+
+## Coming from `System.Text.RegularExpressions`
+
+- **`Match` means a search, not an anchored match.** Upstream's anchored `match` is
+  `MatchAtStart`, and `fullmatch` is `FullMatch`. See "`Match` means upstream's `search`;
+  upstream's anchored `match` is `MatchAtStart`" in `docs/DIVERGENCES.md`.
+- **Replacement templates use `\1`, not `$1`.** See "Replacement templates speak upstream's
+  language" in `docs/DIVERGENCES.md`.
+- **`Split` returns `string?[]` with a `null` entry where a capturing group did not take
+  part**, rather than omitting the entry as the built-in `Regex.Split` does. See "`Split` returns
+  `string?[]` and puts `null` where a capturing group did not take part" in
+  `docs/DIVERGENCES.md`.
 
 ## One deliberate difference from mrab-regex's defaults
 
