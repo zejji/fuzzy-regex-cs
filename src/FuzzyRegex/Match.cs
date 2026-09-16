@@ -9,8 +9,9 @@ namespace Fuzzy.Text.RegularExpressions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Index"/> and <see cref="Length"/> are UTF-16 code units, matching the built-in
-/// <c>Regex</c>. Upstream reports codepoints; see design spec section 4.
+/// <b>Indices are UTF-16 code units</b>, not codepoints: <see cref="Index"/> and
+/// <see cref="Length"/> match the built-in <c>Regex</c>, where upstream reports codepoints
+/// (design spec section 4).
 /// </para>
 /// <para>
 /// The engine works in <c>(start, end)</c> throughout, keeping upstream's names. This class and the
@@ -104,15 +105,26 @@ public class Group : Capture
 /// <see cref="FuzzyCounts"/>, <see cref="FuzzyChanges"/> and <see cref="PartialMatch"/>.
 /// </summary>
 /// <remarks>
-/// <b>A match may be read from any thread</b>, and from several at once. It holds a copy of
-/// everything it reports, taken before the engine's state was reused, so it neither shares with the
-/// pattern that produced it nor changes after it is handed over.
+/// <para>
+/// <b><c>Match</c> may be read from any thread, where <c>System.Text.RegularExpressions.Match</c>
+/// may not</b>. It holds a copy of everything it reports, taken before the engine's state was
+/// reused, so it neither shares with the pattern that produced it nor changes after it is
+/// handed over.
+/// </para>
 /// <para>
 /// This is deliberately stronger than the built-in <see cref="System.Text.RegularExpressions.Match"/>,
 /// whose documentation says result objects "should be used on a single thread" because "their
 /// implementations could delay computation of some results". One value here is computed on demand -
 /// <see cref="FuzzyChanges"/> - and it is published as a single reference precisely so that this
 /// promise holds; see <see cref="_splitChanges"/> for what went wrong when it was not.
+/// </para>
+/// <para>
+/// <b><c>Regex</c>-shaped surface</b>: this type mirrors
+/// <see cref="System.Text.RegularExpressions.Match"/> with <c>(Index, Length)</c>-based spans;
+/// <c>expand</c> is <see cref="Result(string)"/>, <c>expandf</c> is
+/// <see cref="ResultFormat(string)"/>, <c>lastindex</c> is <see cref="LastGroupNumber"/> with
+/// Python's <see langword="None"/> rendered as <c>-1</c>, and <c>lastgroup</c> is
+/// <see cref="LastGroupName"/> with <see langword="None"/> rendered as <see langword="null"/>.
 /// </para>
 /// </remarks>
 public sealed class Match : Group
@@ -296,10 +308,21 @@ public sealed class Match : Group
     /// succeed or fail. Upstream <c>Match.partial</c>, set by matching with <c>partial=True</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Only ever true when the match was asked for with <c>partial: true</c>, and only when no
     /// complete match existed there: <c>do_match</c> tries a normal match first and falls back to
     /// the partial one (<c>upstream/src/_regex.c:18140-18162</c>). The scan entry points never set
     /// it, because upstream's <c>finditer</c>/<c>findall</c> take no <c>partial</c> argument.
+    /// </para>
+    /// <para>
+    /// <b>Reversed partial matches run out of text at the slice start</b>. Matched with
+    /// <see cref="FuzzyRegexOptions.RightToLeft"/> (upstream's <c>(?r)</c>) and
+    /// <c>partial: true</c>, this reports a partial at <c>beginning</c> when the pattern still
+    /// needs characters and <c>beginning</c> is where the matchable text ends - upstream reports
+    /// one there on some pattern shapes and no match on others, because it holds two
+    /// contradictory rules for the same boundary. Nothing else about <c>beginning</c> moves:
+    /// <c>^</c> and <c>\A</c> still refuse a non-zero one.
+    /// </para>
     /// </remarks>
     public bool PartialMatch { get; }
 
@@ -476,6 +499,12 @@ public sealed class Match : Group
     /// <c>Regex</c>, and what upstream's scanner does once its status is a failure
     /// (<c>scanner_search_or_match</c>, <c>:20886</c>).
     /// </para>
+    /// <para>
+    /// <b>A per-call <c>timeout</c> on every input-dependent method</b> is this method's one
+    /// exception: it takes neither a timeout nor a <see cref="CancellationToken"/> and instead
+    /// runs under the pattern's own <see cref="FuzzyRegex.MatchTimeout"/>, exactly as
+    /// <see cref="System.Text.RegularExpressions.Match.NextMatch"/> does.
+    /// </para>
     /// </remarks>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     public Match NextMatch() =>
@@ -489,13 +518,18 @@ public sealed class Match : Group
     /// <c>Regex</c> calls it <c>Result</c>.
     /// </summary>
     /// <remarks>
-    /// The template language is upstream's, not <c>Regex</c>'s: the escape character is
-    /// <c>\</c>, so <c>\1</c>, <c>\g&lt;name&gt;</c>, <c>\n</c>, <c>\x41</c> and
-    /// <c>\N{LATIN CAPITAL LETTER A}</c> all mean what they mean upstream, and <c>$</c> is
-    /// ordinary text. The two languages cannot both be honoured because they disagree about
+    /// <para>
+    /// <b>Replacement templates speak upstream's language</b> (<c>\1</c>, <c>\g&lt;name&gt;</c>,
+    /// <c>\n</c>, <c>\x41</c>, <c>\N{...}</c>), not <c>Regex</c>'s <c>$1</c>: the escape
+    /// character is <c>\</c>, so those all mean what they mean upstream, and <c>$</c> is
+    /// ordinary text.
+    /// </para>
+    /// <para>
+    /// The two languages cannot both be honoured because they disagree about
     /// <c>\</c> - verified against both engines 2026-08-29: for the template <c>\n</c>,
     /// <c>regex.sub('.', r'\n', 'x')</c> gives a newline where
     /// <c>Regex.Replace("x", ".", @"\n")</c> gives a backslash followed by <c>n</c>.
+    /// </para>
     /// </remarks>
     /// <param name="replacement">The replacement template, in upstream's syntax.</param>
     /// <returns>The expanded text.</returns>

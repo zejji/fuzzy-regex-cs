@@ -6,11 +6,24 @@ namespace Fuzzy.Text.RegularExpressions;
 /// the pattern and the offset at which parsing failed.
 /// </summary>
 /// <remarks>
-/// A handful of rejections upstream expresses as a plain <c>ValueError</c> rather than as its own
-/// error type - conflicting version or encoding flags, and a named list the pattern never uses -
-/// are also reported through this type, with no <see cref="Pattern"/> or <see cref="Offset"/>,
-/// because upstream's <c>ValueError</c> carries neither (S07; see the reasoning at the throw
-/// sites in <c>Parsing/PatternCompiler.cs</c>).
+/// <para>
+/// <b>Exception mapping</b>. This type means upstream's <c>error</c> and nothing else. A bare
+/// <c>ValueError</c> rejection - conflicting version or encoding flags, or a named list the
+/// pattern never uses - is also reported through it, with no <see cref="Pattern"/> or
+/// <see cref="Offset"/>, because upstream's <c>ValueError</c> carries neither (S07; see the
+/// reasoning at the throw sites in <c>Parsing/PatternCompiler.cs</c>).
+/// </para>
+/// <para>
+/// Upstream's other errors map onto other .NET types, not this one: <c>IndexError</c> from
+/// <c>expand</c> becomes <see cref="ArgumentException"/>; an escaped internal error such as
+/// <c>AttributeError</c> or <c>KeyError</c> becomes <see cref="NotSupportedException"/> or
+/// <see cref="ArgumentOutOfRangeException"/>; the 1 GB backtracking bound and a runaway
+/// recursion raise <see cref="InvalidOperationException"/>, never
+/// <see cref="OutOfMemoryException"/>, where upstream raises <c>MemoryError</c>; a matching
+/// timeout raises <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> where
+/// upstream raises <c>TimeoutError</c>; and <c>\p{Infinity}</c> raises
+/// <see cref="OverflowException"/>, carrying Python's own message.
+/// </para>
 /// </remarks>
 public class FuzzyRegexParseException : Exception
 {
@@ -51,5 +64,9 @@ public class FuzzyRegexParseException : Exception
     /// The zero-based UTF-16 offset into <see cref="Pattern"/> at which parsing failed, or
     /// <c>-1</c> if not supplied.
     /// </summary>
+    /// <remarks>
+    /// <b>Indices are UTF-16 code units</b>, not codepoints, so this differs from upstream's
+    /// <c>error.pos</c> for a pattern holding a non-BMP character before the failure point.
+    /// </remarks>
     public int Offset { get; } = -1;
 }
