@@ -47,7 +47,7 @@ The predefined jobs, read from that same source file (2026-09-16), so nobody has
 | Long | 3 | 15 | 100 |
 | VeryLong | 4 | 30 | 500 |
 
-**The rule for this repo**: default job for a Phase 7 decision, `--job short` **never** for one.
+**The rule for this repo**: `--job medium` (or longer) for a Phase 7 decision, never the BDN default job unqualified, `--job short` **never** for one.
 `MatchingBenchmarks` already records why - at 20 characters on `(a|a)*b` under `--job short` the
 error bar was 21% of the mean, which is not a number you can decide anything with
 (`bench/FuzzyRegex.Benchmarks/MatchingBenchmarks.cs`, the `BacktrackingFailure` doc comment).

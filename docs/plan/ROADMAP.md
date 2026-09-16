@@ -355,6 +355,30 @@ prefilter honour the slice the verb moved (the way upstream's own slow path does
 test. The oracle rows for those shapes stay recorded against a prefilter-free upstream, or in the
 strict manifest, until upstream itself is fixed.
 
+**Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
+research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
+measurement only and changes no engine code: this machine's noise floor from two runs of an
+unchanged build, pyperf installed and probed, the EventPipe and dotTrace/Rider MCP routes proven
+end to end, `.claude/skills/optimise/SKILL.md` written from the research checklist,
+`tools/compare-benchmarks.ps1` extended with an allocation ratio and the floor, the span-copy and
+lazy-walk costs measured and written up for the owner, and `docs/plan/SYNC-DIVERGENCE.md` created
+with a script that pairs a `sync-divergence:` marker to a ledger row. **S59** adds the bounded MRU
+pattern cache behind `FuzzyRegex.CacheSize` (default 15, as `Regex`), keyed on the raw flags,
+AOT-safe, tested under S52b's concurrency contract. **S60** ports the `locate_required_string` and
+`search_start` family from the six waiting arms, on `SearchValues<char>` and vectorised `IndexOf`.
+**S61** implements whichever span-threading and lazy-walk shapes the owner signed off, reuses
+`MatchState` buffers across a walk, and turns the allocation ratio into a gate. **S62** takes the
+inner loop - `Node.Values` to an array, one inlined predicate at a time behind its own number,
+`SkipLocalsInit` and layout where they measure - and measures dispatch cost without changing it.
+**S63** runs the v1.0 gate per the `benchmark` skill, refreshes both baselines on a quiet machine,
+commits the results, and triages every failure into a follow-up slice or an owner decision. The
+ground rules they all obey: measure first and decide the span and lazy-walk questions on numbers,
+not guesses; structural divergence is allowed only with a `SYNC-DIVERGENCE.md` row enforced by
+checklist and script, its gain threshold deferred until S62 has examples; AOT compatibility
+outranks AOT-specific speed, so benchmarking is on the JIT and the AOT publish is green every
+slice; the permanent pins and the oracle at three seeds bound every one of them, and an
+optimisation that changes an answer has ported an upstream bug.
+
 **Phase 6 opens with the upstream sync and the bug sweep, and Phase 7 does not start until both are
 closed (owner decision, 2026-09-12).** Measured that day: the pin is 2026.8.12 and upstream had moved
 21 commits and five releases to 2026.9.10, which is also PyPI's newest and is byte-for-byte upstream's
@@ -638,6 +662,28 @@ Precedent for both halves: PeachPDF keeps its demo as a project in the same repo
 it to Pages alongside the docs (it uses Blazor, which this does not), and `dotnet/blazor-samples`
 ships `DotNetOnWebWorkersReact`, available for .NET 10 and later, as a non-Blazor host driving a
 worker-hosted runtime.
+
+**Phase 9 sliced, 2026-09-16.** The owner confirmed the design above unchanged - Vue 3 on the main
+thread with the engine in a Web Worker, over the Blazor alternative he had raised - and confirmed
+the staging: v1 is this section's deliberately small page, v2 adds an editable sample per major
+feature with contextual help, v3 is polish, and 1.0 need not wait for all of it. `wasm-tools` and
+`wasm-experimental` were installed (10.0.112) the same day, so nothing blocks a start. Three slices,
+each verified against current Microsoft Learn documentation on the day it was written:
+**S70** builds `demo/FuzzyRegex.Demo.Wasm` (a `wasmbrowser` project, one `[JSExport]` taking
+pattern, flags and subject as strings and returning JSON), a plain HTML harness that boots it in a
+worker and proves the `postMessage` round trip and `terminate()` plus respawn, and
+`tools/run-wasm-smoke.ps1` to publish and check the artefact set.
+**S71** is the v1 page itself - three inputs, highlighted spans, a group table, eight worked
+examples, the inputs in the URL fragment, the caps and the warm spare - plus the GitHub Actions job
+that deploys it to Pages with `.nojekyll`, the base href and `*.js binary`, and the README link.
+**S72** is v2: one editable sample per major feature, help panels generated at build time from
+`docs/COMPARISON.md` so there is one source, and UI polish with regex101 as the named reference.
+Two documented facts sharpen this section rather than contradict it. `[JSExport]`/`[JSImport]` is
+"currently limited to the main thread even if multi-threading support is enabled"
+(`dotnet/runtime/src/mono/wasm/features.md`), so `WasmEnableThreads` and its COOP/COEP requirement
+are not merely unneeded here, they would break the interop; and GitHub Pages "doesn't natively
+support using Brotli-compressed resources", so the bytes a visitor waits for are the uncompressed
+ones and the size baseline has to be recorded twice, on disk and on the wire.
 
 ## Candidates parked for later
 
