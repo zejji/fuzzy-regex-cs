@@ -392,7 +392,7 @@ while ($completed -lt $MaxSlices) {
     $failureReason = if (-not $session.Ok) { $session.Reason } else { Test-SliceLanded -HeadBefore $headBefore -SliceName $slice.Name }
 
     if (-not $failureReason) {
-        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'completed' -TotalTokens $session.TotalTokens
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'completed' -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0))
         $completed++
         $consecutiveFailures = 0
         Write-Host ("  done: {0} ({1:N0} tokens, `${2:N2})" -f $slice.BaseName, $session.TotalTokens, $session.CostUsd) -ForegroundColor Green
@@ -406,7 +406,7 @@ while ($completed -lt $MaxSlices) {
     if ($failureReason -eq 'checkpoint') {
         $checkpoints++
         $consecutiveFailures = 0
-        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'checkpoint' -TotalTokens $session.TotalTokens
+        Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'checkpoint' -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0))
         Write-Host ("  CHECKPOINT ({0} of 3): {1} committed green but is still open - a fresh session continues it ({2:N0} tokens)" -f $checkpoints, $slice.BaseName, $session.TotalTokens) -ForegroundColor Yellow
         if ($checkpoints -ge 3) {
             Write-Host "Stopping: $($slice.BaseName) has checkpointed three times without landing. Read its STATE.md notes and decide whether to split it." -ForegroundColor Red
@@ -450,7 +450,7 @@ while ($completed -lt $MaxSlices) {
 
     if ($rateLimitResetsAt) {
         Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'rate-limited' `
-            -TotalTokens $session.TotalTokens -Rescue $rescue
+            -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0)) -Rescue $rescue
         # No sleep. The budget gate at the top of the next iteration refuses to start while the
         # reset is in the future, so the driver stops there of its own accord and says why.
         continue
@@ -458,14 +458,14 @@ while ($completed -lt $MaxSlices) {
 
     if ($consecutiveFailures -ge 2) {
         Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' `
-            -TotalTokens $session.TotalTokens -Rescue $rescue
+            -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0)) -Rescue $rescue
         Add-ParkNote -SliceName $slice.BaseName -Reason $failureReason -Rescue $rescue
         Write-Host "Stopping: $($slice.BaseName) failed twice and has been parked. See docs/plan/STATE.md." -ForegroundColor Red
         break
     }
 
     Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'failed' `
-        -TotalTokens $session.TotalTokens -Rescue $rescue
+        -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0)) -Rescue $rescue
 }
 
 Write-Host ''

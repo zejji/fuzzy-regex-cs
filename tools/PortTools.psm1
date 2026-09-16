@@ -618,6 +618,9 @@ function Write-SliceLogEntry {
         [Parameter(Mandatory)][string]$Slice,
         [Parameter(Mandatory)][ValidateSet('completed', 'checkpoint', 'failed', 'parked', 'rate-limited')][string]$Outcome,
         [long]$TotalTokens = 0,
+        # The session's total_cost_usd, so spend against the owner's allowance is a sum over this
+        # file (owner, 2026-09-16) and not a grep over driver logs that .scratch clears.
+        [double]$CostUsd = 0,
         [AllowNull()][object]$Rescue
     )
 
@@ -626,6 +629,7 @@ function Write-SliceLogEntry {
         slice       = $Slice
         outcome     = $Outcome
         totalTokens = $TotalTokens
+        costUsd     = [math]::Round($CostUsd, 2)
     }
 
     if ($Rescue -and ($Rescue.StashLabel -or $Rescue.BranchName -or $Rescue.AbandonedSha)) {
