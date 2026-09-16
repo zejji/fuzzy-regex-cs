@@ -432,6 +432,18 @@ the port's, flagging violations for ledger triage. The skill now requires gap-te
 to carry provenance from a real upstream run or a DIVERGENCES row, and S57 audits the ones written
 before the rule. Estimate 14-19 becomes 15-20.
 
+**S53b adds API completeness before optimisation (owner decision 2026-09-16, after the Fable review
+in `docs/plan/2026-09-16-unported-members-review.md`).** Seventeen of the twenty-one "no port
+equivalent" rows stand; four decisions change, all additive and all cheaper before S54 baselines
+the shapes users will call: lazy `EnumerateMatches`/`EnumerateSplits` over the existing
+`NextMatch` path (the built-in `Regex` is lazy and .NET 7/9 added the same entry points), `Ascii`/
+`Unicode`/`Word` on `FuzzyRegexOptions` with `Options` no longer stripping them (a latent cache-key
+bug for Phase 7), `GroupCollection : IReadOnlyDictionary<string, Group>` as .NET 5+'s is, and
+`beginning`/`length` on `Replace`. The pattern cache stays a Phase 7 item, recorded as PLANNED with
+`CacheSize` as the equivalent. `docs/plan/OPTIMISATION-NOTES.md` now indexes every deferred
+optimisation so Phase 7 does not rediscover them. S53 publishes the whole TUnit suite as Native AOT
+before building the sample. Estimate 16-21 becomes 17-22.
+
 **S52d fixes ledger 24 on the owner's ruling (2026-09-15, Option B of
 `docs/plan/upstream-reports/ledger-24-briefing.md`).** A reversed match with `partial=True` runs
 out of text at the slice start and reports a partial there; `^`, `\A`, `` and lookbehind keep

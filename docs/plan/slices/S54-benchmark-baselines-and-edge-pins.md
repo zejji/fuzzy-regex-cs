@@ -25,7 +25,7 @@ Optimisation is where silent behaviour change is likeliest, so Phase 6 pins two 
 
 - **The suite**, per `.claude/skills/benchmark/SKILL.md` and spec section 11: literal-heavy,
   class-heavy, backtracking-heavy, fuzzy short and long subjects, `(?e)` and `(?b)`, case-folded,
-  reverse, partial, scan (`Matches`) over a long text, `Replace` with a template, compile time for
+  reverse, partial, scan (`Matches`, and `EnumerateMatches` from S53b, both) over a long text, `Replace` with a template, compile time for
   a large pattern, and the built-in `Regex` (interpreted and `RegexOptions.Compiled`) on the exact
   subset it can express, as the reference point. BenchmarkDotNet in `bench/FuzzyRegex.Benchmarks`,
   Release, with memory diagnoser.

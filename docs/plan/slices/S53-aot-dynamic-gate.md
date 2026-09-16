@@ -13,6 +13,23 @@ with `PublishAot=true` that runs real matches.
 
 ## Scope
 
+- **First, the whole suite natively (owner question 2026-09-16).** TUnit is source-generated and
+  documents Native AOT as `<PublishAot>true</PublishAot>` plus `dotnet publish -c Release`
+  (tunit.dev, engine modes; MSTest 4.4 shipped the same on 3 Sept 2026 for `net10.0`, so no
+  .NET 11 is needed). Publish `tests/FuzzyRegex.Tests` with `-r win-x64` and `-r linux-x64` and run
+  the produced executable: all 6,144 tests under the same trimming and reflection constraints a
+  consumer's AOT app enforces, which is stronger evidence than any sample. Expected friction, and
+  how it is handled: AwesomeAssertions is a FluentAssertions fork with reflection inside and is not
+  marked AOT-compatible, so trim warnings will come from it. Handle them in the test project ONLY
+  (replace the six `BeEquivalentTo` uses, or a suppression scoped to the test csproj with the
+  warning code and reason recorded); `src/` keeps zero suppressions. If AwesomeAssertions cannot
+  run natively at all, record the finding and the trade-off (TUnit's own assertions are AOT-clean)
+  in STATE.md for the owner rather than switching libraries inside this slice. The oracle test
+  project is NOT published (it parses JSON reflectively by design). Wire the native run into CI as
+  the gate on both platforms.
+- **Then `samples/FuzzyRegex.AotSmoke/`**, reduced to what only a consumer can prove: a project
+  reference from a separate app, binary size and startup time for Phase 7's baseline, and a
+  handful of feature cases as a smoke check. Original scope, kept for reference:
 - **`samples/FuzzyRegex.AotSmoke/`**: a console app referencing `src/FuzzyRegex` by project, with
   `PublishAot=true`, exercising one case from every feature area: literals, classes, Unicode
   properties (which pull the transliterated tables), full case folding, named lists, lookaround,

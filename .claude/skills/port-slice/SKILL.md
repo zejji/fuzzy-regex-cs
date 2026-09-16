@@ -250,6 +250,9 @@ rejects, all of which have already burned turns on real slices:
   amendment-16 ceremony (mechanism, blind review, verifier) runs once over a slice's batch of pins,
   not once per pin. A slice starting its THIRD sitting begins by writing into its notes file how the
   rest could be done in one sitting, and does that. Standards do not drop; the route does.
+- **A deferred optimisation is recorded twice** (owner request 2026-09-16): a `ponytail:` or
+  `Phase 7` comment at the line naming the ceiling and the lift, and one row in
+  `docs/plan/OPTIMISATION-NOTES.md`. A slice that implements one deletes both in the same commit.
   **You will be told your deadline.** From 30 minutes before the driver's kill, every tool call
   carries a `[driver deadline]` line with the minutes left; under 25, stop starting anything long
   (a 6000-row wave, a control run, a blind review) and commit a checkpoint, reserving four minutes
