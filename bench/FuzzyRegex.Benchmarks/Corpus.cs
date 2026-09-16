@@ -36,6 +36,22 @@ internal static class Corpus
     public static readonly string Short = _sentence + "and finds a needle.";
 
     /// <summary>
+    /// The short subject with a misspelled <c>haystack</c> at the end, for the workloads that vary
+    /// the error budget and the ranking mode.
+    /// </summary>
+    /// <remarks>
+    /// <b>It has to be a near miss rather than an exact one, and it has to be there at all.</b> The
+    /// first version of these three benchmarks ran <c>(?:haystack){e&lt;=3}</c> against
+    /// <see cref="Short"/>, which contains nothing like it: all three answered no match in
+    /// identical time, so <c>ENHANCEMATCH</c> never re-ran and <c>BESTMATCH</c> never explored, and
+    /// the benchmark named after the likeliest place to regress was measuring a failed scan.
+    /// Measured on regex 2026.9.10, 2026-09-16: here the plain answer is span (54,63) with counts
+    /// (0,2,1) and both ranking modes move it to (56,63) with (0,0,1), so they are doing the work.
+    /// <c>Gaps/Engine/OptimiserTrapsTests.cs</c> pins those three answers.
+    /// </remarks>
+    public static readonly string Fuzzy = _sentence + "and finds a haystakc.";
+
+    /// <summary>
     /// A hundred kilobytes of the same filler. The lazy walk's per-step state makes a full walk
     /// quadratic in the subject (<c>OPTIMISATION-NOTES.md</c>), so the workload that drains one to
     /// the end uses this rather than <see cref="Long"/>: at a megabyte it costs tens of seconds,

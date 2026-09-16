@@ -12,9 +12,14 @@
     machine id is derived from the processor name BenchmarkDotNet itself reports, so it cannot
     drift away from the numbers it labels.
 
-    RED on any benchmark slower than the baseline by more than -Threshold, and on any baselined
+    RED on any benchmark slower than the baseline by more than -Threshold, on any benchmark
+    allocating more than -Threshold times the baseline's bytes per operation, and on any baselined
     benchmark missing from the run - a disappearing benchmark and a lost measurement look identical
     from the outside, which is the rule tools/check-ratchet.ps1 already applies to tests.
+
+    Allocation is checked as well as time because Phase 7's first optimisation lever is allocation
+    elimination (the `benchmark` skill), so a change that trades bytes for nanoseconds is precisely
+    what this has to be able to see.
 
     THE WORKING DIRECTORY MATTERS and this script sets it. BenchmarkDotNet locates the benchmark
     project by walking up from the working directory to the nearest solution file and then
@@ -82,17 +87,61 @@ if ($reports.Count -eq 0) {
 }
 
 $current = [ordered]@{}
+$unmeasured = @()
 $host_ = $null
 foreach ($report in $reports) {
     $json = Get-Content -LiteralPath $report.FullName -Raw | ConvertFrom-Json
     if ($null -eq $host_) { $host_ = $json.HostEnvironmentInfo }
     foreach ($benchmark in $json.Benchmarks) {
+        # BenchmarkDotNet writes an entry with no Statistics at all when the benchmark did not run -
+        # its generated project failed to build, or the host timed out. Reading straight through
+        # that gave "The property 'Median' cannot be found on this object" and no clue what had
+        # happened; found by S54's verifier when BDN's boilerplate build hit its own 120 s timeout.
+        if ($null -eq $benchmark.PSObject.Properties['Statistics'] -or $null -eq $benchmark.Statistics) {
+            $unmeasured += $benchmark.FullName
+            continue
+        }
+
+        # $null, not 0, when the report carries no Memory node: a missing measurement and a genuine
+        # zero are different facts, and conflating them is what let a lost allocation reading look
+        # like a 100% improvement. `-1` records "not measured" in the baseline, which the comparison
+        # below refuses to read as an improvement.
+        $bytes = if ($null -ne $benchmark.PSObject.Properties['Memory'] -and $null -ne $benchmark.Memory) {
+            $benchmark.Memory.BytesAllocatedPerOperation
+        }
+        else { -1 }
+
         $current[$benchmark.FullName] = [ordered]@{
             medianNs       = [math]::Round($benchmark.Statistics.Median, 2)
-            allocatedBytes = $benchmark.Memory.BytesAllocatedPerOperation
+            minNs          = [math]::Round($benchmark.Statistics.Min, 2)
+            allocatedBytes = $bytes
         }
     }
 }
+
+# BenchmarkDotNet's own multimodality warning, read out of its run log. It is the honest signal for
+# "something else was running": a bimodal distribution means some iterations were descheduled, and
+# the median it reports is then worth rather less than its decimal places suggest.
+# Every .log, not 'BenchmarkRun-*.log': BenchmarkDotNet names the log after the run, and a run
+# covering one benchmark class is named after that class instead. A narrower glob silently matched
+# nothing on every filtered run.
+$multimodal = @(
+    Get-ChildItem -Path $artifacts -Filter '*.log' -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-Content -LiteralPath $_.FullName } |
+        Select-String -Pattern '^\s*(\S+):\s+\S+\s+->\s+It seems that the distribution' |
+        ForEach-Object { $_.Matches[0].Groups[1].Value } |
+        Sort-Object -Unique
+)
+
+# A benchmark whose fastest iteration is this far below its median was being descheduled for most
+# of the run. 0.85 is a judgement, not a measurement: on an idle machine these sit at 0.95-1.00, and
+# the contended run S54 first recorded had thirteen rows between 0.53 and 0.76.
+$_contendedFloor = 0.85
+$contended = @(
+    $current.Keys | Where-Object {
+        $current[$_].medianNs -gt 0 -and ($current[$_].minNs / $current[$_].medianNs) -lt $_contendedFloor
+    }
+)
 
 # Derived from what BenchmarkDotNet reports, so the folder name and the numbers inside it cannot
 # describe different machines. Non-alphanumerics collapse to a single hyphen.
@@ -100,6 +149,13 @@ $machineId = ("$($host_.OsVersion.Split(' ')[0])-$($host_.Architecture)-$($host_
         -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLowerInvariant()
 $baselineDir = Join-Path $repoRoot "bench/baselines/$machineId"
 $baselinePath = Join-Path $baselineDir 'net10.0.json'
+
+if ($unmeasured.Count -gt 0) {
+    Write-Host "Benchmarks: RED - $($unmeasured.Count) benchmark(s) produced no measurement at all:" -ForegroundColor Red
+    foreach ($name in $unmeasured) { Write-Host "  $name" -ForegroundColor Red }
+    Write-Host '  The run did not complete. Look in the artifacts log before reading anything below.' -ForegroundColor Yellow
+    exit 1
+}
 
 if ($UpdateBaseline) {
     if ($Filter -ne '*') {
@@ -121,9 +177,30 @@ if ($UpdateBaseline) {
             benchmarkDotNet = $host_.BenchmarkDotNetVersion
         }
         takenUtc   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        # Recorded rather than assumed: BenchmarkDotNet flags a multimodal distribution when the
+        # machine was not quiet, and a median carrying that flag should not be read to two decimal
+        # places. Listing them here means the next reader sees which rows to distrust without
+        # having to still have the run log.
+        multimodal = @($multimodal)
+        # The blunter contention signal, and the one that matters to the gate: a benchmark whose
+        # fastest iteration is far below its median spent most of the run being descheduled, so the
+        # median records the contention and not the code. A baseline like that is PESSIMISTIC, which
+        # means the -Threshold gate has less headroom than it looks like it has - a row recorded at
+        # 0.55 min/median can get nearly twice as slow and still compare GREEN. Recorded per row so
+        # a later reader can see which numbers to distrust without still having the run log.
+        contended  = @($contended)
         benchmarks = $current
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $baselinePath -Encoding utf8NoBOM
     Write-Host "Baseline written: $baselinePath ($($current.Count) benchmarks)." -ForegroundColor Green
+    if ($multimodal.Count -gt 0) {
+        Write-Host "  $($multimodal.Count) benchmark(s) had a multimodal distribution:" -ForegroundColor Yellow
+        foreach ($name in $multimodal) { Write-Host "    $name" -ForegroundColor Yellow }
+    }
+    if ($contended.Count -gt 0) {
+        Write-Host "  $($contended.Count) of $($current.Count) benchmark(s) have min/median below $_contendedFloor - THE MACHINE WAS NOT QUIET." -ForegroundColor Yellow
+        Write-Host '  Those medians are pessimistic, so the threshold has less headroom than it appears.' -ForegroundColor Yellow
+        Write-Host '  Re-take this baseline on an idle machine before trusting it as a gate.' -ForegroundColor Yellow
+    }
     exit 0
 }
 
@@ -137,8 +214,21 @@ $baseline = Get-Content -LiteralPath $baselinePath -Raw | ConvertFrom-Json
 Write-Host ''
 Write-Host "Baseline: $baselinePath (taken $($baseline.takenUtc))"
 Write-Host "Machine:  $($baseline.machine.processor), $($baseline.machine.os)"
+$baselineContended = @(if ($baseline.PSObject.Properties['contended']) { $baseline.contended })
+if ($baselineContended.Count -gt 0) {
+    Write-Host ''
+    Write-Host "CAUTION: $($baselineContended.Count) of this baseline's rows were measured on a machine that was not" -ForegroundColor Yellow
+    Write-Host '  quiet, so their medians are pessimistic and this comparison has less headroom than the' -ForegroundColor Yellow
+    Write-Host '  threshold suggests. Re-take the baseline on an idle machine before relying on it.' -ForegroundColor Yellow
+}
 Write-Host ''
-Write-Host ('{0,-58} {1,>12} {2,>12} {3,>8}' -f 'Benchmark', 'baseline ns', 'now ns', 'ratio')
+if ($Filter -ne '*') {
+    Write-Host "PARTIAL RUN (-Filter '$Filter'): only what it measured is compared, and the" -ForegroundColor Yellow
+    Write-Host '  missing-benchmark check is SKIPPED. A green partial run is not a green suite.' -ForegroundColor Yellow
+    Write-Host ''
+}
+
+Write-Host ('{0,-58} {1,12} {2,12} {3,8} {4,8}' -f 'Benchmark', 'baseline ns', 'now ns', 'time', 'alloc')
 
 $regressions = @()
 $missing = @()
@@ -151,10 +241,46 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
 
     $now = $current[$name].medianNs
     $ratio = if ($was -gt 0) { $now / $was } else { 1 }
+
+    # Allocation is compared as well as time, and to the same threshold. Phase 7's first lever is
+    # allocation elimination (`benchmark` skill), so a change that trades bytes for nanoseconds is
+    # exactly what this has to be able to see; a baseline that recorded allocations and never read
+    # them back would have let any allocation regression through.
+    $wasBytes = $baseline.benchmarks.$name.allocatedBytes
+    $nowBytes = $current[$name].allocatedBytes
+
+    # -1 on either side means that side was never measured: not an improvement and not a
+    # regression, so it is reported as such rather than folded into a ratio.
+    $allocUnmeasured = ($wasBytes -lt 0 -or $nowBytes -lt 0)
+    # A baselined allocation that has become zero is far more likely to be a diagnoser that did not
+    # attach than an engine that stopped allocating altogether, and reading it as a 100%
+    # improvement is how a whole run of lost readings passes GREEN. Flagged so somebody looks.
+    $allocLost = (-not $allocUnmeasured) -and $wasBytes -gt 0 -and $nowBytes -eq 0
+    $allocAppeared = (-not $allocUnmeasured) -and $wasBytes -eq 0 -and $nowBytes -gt 0
+    $allocRatio = if (-not $allocUnmeasured -and $wasBytes -gt 0) { $nowBytes / $wasBytes } else { 1 }
+    $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt $Threshold)
+
+    $allocCell =
+    if ($allocUnmeasured) { '    n/a' }
+    elseif ($allocLost) { '   lost' }
+    elseif ($allocAppeared) { '    new' }
+    else { '{0,6:N2}x' -f $allocRatio }
+
     $short = $name -replace '^Fuzzy\.Text\.RegularExpressions\.Benchmarks\.', ''
-    $colour = if ($ratio -gt $Threshold) { 'Red' } elseif ($ratio -lt 0.9) { 'Green' } else { 'Gray' }
-    Write-Host ('{0,-58} {1,12:N1} {2,12:N1} {3,8:N2}x' -f $short, $was, $now, $ratio) -ForegroundColor $colour
-    if ($ratio -gt $Threshold) { $regressions += "$short ($([math]::Round($ratio, 2))x)" }
+    $colour =
+    if ($ratio -gt $Threshold -or $allocRegressed) { 'Red' }
+    elseif ($ratio -lt 0.9) { 'Green' }
+    else { 'Gray' }
+    Write-Host ('{0,-58} {1,12:N1} {2,12:N1} {3,6:N2}x {4,7}' -f $short, $was, $now, $ratio, $allocCell) -ForegroundColor $colour
+
+    if ($ratio -gt $Threshold) { $regressions += "$short slower ($([math]::Round($ratio, 2))x)" }
+    if ($allocRegressed) {
+        $why =
+        if ($allocLost) { 'allocation no longer measured (diagnoser lost?)' }
+        elseif ($allocAppeared) { 'now allocates where the baseline did not' }
+        else { "allocates more ($([math]::Round($allocRatio, 2))x)" }
+        $regressions += "$short $why - $wasBytes -> $nowBytes bytes"
+    }
 }
 
 $new = @($current.Keys | Where-Object { $_ -notin $baseline.benchmarks.PSObject.Properties.Name })
@@ -164,7 +290,8 @@ foreach ($name in $new) {
 
 Write-Host ''
 if ($regressions.Count -eq 0 -and $missing.Count -eq 0) {
-    Write-Host "Benchmarks: GREEN - nothing more than $($Threshold)x slower than the baseline." -ForegroundColor Green
+    $scope = if ($Filter -eq '*') { 'the suite' } else { "the '$Filter' subset" }
+    Write-Host "Benchmarks: GREEN - nothing in $scope more than $($Threshold)x slower, or allocating $($Threshold)x more, than the baseline." -ForegroundColor Green
     exit 0
 }
 

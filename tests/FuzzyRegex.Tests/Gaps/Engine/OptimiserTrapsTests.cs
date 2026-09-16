@@ -59,6 +59,12 @@ public sealed class OptimiserTrapsTests
     /// </summary>
     private static readonly string _dense = Pad("a needle in a haystack.", 100 * 1024);
 
+    /// <summary>
+    /// The benchmark suite's fuzzy-ranking subject: a misspelled <c>haystack</c> the ranking modes
+    /// can improve on. Same string as <c>Corpus.Fuzzy</c>.
+    /// </summary>
+    private const string _fuzzySubject = _sentence + "and finds a haystakc.";
+
     /// <summary>Builds a subject of at least <paramref name="size"/> filler characters plus a tail.</summary>
     /// <param name="tail">The distinguishing tail, appended once.</param>
     /// <param name="size">How much filler to lay down first.</param>
@@ -92,10 +98,12 @@ public sealed class OptimiserTrapsTests
         // The three copies of this recipe drift silently otherwise, and a pin measured against a
         // different subject from the benchmark is not a pin on the benchmark.
         //
-        // regex 2026.9.10: len(LONG)=1048631 len(LONG_PARTIAL)=1048625 len(DENSE)=102455.
+        // regex 2026.9.10: len(LONG)=1048631 len(LONG_PARTIAL)=1048625 len(DENSE)=102455
+        //                  len(FUZZY)=65.
         _long.Length.Should().Be(1048631);
         _longPartial.Length.Should().Be(1048625);
         _dense.Length.Should().Be(102455);
+        _fuzzySubject.Length.Should().Be(65);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -234,6 +242,10 @@ public sealed class OptimiserTrapsTests
         //   22    0.21 ms  2,649.52 ms
         //   24    0.36 ms 10,646.58 ms
         //
+        // The right-hand column's absolute values swing on a busy machine - n=24 came out at
+        // 6,497 ms, 9,832 ms and 10,647 ms across three runs. What reproduces, and what is being
+        // relied on here, is the SHAPE: one column flat, the other doubling per character.
+        //
         // '(a+)+b' is flat in n because the inner 'a+' is one greedy repeat with nothing to
         // redistribute; '(a|a)*b' doubles per character. Both are pinned so that a Phase 7 change
         // moving a shape between the two classes is visible, and the run lengths here are the ones
@@ -283,16 +295,51 @@ public sealed class OptimiserTrapsTests
     [Property("Upstream", "none - gap test")]
     public void A_timeout_fires_inside_a_long_scan_rather_than_only_between_matches()
     {
-        // A megabyte scan takes hundreds of milliseconds, so a one-millisecond budget must be
-        // noticed. The trap for Phase 7 is a fast path that skips the poll: an optimised scan that
-        // stops checking the clock turns a bounded call into an unbounded one.
+        // The pattern is one that NEVER MATCHES, so the megabyte is one uninterrupted scan with no
+        // match boundary anywhere in it: the only way to notice a one-millisecond budget is to poll
+        // the clock inside the matching loop. `\w+` would not test that - it finds 214,493 matches,
+        // so an engine that only checked between matches would pass and the Phase 7 fast path this
+        // is here to guard against would slip straight through.
         //
-        // DIVERGENCES.md, "Exception mapping", as above. Upstream has no timeout to compare with.
-        var pattern = new FuzzyRegex(@"\w+");
+        // regex 2026.9.10: search('zebra', LONG) -> None, so there is genuinely nothing to find.
+        // DIVERGENCES.md, "Exception mapping": a matching timeout raises RegexMatchTimeoutException
+        // where upstream raises TimeoutError. Upstream has no timeout to compare with.
+        var pattern = new FuzzyRegex("zebra");
 
-        Action act = () => _ = pattern.Matches(_long, timeout: TimeSpan.FromMilliseconds(1)).Count;
+        Action act = () => pattern.IsMatch(_long, timeout: TimeSpan.FromMilliseconds(1));
 
         act.Should().Throw<RegexMatchTimeoutException>();
+
+        // And the eager walk is bounded too, which is the other half of the contract.
+        Action walk = () => _ = new FuzzyRegex(@"\w+").Matches(_long, timeout: TimeSpan.FromMilliseconds(1)).Count;
+
+        walk.Should().Throw<RegexMatchTimeoutException>();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void The_two_ranking_modes_improve_on_the_plain_fuzzy_answer()
+    {
+        // This pins the three fuzzy-ranking BENCHMARKS, not just the engine. Their first version
+        // ran `(?:haystack){e<=3}` against a subject containing nothing like it, so all three
+        // answered no match in identical time and the workload named as the likeliest place to
+        // regress was measuring a failed scan. What makes it a real workload is that the plain
+        // answer and the ranked answer DIFFER, and that is what is asserted here.
+        //
+        // regex 2026.9.10: search('(?:haystack){e<=3}', FUZZY) -> span (54,63), fuzzy_counts
+        //                  (0,2,1), where (?e) and (?b) both -> span (56,63), counts (0,0,1).
+        // Python's fuzzy_counts is (substitutions, insertions, deletions), the same order as
+        // FuzzyCounts here.
+        Match plain = new FuzzyRegex("(?:haystack){e<=3}").Match(_fuzzySubject);
+        Match enhanced = new FuzzyRegex("(?e)(?:haystack){e<=3}").Match(_fuzzySubject);
+        Match best = new FuzzyRegex("(?b)(?:haystack){e<=3}").Match(_fuzzySubject);
+
+        (plain.Index, plain.Index + plain.Length).Should().Be((54, 63));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(0, 2, 1));
+        (enhanced.Index, enhanced.Index + enhanced.Length).Should().Be((56, 63));
+        enhanced.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+        (best.Index, best.Index + best.Length).Should().Be((56, 63));
+        best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     // ---------------------------------------------------------------------------------------

@@ -53,6 +53,22 @@ internal static class Sizing
             string subject = new('a', n);
             Report($"(a+)+b  n={n}", () => new FuzzyRegex("(a+)+b").IsMatch(subject) ? 1 : 0);
         }
+
+        // The same shape on the built-in engine, so ReferenceBenchmarks.BacktrackingBcl's remarks
+        // can say what was measured here rather than what one would expect. Instances are built
+        // once, outside the timed call, exactly as the benchmarks build theirs.
+        Console.WriteLine("\n## (a|a)*b on System.Text.RegularExpressions.Regex, for comparison");
+        foreach (int n in new[] { 18, 24, 30, 40 })
+        {
+            string subject = new('a', n);
+            var interpreted = new System.Text.RegularExpressions.Regex("(a|a)*b");
+            var compiled = new System.Text.RegularExpressions.Regex(
+                "(a|a)*b",
+                System.Text.RegularExpressions.RegexOptions.Compiled
+            );
+            Report($"bcl (a|a)*b          n={n}", () => interpreted.IsMatch(subject) ? 1 : 0);
+            Report($"bcl (a|a)*b compiled n={n}", () => compiled.IsMatch(subject) ? 1 : 0);
+        }
     }
 
     /// <summary>Times an operation and prints the best of <paramref name="runs"/> elapsed times.</summary>

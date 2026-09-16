@@ -101,17 +101,36 @@ public class ReferenceBenchmarks
     [Benchmark]
     public int ReplaceBclCompiled() => _compiledPairs.Replace(Corpus.Long, "$2 $1").Length;
 
-    /// <summary>Exponential backtracking to exhaustion, this port.</summary>
+    /// <summary>
+    /// Exponential backtracking to exhaustion, this port - S51's exact pattern and subject, kept so
+    /// its commit message stays comparable.
+    /// </summary>
     /// <returns>Whether it matched, which it does not.</returns>
     [Benchmark]
     public bool BacktrackingPort() => _portBacktracking.IsMatch(_backtrackingSubject);
 
-    /// <summary>Exponential backtracking to exhaustion, interpreted <see cref="Regex"/>.</summary>
+    /// <summary>
+    /// The same pattern and subject, interpreted <see cref="Regex"/>. <b>It is not exponential on
+    /// this shape and this port is</b>, which is what the ratio here is actually about. Measured
+    /// with the <c>sizing</c> mode on 2026-09-16, <c>(a|a)*b</c> over a run of <c>a</c>:
+    /// <code>
+    ///   n     this port      Regex    Regex compiled
+    ///   18     151.41 ms    0.01 ms          0.00 ms
+    ///   24   6,497.28 ms    0.02 ms          0.00 ms
+    ///   30           -      0.03 ms          0.01 ms
+    ///   40           -      0.06 ms          0.01 ms
+    /// </code>
+    /// The port doubles per character; the built-in engine grows about six-fold across a subject
+    /// 2.2 times longer, so polynomially. No claim is made here about WHICH of the built-in
+    /// engine's start optimisations does it - only that this port has none of that family yet, and
+    /// that this is the largest gap in the whole comparison table
+    /// (<c>docs/plan/OPTIMISATION-NOTES.md</c>). It is not a claim that one inner loop is faster.
+    /// </summary>
     /// <returns>Whether it matched, which it does not.</returns>
     [Benchmark]
     public bool BacktrackingBcl() => _bclBacktracking.IsMatch(_backtrackingSubject);
 
-    /// <summary>Exponential backtracking to exhaustion, compiled <see cref="Regex"/>.</summary>
+    /// <summary>The same rejection, compiled <see cref="Regex"/>. See <see cref="BacktrackingBcl"/>.</summary>
     /// <returns>Whether it matched, which it does not.</returns>
     [Benchmark]
     public bool BacktrackingBclCompiled() => _compiledBacktracking.IsMatch(_backtrackingSubject);

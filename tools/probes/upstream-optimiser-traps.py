@@ -33,6 +33,7 @@ def pad(tail, size=MEGABYTE):
 LONG = pad("a needle in a haystack.")
 LONG_PARTIAL = pad("a needle in a hay")
 SHORT = SENTENCE + "and finds a needle."
+FUZZY = SENTENCE + "and finds a haystakc."
 DENSE = pad("a needle in a haystack.", 100 * 1024)
 
 
@@ -112,7 +113,17 @@ partial = regex.compile(r"a needle in a haystack\.", flags=V).search(
 show("partial search in LONG_PARTIAL", (partial.span(), partial.partial))
 show("search 'needle' in SHORT", regex.search("needle", SHORT, flags=V).span())
 
-print("\n## E. The 100 KB subject, where the full lazy walk is affordable")
+print("\n## E. The fuzzy ranking subject: a near miss the ranking modes can improve on")
+show("len(FUZZY)", len(FUZZY))
+for p in ("(?:haystack){e<=3}", "(?e)(?:haystack){e<=3}", "(?b)(?:haystack){e<=3}"):
+    m = regex.search(p, FUZZY, flags=V)
+    show(f"search '{p}' in FUZZY", (m.span(), m.fuzzy_counts))
+show("search 'needle' in FUZZY", regex.search("needle", FUZZY, flags=V))
+
+print("\n## F. A single uninterrupted scan, for the timeout pin")
+show("search 'zebra' in LONG", regex.search("zebra", LONG, flags=V))
+
+print("\n## G. The 100 KB subject, where the full lazy walk is affordable")
 dense_words = spans(r"\w+", DENSE)
 show("len(DENSE)", len(DENSE))
 show(r"count '\w+' in DENSE", len(dense_words))

@@ -15,10 +15,10 @@
 
   Measured 2026-09-16 with BenchmarkDotNet 0.15.8 and three worktrees present: the failure happens
   with the working directory at the repository root AND at bench/FuzzyRegex.Benchmarks, and stops
-  happening with this file in place and the working directory at bench/ - 32 of 32 benchmarks ran.
-  It is the working directory that decides, not the assembly location, so the runner is
-  tools/run-benchmarks.ps1, which sets it. Running by hand from anywhere above bench/ will fail
-  this way again.
+  happening with this file in place and the working directory at bench/ - every benchmark in the
+  suite then ran. It is the working directory that decides, not the assembly location, so the
+  runner is tools/compare-benchmarks.ps1, which sets it. Running by hand from anywhere above bench/
+  will fail this way again.
 -->
 <Solution>
   <Project Path="FuzzyRegex.Benchmarks/FuzzyRegex.Benchmarks.csproj" />

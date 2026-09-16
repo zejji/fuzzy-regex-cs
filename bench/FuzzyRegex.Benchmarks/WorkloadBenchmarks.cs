@@ -150,20 +150,24 @@ public class WorkloadBenchmarks
     [Benchmark]
     public int FuzzyLong() => _fuzzyOne.Match(Corpus.Long).Index;
 
-    /// <summary>A wider error budget on a short subject.</summary>
+    /// <summary>
+    /// A wider error budget, over the subject that actually contains a near miss. Answers span
+    /// (54,63) with counts (0,2,1); the two ranking modes below move it to (56,63) and (0,0,1),
+    /// which is how one can tell they are doing work rather than failing identically.
+    /// </summary>
     /// <returns>Where it was found.</returns>
     [Benchmark]
-    public int FuzzyBudgetThree() => _fuzzyThree.Match(Corpus.Short).Index;
+    public int FuzzyBudgetThree() => _fuzzyThree.Match(Corpus.Fuzzy).Index;
 
-    /// <summary>The same budget under <c>ENHANCEMATCH</c>.</summary>
-    /// <returns>How many errors the answer carries.</returns>
+    /// <summary>The same budget under <c>ENHANCEMATCH</c>, which re-runs to reduce the errors.</summary>
+    /// <returns>How many errors the answer carries, which is 1 rather than 3.</returns>
     [Benchmark]
-    public int EnhanceMatch() => _enhance.Match(Corpus.Short).FuzzyCounts.Total;
+    public int EnhanceMatch() => _enhance.Match(Corpus.Fuzzy).FuzzyCounts.Total;
 
-    /// <summary>The same budget under <c>BESTMATCH</c>.</summary>
-    /// <returns>How many errors the answer carries.</returns>
+    /// <summary>The same budget under <c>BESTMATCH</c>, which explores the space.</summary>
+    /// <returns>How many errors the answer carries, which is 1 rather than 3.</returns>
     [Benchmark]
-    public int BestMatch() => _best.Match(Corpus.Short).FuzzyCounts.Total;
+    public int BestMatch() => _best.Match(Corpus.Fuzzy).FuzzyCounts.Total;
 
     /// <summary>Compiles a large pattern from source, which is parser and compiler work only.</summary>
     /// <returns>How many capture groups it has, so the result cannot be discarded.</returns>
