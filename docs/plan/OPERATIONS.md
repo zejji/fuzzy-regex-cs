@@ -235,11 +235,38 @@ of one. Installed on this machine, 2026-09-14:
 
 Quote the version and the flags in the slice notes, as S45 did.
 
-### There is no second FUZZY engine on this machine, and the wall is permissions, not availability
+### TRE is the second FUZZY engine, and it runs in WSL (installed 2026-09-16 by the owner)
 
-**None of the four engines above does approximate matching.** Every one of them answers `(?e)`,
+TRE 0.8.0 is the approximate-regex library whose `{~n}` / `{+n}` / `{-n}` / `{#n}` cost syntax
+mrab-regex's fuzzy feature was modelled on, so it cross-checks `{e<=n}`, `{i<=n}`, `{d<=n}` and
+`{s<=n}` on real patterns. Its Python binding refuses to build on Windows BY DESIGN (a compile-time
+check in `tre-python.c:425` demands a 4-byte `wchar_t`; Windows has 2), so it lives in WSL Ubuntu
+24.04, where the owner installed `libtre-dev tre-agrep build-essential python3-dev python3-venv`
+and the orchestrator built the binding from `github.com/laurikari/tre` (`python/setup.py.in` with
+setuptools in place of distutils, `library_dirs` pointing at `/usr/lib/x86_64-linux-gnu`) into
+`~/.venvs/tre` inside WSL. Offsets are codepoints, proven on a non-BMP-free but non-ASCII subject.
+
+Call it from Windows in one line; the driver allowlist permits `wsl`:
+
+```
+wsl -d Ubuntu -- ~/.venvs/tre/bin/python -c "import tre; p=tre.compile('PATTERN', tre.EXTENDED); m=p.search('xxPATERNyy', tre.Fuzzyness(maxerr=1)); print(m.groups(), m.cost)"
+# ((2, 8),) 1        measured 2026-09-16
+wsl -d Ubuntu -- ~/.venvs/tre/bin/python -c "import tre; m=tre.compile('ﬁı', tre.EXTENDED).search('aﬁxb', tre.Fuzzyness(maxsub=1)); print(m.groups(), m.cost)"
+# ((1, 3),) 1        codepoint offsets, not UTF-8 bytes
+```
+
+`tre.Fuzzyness(maxerr=, maxins=, maxdel=, maxsub=, delcost=, inscost=, subcost=)` maps onto
+`{e<=,i<=,d<=,s<=}` and the cost form. For a batch, write the rows as JSON to a file under `/mnt/c/...`
+and run one WSL Python process over them; a `wsl` start is about 200 ms, so never call it per row.
+Ceilings: TRE has no BESTMATCH/ENHANCEMATCH, no named-list constraint, no `fuzzy_changes` (only
+the total `cost`), and its regex dialect is POSIX ERE, so only the fuzzy CORE (literal, class,
+group, repeat patterns with a budget) is comparable. `tre-agrep` is on the WSL PATH as well.
+
+### Before that: the first sitting's search on Windows, kept for the record
+
+**None of the four Windows engines above does approximate matching.** Every one of them answers `(?e)`,
 `{e<=n}`, `fuzzy_counts` and `fuzzy_changes` with a syntax error, so on any fuzzy row upstream is
-currently the only engine in the room and amendment 16's "run a second engine" cannot be satisfied.
+the only Windows engine in the room; TRE in WSL (above) is what satisfies amendment 16 on fuzzy rows.
 
 Measured 2026-09-16 (S52c sitting 1, scope item 5, inside the thirty-minute box the slice set):
 

@@ -256,7 +256,8 @@ rejects, all of which have already burned turns on real slices:
   for the pre-commit inspection. A `[message from the orchestrator]` line is an instruction from
   the human's session: follow it. If the kill does land, the driver keeps your last GREEN commit
   and stashes the rest, so commit early and often.
-  **Second engines are installed** - PCRE2 (`import pcre2`), Perl, .NET, regex 2026.9.10; see
+  **Second engines are installed** - PCRE2 (`import pcre2`), Perl, .NET, regex 2026.9.10, and TRE
+  for FUZZY rows via `wsl -d Ubuntu -- ~/.venvs/tre/bin/python` (one process per batch); see
   OPERATIONS.md "Second engines". Run them; do not stop to ask whether they are available.
   **A deliberate difference from upstream is appended to `docs/DIVERGENCES.md` in the same commit**
   (what, why, where decided, how a user gets upstream's behaviour). Phase 8 writes the user docs from

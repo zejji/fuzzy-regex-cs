@@ -57,11 +57,13 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
 4. **The same checker on the port's answers**, in `OracleComparer`, so a port bug that both engines
    share is visible too. A port violation is a port bug unless the same row violates upstream and
    the ledger explains why the port follows.
-5. **Fuzzy second engine.** The `tre` PyPI binding (0.8.0) fails to build on Windows (measured
-   2026-09-15: "Failed to build 'tre' when getting requirements to build wheel"). Try one
-   alternative within thirty minutes - `agrep` from Git for Windows or a prebuilt TRE - and record
-   in `docs/plan/OPERATIONS.md` what works; if nothing does, say so and keep the invariants as the
-   fuzzy instrument.
+5. **Fuzzy second engine: TRE, installed in WSL on 2026-09-16 after sitting 1** (recipe and call
+   shape in `docs/plan/OPERATIONS.md`, "TRE is the second FUZZY engine"). Use it as the independent
+   engine for every fuzzy-core invariant violation this slice triages, and add one probe,
+   `tools/probes/tre-fuzzy-check.py`, that takes a rows JSON file and asks TRE in ONE WSL process
+   for each row whose pattern is in the comparable core (literal, class, group, repeat, with an
+   `{e,i,d,s<=n}` budget and no BESTMATCH/ENHANCEMATCH/named list): does a match within the budget
+   exist, and what is its minimum cost. Record per row CONFIRMED / DIFFERENT / OUT OF DIALECT.
 6. **Docs.** `docs/VERIFICATION.md` gains a paragraph: the oracle proves agreement, the invariants
    prove consistency, and only the two together say anything about correctness where the port
    inherits upstream's answer.
@@ -93,9 +95,9 @@ with no port involved, and then against the port's. Owner request 2026-09-15 (sp
       *(Sitting 1: list DONE - `docs/ORACLE-INVARIANTS.md`, 22 invariants, a calibration per item.
       Checker not started.)*
 - [ ] Three-seed wave run with violations triaged; ledger entries for real ones.
-- [x] Fuzzy second engine tried and the result recorded in OPERATIONS. *(Sitting 1: none reachable.
-      `agrep` and Perl `String::Approx` are absent; `fuzzysearch` is blocked by permissions, not
-      proven to fail. The invariants are the fuzzy instrument, as this scope item provides for.)*
+- [ ] TRE (WSL) used on the fuzzy-core violations and `tools/probes/tre-fuzzy-check.py` committed.
+      *(Sitting 1 found nothing reachable from a driver session - `agrep` and Perl `String::Approx`
+      absent, `pip` outside the allowlist; the orchestrator and owner then installed TRE in WSL.)*
 - [ ] Gate row 104366 run through the invariants, and what they say about it recorded.
       *(Sitting 1: the invariant that handles it is `greedy-lazy-existence-agree`; running the row
       through it belongs to the checker sitting.)*
