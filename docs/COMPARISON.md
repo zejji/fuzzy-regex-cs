@@ -42,8 +42,9 @@ Module-level functions:
 | `regex.purge()` | no equivalent yet (planned) | Upstream clears its module-global pattern cache; this port has no pattern cache yet. `FuzzyRegex.CacheSize` is **PLANNED (Phase 7)** per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table - do not treat it as available today. |
 
 Compiled `Pattern`'s methods (an instance of upstream's `Pattern`, a compiled `FuzzyRegex` here):
-every method above has an instance counterpart with the same name and the same mapping, called on
-the compiled object instead of passed a pattern string - `pattern.search(string)` is
+every matching method above (`search` through `splititer`) has an instance counterpart with the
+same name and the same mapping, called on the compiled object instead of passed a pattern string;
+`escape` is static only and `findall` and `purge` have no counterpart on either - `pattern.search(string)` is
 `fuzzyRegex.Match(input, ...)`, `pattern.sub(repl, string)` is `fuzzyRegex.Replace(input,
 replacement, ...)`, and so on. Two `Pattern` members have no such static twin above because upstream
 itself has none:
