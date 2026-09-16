@@ -32,12 +32,18 @@ foreach ($f in $Files) {
         $lines = $m.Groups[1].Value -split '\r?\n' | Where-Object { $_ -ne '' -or $true }
         $usings = @($lines | Where-Object { $_ -match '^using .*;\s*$' })
         $code = @($lines | Where-Object { $_ -notmatch '^using .*;\s*$' })
-        # Expected output = the run of `// ` comment lines at the END of the block.
+        # Expected output = the run of `// ` comment lines at the END of the block, or, when a
+        # block has none, the `// text` trailing each Console.WriteLine line, in order.
         $expected = New-Object System.Collections.Generic.List[string]
         for ($i = $code.Count - 1; $i -ge 0; $i--) {
             if ($code[$i] -match '^\s*$') { continue }
             if ($code[$i] -match '^// ?(.*)$') { $expected.Insert(0, $Matches[1]) } else { break }
         }
+        if ($expected.Count -eq 0) {
+            foreach ($l in $code) { if ($l -match 'Console\.WriteLine\(.*\);\s*// ?(.*\S)\s*$') { $expected.Add($Matches[1]) } }
+        }
+        # `// True - why it is true` compares as `True`: text after ` - ` is annotation, not output.
+        $expected = [System.Collections.Generic.List[string]]@($expected | ForEach-Object { ($_ -split ' - ', 2)[0].TrimEnd() })
         $blocks += [pscustomobject]@{ File = $f; Ordinal = $n; Usings = $usings; Code = ($code -join "`n"); Expected = @($expected) }
     }
 }
@@ -78,8 +84,8 @@ foreach ($b in $blocks) {
     $k++
     $start = [array]::IndexOf($out, "=== $k")
     $end = if ($k -lt $blocks.Count) { [array]::IndexOf($out, "=== $($k + 1)") } else { $out.Count }
-    $actual = @($out[($start + 1)..($end - 1)] | Where-Object { $_ -ne $null })
-    if ($start -lt 0) { $actual = @() }
+    # A PowerShell range with start > end runs BACKWARDS, so an empty section must be special-cased.
+    $actual = if ($start -lt 0 -or ($end - 1) -lt ($start + 1)) { @() } else { @($out[($start + 1)..($end - 1)]) }
     if ($b.Expected.Count -eq 0) { Write-Host ("ok   {0} #{1} (compiles; no expected output)" -f $b.File, $b.Ordinal); continue }
     if (($actual -join "`n") -eq ($b.Expected -join "`n")) { Write-Host ("ok   {0} #{1}" -f $b.File, $b.Ordinal) }
     else {
