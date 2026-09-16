@@ -34,11 +34,11 @@ Module-level functions:
 | `regex.finditer(pattern, string)` | `FuzzyRegex.EnumerateMatches(input, pattern, options, ...)` (static) | Lazy, like `finditer`. `FuzzyRegex.Matches` is the eager counterpart - see "**A lazy walk times each STEP...**" below. |
 | `regex.sub(pattern, repl, string)` | `FuzzyRegex.Replace(input, pattern, replacement, options, ...)` (static) | Template language is upstream's, not `$1` - see "**Replacement templates speak upstream's language**" below. |
 | `regex.subf(pattern, format, string)` | `FuzzyRegex.ReplaceFormat(input, pattern, format, options, ...)` (static) | `str.format`-style template. |
-| `regex.subn(pattern, repl, string)` | `FuzzyRegex.Replace(input, pattern, replacement, options, beginning, length, out int replacements, ...)` (instance overload with `out int`) | Returns the count through an `out` parameter instead of a tuple. |
+| `regex.subn(pattern, repl, string)` | `regex.Replace(input, replacement, count, out int replacements, ...)` (instance overloads only; no static form) | Returns the count through an `out` parameter instead of a tuple. |
 | `regex.subfn(pattern, format, string)` | `FuzzyRegex.ReplaceFormat(input, format, count, out int replacements, ...)` (instance overload with `out int`) | Same shape as `subn`, format-template flavour. |
 | `regex.split(pattern, string)` | `FuzzyRegex.Split(input, pattern, options, ...)` (static) | `-1` means no limit; upstream's `maxsplit=0` does - see "**`Split` spells "no limit" as `maxSplits = -1`**" below. |
 | `regex.splititer(pattern, string)` | `FuzzyRegex.EnumerateSplits(input, pattern, options, ...)` (static) | Lazy twin of `Split`. |
-| `regex.escape(pattern)` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` (static) | Same idea; `specialOnly` and `literalSpaces` are exposed as named parameters rather than upstream's positional ones. |
+| `regex.escape(pattern)` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` (static) | Same idea; upstream's `special_only` and `literal_spaces` are `specialOnly` and `literalSpaces` here, both usable by name on either side. |
 | `regex.purge()` | no equivalent yet (planned) | Upstream clears its module-global pattern cache; this port has no pattern cache yet. `FuzzyRegex.CacheSize` is **PLANNED (Phase 7)** per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table - do not treat it as available today. |
 
 Compiled `Pattern`'s methods (an instance of upstream's `Pattern`, a compiled `FuzzyRegex` here):
@@ -62,12 +62,12 @@ itself has none:
 |---|---|---|
 | `match.group(n)` | `match.Groups[n].Value` | No standalone `group` method; go through the group. `match.Groups[0].Value` is also `match.Value` (inherited - see Table B). |
 | `match.groups()` | `match.Groups` (numbers 1 upward) | `GroupCollection` is enumerable; skip index 0 for upstream's `groups()` shape. |
-| `match.groupdict()` | the named entries of `match.Groups` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>`...**" below - `Groups` is total (every group, keyed by name or by number-as-text), where `groupdict()` is named-only. There is no built-in filter to the named subset; a caller writes one, e.g. `match.Groups.Where(kv => !int.TryParse(kv.Key, out _))`. |
+| `match.groupdict()` | the named entries of `match.Groups` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>`...**" below - `Groups` is total (every group, keyed by name or by number-as-text), where `groupdict()` is named-only. There is no built-in filter to the named subset; a caller writes one over the dictionary face - cast first, because `Groups` has two enumerable faces and `Groups.Where(...)` is ambiguous (see the row): `((IReadOnlyDictionary<string, Group>)match.Groups.Where(kv => !int.TryParse(kv.Key, out _))`. |
 | `match.start([group])`, `match.end([group])`, `match.span([group])` | `match.Groups[n].Index`, `.Index + .Length`, or the pair | No `Start`/`End`/`Span` names; `(Index, Length)` carries the same information. `match.Groups[0]` is `match` itself. |
 | `match.captures([group])` | `match.Groups[n].Captures` | A `CaptureCollection`; kept for every group, not only ones inside a repeated construct - see Table B's `Group.Captures` row. |
 | `match.starts([group])`, `match.ends([group])`, `match.spans([group])` | `Group.Captures` with `(Index, Length)` | Per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table: all six of upstream's per-index accessors collapse onto one `Group.Captures` returning a `CaptureCollection`. |
 | `match.fuzzy_counts` | `match.FuzzyCounts` | A `FuzzyCounts` record (`Substitutions`, `Insertions`, `Deletions`, `Total`). |
-| `match.fuzzy_changes` | `match.FuzzyChanges` | A `FuzzyChanges` record (`Substitutions`, `Insertions`, `Deletions`, each a list of subject positions). |
+| `match.fuzzy_changes` | `match.FuzzyChanges` | A `FuzzyChanges` record (`Substitutions`, `Insertions`, `Deletions`). Substitution and insertion entries are subject positions in UTF-16 code units; a deletion entry is where the missing character would sit in a subject with all earlier deletions put back, which can lie past the end of the match or of the subject (upstream shifts them the same way). |
 | `match.expand(template)` | `match.Result(replacement)` | Same template language as `sub`, not `Regex`'s `$1` - see Table B. |
 | `match.expandf(format)` | `match.ResultFormat(format)` | `str.format`-style template. |
 | `match.detach_string()` | none | Drops the match's reference to the subject so Python can free it; .NET's GC needs no such hint. |
@@ -292,7 +292,8 @@ what is safe to do, not in what a call returns.
 ### A `CancellationToken` on every input-dependent method
 
 Every method that reads the subject - `Match`, `Matches`, `Replace`, `Split`, and so on - takes a
-`CancellationToken` as its last parameter. Upstream has no equivalent, because a Python caller
+`CancellationToken` as its last parameter, with one exception: `Match.NextMatch()` takes neither a
+token nor a timeout and runs under the pattern's `MatchTimeout`, as `Regex`'s does. Upstream has no equivalent, because a Python caller
 interrupts a long match with Ctrl-C instead.
 
 ```csharp
@@ -312,8 +313,8 @@ catch (OperationCanceledException)
 
 ### A per-call `timeout` on every input-dependent method
 
-Every input-dependent method also takes a `TimeSpan? timeout`, defaulting to `null`, which means
-"use the pattern's own `MatchTimeout`". This is parity with upstream, which has always taken a
+Every input-dependent method except `Match.NextMatch()` also takes a `TimeSpan? timeout`, defaulting
+to `null`, which means "use the pattern's own `MatchTimeout`" (`NextMatch` always uses it). This is parity with upstream, which has always taken a
 per-call `timeout=`; what is new is that the built-in `Regex` never gave an instance method one, so
 the shape here is closer to upstream than to `Regex`.
 
@@ -523,9 +524,22 @@ an absence; use `Groups` and `Group.Captures` instead, as shown under `match.cap
 When a named list is supplied but never referenced in the pattern, the error message includes the
 name exactly as it was written. Upstream instead formats it through Python's `ascii()` repr, so a
 named list called `é` reports `unused keyword argument '\xe9'` upstream and `unused keyword argument
-'é'` here. ASCII names read identically on both engines, so there is no example that would show a
-visible difference without a non-ASCII name, which the parser does not currently expose a way to
-trigger through the public surface in a single line worth reproducing here.
+'é'` here. ASCII names read identically on both engines; a non-ASCII name reaches the check through
+the constructor's `namedLists` argument:
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var lists = new Dictionary<string, IReadOnlyCollection<string>> { ["é"] = new[] { "x" } };
+try
+{
+    _ = new FuzzyRegex("a", FuzzyRegexOptions.None, lists);
+}
+catch (FuzzyRegexParseException ex)
+{
+    Console.WriteLine(ex.Message);   // unused keyword argument 'é'
+}
+```
 
 No test in `tests/FuzzyRegex.Tests` pins this message's exact wording; it is pinned only in
 `docs/DIVERGENCES.md`.
@@ -573,8 +587,8 @@ Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı
 
 ### The search prefilters are not ported
 
-`Match`, `EnumerateMatches` and partial matching can answer what upstream's own anchored
-`MatchAtStart` answers on several pattern families, because the fast-path prefilters that let
+`Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several
+pattern families, because the fast-path prefilters that let
 upstream skip ahead during a search are Phase 7 work here and are not implemented yet. Where the two
 disagree, this port's answer has been checked against a second independent engine and is treated as
 permanently correct rather than as a placeholder to invert later.
