@@ -647,24 +647,29 @@ catch (FuzzyRegexParseException ex)
 }
 ```
 
-### `(?L)` is rejected at match time
+### `(?L)` works only when casing is not requested
 
-Upstream reads the process's C locale for `(?L)`, which .NET has no equivalent of, so this port
-refuses it rather than silently ignoring the flag. Measured on 2026-09-16 through the public API: a
-run of two or more case-insensitive characters (`(?Li)ab`) is refused when the pattern is
-constructed; `(?L)a` and `(?Li)a` construct and are refused on their first match. The refusal is a
-`NotImplementedException` today, with the message `needs:locale-flag`.
+Upstream reads the process's C locale only when `(?L)` needs casing. .NET has no equivalent of that
+locale, so this port allows patterns that do not request casing and rejects those that do. A plain
+`(?L)a` matches exactly as it does without the flag. Any case-insensitive or full-folding operation,
+including a literal, set or backreference, is rejected when the pattern is constructed. The
+exception is `NotSupportedException`; its message identifies `(?L)` and recommends `(?u)` or
+`(?a)`.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
+var literal = new FuzzyRegex("(?L)a");
+Console.WriteLine(literal.FullMatch("a").Success);   // True
+Console.WriteLine(literal.FullMatch("A").Success);   // False
+
 try
 {
-    _ = new FuzzyRegex("(?Li)ab");
+    _ = new FuzzyRegex("(?Li)a");
 }
-catch (Exception ex)
+catch (NotSupportedException ex)
 {
-    Console.WriteLine(ex.GetType().Name);   // NotImplementedException
+    Console.WriteLine(ex.Message.Contains("(?L)", StringComparison.Ordinal));   // True
 }
 ```
 
