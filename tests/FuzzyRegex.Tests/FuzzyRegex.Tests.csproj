@@ -4,7 +4,66 @@
     <RootNamespace>Fuzzy.Text.RegularExpressions.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!--
+      S53. Microsoft.Testing.Platform ships localized satellite assemblies (cs, de, es, fr, ...).
+      Native AOT compiles them into the binary, where they show up in AppDomain.GetAssemblies()
+      carrying a CultureName - and AwesomeAssertions walks that list to find the test framework's
+      exception type, which means constructing CultureInfo("cs"). Under the repo-wide
+      InvariantGlobalization=true that throws, so EVERY assertion failure in the published binary
+      was reported as "CultureNotFoundException: cs is an invalid culture identifier" instead of as
+      the failure - measured 2026-09-16, and it would have made the AOT gate useless as a
+      diagnostic. Shipping only English resources is the fix that keeps InvariantGlobalization
+      honest; the alternative was turning globalization on for the test app alone, which changes
+      the environment the library is tested in.
+    -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!--
+      S53. This project is published with PublishAot=true and the produced executable is run as the
+      dynamic half of the AOT gate (tools/run-aot-tests.ps1, the `native-aot` job in ci.yml). The
+      five suppressions below are scoped to this test project; src/FuzzyRegex carries none at all
+      and, measured 2026-09-16, produces zero trim or AOT warnings of its own.
+
+      IL2026, IL2070, IL2075 - this project reflects over the library on purpose. The thread-safety
+      audits in Gaps/Api and the ported-test conventions scan read types, fields and properties by
+      name to report what they find, so the trimmer cannot see how they are reached. The scans stay
+      honest two ways: the assemblies they read are rooted below, and a scan that comes back empty
+      now FAILS rather than passing over nothing - see
+      ThreadSafetyTests.The_library_assembly_this_file_scans_has_not_been_trimmed_away and the
+      count floor in PortedTestConventionsTests.Every_ported_test_in_this_assembly_conforms.
+
+      IL2104, IL3053 - AwesomeAssertions 9.6.0 is a FluentAssertions fork with reflection inside
+      and is not marked AOT-compatible, so it reports these two aggregate warnings for the whole
+      assembly. They cannot be fixed from here. What they mean in practice was measured rather than
+      assumed: only BeEquivalentTo actually fails at run time, which is why S53 replaced its twelve
+      call sites with Equivalence and banned it in AotAssertionConventionTests. The other ~4,600
+      assertions run natively.
+    -->
+    <NoWarn>$(NoWarn);IL2026;IL2070;IL2075;IL2104;IL3053</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      S53. Root both assemblies rather than letting the trimmer keep only what it can see being
+      called. The reflection-based audits above scan them by name, so a trimmed assembly would
+      turn every one of those tests into a pass over nothing; and the library is the subject under
+      test, not a dependency to be shaken down for size. The size claim the AOT gate makes for a
+      real consumer is measured by samples/FuzzyRegex.AotSmoke instead, which roots nothing.
+    -->
+    <TrimmerRootAssembly Include="FuzzyRegex" />
+    <TrimmerRootAssembly Include="FuzzyRegex.Tests" />
+    <!--
+      And TUnit.Assertions, because AwesomeAssertions reports a failure by reflectively
+      constructing the host test framework's exception type -
+      Activator.CreateInstance(typeof(TUnit.Assertions.Exceptions.AssertionException), message).
+      The trimmer cannot see that call, so it drops the (string) constructor and the report comes
+      out as "MissingMethodException: No parameterless constructor defined" instead of as the
+      assertion that failed - measured 2026-09-16. The gate would still go red, but on a
+      substituted error, which is worse than useless for diagnosing one.
+    -->
+    <TrimmerRootAssembly Include="TUnit.Assertions" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="TUnit" />

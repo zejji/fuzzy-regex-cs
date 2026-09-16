@@ -9,4 +9,7 @@
   <Folder Name="/bench/">
     <Project Path="bench/FuzzyRegex.Benchmarks/FuzzyRegex.Benchmarks.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/FuzzyRegex.AotSmoke/FuzzyRegex.AotSmoke.csproj" />
+  </Folder>
 </Solution>

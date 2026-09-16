@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!--
+      Not "FuzzyRegex.AotSmoke", although that is the folder name: a namespace beginning
+      "FuzzyRegex" shadows the FuzzyRegex type this app exists to call.
+    -->
+    <RootNamespace>FuzzyRegexSamples.AotSmoke</RootNamespace>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      S53, the consumer half of the AOT gate. tools/run-aot-tests.ps1 publishes the whole test
+      suite natively, which is the stronger evidence; this app answers what only a separate
+      consumer can. It reaches the library through a PROJECT REFERENCE from outside the test
+      tree, it roots nothing, and it trims as a real application would, so the binary size and
+      startup time it reports are the numbers a user would see - Phase 7's baseline.
+
+      PublishAot is NOT set here. It is passed by tools/run-aot-smoke.ps1 on the publish command
+      line, exactly as the test project does it, and that is load-bearing rather than tidiness:
+      setting it in the csproj makes the SDK write the matching feature switch into the ORDINARY
+      build's runtimeconfig too, so `RuntimeFeature.IsDynamicCodeSupported` reads false under a
+      plain `dotnet run` and this app's own "which runtime am I on" line reported a Native AOT run
+      when there had not been one. S53's blind review caught that; keeping the switch on the
+      publish alone is what makes the report true.
+    -->
+
+    <!--
+      No IL2xxx or IL3xxx suppression here, and none in src/FuzzyRegex either: the point of this
+      project is that a consumer publishing the library gets a clean ILCompiler run. If a trim
+      warning ever appears, the fix belongs in src/, test-first, never in a [DynamicDependency]
+      band-aid here.
+    -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/FuzzyRegex/FuzzyRegex.csproj" />
+  </ItemGroup>
+</Project>

@@ -285,6 +285,23 @@ real matches. Static analysis is necessary and not sufficient - it cannot see a 
 failure - so this is the test that actually proves the claim, and it belongs in phase 6 alongside
 the rest of the hardening.
 
+**S53 built it, and the static half turned out to have been enough for `src/` (2026-09-16).** The
+gate is two commands, both in CI as the `native-aot` job on Windows and Linux: the whole suite
+published natively (`tools/run-aot-tests.ps1`, 6,155 tests, 0 failed, 3 skipped) and a consumer
+smoke app (`tools/run-aot-smoke.ps1`, 29 of 29). **`src/FuzzyRegex` was not modified at all** and
+emits zero trim and zero AOT warnings. Every defect the gate found was in the test project, in
+AwesomeAssertions or in the build - `BeEquivalentTo` cannot run natively, and neither can the S52b
+object-graph walk, which reads BCL private fields and is therefore skipped in the native run only.
+**Phase 7's baseline, from the consumer binary and the WARM run: 6,972,928 bytes byte-exact, and -
+as ranges over seven observations on a busy machine, which is how they must be read - 28-54 ms to
+`Main` and 30-57 ms to the first answer, so the library's own first compile and match costs 1-3 ms.
+Re-measure the timings on a quiet machine before optimising against them.** The test
+binary's 38.2 MB is not a consumer number - that publish roots three assemblies so its reflection
+audits stay honest. The gate also exposed a defect that has nothing to do with AOT and constrains
+every future slice: **a reflection scan that finds nothing makes a subset assertion pass**, which
+three permanent S52b/convention tests were doing, and every such scan now carries a measured
+non-vacuity floor.
+
 **This is why it constrains phase 7 specifically.** The classic .NET regex optimisation is
 `RegexOptions.Compiled`: emit IL at run time through `Reflection.Emit` and `DynamicMethod`. That is
 fundamentally incompatible with native AOT, which has no JIT to emit into. Phase 7 has to know the

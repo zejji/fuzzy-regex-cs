@@ -58,10 +58,70 @@ public sealed class ThreadSafetyTests
     /// </remarks>
     private static readonly IReadOnlySet<string> _patternGraphAllowlist = BuildPatternGraphAllowlist();
 
-    [Test]
-    public void Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted()
+    /// <summary>
+    /// Every library-declared field reachable from a compiled pattern that is neither
+    /// <c>readonly</c> nor <c>init</c>-only, which is the set both rules below are about.
+    /// </summary>
+    /// <remarks>
+    /// S53 pulled this out of the two tests that had a copy each, so that the non-vacuity guard
+    /// lives in one place. Both rules are subset assertions and BOTH of them pass if this comes
+    /// back empty - one because an empty set is a subset of the allowlist, the other because the
+    /// allowlist would then be entirely stale, which is at least loud. The guard is not
+    /// theoretical: in the published Native AOT binary this returned NOTHING, because the trimmer
+    /// does not keep the property-accessor metadata
+    /// <c>ObjectGraph.IsWriteOnceAfterConstruction</c> reads, so every field looked init-only.
+    /// </remarks>
+    /// <summary>
+    /// Skips the caller when <see cref="ObjectGraph.Walk"/> cannot run, which is any Native AOT
+    /// binary. S53 measured what happens there, and it is not a fixable hazard in this port:
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk descends into BCL objects on purpose - a library field typed
+    /// <c>IReadOnlyList&lt;uint&gt;</c> says nothing about whether a builder still holds the list
+    /// behind it - and it does that by reading private fields such as
+    /// <c>List&lt;FuzzyRegex&gt;._items</c>. Native AOT generates no field accessor for a
+    /// framework generic reached only by reflection. Published and run 2026-09-16, both ways
+    /// round: by default the walk returned ONE slot and the three subset assertions passed over
+    /// nothing, and with <c>IlcGenerateCompleteTypeMetadata</c> it threw
+    /// <c>NotSupportedException: This object cannot be invoked because no code was generated for
+    /// it: 'System.Collections.Generic.List`1[Fuzzy.Text.RegularExpressions.FuzzyRegex]._items'</c>
+    /// and cost 5.3 MB of binary for the privilege.
+    /// </para>
+    /// <para>
+    /// So these three rules are JIT-only, and they are skipped rather than weakened. They still
+    /// run on every commit, on all three operating systems, in the <c>build-and-ratchet</c> job -
+    /// what they audit is the port's own structure, which does not depend on the runtime that
+    /// asks. Rewriting the walk to enumerate collections through <c>IEnumerable</c> instead would
+    /// make it run here, and would also stop it seeing a list's <c>_size</c> and <c>_version</c>
+    /// move; that is a weaker thread-safety audit bought with a runtime the audit does not need,
+    /// and S52b's rules are permanent. The library's OWN reflection audits are unaffected and do
+    /// run natively: they read rooted library types, not BCL internals.
+    /// </para>
+    /// </remarks>
+    private static void SkipWhereTheObjectGraphWalkCannotRun()
     {
+        // The documented proxy for "this is a Native AOT binary": no JIT, hence no generated
+        // accessor for a field nothing statically references.
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+        {
+            TUnit.Core.Skip.Test(
+                "the object-graph walk reads BCL private fields, for which native AOT generates no "
+                    + "accessor; this rule runs under the JIT in the build-and-ratchet job"
+            );
+        }
+    }
+
+    /// <returns>The field names, as <c>Type.Field</c>, sorted and deduplicated.</returns>
+    private static IReadOnlyList<string> MutableFieldsInThePatternGraph()
+    {
+        SkipWhereTheObjectGraphWalkCannotRun();
+
         IReadOnlyList<ObjectGraph.Slot> slots = ObjectGraph.Walk(CompileEveryFamily());
+
+        // Measured 2026-09-16 under the JIT: the walk visits 27,000-odd slots for the family set.
+        // The floor is a "the walk found the graph" alarm, deliberately far below it.
+        slots.Should().HaveCountGreaterThan(1000, "the walk must reach the pattern graph to judge it");
 
         IReadOnlyList<string> mutable =
         [
@@ -76,7 +136,24 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
+        // The allowlist names forty, and under the JIT this set is exactly those forty. A floor of
+        // thirty catches a reflection surface that has stopped reporting writability without
+        // pinning the count, which the two subset rules already do between them.
         mutable
+            .Should()
+            .HaveCountGreaterThan(
+                30,
+                "the allowlist names forty writable fields, so a near-empty answer means the "
+                    + "reflection surface stopped reporting writability - not that the engine "
+                    + "became immutable"
+            );
+
+        return mutable;
+    }
+
+    [Test]
+    public void Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted() =>
+        MutableFieldsInThePatternGraph()
             .Should()
             .BeSubsetOf(
                 _patternGraphAllowlist,
@@ -85,36 +162,24 @@ public sealed class ThreadSafetyTests
                     + "it is genuinely written only by the compiler, add it to the allowlist with "
                     + "the writer named, and the snapshot test will prove the claim"
             );
-    }
 
     [Test]
-    public void The_pattern_graph_allowlist_has_no_entry_that_has_stopped_existing()
-    {
-        IReadOnlyList<ObjectGraph.Slot> slots = ObjectGraph.Walk(CompileEveryFamily());
-
-        IReadOnlySet<string> mutable = slots
-            .Where(static slot =>
-                slot.Field is not null
-                && slot.Field.DeclaringType?.Assembly == _library
-                && !ObjectGraph.IsWriteOnceAfterConstruction(slot.Field, slot.Owner!)
-            )
-            .Select(static slot => $"{slot.Field!.DeclaringType!.Name}.{slot.Field.Name}")
-            .ToHashSet(StringComparer.Ordinal);
-
+    public void The_pattern_graph_allowlist_has_no_entry_that_has_stopped_existing() =>
         // Strict, the way tests/parity-baseline.json is: an allowlist that keeps an entry for a
         // field somebody has since made readonly is an allowlist nobody is reading.
         _patternGraphAllowlist
             .Should()
             .BeSubsetOf(
-                mutable,
+                MutableFieldsInThePatternGraph(),
                 "an allowlist entry for a field that is now readonly, or has been deleted, is stale "
                     + "and should be removed"
             );
-    }
 
     [Test]
     public void Matching_writes_nothing_reachable_from_a_compiled_pattern()
     {
+        SkipWhereTheObjectGraphWalkCannotRun();
+
         IReadOnlyList<FuzzyRegex> patterns = CompileEveryFamily();
 
         // THE FIRST SNAPSHOT IS TAKEN BEFORE THESE PATTERNS HAVE MATCHED ANYTHING, and that is
@@ -136,10 +201,16 @@ public sealed class ThreadSafetyTests
 
         IReadOnlyDictionary<string, string> afterTwice = Snapshot(patterns);
 
-        afterOnce
+        // Rendered to sorted lines rather than compared with BeEquivalentTo, which cannot run
+        // under Native AOT (see Equivalence). Equal on two line lists reports the first path whose
+        // value moved, which is the same diagnosis BeEquivalentTo gave.
+        IReadOnlyList<string> baseline = Equivalence.Lines(before);
+
+        Equivalence
+            .Lines(afterOnce)
             .Should()
-            .BeEquivalentTo(
-                before,
+            .Equal(
+                baseline,
                 "matching must not write anything reachable from a compiled pattern - that is the "
                     + "whole of the shareable-between-threads promise, and it is what justifies "
                     + "every entry in the pattern-graph allowlist"
@@ -147,7 +218,33 @@ public sealed class ThreadSafetyTests
 
         // The second reading catches a write that accumulates rather than one that settles on the
         // first match; between them the two cover both shapes.
-        afterTwice.Should().BeEquivalentTo(before, "and it must not drift on later matches either");
+        Equivalence.Lines(afterTwice).Should().Equal(baseline, "and it must not drift on later matches either");
+    }
+
+    /// <summary>
+    /// S53. Every rule in this file is a reflection scan that reports what it found, so each one
+    /// passes vacuously if the scan finds nothing - and a trimmed publish is exactly how a scan
+    /// comes back empty. The suite is published as a Native AOT binary and run as the AOT gate, so
+    /// that is not hypothetical: without <c>TrimmerRootAssembly</c> in the test project, the
+    /// trimmer keeps only the members the tests happen to call and every audit below becomes a
+    /// tick for nothing.
+    /// </summary>
+    /// <remarks>
+    /// The floors are well under the real sizes, measured 2026-09-16 on
+    /// <c>src/FuzzyRegex/bin/Release/net10.0/FuzzyRegex.dll</c>: 281 types and 465 declared static
+    /// fields. They are a trimming alarm, not a size ratchet, so they are deliberately loose.
+    /// </remarks>
+    [Test]
+    public void The_library_assembly_this_file_scans_has_not_been_trimmed_away()
+    {
+        _library
+            .GetTypes()
+            .Should()
+            .HaveCountGreaterThan(200, "281 types were measured; far fewer means the trimmer took them");
+
+        LibraryStaticFields()
+            .Should()
+            .HaveCountGreaterThan(300, "465 declared static fields were measured, and every rule below scans them");
     }
 
     [Test]
@@ -230,47 +327,40 @@ public sealed class ThreadSafetyTests
         //    growing instead of saturating after one pass. S52b's blind review put an unsynchronised
         //    static Dictionary on the match path and the saturating version of this test missed it.
         //
-        // A Lazy is excluded from the comparison rather than being compared: going from not-created
+        // A Lazy is left out of the snapshot rather than being compared: going from not-created
         // to created is the one legitimate write a static here may make, and it may happen at any
         // point depending on which test ran first.
-        IReadOnlyDictionary<string, string> before = NonLazy(StaticTableSnapshot());
+        IReadOnlyDictionary<string, string> before = StaticTableSnapshot();
 
         RunWholeWorkload(patterns, salt: "s52b-first");
 
-        IReadOnlyDictionary<string, string> afterOnce = NonLazy(StaticTableSnapshot());
+        IReadOnlyDictionary<string, string> afterOnce = StaticTableSnapshot();
 
         RunWholeWorkload(patterns, salt: "s52b-second");
 
-        IReadOnlyDictionary<string, string> afterTwice = NonLazy(StaticTableSnapshot());
+        IReadOnlyDictionary<string, string> afterTwice = StaticTableSnapshot();
 
-        afterOnce
+        IReadOnlyList<string> baseline = Equivalence.Lines(before);
+
+        Equivalence
+            .Lines(afterOnce)
             .Should()
-            .BeEquivalentTo(
-                before,
+            .Equal(
+                baseline,
                 "the generated Unicode tables are readonly references to mutable arrays, so "
                     + "'nothing writes them' is a claim that has to be measured rather than "
                     + "inferred from the field modifier"
             );
 
-        afterTwice
+        Equivalence
+            .Lines(afterTwice)
             .Should()
-            .BeEquivalentTo(
-                before,
+            .Equal(
+                baseline,
                 "and a static that grew with each distinct subject would be shared mutable state "
                     + "however readonly the field holding it is"
             );
     }
-
-    /// <summary>
-    /// A snapshot without its <see cref="Lazy{T}"/> entries, which are the one thing in it entitled
-    /// to change once.
-    /// </summary>
-    /// <param name="snapshot">The snapshot to filter.</param>
-    /// <returns>Everything else.</returns>
-    private static Dictionary<string, string> NonLazy(Dictionary<string, string> snapshot) =>
-        snapshot
-            .Where(static entry => !entry.Value.StartsWith("lazy-created:", StringComparison.Ordinal))
-            .ToDictionary(StringComparer.Ordinal);
 
     [Test]
     public void Every_field_of_a_match_is_write_once()
@@ -289,10 +379,11 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        mutable
+        Equivalence
+            .Sorted(mutable)
             .Should()
-            .BeEquivalentTo(
-                _matchAllowlist,
+            .Equal(
+                Equivalence.Sorted(_matchAllowlist),
                 "this port documents a Match as readable from any thread, which is stronger than "
                     + "the built-in Regex's contract, so any field a read can write must be a "
                     + "single reference - anything wider cannot be published atomically"
@@ -439,12 +530,18 @@ public sealed class ThreadSafetyTests
             object? value = field.GetValue(null);
             string name = $"{field.DeclaringType!.FullName}.{field.Name}";
 
-            // A Lazy is recorded by whether it has been forced rather than by its contents: forcing
-            // one to read it would be the very write this test is looking for. The workload has
-            // already forced every Lazy the engine uses before the first snapshot is taken.
+            // A Lazy is left out: reading its contents would force it, which is the very write this
+            // test is looking for, and going from not-created to created is the one legitimate
+            // write a static here may make - it happens on whichever test runs first. Every caller
+            // dropped these entries anyway, so leaving them out is what the comparison already did.
+            //
+            // S53: the earlier version recorded `lazy-created:{IsValueCreated}`, read through
+            // `field.FieldType.GetProperty("IsValueCreated")`. That returns NULL in a Native AOT
+            // binary - the trimmer keeps no property metadata for a framework generic reached only
+            // by name - so the `!` threw a NullReferenceException and this test was the last red
+            // one in the published suite. The value was discarded by the caller either way.
             if (field.FieldType.IsGenericType && field.FieldType.GetGenericTypeDefinition() == typeof(Lazy<>))
             {
-                snapshot[name] = $"lazy-created:{field.FieldType.GetProperty("IsValueCreated")!.GetValue(value)}";
                 continue;
             }
 

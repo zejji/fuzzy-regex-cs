@@ -132,7 +132,9 @@ public sealed class RelativeCallAndAliasTests
             .Code.Should()
             .Equal(65u, 3, 74, 1, 2, 97, 98, 20, 10, 30, 1, 1, 1, 12, 1, 97, 20, 36, 30, 1, 1, 1, 12, 1, 98, 20, 20, 1);
         compiled.GroupCount.Should().Be(1);
-        compiled.GroupIndex.Should().BeEquivalentTo(new Dictionary<string, int> { ["x"] = 1 });
+        // Rendered rather than compared with BeEquivalentTo, which cannot run under Native AOT
+        // (see Equivalence).
+        Equivalence.Lines(compiled.GroupIndex).Should().Equal("x=1");
     }
 
     /// <summary>
@@ -176,6 +178,6 @@ public sealed class RelativeCallAndAliasTests
 
         compiled.Code.Should().Equal(11u, 0, 30, 1, 1, 1, 12, 1, 97, 30, 1, 2, 1, 12, 1, 98, 20, 20, 20, 31, 0, 1);
         compiled.GroupCount.Should().Be(1);
-        compiled.GroupIndex.Should().BeEquivalentTo(new Dictionary<string, int> { ["x"] = 1 });
+        Equivalence.Lines(compiled.GroupIndex).Should().Equal("x=1");
     }
 }

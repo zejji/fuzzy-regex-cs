@@ -21,7 +21,12 @@ public sealed class UnicodeTableTests
     {
         IEnumerable<string> ours = UnicodeTables.AllTables().Select(static t => t.Name);
 
-        ours.Should().BeEquivalentTo(UnicodeFixture.Tables.Keys, "no table may be dropped or invented");
+        // Sorted and compared with Equal rather than BeEquivalentTo, which cannot run under
+        // Native AOT (see Equivalence); the question asked is still set equality.
+        Equivalence
+            .Sorted(ours)
+            .Should()
+            .Equal(Equivalence.Sorted(UnicodeFixture.Tables.Keys), "no table may be dropped or invented");
     }
 
     [Test]

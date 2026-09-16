@@ -429,15 +429,20 @@ public sealed class RegressionsFuzzyTests
             ["lzy", "", "lzy", "hog", "hog", ""],
         ];
 
-        Upstream
-            .Matches(
-                "The quick borwn fax jumped over the lzy hog",
-                @"((brown)|(lazy)){1<=e<=3} ((dog)|(fox)){1<=e<=3}",
-                FuzzyRegexOptions.EnhanceMatch
+        // Rendered one line per match rather than compared with BeEquivalentTo, which cannot run
+        // under Native AOT (see Equivalence); Equal keeps the strict ordering this asserted.
+        Equivalence
+            .RowLines(
+                Upstream
+                    .Matches(
+                        "The quick borwn fax jumped over the lzy hog",
+                        @"((brown)|(lazy)){1<=e<=3} ((dog)|(fox)){1<=e<=3}",
+                        FuzzyRegexOptions.EnhanceMatch
+                    )
+                    .Select(static m => m.Groups.Skip(1).Select(static g => g.Value))
             )
-            .Select(static m => m.Groups.Skip(1).Select(static g => g.Value).ToArray())
             .Should()
-            .BeEquivalentTo(expected, static options => options.WithStrictOrdering());
+            .Equal(Equivalence.RowLines(expected));
     }
 
     // ---- plain fuzzy matching ----

@@ -87,6 +87,49 @@ jobs:
           path: TestResults/
           if-no-files-found: warn
 
+  native-aot:
+    # The DYNAMIC half of the Native AOT gate (ROADMAP, amendment 12; S53). The static half is
+    # <IsAotCompatible>true</IsAotCompatible> on src/FuzzyRegex, which the build-and-ratchet job
+    # above already enforces through TreatWarningsAsErrors. Static analysis cannot see a
+    # runtime-only failure, so this job publishes real ILCompiler binaries and runs them.
+    #
+    # Both platforms, because the ILCompiler and the linker it drives are platform-specific: a
+    # green win-x64 leg is not evidence for linux-x64. macOS is left out deliberately - it is the
+    # third leg above for the managed suite, and a third native compile roughly doubles this job's
+    # wall clock for a platform no Phase 7 measurement targets. Revisit in Phase 8 if the package
+    # claims macOS AOT support.
+    name: Native AOT (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: The whole suite, published natively and run
+        # 6,155 tests under the same trimming and reflection constraints a consumer's AOT app
+        # enforces. Stronger than any sample: a sample only asserts the cases somebody thought of.
+        shell: pwsh
+        run: ./tools/run-aot-tests.ps1 -Rid ${{ matrix.rid }}
+
+      - name: The consumer smoke app, published natively and run
+        # What only a separate consumer can show: a project reference from outside the test tree,
+        # nothing rooted in the trimmer, and the binary size and startup time a user would see.
+        shell: pwsh
+        run: ./tools/run-aot-smoke.ps1 -Rid ${{ matrix.rid }}
+
   inspections:
     name: ReSharper inspections (IDE0320 and other IDE-only errors must fail here)
     runs-on: windows-latest

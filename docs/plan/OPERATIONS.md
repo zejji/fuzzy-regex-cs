@@ -35,6 +35,8 @@ tools/check-ratchet.ps1 -AcceptRemovals  # a baselined test was renamed or delib
 tools/run-tool-tests.ps1                 # Pester tests for the tooling itself
 tools/run-slices.ps1 -DryRun             # what the driver would do next, without spending anything
 dotnet csharpier format .                # formatting; CI fails the build on any drift
+tools/run-aot-tests.ps1                  # the whole suite, published Native AOT and run (1-2 min)
+tools/run-aot-smoke.ps1                  # the consumer smoke app, ditto, plus size and startup
 ```
 
 The ratchet goes red when a baselined test disappears from the run, which is what a rename looks
@@ -220,6 +222,31 @@ this list.
 | `docs/plan/slices/` vs `slices/done/` | remaining vs completed work |
 | `docs/plan/DECISIONS.md` | dated one-line decision log |
 | `git log --oneline` | one commit per slice, readable history |
+
+## The Native AOT gate (S53)
+
+Two commands, both in CI as the `native-aot` job on `windows-latest` and `ubuntu-latest`. The
+ILCompiler and the linker it drives are platform-specific, so a green leg on one is not evidence
+for the other.
+
+- `tools/run-aot-tests.ps1` publishes `tests/FuzzyRegex.Tests` with `PublishAot=true` and runs the
+  produced executable: the whole suite under a consumer's trimming and reflection constraints.
+- `tools/run-aot-smoke.ps1` publishes `samples/FuzzyRegex.AotSmoke`, a console app that reaches the
+  library by project reference and roots nothing, and reports binary size and startup time. That is
+  Phase 7's baseline; the test binary's size is not, because it roots three assemblies.
+
+**On Windows you need the Visual Studio C++ build tools**, because the ILCompiler shells out to
+MSVC's `link.exe`. Installed here: Build Tools 2022, MSVC 14.44.35207, Windows SDK 10.0.26100. Both
+scripts prepend the Visual Studio *Installer* directory to `PATH`, because the ILCompiler locates
+MSVC by running `vswhere.exe` and a plain shell does not have it: without that the publish reaches
+"Generating native code" and then fails with `MSB3073` and `'vswhere.exe' is not recognized`
+(measured 2026-09-16). GitHub's `windows-latest` image already has it on `PATH`.
+
+**Three tests are skipped in the native run and only there**: the S52b object-graph walk
+(`ThreadSafetyTests`, via `SkipWhereTheObjectGraphWalkCannotRun`). It reads BCL private fields such
+as `List<T>._items`, for which native AOT generates no accessor; the reason and the two measured
+failure modes are in that method's own documentation. They run under the JIT on all three operating
+systems in `build-and-ratchet`.
 
 ## Second engines for divergence research
 

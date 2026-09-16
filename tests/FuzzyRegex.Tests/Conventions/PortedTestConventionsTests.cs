@@ -99,7 +99,17 @@ public sealed class PortedTestConventionsTests
                     ?? System.Reflection.CustomAttributeExtensions.GetCustomAttribute<SkipAttribute>(type)?.Reason
             );
 
-        PortedTestConventions.Validate(portedTests).Should().BeEmpty();
+        // S53. The scan has to find the tests for Validate's verdict to mean anything, and a
+        // trimmed publish is how it comes back empty: the suite is published as a Native AOT binary
+        // and run as the AOT gate, where without TrimmerRootAssembly the method metadata this reads
+        // is not kept. 892 ported test METHODS across 204 types were measured 2026-09-16 - not the
+        // 1,967 the status board reports, which counts one row per [Arguments] set. The floor is a
+        // trimming alarm, not a count to maintain.
+        IReadOnlyList<(string Namespace, string TestName, string? SkipReason)> found = [.. portedTests];
+
+        found.Should().HaveCountGreaterThan(700, "892 ported test methods were measured, across 204 types");
+
+        PortedTestConventions.Validate(found).Should().BeEmpty();
     }
 
     [Test]
@@ -148,7 +158,9 @@ public sealed class PortedTestConventionsTests
     [Test]
     public void No_ported_test_source_compiles_outside_Upstream()
     {
-        DirectoryInfo ported = new(Path.Combine(RepositoryRoot().FullName, "tests", "FuzzyRegex.Tests", "Ported"));
+        DirectoryInfo ported = new(
+            Path.Combine(TestTree.RepositoryRoot().FullName, "tests", "FuzzyRegex.Tests", "Ported")
+        );
         ported.Exists.Should().BeTrue("the ported tree must be found for this guard to mean anything");
 
         List<string> violations = [];
@@ -165,20 +177,5 @@ public sealed class PortedTestConventionsTests
         }
 
         violations.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// The repository root, found from the test assembly's own location rather than from the
-    /// working directory, which a test runner does not promise.
-    /// </summary>
-    private static DirectoryInfo RepositoryRoot()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "FuzzyRegex.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        return directory ?? throw new InvalidOperationException("no FuzzyRegex.slnx above " + AppContext.BaseDirectory);
     }
 }

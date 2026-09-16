@@ -87,8 +87,10 @@ public sealed class CompileParityTests
         {
             compiled.Code.Should().Equal(row.Code, "the bytecode is the whole point of the corpus");
             compiled.Flags.Should().Be(row.ResolvedFlags);
-            compiled.GroupIndex.Should().BeEquivalentTo(row.GroupIndex);
-            compiled.NamedLists.Should().BeEquivalentTo(row.CompiledNamedLists);
+            // Rendered to sorted lines rather than compared with BeEquivalentTo, which cannot run
+            // under Native AOT (see Equivalence). Both are order-insensitive maps either way.
+            Equivalence.Lines(compiled.GroupIndex).Should().Equal(Equivalence.Lines(row.GroupIndex));
+            Equivalence.SetLines(compiled.NamedLists).Should().Equal(Equivalence.SetLines(row.CompiledNamedLists));
             // Order-sensitive on the outer list, because a position in it *is* the index the
             // parser assigned that named list and the index is baked into the bytecode; but
             // set equality within each entry, because upstream stores each as a frozenset.
