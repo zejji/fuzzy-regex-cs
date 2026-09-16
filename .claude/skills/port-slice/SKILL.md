@@ -239,6 +239,17 @@ rejects, all of which have already burned turns on real slices:
   A green commit that leaves the slice file in `docs/plan/slices/` is a **checkpoint**: the driver
   keeps it and starts a fresh session on the same slice (three checkpoints stop the driver). Use it
   only when the slice genuinely needs another sitting, and make STATE.md say exactly what is left.
+  **Per-sitting notes go in `docs/plan/slices/notes/<slice>-sittings.md`, never in the slice file**,
+  which stays its spec plus a one-line pointer; S52's slice file reached 3,400 lines and every fresh
+  sitting re-read it.
+- **Same result, cheapest route** (owner rule 2026-09-16). S52 spent 18 sittings and 650M tokens
+  judging oracle rows one at a time, reasoning from each row's shape, getting it wrong, then running
+  the ablation; its nineteenth sitting scripted every ablation of every row into one wave and judged
+  the remaining 22 in an hour. So: a step done by hand more than twice is scripted and run over the
+  whole set in one pass, and the classification is read off the output, never guessed first. The
+  amendment-16 ceremony (mechanism, blind review, verifier) runs once over a slice's batch of pins,
+  not once per pin. A slice starting its THIRD sitting begins by writing into its notes file how the
+  rest could be done in one sitting, and does that. Standards do not drop; the route does.
   **You will be told your deadline.** From 30 minutes before the driver's kill, every tool call
   carries a `[driver deadline]` line with the minutes left; under 25, stop starting anything long
   (a 6000-row wave, a control run, a blind review) and commit a checkpoint, reserving four minutes

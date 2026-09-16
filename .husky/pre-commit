@@ -34,7 +34,10 @@ printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git add
 # ReSharper's command-line inspector over the whole solution, ERROR severity, --no-build (the
 # caller has built; the ratchet always has). Fails the commit on any finding.
 echo "pre-commit: running IDE inspections (about four minutes) ..."
-pwsh -NoProfile -File tools/check-inspections.ps1 -Output .scratch/inspect-precommit.xml || {
-  echo "pre-commit: IDE inspections RED - fix the findings above (or see .scratch/inspect-precommit.xml)."
+# Per-process output path: on 2026-09-15 two concurrent commits shared one file and the second
+# committer's inspection read the first's results.
+inspect_out=".scratch/inspect-precommit-$$.xml"
+pwsh -NoProfile -File tools/check-inspections.ps1 -Output "$inspect_out" || {
+  echo "pre-commit: IDE inspections RED - fix the findings above (or see $inspect_out)."
   exit 1
 }
