@@ -7,6 +7,14 @@ delivers: []
 
 # S55 - Mutation testing tooling and calibration
 
+**In progress, sitting 2 checkpoint (2026-09-17).** Per-sitting detail, calibration numbers, the
+orchestrator's withdrawn "blocked" claim and its evidence:
+`docs/plan/slices/notes/S55-sittings.md`. Tooling built and working (`tools/run-stryker.ps1`,
+`stryker-config.json`, `tools/stryker-queue.json`). API-layer chunk (`*.cs`) done: 237 mutants,
+0 survived. Parser chunk (`Parsing/*.cs`, 2189 mutants) left running in the background past this
+sitting's deadline; its report will be under `TestResults/stryker/parsing/` for the next sitting
+to read and triage. `Engine/Substitution.cs` not yet run.
+
 The exit gate's third instrument (ROADMAP; amendments 12 and 14): the only one that answers "would a
 regression actually fail a test?". Stryker.NET reruns the suite per mutant, so the engine will take
 hours; the owner has allowed long runs provided they improve the outcome, and asked for many small

@@ -1,0 +1,16 @@
+[
+  { "chunk": "matcher-01-charset", "mutate": ["Engine/Matcher.cs{1..1500}"] },
+  { "chunk": "matcher-02-boundaries", "mutate": ["Engine/Matcher.cs{1501..3000}"] },
+  { "chunk": "matcher-03", "mutate": ["Engine/Matcher.cs{3001..4500}"] },
+  { "chunk": "matcher-04", "mutate": ["Engine/Matcher.cs{4501..6000}"] },
+  { "chunk": "matcher-05", "mutate": ["Engine/Matcher.cs{6001..7500}"] },
+  { "chunk": "matcher-06", "mutate": ["Engine/Matcher.cs{7501..9190}"] },
+  { "chunk": "matcher-07-domatch", "mutate": ["Engine/Matcher.cs{9191..10328}"] },
+  { "chunk": "matchstate", "mutate": ["Engine/MatchState.cs"] },
+  { "chunk": "nodecompiler", "mutate": ["Engine/NodeCompiler.cs"] },
+  { "chunk": "optimiser", "mutate": ["Engine/Optimiser.cs"] },
+  { "chunk": "iteration", "mutate": ["Engine/Iteration.cs"] },
+  { "chunk": "bytestack", "mutate": ["Engine/ByteStack.cs"] },
+  { "chunk": "guardlist", "mutate": ["Engine/GuardList.cs"] },
+  { "chunk": "unicode-casing", "mutate": ["Unicode/UnicodeCasing.cs"] }
+]

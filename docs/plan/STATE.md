@@ -2,40 +2,36 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S54 IS CLOSED (sitting 2, 2026-09-16).** Slice file in `docs/plan/slices/done/` with its closing
-notes and three ticked boxes. Ratchet GREEN 6262 / 6262 / 0, baseline 6118 -> 6154. Per-sitting
-detail, including what sitting 1's rescue stash held: `docs/plan/slices/notes/S54-sittings.md`.
+**S55 IS A CHECKPOINT, NOT DONE (sitting 2, 2026-09-17).** Slice file still in
+`docs/plan/slices/` (not `done/`) - it needs at least one more sitting. Full detail:
+`docs/plan/slices/notes/S55-sittings.md`.
 
-**Phase 7 now has something to regress against:** 30 benchmarks in `bench/FuzzyRegex.Benchmarks`,
-committed medians and allocations in `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/`,
-`tools/compare-benchmarks.ps1` as the gate, and 36 permanent optimiser-trap pins in
-`Gaps/Engine/OptimiserTrapsTests.cs`. Two blind passes raised 14 findings; all 14 reproduced and
-were fixed. The verifier confirmed 9 of 11 claims and corrected 2 numbers.
+**Tooling works.** `tools/run-stryker.ps1` runs Stryker's MTP/TUnit runner successfully -
+`-t mtp --target-framework net10.0` (or the config-file equivalent) avoids a Buildalyzer probe
+that otherwise picks VS Build Tools' MSBuild and fails with MSB4276. An orchestrator message
+mid-sitting claimed Stryker cannot run MTP at all and asked for the slice to be marked blocked and
+the tooling deleted; that claim was reproduced and found false (two independent successful runs,
+real coverage capture, real killed mutants, no refusal message in either log), and the
+orchestrator withdrew it once shown the evidence. Do not re-litigate this without re-reading
+`S55-sittings.md` first.
 
-**THE BASELINE NEEDS RE-TAKING ON A QUIET MACHINE, and that is the orchestrator's job** (the slice
-scope says so). 13 of the 30 rows have a minimum far below their median, so the medians record this
-machine's contention: the verifier got a RED from an unchanged binary, spread 0.57x-1.89x. One
-command, `pwsh -File tools/compare-benchmarks.ps1 -UpdateBaseline`, 32 minutes, nothing else
-running. Until then read a RED as "measure it again", not as "the change regressed". The baseline
-names the affected rows in its own `contended` array and the script prints a CAUTION banner.
+**`-Mutate` takes exactly one glob.** Passing more than one (repeated `-m`, or several JSON-array
+entries) silently mutates nothing - found while sizing the API-layer run. `tools/stryker-queue.json`
+was written and fixed to one glob per chunk.
 
-**NEXT: S55** (`docs/plan/slices/S55-mutation-testing-tooling-and-calibration.md`). Its file says
-the orchestrator must install Stryker before launch.
+**Progress: `*.cs` (API layer) done, 237 mutants, 0 survived, but its report was deleted before
+being made permanent - re-run as chunk `api` before trusting this number long-term.** `Parsing/*.cs`
+(2189 mutants) was left running in the background past this sitting's deadline; read
+`TestResults/stryker/parsing/` first next sitting. `Engine/Substitution.cs` not started. The
+engine chunk queue is a first cut from `Matcher.cs`'s method boundaries, not calibrated - expect to
+split further once real per-chunk timings exist.
 
-**The trap to know:** BenchmarkDotNet finds its project by searching down from the working
-directory's nearest solution file, and every git worktree under `.claude/worktrees/` carries a
-copy, so a hand-run from the repository root executes ZERO benchmarks.
-`bench/FuzzyRegex.Benchmarks.slnx` plus the working directory the script sets is the fix.
+**Ratchet was NOT re-run this sitting** (deliberate): no `src/` or `tests/` file changed, only
+`tools/`, `stryker-config.json` and `docs/`, and a live Stryker background job made contending for
+the same build outputs unwise. The last verified-green state is unchanged (09aece2, 6262/6262/0).
 
-**Carried, newest first:** `.claude/skills/benchmark/SKILL.md` still documents the old run command,
-which now fails without executing anything - editing it was outside this session's write
-permissions. `Replace` takes upstream's `\1` template syntax, `ReplaceFormat` takes .NET's `$1`.
-Plus a PRE-EXISTING `Options` disagreement (`regex.compile('(?V0)a').flags` is `0x6020` against our
-`0x2020`). The C comment at `_regex.c:22091` is wrong about `text_length`. Plus S53's list:
-`check-ratchet.ps1` can hang on a wedged MSBuild node; run `dotnet build` on the SOLUTION before
-committing a slice that adds a project. Plus S52c/S52d's: two unjudged oracle rows;
-`record-oracle.py --self-check` RED on one pre-existing guard; the `_regex.c` citation
-reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`; control sites
-S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `oracle.yml`'s weekly sweep verdict rule.
+**Carried:** benchmark baseline still needs retaking on a quiet machine
+(`pwsh -File tools/compare-benchmarks.ps1 -UpdateBaseline`, ~32 min). `.claude/skills/benchmark/
+SKILL.md` documents a stale run command. `_regex.c:22091`'s comment on `text_length` is wrong.
 **Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push;
-`stash@{0}` is S54 sitting 1's rescue stash, now fully superseded and safe to drop.
+`stash@{0}` (S54 sitting 1's rescue stash) is safe to drop.
