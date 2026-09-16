@@ -2,34 +2,36 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S53b IS CLOSED (sitting 2, 2026-09-16).** Slice file in `docs/plan/slices/done/` with its closing
-notes and five ticked boxes. Ratchet GREEN 6226 / 6226 / 0, baseline 6118, no baseline move.
+**S54 IS IN FLIGHT, sitting 2 (2026-09-16). This commit is a CHECKPOINT, not the close.** The slice
+file is still in `docs/plan/slices/`. Ratchet GREEN 6261 / 6261 / 0, baseline moved 6118 -> 6153.
+Per-sitting notes: `docs/plan/slices/notes/S54-sittings.md`.
 
-**The one outstanding claim is CONFIRMED.** A fresh verifier ran `pwsh -File tools/run-oracle.ps1`
-with every default (seeds 7, 4242, 20260916; 22 generators; 300 rows; Release): 0 diverge at each
-seed, agree 6342 / 6347 / 6354 of 6380, "Oracle: GREEN ... at all 3 seeds". All eleven of S53b's
-claims are now CONFIRMED across the two sittings; nothing was removed or weakened. Sitting 2 changed
-no code, no test and no instrument, so sitting 1's negative-control numbers stand as recorded.
+**Landed here:** the benchmark suite (32 benchmarks over a shared corpus, in `WorkloadBenchmarks`,
+`ReferenceBenchmarks` and a `sizing` mode), `tools/compare-benchmarks.ps1`, the upstream probe
+`tools/probes/upstream-optimiser-traps.py`, and `Gaps/Engine/OptimiserTrapsTests.cs` - 35 cases,
+every upstream-expressible expectation carrying its `regex` 2026.9.10 provenance. S51's
+`MatchingBenchmarks` is deleted into the suite.
 
-**Sitting 1's notes file said the verifier never reported and its commit message said it confirmed
-ten of eleven.** The commit message was right. Lesson recorded in the notes: the message is written
-last, so update the notes file in the same edit.
+**WHAT IS LEFT, in order:** (1) run `pwsh -File tools/compare-benchmarks.ps1 -UpdateBaseline` with
+nothing else on the machine, about 30 minutes, and commit `bench/baselines/<machine-id>/net10.0.json`
+with the machine description; (2) re-run it without `-UpdateBaseline` to prove the script is green
+against itself; (3) the ratio table for `Regex` versus this port into the closing notes; (4) blind
+review, then the independent verifier; (5) close the slice. **No .NET 11 runtime is installed**
+(`dotnet --list-runtimes`: 10.0.11 is the newest), so the baselines are .NET 10 only, which the
+slice's own scope allows - say so in the closing notes.
 
-**NEXT: S54** (`docs/plan/slices/S54-benchmark-baselines-and-edge-pins.md`), the first slice of
-Phase 7. The public API is frozen from `f3c1135`, so S54 measures the shape S53b settled, and its
-workload list already names `EnumerateMatches` beside `Matches` on the 1 MB subject.
+**The one trap to know:** BenchmarkDotNet locates its project by searching down from the working
+directory's nearest solution file, and every git worktree under `.claude/worktrees/` carries a copy,
+so a hand-run from the repository root executes ZERO benchmarks. `bench/FuzzyRegex.Benchmarks.slnx`
+plus the working directory `tools/compare-benchmarks.ps1` sets is the fix. DECISIONS 2026-09-16.
 
-**Carried, newest first:** a PRE-EXISTING `Options` disagreement - with upstream's `DEFAULT_VERSION`
-at `VERSION1`, `regex.compile('(?V0)a').flags` is `0x6020` against our `0x2020`, upstream reporting
-`FULLCASE` for an inline `(?V0)` and not for the `V0` flag; the `FullCase` bit predates S53b. The C
-comment at `_regex.c:22091` is wrong about `text_length` being truncated to the slice end
-(`state_init` sets the whole subject's length, `:18439`); this port follows the code. Plus S53's
-list: `check-ratchet.ps1` can hang on a wedged MSBuild node (`MSBUILDDISABLENODEREUSE='1'` plus
-`DOTNET_CLI_USE_MSBUILD_SERVER='0'`; owner call); run `dotnet build` on the SOLUTION before
-committing a slice that adds a project. Plus S52c/S52d's list: two unjudged oracle rows (seeds 99991
-row 3825, 31415 row 3756, both `interactions`, both proven pre-existing); `record-oracle.py
---self-check` RED on one pre-existing guard; `upstream-bestmatch-free-answer.py`'s unguarded
-`fuzzy_changes`; the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale
-`FuzzyRegex.Search(...)`; `run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines;
-`quantifiers-long`'s filler margin; `oracle.yml`'s weekly sweep verdict rule.
+**Carried, newest first:** `Replace` takes upstream's `\1` template syntax and `ReplaceFormat` takes
+.NET's `$1` - the trap tests caught a benchmark measuring the wrong work. Plus a PRE-EXISTING
+`Options` disagreement (`regex.compile('(?V0)a').flags` is `0x6020` against our `0x2020`; the
+`FullCase` bit predates S53b). The C comment at `_regex.c:22091` is wrong about `text_length`.
+Plus S53's list: `check-ratchet.ps1` can hang on a wedged MSBuild node; run `dotnet build` on the
+SOLUTION before committing a slice that adds a project. Plus S52c/S52d's list: two unjudged oracle
+rows; `record-oracle.py --self-check` RED on one pre-existing guard; the `_regex.c` citation
+reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`; control sites
+S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `oracle.yml`'s weekly sweep verdict rule.
 **Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.

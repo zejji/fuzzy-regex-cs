@@ -1,0 +1,25 @@
+<!--
+  This solution exists to make BenchmarkDotNet able to find its own project, and for no other
+  reason. Build and test from the repository-root FuzzyRegex.slnx as usual.
+
+  BenchmarkDotNet regenerates a project per job, so it has to locate the benchmark .csproj. It does
+  that by walking up from the WORKING DIRECTORY to the nearest .sln/.slnx and then searching EVERY
+  subdirectory below it for `<assembly name>.csproj` (CsProjGenerator.GetProjectFilePath). With the
+  repository-root solution as that stop point, the search also descends into .claude/worktrees/,
+  where each linked git worktree holds its own copy of the benchmark project, and BenchmarkDotNet
+  refuses to run:
+
+      System.NotSupportedException: Found more than one matching project file for
+      FuzzyRegex.Benchmarks in <repo> and its subfolders ... Benchmark project names needs to be
+      unique.
+
+  Measured 2026-09-16 with BenchmarkDotNet 0.15.8 and three worktrees present: the failure happens
+  with the working directory at the repository root AND at bench/FuzzyRegex.Benchmarks, and stops
+  happening with this file in place and the working directory at bench/ - 32 of 32 benchmarks ran.
+  It is the working directory that decides, not the assembly location, so the runner is
+  tools/run-benchmarks.ps1, which sets it. Running by hand from anywhere above bench/ will fail
+  this way again.
+-->
+<Solution>
+  <Project Path="FuzzyRegex.Benchmarks/FuzzyRegex.Benchmarks.csproj" />
+</Solution>

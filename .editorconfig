@@ -238,3 +238,27 @@ dotnet_diagnostic.S2325.severity = none
 ; "Remove unused parameter": true only while the body ignores its arguments.
 dotnet_diagnostic.IDE0060.severity = none
 
+; ==========================================================================
+; The benchmark project, added S54.
+;
+; bench/ measures the built-in System.Text.RegularExpressions.Regex beside this port as the
+; reference point a .NET user compares against. Three rules that are right for production code
+; that compiles a pattern are wrong for a benchmark, and each is disapplied here and nowhere else.
+; Nothing else is relaxed: the benchmarks are held to the same correctness and naming rules as the
+; rest of the repository.
+; ==========================================================================
+[bench/**/*.cs]
+; MA0009 (ReDoS) and S6444 (pass a timeout) both want a match timeout on every `new Regex(...)`.
+; Every pattern here is a compile-time constant and ONE OF THEM IS DELIBERATELY EXPONENTIAL - it
+; is the backtracking workload. A timeout would not protect anything (there is no untrusted input)
+; and would change what is measured, because the BCL engine polls it on the same loop this port's
+; own side is measured without. Satisfying the rule with Regex.InfiniteMatchTimeout would silence
+; it while proving nothing, which is worse than saying so here.
+dotnet_diagnostic.MA0009.severity = none
+dotnet_diagnostic.S6444.severity = none
+; MA0023: use RegexOptions.ExplicitCapture or named groups rather than numbered captures. The
+; template workload is `(\w+) (\w+)` substituted with `$2 $1`: the numbered groups are what the
+; benchmark exercises, and the same pattern text has to go to all three engines for the ratio to
+; mean anything.
+dotnet_diagnostic.MA0023.severity = none
+

@@ -37,7 +37,7 @@ are not repeated here.
 | Where | What is deferred | Notes |
 |---|---|---|
 | `FuzzyRegex.cs:338`, `:873` | `ReadOnlySpan<char>` overloads copy the span to a string | The engine indexes a string; lifting means threading a span through `MatchState` and every `try_match_*`. Biggest allocation win available; decide early in Phase 7 because it touches everything. |
-| `Engine/Iteration.cs:216`, `:336` | One `MatchState` per step, for `Match.NextMatch` and for `EnumerateMatches`/`EnumerateSplits` | A walk re-creates state per match, so it costs one vectorised pass over the subject per match where `Matches` costs one in total (DECISIONS 2026-09-01). **It is not simply an oversight to delete**: a state owns rented buffers, so one held across a `yield return` is one an abandoned iterator never returns, and the lift has to solve that - a pooled state released on `Dispose`, or a struct enumerator. A second, visible consequence is that a lazy walk's `timeout` bounds each step rather than the walk (DIVERGENCES, API shape). |
+| `Engine/Iteration.cs:216`, `:336` | One `MatchState` per step, for `Match.NextMatch` and for `EnumerateMatches`/`EnumerateSplits` | A walk re-creates state per match, so it costs one vectorised pass over the subject per match where `Matches` costs one in total (DECISIONS 2026-09-01). **S54 measured it and it is the largest number in this file**: a full lazy walk of `\w+` costs **12,643 ms over 1 MB against 111 ms** for the eager `Matches`, and 117 ms over 100 KB against 4.51 ms - 113x, and quadratic, since 10.2x the subject cost 108x the time. Reproduce with `dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- sizing`. **It is not simply an oversight to delete**: a state owns rented buffers, so one held across a `yield return` is one an abandoned iterator never returns, and the lift has to solve that - a pooled state released on `Dispose`, or a struct enumerator. A second, visible consequence is that a lazy walk's `timeout` bounds each step rather than the walk (DIVERGENCES, API shape). |
 | `Engine/Iteration.cs:487` | `EnumerateSplits` repeats `Split`'s loop instead of sharing it | The two have different state models, so today they cannot share. `OracleWaveTests.The_lazy_walks_answer_exactly_what_the_eager_ones_do` is what stops them drifting; if the per-step state goes, `Split` becomes `[.. EnumerateSplits(...)]` and the duplication with it. |
 | `FuzzyRegex.cs` static conveniences (six sites) | No pattern cache: `new FuzzyRegex(pattern, options)` per call | Upstream caches (that is what `purge`/`cache_all` control); .NET caches the 15 most recent static patterns behind `Regex.CacheSize` (Microsoft Learn, best-practices page, read 2026-09-16). Planned as the first Phase 7 slice: a bounded MRU keyed on the raw flags (not on `Options`, see S53b item 2), `CacheSize` property, AOT-safe, and a concurrent test under S52b's contract. |
 | `Engine/Substitution.cs:443`, `:618` | Template parsing: one subscript level; integer parsing limited to signed ASCII decimal | Correctness ceilings, not speed; listed so they are not lost. |
@@ -46,8 +46,25 @@ are not repeated here.
 
 ## Measurement notes for Phase 7
 
-- S54 baselines the workloads and the traps. Any optimisation lands behind a BenchmarkDotNet delta on
-  the same machine, per the `benchmark` skill.
+- **The baselines exist** (S54), in `bench/baselines/<machine-id>/net10.0.json`. A slice measures
+  against them with one command, which runs the suite and prints the per-benchmark ratio:
+
+  ```
+  pwsh -File tools/compare-benchmarks.ps1
+  ```
+
+  It is RED on any benchmark more than 1.25x slower than the baseline - the v1.0 gate's own
+  per-workload tolerance - and on a baselined benchmark missing from the run. **Run it rather than
+  `dotnet run` by hand**: BenchmarkDotNet finds the benchmark project by searching down from the
+  working directory's nearest solution file, and from the repository root that search also finds the
+  copy inside every git worktree, so a hand-run dies having executed nothing. DECISIONS 2026-09-16
+  has the mechanism; `bench/FuzzyRegex.Benchmarks.slnx` is the fix.
+- The traps an optimiser is tempted to special-case are pinned in
+  `tests/FuzzyRegex.Tests/Gaps/Engine/OptimiserTrapsTests.cs`, and **those tests are permanent** -
+  a Phase 7 slice that turns one red has changed an answer.
+- **`(a+)+b` is not the catastrophic shape in this port; `(a|a)*b` is.** Measured S54: `(a+)+b` is
+  flat at 0.2-0.7 ms from n=18 to n=24, `(a|a)*b` goes 161 ms to 10.6 s over the same range. Both
+  are pinned, so a change that moves a shape between the two classes is visible.
 - Native AOT: the classic .NET regex `Compiled` route (IL emit) is unavailable; the constraint and the
   fast-path alternative are in ROADMAP.md under Phase 7.
 - Every optimisation must keep the oracle GREEN at three seeds and `ExpectedDivergences` strict; an
