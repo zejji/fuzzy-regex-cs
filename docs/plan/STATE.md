@@ -2,37 +2,34 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S52 IS A CHECKPOINT (2026-09-16, sitting 18). Ratchet GREEN, 6123 / 6123 / 0 skipped, 6015 distinct
-ids, baseline 6015** - two new gap tests. `src/` is untouched this sitting.
+**S52 IS CLOSED (2026-09-16, sitting 19), and the slice file is in `done/`. Ratchet GREEN,
+6127 / 6127 / 0 skipped, 6019 distinct ids, baseline 6019.** `src/` untouched: this sitting added
+pins, tests and one instrument, no engine change.
 
-**THE OWNER HAS RULED AND S52 IS NOT SPLIT AND NOT CAPPED** (orchestrator, 2026-09-15). "No unjudged
-row" means the rows S52 has ALREADY produced: the sweep's 37 and the gate's 3, of which 104366 goes
-to S52c/S52d and counts as judged. **Run no further sweeps inside S52** - the 20-seed sweep and the
-6000-row gate are S57's. Multiple sittings are fine. Then close S52.
-
-**FIFTEEN OF THE 37 ARE JUDGED. 22 TO GO**, and they are sitting 15's groups B, C, E, F and G less
-the judged, plus group A's residue. Replay:
+**ALL 37 SWEEP ROWS ARE JUDGED AND PINNED.**
 `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl` gives
-**expected 15, diverge 22**. Sitting 18 judged group D's six: rows 25, 29, 36 into
-`search-start-partial`, 13 and 22 into `partial-retry-carried-slice-forward`, 24 into
-`partial-retry-reversed-slice`.
+**expected 37, diverge 0**, where sitting 18 left `expected 15, diverge 22`. The default wave is
+GREEN at all three seeds, the third of which is the DATE - so a fresh seed every day.
 
-**THE LESSON SITTING 18 PAID FOR: A SHAPE IS NOT A CLASSIFICATION, AND A CAPPED SWEEP CAN NAME THE
-RIGHT ANCHOR BY LUCK.** Sitting 15 filed all six as "`search-start-partial` shape"; they are three
-families, and what separates them is a question neither existing door asks - whether upstream's own
-search answer is producible by ANY anchored `match(pos, endpos, partial=True)` in the region.
-`gate-divergence-doors.py` also stops its sweep after three hits, which finds the leftmost `pos`
-forwards but NOT the highest `endpos` on a reversed row, and the reversed argument is about the
-highest. Both are now in `tools/probes/upstream-partial-anchor-reachability.py`.
+**THE METHOD THAT DID IT, and the owner asked for it: batch the ablations, classify by family.**
+`tools/probes/sweep-ablation-matrix.py` takes every unjudged row and writes ONE rows file holding
+every single-construct ablation of it - each flag, the fuzzy constraints, the verb, the atomic cut,
+the prefilter, the Turkic swap, and the doors. One `run-oracle.ps1 -Rows` over it answers both
+halves of amendment 16 at once, because the harness asks upstream AND this port the identical
+questions. The table is committed at `tools/probes/sweep-ablation-matrix.txt`. Twenty-two rows
+became five families in one reading; three new entries, five widened, four new gap tests.
 
-**SITTING 19's FIRST JOB: group C** - sweep rows 16, 26, 30 and 33, four rows of one shape
-(overlapped scan, the verb moving a bound between matches) whose argument and probes the four
-`overlapped-skip-*` entries and `skip-carried-slice-on-a-scan-with-no-walk` already carry. Take the
-uncapped sweep with you. **Rows 4 and 15 are still the two nobody can place.**
+**THE SLICE FILE IS NOW A SPEC.** Every per-sitting note lives in
+`docs/plan/slices/notes/S52-sittings.md` (about 3,640 lines); `docs/plan/slices/done/S52-*.md` is
+61. Do the same for any slice whose notes outgrow it.
+
+**NEXT: S52b (thread safety)**, then S52c/S52d, which the owner's ruling handed the gate's row
+104366. Nothing is blocked.
 
 **Carried** (full list in sitting 10's notes): `upstream-bestmatch-free-answer.py`'s unguarded
-`fuzzy_changes` read; the `_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale
-`FuzzyRegex.Search(...)`; `record-oracle.py --self-check`; `run-controls.py`; control sites
-S32-B/S38-A/S35-A/S29-A/D; PORTMAP lines; `quantifiers-long`'s filler margin; `oracle.yml`'s weekly
-sweep verdict rule; the `pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:**
-`slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push.
+`fuzzy_changes` read - **now urgent, because sweep row 18 carries POSIX and is in a pin**; the
+`_regex.c` citation reconciliation; `port-tests/SKILL.md`'s stale `FuzzyRegex.Search(...)`;
+`record-oracle.py --self-check`; `run-controls.py`; control sites S32-B/S38-A/S35-A/S29-A/D;
+PORTMAP lines; `quantifiers-long`'s filler margin; `oracle.yml`'s weekly sweep verdict rule; the
+`pos`/`endpos`-versus-`codepointSlice` fix. **Open for the owner:** `slice-log.jsonl` marks S26
+`failed`; `origin/main` needs a push.

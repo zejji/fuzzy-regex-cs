@@ -394,4 +394,66 @@ public sealed class FuzzyCountsAndChangesTests
             .Deletions.Count.Should()
             .Be(counts.Deletions, $"the match at ({m.Index}, {m.Index + m.Length}) counted that many deletions");
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void An_overlapped_scan_reports_the_change_positions_the_cut_free_pattern_reports()
+    {
+        // Sweep row 26 of tools/probes/sweep-divergence-rows.jsonl, judged by S52's nineteenth
+        // sitting as `atomic-leak-beside-a-wrong-kinded-list`: ONE row carrying two of ledger entry
+        // 11's doors in one scan. Both engines report the same six matches with the same spans and
+        // the same counts, and differ over three change positions.
+        //
+        // PROVENANCE, measured 2026-09-16 on regex 2026.9.10 by .scratch/prov.py, in CODEPOINTS
+        // (the subject is astral, so the UTF-16 indices asserted below are wider):
+        //
+        //   as drawn  (4,8) s[7] | (4,7) s[6] | (0,6) counts=(1,0,0) changes=([],[5],[]) |
+        //             (0,5) s[3] | (0,3) s[2] | (0,2) d[1]
+        //   cut-free  (4,8) s[6] | (4,7) s[6] | (4,6) d[5] | (0,5) s[2] | (0,3) s[2] | (0,2) d[1]
+        //
+        // The first and fourth matches are the atomic leak: spell the `(?>` as `(?:` and upstream's
+        // substitution moves from codepoint 7 to 6 and from 3 to 2, which is this port's answer on
+        // both (UTF-16 9 and 2). The THIRD match needs no control - upstream counts ONE SUBSTITUTION
+        // and then lists ONE INSERTION and no substitution, which is one answer contradicting
+        // itself. The verb is not involved: `(*SKIP)` -> `(*PRUNE)` and the verb deleted both leave
+        // upstream's answer unchanged.
+        const string pattern = @"(?r)\b(?>(?:\p{Lu}{1,1}?[^\p{L}]){e<=1})(?:[^a]*?(*SKIP)[\p{L}\p{N}]|[abz])";
+        string subject =
+            "AA"
+            + char.ConvertFromUtf32(0x10400)
+            + " "
+            + char.ConvertFromUtf32(0x10400)
+            + char.ConvertFromUtf32(0x1D518)
+            + char.ConvertFromUtf32(0x1D518)
+            + "a";
+        FuzzyRegexOptions options = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase;
+
+        Match[] scan = [.. new FuzzyRegex(pattern, options).Matches(subject, overlapped: true)];
+
+        scan.Select(static m => (m.Index, m.Length)).Should().Equal((5, 7), (5, 6), (0, 9), (0, 7), (0, 4), (0, 2));
+
+        // The whole of the divergence, in UTF-16: upstream answers 11, 9, an INSERTION at 7, 4 and
+        // 2 for the first five, and this port answers a substitution at 9, 9, 2, 2 and 2.
+        scan[0].FuzzyChanges.Substitutions.Should().Equal(9);
+        scan[1].FuzzyChanges.Substitutions.Should().Equal(9);
+        scan[2].FuzzyChanges.Substitutions.Should().Equal(2);
+        scan[2].FuzzyChanges.Insertions.Should().BeEmpty("the counts say one substitution");
+        scan[3].FuzzyChanges.Substitutions.Should().Equal(2);
+        scan[5].FuzzyChanges.Deletions.Should().Equal(1);
+
+        foreach (Match m in scan)
+        {
+            AssertChangesAgreeWithCounts(m);
+        }
+
+        // The control itself, run here as well as in the probe: with the cut removed this port
+        // answers the first match's substitution at the same place upstream's cut-free scan does.
+        Match cutFree = new FuzzyRegex(pattern.Replace("(?>", "(?:", StringComparison.Ordinal), options).Matches(
+            subject,
+            overlapped: true
+        )[0];
+
+        (cutFree.Index, cutFree.Length).Should().Be((5, 7));
+        cutFree.FuzzyChanges.Substitutions.Should().Equal(9);
+    }
 }

@@ -585,4 +585,48 @@ public sealed class CaseFoldingTests
         (m.Index, m.Length).Should().Be((end, 0));
         m.FuzzyCounts.Substitutions.Should().Be(substitutions);
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10 ON PURPOSE, and this test pins OUR answer.
+    [Test]
+    public void A_case_insensitive_upper_range_does_not_reach_the_dotless_small_through_a_K_reset()
+    {
+        // Sweep row 28 of tools/probes/sweep-divergence-rows.jsonl, judged by S52's nineteenth
+        // sitting as `turkic-default-folding-under-a-zero-width-answer`. The row is the plainest
+        // statement of this family there is: a case-insensitive `[A-Z]` either reaches U+0131 or it
+        // does not, and reaching it needs CaseFolding.txt's `T` row `0049; T; 0131`, which this port
+        // does not apply by default.
+        //
+        // PROVENANCE, measured 2026-09-16 on regex 2026.9.10 by .scratch/prov.py (the run this
+        // comment quotes) and reproducible with
+        // `python tools/probes/sweep-ablation-matrix.py --emit <file> --rows 28`:
+        //
+        //   regex.compile(r"^[A-Z]+?\K", regex.I | regex.F).match('ıı')  -> (1, 1)
+        //   the same call with the subject's U+0131 swapped for U+00DF, U+FB00 or U+01F0 -> None
+        //   the same call without IGNORECASE                                       -> None
+        //
+        // The swap is the family's own control: all three stand-ins fold to more than one character
+        // as U+0130 does, and none of them carries a `T` row, so upstream answering None on each is
+        // what says the `T` mapping is the whole of the difference rather than case folding at all.
+        const string pattern = @"^[A-Z]+?\K";
+        string dotlessSmall = new((char)0x0131, 2);
+
+        Match refused = new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase).Match(
+            dotlessSmall
+        );
+
+        refused.Success.Should().BeFalse("upstream answers the zero-width (1, 1) through the `T` row");
+
+        // The control that says this port's `[A-Z]` folds normally, so what it refuses is the `T`
+        // row and not case folding: the ASCII partner of the same range is reached.
+        Match reached = new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase).Match("ii");
+
+        reached.Success.Should().BeTrue();
+        (reached.Index, reached.Length).Should().Be((1, 0), @"`\K` resets the start after one `i`");
+
+        // And the swap control, run here as well as in the probe: both engines answer nothing.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase)
+            .Match(new string((char)0x00DF, 2))
+            .Success.Should()
+            .BeFalse();
+    }
 }

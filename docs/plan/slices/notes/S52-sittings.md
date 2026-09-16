@@ -1,58 +1,11 @@
----
-slice: S52
-phase: 6
-title: Oracle hardening - a seed sweep tool, all Unicode planes, longer subjects, and timeout rows
-delivers: []
----
+# S52 sitting notes
 
-# S52 - Oracle hardening
+The per-sitting notes of `docs/plan/slices/S52-oracle-hardening.md`, moved here VERBATIM on
+2026-09-16 (sitting 19) on the owner's instruction so that a checkpointed successor reads a
+200-line slice file rather than a 3,400-line one. Nothing was rewritten in the move: every
+block below is the text its own sitting committed, in order, and the numbers in it are true of
+the tree that sitting left. The slice file keeps the scope, the verification and the boxes.
 
-The one lesson Phase 5 paid for five times (S33, S34, S35, S40a, S43): scope hardening on SEEDS, not
-on rows. Each of those found a real defect at a seed no earlier slice had used, on generators
-already swept at higher row counts. A new seed costs about a minute.
-
-## Scope
-
-- **`tools/sweep-seeds.ps1`**: run every generator at N fresh seeds (default 20, 2000 rows each),
-  drawn and recorded so a red seed is reproducible, consuming each wave and summarising per seed
-  and per generator. Detached-friendly (writes progress to a log, resumable per seed) so the
-  orchestrator can run it overnight. Add a weekly CI job on `oracle.yml` with a rotating seed.
-- **All Unicode planes.** Every generator's subject and literal alphabets gain astral characters
-  (SMP letters and digits, emoji with modifiers and ZWJ), unpaired surrogates where the .NET string
-  allows and Python does not (recorded as `unsupported` on the Python side rather than dropped, so
-  the asymmetry is visible), and the `\X` grapheme cases. Indices are UTF-16 here and codepoints
-  there; the recorder's `_to_index_length` already converts, so the risk is in the port, not the
-  harness.
-- **Longer subjects**: a `long` variant of `literals`, `quantifiers`, `partial` and `fuzzy` with
-  subjects of 1,000 to 20,000 characters, to reach the paths that only a long text takes
-  (`search_start`-shaped scanning, repeat guards, fuzzy insert budgets far from the start).
-- **Timeout rows**: patterns known to be slow on both engines under a small `timeout=`, comparing
-  that both time out (upstream's `TimeoutError` versus this port's `RegexMatchTimeoutException`)
-  rather than skipping them. Depends on S51's `timeout` comparison.
-- **Lift the last `interactions` exclusions** if S46 and S47 left any, and re-run at the fourth
-  seed.
-- Every divergence found is judged to amendment 16; the slice does not end with an unjudged row.
-
-## Verification
-
-- Seed sweep run once here with its output committed to the closing notes: 20 seeds, every
-  generator, and the verdict per seed. Default wave GREEN at three seeds, 6000 rows; `fuzzy` and
-  `interactions` at 99991.
-
-## Done when
-
-- [x] Sweep tool committed and run; CI job added; astral, long and timeout generators recorded.
-      (Sweep tool and its run: sitting 13. CI job: `oracle.yml`'s Thursday cron. Astral: sitting 2.
-      Long: sitting 4. Timeout: sitting 14. The sweep's 37 red rows are box 2's problem, not this
-      box's - the instrument exists and has been run.)
-- [ ] Every divergence judged, fixed or entered with a control; nothing unjudged.
-      (Sitting 18: 15 of the 37 sweep rows judged. Sitting 16's and 17's nine, plus group D's six -
-      rows 25, 29 and 36 into `search-start-partial`, 13 and 22 into
-      `partial-retry-carried-slice-forward`, 24 into `partial-retry-reversed-slice`, split by the
-      reachability instrument rather than by the shape they share. 22 to go, plus the gate's
-      104366 which the owner's ruling sends to S52c/S52d.)
-- [ ] Ratchet GREEN, blind review (hunt: an astral row whose index is converted twice; a long-subject
-      generator that never reaches the path it was written for), commit.
 
 ---
 
@@ -3390,3 +3343,299 @@ anchor by luck and the wrong one just as easily.
 
 **Also still untouched and still not S52's**: the 20-seed sweep run and the 6000-row three-seed gate
 are S57's by the owner's ruling, and S52 runs no further sweeps.
+
+---
+
+## Sitting 19 (2026-09-16) - CLOSED. The last 22 rows judged from one table, not one at a time
+
+The orchestrator relayed an owner instruction mid-sitting: the same result - every remaining sweep
+row judged and pinned to amendment 16's standard - by the most efficient route, changing the METHOD
+and not the scope. Batch the ablations first, classify by family from the table, batch the ceremony,
+and cut the orientation cost of a 3,392-line slice file. That is what this sitting did, and the
+slice closes: **`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl` is
+`agree 0 unsupported 0 expected 37 timeout 0 resource 0 diverge 0 of 37 rows`.**
+
+### What the batch instrument is, and why it beat reasoning from shapes
+
+**`tools/probes/sweep-ablation-matrix.py`** (new, committed) takes every unjudged row of
+`sweep-divergence-rows.jsonl` and writes one oracle rows file holding, per row: the row as drawn,
+every single-flag removal the row can take (inline spelling AND flag bit together), the fuzzy
+constraints stripped, `(*SKIP)` spelled `(*PRUNE)`, the verb deleted, the atomic cut opened, the
+required-string prefilter toggled, the Turkic letters swapped for three non-`T` multi-character
+folds, and the doors - a single `search` where the row scans, a non-overlapped scan where it
+overlaps, the call without `partial=True`.
+
+**One `run-oracle.ps1 -Rows` over that file answers both halves of amendment 16's question at
+once**, which is the whole economy of it: the harness re-records every variant against upstream AND
+runs this port over the identical rows, so "which ablation moves upstream onto this port's answer"
+and "does upstream contradict itself through its own door" come out of one 211-row run instead of
+twenty-two hand-built probes. The committed table is **`tools/probes/sweep-ablation-matrix.txt`**,
+with the three commands that regenerate it and the caveat a reader needs: the 58 diverging VARIANTS
+in it are not unfinished work, because an ablation is a different question from the row it came
+from and no entry was ever written for one.
+
+Sittings 16, 17 and 18 each recorded that reasoning from a row's shape was wrong and the ablation
+was right. This sitting is the same lesson applied to the METHOD: of the 22 rows, the table sorted
+20 into families in one reading, and the two it did not are the two that turned out to be about
+this port's own doors rather than upstream's.
+
+### The five families, and where each row landed
+
+| rows | what the table says | where they went |
+|---|---|---|
+| 1, 2, 8, 11, 19, 27, 28, 34 | `no-i` agrees, and all three Turkic swaps agree | the Turkic entries, three of them |
+| 4, 7, 9, 15, 16, 21, 30, 32, 33 | `skip->prune` agrees, and a door of upstream's own agrees | five `(*SKIP)` entries |
+| 5, 26, 31 | `atomic-free` agrees | the atomic-leak entries, one new |
+| 6 | nothing but `no-r` agrees; the verb ablation moves NOTHING | a new entry - upstream's phantom partial |
+| 14 | `no-r` agrees; the row is an already-judged bug plus one lost capture | a row-keyed arm on an existing entry |
+
+**Eight Turkic rows, and the swap control ran on all eight in one batch.** Replacing every U+0130
+and U+0131 - in the pattern, the subject AND the named lists - with U+00DF, U+FB00 or U+01F0 makes
+the two engines agree on every row, 24 cells of 24, and removing IGNORECASE agrees too. Three
+entries take them and NOT ONE PREDICATE WAS LOOSENED: five rows are `split`/`sub`/`subf` answers
+with no span for the predicate to read, so they join `turkic-default-folding-without-spans` beside
+its `scanMatches` guard; row 34's letter lives only in a `\L<w1>` list, which is
+`turkic-default-folding-from-the-pattern-side`'s own shape; and rows 19 and 28 get a new sibling,
+**`turkic-default-folding-under-a-zero-width-answer`**, because both patterns end in `\K` and the
+only span either engine reports is zero-width AT THE END of the subject, where the span test has no
+character to read. Teaching that test to read the character BEFORE such a span would have
+classified them by loosening, which the owner's 2026-09-14 ruling forbids.
+
+**Nine `(*SKIP)` rows across five entries.** Rows 7 and 9 into `reversed-skip-invents-a-match`, and
+row 7 is the strongest form of that argument yet: it is a `match`, ONE attempt, so there is no next
+attempt whose start a skip point could move and the two verbs must prune identically - yet upstream
+answers a fuzzy match where its own `(*PRUNE)` answers None. Rows 4 and 15 - sitting 15's "the two
+nobody can place" - into `bestmatch-loses-a-partial`, placed by TWO independent ablations rather
+than by the anchored door sitting 15 rightly distrusted: deleting the `(?b)` and spelling the verb
+`(*PRUNE)` each restore this port's exact answer. Rows 16 and 33 into
+`skip-carried-slice-on-a-scan-with-no-walk`, with a THIRD reason the recorder writes no walk (a
+leading `\b`) and the measurement that makes a hand-computed walk sound on these two rows anyway:
+asking upstream where `\b` holds under each truncation gives the untruncated positions at every
+point BELOW the cut, and no reported match's `\b` is at a cut. Row 30 into
+`end-of-line-reads-a-skip-moved-slice` - the first overlapped scan there - where upstream's own `$`
+is true at codepoint 9 alone and its scan reports four matches ending at 8, 6, 5 and 4. Rows 21 and
+32 into a new entry, **`skip-moved-slice-changes-the-edit`**: the same span reported with a
+different EDIT SCRIPT, a deletion where `(*PRUNE)` charges a substitution, inside ONE attempt.
+
+**Three atomic-leak rows.** Rows 5 and 31 are row 74033's case exactly and join
+`atomic-group-leaks-a-change-position` on its own recorded `atomicFreeOutcome` key. Row 26 gets a
+new entry, **`atomic-leak-beside-a-wrong-kinded-list`**, because it carries TWO of ledger entry 11's
+doors in one scan: its first and fourth matches are the atomic leak (the cut-free spelling moves
+upstream's substitution onto this port's position), and its third match contradicts itself before
+this port is consulted - counts of one substitution, a change list holding one insertion. Neither
+existing entry could take it, and the reason is worth keeping: the atomic entry demands this port's
+whole answer equal upstream's cut-free answer, and here the cut-free scan is a DIFFERENT SCAN.
+
+### The two rows that were about this port's doors, and how each was settled
+
+**Row 6 is upstream reporting a partial nothing could complete.** Upstream answers the whole subject
+as a partial; this port answers one codepoint shorter. A partial promises that more text would
+complete the match, and a reversed match runs out of text on the LEFT, so the completing text is a
+PREFIX - but the pattern needs a literal SPACE immediately left of its alternation, the alternation
+can only reach the end by consuming one or two characters, so the space would have to be the `\n` at
+codepoint 0 or the astral letter at 1. **Those are characters the subject already has and no prefix
+can change**, so the failure is a mismatch on text it holds, not a shortage of text. Measured as
+well as argued: 0 of 56 one- and two-character prefixes complete it. At codepoint 2 the partial is
+real - `[^\d]` consumes the `\n` at 0 and the literal space then needs codepoint -1 - and upstream's
+own anchored `match(0, 2, partial=True)` answers exactly what this port answers. New entry,
+**`reversed-partial-its-own-pattern-cannot-produce`**. The verb ablation is what kills the obvious
+hypothesis: deleting the `(*PRUNE)` leaves upstream's answer character for character unchanged.
+
+**Row 14 is an already-judged upstream bug plus one lost capture, and the capture was the trap.**
+`reverse-fullmatch-narrowed-slice`'s second arm reaches everything about the row except that
+upstream reports group 1 captured ONCE where this port reports it twice - so the rendering equality
+that arm demands is false. **The question "how many captures does a zero-width `(...)+` report" was
+asked in isolation before anything was pinned**, because this port over-capturing would have been a
+defect to FIX rather than a row to classify: upstream answers TWO on the same pattern over the whole
+subject and on four minimised shapes (`(a*?)+` and `(a*)+`, forward and reversed, over '' and 'b'),
+and this port agrees with it on all five - a five-row oracle run at `diverge 0`. So two is right,
+the lost capture is the narrowed slice losing an iteration, and a row-keyed arm takes it. The
+predicate arms are untouched.
+
+### What was NOT done, and one instrument bug found by its own output
+
+**The slice file was split before the deep work**, on the owner's instruction: every per-sitting
+note block moved verbatim to `docs/plan/slices/notes/S52-sittings.md`, leaving a 62-line spec. This
+sitting's notes are the first written straight into the notes file.
+
+**The matrix's first version silently skipped the control row 34 most needed.** It looked for the
+Turkic letters with `json.dumps(namedLists)`, whose default `ensure_ascii` had already spelled
+U+0130 as `İ`, so a row whose only Turkic letter lives in a named list generated no swap
+variants at all. Found by reading the table and noticing three missing lines. Fixed with
+`ensure_ascii=False`, and recorded in the entry that row 34 went into, because the next batch
+instrument will be written by someone who has not met this.
+
+### Numbers
+
+- Ratchet **GREEN**, **6127 / 6127 / 0 skipped**, **6019 distinct ids**, baseline **6015 -> 6019** -
+  the four new gap tests. **No file under `src/` changed this sitting.**
+- The 37-row replay: **expected 37, diverge 0**, where sitting 18 left `expected 15, diverge 22`.
+- The ablation run: 211 variants, `agree 99  expected 54  diverge 58  of 211`.
+- Four new gap tests, one per new entry that needed one; the fifth new pin reuses an existing test.
+- Two analyzer findings on the new tests (CA1826 and S6608, `.First()` on an indexable collection)
+  were FIXED rather than suppressed - both are right, and indexing is what the rest of the file does.
+
+
+### The default wave went red at today's seed, and the row is pinned rather than deferred
+
+The pre-commit wave is `pwsh -File tools/run-oracle.ps1`, whose third default seed is
+`Get-Date -Format yyyyMMdd` (`tools/run-oracle.ps1:256`) - so every day's run draws a seed no slice
+has used, and 2026-09-16's drew one:
+
+```
+seed 7          agree 6366  expected 8  timeout 2  resource 4  diverge 0  of 6380
+seed 4242       agree 6373  expected 2  timeout 0  resource 5  diverge 0  of 6380
+seed 20260916   agree 6371  expected 3  timeout 0  resource 5  diverge 1  of 6380
+```
+
+**It is not a new family and it is not this sitting's doing** - no `src/` file changed - but a red
+gate is ground truth and it was judged on the spot rather than left for S57. `verbs` row 5721,
+`(?r)\p{ASCII}{1,3}(*SKIP)ﬀ$` over `sﬀﬀ` as a `subf`: upstream raises `IndexError`
+(its template asks for a group the pattern never makes, so it raises precisely when it finds a
+match) where this port replaces nothing. Upstream's own `$` is true at codepoint 3 alone and its
+scan reports a match ending at 2. **It is the first row of `end-of-line-reads-a-skip-moved-slice`
+on which the `(?w)` control can run**: `(?w)$` is true at 3 as well and nowhere else, so the twin
+that reads `text_end` rather than `slice_end` creates no line end and cannot answer for the wrong
+reason - and under it upstream returns the subject unchanged, which is this port's answer, as do
+`(*PRUNE)`, the verb deleted, and `$` spelled out. Both of that entry's earlier rows had to do
+without this control; this one has it.
+
+Re-run at that seed alone after the pin: `pwsh -File tools/run-oracle.ps1 -Seeds 20260916` is
+`agree 6371  expected 4  timeout 0  resource 5  diverge 0  of 6380` - **GREEN**.
+
+### The negative control, run last against the code committed here
+
+No control this sitting mutates the engine. None could: no `src/` file changed. What it controls is
+the KEYING, because every pin added here is keyed on a row AND on this port's exact answer, and a
+judged answer that is wrong classifies nothing.
+
+> **Control A, `entry-keying`**: in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, change one
+> character in one judged answer of each of six touched entries. The lines read, in the file:
+> ```
+>         "split 3 ' \\u0130\\u0130\\u0131\\u0131' '\\ufb00' ''",
+>         "match 0:(3,0)[(3,0)] last=-1/- fuzzy=(1,0,0)[s:0][i:][d:]",
+>         "match 0:(0,3)[(0,3)] 1:(1,2)[(1,2)] last=1/- partial",
+>         "match 0:(1,0)[(1,0)] 1:(1,0)[(1,0),(1,0)] last=1/g1",
+>         "match 0:(0,2)[(0,2)] 1:unset last=-1/-",
+>         "matches 1 | match 0:(7,4)[(7,4)] last=-1/-",
+> ```
+> (one each from `_turkicWithoutSpansOurs`, `_turkicZeroWidthOurs`, `_reversedPhantomPartialOurs`,
+> `_reverseFullmatchLostCaptureOurs`, `_turkicPatternSideOurs` and `_endOfLineReadsMovedSliceOurs`),
+> breaking one index or one escape in each: `ı` to `Ĳ`, `(3,0)` to `(3,1)`, `(0,3)` to
+> `(0,4)`, `(1,0)` to `(1,1)`, `(0,2)` to `(0,3)`, `(7,4)` to `(7,5)`.
+> Rows: the committed `tools/probes/sweep-divergence-rows.jsonl`, all 37, run with
+> `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl`. No seed - these
+> are explicit rows.
+> Result: **expected 31, diverge 6 of 37** broken, against **expected 37, diverge 0** restored, and
+> the six that flip are exactly sweep rows 1, 6, 14, 19, 30 and 34 - one per broken answer, and
+> nothing else. Applied and reverted by `.scratch/control.py`, whose `finally` restores the file;
+> md5 `36ebb43bd0dc714ceb1c8f607906d517` before and after - **the control was re-run against the file as committed, after the two blind passes' fixes had landed**, which is why that md5 is not the one an earlier run of it printed.
+
+**No second seed, for sittings 15 to 18's reason**: the control runs over an explicit rows file
+rather than a generator draw, so there is no seed to vary. What stands in for it is that six
+entries are broken independently and the 31 rows belonging to the other entries stay EXPECTED.
+
+**Two of the new pins carry a live control that no mutation is needed to test.**
+`skip-moved-slice-changes-the-edit` and `reversed-skip-invents-a-match` are keyed on upstream's own
+recorded `pruneOutcome` and `atomic-group-leaks-a-change-position` on its `atomicFreeOutcome`, so
+every run re-computes the discriminator from the wave: if upstream ever answers its `(*PRUNE)` or
+cut-free spelling differently, or this port stops agreeing with it, those rows stop being classified
+and are reported.
+
+### Review
+
+**Two blind passes, both dispatched inside the turn and read as tool results. Pass one, over the
+whole diff: five findings raised, five reproduced, five fixed.** Not one was a defect in the port or
+in a judgement - the reviewer re-derived every new judged answer from the replay report character
+for character, re-ran the astral UTF-16 conversions on rows 26 and 6, mutated two judged answers and
+two gap tests and watched exactly the right things go red, and confirmed no `Applies` body or helper
+was loosened. All five were defects in THIS SITTING'S EVIDENCE:
+
+1. **Four of six provenance citations named the wrong sweep seed or row.** Every row of
+   `sweep-divergence-rows.jsonl` carries its own `comment`; I had written the citations from the
+   pattern of the neighbouring ones instead of reading them. Rows 6, 19, 28 and 21 were wrong.
+2. **The ablation matrix's mis-pairing guard compared three fields where its own docstring promised
+   every one.** 94 of 211 variants differ from their base row only in `flags`, `oracle`, `partial`
+   or `namedLists`, so a mis-paired wave would have inverted the MOVED/same column in silence - the
+   one column the Turkic and atomic Reasons cite.
+3. **A codepoint stated as a UTF-16 index** in `atomic-leak-beside-a-wrong-kinded-list`: the
+   cut-free third match's deletion is at codepoint 5, not 7.
+4. **`turkic-default-folding-under-a-zero-width-answer` classifies a total failure on its row 28**,
+   because this port's judged answer there IS `no match`. The reviewer proved it by adding the entry
+   to `OracleWaveTests`'s over-classification guard and watching that test fail, and by adding the
+   six other new entries and watching it pass. The entry now states the hole out loud and carries a
+   narrowing clause; see below for what the clause does and does not buy.
+5. **"0 of 56 prefixes" was stated without the qualifier that makes it true** (none completes the
+   match AT THE TEXT END; four match somewhere).
+
+**Pass two, a first pass over the repair delta: four findings raised, four reproduced, four fixed -
+and the sharpest is one the first pass could not have seen.**
+
+1. **The `prefilter-on`/`prefilter-off` variants were measuring NOTHING.** The recorder switches
+   upstream's required-string prefilter on the `generator` TAG (`tools/record-oracle.py:325` and
+   `:522`) and DERIVES the `oracle` field as an output; nothing reads it in. Setting `oracle` - which
+   is what the first version of the matrix did - produced 22 variants byte-identical to their base
+   rows, reported in the committed table as though they were results. They flip the tag now, and
+   every one still reads `same`, so the finding survives as a measurement: on these rows the
+   prefilter genuinely changes nothing. **And fixing it closed the guard's residue**, because
+   `generator` is echoed by the recorder and is now compared.
+2. **The repaired codepoint sentence's OTHER half was wrong**: the drawn third match carries an
+   INSERTION at codepoint 5, not a substitution at 2 - the substitution at 2 is this port's answer,
+   four lines from where the entry says so correctly.
+3. **The new narrowing clause's justification named an unreachable case.** Entries are consulted
+   only on a DIVERGE verdict (`OracleComparer.cs:98`), so an upstream that stopped folding through
+   the `T` row would AGREE with this port and never reach the entry. The clause is still a
+   narrowing - it removes the case where upstream's answer changes KIND while this port answers
+   nothing - and the paragraph now says that instead.
+4. **"the four that match at all" is not checkable**, because the alphabet was never named and the
+   count varies with it. The reviewer swept all 3,432 seven-character alphabets from a
+   fourteen-character pool: **0 end at the text end in every one**, which is the load-bearing half.
+   The entry now names its alphabet and quotes the sweep rather than the count.
+
+**No third pass.** Pass two's fixes are one instrument change, re-proved by running it (correct wave
+exit 0, a wave with two rows swapped exit 1, the committed table byte-identical), and three prose
+corrections inside text pass two had just read. The independent verifier below re-ran the instrument
+from scratch.
+
+### The independent verifier
+
+A fresh agent (amendment 16 limb (d)), briefed with nothing but this tree and `VERIFICATION.md`'s
+do-not-use-git clause. It re-ran the headline replay, the ratchet, the baseline diff, all four gap
+tests and their mutations, every expected value in them against live upstream, Control A rebuilt
+from its written description, the whole 211-variant instrument end to end, the mis-pairing guard
+both ways, the default wave at today's seed, the Turkic swap control on all eight rows, and every
+provenance citation. **Everything CONFIRMED except four, all folded in above, and three COULD NOT
+RUN.**
+
+**DIFFERENT, and fixed.** (a) The control's quoted md5 was the file's md5 at the time the control
+first ran, not the committed file's - the two blind passes' fixes landed in between. The control has
+been RE-RUN against the committed file and the md5 above is that one, which is what this skill asks
+for and what I had not done. (b) Row 14's paragraph said upstream "asked the identical pattern over
+the whole subject" reports two captures without naming the OPERATION: that is its `search` answer,
+where its `fullmatch` over the same subject reports three, and over 'b' a `fullmatch` answers None
+on all four minimised shapes. The paragraph names the operation now, and says why it matters.
+(c) STATE.md claimed the slice file was already in `done/`; it was not until the `git mv` this
+sitting ends with. (d) STATE.md's two line counts were written before the last three sections were
+appended.
+
+**COULD NOT RUN, three.** The comparison against sitting 18's `expected 15, diverge 22`, which needs
+a checkout of the prior tree and the brief forbids git checkouts - it is in sitting 18's own notes
+and in this commit's parent. The blind review's sweep of "3,432 seven-character alphabets", whose
+POOL the review never recorded: that claim has been removed from the entry rather than left
+unreproducible, and what stands there now is the named alphabet and the structural argument. And
+`.scratch/control.py` itself, which is gitignored scratch by design - the control is written out in
+full above so it can be rebuilt, and the verifier did rebuild it and got the same six rows.
+
+**CONFIRMED:** the replay at `expected 37, diverge 0`; the ratchet GREEN at 6127/6127/0 skipped,
+6019 distinct ids, baseline 6019, with `tests/parity-baseline.json` gaining exactly the four new ids
+and losing none; that no file under `src/` changed; all four gap tests passing and each going red
+under a mutated assertion, restored byte-identically; every expected value in all four against a
+live `regex 2026.9.10`, the astral UTF-16 conversions on rows 26 and 6 re-derived independently;
+Control A on every particular - `expected 31, diverge 6`, the six flipped rows exactly 1, 6, 14, 19,
+30 and 34; the instrument's 211 variants, its table body byte-identical to the committed one, its
+guard at exit 0 correct and exit 1 on a swap that differs ONLY in `generator` (the residue the
+second pass's repair set out to close); that all 22 prefilter variants now carry a different
+`generator` and `oracle` from their base rows and still read `same`; the default wave at seed
+20260916 GREEN at `agree 6371 expected 4 diverge 0`; row 30's `$` true at codepoint 9 alone with
+four phantom ends; rows 21, 26 and 6's measurements cell for cell; the Turkic swap at 24 of 24 and
+`no-i` on all eight; and all seven provenance citations against the rows file's own comments.

@@ -1313,4 +1313,62 @@ public sealed class PartialMatchingTests
 
         pattern.Match(subject).Success.Should().BeFalse();
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_reversed_partial_stops_at_the_anchor_where_the_text_really_ran_out()
+    {
+        // Sweep row 6 of tools/probes/sweep-divergence-rows.jsonl, the last of the seed sweep's 37
+        // rows to be judged (S52's nineteenth sitting, `reversed-partial-its-own-pattern-cannot-
+        // produce`). Upstream answers a partial over the WHOLE subject; this port answers one
+        // codepoint shorter, and the difference is whether the match ran out of text or mismatched
+        // on text it had.
+        //
+        // PROVENANCE, measured 2026-09-16 on regex 2026.9.10 by .scratch/prov.py and
+        // .scratch/anchors2.py, in CODEPOINTS:
+        //
+        //   search(partial=True)          (0, 3) g1 unset PARTIAL   <- upstream
+        //   match(0, 3, partial=True)     (0, 3) g1 unset PARTIAL   <- the same phantom anchored
+        //   match(0, 2, partial=True)     (0, 2) g1=(1, 2) PARTIAL  <- THIS PORT'S ANSWER
+        //   search()                      None                      <- no complete match either way
+        //   the (*PRUNE) deleted          (0, 3) g1 unset PARTIAL   <- the verb is not involved
+        //   of 56 one- and two-character prefixes over {space, newline, '0', 'a', U+1D518, '_',
+        //     tab}, four match anywhere at all and NONE completes the match at the text end
+        //
+        // WHY (0, 3) CANNOT BE A PARTIAL. A partial promises that more text would complete the
+        // match, and a reversed match runs out of text on the LEFT - so the completing text is a
+        // PREFIX. The pattern needs a literal SPACE immediately left of its alternation, the
+        // alternation can only end at codepoint 3 by consuming one or two characters, so the space
+        // would have to be the '\n' at 0 or the astral letter at 1. Both are characters the subject
+        // already has, and no prefix can change them. At codepoint 2 the story is different and the
+        // partial is real: `[^\d]` consumes the '\n' at 0, the literal space then needs codepoint
+        // -1, and THAT is running out of text.
+        //
+        // PERMANENT, and judged in this port's favour.
+        const string pattern = @"(?r)(?p)\b\ (?:.??(*PRUNE)[^\d]|\p{Nd})(\p{L}+?)?";
+        string subject = "\n" + char.ConvertFromUtf32(0x1D518) + " ";
+
+        Match partial = new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase).Match(subject, partial: true);
+
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((0, 3), "upstream answers (0, 4), the whole subject");
+        (partial.Groups[1].Index, partial.Groups[1].Length)
+            .Should()
+            .Be((1, 2), "upstream's group 1 is unset in its phantom answer");
+
+        // With no partial asked for there is no match at all, on either engine.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.IgnoreCase)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+
+        // The control that says the verb is not in this: deleting it moves neither engine.
+        Match verbless = new FuzzyRegex(
+            pattern.Replace("(*PRUNE)", "", StringComparison.Ordinal),
+            FuzzyRegexOptions.IgnoreCase
+        ).Match(subject, partial: true);
+
+        verbless.PartialMatch.Should().BeTrue();
+        (verbless.Index, verbless.Length).Should().Be((0, 3));
+    }
 }

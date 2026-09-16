@@ -1,0 +1,274 @@
+THE ABLATION MATRIX: every sweep row that was unjudged on 2026-09-16, every single-construct
+ablation of it, asked of BOTH engines in one pass.
+
+Produced by S52's nineteenth sitting on the owner's instruction to batch the ablations rather than
+reason from each row's shape. Regenerate it from the committed tree, in three commands:
+
+    python tools/probes/sweep-ablation-matrix.py --emit .scratch/ablations.jsonl \
+        --rows 1,2,4,5,6,7,8,9,11,14,15,16,19,21,26,27,28,30,31,32,33,34
+    pwsh -File tools/run-oracle.ps1 -Rows .scratch/ablations.jsonl
+    python tools/probes/sweep-ablation-matrix.py --table \
+        TestResults/oracle/wave.jsonl TestResults/oracle/report.txt \
+        --rows 1,2,4,5,6,7,8,9,11,14,15,16,19,21,26,27,28,30,31,32,33,34
+
+The row numbers are those of tools/probes/sweep-divergence-rows.jsonl. There is no seed anywhere:
+these are explicit rows.
+
+HOW TO READ THE VERDICT COLUMN. AGREE means the two engines answered the variant identically -
+which also tells you this port's answer to it, because agreement is equality. DIVERGE means they
+did not and no entry in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs claims that question.
+Anything else is the id of the entry that does.
+
+THE `prefilter-on` / `prefilter-off` ROWS ARE A MEASUREMENT AND NOT AN ARTEFACT, which is worth
+saying because for one revision of the script they were not: upstream's required-string prefilter
+is switched by the recorder's `generator` TAG (tools/record-oracle.py:325 and :522), not by the
+`oracle` field, which the recorder derives and writes back. Setting `oracle` produced 22 variants
+that were byte-identical to their base rows. They flip the tag now, and every one of them still
+reads `same` - so on these rows the prefilter genuinely changes nothing.
+
+THE DIVERGING VARIANTS ARE NOT UNFINISHED WORK. An ablation is a DIFFERENT question from the row
+it came from, so a variant that diverges is a question no wave has drawn and no entry was written
+for. What S52 owed was the 37 rows of the sweep itself, and the replay of those is
+`expected 37, diverge 0`:
+
+    pwsh -File tools/run-oracle.ps1 -Rows tools/probes/sweep-divergence-rows.jsonl
+
+Recorded against regex 2026.9.10 on 2026-09-16, in Release, on the tree S52's nineteenth sitting
+committed.
+
+sweep variant                kind     upstream  verdict
+
+    1 as-drawn               base     same      turkic-default-folding-without-spans
+    1 no-b                   ablation MOVED     DIVERGE
+    1 no-r                   ablation MOVED     AGREE
+    1 no-i                   ablation MOVED     AGREE
+    1 no-f                   ablation same      AGREE
+    1 no-fuzzy               ablation MOVED     AGREE
+    1 turkic-swap:00df       control  MOVED     AGREE
+    1 turkic-swap:fb00       control  MOVED     AGREE
+    1 turkic-swap:01f0       control  MOVED     AGREE
+    1 prefilter-off          ablation same      turkic-default-folding-without-spans
+    1 door:scan-instead      door     MOVED     turkic-default-folding
+
+    2 as-drawn               base     same      turkic-default-folding-without-spans
+    2 no-i                   ablation MOVED     AGREE
+    2 no-f                   ablation same      DIVERGE
+    2 skip->prune            ablation same      DIVERGE
+    2 verb-deleted           ablation same      DIVERGE
+    2 turkic-swap:00df       control  MOVED     AGREE
+    2 turkic-swap:fb00       control  MOVED     AGREE
+    2 turkic-swap:01f0       control  MOVED     AGREE
+    2 prefilter-on           ablation same      turkic-default-folding-without-spans
+    2 door:scan-instead      door     MOVED     turkic-default-folding
+
+    4 as-drawn               base     same      bestmatch-loses-a-partial
+    4 no-b                   ablation MOVED     AGREE
+    4 no-e                   ablation same      DIVERGE
+    4 no-p                   ablation same      DIVERGE
+    4 no-r                   ablation MOVED     AGREE
+    4 no-i                   ablation same      DIVERGE
+    4 no-m                   ablation same      DIVERGE
+    4 no-fuzzy               ablation MOVED     AGREE
+    4 skip->prune            ablation MOVED     AGREE
+    4 verb-deleted           ablation MOVED     AGREE
+    4 prefilter-off          ablation same      bestmatch-loses-a-partial
+    4 door:anchored-match    door     same      DIVERGE
+    4 door:no-partial        door     same      AGREE
+
+    5 as-drawn               base     same      atomic-group-leaks-a-change-position
+    5 no-e                   ablation same      DIVERGE
+    5 no-a                   ablation same      DIVERGE
+    5 no-V1                  ablation MOVED     AGREE
+    5 no-fuzzy               ablation MOVED     AGREE
+    5 atomic-free            ablation MOVED     AGREE
+    5 prefilter-off          ablation same      atomic-group-leaks-a-change-position
+    5 door:search-instead    door     same      DIVERGE
+    5 door:no-partial        door     same      DIVERGE
+
+    6 as-drawn               base     same      reversed-partial-its-own-pattern-cannot-produce
+    6 no-p                   ablation same      DIVERGE
+    6 no-r                   ablation MOVED     AGREE
+    6 no-i                   ablation same      DIVERGE
+    6 no-V1                  ablation same      DIVERGE
+    6 prune-deleted          ablation same      DIVERGE
+    6 prefilter-off          ablation same      reversed-partial-its-own-pattern-cannot-produce
+    6 door:anchored-match    door     same      DIVERGE
+    6 door:no-partial        door     MOVED     AGREE
+
+    7 as-drawn               base     same      reversed-skip-invents-a-match
+    7 no-b                   ablation MOVED     AGREE
+    7 no-r                   ablation MOVED     AGREE
+    7 no-m                   ablation same      DIVERGE
+    7 no-fuzzy               ablation MOVED     AGREE
+    7 skip->prune            ablation MOVED     AGREE
+    7 verb-deleted           ablation MOVED     AGREE
+    7 prefilter-off          ablation same      reversed-skip-invents-a-match
+    7 door:search-instead    door     same      DIVERGE
+
+    8 as-drawn               base     same      turkic-default-folding-without-spans
+    8 no-r                   ablation MOVED     DIVERGE
+    8 no-i                   ablation MOVED     AGREE
+    8 no-m                   ablation same      DIVERGE
+    8 skip->prune            ablation same      DIVERGE
+    8 verb-deleted           ablation same      DIVERGE
+    8 atomic-free            ablation same      DIVERGE
+    8 turkic-swap:00df       control  MOVED     AGREE
+    8 turkic-swap:fb00       control  MOVED     AGREE
+    8 turkic-swap:01f0       control  MOVED     AGREE
+    8 prefilter-on           ablation same      turkic-default-folding-without-spans
+    8 door:scan-instead      door     MOVED     turkic-default-folding
+
+    9 as-drawn               base     same      reversed-skip-invents-a-match
+    9 no-r                   ablation MOVED     AGREE
+    9 no-m                   ablation MOVED     AGREE
+    9 skip->prune            ablation MOVED     AGREE
+    9 verb-deleted           ablation MOVED     AGREE
+    9 atomic-free            ablation same      DIVERGE
+    9 prefilter-on           ablation same      reversed-skip-invents-a-match
+    9 door:anchored-match    door     MOVED     AGREE
+
+   11 as-drawn               base     same      turkic-default-folding-without-spans
+   11 no-e                   ablation same      DIVERGE
+   11 no-r                   ablation MOVED     DIVERGE
+   11 no-i                   ablation MOVED     AGREE
+   11 no-fuzzy               ablation MOVED     AGREE
+   11 turkic-swap:00df       control  MOVED     AGREE
+   11 turkic-swap:fb00       control  MOVED     AGREE
+   11 turkic-swap:01f0       control  MOVED     AGREE
+   11 prefilter-off          ablation same      turkic-default-folding-without-spans
+   11 door:scan-instead      door     MOVED     turkic-default-folding
+
+   14 as-drawn               base     same      reverse-fullmatch-narrowed-slice
+   14 no-r                   ablation MOVED     AGREE
+   14 no-i                   ablation MOVED     reverse-fullmatch-narrowed-slice
+   14 no-V1                  ablation MOVED     AGREE
+   14 prefilter-on           ablation same      reverse-fullmatch-narrowed-slice
+   14 door:search-instead    door     MOVED     AGREE
+   14 door:no-partial        door     MOVED     reverse-fullmatch-narrowed-slice
+
+   15 as-drawn               base     same      bestmatch-loses-a-partial
+   15 no-b                   ablation MOVED     AGREE
+   15 no-r                   ablation same      DIVERGE
+   15 no-m                   ablation same      DIVERGE
+   15 no-V1                  ablation MOVED     DIVERGE
+   15 no-fuzzy               ablation MOVED     AGREE
+   15 skip->prune            ablation MOVED     AGREE
+   15 verb-deleted           ablation MOVED     AGREE
+   15 prefilter-off          ablation same      bestmatch-loses-a-partial
+   15 door:anchored-match    door     same      AGREE
+   15 door:no-partial        door     same      AGREE
+
+   16 as-drawn               base     same      skip-carried-slice-on-a-scan-with-no-walk
+   16 no-r                   ablation MOVED     overlapped-skip-stale-slice
+   16 no-i                   ablation same      DIVERGE
+   16 no-m                   ablation same      DIVERGE
+   16 skip->prune            ablation MOVED     AGREE
+   16 verb-deleted           ablation MOVED     AGREE
+   16 prefilter-on           ablation same      skip-carried-slice-on-a-scan-with-no-walk
+   16 door:not-overlapped    door     MOVED     AGREE
+   16 door:single-search     door     MOVED     AGREE
+
+   19 as-drawn               base     same      turkic-default-folding-under-a-zero-width-answer
+   19 no-i                   ablation MOVED     AGREE
+   19 no-f                   ablation same      DIVERGE
+   19 no-m                   ablation same      DIVERGE
+   19 no-V1                  ablation MOVED     AGREE
+   19 no-fuzzy               ablation same      turkic-default-folding
+   19 skip->prune            ablation same      DIVERGE
+   19 verb-deleted           ablation same      DIVERGE
+   19 turkic-swap:00df       control  MOVED     AGREE
+   19 turkic-swap:fb00       control  MOVED     AGREE
+   19 turkic-swap:01f0       control  MOVED     AGREE
+   19 prefilter-off          ablation same      turkic-default-folding-under-a-zero-width-answer
+   19 door:search-instead    door     same      DIVERGE
+
+   21 as-drawn               base     same      skip-moved-slice-changes-the-edit
+   21 no-b                   ablation MOVED     AGREE
+   21 no-e                   ablation same      DIVERGE
+   21 no-fuzzy               ablation MOVED     AGREE
+   21 skip->prune            ablation MOVED     AGREE
+   21 verb-deleted           ablation MOVED     AGREE
+   21 prefilter-off          ablation same      skip-moved-slice-changes-the-edit
+   21 door:single-search     door     MOVED     DIVERGE
+   21 door:overlapped        door     same      DIVERGE
+
+   26 as-drawn               base     same      atomic-leak-beside-a-wrong-kinded-list
+   26 no-r                   ablation MOVED     AGREE
+   26 no-i                   ablation same      DIVERGE
+   26 no-f                   ablation same      DIVERGE
+   26 no-fuzzy               ablation MOVED     AGREE
+   26 skip->prune            ablation same      DIVERGE
+   26 verb-deleted           ablation same      DIVERGE
+   26 atomic-free            ablation MOVED     AGREE
+   26 prefilter-off          ablation same      atomic-leak-beside-a-wrong-kinded-list
+   26 door:not-overlapped    door     MOVED     DIVERGE
+   26 door:single-search     door     MOVED     DIVERGE
+
+   27 as-drawn               base     same      turkic-default-folding-without-spans
+   27 no-i                   ablation MOVED     AGREE
+   27 no-f                   ablation same      DIVERGE
+   27 no-m                   ablation same      DIVERGE
+   27 turkic-swap:00df       control  MOVED     AGREE
+   27 turkic-swap:fb00       control  MOVED     AGREE
+   27 turkic-swap:01f0       control  MOVED     AGREE
+   27 prefilter-off          ablation same      turkic-default-folding-without-spans
+   27 door:scan-instead      door     MOVED     turkic-default-folding
+
+   28 as-drawn               base     same      turkic-default-folding-under-a-zero-width-answer
+   28 no-i                   ablation MOVED     AGREE
+   28 no-f                   ablation same      DIVERGE
+   28 turkic-swap:00df       control  MOVED     AGREE
+   28 turkic-swap:fb00       control  MOVED     AGREE
+   28 turkic-swap:01f0       control  MOVED     AGREE
+   28 prefilter-off          ablation same      turkic-default-folding-under-a-zero-width-answer
+   28 door:search-instead    door     MOVED     turkic-default-folding
+
+   30 as-drawn               base     same      end-of-line-reads-a-skip-moved-slice
+   30 no-r                   ablation MOVED     AGREE
+   30 no-i                   ablation same      DIVERGE
+   30 no-m                   ablation MOVED     AGREE
+   30 skip->prune            ablation MOVED     AGREE
+   30 verb-deleted           ablation MOVED     AGREE
+   30 prefilter-on           ablation same      end-of-line-reads-a-skip-moved-slice
+   30 door:not-overlapped    door     MOVED     AGREE
+   30 door:single-search     door     MOVED     AGREE
+
+   31 as-drawn               base     same      atomic-group-leaks-a-change-position
+   31 no-fuzzy               ablation MOVED     AGREE
+   31 atomic-free            ablation MOVED     AGREE
+   31 prefilter-off          ablation same      atomic-group-leaks-a-change-position
+   31 door:anchored-match    door     same      DIVERGE
+
+   32 as-drawn               base     same      skip-moved-slice-changes-the-edit
+   32 no-p                   ablation MOVED     DIVERGE
+   32 no-r                   ablation MOVED     AGREE
+   32 no-fuzzy               ablation MOVED     AGREE
+   32 skip->prune            ablation MOVED     AGREE
+   32 verb-deleted           ablation MOVED     AGREE
+   32 prefilter-off          ablation same      skip-moved-slice-changes-the-edit
+   32 door:search-instead    door     same      DIVERGE
+   32 door:no-partial        door     MOVED     AGREE
+
+   33 as-drawn               base     same      skip-carried-slice-on-a-scan-with-no-walk
+   33 no-r                   ablation MOVED     AGREE
+   33 no-i                   ablation MOVED     DIVERGE
+   33 no-f                   ablation same      DIVERGE
+   33 no-fuzzy               ablation MOVED     AGREE
+   33 skip->prune            ablation MOVED     AGREE
+   33 verb-deleted           ablation MOVED     AGREE
+   33 prefilter-off          ablation same      skip-carried-slice-on-a-scan-with-no-walk
+   33 door:not-overlapped    door     MOVED     AGREE
+   33 door:single-search     door     MOVED     AGREE
+
+   34 as-drawn               base     same      turkic-default-folding-from-the-pattern-side
+   34 no-i                   ablation MOVED     AGREE
+   34 no-m                   ablation same      DIVERGE
+   34 no-V1                  ablation same      AGREE
+   34 no-fuzzy               ablation MOVED     AGREE
+   34 turkic-swap:00df       control  MOVED     AGREE
+   34 turkic-swap:fb00       control  MOVED     AGREE
+   34 turkic-swap:01f0       control  MOVED     AGREE
+   34 prefilter-off          ablation same      turkic-default-folding-from-the-pattern-side
+   34 door:search-instead    door     same      DIVERGE
+
+211 variants, 99 agreeing, 112 reported
