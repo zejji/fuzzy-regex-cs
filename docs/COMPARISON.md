@@ -50,7 +50,7 @@ itself has none:
 
 | Python `regex` | FuzzyRegex | Notes |
 |---|---|---|
-| `pattern.groups` (the count) | `FuzzyRegex.GroupNumbers` | Reshaped: a list of the group numbers, not a count. `GroupNumbers.Count` gives the count. |
+| `pattern.groups` (the count) | `FuzzyRegex.GroupNumbers` | Reshaped: a list of the group numbers, group 0 first, not a count. `GroupNumbers.Count - 1` is upstream's `groups` (measured 2026-09-16: `(a)(?<n>b)` gives `0,1,2`). |
 | `pattern.groupindex` (the dict) | `FuzzyRegex.GroupNumberFromName`, `FuzzyRegex.GroupNameFromNumber`, `FuzzyRegex.GroupNames` | Reshaped: two lookups and a name list, not a dictionary property. |
 | `pattern.scanner()`, `regex.Scanner` | none | See the "Upstream members with no port equivalent" table in `docs/DIVERGENCES.md`. |
 | `pattern.prefixmatch(string)`, `regex.prefixmatch` | `FuzzyRegex.MatchAtStart` | An exact alias of `match` upstream; the port has one name for it. |
@@ -91,7 +91,7 @@ itself has none:
 | `Regex.Replace(input, replacement)` | `FuzzyRegex.Replace(input, replacement)` | See "**`Replace`'s `count` is inverted the same way**" and "**Replacement templates speak upstream's language**" below. |
 | `Regex.Replace(input, MatchEvaluator)` | `FuzzyRegex.Replace(input, MatchEvaluator)` | Same idea; `MatchEvaluator` here is `Fuzzy.Text.RegularExpressions.MatchEvaluator`, a distinct delegate type shaped after the built-in one. |
 | `Regex.Escape(input)` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` | Two extra parameters; `specialOnly` and `literalSpaces` change which characters are escaped, following upstream's own `escape` rather than `Regex.Escape`'s fixed metacharacter set. |
-| `Match.NextMatch()` | `Match.NextMatch()` | Same name and meaning: resumes from where this match ended, within the same slice. |
+| `Match.NextMatch()` | `Match.NextMatch()` | Same name and meaning: resumes from where this match ended, within the same slice. The one input-dependent method with no per-call `timeout` or `CancellationToken`: it runs under the pattern's `MatchTimeout`, as `Regex`'s does. |
 | `Match.Result(replacement)` | `Match.Result(replacement)` | Same name, different template language - `\1`/`\g<name>` here, `$1` there. `$` is ordinary text in this port's templates. |
 | `Group.Success`, `.Value`, `.Index`, `.Length` | `Group.Success`, `.Value`, `.Index`, `.Length` | Same shape. |
 | `Group.Captures` | `Group.Captures` | Here, every group keeps its full capture list, oldest first, even outside a quantified construct; the built-in only populates this for a group inside a repeat. |
