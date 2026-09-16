@@ -22,16 +22,16 @@ says otherwise; owner decision recorded or pending). Evidence for the technical 
 | Tests, including manual or explicit ones if the suite would slow | **holds** | Oracle at three seeds and the permanent pins are the correctness net; slow cases go under an explicit category the ratchet skips, as `OptimiserTrapsTests` (S54) already plans. |
 | See OPTIMISATION-NOTES.md | **holds** | It is the index; the research names its three best targets: the prefilter family, per-match allocation (span copy, one `MatchState` per lazy step), the per-character loop (`Node.Values` as `List<uint>`). |
 
-### Decisions the owner still has to make (from the research)
+### Decisions from the research (owner ruled 2026-09-16; DECISIONS.md "Phase 7 ground rules")
 
-1. Span threading through `MatchState`: opening design slice, or later? It touches everything
-   and a `Span` cannot cross a `yield`, so it interacts with the lazy walks.
-2. Lazy-walk shape: pooled state released on `Dispose`, or a ref struct enumerator that is not
-   `IEnumerable<T>`? Public surface, so not a slice's call.
-3. Structural divergence budget: may Phase 7 flatten the node graph or replace the dispatch
-   switch at all, and above what measured win? Each such change taxes `sync-upstream` forever.
-4. AOT measurement policy: both JIT and `nativeaot` for every optimisation, or JIT with an AOT
-   verification only where the mechanism is JIT-dependent (the research's recommendation)?
+1. Span threading through `MatchState`: measured in S58 and decided early on the numbers, because it
+   touches everything and a `Span` cannot cross a `yield`.
+2. Lazy-walk shape (pooled state on `Dispose`, or a ref struct enumerator): decided from the same
+   benchmarks, not guessed; it is public surface, so the owner signs it off.
+3. Structural divergence: allowed, with sync-upstream notes strictly maintained and enforced by
+   checklist and script; the minimum measured gain is set once concrete examples exist.
+4. AOT policy: compatibility outranks AOT-specific speed; benchmark on the JIT, under AOT only where
+   the mechanism is JIT-dependent, AOT publish green every slice.
 
 ## Phase 8: documentation
 
@@ -53,8 +53,7 @@ last, after Phase 7, so it does not collide with `src/` edits.
 | As small and optimised as possible | **holds** | The WASM publish is a trimming and AOT proof (ROADMAP); size baseline recorded at S53b and re-measured after Phase 7. |
 | Build in stages; 1.0 need not wait for every demo feature | **holds** | ROADMAP puts the demo after 1.0 unless a working link is wanted *at* 1.0; the staging above lets v1 ship with 1.0 if the owner wants it. |
 
-Prerequisite (owner action, elevated prompt): `dotnet workload install wasm-tools wasm-experimental`.
-No workloads are installed today (`dotnet workload list`, 2026-09-16).
+Prerequisite done 2026-09-16: `dotnet workload install wasm-tools wasm-experimental` (owner, elevated).
 
 ## Running the three streams in parallel
 
