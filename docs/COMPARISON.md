@@ -18,13 +18,7 @@ quotes and links its row headings rather than restating them from memory. `docs/
 also tracks work that is designed but not shipped yet (`PLANNED` rows); nothing in this document
 describes a `PLANNED` row as current behaviour.
 
-<!-- TODO(owner): this document was written with the `upstream/` git submodule not checked out in
-the worktree, so Table A below is built from docs/DIVERGENCES.md, src/FuzzyRegex/PublicAPI.Unshipped.txt
-and the well-documented, stable public surface of Python's `regex` module (which mirrors `re`'s
-naming for compile/search/match/fullmatch/findall/finditer/sub/subn/split, plus regex's own
-subf/subfn/splititer/purge), rather than by reading upstream/regex/_main.py directly. Please
-re-check Table A against upstream/regex/_main.py once the submodule is available, in case a
-signature or default has moved since this was written. -->
+Table A was checked row by row against `upstream/regex/_main.py` on 2026-09-16.
 
 ## Table A: Python `regex` to FuzzyRegex
 
@@ -70,7 +64,7 @@ itself has none:
 | `match.groupdict()` | the named entries of `match.Groups` | See "**`Match.Groups` is an `IReadOnlyDictionary<string, Group>`...**" below - `Groups` is total (every group, keyed by name or by number-as-text), where `groupdict()` is named-only. There is no built-in filter to the named subset; a caller writes one, e.g. `match.Groups.Where(kv => !int.TryParse(kv.Key, out _))`. |
 | `match.start([group])`, `match.end([group])`, `match.span([group])` | `match.Groups[n].Index`, `.Index + .Length`, or the pair | No `Start`/`End`/`Span` names; `(Index, Length)` carries the same information. `match.Groups[0]` is `match` itself. |
 | `match.captures([group])` | `match.Groups[n].Captures` | A `CaptureCollection`; kept for every group, not only ones inside a repeated construct - see Table B's `Group.Captures` row. |
-| `match.starts([group])`, `match.ends([group])`, `match.spans([group])` | no equivalent found in the public API; see `Group.Captures` on `Match.Groups[n]` | <!-- TODO(owner): docs/DIVERGENCES.md's "Upstream members with no port equivalent" table names `Match.GroupAt` as the port equivalent for this row, but `Match.GroupAt` is `internal` in src/FuzzyRegex/Match.cs and does not appear in src/FuzzyRegex/PublicAPI.Unshipped.txt. Please reconcile: either GroupAt should be public, or the DIVERGENCES row needs updating to point at Groups[n] instead. --> |
+| `match.starts([group])`, `match.ends([group])`, `match.spans([group])` | `Group.Captures` with `(Index, Length)` | Per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table: all six of upstream's per-index accessors collapse onto one `Group.Captures` returning a `CaptureCollection`. |
 | `match.fuzzy_counts` | `match.FuzzyCounts` | A `FuzzyCounts` record (`Substitutions`, `Insertions`, `Deletions`, `Total`). |
 | `match.fuzzy_changes` | `match.FuzzyChanges` | A `FuzzyChanges` record (`Substitutions`, `Insertions`, `Deletions`, each a list of subject positions). |
 | `match.expand(template)` | `match.Result(replacement)` | Same template language as `sub`, not `Regex`'s `$1` - see Table B. |
@@ -532,11 +526,8 @@ named list called `é` reports `unused keyword argument '\xe9'` upstream and `un
 visible difference without a non-ASCII name, which the parser does not currently expose a way to
 trigger through the public surface in a single line worth reproducing here.
 
-<!-- TODO(owner): I could not find a short, self-contained public-API example that surfaces the
-"unused keyword argument" message text directly (it requires a named list that is never referenced,
-and the exact wording is not documented in the XML docs I read) - please supply one from
-tests/FuzzyRegex.Tests if a concrete pinned case exists, or confirm the row is accurately described
-without one. -->
+No test in `tests/FuzzyRegex.Tests` pins this message's exact wording; it is pinned only in
+`docs/DIVERGENCES.md`.
 
 ### Not ported at all
 
@@ -601,10 +592,15 @@ resolves through whatever `unicodedata` version the host CPython build ships (16
 this was measured). A small number of codepoints named in 17.0.0 but not 16.0.0 resolve here and
 raise upstream.
 
-<!-- TODO(owner): I don't have a specific 17.0.0-only character name confirmed against the XML docs
-or tests to hand; the DIVERGENCES row states "4,803 codepoints resolve here and raise upstream" but
-does not name one, so I have not guessed a `\N{...}` value for this example. Please supply a
-concrete name if one is available, or accept the description without a worked example. -->
+`tests/FuzzyRegex.Tests/Gaps/Unicode/UnicodeCharacterNameTests.cs`'s `Every_stored_name_resolves_to_its_own_codepoint`
+pins one such name: `"TOLONG SIKI DIGIT ONE"` resolves to U+11DE1, a codepoint Unicode 17.0.0 added.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("\U00011DE1", @"\N{TOLONG SIKI DIGIT ONE}");
+Console.WriteLine(m.Success);   // True - upstream on a 16.0.0 unicodedata host has no such name
+```
 
 ### A digit's decimal value is derived from upstream's own tables
 
