@@ -103,6 +103,18 @@ public class Group : Capture
 /// <see cref="System.Text.RegularExpressions.Match"/>, plus the mrab-regex-only
 /// <see cref="FuzzyCounts"/>, <see cref="FuzzyChanges"/> and <see cref="PartialMatch"/>.
 /// </summary>
+/// <remarks>
+/// <b>A match may be read from any thread</b>, and from several at once. It holds a copy of
+/// everything it reports, taken before the engine's state was reused, so it neither shares with the
+/// pattern that produced it nor changes after it is handed over.
+/// <para>
+/// This is deliberately stronger than the built-in <see cref="System.Text.RegularExpressions.Match"/>,
+/// whose documentation says result objects "should be used on a single thread" because "their
+/// implementations could delay computation of some results". One value here is computed on demand -
+/// <see cref="FuzzyChanges"/> - and it is published as a single reference precisely so that this
+/// promise holds; see <see cref="_splitChanges"/> for what went wrong when it was not.
+/// </para>
+/// </remarks>
 public sealed class Match : Group
 {
     private readonly FuzzyRegex _regex;
@@ -112,7 +124,31 @@ public sealed class Match : Group
     private readonly int _sliceEnd;
     private readonly bool _overlapped;
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
-    private FuzzyChanges? _splitChanges;
+
+    /// <summary>
+    /// The cache behind <see cref="FuzzyChanges"/>, boxed so that publishing it is a single
+    /// reference write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It was a <c>FuzzyChanges?</c> until S52b, and that was a real defect</b>, because
+    /// <see cref="RegularExpressions.FuzzyChanges"/> is a three-reference struct and a nullable
+    /// one is four fields wide: writing it is not atomic, so a second thread reading
+    /// <see cref="FuzzyChanges"/> could see the "has a value" flag already set and one or more of
+    /// the three lists still null. That is not theoretical - <c>ThreadSafetyStressTests</c>'s
+    /// <c>One_match_can_be_read_from_many_threads_at_once</c> reproduced it on the first run, and
+    /// this port documents a <see cref="Match"/> as readable from any thread.
+    /// </para>
+    /// <para>
+    /// A <see cref="System.Runtime.CompilerServices.StrongBox{T}"/> rather than a
+    /// <see cref="Lazy{T}"/> because a <c>Lazy</c> allocates on every match whether or not anyone
+    /// reads the property, and rather than computing the lists in the constructor because that
+    /// allocates three of them on every match, fuzzy or not. Two threads racing here may each build
+    /// a box and one wins; the value is a pure function of the readonly
+    /// <see cref="_fuzzyChanges"/>, so the loser's answer was equal to the winner's.
+    /// </para>
+    /// </remarks>
+    private System.Runtime.CompilerServices.StrongBox<FuzzyChanges>? _splitChanges;
 
     /// <summary>
     /// Port of <c>pattern_new_match</c> (<c>upstream/src/_regex.c</c> line 20738), whose
@@ -325,10 +361,12 @@ public sealed class Match : Group
     /// </para>
     /// <para>
     /// Cached, because upstream builds three fresh lists on every attribute read and a .NET property
-    /// that allocates on every get is a trap that a <c>foreach</c> over it falls into.
+    /// that allocates on every get is a trap that a <c>foreach</c> over it falls into. The cache is
+    /// published as one reference so that the read is safe from any thread - see
+    /// <see cref="_splitChanges"/>.
     /// </para>
     /// </remarks>
-    public FuzzyChanges FuzzyChanges => _splitChanges ??= SplitFuzzyChanges();
+    public FuzzyChanges FuzzyChanges => (_splitChanges ??= new(SplitFuzzyChanges())).Value;
 
     /// <summary>
     /// Upstream <c>match_fuzzy_changes</c> (<c>upstream/src/_regex.c</c> line 20504): one list of

@@ -27,6 +27,24 @@ and `Regex` reading back. The only pattern that changes meaning is an unescaped 
 the parse error says so. Every other deliberate difference from upstream is listed in
 [`docs/DIVERGENCES.md`](docs/DIVERGENCES.md).
 
+## Thread safety
+
+**A compiled `FuzzyRegex` is immutable and thread safe.** Compile it on any thread, share it
+between threads, and call its matching methods from as many at once as you like; nothing it does
+alters global state. **A `Match` may be read from any thread too**, and from several at once - it
+holds a copy of everything it reports.
+
+The one exception is the one .NET has everywhere: an **enumerator** belongs to the thread that made
+it. A `MatchCollection` can be read from several threads, but each needs its own `foreach`.
+
+This is a slightly stronger promise than `System.Text.RegularExpressions.Regex`, which is itself
+thread safe but documents its `Match` and `MatchCollection` results as single-thread objects,
+because they may compute parts of their answer lazily. Compiling a pattern is the expensive step
+here as it is there, so share one instance rather than constructing per call.
+
+Upstream's `concurrent=True` argument has no equivalent and needs none: it asks mrab-regex's C to
+release CPython's global interpreter lock during a match, and this port never takes a global lock.
+
 ## Licensing
 
 Apache-2.0 (this port), derived from mrab-regex, which is `Apache-2.0 AND CNRI-Python`

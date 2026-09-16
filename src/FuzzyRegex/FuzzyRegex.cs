@@ -17,8 +17,29 @@ public delegate string MatchEvaluator(Match match);
 /// </summary>
 /// <remarks>
 /// <para>
-/// Instances are immutable and safe to share between threads, as both upstream and the built-in
-/// <c>Regex</c> promise.
+/// <b>Thread safety.</b> Instances are immutable and thread safe. A <see cref="FuzzyRegex"/> can be
+/// compiled on any thread and shared between threads, and its matching methods can be called from
+/// any thread at once; they alter no global state. A <see cref="RegularExpressions.Match"/> this class returns may
+/// likewise be read from any thread. An enumerator is the exception, as it is everywhere in .NET: a
+/// <see cref="MatchCollection"/> may be read from several threads, but one enumerator over it -
+/// the thing a <c>foreach</c> creates - belongs to the thread that made it.
+/// </para>
+/// <para>
+/// That is the guarantee the built-in <see cref="System.Text.RegularExpressions.Regex"/> makes -
+/// "The Regex class itself is thread safe and immutable (read-only)" - <b>plus</b> the part it
+/// explicitly withholds, which is that "result objects (Match and MatchCollection) returned by
+/// Regex should be used on a single thread" because "their implementations could delay computation
+/// of some results". This port makes the stronger promise instead, and pays for it by publishing
+/// the one value a <see cref="RegularExpressions.Match"/> computes on demand as a single reference; the tests in
+/// <c>Gaps/Api/ThreadSafetyTests.cs</c> and <c>Gaps/Api/ThreadSafetyStressTests.cs</c> hold it to
+/// that. It is reached by immutability rather than by locking, which is what lets it coexist with
+/// .NET's own advice to library authors to "not make instance data thread safe by default" since
+/// "adding locks to create thread-safe code decreases performance".
+/// </para>
+/// <para>
+/// Upstream's <c>concurrent</c> argument has no equivalent here and needs none. It asks upstream's
+/// C to release the GIL during the match, which is a question that exists only because CPython has
+/// a global lock; this port never takes one, so every call is already concurrent.
 /// </para>
 /// <para>
 /// Three matching operations exist where the built-in <c>Regex</c> has one, because upstream has
@@ -33,11 +54,6 @@ public delegate string MatchEvaluator(Match match);
 /// Upstream's <c>pos</c> and <c>endpos</c> arguments are expressed the .NET way, as a
 /// <c>beginning</c> and a <c>length</c>: <c>endpos</c> is <c>beginning + length</c>. Positions and
 /// lengths are UTF-16 code units throughout (design spec section 4).
-/// </para>
-/// <para>
-/// The constructor compiles for real from S07 onwards, and the pattern-level members below it
-/// report what it produced. The matching members still throw
-/// <see cref="NotImplementedException"/>: the engine lands in phase 3.
 /// </para>
 /// </remarks>
 public sealed class FuzzyRegex

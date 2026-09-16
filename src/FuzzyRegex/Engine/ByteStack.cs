@@ -38,8 +38,17 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// platforms this port targets. DECISIONS 2026-08-31.
 /// </para>
 /// </remarks>
-internal sealed class ByteStack : IDisposable
+/// <param name="pool">
+/// Where the backing array is rented from, or <see langword="null"/> for
+/// <see cref="ArrayPool{T}.Shared"/>. It is a constructor parameter rather than a settable static
+/// so that the tests can watch the rent and return traffic without the library gaining a piece of
+/// shared mutable state - which is the very thing S52b exists to keep out of it. Nothing in the
+/// library passes anything but null.
+/// </param>
+internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
 {
+    private readonly ArrayPool<byte> _pool = pool ?? ArrayPool<byte>.Shared;
+
     /// <summary>Upstream <c>RE_MEMORY_LIMIT</c> (<c>upstream/src/_regex.c</c> line 40).</summary>
     private const int _memoryLimit = 0x40000000;
 
@@ -66,9 +75,11 @@ internal sealed class ByteStack : IDisposable
     {
         if (_storage.Length > 0)
         {
-            ArrayPool<byte>.Shared.Return(_storage);
+            _pool.Return(_storage);
         }
 
+        // Cleared before returning so a second Dispose cannot hand the same buffer back twice -
+        // which would give one array to two callers, and through them to two threads.
         _storage = [];
         Count = 0;
     }
@@ -292,12 +303,12 @@ internal sealed class ByteStack : IDisposable
             );
         }
 
-        byte[] grown = ArrayPool<byte>.Shared.Rent(newCapacity);
+        byte[] grown = _pool.Rent(newCapacity);
         _storage.AsSpan(0, Count).CopyTo(grown);
 
         if (_storage.Length > 0)
         {
-            ArrayPool<byte>.Shared.Return(_storage);
+            _pool.Return(_storage);
         }
 
         _storage = grown;
