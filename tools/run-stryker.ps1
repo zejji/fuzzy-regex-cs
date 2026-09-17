@@ -61,7 +61,7 @@
     TimeoutAndCancellationTests, OptimiserTrapsTests) now carry [SkipUnderStryker] and sit out
     when FUZZYREGEX_UNDER_STRYKER=1, which this script sets; stryker-config.json runs 4
     concurrent runners (was the default of 14 on 28 threads) with additional-timeout 30000 ms,
-    and this process runs at BelowNormal priority. Cost: roughly three times the wall clock.
+    (BelowNormal priority was tried and reverted the same day: it starves the coverage relay). Cost: roughly three times the wall clock.
     Gain: a "Timeout" now means a real hang, not a starved runner, and the machine stays usable.
 
 .PARAMETER Chunk
@@ -134,7 +134,10 @@ function Invoke-StrykerChunk {
     # priority class, so the desktop wins any contention; and the suite's load-sensitive classes
     # ([SkipUnderStryker]) sit out, since fourteen parallel suites of stress tests was what turned
     # 557 of 2189 parsing mutants into "Timeout" (counted as killed) on the first run.
-    (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+    # NOT BelowNormal: measured 2026-09-17 11:05, at BelowNormal the MTP coverage relay acks timed
+    # out for nearly every test (1096+ Dubious in 47 min, 5 CPU-seconds used), so capture took an
+    # order of magnitude longer and every mutant then ran against the whole suite. Four runners and
+    # the [SkipUnderStryker] classes are what keep the machine usable.
     $env:FUZZYREGEX_UNDER_STRYKER = '1'
     Push-Location $repoRoot
     try {

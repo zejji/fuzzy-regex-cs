@@ -88,7 +88,10 @@ $allowedTools = @(
     'Bash(tasklist *)', 'PowerShell(Get-Process *)',
     # Compound commands are matched part by part, so `cd repo && dotnet run ...` was denied on the
     # cd (S45, 2026-09-14). These read or set nothing outside the shell. Owner-approved 2026-09-14.
-    'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)'
+    'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)',
+    # S55 sittings lost turns to these (2026-09-16/17): shell loops, unset, find, and reading a
+    # process's command line, all read-only.
+    'Bash(for *)', 'Bash(unset *)', 'Bash(find *)', 'PowerShell(Get-CimInstance *)'
 )
 
 function Get-PendingSlice {
