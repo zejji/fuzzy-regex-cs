@@ -147,6 +147,26 @@ that report first, before running anything else, and triage its survivors - that
 this slice's remaining "API layer and parse-error paths" work. If the process did not survive past
 this session, re-run the same command; it is idempotent (skips if the report already exists).
 
+## Sitting 3 plan (2026-09-17, one-sitting closeout)
+
+Third sitting - owner rule: state how the rest lands in one sitting before starting.
+`parsing`'s background run from sitting 2 was dead with no report (no `dotnet`/`stryker` process
+alive, `run.log` ends right after "2189 total mutants will be tested", no `reports/` dir) - killed
+by the sitting boundary, not a crash. Deadline this sitting: 2026-09-17T05:31 BST (~4h from start),
+plenty for the three runs below (api ~15min, parsing ~45-60min observed, Substitution.cs 663 lines
+so expect API-layer order of magnitude). Plan, in order, each run polled to completion with bounded
+blocking calls in-turn (never ended-turn-and-wait, per this skill's S07/S44 rule):
+
+1. `pwsh -File tools/run-stryker.ps1 -Chunk api -Mutate '*.cs'` - permanent replacement for
+   sitting 2's deleted throwaway probe (237 mutants, 0 survived expected).
+2. `pwsh -File tools/run-stryker.ps1 -Chunk parsing -Mutate 'Parsing/*.cs'` - re-run from scratch
+   (no report exists to resume from).
+3. `pwsh -File tools/run-stryker.ps1 -Chunk substitution -Mutate 'Engine/Substitution.cs'`.
+4. Read each `mutation-report.json`, triage every survivor: a killing test or a recorded
+   equivalent-mutant reason, written into `docs/plan/mutation/2026-09-17-api-parser.md`.
+5. Ratchet green, blind review of the new tests, verifier pass on any quoted mutant/survivor
+   numbers, commit, move slice to `done/`.
+
 ## Engine chunk queue (`tools/stryker-queue.json`)
 
 Written from `Matcher.cs`'s method boundaries (`grep -n "^    private static\|^    internal
