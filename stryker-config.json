@@ -5,6 +5,8 @@
     "test-projects": ["tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj"],
     "reporters": ["Progress", "Html", "Json"],
     "mutation-level": "Standard",
+    "concurrency": 4,
+    "additional-timeout": 30000,
     "thresholds": { "high": 80, "low": 60, "break": 0 },
     "since": { "enabled": false }
   }

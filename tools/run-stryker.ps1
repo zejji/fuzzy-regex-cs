@@ -56,8 +56,13 @@
     to treating it as covering every mutant, which costs speed, not correctness - and excluding
     these tests would blind mutation testing to exactly the edge-case tests Phase 6/7 care about
     most. additional-timeout/timeout-ratio (config-only, no CLI flag) govern the PER-MUTANT test
-    timeout, not this initial capture step, so there is nothing to tune here; accept the Dubious
-    mark. Verified 2026-09-17.
+    timeout, not this initial capture step. Verified 2026-09-17.
+    Revised later that day (owner): the three load-sensitive classes (ThreadSafetyStressTests,
+    TimeoutAndCancellationTests, OptimiserTrapsTests) now carry [SkipUnderStryker] and sit out
+    when FUZZYREGEX_UNDER_STRYKER=1, which this script sets; stryker-config.json runs 4
+    concurrent runners (was the default of 14 on 28 threads) with additional-timeout 30000 ms,
+    and this process runs at BelowNormal priority. Cost: roughly three times the wall clock.
+    Gain: a "Timeout" now means a real hang, not a starved runner, and the machine stays usable.
 
 .PARAMETER Chunk
     Short name for this run. Reports and the log go to TestResults/stryker/<chunk>/.
@@ -125,6 +130,12 @@ function Invoke-StrykerChunk {
 
     Write-Host "Stryker chunk '$ChunkName': mutate = $MutateGlob" -ForegroundColor Cyan
 
+    # Kind to the machine (owner, 2026-09-17): the whole tree of test runners inherits this
+    # priority class, so the desktop wins any contention; and the suite's load-sensitive classes
+    # ([SkipUnderStryker]) sit out, since fourteen parallel suites of stress tests was what turned
+    # 557 of 2189 parsing mutants into "Timeout" (counted as killed) on the first run.
+    (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+    $env:FUZZYREGEX_UNDER_STRYKER = '1'
     Push-Location $repoRoot
     try {
         & dotnet stryker -m $MutateGlob -O $chunkDir --skip-version-check -V info 2>&1 |

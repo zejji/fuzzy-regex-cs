@@ -26,6 +26,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// it reports an inconclusive run rather than passing silently.
 /// </para>
 /// </remarks>
+[SkipUnderStryker]
 public sealed class TimeoutAndCancellationTests
 {
     /// <summary>The pathological pattern: exponential backtracking with no way to succeed.</summary>

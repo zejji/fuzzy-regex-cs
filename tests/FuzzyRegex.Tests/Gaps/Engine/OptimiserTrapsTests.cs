@@ -35,6 +35,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// the first test below asserts them.
 /// </para>
 /// </remarks>
+[SkipUnderStryker]
 public sealed class OptimiserTrapsTests
 {
     /// <summary>The filler sentence: forty-four characters, no <c>needle</c>, no digits.</summary>

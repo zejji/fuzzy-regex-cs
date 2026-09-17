@@ -12,6 +12,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// The engine is deterministic, so there is nothing to tolerate here - a subject either gives the
 /// answer it gave sequentially or it does not. Any mismatch, and any exception, is a race.
 /// </remarks>
+[SkipUnderStryker]
 public sealed class ThreadSafetyStressTests
 {
     /// <summary>
