@@ -8,6 +8,12 @@ internal enum CaseEncoding
     /// <summary>Upstream <c>ascii_encoding</c> (<c>upstream/src/_regex.c</c> line 1003).</summary>
     Ascii,
 
+    /// <summary>
+    /// Upstream <c>locale_encoding</c>. Its non-casing operations follow the Unicode path for this
+    /// port's <c>string</c>-only API; its casing operations are unsupported.
+    /// </summary>
+    Locale,
+
     /// <summary>Upstream <c>unicode_encoding</c> (<c>upstream/src/_regex.c</c> line 2046).</summary>
     Unicode,
 }
@@ -17,10 +23,10 @@ internal enum CaseEncoding
 /// (<c>upstream/src/_regex.c</c> lines 941-1003 and 1362-2046).
 /// </summary>
 /// <remarks>
-/// Upstream stores each encoding as a struct of function pointers and dispatches through it. Two
+/// Upstream stores each encoding as a struct of function pointers and dispatches through it. Three
 /// encodings and four operations do not justify a table here, so the encoding is an enum and the
-/// dispatch is a switch; the members keep upstream's names. The <c>locale_</c> encoding is not
-/// ported - <c>LOCALE</c> depends on the C locale and is not surfaced (see <c>docs/PORTMAP.md</c>).
+/// dispatch is a switch; the members keep upstream's names. The <c>locale_</c> encoding's casing is
+/// not ported because it depends on the C locale and is not surfaced (see <c>docs/PORTMAP.md</c>).
 /// </remarks>
 internal static class Encodings
 {
@@ -40,9 +46,7 @@ internal static class Encodings
 
         if ((flags & RegexFlags.Locale) != 0)
         {
-            throw new NotImplementedException(
-                "needs:locale-flag - the LOCALE encoding's casing depends on the C locale"
-            );
+            return CaseEncoding.Locale;
         }
 
         if ((flags & RegexFlags.Ascii) != 0)
@@ -51,6 +55,19 @@ internal static class Encodings
         }
 
         return CaseEncoding.Unicode;
+    }
+
+    /// <summary>Rejects an attempt to use the C locale's casing through the public API.</summary>
+    /// <param name="encoding">The encoding selected for the casing operation.</param>
+    /// <exception cref="NotSupportedException"><paramref name="encoding"/> is <c>LOCALE</c>.</exception>
+    internal static void EnsureCaseSupported(CaseEncoding encoding)
+    {
+        if (encoding == CaseEncoding.Locale)
+        {
+            throw new NotSupportedException(
+                "The LOCALE flag (?L) is not supported: its casing depends on the C locale, which .NET does not expose. Use (?u) or (?a)."
+            );
+        }
     }
 
     /// <summary>
@@ -64,6 +81,8 @@ internal static class Encodings
     /// <returns>How many cases were written.</returns>
     internal static int AllCases(CaseEncoding encoding, uint ch, Span<uint> codepoints)
     {
+        EnsureCaseSupported(encoding);
+
         if (encoding == CaseEncoding.Unicode)
         {
             // DIVERGES FROM UPSTREAM, deliberately - see TurkicDefaults.
@@ -96,6 +115,8 @@ internal static class Encodings
     /// <returns>The folded codepoint.</returns>
     internal static uint SimpleCaseFold(CaseEncoding encoding, uint ch)
     {
+        EnsureCaseSupported(encoding);
+
         if (encoding == CaseEncoding.Ascii)
         {
             // Uppercase folds to lowercase.
@@ -124,6 +145,8 @@ internal static class Encodings
     /// <returns>How many codepoints were written.</returns>
     internal static int FullCaseFold(CaseEncoding encoding, uint ch, Span<uint> folded)
     {
+        EnsureCaseSupported(encoding);
+
         if (encoding == CaseEncoding.Ascii)
         {
             // Uppercase folds to lowercase.

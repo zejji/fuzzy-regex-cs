@@ -16,7 +16,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// tag 0 rather than the Unicode one; and every construct that does not ask a character's case
 /// compiles exactly as it would without the flag. Only <c>get_all_cases</c> and the folding
 /// functions branch on it, and those read the process's C locale, which has no .NET counterpart -
-/// so this port throws its <c>needs:locale-flag</c> seam there and nowhere else.
+/// so this port rejects only patterns whose compiled operations consult casing.
 /// </para>
 /// <para>
 /// No corpus row covers <c>(?L)</c> with a <c>str</c> pattern: upstream's suite only uses it on
@@ -38,12 +38,11 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Parsing;
 /// '(?Li)--'         resolved=I|L|V0 code=[74, 16, 2, 45, 45, 1]
 /// </code>
 /// <para>
-/// The seam is narrower than it looks. <c>is_cased_i</c> is reached only from
+/// The parser seam is narrower than it looks. <c>is_cased_i</c> is reached only from
 /// <c>Sequence._flush_characters</c>, and a one-item sequence is never a <c>Sequence</c>
-/// (<c>make_sequence</c>, <c>:1935</c>), so <c>(?Li)a</c> compiles here as it does upstream and
-/// only a run of two or more characters stops at the seam. <c>Character.folded</c> is not
-/// locale-sensitive either: it folds with the constant <c>FULL_CASE_FOLDING</c>, whose
-/// <c>UNICODE</c> bit wins over the pattern's flags.
+/// (<c>make_sequence</c>, <c>:1935</c>), so <c>(?Li)a</c> reaches the engine compiler before it is
+/// rejected. A run of two or more characters is rejected earlier by the parser. Both paths report
+/// the same public exception.
 /// </para>
 /// </remarks>
 public sealed class LocaleFlagTests
@@ -56,7 +55,7 @@ public sealed class LocaleFlagTests
     /// Upstream's <c>DEFAULT_VERSION</c>, which is what every expected code listing below was
     /// recorded under. This port's own default is <c>Version1</c> since S50b, and version 1 implies
     /// <c>FULLCASE</c> - which would both change <c>compiled.Flags</c> and collapse
-    /// <c>(?Li)ab</c> onto <c>(?Lfi)ab</c>, losing a case rather than failing.
+    /// <c>(?Li)ab</c> onto <c>(?Lfi)ab</c>, losing one bytecode case.
     /// </summary>
     private const int _upstreamDefaultVersion = RegexFlags.Version0;
 
@@ -84,7 +83,7 @@ public sealed class LocaleFlagTests
         }
     }
 
-    /// <summary>A single case-insensitive character never reaches <c>is_cased_i</c> either.</summary>
+    /// <summary>A single case-insensitive character still compiles to upstream's bytecode.</summary>
     [Test]
     [Arguments(@"(?Li)a", new uint[] { 13, 1, 97, 1 })]
     [Arguments(@"(?Li)K", new uint[] { 13, 1, 75, 1 })]
@@ -119,6 +118,37 @@ public sealed class LocaleFlagTests
     {
         Action compile = () => PatternCompiler.Compile(pattern, 0, _noNamedLists, _upstreamDefaultVersion);
 
-        compile.Should().Throw<NotImplementedException>().WithMessage("needs:locale-flag*");
+        compile.Should().Throw<NotSupportedException>().WithMessage("*(?L)*");
+    }
+
+    [Test]
+    [Arguments("(?L)a")]
+    [Arguments("(?V0L)a")]
+    public void A_locale_pattern_without_casing_matches_case_sensitively(string pattern)
+    {
+        var regex = new FuzzyRegex(pattern);
+
+        using (new AssertionScope())
+        {
+            regex.FullMatch("a").Success.Should().BeTrue();
+            regex.FullMatch("A").Success.Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// The engine compiler sees every case-insensitive opcode, including the single-character shape
+    /// which bypasses the parser's <c>is_cased_i</c> call, so all are rejected at construction.
+    /// </summary>
+    [Test]
+    [Arguments("(?Li)ab")]
+    [Arguments("(?Li)a")]
+    [Arguments("(?Li)[a]")]
+    [Arguments(@"(?Li)(a)\1")]
+    [Arguments("(?Lfi)a")]
+    public void A_locale_casing_operation_is_rejected_at_construction(string pattern)
+    {
+        Action construct = () => _ = new FuzzyRegex(pattern);
+
+        construct.Should().Throw<NotSupportedException>().WithMessage("*(?L)*");
     }
 }

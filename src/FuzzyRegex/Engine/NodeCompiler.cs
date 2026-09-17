@@ -204,6 +204,8 @@ internal static class NodeCompiler
     /// <returns>The new node.</returns>
     private static Node CreateNode(PatternObject pattern, Opcode op, uint flags, long step, int valueCount)
     {
+        pattern.RequiresCaseEncoding |= UsesCasing(op);
+
         var node = new Node(valueCount)
         {
             Op = op,
@@ -217,6 +219,32 @@ internal static class NodeCompiler
 
         return node;
     }
+
+    /// <summary>Whether an opcode consults its encoding's casing functions.</summary>
+    private static bool UsesCasing(Opcode op) =>
+        op
+            is Opcode.CharacterIgn
+                or Opcode.CharacterIgnRev
+                or Opcode.PropertyIgn
+                or Opcode.PropertyIgnRev
+                or Opcode.RangeIgn
+                or Opcode.RangeIgnRev
+                or Opcode.RefGroupFld
+                or Opcode.RefGroupFldRev
+                or Opcode.RefGroupIgn
+                or Opcode.RefGroupIgnRev
+                or Opcode.SetDiffIgn
+                or Opcode.SetDiffIgnRev
+                or Opcode.SetInterIgn
+                or Opcode.SetInterIgnRev
+                or Opcode.SetSymDiffIgn
+                or Opcode.SetSymDiffIgnRev
+                or Opcode.SetUnionIgn
+                or Opcode.SetUnionIgnRev
+                or Opcode.StringFld
+                or Opcode.StringFldRev
+                or Opcode.StringIgn
+                or Opcode.StringIgnRev;
 
     /// <summary>
     /// Upstream <c>add_node</c> (<c>upstream/src/_regex.c</c> lines 23918-23923): the second call

@@ -68,8 +68,8 @@ internal static class ParseFunctions
     /// <param name="ch">The codepoint to test.</param>
     /// <returns><see langword="true"/> if the character is cased.</returns>
     /// <remarks>
-    /// The <c>LOCALE</c> encoding still throws <c>needs:locale-flag</c>: its casing comes from the
-    /// C locale, not from a table.
+    /// The <c>LOCALE</c> encoding throws <see cref="NotSupportedException"/> with a public-facing
+    /// message: its casing comes from the C locale, not from a table.
     /// </remarks>
     internal static bool IsCasedI(Info info, int ch)
     {

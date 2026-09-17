@@ -65,8 +65,7 @@ internal sealed class RepeatInfo
 /// <c>docs/PORTMAP.md</c> records each one.
 /// </para>
 /// <para>
-/// The encoding upstream picks here (<c>:26013-26028</c>) is picked on demand instead - see
-/// <see cref="Encoding"/>.
+/// The encoding upstream picks here (<c>:26013-26028</c>) is exposed through <see cref="Encoding"/>.
 /// </para>
 /// </remarks>
 internal sealed class PatternObject
@@ -111,6 +110,12 @@ internal sealed class PatternObject
 
     /// <summary>Upstream <c>node_list</c> and <c>node_count</c>.</summary>
     internal readonly List<Node> NodeList = [];
+
+    /// <summary>
+    /// Whether the compiler encountered an opcode that consults its encoding's casing functions.
+    /// <b>This port's own field:</b> it identifies the unsupported part of <c>LOCALE</c> exactly.
+    /// </summary>
+    internal bool RequiresCaseEncoding;
 
     /// <summary>Upstream <c>group_info</c>, indexed by group number minus one.</summary>
     internal readonly List<GroupInfo> GroupInfoList = [];
@@ -190,15 +195,12 @@ internal sealed class PatternObject
     internal long PatternCallRef;
 
     /// <summary>
-    /// Upstream's <c>encoding</c> (<c>:26013-26028</c>), chosen on first use rather than during
-    /// compilation.
+    /// Upstream's <c>encoding</c> (<c>:26013-26028</c>).
     /// </summary>
     /// <remarks>
-    /// Deferring it is deliberate. <see cref="Encodings.Select"/> throws for <c>LOCALE</c>, whose
-    /// casing depends on the C locale and is not ported; doing that here would refuse to build a
-    /// node graph for a <c>(?L)</c> pattern that upstream builds one for happily. Upstream's own
-    /// guess-from-the-pattern-class branch has nothing to port, since this port has no bytes
-    /// patterns.
+    /// Upstream's guess-from-the-pattern-class branch has nothing to port, since this port has no
+    /// bytes patterns. <c>LOCALE</c> can be selected for non-casing operations; <see cref="Compile"/>
+    /// rejects only a graph that contains an operation whose casing would need the C locale.
     /// </remarks>
     internal CaseEncoding Encoding => Encodings.Select(Flags);
 
@@ -281,6 +283,11 @@ internal sealed class PatternObject
                     _ => null,
                 };
             }
+        }
+
+        if (self.Encoding == CaseEncoding.Locale && self.RequiresCaseEncoding)
+        {
+            Encodings.EnsureCaseSupported(self.Encoding);
         }
 
         // NOT PORTED: scan_locale_chars, which reads the C locale.
