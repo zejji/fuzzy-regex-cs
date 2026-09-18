@@ -88,6 +88,8 @@ $allowedTools = @(
     # -Last 1` was denied; adding the PowerShell mirrors ran it.
     'Bash(dotnet *)', 'Bash(git *)', 'Bash(pwsh *)', 'Bash(python *)',
     'PowerShell(dotnet *)', 'PowerShell(git *)', 'PowerShell(pwsh *)', 'PowerShell(python *)',
+    'Bash(npm *)', 'Bash(npx *)', 'Bash(node *)',
+    'PowerShell(npm *)', 'PowerShell(npx *)', 'PowerShell(node *)',
 
     # Claude Code decomposes a compound command and requires EVERY part to match, so
     # `dotnet build ... | Select-Object -Last 60` is denied on the filter, not on dotnet. These
