@@ -463,6 +463,12 @@ row, the ported suite pins `Version0` through one helper, and the one loud edge 
 gets an error that names `Version0`. Before S51 so every later slice tests and measures the shipped
 default. Estimate 13-18 becomes 14-19.
 
+**S56b adds a compile budget (owner, 2026-09-18).** A probe of `((a{1000}){1000}){1000}` crashed the
+owner's machine at compile time; the cause is inherited repeat unrolling (investigation above). S56b
+puts a configurable node budget at the compiler's single node-creation point, throwing a parse
+exception before any matching; default about a million nodes, exact parity below it. Runs on main
+after S55. Estimate 15-20 becomes 16-21.
+
 **S52c adds metamorphic invariants (owner, 2026-09-15, spec amendment 25).** The oracle sees
 disagreement, not correctness: a bug the port inherited line for line agrees with upstream and
 hides. Every inherited bug so far was found by upstream contradicting itself, by hand. S52c makes
@@ -704,6 +710,12 @@ registries (Context7, DeepWiki) as owner-performed steps with prepared files; **
 release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
 
 ## Candidates parked for later
+- **Counted repeats without unrolling (post-1.0).** The compiler unrolls the minimum count of every
+  counted repeat (inherited from upstream, 2018.11.22, to keep the position-keyed repeat guard sound),
+  so memory is linear in the product of nested counts; S56b bounds it with a node budget. The
+  structural fix emits counted repeats and redesigns the guard: flat memory, but a hot-path
+  divergence from upstream whose backtracking effects the oracle cannot see. Take it up when Phase 7
+  has benchmarks to measure it against. Investigation: `2026-09-18-repeat-unrolling-investigation.md`.
 
 - **Mutation testing (Stryker.NET), phase 6, scoped and on demand.** It answers "do our tests
   actually pin this behaviour?", which is worth asking of a port. But it is the wrong tool for
