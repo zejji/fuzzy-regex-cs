@@ -19,6 +19,10 @@
       - .nojekyll is at the web root. Without it GitHub Pages runs Jekyll, Jekyll drops every
         underscore-prefixed directory, and the app serves a 404 for its own runtime;
       - worker.js and harness.html reached the web root;
+      - the page's bundle reached it too, and index.html names files that exist. The bundle's name
+        carries a content hash, so a missing one cannot be checked by name: the page is parsed and
+        every asset it references looked up. That is what catches a publish that gathered a stale
+        index.html from before the last front-end build (S71);
       - every file the manifest names is on disk, the compressed .br and .gz variants included.
         Those are what a visitor downloads, and checking only the uncompressed ones let 41 of 42 of
         them be deleted with the script still GREEN (measured, S70 sitting 4);
@@ -44,6 +48,12 @@
     Keep obj/ and bin/ instead of clearing them first. Faster, and weaker: an incremental
     re-publish does not re-emit trim warnings, so a run with this switch cannot claim there were
     none (S53's verifier found exactly that).
+
+.PARAMETER SkipWebBuild
+    Do not build demo/web first. The publish then gathers whatever page is in the .NET web root
+    already. For a caller that has just built the front end itself - pages.yml runs it as its own
+    step, so that a type error is reported as a front-end failure and not as a smoke failure - and
+    for a run against a page somebody is editing. The checks below still fail on a stale page.
 
 .PARAMETER SkipPublish
     Check the publish that is already on disk instead of producing a new one. This exists to make
@@ -73,6 +83,7 @@
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
     [switch]$SkipClean,
+    [switch]$SkipWebBuild,
     [switch]$SkipPublish,
     [string]$OutDir
 )
@@ -146,6 +157,13 @@ else {
         }
     }
 
+    # The front end BEFORE the publish, or the publish gathers the previous build's page into its
+    # manifest and every check below is made against a stale index.html.
+    if (-not $SkipWebBuild) {
+        & (Join-Path $PSScriptRoot 'build-demo-web.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'The demo front-end build failed, so there is no page to publish.' }
+    }
+
     Write-Host "Publishing the browser demo ($Configuration) to $publishDir."
 
     # The output is captured, not streamed, so that the zero-warning claim can be CHECKED rather
@@ -192,19 +210,31 @@ $required = @(
     # run time, so a publish that dropped one would deploy a demo that boots into a blank screen -
     # which is precisely the failure this script exists to catch before Pages does.
     'index.html'
-    'app.js'
     'checks.html'
     'examples.json'
-    'lib/caps.js'
-    'lib/fragment.js'
-    'lib/highlight.js'
-    'lib/pool.js'
-    'vendor/vue.esm-browser.prod.js'
 )
 foreach ($relative in $required) {
     $path = Join-Path $webRoot $relative
     if (-not (Test-Path $path)) {
         throw "The publish is missing $relative. Nothing downstream works without it."
+    }
+}
+
+# The page's own bundle, which cannot be named: `vite build` writes assets/index-<hash>.js and a
+# new hash on every content change. So the page is read and every asset it references checked,
+# which is the stronger assertion anyway - it fails on a stale index.html naming a bundle that the
+# last build replaced, and naming a bundle that was never there.
+$pageHtml = Get-Content (Join-Path $webRoot 'index.html') -Raw
+$referenced = @([regex]::Matches($pageHtml, '(?:src|href)="\.?/?(assets/[^"]+)"') |
+        ForEach-Object { $_.Groups[1].Value })
+if ($referenced.Count -eq 0) {
+    throw 'The published index.html references no assets/ file. That is not a built page: ' +
+    'run tools/build-demo-web.ps1 before publishing.'
+}
+foreach ($asset in $referenced) {
+    if (-not (Test-Path (Join-Path $webRoot $asset))) {
+        throw "The published index.html references $asset, which is not in the publish. The page " +
+        'and the bundle are from different builds.'
     }
 }
 

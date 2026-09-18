@@ -324,8 +324,13 @@
     //    DISABLED, so the number means "what a respawn costs", and again with it enabled, so the
     //    difference means "what the spare saves".
     async function measureRespawn() {
-      const { createPool } = await import('./lib/pool.js');
-      const { spawnEngineWorker } = await import('./app.js');
+      // Taken from INSIDE the page, through the handle it publishes, rather than by importing its
+      // modules into this one. Since the Vite build there is no stable module URL to import: the
+      // bundle is one hashed file per build. `__demoInternals` is the page's answer to that, and
+      // taking the measurement in the page's own window is the truer reading anyway - that is the
+      // window the demo's workers are really spawned from.
+      await openPage();
+      const { createPool, spawnEngineWorker } = document.getElementById('page').contentWindow.__demoInternals;
 
       const cold = createPool({ spawn: spawnEngineWorker, spare: false });
       await cold.ready;

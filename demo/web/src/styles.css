@@ -1,0 +1,167 @@
+/*
+  The demo's design system, such as it is: one palette, one spacing scale, one type scale.
+
+  Tailwind supplies the scales, so "consistent spacing" is a matter of using its steps and no
+  arbitrary values - there is not a single `[13px]` in this project. What is defined here is the
+  handful of things a utility class cannot say once: the palette tokens, and the four repeated
+  shapes (field, button, pill, mark) whose classes are also what checks.html selects on.
+
+  The sources behind the layout decisions are named in the slice's closing notes. The three that
+  changed something visible here:
+    - NN/g, "Website Forms Usability" and "Placeholders in Form Fields Are Harmful": one column,
+      labels above their field, hints persistent rather than inside the box as a placeholder.
+    - NN/g, "Response Time Limits": the busy state has to appear within about a second, and a wait
+      longer than that needs an animation rather than a word - hence .pill-busy's pulse.
+    - W3C, WCAG 2.2: 2.5.8 Target Size (Minimum) is 24x24 CSS px, and every control here clears it
+      with room to spare; 2.4.13 wants a 2 px focus perimeter at 3:1 against the unfocused state,
+      which is what .focus-ring draws.
+*/
+
+@import 'tailwindcss';
+
+@theme {
+    /*
+      Neutrals plus ONE accent. The accent is reserved for interactive things - focus, the primary
+      action, links - so that a highlighted match can never be read as something to click.
+    */
+    --color-accent: oklch(0.52 0.19 258);
+    --color-accent-soft: oklch(0.96 0.03 258);
+    --color-accent-dark: oklch(0.72 0.15 258);
+
+    /*
+      Match highlights, in a hue nothing else on the page uses. TWO tints, alternating, because
+      adjacent matches are the normal case - `\w` over "abab" is four of them - and one flat colour
+      would render four answers as one block. Every mark also carries its own border, so the
+      distinction survives a reader who cannot tell the two tints apart.
+    */
+    --color-hit-a: oklch(0.91 0.11 85);
+    --color-hit-b: oklch(0.84 0.13 85);
+    --color-hit-edge: oklch(0.55 0.13 85);
+    --color-hit-a-dark: oklch(0.45 0.09 85);
+    --color-hit-b-dark: oklch(0.55 0.11 85);
+}
+
+@layer base {
+    html {
+        color-scheme: light dark;
+    }
+
+    body {
+        @apply bg-slate-50 text-slate-900 antialiased;
+        @apply dark:bg-slate-950 dark:text-slate-100;
+    }
+
+    /* 2.4.13 Focus Appearance: a 2 px perimeter of its own, not the browser's hairline. */
+    :where(a, button, input, textarea, [tabindex]):focus-visible {
+        @apply outline-2 outline-offset-2 outline-accent dark:outline-accent-dark;
+    }
+
+    a {
+        @apply text-accent underline underline-offset-2 dark:text-accent-dark;
+    }
+}
+
+@layer components {
+    .card {
+        @apply rounded-lg border border-slate-200 bg-white p-4 sm:p-6;
+        @apply dark:border-slate-800 dark:bg-slate-900;
+    }
+
+    .field-label {
+        @apply mb-1 block text-sm font-semibold text-slate-700 dark:text-slate-200;
+    }
+
+    .field {
+        @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2;
+        @apply font-mono text-sm text-slate-900 placeholder:text-slate-400;
+        @apply dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+    }
+
+    /* Persistent, under the field. Never a placeholder: a hint that vanishes as you type is a hint
+       you cannot re-read while you need it. */
+    .field-hint {
+        @apply mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400;
+    }
+
+    .pill {
+        @apply inline-flex min-h-6 items-center gap-1.5 rounded-full border border-slate-300 px-3 py-0.5;
+        @apply text-xs font-medium text-slate-700;
+        @apply dark:border-slate-700 dark:text-slate-300;
+    }
+
+    .pill-busy {
+        @apply motion-safe:animate-pulse;
+    }
+
+    .pill-alert {
+        @apply border-red-400 text-red-700 dark:border-red-500 dark:text-red-300;
+    }
+
+    /* 44 px tall, comfortably over WCAG 2.2's 24x24 minimum (2.5.8). */
+    .button {
+        @apply inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2;
+        @apply border border-slate-300 bg-white text-sm font-semibold text-slate-800;
+        @apply hover:border-slate-400 hover:bg-slate-100;
+        @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
+    }
+
+    .button-primary {
+        @apply border-transparent bg-accent text-white hover:bg-accent/90;
+        @apply dark:bg-accent-dark dark:text-slate-950 dark:hover:bg-accent-dark/90;
+    }
+
+    .example-button {
+        @apply block w-full rounded-md border border-slate-200 bg-white p-3 text-left;
+        @apply hover:border-accent hover:bg-accent-soft;
+        @apply dark:border-slate-800 dark:bg-slate-900 dark:hover:border-accent-dark dark:hover:bg-slate-800;
+    }
+
+    .subject-pane {
+        @apply rounded-md border border-slate-200 bg-white p-4 font-mono text-sm leading-7;
+        @apply whitespace-pre-wrap [overflow-wrap:anywhere];
+        @apply dark:border-slate-800 dark:bg-slate-950;
+    }
+
+    .hit {
+        @apply cursor-pointer rounded-xs border text-inherit;
+        border-color: var(--color-hit-edge);
+        background: var(--color-hit-a);
+    }
+
+    .hit-alt {
+        background: var(--color-hit-b);
+    }
+
+    .hit-current {
+        @apply outline-2 outline-offset-1 outline-slate-900 dark:outline-slate-100;
+    }
+
+    /* A zero-length match has nothing to paint, so it gets a caret of its own. */
+    .hit-empty {
+        @apply border-l-2 px-0;
+        border-left-color: var(--color-hit-edge);
+    }
+
+    .data-table {
+        @apply w-full border-collapse text-left text-sm;
+    }
+
+    .data-table th {
+        @apply border-b border-slate-300 px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase;
+        @apply dark:border-slate-700 dark:text-slate-400;
+    }
+
+    .data-table td {
+        @apply border-b border-slate-200 px-3 py-2 align-top dark:border-slate-800;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .hit {
+        background: var(--color-hit-a-dark);
+    }
+
+    .hit-alt {
+        background: var(--color-hit-b-dark);
+    }
+}

@@ -5,23 +5,20 @@
 // never reaches GitHub's request logs. A query string would put whatever a stranger pasted -
 // possibly something from their own work - into someone else's log file.
 
-import { MAX_FRAGMENT_LENGTH } from './caps.js';
+import type { Inputs } from '../types';
+
+import { MAX_FRAGMENT_LENGTH } from './caps';
 
 // Keys are one letter because the whole point is a link somebody can paste; `pattern=` three times
 // over is three times the length for no added clarity in a string nobody reads by eye.
-const KEYS = { pattern: 'p', flags: 'f', subject: 's' };
+const KEYS: Readonly<Record<keyof Inputs, string>> = { pattern: 'p', flags: 'f', subject: 's' };
 
 export { MAX_FRAGMENT_LENGTH };
 
-/**
- * Encodes the three inputs as a fragment, without the leading `#`.
- *
- * @param {{pattern: string, flags: string, subject: string}} inputs
- * @returns {string}
- */
-export function encode(inputs) {
+/** Encodes the three inputs as a fragment, without the leading `#`. */
+export function encode(inputs: Inputs): string {
     const parameters = new URLSearchParams();
-    for (const [name, key] of Object.entries(KEYS)) {
+    for (const [name, key] of Object.entries(KEYS) as [keyof Inputs, string][]) {
         // An empty box is written out too. Dropping it would make "cleared the flags" and "did not
         // say anything about the flags" the same link, and they load differently.
         parameters.set(key, inputs[name] ?? '');
@@ -36,10 +33,9 @@ export function encode(inputs) {
  * A fragment carrying none of the three keys is not an error and not an empty case: it is somebody
  * else's anchor (`#install`, a link into the README) and the page must leave its inputs alone.
  *
- * @param {string} fragment The location fragment, with or without its leading `#`.
- * @returns {{pattern: string, flags: string, subject: string} | null}
+ * @param fragment The location fragment, with or without its leading `#`.
  */
-export function decode(fragment) {
+export function decode(fragment: string | undefined | null): Inputs | null {
     const text = (fragment ?? '').replace(/^#/, '');
     if (text === '') return null;
 

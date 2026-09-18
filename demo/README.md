@@ -7,24 +7,31 @@ which [RFC 3986 section 3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)
 Live at <https://zejji.github.io/fuzzy-regex-cs/> once Pages is enabled (see "Deploy to GitHub Pages"
 below).
 
+![The page at 1280 px](../docs/demo/page-1280.png)
+
 ## What is in here
 
 | Path | What it is |
 | --- | --- |
 | `FuzzyRegex.Demo.Wasm/DemoEngine.cs` | The `[JSExport]` surface. Takes pattern, flags and subject; returns one JSON answer. Owns the engine-side caps. |
 | `FuzzyRegex.Demo.Wasm/wwwroot/worker.js` | Boots the runtime inside a Web Worker and answers one request at a time. The engine never runs on the page's thread. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/index.html` | The page itself: three inputs, the highlighted subject, the match and group tables, the examples sidebar. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/app.js` | The Vue application. Debounces input, drives the worker pool, formats the answer. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/lib/` | The parts that are testable without a browser: `caps.js`, `fragment.js`, `highlight.js`, `pool.js`. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/vendor/` | Vue, vendored. No CDN and no bundler; see "Re-vendoring Vue". |
 | `FuzzyRegex.Demo.Wasm/wwwroot/examples.json` | The eight worked examples in the sidebar. Their answers are pinned by a test, so this file is not free-form copy. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/checks.html` | The browser-side verdict page. Drives the real `index.html` in an iframe and prints CHECKS GREEN or CHECKS RED. |
+| `FuzzyRegex.Demo.Wasm/wwwroot/checks.html` | The browser-side verdict page. Drives the real page in an iframe and prints CHECKS GREEN or CHECKS RED. |
 | `FuzzyRegex.Demo.Wasm/wwwroot/harness.html` | The engine-only harness from the previous slice. Kept because it isolates the worker from the page. |
-| `tests/` | `node --test` tests for `lib/` and for the page's own state machine in `app.js`, run with fake workers and no browser. |
+| `web/` | The front end: Vite, Vue 3, TypeScript (strict) and Tailwind. `npm run build` writes the page into the folder above. |
+| `web/src/demo.ts` | The page's state machine - debounce, worker pool, fragment, caps - with no DOM in it, which is why it can be unit tested. |
+| `web/src/App.vue` | The layout: three inputs, status pills, highlighted subject, match and group tables, examples sidebar. |
+| `web/src/lib/` | `caps.ts`, `fragment.ts`, `highlight.ts`, `pool.ts`. |
+| `web/src/types.ts` | The TypeScript side of `DemoEngine`'s JSON, so a renamed field there is a build error here. |
+| `web/tests/` | Vitest unit tests for all of the above, with fake workers and jsdom. |
+
+The built page (`wwwroot/index.html` and `wwwroot/assets/`) is **generated and gitignored**. It is
+written into the .NET web root on purpose: the wasm publish then gathers page, worker and runtime
+into one static-asset manifest, which is what the smoke script checks and what Pages uploads.
 
 Two more things live outside this folder because they are repository-wide:
-`tools/run-wasm-smoke.ps1` (publishes and checks the artefact set) and
-`.github/workflows/pages.yml` (deploys).
+`tools/build-demo-web.ps1` and `tools/run-wasm-smoke.ps1` (build, publish and check the artefact
+set), and `.github/workflows/pages.yml` (deploys).
 
 ## Run it locally on Windows, from a fresh clone
 
@@ -41,15 +48,18 @@ Two more things live outside this folder because they are repository-wide:
 
   On Windows this writes into the SDK's own folder, so run it from a terminal that is allowed to:
   an elevated PowerShell if the SDK is installed under `C:\Program Files`.
+- **Node 22.12 or later**, and this one is required to build the page at all, not only to test it.
+  `web/.nvmrc` pins 24, which is what the runs recorded in the slice notes used; `nvm use` in
+  `demo/web` picks it up. `tools/build-demo-web.ps1` refuses below 22.12, which is Vite 8's floor.
 - **Python 3**, only to serve the published files. Any static file server will do; Python's is used
   below because it is the one the browser runs in this repository were done with.
-- **Node 20 or later**, only to run the JavaScript tests. Not needed to run the page.
 
-### Publish and serve
+### Build, publish and serve
 
 ```powershell
 git clone https://github.com/zejji/fuzzy-regex-cs.git
 cd fuzzy-regex-cs
+pwsh -File tools/build-demo-web.ps1
 dotnet publish demo/FuzzyRegex.Demo.Wasm -c Release
 cd demo/FuzzyRegex.Demo.Wasm/bin/Release/net10.0/publish/wwwroot
 python -m http.server 8080
@@ -59,47 +69,82 @@ Then open <http://localhost:8080/>. The first answer should appear within a seco
 page settling; the status line tells you which state it is in ("starting the engine", "matching",
 or the match count and how long it took).
 
+**The front-end build comes first.** `npm run build` (which is all `build-demo-web.ps1` runs, after
+`npm ci`) type-checks with `vue-tsc`, runs the Vitest suite, and only then writes
+`wwwroot/index.html` and `wwwroot/assets/`. Publish without it and the publish gathers the previous
+build's page, or no page at all on a fresh clone.
+
 Serve the **publish** output, not the `wwwroot` source folder. The source folder has no
 `_framework/`, so the page loads and the engine never starts.
 
-The checked version of the same thing:
+The checked version of the whole thing:
 
 ```powershell
 pwsh -File tools/run-wasm-smoke.ps1 -OutDir .scratch/demo-publish
 ```
 
-That publishes **and** asserts the artefact set: every file the static web assets manifest names is
-on disk, every `integrity` hash matches a SHA-256 recomputed from the file, nothing unnamed is left
-over, and `.nojekyll` is at the web root. Serve `.scratch/demo-publish/wwwroot` the same way.
-`.scratch/` is gitignored. This is what CI runs, so it is the one that tells you whether a deployment
-would work.
+That builds the front end, publishes, **and** asserts the artefact set: every file the static web
+assets manifest names is on disk, every `integrity` hash matches a SHA-256 recomputed from the file,
+nothing unnamed is left over, the page references assets that exist, and `.nojekyll` is at the web
+root. Serve `.scratch/demo-publish/wwwroot` the same way. `.scratch/` is gitignored. This is what CI
+runs, so it is the one that tells you whether a deployment would work.
 
-Editing the page is publish-and-refresh either way: this project has no launch profile and no dev
-server, because what is served on Pages is a trimmed publish and anything else would be a different
-artefact from the one under test. A page-only change (HTML, `app.js`, `lib/`) can be made against an
-already-published folder by copying the file over and refreshing, but commit the source, not the
-copy.
+### The dev server
 
-If a change to a `.js` or `.html` file seems not to take, it is the browser's cache, not the
-publish: the demo's own files are served under their own names rather than fingerprinted ones. Hard
-refresh (Ctrl+F5).
+```powershell
+dotnet publish demo/FuzzyRegex.Demo.Wasm -c Release   # once, for the runtime
+npm --prefix demo/web run dev
+```
+
+Vite serves the page with hot reload at the URL it prints. The three things it cannot bundle -
+`_framework/`, `worker.js` and `examples.json` - are served by a small middleware in
+`web/vite.config.ts` out of the most recent publish (Release, then Debug, then the source web root).
+So the publish above is a prerequisite, but only once: it is the engine that is being served from
+there, and the engine only changes when the C# does.
 
 ### Run the tests
 
 ```powershell
-pwsh -File tools/run-demo-js-tests.ps1
+npm --prefix demo/web test        # Vitest, or `npm --prefix demo/web run build` for the lot
 ```
-
-That runs `demo/tests/*.test.js` under `node --test`. It refuses Node below 20, where the test
-runner exits 0 having run nothing.
 
 The C# side of the demo is covered by the main suite, in
 `tests/FuzzyRegex.Tests/Gaps/Demo/`: `DemoExamplesTests` pins every sidebar example's answer against
-the upstream `regex` module, and `DemoCapsTests` reads `wwwroot/lib/caps.js` as text and checks its
+the upstream `regex` module, and `DemoCapsTests` reads `web/src/lib/caps.ts` as text and checks its
 numbers against `DemoEngine`'s, so the page's limits and the engine's cannot drift apart silently.
 
-Neither of these is wired into `tools/check-ratchet.ps1` as a demo-specific step: the JS tests run in
-`pages.yml`, and the C# ones are ordinary tests in the ordinary suite.
+Neither of these is wired into `tools/check-ratchet.ps1` as a demo-specific step: the front-end
+build runs in `pages.yml`, and the C# ones are ordinary tests in the ordinary suite.
+
+For a verdict on the real page in a real browser, serve a publish as above and open `/checks.html`.
+It drives `index.html` in an iframe - every worked example, the shared-link round trip, both page
+caps, the non-participating group, a runaway pattern killed mid-match, and what the warm spare is
+worth - and prints CHECKS GREEN or CHECKS RED.
+
+## The front end
+
+Vite 8, Vue 3.5, TypeScript 6 strict, Tailwind 4, Vitest 5. Every version is pinned exactly in
+`web/package.json` and installed with `npm ci`, so the build on a laptop and the build on the runner
+are the same build. No CDN: what ships is what was reviewed, bundled from `node_modules`.
+
+Two notes for anyone upgrading:
+
+- **`typescript` is pinned to 6.0.3, not to the current 7.x.** `vue-tsc@3.3.11` declares a peer
+  range of `>=5.0.0`, and it is wrong: under TypeScript 7.0.2 it crashes at once with
+  `ERR_PACKAGE_PATH_NOT_EXPORTED: Package subpath './lib/tsc' is not defined by "exports"`
+  (measured 2026-09-18). Check that `vue-tsc --build` actually runs before taking a TypeScript
+  major.
+- **There is no `<base href>` in the page,** which is a deliberate difference from Microsoft's
+  Blazor-on-Pages recipe. The bundle is document-relative (Vite's `base: './'`) and the worker is
+  resolved against `document.baseURI`, so one artefact boots at the repository subpath on Pages, at
+  the root of a local server and at a fork's preview path. Tested at both, not argued: `checks.html`
+  is green at a server root and under `/fuzzy-regex-cs/`.
+
+The layout follows Nielsen Norman Group's form-design guidance (one column, labels above their
+field, hints that persist instead of placeholders), its response-time limits (the 250 ms debounce,
+and a busy state that appears rather than a frozen page), and WCAG 2.2 for target size, focus
+appearance and contrast. The two screenshots in `docs/demo/` are the reference layouts at 390 and
+1280 px.
 
 ## Deploy to GitHub Pages
 
@@ -122,11 +167,12 @@ so a broken demo can never block a library merge.
 
 The build job, in order:
 
-1. Checks out the repository with submodules and installs the SDK named in `global.json`.
+1. Checks out the repository with submodules and installs the SDK named in `global.json` and the
+   Node version named in `demo/web/.nvmrc`.
 2. Installs the `wasm-tools` workload.
-3. Runs the page's Node tests.
-4. Runs `tools/run-wasm-smoke.ps1`, which publishes and then asserts the artefact set described
-   above. If anything it checks is wrong, nothing is uploaded.
+3. Runs `tools/build-demo-web.ps1`: `npm ci`, type-check, unit tests, bundle.
+4. Runs `tools/run-wasm-smoke.ps1 -SkipWebBuild`, which publishes and then asserts the artefact set
+   described above. If anything it checks is wrong, nothing is uploaded.
 5. Checks that `.nojekyll` reached the publish root. Without it, Pages runs Jekyll, Jekyll drops
    every underscore-prefixed folder, and the site serves a 404 for its own `_framework/` while
    reporting a successful deployment.
@@ -134,11 +180,6 @@ The build job, in order:
 
 The deploy job then publishes that artefact to the `github-pages` environment. It needs the
 `pages: write` and `id-token: write` permissions, which are granted in the workflow file.
-
-There is no base-href rewrite step, which is a deliberate difference from Microsoft's documented
-Blazor-on-Pages recipe. Every URL in this page is relative to the document and the worker is resolved
-against `import.meta.url`, so the same artefact boots at `https://<user>.github.io/<repo>/`, at the
-root of a local server, and at a fork's preview path, with nothing to keep in step.
 
 ### How to tell it is live
 
@@ -152,31 +193,3 @@ root of a local server, and at a fork's preview path, with nothing to keep in st
 
 A deployment that ran but left the site unchanged is almost always the browser cache or the CDN;
 open the URL in a private window before investigating anything else.
-
-## Re-vendoring Vue
-
-The page uses Vue 3, vendored as a single ES module: no CDN, so the page has no third-party runtime
-dependency at load time, and no bundler, so what ships is what was reviewed.
-
-Currently `vue@3.5.43`, `dist/vue.esm-browser.prod.js`, 173,163 bytes, SHA-256
-`877f675a8c5f347073b4d5437439a042b984d81fc5da2770eb7e6d320d5017f3`. That hash is repeated in the
-comment above the import in `app.js`; both must be updated together.
-
-To take a new version:
-
-1. Download `https://registry.npmjs.org/vue/-/vue-<version>.tgz` and check its SHA-512 against the
-   `dist.integrity` field of `https://registry.npmjs.org/vue/<version>`. Do not skip this: it is the
-   only check on what you are about to commit.
-2. Extract `package/dist/vue.esm-browser.prod.js` from the tarball to
-   `FuzzyRegex.Demo.Wasm/wwwroot/vendor/vue.esm-browser.prod.js`. Take the file's bytes as they are;
-   do not reformat it and do not let an editor change its line endings.
-3. Record the new byte count and SHA-256 in the `app.js` comment and in this file.
-4. Re-run the Node tests and the smoke script, and open the page.
-
-`.gitattributes` marks `*.js binary` so Git does not normalise line endings in it. A line-ending flip
-would change the file's hash and, in the published output, break the subresource-integrity check that
-`run-wasm-smoke.ps1` recomputes.
-
-The build used is the **full** one, with the template compiler, not `vue.runtime.esm-browser.prod.js`:
-the page's markup is in `index.html` and is compiled in the browser, which keeps the page readable as
-HTML rather than as a string inside a script.

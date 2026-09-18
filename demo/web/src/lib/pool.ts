@@ -11,20 +11,68 @@
 // question can be answered. The ROADMAP notes there is no published figure for that; the spare makes
 // the number stop mattering, and checks.html measures it both ways so the claim is not a guess.
 
+import type { BootState, Inputs, Reply, WorkerLike } from '../types';
+
+/** What a pool tells its owner whenever its shape changes. */
+export interface PoolState {
+    readonly generation: number;
+    readonly hasSpare: boolean;
+}
+
+export interface Pool {
+    readonly generation: number;
+    readonly hasSpare: boolean;
+    /** Settles when a worker has booted, with `{ok: true}` or `{ok: false, error}`. */
+    readonly ready: Promise<BootState>;
+    /** Asks the serving worker. The answer is the engine's JSON, already parsed. */
+    ask(request: Inputs): Promise<Reply>;
+    /**
+     * Kills the serving worker mid-question and takes over with the spare. The in-flight promise
+     * settles with `{aborted: true}` rather than hanging.
+     */
+    stop(why?: string): void;
+    /** Shuts the pool down. Used by the checks page; the demo page itself never stops. */
+    dispose(): void;
+}
+
+export interface PoolOptions {
+    /**
+     * Makes a new worker. Injected rather than hard-coded so the pool can be driven by a fake in the
+     * unit tests, where there is no Worker and no runtime to boot.
+     */
+    spawn: () => WorkerLike;
+    /**
+     * Keep a warm spare. False is not a configuration anyone should run: it exists so checks.html
+     * can measure what the spare is worth, and a measurement with no control is not a measurement.
+     */
+    spare?: boolean;
+    /**
+     * Told whenever the pool's state changes, so a UI can show "starting", "ready" or a boot failure
+     * without polling.
+     */
+    onChange?: (state: PoolState) => void;
+}
+
+interface Client {
+    readonly ready: Promise<BootState>;
+    ask(request: Inputs): Promise<Reply>;
+    terminate(why: string): void;
+}
+
 /**
  * Wraps one Worker in the request/reply contract worker.js speaks: every request carries a
  * requestId and every reply carries it back, so an answer to a question the user has moved on from
  * can be dropped rather than rendered as the answer to the new one.
- *
- * @param {Worker} worker
  */
-function createClient(worker) {
-    const waiting = new Map();
+function createClient(worker: WorkerLike): Client {
+    const waiting = new Map<number, (reply: Reply) => void>();
     let nextId = 1;
-    let settleReady;
-    let failed = null;
+    let settleReady!: (state: BootState) => void;
+    let failed: string | null = null;
 
-    const ready = new Promise((resolve) => { settleReady = resolve; });
+    const ready = new Promise<BootState>((resolve) => {
+        settleReady = resolve;
+    });
 
     // A worker that dies - terminated, or a boot that threw - must settle every promise waiting on
     // it. Without this the page's "matching..." state is permanent and indistinguishable from a slow
@@ -33,7 +81,7 @@ function createClient(worker) {
     // identical from here - both end with nobody getting an answer - but they are opposite claims
     // about the engine, and a page that shows the first as the second tells a visitor the demo is
     // broken while the promoted spare answers correctly behind the message.
-    const failEveryone = (why, aborted = false) => {
+    const failEveryone = (why: string, aborted = false) => {
         failed = why;
         settleReady({ ok: false, error: why, aborted });
         for (const [, settle] of waiting) settle({ error: why, aborted: true });
@@ -43,12 +91,14 @@ function createClient(worker) {
     worker.addEventListener('error', (event) => failEveryone(`worker error: ${event.message ?? event}`));
 
     worker.addEventListener('message', (event) => {
-        const data = event.data ?? {};
-        if (data.ready === false) {
-            failEveryone(`the engine failed to load: ${data.error}`);
-            return;
-        }
-        if (data.ready) {
+        const data = event.data;
+        if (data === undefined) return;
+
+        if ('ready' in data) {
+            if (data.ready === false) {
+                failEveryone(`the engine failed to load: ${data.error}`);
+                return;
+            }
             settleReady({ ok: true });
             return;
         }
@@ -56,18 +106,16 @@ function createClient(worker) {
         const settle = waiting.get(data.requestId);
         if (settle === undefined) return;
         waiting.delete(data.requestId);
-        settle(JSON.parse(data.json));
+        settle(JSON.parse(data.json) as Reply);
     });
 
     return {
-        worker,
         ready,
-        get failed() { return failed; },
         ask(request) {
             if (failed !== null) return Promise.resolve({ error: failed, aborted: true });
 
             const requestId = nextId++;
-            return new Promise((resolve) => {
+            return new Promise<Reply>((resolve) => {
                 waiting.set(requestId, resolve);
                 worker.postMessage({ requestId, ...request });
             });
@@ -79,26 +127,15 @@ function createClient(worker) {
     };
 }
 
-/**
- * A worker and a warm spare behind it.
- *
- * @param {object} options
- * @param {() => Worker} options.spawn Makes a new worker. Injected rather than hard-coded so the
- *   pool can be driven by a fake in `node --test`, where there is no Worker and no runtime to boot.
- * @param {boolean} [options.spare] Keep a warm spare. False is not a configuration anyone should
- *   run: it exists so checks.html can measure what the spare is worth, and a measurement with no
- *   control is not a measurement.
- * @param {(state: object) => void} [options.onChange] Told whenever the pool's state changes, so a
- *   UI can show "starting", "ready" or a boot failure without polling.
- */
-export function createPool({ spawn, spare = true, onChange = () => {} }) {
+/** A worker and a warm spare behind it. */
+export function createPool({ spawn, spare = true, onChange = () => {} }: PoolOptions): Pool {
     let current = createClient(spawn());
-    let standby = spare ? createClient(spawn()) : null;
+    let standby: Client | null = spare ? createClient(spawn()) : null;
     let generation = 0;
 
     const announce = () => onChange({ generation, hasSpare: standby !== null });
 
-    current.ready.then(announce);
+    void current.ready.then(announce);
     announce();
 
     /**
@@ -117,12 +154,13 @@ export function createPool({ spawn, spare = true, onChange = () => {} }) {
         for (;;) {
             const pending = current.ready;
             const state = await pending;
-            if (state.aborted !== true || current.ready === pending) return state;
+            const killed = state.ok === false && state.aborted;
+            if (!killed || current.ready === pending) return state;
         }
     })();
 
     /** Promotes the spare (or starts a worker when there is none) and boots a replacement. */
-    const replace = (why) => {
+    const replace = (why: string) => {
         current.terminate(why);
         generation++;
 
@@ -133,22 +171,23 @@ export function createPool({ spawn, spare = true, onChange = () => {} }) {
         current = standby ?? createClient(spawn());
         standby = spare ? createClient(spawn()) : null;
         announce();
-        if (standby !== null) standby.ready.then(announce);
+        if (standby !== null) void standby.ready.then(announce);
     };
 
     return {
-        get generation() { return generation; },
-        get hasSpare() { return standby !== null; },
-        /** Settles when a worker has booted, with `{ok: true}` or `{ok: false, error}`. */
+        get generation() {
+            return generation;
+        },
+        get hasSpare() {
+            return standby !== null;
+        },
         ready,
-        /** Asks the serving worker. The answer is the engine's JSON, already parsed. */
-        ask(request) { return current.ask(request); },
-        /**
-         * Kills the serving worker mid-question and takes over with the spare. The in-flight promise
-         * settles with `{aborted: true}` rather than hanging.
-         */
-        stop(why = 'stopped') { replace(why); },
-        /** Shuts the pool down. Used by the checks page; the demo page itself never stops. */
+        ask(request) {
+            return current.ask(request);
+        },
+        stop(why = 'stopped') {
+            replace(why);
+        },
         dispose() {
             current.terminate('disposed');
             if (standby !== null) standby.terminate('disposed');

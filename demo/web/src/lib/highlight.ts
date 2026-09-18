@@ -6,23 +6,41 @@
 // to the segments afterwards - slicing after the work is done is a cap that costs exactly as much as
 // having no cap.
 
-import { MAX_DISPLAYED_MATCHES } from './caps.js';
+import type { Span } from '../types';
+
+import { MAX_DISPLAYED_MATCHES } from './caps';
 
 export { MAX_DISPLAYED_MATCHES };
+
+/** One run of the subject as the page paints it. `match` is null for the text between matches. */
+export interface Segment {
+    readonly text: string;
+    /** The match's number in the full answer, or null for plain text. */
+    readonly match: number | null;
+}
+
+/** The subject split into paintable runs, and how much of the answer they cover. */
+export interface View {
+    readonly segments: readonly Segment[];
+    readonly shown: number;
+    readonly total: number;
+}
 
 /**
  * Splits the subject into the runs the page paints: plain text, and one run per highlighted match.
  *
- * @param {string} subject The text that was searched.
- * @param {Array<{index: number, length: number}>} matches The engine's matches, in order.
- * @param {number} [cap] The most matches to draw. Defaults to {@link MAX_DISPLAYED_MATCHES}.
- * @returns {{segments: Array<{text: string, match: number | null}>, shown: number, total: number}}
- *   `match` is the match's number in the full answer, or null for the text between matches.
+ * @param subject The text that was searched.
+ * @param matches The engine's matches, in order.
+ * @param cap The most matches to draw. Defaults to {@link MAX_DISPLAYED_MATCHES}.
  */
-export function segments(subject, matches, cap = MAX_DISPLAYED_MATCHES) {
+export function segments(
+    subject: string,
+    matches: readonly Span[] | undefined,
+    cap: number = MAX_DISPLAYED_MATCHES,
+): View {
     const all = matches ?? [];
     const drawn = all.slice(0, Math.max(0, cap));
-    const pieces = [];
+    const pieces: Segment[] = [];
     let at = 0;
 
     for (const [number, match] of drawn.entries()) {

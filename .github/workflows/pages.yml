@@ -21,7 +21,7 @@ on:
       - 'demo/**'
       - 'src/**'
       - 'tools/run-wasm-smoke.ps1'
-      - 'tools/run-demo-js-tests.ps1'
+      - 'tools/build-demo-web.ps1'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -60,21 +60,26 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # tools/run-demo-js-tests.ps1 refuses below 20: `node --test` is only stable from there,
-          # and below 18 it exits 0 having run nothing, which is a green light over an empty run.
-          node-version: 20
+          # From demo/web/.nvmrc, so the runner and a developer's machine use one pinned version and
+          # there is no second place to update. Vite 8 needs 22.12 or newer; tools/build-demo-web.ps1
+          # refuses below that so the failure names Node rather than surfacing as a missing API deep
+          # inside the toolchain.
+          node-version-file: demo/web/.nvmrc
+          cache: npm
+          cache-dependency-path: demo/web/package-lock.json
 
       - name: Install the WebAssembly workload
         # Required to publish a browser-wasm app; the SDK does not carry it by default.
         run: dotnet workload install wasm-tools
 
-      - name: The page's own unit tests
-        # Node, not a browser: the fragment, the display cap, the worker pool's promotion and the
-        # page's own state machine are all testable without one. What needs a browser is
-        # wwwroot/checks.html, which is driven by hand and recorded in the slice notes - a headless
-        # browser in CI is a later slice's if it earns it.
+      - name: Build the page - type-check, unit tests, bundle
+        # `npm ci`, then vue-tsc, then Vitest, then vite build, and any of the four fails the job.
+        # The tests are Node and not a browser: the fragment, the display cap, the worker pool's
+        # promotion and the page's own state machine are all testable without one. What needs a
+        # browser is wwwroot/checks.html, which is driven by hand and recorded in the slice notes -
+        # a headless browser in CI is a later slice's if it earns it.
         shell: pwsh
-        run: ./tools/run-demo-js-tests.ps1
+        run: ./tools/build-demo-web.ps1
 
       - name: Publish the demo and assert its artefact set
         # Before anything is uploaded: a missing _framework file, a stale asset nobody named or an
@@ -82,7 +87,7 @@ jobs:
         # machine and fails on Pages. Catching it here costs a minute; catching it after deployment
         # costs whoever opened the link.
         shell: pwsh
-        run: ./tools/run-wasm-smoke.ps1 -OutDir ${{ runner.temp }}/demo-publish
+        run: ./tools/run-wasm-smoke.ps1 -SkipWebBuild -OutDir ${{ runner.temp }}/demo-publish
 
       - name: The runtime's own folder must survive Jekyll
         # .nojekyll is committed in wwwroot and published with it, so this checks rather than
@@ -102,8 +107,9 @@ jobs:
       # No base-href rewrite step, and that is a divergence from the documented recipe worth being
       # explicit about. Microsoft's uses SteveSandersonMS/ghaction-rewrite-base-href because a Blazor
       # app's index.html is generated and its framework resolves assets against <base href>. This
-      # page is ours: every URL in it is relative to the document, and app.js resolves the worker
-      # against `import.meta.url`, so the same artefact boots at the repository subpath on Pages, at
+      # page is ours: every URL in it is relative to the document (Vite's `base: './'`), and demo.ts
+      # resolves the worker against `document.baseURI`, so the same artefact boots at the repository
+      # subpath on Pages, at
       # the root of a local server and at a preview path on a fork. Nothing third-party to pin, and
       # no second place for the path to drift out of step with.
 

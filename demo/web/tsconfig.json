@@ -1,0 +1,31 @@
+{
+  // One project, not the template's three: this front end is a page, a composable and four small
+  // modules, and a split into app/node/test projects would be more configuration than code.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+
+    // Strict, and then the four the slice asks for by name. `noUncheckedIndexedAccess` is the one
+    // that earns its keep here: the page indexes match and group arrays by a number the visitor
+    // chose, and `matches[selected]` really can be undefined.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "preserve"
+  },
+  "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
+}

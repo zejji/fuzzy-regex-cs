@@ -1,0 +1,31 @@
+{
+  "name": "fuzzy-regex-demo",
+  "private": true,
+  "type": "module",
+  "description": "The front end of the FuzzyRegex browser demo. Builds into the .NET project's wwwroot, which is the web root the WebAssembly publish fills.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "vue-tsc --build --force",
+    "test": "vitest run",
+    "build": "npm run typecheck && npm run test && npm run clean && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "3.5.43"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "26.6.1",
+    "@vitejs/plugin-vue": "6.0.9",
+    "jsdom": "30.1.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.0",
+    "vitest": "5.0.1",
+    "vue-tsc": "3.3.11"
+  }
+}

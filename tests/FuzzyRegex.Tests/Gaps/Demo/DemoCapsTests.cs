@@ -13,22 +13,23 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// <para>
 /// The demo enforces its bounds twice, in two languages, for two different reasons: the engine's
 /// (<see cref="DemoEngine"/>) hold even when somebody drives the worker from the browser console,
-/// and the page's (<c>wwwroot/lib/caps.js</c>) protect the main thread, which is the one freeze a
+/// and the page's (<c>demo/web/src/lib/caps.ts</c>) protect the main thread, which is the one freeze a
 /// Web Worker does nothing about. Two copies of a number in two languages is exactly the arrangement
 /// that drifts, and a drift here is silent: raise the engine's subject cap and the page goes on
 /// refusing at the old number with a message quoting the new one.
 /// </para>
 /// <para>
-/// So the JavaScript is read as text and its constants parsed. That is cruder than importing them,
+/// So the TypeScript is read as text and its constants parsed. That is cruder than importing them,
 /// and it is the only option that does not put a JavaScript runtime in the test suite - the suite
 /// also runs published as Native AOT - or duplicate the numbers a third time in a shared JSON file
-/// that nothing would check either.
+/// that nothing would check either. The source and not the build output, for the same reason: the
+/// build output is a hashed bundle that only exists after <c>npm run build</c> has run.
 /// </para>
 /// </remarks>
 public sealed class DemoCapsTests
 {
     /// <summary>
-    /// <c>caps.js</c>, found from the test assembly rather than from the working directory.
+    /// <c>caps.ts</c>, found from the test assembly rather than from the working directory.
     /// </summary>
     /// <remarks>
     /// Source-relative: <see cref="CallerFilePathAttribute"/> is how a test finds a file that is
@@ -38,7 +39,7 @@ public sealed class DemoCapsTests
     private static string CapsSource([CallerFilePath] string thisFile = "")
     {
         string repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "../../../.."));
-        string caps = Path.Combine(repoRoot, "demo/FuzzyRegex.Demo.Wasm/wwwroot/lib/caps.js");
+        string caps = Path.Combine(repoRoot, "demo/web/src/lib/caps.ts");
 
         File.Exists(caps).Should().BeTrue("the page's caps live in {0}", caps);
         return File.ReadAllText(caps);
@@ -55,7 +56,7 @@ public sealed class DemoCapsTests
             TimeSpan.FromSeconds(5)
         );
 
-        declaration.Success.Should().BeTrue("caps.js must declare {0} as a plain number", name);
+        declaration.Success.Should().BeTrue("caps.ts must declare {0} as a plain number", name);
         return int.Parse(declaration.Groups["value"].Value, CultureInfo.InvariantCulture);
     }
 

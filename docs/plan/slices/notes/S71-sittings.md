@@ -334,3 +334,90 @@ The independent verifier (amendment 16, limb d) stays deferred to the closing si
 sitting 1: the numbers this sitting quotes are browser measurements, and re-running them needs the
 publish, two servers and the Playwright session that only the closing sitting will have standing up
 anyway.
+
+---
+
+## Sitting 3 (2026-09-18, evening) - the Vite/Vue/TypeScript re-plan, built
+
+Resumed from checkpoint `2546c51` with the npm blocker lifted (owner grant `e842ca9`: npm, npx and
+node allowlisted). This sitting did the rewrite sitting 2 planned, end to end: the front end is now a
+real project, the hand-written modules are typed, the page is designed, and both layouts are green in
+a browser.
+
+### What landed
+
+- **`demo/web/`**: Vite 8.3.0, Vue 3.5.43, TypeScript 6.0.3 strict, Tailwind 4.3.3, Vitest 5.0.1,
+  `vue-tsc` 3.3.11, all pinned exactly and installed with `npm ci`. `npm run build` is
+  `typecheck && test && clean && vite build`, so a type error or a failing test cannot produce a
+  bundle.
+- **The build writes into the .NET web root** (`demo/FuzzyRegex.Demo.Wasm/wwwroot`, `emptyOutDir:
+  false`), so the wasm publish gathers page, worker and runtime into one static-asset manifest.
+  `npm run clean` deletes exactly `index.html` and `assets/` first - listed, never globbed, because
+  that directory also holds hand-written files. Both are gitignored now.
+- **The four modules and their tests are ports, not rewrites**: `caps.ts`, `fragment.ts`,
+  `highlight.ts`, `pool.ts`, plus `demo.ts` (was `app.js`'s setup function) and `types.ts`, which is
+  the TypeScript side of `DemoEngine`'s JSON. The 34 `node --test` tests became **34 Vitest tests in
+  4 files**, assertions unchanged, with jsdom giving the real `document`/`location`/`history` the old
+  hand shims faked.
+- **`App.vue` and `styles.css`** are the design bar: one column, labels above their field, persistent
+  hints, one accent reserved for interactive things, two alternating match tints each with its own
+  edge, 44 px controls, a 2 px `:focus-visible` outline, and a dark scheme.
+- **Tooling**: `tools/run-demo-js-tests.ps1` is replaced by `tools/build-demo-web.ps1` (Node floor
+  22.12, `npm ci`, `npm run build`, then a check that the two artefacts landed).
+  `tools/run-wasm-smoke.ps1` gained `-SkipWebBuild`, runs the front-end build before publishing, and
+  no longer names `app.js`/`lib/`/`vendor/`: the bundle's name carries a content hash, so it now
+  parses the published `index.html` and asserts every `assets/...` it references exists. `pages.yml`
+  installs Node from `.nvmrc` with npm caching and runs the build as its own step.
+- **Deleted**: `wwwroot/app.js`, `wwwroot/lib/`, `wwwroot/vendor/vue.esm-browser.prod.js`, the
+  tracked `wwwroot/index.html`, `demo/tests/`, and the README's "Re-vendoring Vue" section. Vue now
+  comes from `node_modules` and is bundled.
+
+### Two decisions worth keeping
+
+1. **`typescript` is pinned to 6.0.3, not the current 7.0.2.** Sitting 2 read `vue-tsc@3.3.11`'s peer
+   range (`typescript >=5.0.0`) and concluded 7 was fine. It is not: `vue-tsc --build` under 7.0.2
+   fails immediately with
+   `Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './lib/tsc' is not defined by "exports" in
+   .../typescript/package.json`. A declared peer range is not evidence about a package layout change;
+   running it is. 6.0.3 is the newest 6.x on the registry and type-checks clean.
+2. **The worker URL is `document.baseURI`, not `import.meta.url`.** Before bundling the page's module
+   sat beside `worker.js`; a bundled module sits under `assets/`, so `import.meta.url` would resolve
+   to `assets/worker.js` and 404. `document.baseURI` says what is meant - the worker is a sibling of
+   the PAGE - and keeps the no-base-href property that makes one artefact work at a root and at a
+   subpath.
+
+### checks.html had to change with it
+
+Check 6 imported `./lib/pool.js` and `./app.js` to build its own pools. There is no stable module URL
+any more (one hashed bundle per build), so the page publishes what the harness needs:
+`window.__demoInternals = { createPool, spawnEngineWorker }`, and check 6 takes them from the frame's
+window. That is also the truer measurement - the pools are now built in the window whose workers the
+demo actually spawns.
+
+### Runs, all on the committed tree
+
+| What | Command | Result |
+| --- | --- | --- |
+| Front end | `pwsh -File tools/build-demo-web.ps1` | `npm ci`, type-check clean, **34 tests / 4 files passed**, bundle written. DEMO WEB BUILD GREEN |
+| Publish + artefacts | `pwsh -File tools/run-wasm-smoke.ps1 -OutDir .scratch/wasm-publish` | **WASM SMOKE GREEN**: 28 files, 8,007,899 bytes (7.64 MB), gzip 2.16 MB, 56 integrity endpoints recomputed |
+| Browser, root | `http://localhost:8090/checks.html` | **CHECKS GREEN, 9 of 9** |
+| Browser, subpath | `http://localhost:8090/fuzzy-regex-cs/checks.html` | **CHECKS GREEN, 9 of 9** |
+
+Both browser runs used one `python -m http.server 8090` over `.scratch/serve`, which holds the
+publish twice: at the root and under `fuzzy-regex-cs/`. Chrome 153 via the Playwright MCP server.
+
+Numbers from the root run: display cap `200 drawn of 300 found, 200 <mark> elements`; runaway
+`32 timer ticks on the checks page and 32 inside the demo during the 500 ms window, status pills
+["matching..."]`; respawn **71.2 ms with the spare, 175.9 ms without**; stop-to-next-answer-on-screen
+414.3 ms. Subpath run: 107.1 ms with the spare, 185.6 ms without.
+
+**One earlier finding does not reproduce.** Sitting 2 measured 1 and 0 animation frames on the demo
+page and recorded that it "does not get rAF in this browser". This sitting's root run reported **30
+frames** in the same 500 ms window on the new page. So that was a property of the old page or of that
+session, not a standing fact about the browser; the reported-only treatment of the frame count stays
+right either way, and the assertion has never depended on it.
+
+### Screenshots
+
+`docs/demo/page-1280.png` and `docs/demo/page-390.png`, taken with Playwright at those two widths
+against the subpath URL. They are the reference layouts and are linked from `demo/README.md`.
