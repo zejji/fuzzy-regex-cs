@@ -100,6 +100,10 @@ $allowedTools = @(
     # tasklist / Get-Process are read-only and let a session see an orphaned test host (S44).
     'WebFetch', 'WebSearch', 'Bash(curl *)', 'Bash(perl *)', 'Bash(wsl *)',
     'Bash(tasklist *)', 'PowerShell(Get-Process *)',
+
+    # A Headroom-compressed tool result can drop the decisive line; this expands it by hash.
+    'mcp__headroom__headroom_retrieve',
+
     # Compound commands are matched part by part, so `cd repo && dotnet run ...` was denied on the
     # cd (S45, 2026-09-14). These read or set nothing outside the shell. Owner-approved 2026-09-14.
     'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)',
