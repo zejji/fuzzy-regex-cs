@@ -34,3 +34,18 @@ browser leg. Neither is this slice's concern.
 
 **Open for the owner (carried, unverified this session):** `slice-log.jsonl` marks S26
 `failed`; `origin/main` needs a push; benchmark baseline needs retaking on a quiet machine.
+
+**This session (2026-09-18, ran out of road before any code):** S56 still blocked -
+`dotnet-stryker.exe` (PID 50328) confirmed running in the `stryker` worktree, no reports yet, so
+its engine survivor queue has not finished. Picked up **S56b** instead (independent of S56, runs
+on `main` after S55 per its own file) and read its scope, the investigation doc and the existing
+`matchTimeout` threading pattern in `FuzzyRegex.cs` (widest public ctor takes it as a required
+param, cascades down via `: this(...)` to the internal ctor with `defaultVersion`, which calls
+`Engine.PatternObject.Compile(_compiled)`). Plan for next sitting: add `maxCompiledNodes` the same
+way (optional param, default `DefaultMaxCompiledNodes = 1_000_000`, threaded through every ctor
+tier to `PatternObject.Compile`), store the budget on `PatternObject` and check
+`NodeList.Count` at the top of `NodeCompiler.CreateNode` (`NodeCompiler.cs:205`) before `Add`,
+throwing `FuzzyRegexParseException` (has a `(message, pattern, offset)` ctor already) naming the
+count and budget. No code written yet - write the four tests first per the slice file's
+`Gaps/Engine/` list, watch them fail, then implement. Tree was clean at session start and stays
+clean; nothing to stash.
