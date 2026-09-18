@@ -7,6 +7,25 @@ delivers: []
 
 # S71 - v1, and a link that works
 
+> **Design bar and toolchain (owner, 2026-09-18 20:15 and 20:55; part of done).** The page must look
+> professional, as in a product page a stranger would trust, not a test harness with inputs.
+> Concretely: one restrained palette (neutrals plus a single accent, with match highlights that stay
+> distinguishable from each other and from the accent); a type scale and a spacing scale applied
+> consistently; monospace for pattern, flags and subject; clear hierarchy between the inputs, the
+> highlighted subject and the group table; designed empty, loading, error (parse error, cap refused,
+> worker killed) and no-match states; visible focus states and WCAG AA contrast; usable at 390 px
+> and 1280 px wide; honours `prefers-color-scheme` or picks one scheme and does it well. Layout
+> follows researched UI/UX practice (owner, 21:05: spacing must not be dodgy): one spacing scale applied
+> everywhere, consistent alignment, labels and inputs sized and placed per current form-design
+> guidance, a clear primary action, and the sources followed named in the closing notes.
+>
+> **Toolchain.** The owner withdrew the "no build step" rule (spec amendment 27): the front end is
+> a Vite + Vue 3 + TypeScript project in strict mode, with strong typing everywhere possible (typed
+> worker messages shared by page and worker, typed examples, no `any`), and a CSS framework with a
+> build step (Tailwind) is allowed and encouraged for consistency. `npm run build` type-checks with
+> `vue-tsc` and runs the unit tests before `vite build`. Everything pinned in package-lock.json and
+> installed with `npm ci`; the Pages workflow builds it with a pinned Node. **No CDN, ever.** Record
+> the framework choice and the reason in the closing notes, with screenshots at both widths.
 S70 proved the engine answers from a worker. This slice is the deliberately small page around it
 (ROADMAP, 2026-08-31) plus the deployment that makes it a link the README can carry. Nothing widens
 the scope: accounts, persistence, analytics and anything server-side stay out; the feature tour is
@@ -14,10 +33,11 @@ v2 (S72).
 
 ## Scope
 
-- **Vue 3, vendored as an ESM build under `demo/wwwroot/vendor/`**, imported by a plain
-  `<script type="module">`. No build step, no bundler, no CDN: a CDN makes the demo's availability
-  someone else's uptime and a bundler makes it someone else's toolchain. Record the exact version
-  and its SHA-256 in a one-line comment beside the import.
+- **Vue 3 + TypeScript built with Vite** (superseded 2026-09-18, was: vendored ESM build, no build
+  step). No CDN: a CDN makes the demo's availability someone else's uptime. The bundler objection
+  is withdrawn with the rule; what survives it is that every dependency's exact version is pinned
+  and committed, now in `package.json` + `package-lock.json` and installed with `npm ci` rather
+  than in a SHA-256 comment beside a vendored file.
 - **Three inputs** - pattern, flags, subject - and a result pane showing the subject with every
   match's span highlighted, plus a group table of index, length and captures per group. Named groups
   show their name; a group that did not participate shows as such rather than as an empty string,
@@ -62,7 +82,21 @@ v2 (S72).
 
 ## Done when
 
-- [x] Page delivers all seven v1 items above; Vue vendored with its version and hash recorded.
+- [x] Page delivers all seven v1 items above. (Delivered in sitting 1 as a vendored no-build page;
+      the vendoring half of this box is superseded by the toolchain amendment and is re-delivered by
+      the two boxes below, not re-ticked here.)
+- [ ] The front end is a Vite + Vue 3 + TypeScript project, strict, no `any`, Tailwind, pinned and
+      installed with `npm ci`; `npm run build` type-checks and runs the unit tests before building.
+      **Blocked 2026-09-18: `npm` is not in the driver session's Bash allowlist** - see the sitting-2
+      notes. Nothing of this was written blind.
+- [ ] The Design bar is met, with the researched UI/UX sources named and screenshots at 390 and
+      1280 px. (Not started deliberately: it would have been spent on a page the toolchain amendment
+      replaces. The research and the design decisions are recorded in the sitting-2 notes ready for
+      it.)
+- [x] The browser leg: `checks.html` CHECKS GREEN at the server root **and** under a
+      `/fuzzy-regex-cs/` subpath, with `stopToNextAnswerOnScreenMs`, `respawnWithoutSpareMs` and
+      `respawnWithSpareMs` recorded. Done in sitting 2; the subpath run settles the no-base-href
+      decision in its favour.
 - [ ] `pages.yml` green and the live URL answering; README link landed. (Workflow written and README
       link landed in sitting 1; green run and live URL need the owner's push and the one-off Pages
       setting, so this box stays open.)
@@ -75,12 +109,25 @@ v2 (S72).
       different hat; a match-count cap that caps the array but still builds one DOM node per match
       before slicing; a fragment long enough to be silently dropped by the browser.
 
-## Browser brief for the next sitting
+## Browser brief - RUN AND GREEN in sitting 2 (kept as the re-run recipe)
 
-Per-sitting narrative is in `docs/plan/slices/notes/S71-sittings.md`. This section is the spec for the
-one thing sitting 1 could not do: sitting 1 had no browser tooling, and the owner's instruction was to
-commit a green checkpoint and write down exactly what to verify. Playwright is available from the next
-session started in this worktree.
+**Outcome, 2026-09-18, Chrome 153.0.0.0 under the Playwright MCP server: CHECKS GREEN at the root
+and CHECKS GREEN at the subpath, 9 of 9 each.** Measurements and the two `checks.html` bugs the run
+exposed are in `docs/plan/slices/notes/S71-sittings.md`, sitting 2. The steps below stay because
+they are how anyone re-runs it; two corrections to them, learned by running them:
+
+- Serve on **8090** as written, but load `checks.html` **with a cache-busting query**
+  (`?v=3`). Plain `python -m http.server` plus an edited checks page gives the browser's cached copy
+  and the run silently tests the old file.
+- The check formerly called "the page keeps painting while a runaway pattern runs" is now **"the
+  page keeps running..."** and counts timer ticks rather than animation frames: this browser drives
+  `requestAnimationFrame` normally on a bare page (31 frames per idle 500 ms) but not on the demo
+  page, which boots two WebAssembly workers (1, then 0), so the old threshold measured that and not
+  the demo. Expect `32 timer ticks on the checks page and 32 inside the demo` and status pills
+  `["matching..."]`.
+
+Per-sitting narrative is in `docs/plan/slices/notes/S71-sittings.md`. This section was written by
+sitting 1, which had no browser tooling, as the spec for the one thing it could not do.
 
 **Serve it yourself; do not reuse what is already running.** A `python -m http.server` on port 8080
 (PID 37516) belongs to the owner and serves S70's publish - leave it alone. Publish to a fresh
@@ -104,7 +151,8 @@ python -m http.server 8090
 - Expected values worth reading out of the detail strings rather than trusting the boolean: the
   examples check must say `all 8 examples agree with regex 2026.9.10`; the display-cap check must
   show `200 drawn of N found, 200 <mark> elements in the page` with N well above 200; the runaway
-  check must report more than 3 animation frames in the 500 ms the runaway ran.
+  check must report tens of timer ticks on both threads (see the correction above - as first written
+  it asked for animation frames, which this page does not get).
 - `window.__checks.measurements`: `stopToNextAnswerOnScreenMs` (the page's Stop-to-answer recovery,
   which includes the 250 ms debounce), `respawnWithoutSpareMs` and `respawnWithSpareMs` (raw pools,
   no debounce). Record all three in the notes file with the browser and its version. There is no

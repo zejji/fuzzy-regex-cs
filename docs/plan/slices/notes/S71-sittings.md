@@ -88,7 +88,7 @@ variants.
   250 ms debounce, so any driver waiting on it reads the previous case's answer. Added a `pending`
   ref and a `busy` computed, used by the UI and by `checks.html`, whose `settled()` also had to
   `await sleep(0)` because `until()` tests its predicate synchronously.
-- Rejected: `docs/STATUS.md`'s "Parity against upstream commit aee2430" names a local commit - real,
+- Rejected: `docs/STATUS.md:9`'s "Parity against upstream commit ..." names a local commit - real,
   but a pre-existing generator issue, not this diff (recorded as an open item). Rejected: the README
   link 404s - expected until the owner enables Pages. Rejected: a style rewrite.
 
@@ -127,11 +127,210 @@ the debounce's `pool.stop` kill a still-booting worker.
    measurements: `stopToNextAnswerOnScreenMs`, `respawnWithoutSpareMs` and `respawnWithSpareMs`.
 3. **The live URL**. The README link 404s until the owner pushes and sets Settings - Pages -
    Source = GitHub Actions. Nothing was pushed this sitting.
-4. **`docs/STATUS.md` says "Parity against upstream commit aee2430"**, which is this repository's
-   HEAD, not an upstream commit. A generator bug, pre-existing, not part of this slice.
+4. **`docs/STATUS.md:9` says "Parity against upstream commit `<sha>`"**, which is this repository's
+   HEAD, not an upstream commit. A generator bug, pre-existing, not part of this slice. Named by line
+   rather than by SHA because the generator rewrites it on every commit.
 5. **`DemoEngine.cs` has a comment calling capture lists "an mrab-regex feature the built-in engine
    does not have".** .NET has `Group.Captures`; the sentence is wrong as written.
 6. **The independent verifier** (amendment 16, limb d) is deferred to the closing sitting, where it
    can re-run the browser evidence as well as the probe and the Demo tests. Blind pass 2 re-ran
    `tools/probes/demo-examples-expectations.py` and the `Gaps/Demo` tests and confirmed every quoted
    expectation.
+
+## Sitting 2 (2026-09-18) - CHECKPOINT, not done
+
+Two scope changes arrived from the owner during this sitting, the second of them large:
+
+- **20:15, the Design bar** (in the slice file): the page must look professional, not merely work.
+- **20:55, the toolchain**: the "vendored, no build step" rule is **withdrawn**. The front end moves
+  to Vite + Vue 3 + TypeScript (strict) with Tailwind, everything pinned in `package.json` and
+  installed with `npm ci`. Only the CDN ban survives. **21:05**: the layout must follow researched
+  UI/UX guidance, with the sources recorded.
+
+That supersedes most of the page sitting 1 built (the vendored `vendor/vue.esm-browser.prod.js`, the
+hand-written ESM modules under `lib/`, and the styling the Design bar would have gone into). So this
+sitting deliberately did **not** restyle the old page: an hour of CSS on a page being replaced within
+the week is the wasted work the owner's 2026-09-16 rule names. What it did instead was finish the one
+thing that was blocking the slice and is **not** affected by the rewrite - the browser leg, which
+tests the worker, the pool and the engine - and then prepare the re-plan.
+
+### The browser leg: GREEN at the root and GREEN at the subpath
+
+Ran for the first time ever (sitting 1 had no browser). Chrome 153.0.0.0 driven by the Playwright MCP
+server, serving `.scratch/wasm-s71-base/wwwroot` with `python -m http.server`.
+
+| Run | URL | Verdict |
+| --- | --- | --- |
+| Root | `http://localhost:8090/checks.html?v=3` | **CHECKS GREEN**, 9 of 9 |
+| Subpath | `http://localhost:8091/fuzzy-regex-cs/checks.html` | **CHECKS GREEN**, 9 of 9 |
+
+**The subpath run settles the no-base-href decision in its favour.** Sitting 1 diverged from
+Microsoft's Blazor-on-Pages recipe by shipping no `<base href>` at all and reasoned that every URL in
+the page is document-relative. That is now tested rather than argued: the same artefact boots and
+answers identically at the server root and at `/fuzzy-regex-cs/`, which is what GitHub Pages will
+serve. The hard-coded base the Findings section originally planned would have worked at exactly one
+of the two.
+
+**Two real bugs, both invisible without a browser, both in `checks.html` rather than in the page.**
+
+1. **The checks page hung for ever at check 2.** `openPage` assigns `frame.src = './index.html' +
+   fragment`. When the previous src differed only in its FRAGMENT that is a same-document
+   navigation: no reload, no `load` event, and the `await` never returns. Observed exactly: check 1
+   PASS, then "running..." for 180 s with the iframe still showing the last example's inputs
+   (`\bfuzzy\b`) under the new URL. Fixed by blanking the frame to `about:blank` and awaiting that
+   load before assigning the real URL, so every `openPage` is a genuine document load.
+2. **"the address bar follows the inputs" asserted with the wrong decoder.** `encode()` builds the
+   fragment with `URLSearchParams`, which writes a space as `+`; the check read it back with
+   `decodeURIComponent`, which leaves `+` alone, so a correct address bar failed the check. The page
+   was right the whole time - check 2's round trip passes, because the page parses the fragment with
+   `URLSearchParams` as well. Now asserted by parsing, which is also what the page does on load.
+
+**One check was measuring something other than the demo.** "the page keeps painting while a runaway
+pattern runs" counted `requestAnimationFrame` callbacks and wanted more than 3 in 500 ms; it got 1.
+The first hypothesis - "this browser does not drive rAF" - was tested, and it is **wrong**. Two 500 ms
+windows on each of two *idle* pages, same browser, same server, `visibilityState === 'visible'`:
+
+| Idle page | frames | 16 ms timer ticks |
+|---|---|---|
+| A page with nothing on it (`.scratch/wasm-s71-base/wwwroot/raf-probe.html`) | 31, 31 | 31, 30 |
+| The demo page, which boots two .NET WebAssembly workers | 1, 0 | 28, 30 |
+
+So rAF works fine here in general and does not work **on this page**, and the frame count was
+measuring that interaction rather than whether the demo stayed responsive. Cause not established -
+the observation is what is recorded, and it is enough to disqualify the metric. (Written down because
+the first draft of these notes asserted the general version, and the blind review caught it.)
+
+The check now counts 16 ms timer ticks on both threads - a blocked main thread cannot service a timer
+either - and reads the iframe's **status pills** mid-runaway to prove the page drew its "matching..."
+state while the worker was wedged. Pills, not the page's whole text: the intro paragraph contains the
+words "compiled to WebAssembly and matching in your browser", so a body-text search for "matching"
+passes on a page doing nothing at all. That, too, is a review finding. The rAF count is still
+reported, never asserted on. Result: **32 ticks on the checks page and 32 inside the demo** in the
+500 ms window, status pills `["matching..."]`. That is a stronger claim than the original, and one
+that holds in a headless browser as well as a headed one.
+
+### The measurements the ROADMAP wanted
+
+There is no published figure for a .NET WebAssembly respawn, so these are the port's own. Three
+observations of each, across the two green runs plus the intermediate one:
+
+| Measurement | Root run | Subpath run | Earlier run | Notes |
+| --- | --- | --- | --- | --- |
+| `stopToNextAnswerOnScreenMs` | 440.7 | 438.7 | - | includes the 250 ms debounce |
+| `respawnWithoutSpareMs` | 249.5 | 242.7 | 271.5 | spare disabled, raw pool |
+| `respawnWithSpareMs` | 193.8 | 119.3 | 144.6 | raw pool |
+
+So a respawn costs roughly **250 ms without the spare and roughly 150 ms with it** - the spare saves
+about 100 ms, and Stop to a fresh answer on screen is a hair over 400 ms of which 250 ms is the
+page's own debounce. Honest caveat: the with-spare figure ranges 119-194 ms over three runs on a
+machine that is also running the Stryker queue, so treat it as "about 150 ms", not as a benchmark.
+
+### Screenshots (the page as it stands, before the redesign)
+
+`.scratch/s71-v1-before-1280.png` and `.scratch/s71-v1-before-390.png`. They are the "before" for the
+Design bar: the page is correct, tidy and plainly a test harness - system colours, one flat column of
+labels and boxes, no hierarchy between the inputs and the answers. Keeping them is the cheapest way
+for the next sitting to show what changed.
+
+### BLOCKER: `npm` is not in this session's Bash allowlist
+
+The re-plan cannot start until this is granted. `npm --version` is refused before it runs:
+
+> This command requires approval
+
+`node` is allowed (v24.16.0 is installed) and only `npm` is missing, so this is a one-line
+allowlist change rather than a missing tool. **Nothing was worked around.** Widening my own sandbox
+is the owner's call, not mine, and a Vite project written blind - no install, no `vue-tsc`, no test
+run - would be exactly the unverified code the standard forbids.
+
+What was established instead, so the next sitting starts from facts rather than guesses:
+
+- **The network is fine.** `.scratch/probe-npm-registry.py`: DNS `registry.npmjs.org` ->
+  104.16.10.34, `GET /vite/latest` -> HTTP 200. The sandbox is not the obstacle; the allowlist is.
+- **Current versions, read from the registry today** (`.scratch/probe-npm-versions.py`), for pinning:
+  `vite 8.3.0` (needs node `^20.19.0 || >=22.12.0`), `vue 3.5.43`, `@vitejs/plugin-vue 6.0.9`,
+  `typescript 7.0.2`, `vue-tsc 3.3.11`, `vitest 5.0.1` (node `^22.12.0 || ^24.0.0 || >=26.0.0`),
+  `tailwindcss 4.3.3`, `@tailwindcss/vite 4.3.3`, `@types/node 26.6.1`, `jsdom 30.1.0`.
+  Installed Node is **v24.16.0**, which satisfies every one of those ranges - so `.nvmrc` should say
+  24 and `engines.node` should be `>=22.12.0`.
+- **One compatibility question to settle before pinning, not after:** `typescript 7.0.2` is current
+  and `vue-tsc 3.3.11` has historically pinned a TypeScript range. Check `vue-tsc`'s peer range
+  first; if it has not caught up to TS 7, pin TypeScript to the newest 5.x/6.x it accepts and say so
+  in the commit. Do not assume this either way - it is one `npm view vue-tsc peerDependencies` away.
+
+### The UI/UX guidance this design will follow (owner's 21:05 requirement)
+
+Searched 2026-09-18. Three sources, and what each one changes about the layout:
+
+1. **NN/g, "Website Forms Usability: Top 10 Recommendations" and "Placeholders in Form Fields Are
+   Harmful"** (<https://www.nngroup.com/articles/web-form-design/>,
+   <https://www.nngroup.com/articles/form-design-placeholders/>). Single column; labels above their
+   field, never inside it; hints persistent rather than vanishing. **Changes:** the Flags box
+   currently uses a placeholder (`e.g. IgnoreCase, BestMatch`) as half its explanation - that becomes
+   a persistent hint under a real label. The three inputs stay one column and stop competing with the
+   examples sidebar for the eye.
+2. **NN/g, "Response Time Limits"** (<https://www.nngroup.com/articles/response-times-3-important-limits/>):
+   0.1 s feels instant, 1 s keeps the flow of thought, 10 s is the limit of attention. **Changes:**
+   this is the justification for the 250 ms debounce and for showing "matching..." rather than
+   nothing - and it says the busy state must appear within ~1 s of the keystroke, which the measured
+   440 ms Stop-to-answer comfortably meets. A wait animation, not a bare word, for anything past 1 s.
+3. **W3C, "What's New in WCAG 2.2"** (<https://w3.org/WAI/standards-guidelines/wcag/new-in-22/>):
+   **2.5.8 Target Size (Minimum), Level AA, 24x24 CSS px**; 2.4.13 Focus Appearance (AAA) wants a
+   2 px perimeter at 3:1 contrast against the unfocused state; 2.4.11 Focus Not Obscured (AA).
+   **Changes:** the eight example buttons and the Stop button get a real minimum hit area, and the
+   focus ring becomes a 2 px solid outline with its own contrast rather than the browser default.
+   Body text and the highlight colours still have to clear 4.5:1 (1.4.3, AA), which is worth
+   computing rather than eyeballing - the match highlight is a background behind body-sized text.
+
+Two design consequences worth writing down before anyone opens an editor, because both are about
+this page specifically rather than about forms in general:
+
+- **Adjacent matches must stay visually separate.** `\w` over `abab` is four matches, and one flat
+  highlight colour renders them as a single block - the page would be lying about the answer. The
+  redesign alternates two tints and gives every `<mark>` its own edge, so "four matches" looks like
+  four. Keep it a border rather than a hue difference, so it survives colour blindness.
+- **`checks.html` counts `<mark>` elements** (`marks === demo.view.shown`) and greps the page for
+  "did not participate". Whatever the new components look like, one displayed match must still be
+  exactly one `<mark>`, or the display-cap check silently changes meaning.
+
+### Tests
+
+- **34 `node --test` tests GREEN** (`tools/run-demo-js-tests.ps1`), unchanged by this sitting's edits.
+- **Ratchet GREEN** - see the commit's STATE.md line for the numbers.
+- No C# changed this sitting; the only code edit is `checks.html`, which no test reads.
+
+### Review
+
+**Blind pass over this sitting's diff: 5 findings raised, 5 reproduced, 5 fixed.** No second pass was
+needed - the fixes touched `checks.html`'s one check plus prose, all of it inside what the reviewer
+had already read, and the fixed page was re-run in the browser rather than reasoned about.
+
+1. **`renderedWhileRunning.includes('matching')` was vacuous.** `index.html`'s intro paragraph reads
+   "compiled to WebAssembly and matching in your browser", so a body-text search for "matching"
+   passes on a page doing nothing. Reproduced by reading the paragraph. Fixed: the check now reads
+   `.status .pill` and asserts a pill starting "matching", and the detail string prints the pills, so
+   a future regression is visible in the output as well as in the boolean.
+2. **The 500 ms in the detail string was really ~750 ms.** Both intervals started before the inputs
+   were set, so the window included the 250 ms debounce and the `until()` poll. Reproduced by
+   arithmetic and then by measurement: the old code reported 47 ticks, the fixed code reports 32, and
+   47/0.75 s = 63/s against 32/0.5 s = 64/s - the same rate over an honestly-measured window. Fixed
+   by starting the counters after the wait.
+3. **The intervals could leak.** `await until(...)` can throw on its 30 s timeout between the
+   intervals being created and cleared, leaving both running for the life of the checks page and of
+   the frame it drives. Fixed with `try`/`finally`.
+4. **The rAF claim was too broad** - see the table above. The reviewer was right; the measurement I
+   had was real but the generalisation drawn from it was not. Corrected in four places
+   (`checks.html`, these notes, `DECISIONS.md`, the slice file).
+5. **`STATE.md` quoted a stale SHA** for the `docs/STATUS.md` open item. Fixed, and both copies of
+   that item now name `docs/STATUS.md:9` rather than a SHA the generator rewrites every commit.
+
+After the fixes, `checks.html` was re-run in both layouts: **CHECKS GREEN 9/9 at
+`http://localhost:8090/checks.html?v=4` and 9/9 at
+`http://localhost:8091/fuzzy-regex-cs/checks.html?v=4`**, runaway check reporting
+`32 timer ticks on the checks page and 32 inside the demo during the 500 ms window, status pills
+["matching..."]`.
+
+The independent verifier (amendment 16, limb d) stays deferred to the closing sitting, as in
+sitting 1: the numbers this sitting quotes are browser measurements, and re-running them needs the
+publish, two servers and the Playwright session that only the closing sitting will have standing up
+anyway.
