@@ -1,0 +1,4 @@
+Mandatory, and not cosmetic: GitHub Pages runs Jekyll by default, Jekyll drops every
+underscore-prefixed directory, and the .NET WebAssembly runtime lives in _framework. Without this
+file the deployed app serves a 404 for its own runtime (ROADMAP, 2026-08-31). The file's contents
+are ignored; only its presence matters, which is why this explanation can live in it.
