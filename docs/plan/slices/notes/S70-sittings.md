@@ -243,3 +243,144 @@ checkpoint.
    **Still open after sitting 3, same cause, now identified precisely**: PID 37516,
    `C:\Python314\python.exe -m http.server 8080 --bind 127.0.0.1`, whose working directory IS the
    published `wwwroot`. Kill it *after* the browser leg has used it, then run the clean publish.
+
+## Sitting 4 (2026-09-18) - the close
+
+Both blockers cleared without this session opening a browser or killing anything.
+
+### The browser leg
+
+Run by the orchestrator, not by this session: **Playwright MCP over Chromium, orchestrator,
+2026-09-18 15:56**, recorded in `.claude/driver/s70-browser-evidence.json`. Three sittings had each
+spent their whole turn being denied the browser tools and exited with no commit, so the leg was
+taken out of the slice session entirely.
+
+What it served matters as much as what it found: `harness.html` came from the stray
+`python -m http.server 8080` (PID 37516) serving the demo worktree's published `wwwroot` at commit
+`b40dadd`, and the **served file's md5 was compared against the file on disk** - so the harness that
+ran is the harness that is committed, not an older publish.
+
+Verdict **HARNESS GREEN**, `window.__harness.ok === true`, all six checks passing:
+
+- round trip returns the engine's own answer: `index=0 length=6 counts=(1,1,1)`, which upstream also
+  gives - the page cannot compute per-error-type counts, so this is not an echo;
+- each reply carries the `requestId` it was asked with (`#1 -> 3 matches, #2 -> 2 matches`);
+- a parse error crosses as JSON, not as a rejection: `{"error":"missing )"}`;
+- **31 animation frames in the 500 ms the runaway pattern ran** - the page kept painting;
+- `terminate()` killed the runaway: no answer after 3.5 s, past the 2 s an unkilled worker would
+  have answered on;
+- a respawned worker answers correctly: `[[1,1],[4,2],[8,3]]`, matching upstream.
+
+Only console error: a 404 for `/favicon.ico`, no favicon being shipped.
+
+**The warm-time baseline is 418.3 ms** from `new Worker(...)` to the first answer (Chromium,
+this machine, warm). That is the demo's own number. It is not comparable with S53's AOT figures for
+the reason the slice file gives, and it is a *warm* figure - the runtime's files were already in the
+browser cache, so it is a floor for a first visit, not a prediction of one.
+
+### The clean publish, and the `-OutDir` that made it possible
+
+The zero-trim-warning claim needs a publish from a cleared `obj/`, and for two sittings the publish
+directory was held open by PID 37516 - whose job was to serve the browser leg. The owner's rule is
+that this session does not kill processes, so the script grew a **`-OutDir`** instead: publish
+somewhere else, clear `obj/` and that directory, leave `bin/` alone. `obj/` is where the linker's
+state lives, so clearing it is what re-emits the warnings; `bin/` was only ever cleared because it
+was where the publish landed.
+
+`tools/run-wasm-smoke.ps1 -OutDir .scratch/wasm-clean-publish`: **WASM SMOKE GREEN**, 22 files,
+7,278,441 bytes on disk, 2,076,631 gzip, 44 integrity endpoints recomputed. Zero warnings - the only
+line in the log matching `warning` is the script's own banner about re-emitting them, and
+`Directory.Build.props` sets `TreatWarningsAsErrors`, so one would have failed the publish.
+
+**That claim would be vacuous if the trimmer had not run, so that was checked rather than assumed**:
+`obj/Release/net10.0/linked/Link.semaphore` is timestamped 16:00:47, inside this run, and `obj/` was
+deleted at its start. The size figures are identical to sitting 3's incremental run bar one byte of
+gzip (2,076,631 against 2,076,630), which is the evidence that the two runs published the same app.
+
+`-OutDir` refuses a directory containing the repository, because the clean step deletes what it is
+given and `-OutDir .` would otherwise be a working tree deleted by a smoke test.
+
+### Review (sitting 4)
+
+One blind pass, Opus, over the tooling the sitting-3 reviewer never saw - its own fixes, committed
+in `b40dadd` - plus this sitting's `-OutDir`. Dispatched blind and waited for in-turn, carrying the
+bounded-probe limits. **5 findings raised, 5 reproduced, 5 fixed.** The reproduction gate did not
+kill any of them this time, which is unusual and worth saying plainly: every one was a check that
+passed without checking, and every one was demonstrable in seconds against a copy of the publish.
+
+- **`-OutDir` could delete the repository's own directories.** The guard refused only a directory
+  that IS or CONTAINS the repo root, so `-OutDir tools` - the directory the script itself lives in -
+  sailed through to `Remove-Item -Recurse -Force`. Reproduced as logic, not by deleting anything:
+  `demo blocks=False`, `tools blocks=False`. Now two gates, the second asking git whether the target
+  holds tracked files, because tracked is the definition of "work" here and `.scratch/` and anywhere
+  outside the repo are the disposable cases. Verified both ways: `-OutDir src` is refused with
+  `holds 44 git-tracked file(s)` and `src/` is still there; a path under `%TEMP%` is allowed through
+  to the web-root check. That second test is not incidental - the first version of the fix asked git
+  about every path, and `git ls-files` on a path outside the repository exits 128, so the safest
+  possible `-OutDir` would have been the one it refused.
+- **The compressed variants were never checked for existence**, only excluded from hashing, because
+  the `.br|.gz` skip sat above the existence check rather than below it. 41 of 42 deleted still gave
+  `WASM SMOKE GREEN`, with the printed gzip figure collapsing from 2,076,631 bytes to 3,796 and
+  nothing objecting. Those files are what a visitor downloads. The two lines are now the other way
+  round.
+- **Nothing looked from disk back to the manifest**, so a file nobody published was counted into the
+  size baseline: one duplicated `.wasm` gave `23 files, 8762377 bytes (8.36 MB)` and GREEN, against
+  the true 22 and 6.94 MB. It is not hypothetical - an asset's fingerprint changes every build, so
+  under `-SkipClean` or a re-used `-OutDir` stale files accumulate rather than being overwritten, and
+  the inflated figure is the one that would have gone into these notes as the demo's baseline.
+- **The zero-warning claim was inferred, not made.** The only assertion about the publish was its
+  exit code, and `TreatWarningsAsErrors` promotes compiler warnings, not every category MSBuild can
+  emit. The script now captures the publish output and throws on any `warning <CODE>` line, so the
+  claim in its own `.DESCRIPTION` is one the code checks. (This is also the sitting's own evidence
+  made honest: the first clean run's zero-warning claim came from me grepping the log by hand.)
+- **`(... | Measure-Object -Sum).Sum` throws on an empty pipeline** under `Set-StrictMode -Version
+  Latest` - `The property 'Sum' cannot be found on this object` - so a publish with no `.gz` died
+  with an internal PowerShell error after every real check had passed. Both totals now handle it.
+
+The new checks get a committed probe rather than a paragraph, for the reason the directory's other
+two exist: **`tools/probes/wasm-smoke-artefact-checks.ps1`**, which copies the publish to a per-run
+temp directory, runs a control over it, deletes 41 of 42 compressed variants, restores them, adds an
+orphan, removes it, and runs a closing control. `BOTH ARTEFACT CHECKS FIRED: 41 compressed variants
+deleted gives exit 1 and the missing wording; one orphan file gives exit 1 and the orphan wording;
+the copy checks GREEN again once both are undone.` It needs only an existing publish and takes
+seconds. The two older probes still pass against the changed script, controls included.
+
+**Every figure above was re-taken from the code being committed**, after the last fix: a final
+`-OutDir .scratch/wasm-clean-publish` run gives WASM SMOKE GREEN, 22 files, 7,278,441 bytes,
+2,076,631 gzip, 44 integrity endpoints, zero orphans, and `linked/Link.semaphore` timestamped
+16:14:57 inside that run.
+
+### Independent verifier (amendment 16(d))
+
+A fresh Opus subagent, briefed with nothing but the commit-ready tree, re-ran every number these
+notes and the closing notes quote. **Ten claims, nine CONFIRMED, one DIFFERENT** - the three probes'
+verdicts, all four clean-publish figures, both `-OutDir` guard behaviours, the ratchet's totals
+(6343 tests, 0 skipped, baseline 6235), the `Link.semaphore` timestamp, and every figure the closing
+notes quote from the browser-evidence file, which it checked as quoted rather than re-running,
+having no browser and being told not to seek one. It left both publish directories GREEN and
+`git status` byte-identical to how it found it.
+
+**The DIFFERENT is worth keeping, because it is a fact about this suite and not about this slice.**
+The verifier's brief made `DOTNET_GCHeapHardLimit=0x40000000` mandatory - the slice's own
+bounded-probe rule, written for the demo engine - and under a 1 GB heap the ratchet is RED at 6341
+passing and 2 failing:
+
+- `FuzzyRecursionTests.The_stack_bound_is_still_what_catches_a_blowup_the_guard_cannot_see`
+- `InheritedIssueTests.A_long_repeated_capture_group_costs_the_backtracking_stack_a_block_per_repetition`
+
+Both die with `OutOfMemoryException` in `ByteStack.Grow` (`ByteStack.cs:306`), which is exactly what
+they are for: they deliberately grow the backtracking stack until something stops them, and under
+the cap the thing that stops them is the cap. Re-run without it, the ratchet is GREEN at 6343/0/0,
+which is the figure these notes record. **So the bounded-probe limits belong on demo-engine probes,
+not on the test suite**, and a future session that applies them to `check-ratchet.ps1` will get a
+RED that means nothing.
+
+### One thing this sitting got wrong
+
+The first ratchet run was pointed at `C:\...\fuzzy-regex-cs\tools\check-ratchet.ps1` - the main
+checkout's copy, not the worktree's. It built and ran **main's** test assembly while sitting in the
+worktree, passed 6343 tests, and then failed with `Ratchet: RED - no test report was produced`
+because it looked for the report under the main checkout. Worth knowing: a worktree session that
+gets the path wrong does not get an error saying so, it gets a green-looking test run about the
+wrong tree. The real run, `.claude/worktrees/demo/tools/check-ratchet.ps1`, is GREEN: 6343 passing,
+0 failing, 0 skipped, baseline 6235 unchanged.

@@ -2,40 +2,34 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**S70 IS A CHECKPOINT, NOT DONE (sitting 3, 2026-09-18, branch `phase9-demo`).** The slice file
-stays in `docs/plan/slices/`. Full detail: `docs/plan/slices/notes/S70-sittings.md`.
+**S70 IS DONE (four sittings, 2026-09-18, branch `phase9-demo`).** Slice file moved to
+`docs/plan/slices/done/`; per-sitting detail in `docs/plan/slices/notes/S70-sittings.md`.
 
 **Green at this commit.** Ratchet GREEN, 6343 passing, 0 failing, 0 skipped, baseline 6235
-unchanged. `tools/run-wasm-smoke.ps1 -SkipClean`: WASM SMOKE GREEN, 22 files, 7,278,441 bytes on
-disk, 2,076,630 gzip, 44 integrity endpoints.
+unchanged. `tools/run-wasm-smoke.ps1 -OutDir .scratch/wasm-clean-publish`: WASM SMOKE GREEN from a
+cleared `obj/`, 22 files, 7,278,441 bytes on disk, 2,076,631 gzip, 44 integrity endpoints, zero
+warnings. All three probes in `tools/probes/wasm-smoke-*` fire and re-run in seconds.
 
-**What sitting 3 added.** The smoke script's missing-artefact branch is no longer reasoned: a new
-`-SkipPublish` switch makes it reachable, `tools/probes/wasm-smoke-missing-artefact.ps1` fires it
-(exit 1, names the file, no GREEN, GREEN again after the restore), and
-`tools/probes/wasm-smoke-branch-controls.ps1` shows that probe would have been wrong twice over
-without its own controls. One blind pass over that delta: 7 findings, 6 fixed, 1 not sustained.
+**What sitting 4 closed.** The browser leg, run by the orchestrator with Playwright over Chromium
+(evidence in `.claude/driver/s70-browser-evidence.json`): HARNESS GREEN, all six checks, **warm
+baseline 418.3 ms** from `new Worker(...)` to first answer. And the clean publish, via a new
+`-OutDir` that publishes away from the directory PID 37516 still holds open - no process was killed.
+Blind pass over the unreviewed tooling: 5 findings, 5 reproduced, 5 fixed, all of them checks that
+passed without checking. Independent verifier run over the commit-ready tree.
 
-**Two things block the close, both needing the owner, neither being code:**
+**Next: S71 (`docs/plan/slices/S71-vue-page-v1.md`), the demo's UI half.** Two things S70 learned
+that it must design around: `worker.terminate()` is the PRIMARY control, not an error path, because
+a pathological pattern can wedge `FuzzyRegex` *construction*, where `MatchTimeout` does not apply;
+and rendering a result with hundreds of thousands of matches freezes the main thread, which the
+worker does nothing about.
 
-1. **The browser leg, unrun for a third sitting.** The Playwright MCP tool is in the session but
-   not permission-granted (`browser_navigate` returns "you haven't granted it yet"). Everything
-   else is ready: the server on 127.0.0.1:8080 already serves the freshly published web root
-   (`harness.html` returns 200), so the grant is the only missing piece. Read `window.__harness`
-   and `window.__bootToFirstAnswerMs`.
-2. **The clean publish, for the zero-trim-warning claim.** PID 37516
-   (`python.exe -m http.server 8080`, a stray from sitting 2) has the published `wwwroot` as its
-   working directory and holds it open, so the script's clean step cannot delete it. **Kill it only
-   AFTER the browser leg has used it** - it is the server that leg needs.
+**Do not re-measure the compile blow-up.** `(((a{100}){100}){100}){100}` never returns and took the
+machine to 0 GB free on 2026-09-18. Recorded in `DemoEngine.MatchTimeout`'s remarks, sliced as S56b
+on `main`.
 
-**Then, to close:** one blind pass over the browser-leg delta, the independent verifier (amendment
-16(d)) over the commit-ready tree, tick the last two "Done when" boxes, move the slice file.
-
-**Do not re-measure the compile blow-up.** `Run` has no clock over `FuzzyRegex` construction, so
-`(((a{100}){100}){100}){100}` never returns; recorded in `DemoEngine.MatchTimeout`'s remarks and
-sliced as S56b on `main`. It took the machine to 0 GB free on 2026-09-18.
-
+**Open for the owner.** PID 37516 (`python -m http.server 8080`) is still running and no longer
+needed by anything - the browser leg is done and the smoke script no longer needs its directory.
 **Carried from main:** benchmark baseline needs retaking on a quiet machine (~32 min);
 `.claude/skills/benchmark/SKILL.md` documents a stale run command; `_regex.c:22091`'s comment on
-`text_length` is wrong. **Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main`
-needs a push; `stash@{0}` (S54 sitting 1's rescue stash) is safe to drop. The orchestrator merges
-`phase9-demo`.
+`text_length` is wrong. `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push;
+`stash@{0}` (S54 sitting 1's rescue stash) is safe to drop. The orchestrator merges `phase9-demo`.
