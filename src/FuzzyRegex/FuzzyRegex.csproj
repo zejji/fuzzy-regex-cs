@@ -13,6 +13,8 @@
     -->
     <NoWarn>RS0026</NoWarn>
     <IsPackable>true</IsPackable>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageId>FuzzyRegex</PackageId>
     <Description>A .NET port of mrab-regex: a full-featured regex engine with fuzzy (approximate) matching and per-error-type budgets.</Description>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>

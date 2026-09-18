@@ -7,9 +7,15 @@ with per-error-type budgets - insertions, deletions and substitutions inside pat
 `Fuzzy.Text.RegularExpressions`, and the main type is `FuzzyRegex`, shaped after
 `System.Text.RegularExpressions.Regex`.
 
-**Status: planning / early implementation.** Not yet usable. See
-[`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`](docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md)
-for the design and [`docs/plan/OPERATIONS.md`](docs/plan/OPERATIONS.md) for how the port is run.
+**Status: pre-1.0.** Feature-complete against the pinned upstream release - the whole ported
+upstream test suite passes (`docs/STATUS.md`) - and the public API is frozen. What is left before
+1.0 - performance work, packaging, mutation-test coverage, the rest of this documentation and a
+browser demo - is tracked in [`docs/plan/ROADMAP.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/ROADMAP.md).
+
+A browser demo is planned before 1.0. <!-- demo-link -->
+
+See [`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md)
+for the design and [`docs/plan/OPERATIONS.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/OPERATIONS.md) for how the port is run.
 
 ## Install
 
@@ -20,7 +26,7 @@ dotnet add package FuzzyRegex
 ## Quick start
 
 Every example below compiles against the public API in
-[`src/FuzzyRegex/PublicAPI.Unshipped.txt`](src/FuzzyRegex/PublicAPI.Unshipped.txt). Add
+[`src/FuzzyRegex/PublicAPI.Unshipped.txt`](https://github.com/zejji/fuzzy-regex-cs/blob/main/src/FuzzyRegex/PublicAPI.Unshipped.txt). Add
 `using Fuzzy.Text.RegularExpressions;` before running any of them.
 
 ### Exact match with named groups
@@ -67,7 +73,7 @@ Console.WriteLine($"{substitutions} substitution(s), {insertions} insertion(s), 
 
 `EnumerateMatches` finds matches lazily, one at a time, so an early exit does not pay for the
 whole subject. Its `timeout` bounds each step, not the whole walk; see the divergence "A per-call
-`timeout` on every input-dependent method" in [`docs/DIVERGENCES.md`](docs/DIVERGENCES.md).
+`timeout` on every input-dependent method" in [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md).
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -105,6 +111,11 @@ foreach (Match match in regex.EnumerateMatches("one two three", timeout: TimeSpa
   `string?[]` and puts `null` where a capturing group did not take part" in
   `docs/DIVERGENCES.md`.
 
+These are the three that catch a caller by surprise. See
+[`docs/COMPARISON.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md) for the
+complete Python `regex` and `System.Text.RegularExpressions` mapping and every other difference,
+worked examples included.
+
 ## One deliberate difference from mrab-regex's defaults
 
 **Patterns compile as mrab-regex's version 1 by default, where mrab-regex itself defaults to
@@ -121,7 +132,7 @@ Pass `FuzzyRegexOptions.Version0`, or write `(?V0)` at the start of the pattern,
 and `Regex` reading back. The only pattern that changes meaning is an unescaped `[` inside a set:
 `[[]` is a set containing `[` under version 0 and an unterminated nested set under version 1, and
 the parse error says so. Every other deliberate difference from upstream is listed in
-[`docs/DIVERGENCES.md`](docs/DIVERGENCES.md).
+[`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md).
 
 ## Thread safety
 
@@ -140,6 +151,19 @@ here as it is there, so share one instance rather than constructing per call.
 
 Upstream's `concurrent=True` argument has no equivalent and needs none: it asks mrab-regex's C to
 release CPython's global interpreter lock during a match, and this port never takes a global lock.
+
+## Where the docs are
+
+- [`docs/COMPARISON.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md) - the
+  complete Python `regex` and `System.Text.RegularExpressions` mapping, with a worked example for
+  every difference.
+- [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md) -
+  the running ledger of every deliberate difference from upstream: what, why, and how to get
+  upstream's behaviour back.
+- [`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md) -
+  the design spec.
+- [`docs/plan/OPERATIONS.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/OPERATIONS.md) -
+  how the port itself is run, for contributors.
 
 ## Licensing
 
