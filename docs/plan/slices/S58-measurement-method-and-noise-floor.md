@@ -77,6 +77,10 @@ S54, whose suite and `tools/compare-benchmarks.ps1` it extends rather than rewri
    versus `ref struct` enumerator choice up in the same document, with the API consequence stated
    plainly: a ref struct enumerator is not an `IEnumerable<T>`, so the owner signs it off.
 
+**Workload added 2026-09-18 (research sweep):** a fuzzy no-match large-subject case, e.g.
+`(?:needle){e<=1}` over 1 MB with no near-occurrence, alongside the existing set. It is the
+workload S60 item 10 exists for; without a baseline here that item cannot be judged.
+
 ## Verification
 
 - `pwsh -File tools/check-ratchet.ps1` GREEN, and `pwsh -File tools/run-oracle.ps1` GREEN at its
