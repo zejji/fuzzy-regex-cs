@@ -516,8 +516,8 @@ amended text is inline above; this list is the record of what changed and why.
    likeliest: the benchmark baselines, and the edge cases an optimizer is tempted to special-case -
    zero-width and empty matches, anchors, `MatchTimeout`, large inputs, pathological backtracking.
 
-   *Phase 9 browser demo.* A Vue 3 page, vendored as an ESM build so there is no build step and no
-   CDN dependency, driving a .NET WebAssembly runtime hosted in a Web Worker that exposes one
+   *Phase 9 browser demo.* A Vue 3 + TypeScript page built with Vite (amendment 27; until
+   2026-09-18 a vendored ESM build with no build step), never loading from a CDN, driving a .NET WebAssembly runtime hosted in a Web Worker that exposes one
    `[JSExport]` string-in, JSON-out match method; deployed to GitHub Pages. The worker is the whole
    safety design, and that reasoning is why this belongs in the spec rather than in a README task. A
    public demo invites strangers to type pathological patterns; regex matching is unbounded in the
@@ -889,3 +889,18 @@ amended text is inline above; this list is the record of what changed and why.
     merges `main` at the start of every slice. S72's help panels depend on `COMPARISON.md`'s
     section headings, which S65 stabilises. Estimates unchanged. Housekeeping: the two entries
     above both numbered 25 stand as written; the second (metamorphic invariants) is cited as 25b.
+
+27. **The demo front end gets the standard Vue toolchain: Vite, TypeScript in strict mode, and a CSS
+    framework with a build step (2026-09-18, owner decision).** The 2026-08-31 shape said "vendored
+    as an ESM build so there is no build step", to keep the demo free of someone else's toolchain.
+    The owner overruled it while S71 was in flight: build pipelines are standard for Vue 3,
+    particularly with TypeScript, which the project should be doing; strong typing everywhere possible
+    reduces mistakes; and a framework such as Tailwind is welcome because limiting choices gives
+    consistency. What stays: no CDN, ever, since a CDN makes the demo's availability someone else's
+    uptime; every dependency is pinned in `package-lock.json` and installed with `npm ci`; the
+    Pages workflow builds with a pinned Node. What the build must do: type-check with `vue-tsc`
+    and run the unit tests before `vite build`, so a type error fails the deploy; share one typed
+    contract for the worker's request and response messages between page and worker; no `any`.
+    S71 absorbs the change (its slice file carries the design bar and toolchain rule); the
+    vendored `vue.esm-browser.prod.js` and the hand-written ESM modules from the S71 checkpoint are
+    superseded, their logic ported into typed modules with their tests kept.

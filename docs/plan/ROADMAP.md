@@ -619,8 +619,9 @@ engine's diligence: a runaway is killed with `worker.terminate()`, and a warm sp
 spawned in advance so the respawn is not felt. `MatchTimeout` stays in the demo as the fast
 common-case exit and as defence in depth, never as the only safety net.
 
-**The shape.** The main thread is a Vue 3 UI, vendored as an ESM build so there is no build step and
-no CDN dependency. The worker hosts its own .NET WebAssembly runtime (a `wasmbrowser` project) and
+**The shape.** The main thread is a Vue 3 + TypeScript UI built with Vite, in strict mode, with a
+CSS framework allowed (design spec amendment 27, owner decision 2026-09-18; until then a vendored
+ESM build with no build step). No CDN dependency, ever: everything pinned and installed with `npm ci`. The worker hosts its own .NET WebAssembly runtime (a `wasmbrowser` project) and
 exposes exactly one `[JSExport]` method: pattern, flags and subject in as strings, a JSON result
 out. SolidJS was considered and rejected - the UI is three inputs, a result pane and an examples
 list, so fine-grained reactivity would optimise the part that was never the bottleneck, and the
