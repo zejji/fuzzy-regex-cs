@@ -421,3 +421,16 @@ right either way, and the assertion has never depended on it.
 
 `docs/demo/page-1280.png` and `docs/demo/page-390.png`, taken with Playwright at those two widths
 against the subpath URL. They are the reference layouts and are linked from `demo/README.md`.
+
+## Sitting 4 (2026-09-18) - no work done, allowance gate
+
+The session opened with the five-hour window already at 94%, so the driver's gate said commit a green
+checkpoint and stop. Nothing was started: no ratchet, no review, no verifier.
+
+One thing was cleaned up. `docs/STATUS.md` was dirty again with the same bad line the sitting-3 notes
+describe - `Parity against upstream commit 0867121...`, which is our own HEAD, not upstream's, because
+the `upstream` submodule is not checked out in this worktree. Discarded with `git checkout --`, not
+committed. The generator fix is still an open item.
+
+The sitting-3 next actions are unchanged and are still the next actions: ratchet, blind review over
+the sitting-3 diff, independent verifier, then close the slice.

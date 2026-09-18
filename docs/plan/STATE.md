@@ -1,7 +1,8 @@
 # State
 
 **Slice in flight: S71 (browser page v1), checkpoint after sitting 3.** Branch `phase9-demo`.
-Notes: `docs/plan/slices/notes/S71-sittings.md`.
+Notes: `docs/plan/slices/notes/S71-sittings.md`. Sitting 4 opened at 94% of the allowance window and
+stopped on the gate without starting anything; the next actions below are untouched.
 
 ## Where it is
 
