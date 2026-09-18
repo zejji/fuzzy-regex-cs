@@ -54,3 +54,8 @@ docs/plan/slice-log.jsonl
 # what the driver fails a slice for.
 ORCHESTRATOR-PROMPT.md
 .venvs/
+
+# Serena MCP server's local index/cache for this checkout. Machine-local, has its own nested
+# .gitignore, and unrelated to any slice's scope - it showed up untracked the same session S66
+# ran and would otherwise fail the driver's clean-tree check every sitting from here on.
+.serena/

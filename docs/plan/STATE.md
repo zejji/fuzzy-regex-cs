@@ -2,27 +2,24 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase 8 (`docs` worktree, branch `phase8-docs`). S65 closed 2026-09-18.** `docs/COMPARISON.md`
-checked row by row against every SHIPPED row in `docs/DIVERGENCES.md` (34 rows, all named); its
-runnable examples are pinned (`tests/FuzzyRegex.Tests/Docs/ComparisonSamples.cs`, 27 tests). Two
-new convention tests keep it that way: `Conventions/ComparisonCoversDivergencesTests.cs` and
-`Conventions/PublicApiDocumentationTests.cs` (every public type/member carries an XML
-`<summary>`/`<inheritdoc/>`, read from the generated `FuzzyRegex.xml` against the real reflected
-surface). Found and fixed two real bugs along the way (DECISIONS.md, 2026-09-18): a naive
-`Split('|')` desynchronised by a literal `|` inside a code span was silently dropping a row from
-the scan, and a whole-file substring check let a COMPARISON cross-reference stand in for a
-deleted section. Both proved by negative control, both fixed, both re-proved. COMPARISON.md's
-`##`/`###` headings are frozen for S72 (full list in the slice's closing notes,
-`docs/plan/slices/done/S65-comparison-completeness-and-convention-tests.md`).
+**Phase 8 (`docs` worktree, branch `phase8-docs`). S66 closed 2026-09-18.** `docs/plan/RELEASE.md`
+is the full 1.0 release checklist; S69 follows it exactly. Versioning is a hand-bumped
+`VersionPrefix` (`1.0.0`), no MinVer. `src/FuzzyRegex/FuzzyRegex.csproj` gained the metadata S64
+flagged missing (`Authors`, `PackageProjectUrl`) plus SourceLink and `EnablePackageValidation`.
+Two rehearsal scripts: `tools/pack-and-validate.ps1` (CI's `pack` job, every push - fails locally
+on three SourceLink findings that only resolve once the packed commit is pushed to GitHub, by
+design) and `tools/run-release-rehearsal.ps1` (install from a local feed into a fresh consumer,
+run the README sample, publish trimmed Native AOT - rehearsed green, see DECISIONS.md 2026-09-18
+for the log). `dotnet nuget verify` is skipped (no signing cert; `NU3004` confirmed). Caught and
+fixed mid-slice: `dotnet add package` run inside a repo-tree scratch folder can leak into the real
+root `Directory.Packages.props` via MSBuild's central-package-management search - the rehearsal
+script now writes empty `<Project />` overrides into the scratch consumer first. Full account:
+`docs/plan/slices/done/S66-pack-validate-and-release-dry-run.md`.
 
-**Next: S66**, `docs/plan/slices/S66-pack-validate-and-release-dry-run.md` - pack/validate/dry-run.
-S64's closing notes flagged two package-metadata gaps still open for S66 or the owner to settle:
-no `Authors`, no `PackageProjectUrl`; `PackageLicenseFile` used instead of
-`PackageLicenseExpression` (a deliberate choice, not a gap - valid SPDX would be
-`Apache-2.0 AND CNRI-Python`).
+**Next: S67**, `docs/plan/slices/S67-registries-context7-and-deepwiki.md`.
 
-Ratchet: GREEN, 6307/6307 (6199 distinct ids), baseline 6199 (unchanged - S65 added tests, not
-ported behaviour). `docs/STATUS.md` regenerated.
+Ratchet: GREEN, 6307/6307 (6199 distinct ids), baseline 6199 (unchanged - S66 is packaging/infra,
+`delivers: []`). `docs/STATUS.md` unchanged.
 
 **Not carried from the pre-fork STATE.md**: this branch forked from `main` at the S55 Stryker
 checkpoint. That content belongs to the mutation-testing worktree working Phase 6, not to Phase 8;
