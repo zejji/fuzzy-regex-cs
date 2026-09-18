@@ -55,3 +55,16 @@ cost, not the per-token price, so the guidance stands: Fable for the genuinely h
 analysis (engine-guard redesign, the counted-repeats candidate, the S57 Phase 6 close review, the
 oracle-invariant design), Opus for slices, Sonnet for mechanical slices. Today's allowance: 5-hour
 window 74% used, 7-day 37%.
+
+## S70 STOPPED BY THE OWNER, 2026-09-18 11:45
+The S70 session launched three unbounded probes after two explicit instructions (s70probe at 21 GB,
+s70probe3 at 19 GB); the owner authorised killing the probe and stopping the driver and session.
+The demo worktree holds S70's uncommitted work (9 files: demo/, tests/FuzzyRegex.Tests/Gaps/Demo/,
+tools/run-wasm-smoke.ps1, tools/probes/demo-json-contract-expectations.py, FuzzyRegex.slnx and
+FuzzyRegex.Tests.csproj edits, docs/STATUS.md) on branch phase9-demo at 8d5a257, NOT committed and
+NOT rescued to a branch (force-stopped). Next S70 sitting: launch with `launch-slice.ps1 s70 -Phase 9`
+from the demo worktree only after adding to the slice file's top a bold instruction: "No probe
+project, no `dotnet run` of anything but the harness; exercise DemoEngine.Run only through TUnit
+tests with subjects under 100 chars and repeat products under 10,000." The browser leg still needs
+the owner to grant Playwright tools. Phase 8 (S65, docs worktree) and the Stryker queue were not
+affected and keep running.
