@@ -30,10 +30,15 @@
 .PARAMETER DryRun
     Show what the driver would do - which slice, and the budget verdict - and start nothing.
 
+.PARAMETER NoHeadroom
+    Run the sessions straight against the API instead of through the Headroom proxy. Needed on a
+    machine that has no Headroom installed; costs the run the compression saving.
+
 .EXAMPLE
     tools/run-slices.ps1
     tools/run-slices.ps1 -MaxSlices 3
     tools/run-slices.ps1 -DryRun
+    tools/run-slices.ps1 -NoHeadroom   # a machine without Headroom, at full token cost
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +47,8 @@ param(
     # skip the earlier phase's files that main is still working through. 0 = any phase.
     [int]$Phase = 0,
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoHeadroom
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +62,14 @@ $statePath = Join-Path $repoRoot 'docs/plan/STATE.md'
 $sliceLogPath = Join-Path $repoRoot 'docs/plan/slice-log.jsonl'
 $budgetPath = Join-Path $repoRoot 'docs/plan/budget.json'
 $sessionLogRoot = Join-Path $env:USERPROFILE '.claude/projects'
+
+# Where the slice session sends its API traffic. Until 2026-09-18 this was inherited by accident:
+# the proxy address lives in the main checkout's untracked .claude/settings.local.json, so a
+# session only reached Headroom when the driver happened to be launched from a shell that already
+# had the variable, and a driver started in a worktree (which has no settings.local.json) ran at
+# full token cost with nothing to say so. Set it on the session explicitly instead, and probe the
+# proxy before launching - see the preflight below.
+$headroomBaseUrl = $env:ANTHROPIC_BASE_URL ? $env:ANTHROPIC_BASE_URL : 'http://127.0.0.1:8787'
 
 # The unattended session may edit the repo, build, test and commit - and nothing else. A tool
 # outside this list stalls the slice rather than doing something unreviewed on the machine.
@@ -148,6 +162,15 @@ function Invoke-SliceSession {
         # moved out of .scratch/ on 2026-09-15 because slice sessions clear that directory and
         # took the deadline file with it mid-sitting.
         $startInfo.Environment['FUZZY_SLICE_SESSION'] = '1'
+
+        # Route the session through Headroom, which compresses its context and so charges fewer
+        # tokens to the allowance. ENABLE_TOOL_SEARCH goes with it: Claude Code turns on-demand
+        # tool loading off by itself when ANTHROPIC_BASE_URL points at a custom endpoint (Headroom
+        # issue #746), and this turns it back on, which is what the main checkout's settings do.
+        if (-not $NoHeadroom) {
+            $startInfo.Environment['ANTHROPIC_BASE_URL'] = $headroomBaseUrl
+            $startInfo.Environment['ENABLE_TOOL_SEARCH'] = 'true'
+        }
         $deadline = [datetimeoffset]::Now.AddMinutes($TimeoutMinutes)
         New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.claude/driver') | Out-Null
         Set-Content -LiteralPath (Join-Path $repoRoot '.claude/driver/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
@@ -346,6 +369,22 @@ function Add-ParkNote {
 # Read inside the loop, not here: budget.json says editing it takes effect immediately, and that
 # is only true if the driver re-reads it every time round. $null seeds the first read, which is
 # the one Read-Budget refuses to paper over.
+# Preflight, not a per-slice check: a proxy that dies mid-run fails the session's calls loudly,
+# whereas a proxy that was never up would silently cost the whole run its compression saving.
+# -NoHeadroom is the way past it on a machine with no Headroom installed.
+if ($NoHeadroom) {
+    Write-Host 'Headroom is off (-NoHeadroom): sessions talk to the API directly, at full token cost.' -ForegroundColor Yellow
+}
+else {
+    $proxy = Test-HeadroomProxy -BaseUrl $headroomBaseUrl
+    if (-not $proxy.Healthy) {
+        throw "The Headroom proxy at $headroomBaseUrl is not ready ($($proxy.Detail)). Start it with " +
+        "'headroom proxy' (or 'headroom wrap claude'), or run the driver with -NoHeadroom to " +
+        'accept the full token cost.'
+    }
+    Write-Host "Sessions route through Headroom at $headroomBaseUrl ($($proxy.Detail))." -ForegroundColor DarkGray
+}
+
 $budget = $null
 $startingPhase = $null
 $completed = 0

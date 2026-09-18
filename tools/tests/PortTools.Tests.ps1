@@ -800,3 +800,41 @@ Describe 'Undo-FailedSlice' {
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'Test-HeadroomProxy' {
+    It 'reports the proxy healthy when /health answers ready' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'healthy'; ready = $true; version = '0.37.0' } }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeTrue
+        $probe.Detail | Should -Match '0\.37\.0'
+    }
+
+    It 'probes /health on the given base URL, not the messages endpoint' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'healthy'; ready = $true } }
+
+        Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:9999/' | Out-Null
+
+        Should -Invoke -ModuleName PortTools Invoke-RestMethod -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://127.0.0.1:9999/health' }
+    }
+
+    It 'reports unhealthy when the proxy answers but is not ready, so a slice is not launched into a half-started proxy' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'starting'; ready = $false } }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeFalse
+        $probe.Detail | Should -Match 'starting'
+    }
+
+    It 'reports unhealthy, with the error, when nothing is listening' {
+        Mock -ModuleName PortTools Invoke-RestMethod { throw 'No connection could be made because the target machine actively refused it.' }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeFalse
+        $probe.Detail | Should -Match 'refused'
+    }
+}

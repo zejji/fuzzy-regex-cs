@@ -469,6 +469,49 @@ function Get-RateLimitResetsAt {
     return $latest
 }
 
+function Test-HeadroomProxy {
+    <#
+    .SYNOPSIS
+        Reports whether the Headroom compression proxy is up and ready to carry a slice session.
+
+    .DESCRIPTION
+        Slice sessions send their API traffic through Headroom (ANTHROPIC_BASE_URL, set on the
+        session in run-slices.ps1), which compresses the context and cuts the tokens the run
+        charges to the account's allowance. A proxy that is down fails every call of a slice
+        that has already spent its orientation, so the driver probes it before it launches.
+
+        /health is the proxy's own endpoint. Measured 2026-09-18 against Headroom 0.37.0 running
+        on 127.0.0.1:8787: it answers 200 with
+        {"service":"headroom-proxy","status":"healthy","ready":true,"version":"0.37.0",...}.
+        The other candidates are unusable as a probe - / answers 421 and /v1/models 401.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $uri = "$($BaseUrl.TrimEnd('/'))/health"
+
+    try {
+        $response = Invoke-RestMethod -Uri $uri -TimeoutSec $TimeoutSeconds
+    }
+    catch {
+        return [pscustomobject]@{ Uri = $uri; Healthy = $false; Detail = $_.Exception.Message }
+    }
+
+    # 'ready' is the proxy's own readiness flag: it serves /health while it is still starting up,
+    # and a session launched into that window would fail its first call.
+    $ready = [bool]($response.PSObject.Properties['ready']?.Value)
+    $status = $response.PSObject.Properties['status']?.Value
+    $version = $response.PSObject.Properties['version']?.Value
+
+    return [pscustomobject]@{
+        Uri     = $uri
+        Healthy = $ready -and $status -eq 'healthy'
+        Detail  = "status=$status ready=$ready version=$version"
+    }
+}
+
 function Test-BudgetGate {
     <#
     .SYNOPSIS
@@ -742,4 +785,5 @@ function Undo-FailedSlice {
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
-    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice
+    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
+    Test-HeadroomProxy
