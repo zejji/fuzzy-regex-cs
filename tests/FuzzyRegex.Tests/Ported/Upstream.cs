@@ -65,7 +65,7 @@ internal static class Upstream
         FuzzyRegexOptions options,
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
-    ) => new(pattern, options, matchTimeout, namedLists, Parsing.RegexFlags.Version0);
+    ) => FuzzyRegex.WithDefaultVersion(pattern, options, matchTimeout, namedLists, Parsing.RegexFlags.Version0);
 
     /// <summary>Upstream's <c>regex.search</c>.</summary>
     /// <param name="input">The subject to search.</param>

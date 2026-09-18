@@ -112,6 +112,19 @@ internal sealed class PatternObject
     internal readonly List<Node> NodeList = [];
 
     /// <summary>
+    /// The compile budget: the most nodes <see cref="NodeList"/> may hold. <b>This port's own
+    /// field</b> (S56b), enforced in <c>NodeCompiler.CreateNode</c>; upstream has no limit.
+    /// </summary>
+    internal int MaxNodes = FuzzyRegex.DefaultMaxCompiledNodes;
+
+    /// <summary>
+    /// The pattern the caller wrote. <b>This port's own field</b> (S56b), carried only so the
+    /// budget's <see cref="FuzzyRegexParseException"/> can report the pattern that overran, as
+    /// every other parse failure does.
+    /// </summary>
+    internal string PatternText = "";
+
+    /// <summary>
     /// Whether the compiler encountered an opcode that consults its encoding's casing functions.
     /// <b>This port's own field:</b> it identifies the unsupported part of <c>LOCALE</c> exactly.
     /// </summary>
@@ -210,13 +223,27 @@ internal sealed class PatternObject
     /// the arguments arrive as a <see cref="CompiledPattern"/> instead.
     /// </summary>
     /// <param name="compiled">What the parser produced.</param>
+    /// <param name="patternText">
+    /// The pattern the caller wrote, carried only so the compile budget's refusal can report it.
+    /// </param>
+    /// <param name="maxNodes">
+    /// The compile budget: the most nodes <see cref="NodeList"/> may hold. S56b; upstream has no
+    /// equivalent and allocates until the process dies.
+    /// </param>
     /// <returns>The compiled pattern.</returns>
     /// <exception cref="NotSupportedException">
     /// The code list does not describe a graph this compiler can build. Upstream raises
     /// <c>RuntimeError: invalid RE code</c>, not its own <c>error</c>, so this is not a
     /// <see cref="FuzzyRegexParseException"/> - see DECISIONS 2026-08-31.
     /// </exception>
-    internal static PatternObject Compile(CompiledPattern compiled)
+    /// <exception cref="FuzzyRegexParseException">
+    /// The graph would need more than <paramref name="maxNodes"/> nodes.
+    /// </exception>
+    internal static PatternObject Compile(
+        CompiledPattern compiled,
+        string patternText,
+        int maxNodes = FuzzyRegex.DefaultMaxCompiledNodes
+    )
     {
         ArgumentNullException.ThrowIfNull(compiled);
 
@@ -228,6 +255,8 @@ internal sealed class PatternObject
 
         var self = new PatternObject
         {
+            PatternText = patternText,
+            MaxNodes = maxNodes,
             Flags = compiled.Flags,
             PublicGroupCount = compiled.GroupCount,
             GroupIndex = compiled.GroupIndex,

@@ -283,7 +283,8 @@ public sealed class RepeatTests
         foreach (CompileRow row in Corpus.Compiles())
         {
             PatternObject pattern = PatternObject.Compile(
-                PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
+                PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion),
+                row.Pattern
             );
 
             foreach (Node repeat in pattern.NodeList)
@@ -329,7 +330,8 @@ public sealed class RepeatTests
         lazy.FuzzyChanges.Substitutions.Should().Equal(1);
 
         PatternObject compiled = PatternObject.Compile(
-            PatternCompiler.Compile("(?:a+x){e<=1}", 0, _noNamedLists, PatternCompiler.DefaultVersion)
+            PatternCompiler.Compile("(?:a+x){e<=1}", 0, _noNamedLists, PatternCompiler.DefaultVersion),
+            "(?:a+x){e<=1}"
         );
 
         compiled

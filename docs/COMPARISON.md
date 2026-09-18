@@ -733,6 +733,42 @@ Match m = pattern.Match("xya", beginning: 2, length: 1, partial: true);
 Console.WriteLine((m.Success, m.PartialMatch, m.Index));   // (True, True, 2) - upstream answers None
 ```
 
+### Compile budget
+
+A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted
+repeats multiply: `((a{150}){150}){150}` is 3,375,000 copies. Upstream builds that graph until the
+process runs out of memory. This port refuses it at construction instead, once compiling has created
+more nodes than `maxCompiledNodes` allows - a million by default, about 250 MB. The timeout does not
+cover this, because the cost is paid in the constructor before there is any subject to match.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+try
+{
+    _ = new FuzzyRegex("((a{150}){150}){150}");
+}
+catch (FuzzyRegexParseException e)
+{
+    Console.WriteLine(e.Message);   // compiling this pattern needs more than 1000000 nodes, ...
+}
+
+// Or lower the budget, which is the point of it: compiling a pattern that arrived from outside
+// the process under a ceiling you chose rather than the default quarter of a gigabyte.
+var strict = new FuzzyRegex(
+    untrustedPattern,
+    FuzzyRegexOptions.None,
+    FuzzyRegex.InfiniteMatchTimeout,
+    maxCompiledNodes: 50_000        // about 12 MB
+);
+```
+
+Two details worth knowing. The budget counts the nodes compiling *creates*, not the nodes the
+finished pattern keeps: the optimiser prunes about half of a counted repeat's graph afterwards, and
+the memory has already been spent by then, so a graph that is refused may be smaller than the budget
+once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
+500 GB.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

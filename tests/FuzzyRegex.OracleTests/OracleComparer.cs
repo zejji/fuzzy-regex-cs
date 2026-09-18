@@ -170,7 +170,7 @@ internal static class OracleComparer
         FuzzyRegex compiled;
         try
         {
-            compiled = new FuzzyRegex(
+            compiled = FuzzyRegex.WithDefaultVersion(
                 row.Pattern,
                 (FuzzyRegexOptions)row.Flags,
                 // NOT the row deadline: it is passed PER CALL below instead, so that every row of
@@ -186,7 +186,10 @@ internal static class OracleComparer
                 // The version the RECORDER resolved this row under, not this port's own default,
                 // which S50b made Version1. A default rather than a flag: a row whose pattern says
                 // (?V1) must still get version 1, and both bits at once is "VERSION0 and VERSION1
-                // flags are mutually incompatible".
+                // flags are mutually incompatible". It is a METHOD rather than the constructor it
+                // used to be because this call site was captured silently once already: S56b gave
+                // the public constructor a trailing int of its own and this row's version became a
+                // compile budget, which the waves reported as three ordinary divergences.
                 row.DefaultVersion
             );
         }

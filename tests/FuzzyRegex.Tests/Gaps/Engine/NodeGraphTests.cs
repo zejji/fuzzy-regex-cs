@@ -61,7 +61,7 @@ public sealed class NodeGraphTests
             Corpus.DefaultVersion
         );
 
-        PatternObject pattern = PatternObject.Compile(compiled);
+        PatternObject pattern = PatternObject.Compile(compiled, row.Pattern);
 
         using (new AssertionScope())
         {
@@ -237,5 +237,8 @@ public sealed class NodeGraphTests
     }
 
     private static PatternObject Build(string source) =>
-        PatternObject.Compile(PatternCompiler.Compile(source, 0, _noNamedLists, PatternCompiler.DefaultVersion));
+        PatternObject.Compile(
+            PatternCompiler.Compile(source, 0, _noNamedLists, PatternCompiler.DefaultVersion),
+            source
+        );
 }
