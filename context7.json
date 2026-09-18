@@ -1,0 +1,11 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "FuzzyRegex",
+  "description": "A .NET port of Python's `regex` module (mrab-regex), with fuzzy (approximate) matching via per-error-type budgets - insertions, deletions and substitutions.",
+  "folders": ["docs/", "README.md"],
+  "excludeFolders": ["docs/plan/", "docs/superpowers/", "upstream/", "bench/", "TestResults/"],
+  "excludeFiles": [],
+  "rules": [
+    "Differences from Python's `regex` module are deliberate and tracked in docs/COMPARISON.md - check it before assuming behaviour matches upstream."
+  ]
+}
