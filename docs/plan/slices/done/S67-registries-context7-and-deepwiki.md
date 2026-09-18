@@ -34,5 +34,36 @@ Runs in the `docs` worktree. Small: half a sitting.
 
 ## Done when
 
-- The two files exist, owner steps are listed with their proof checks, and the closing notes record
+- [x] The two files exist, owner steps are listed with their proof checks, and the closing notes record
   the documentation URLs and the date read.
+
+## Closing notes (2026-09-18)
+
+Landed `context7.json` (repo root) and `docs/plan/FINDABILITY.md`. Nothing submitted - both
+registrations need the owner's accounts and are listed as owner steps with proof checks.
+
+**Documentation read, 2026-09-18:**
+- Context7 config format: `https://context7.com/docs/api-reference/add-library/add-a-github-repository`
+  (field descriptions, example) and the schema itself,
+  `https://context7.com/schema/context7.json` (JSON Schema draft-07: `projectTitle` 1-100 chars,
+  `description` 10-200 chars, `folders`/`excludeFolders`/`excludeFiles`/`rules` string arrays,
+  `additionalProperties: false`). Submission form: `https://context7.com/add-library?tab=github`.
+- DeepWiki: public repos index by visiting `deepwiki.com/<owner>/<repo>` with no account; private
+  repos need Devin. Source: search summary of `docs.devin.ai/work-with-devin/deepwiki` and related
+  pages (2026-09-18).
+
+`context7.json` validates against the schema's documented constraints (checked by hand against the
+field list above, not machine-validated - no local schema validator was worth adding for one file):
+`projectTitle` 10 chars, `description` 156 chars, one `rules` entry, `additionalProperties: false`
+respected (no extra keys).
+
+**Review:** one blind pass (Sonnet subagent) over the two-file diff. Two findings, both real:
+(1) FINDABILITY.md claimed `context7.json` was "already committed" while still only staged - fixed
+by dropping the claim; (2) the more material one - `curl https://api.github.com/repos/zejji/fuzzy-regex-cs`
+returns 404 unauthenticated, meaning the repo is currently private or not yet pushed to that URL,
+which both Context7's public-repo submission and DeepWiki's no-account public-repo flow depend on.
+Reproduced myself (same 404) before fixing; added a prerequisite note to FINDABILITY.md rather than
+guessing which of "private" or "not pushed" is true. Both fixes are doc-text only, touched nothing
+the reviewer hadn't already seen, so no second blind pass was needed. No probes, second-engine
+commands or oracle waves in this slice, so the independent-verifier step (amendment 16(d)) does not
+apply - nothing for it to reproduce.

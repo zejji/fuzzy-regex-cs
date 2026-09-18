@@ -1,8 +1,12 @@
 # Findability
 
 How coding assistants discover this library. Both steps below need the owner's accounts and are
-not automatable from a session; `context7.json` (repo root) is the machine-readable half and is
-already committed.
+not automatable from a session; `context7.json` (repo root) is the machine-readable half.
+
+**Prerequisite: the repo must be public first.** Checked 2026-09-18:
+`curl https://api.github.com/repos/zejji/fuzzy-regex-cs` returns 404, which GitHub gives for both
+a private repo and one that doesn't exist there yet. Both steps below need a public GitHub repo at
+that URL - check that before assuming either failed.
 
 ## Owner step 1: Context7
 
