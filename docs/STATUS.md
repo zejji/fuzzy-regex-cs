@@ -6,7 +6,7 @@
 
 # FuzzyRegex parity status
 
-Parity against upstream commit `7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33`.
+Parity against upstream commit `8d5a2578d6428a6c965807b88079422435b2e33e`.
 
 **Overall parity: 100.0%** (1967 of 1967 ported upstream tests passing).
 
@@ -53,7 +53,7 @@ These are not upstream tests, so they do not count towards parity.
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
 | Conventions | 41 | 41 | 0 | 0 |
-| Gaps | 4261 | 4261 | 0 | 0 |
+| Gaps | 4297 | 4297 | 0 | 0 |
 
 ## Tests waiting on a capability
 

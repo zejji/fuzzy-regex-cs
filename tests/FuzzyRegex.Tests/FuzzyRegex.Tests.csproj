@@ -77,6 +77,17 @@
 
   <ItemGroup>
     <!--
+      S70. The demo's JSON contract, compiled into this assembly rather than referenced. The demo
+      project targets browser-wasm and cannot be referenced from a net10.0 test project, but the
+      contract is plain C# with no interop in it - the [JSExport] wrapper is a separate file - so
+      linking the source pins it under the JIT on all three CI operating systems and the demo needs
+      no test host of its own. Gaps/Demo/DemoEngineContractTests.cs is what reads it.
+    -->
+    <Compile Include="../../demo/FuzzyRegex.Demo.Wasm/DemoEngine.cs" Link="Gaps/Demo/DemoEngine.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       The compile-parity corpus, embedded rather than copied to the output directory so the tests
       never depend on the working directory. Regenerate with tools/record-compile-corpus.py.
     -->

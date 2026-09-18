@@ -7,6 +7,9 @@ delivers: []
 
 # S70 - The demo's engine half
 
+**Per-sitting notes: `docs/plan/slices/notes/S70-sittings.md`.** Sitting 2 (2026-09-18) committed a
+GREEN checkpoint; the browser leg is the open item.
+
 The worker is the whole safety design (ROADMAP, 2026-08-31): a public demo invites strangers to type
 pathological patterns, and fuzzy matching is combinatorially worse than the exact case, so "the page
 never freezes" has to be a property of the browser's scheduler, not of the engine's diligence. This
@@ -70,13 +73,19 @@ them makes a failed boot indistinguishable from a failed render.
 
 ## Done when
 
-- [ ] `demo/FuzzyRegex.Demo.Wasm` publishes clean, is in the solution, exposes one `[JSExport]`, its
-      JSON contract pinned by JIT tests.
+- [x] `demo/FuzzyRegex.Demo.Wasm` publishes clean, is in the solution, exposes one `[JSExport]`, its
+      JSON contract pinned by JIT tests. (36 contract tests; whole solution builds Release with 0
+      warnings.)
 - [ ] Harness proves round trip, `terminate()` plus respawn, and a responsive page; baseline recorded
-      with the comparability caveat.
-- [ ] `tools/run-wasm-smoke.ps1` committed and exercised; zero trim warnings from a publish taken
+      with the comparability caveat. **Harness written, never run in a browser** - Playwright was not
+      permission-granted in sitting 2, so the warm-time baseline is still unmeasured. The size
+      baseline IS recorded, with the caveat.
+- [x] `tools/run-wasm-smoke.ps1` committed and exercised; zero trim warnings from a publish taken
       from a cleared `obj/` (S53's verifier: an incremental re-publish does not re-emit them).
-- [ ] Ratchet GREEN, blind review, commit. **Hunt:** a pathological pattern that freezes the page
+      **Caveat:** the clean run predates the final `DemoEngine` changes; the last run was
+      `-SkipClean` because a stray HTTP server held the publish directory. Re-run clean next sitting.
+- [ ] Ratchet GREEN, blind review, commit. **Ratchet GREEN (6305) and two blind passes done**;
+      the independent verifier belongs to the closing commit and has not run. **Hunt:** a pathological pattern that freezes the page
       anyway - the freeze moving into `dotnet.create()` on the respawn, or into the main thread's own
       rendering of a result with hundreds of thousands of matches, neither of which the worker does
       anything about; a round trip that passes because the harness asserts on a value it supplied
