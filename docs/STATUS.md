@@ -52,8 +52,8 @@ These are not upstream tests, so they do not count towards parity.
 
 | Area | Tests | Passing | Skipped | Failing |
 |---|---:|---:|---:|---:|
-| Conventions | 41 | 41 | 0 | 0 |
-| Docs | 3 | 3 | 0 | 0 |
+| Conventions | 43 | 43 | 0 | 0 |
+| Docs | 36 | 36 | 0 | 0 |
 | Gaps | 4297 | 4297 | 0 | 0 |
 
 ## Tests waiting on a capability

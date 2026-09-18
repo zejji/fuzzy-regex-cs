@@ -701,6 +701,14 @@ the later occurrence a group number the earlier occurrence's name has already cl
 write is the one that survives under that name. Upstream instead keeps the group numbered from
 scratch per branch, so an earlier branch's text becomes unreachable through the name.
 
+This is the maintainer's own fix for one specific ordering - the NAMED group coming first in each
+branch. Where the UNNAMED group comes first instead, the name's number is already fixed by an
+earlier branch and this port still answers as upstream does, losing the earlier branch's text the
+same way: `(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))` over `'!BUG'` is `groups=('BUG', None)` on both
+engines, with the first branch's `'!'` unreachable through the name on either. Fixing that ordering
+too needs machinery neither engine has chosen to build; see `docs/DIVERGENCES.md`'s row for the
+detail.
+
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
