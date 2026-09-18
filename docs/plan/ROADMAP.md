@@ -355,6 +355,12 @@ prefilter honour the slice the verb moved (the way upstream's own slow path does
 test. The oracle rows for those shapes stay recorded against a prefilter-free upstream, or in the
 strict manifest, until upstream itself is fixed.
 
+**Techniques from other engines (2026-09-18).** The owner asked whether the Rust `fuzzy-regex-rs`
+library has anything to borrow. Two prefilter refinements were folded into S60 (a rarity gate on the
+skip character; a large-list fast path for `\L<name>`); its automaton design and fuzzy algebra are
+out of bounds because this port returns mrab-regex's answers exactly. Full table in
+`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`.
+
 **Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
 measurement only and changes no engine code: this machine's noise floor from two runs of an

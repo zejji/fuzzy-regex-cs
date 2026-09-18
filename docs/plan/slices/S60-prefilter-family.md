@@ -51,6 +51,20 @@ upstream's own slow path does, never to invert the test.
    same commit. If a sub-part is dropped for size, say which and why in the closing notes - this
    family is large and a partial landing is acceptable, a silent one is not.
 
+8. **Rarity gate on the skip character** (added 2026-09-18 from the fuzzy-regex-rs review,
+   `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` #3). When the prefilter has a choice of
+   which required character to vectorise on, prefer the rarest by a small precomputed frequency
+   table, and skip the prefilter entirely when the subject is shorter than a measured break-even.
+   A skip-choice cannot change an answer; measure it on the no-match large-subject workload, which
+   is the slow path both libraries share, and on short subjects, where S58's floor decides whether
+   the gate itself costs more than it saves.
+9. **Named-list membership above a threshold** (same review, #7). `\L<name>` lists are tested per
+   character through `Matcher.InSetUnion` (`Matcher.cs:536`); a list larger than a threshold gets a
+   per-list `SearchValues<string>` or trie built once at compile time (`PatternObject.cs:103`,
+   `:109`). Answer-identical by construction, but it touches match selection code, so it gets its
+   own oracle wave over list-heavy patterns and a threshold recorded in the commit message. If it
+   does not fit the slice's budget it is deferred with a row, not squeezed in.
+
 ## Verification
 
 - Before and after, same machine, same session, driver idle:
@@ -87,6 +101,7 @@ upstream's own slow path does, never to invert the test.
       their comments deleted.
 - [ ] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
       `sync-divergence:` marker, `tools/check-sync-divergence.ps1` green.
+- [ ] Items 8 and 9 landed, or each deferred with a row and a comment.
 - [ ] Ratchet and AOT green; blind review (hunt: a prefilter that searches below a position a verb
       committed past; a `SearchValues` built per call instead of per pattern; a reverse or
       case-folded arm that skips the fold; the underflow site clamped rather than handled; a

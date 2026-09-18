@@ -70,3 +70,12 @@ are not repeated here.
   fast-path alternative are in ROADMAP.md under Phase 7.
 - Every optimisation must keep the oracle GREEN at three seeds and `ExpectedDivergences` strict; an
   optimisation that changes an answer has ported an upstream bug (ROADMAP, owner rule 2026-09-12).
+
+## From the Rust fuzzy-regex library (reviewed 2026-09-18)
+
+`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` has the full table. Two items adopted, both
+into S60: a rarity gate on the prefilter's skip character (their highest-ROI roadmap item, borrowed
+from resharp) and an Aho-Corasick or `SearchValues<string>` path for large `\L<name>` lists behind
+a threshold ("Results are identical to the alternation; only the speed differs"). Everything else
+there is either already in S59/S60, already deferred here (bounded-repeat unrolling), or rests on
+a non-backtracking automaton or a different fuzzy algebra and must not be copied.
