@@ -838,3 +838,34 @@ Describe 'Test-HeadroomProxy' {
         $probe.Detail | Should -Match 'refused'
     }
 }
+
+Describe 'Test-AllowanceFloor' {
+    BeforeAll {
+        $script:Now = [datetimeoffset]::Parse('2026-09-18T22:00:00+01:00')
+        $script:Reset = [datetimeoffset]::Parse('2026-09-19T01:10:00+01:00')
+        function script:Snapshot([int]$five, [int]$age = 3) {
+            [pscustomobject]@{ Source = 'last-usage.json'; AgeMinutes = $age; FiveHourPercent = $five; FiveHourResetsAt = $script:Reset; SevenDayPercent = 61; SevenDayResetsAt = $script:Reset.AddDays(2) }
+        }
+    }
+    It 'lets a sitting start below the floor' {
+        (Test-AllowanceFloor -Allowance (Snapshot 87) -Now $script:Now).Allowed | Should -BeTrue
+    }
+    It 'blocks at the floor and waits for the five-hour reset' {
+        $v = Test-AllowanceFloor -Allowance (Snapshot 88) -Now $script:Now
+        $v.Allowed | Should -BeFalse
+        $v.WaitUntil | Should -Be $script:Reset
+        $v.Reason | Should -Match 'five-hour'
+    }
+    It 'treats a stale snapshot as unknown and lets the sitting start, saying so' {
+        $v = Test-AllowanceFloor -Allowance (Snapshot 99 -age 60) -Now $script:Now
+        $v.Allowed | Should -BeTrue
+        $v.Stale | Should -BeTrue
+    }
+    It 'treats a missing snapshot as unknown' {
+        (Test-AllowanceFloor -Allowance $null).Stale | Should -BeTrue
+    }
+    It 'waits ten minutes when the reset time is already in the past, rather than spinning' {
+        $snap = Snapshot 95; $snap.FiveHourResetsAt = $script:Now.AddMinutes(-1)
+        (Test-AllowanceFloor -Allowance $snap -Now $script:Now).WaitUntil | Should -Be $script:Now.AddMinutes(10)
+    }
+}

@@ -416,6 +416,22 @@ while ($completed -lt $MaxSlices) {
         break
     }
 
+    # Owner rule 2026-09-18: use most of each five-hour window, never exhaust it. A sitting started
+    # at 90% runs to the cap and then every session on the account stalls until the reset; waiting
+    # here instead costs only the wait. Read-Allowance takes the fresher of the statusline snapshot
+    # and tools/usage-poll.ps1's live poll; a stale or missing snapshot lets the sitting start.
+    while ($true) {
+        $gate = Test-AllowanceFloor -Allowance (Read-Allowance)
+        if ($gate.Allowed) {
+            if ($gate.Stale) { Write-Host "  allowance unknown ($($gate.Reason)); starting anyway" -ForegroundColor Yellow }
+            break
+        }
+        $until = $gate.WaitUntil.AddMinutes(2)
+        Write-Host "  ALLOWANCE GATE: $($gate.Reason); waiting until $($until.ToString('ddd HH:mm')) before the next sitting" -ForegroundColor Yellow
+        $seconds = [int][Math]::Min([Math]::Max(($until - [datetimeoffset]::Now).TotalSeconds, 60), 6 * 3600)
+        Start-Sleep -Seconds $seconds
+    }
+
     $budget = Read-Budget -Path $budgetPath -LastGood $budget
 
     $verdict = Test-BudgetGate -Budget $budget -SliceLogPath $sliceLogPath `

@@ -782,8 +782,78 @@ function Undo-FailedSlice {
     }
 }
 
+function Read-Allowance {
+    <#
+    .SYNOPSIS
+        The freshest known account allowance: five-hour and seven-day percentages used and their reset
+        times, from whichever of the two snapshot files is newer.
+
+    .DESCRIPTION
+        Two writers, one shape (rate_limits.five_hour/seven_day with used_percentage and resets_at in
+        Unix seconds): the user statusline script writes ~/.claude/last-status.json on every
+        interactive prompt, and tools/usage-poll.ps1 writes ~/.claude/last-usage.json from the live
+        usage endpoint every few minutes (measured 2026-09-18, see that script). Returns $null when
+        neither file exists. AgeMinutes tells the caller how much to trust the number.
+    #>
+    [CmdletBinding()]
+    param([string[]]$Paths = @(
+        (Join-Path $env:USERPROFILE '.claude\last-usage.json'),
+        (Join-Path $env:USERPROFILE '.claude\last-status.json')))
+    $file = Get-ChildItem -LiteralPath ($Paths | Where-Object { Test-Path -LiteralPath $_ }) -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $file) { return $null }
+    $rl = (Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json).rate_limits
+    $reset = { param($w) if ($w -and $null -ne $w.resets_at) { [DateTimeOffset]::FromUnixTimeSeconds([long]$w.resets_at) } else { $null } }
+    [pscustomobject]@{
+        Source           = $file.Name
+        AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
+        FiveHourPercent  = if ($rl.five_hour) { [int]$rl.five_hour.used_percentage } else { $null }
+        FiveHourResetsAt = & $reset $rl.five_hour
+        SevenDayPercent  = if ($rl.seven_day) { [int]$rl.seven_day.used_percentage } else { $null }
+        SevenDayResetsAt = & $reset $rl.seven_day
+    }
+}
+
+function Test-AllowanceFloor {
+    <#
+    .SYNOPSIS
+        Says whether a sitting may start (or continue) given the allowance, and if not, until when
+        to wait. Pure: no I/O, so it is unit-tested.
+
+    .DESCRIPTION
+        Owner rule 2026-09-18: use most of each five-hour window but never exhaust it, because a
+        window at 100% stops every session dead until it resets. The floor leaves a reserve for the
+        orchestrator's own merges and relaunches. An unknown allowance ($null) or a stale one (older
+        than -MaxAgeMinutes) is treated as permission to proceed, with Stale = $true so the caller
+        can say so; the driver would otherwise deadlock on a poller that died.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Allowance,
+        [int]$FiveHourFloor = 88,
+        [int]$SevenDayFloor = 97,
+        [int]$MaxAgeMinutes = 45,
+        [datetimeoffset]$Now = [datetimeoffset]::Now
+    )
+    if ($null -eq $Allowance) { return [pscustomobject]@{ Allowed = $true; Stale = $true; WaitUntil = $null; Reason = 'no allowance snapshot' } }
+    if ($Allowance.AgeMinutes -gt $MaxAgeMinutes) { return [pscustomobject]@{ Allowed = $true; Stale = $true; WaitUntil = $null; Reason = "snapshot is $($Allowance.AgeMinutes) min old" } }
+    $wait = $null; $reason = $null
+    if ($null -ne $Allowance.FiveHourPercent -and $Allowance.FiveHourPercent -ge $FiveHourFloor) {
+        $wait = $Allowance.FiveHourResetsAt; $reason = "five-hour window at $($Allowance.FiveHourPercent)% (floor $FiveHourFloor)"
+    }
+    if ($null -ne $Allowance.SevenDayPercent -and $Allowance.SevenDayPercent -ge $SevenDayFloor) {
+        if (-not $wait -or $Allowance.SevenDayResetsAt -gt $wait) { $wait = $Allowance.SevenDayResetsAt }
+        $reason = "seven-day window at $($Allowance.SevenDayPercent)% (floor $SevenDayFloor)"
+    }
+    if ($reason) {
+        if (-not $wait -or $wait -le $Now) { $wait = $Now.AddMinutes(10) }
+        return [pscustomobject]@{ Allowed = $false; Stale = $false; WaitUntil = $wait; Reason = $reason }
+    }
+    [pscustomobject]@{ Allowed = $true; Stale = $false; WaitUntil = $null; Reason = "five-hour at $($Allowance.FiveHourPercent)%" }
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
-    Test-HeadroomProxy
+    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor
