@@ -874,3 +874,18 @@ amended text is inline above; this list is the record of what changed and why.
     its provenance (a real upstream run and version, or the DIVERGENCES row it follows), the
     verifier samples them, and S57 audits the gap tests written before the rule. Estimate 14-19
     becomes 15-20. Decided by the project owner.
+
+26. **The browser demo (Phase 9) moves ahead of 1.0, and Phases 8 and 9 run in parallel with
+    Phases 6 and 7 (2026-09-18, owner decision).** The owner wants the demo site to experiment with
+    the library before the public launch, so the README carries a working "try it in your browser"
+    link *at* 1.0: the option the roadmap offered on 2026-08-31. Preconditions checked the same
+    day: the public API is frozen (`PublicApiAnalyzers`; the API-layer mutation run killed 237 of
+    237 mutants), the `wasm-tools` and `wasm-experimental` workloads are installed, and Phase 7
+    makes no public-surface change. Phase 8 is sliced as S64-S69; its documentation and packaging
+    slices need nothing from Phases 6 or 7, except the `<remarks>` pass (S68, after Phase 7, so it
+    does not collide with `src/` edits) and the release itself (S69, after both gates and the
+    owner's approval of any upstream filing). Each stream runs in its own worktree
+    (`.claude/worktrees/docs`, `.claude/worktrees/demo`) with the driver's `-Phase` filter and
+    merges `main` at the start of every slice. S72's help panels depend on `COMPARISON.md`'s
+    section headings, which S65 stabilises. Estimates unchanged. Housekeeping: the two entries
+    above both numbered 25 stand as written; the second (metamorphic invariants) is cited as 25b.

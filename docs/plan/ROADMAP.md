@@ -685,6 +685,24 @@ are not merely unneeded here, they would break the interop; and GitHub Pages "do
 support using Brotli-compressed resources", so the bytes a visitor waits for are the uncompressed
 ones and the size baseline has to be recorded twice, on disk and on the wire.
 
+**Phase 9 moves ahead of 1.0 (owner decision, 2026-09-18; spec amendment 26).** The owner wants to
+experiment with the library through the demo before launching it publicly, so v1 (S71) ships before
+the release and the README carries the link at 1.0. Phases 8 and 9 start now, in parallel with the
+Phase 6 mutation queue and Phase 7, each in its own worktree with `-Phase`. Running the demo
+locally and deploying it to GitHub Pages are documented step by step in `demo/README.md`, written
+by S71.
+
+**Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
+owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
+Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus
+`IncludeSymbols`/snupkg; **S65** `COMPARISON.md` checked row by row against `DIVERGENCES.md`'s
+SHIPPED rows and the two convention tests (every public member documented, every SHIPPED row
+named); **S66** pack, validate and a dry-run release checklist, nothing published; **S67** the
+registries (Context7, DeepWiki) as owner-performed steps with prepared files; **S68** the
+`<remarks>` divergence notes on every affected public member, **after Phase 7** because it edits
+`src/`; **S69** (Opus) the upstream-report filing under the ledger's owner-approval rule and the 1.0
+release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
+
 ## Candidates parked for later
 
 - **Mutation testing (Stryker.NET), phase 6, scoped and on demand.** It answers "do our tests
