@@ -75,6 +75,11 @@ $headroomBaseUrl = $env:ANTHROPIC_BASE_URL ? $env:ANTHROPIC_BASE_URL : 'http://1
 # outside this list stalls the slice rather than doing something unreviewed on the machine.
 $allowedTools = @(
     'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'Skill', 'Task', 'Agent',
+    # Every tool of the Playwright MCP server (the installed plugin): Phase 9 sessions verify the
+    # demo in a real browser. Owner grant 2026-09-18, after three S70 sittings were parked on the
+    # denial of browser_navigate. Rule form per code.claude.com/docs/en/permissions (read
+    # 2026-09-18): `mcp__<server>` matches every tool that server provides.
+    'mcp__plugin_playwright_playwright',
     # TWO tools, two sets of rules. This machine sets CLAUDE_CODE_USE_POWERSHELL_TOOL=1 in
     # ~/.claude/settings.json, which the child session inherits, so it reaches for the PowerShell
     # tool as readily as Bash - and PowerShell tool calls are matched against 'PowerShell(...)'
