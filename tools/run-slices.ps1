@@ -459,6 +459,15 @@ while ($completed -lt $MaxSlices) {
         continue
     }
 
+    # A sitting that committed the slice into done/ and only then left the tree dirty has landed
+    # the slice: the kept commit is green and the pending file is gone. Without counting it here the
+    # loop's next pick is a DIFFERENT slice, which under -MaxSlices 1 is exactly what the caller
+    # forbade (S65 rolled into S66 and S55 into S56 on 2026-09-18, the second on the wrong model).
+    if (-not (Test-Path -LiteralPath $slice.FullName) -and $rescue.KeptHead) {
+        $completed++
+        Write-Host "  counted as landed for -MaxSlices: the slice file is in done/ on the kept commit" -ForegroundColor Yellow
+    }
+
     if ($consecutiveFailures -ge 2) {
         Write-SliceLogEntry -Path $sliceLogPath -Slice $slice.BaseName -Outcome 'parked' `
             -TotalTokens $session.TotalTokens -CostUsd ([double]($session.CostUsd ?? 0)) -Rescue $rescue
