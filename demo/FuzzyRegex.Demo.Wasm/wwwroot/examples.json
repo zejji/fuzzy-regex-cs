@@ -1,0 +1,58 @@
+[
+  {
+    "title": "Up to two errors",
+    "note": "The library's reason to exist: a pattern that still matches when the subject is not quite right. {e<=2} allows up to two errors of any kind.",
+    "pattern": "(?:colour){e<=2}",
+    "flags": "",
+    "subject": "the color of the collar"
+  },
+  {
+    "title": "Per-error-type limits",
+    "note": "Errors are counted separately, so a pattern can allow a substitution without allowing a deletion. Every match reports what it actually spent.",
+    "pattern": "(?:foobar){i<=1,d<=1,s<=1}",
+    "flags": "",
+    "subject": "xfoobat"
+  },
+  {
+    "title": "Best match, not first match",
+    "note": "Without BestMatch the engine returns the leftmost match it can reach. With it, the engine keeps looking and returns the cheapest one.",
+    "pattern": "(?:kitten){e<=3}",
+    "flags": "BestMatch",
+    "subject": "the sitting kitten"
+  },
+  {
+    "title": "Enhanced match",
+    "note": "EnhanceMatch keeps the same span and reduces the errors inside it, so the reported cost is the honest one.",
+    "pattern": "(?:organise){e<=3}",
+    "flags": "EnhanceMatch",
+    "subject": "the organisers organized it"
+  },
+  {
+    "title": "Named groups and every capture",
+    "note": "A repeated group keeps all of its captures, not only the last. That list is what the group table shows under each group.",
+    "pattern": "(?:(?<word>\\w+),?\\s*)+",
+    "flags": "",
+    "subject": "alpha, beta, gamma"
+  },
+  {
+    "title": "Set operations",
+    "note": "Character sets can be subtracted from one another: word characters that are not digits.",
+    "pattern": "[\\w--[\\d]]+",
+    "flags": "",
+    "subject": "abc123def456"
+  },
+  {
+    "title": "Unicode properties",
+    "note": "A script property matches by what a character is, not by where it sits in an alphabet.",
+    "pattern": "\\p{Greek}+",
+    "flags": "",
+    "subject": "alpha then αβγ then beta"
+  },
+  {
+    "title": "Case-insensitive, with a flag",
+    "note": "Flags are typed by name, so a typo is an error rather than a different set of flags. Try IgnoreCase here, then take it away.",
+    "pattern": "\\bfuzzy\\b",
+    "flags": "IgnoreCase",
+    "subject": "Fuzzy FUZZY fuzzy"
+  }
+]

@@ -1,0 +1,123 @@
+name: Demo (GitHub Pages)
+
+# Publishes demo/FuzzyRegex.Demo.Wasm to GitHub Pages (S71, Phase 9).
+#
+# Separate from ci.yml on purpose: a broken demo must never block a library merge. Nothing in this
+# file gates anything - ci.yml is the merge gate, and this only ever deploys what main already has.
+#
+# One-off repository setting this needs, which no workflow can do for you: Settings, Pages,
+# Source = "GitHub Actions". Without it, deploy-pages fails with "Get Pages site failed". The steps
+# are written out in demo/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The demo itself, and the library it compiles in. Watching src/ as well as demo/ is a
+      # deliberate widening of the slice's "pushes that touch demo/**": the demo is a WebAssembly
+      # publish of this library, so a library change with no demo change leaves a live page that no
+      # longer shows what the library does, and nothing would ever notice. The cost is one publish
+      # per library merge, which is this workflow's whole job.
+      - 'demo/**'
+      - 'src/**'
+      - 'tools/run-wasm-smoke.ps1'
+      - 'tools/run-demo-js-tests.ps1'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Both are required by actions/deploy-pages: `pages: write` "to deploy to Pages" and
+  # `id-token: write` "to verify the deployment originates from an appropriate source"
+  # (github.com/actions/deploy-pages, read 2026-09-16).
+  pages: write
+  id-token: write
+
+# One deployment at a time, and the newest wins. cancel-in-progress is false rather than true here,
+# unlike ci.yml: cancelling a deployment half way leaves Pages serving a half-uploaded artefact.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Publish and check the artefact set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The demo builds src/FuzzyRegex from source and Directory.Build.props is shared with the
+          # rest of the repository, so the checkout is the whole repository as CI sees it.
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          # tools/run-demo-js-tests.ps1 refuses below 20: `node --test` is only stable from there,
+          # and below 18 it exits 0 having run nothing, which is a green light over an empty run.
+          node-version: 20
+
+      - name: Install the WebAssembly workload
+        # Required to publish a browser-wasm app; the SDK does not carry it by default.
+        run: dotnet workload install wasm-tools
+
+      - name: The page's own unit tests
+        # Node, not a browser: the fragment, the display cap, the worker pool's promotion and the
+        # page's own state machine are all testable without one. What needs a browser is
+        # wwwroot/checks.html, which is driven by hand and recorded in the slice notes - a headless
+        # browser in CI is a later slice's if it earns it.
+        shell: pwsh
+        run: ./tools/run-demo-js-tests.ps1
+
+      - name: Publish the demo and assert its artefact set
+        # Before anything is uploaded: a missing _framework file, a stale asset nobody named or an
+        # integrity hash that does not match its file all produce a page that boots on a developer's
+        # machine and fails on Pages. Catching it here costs a minute; catching it after deployment
+        # costs whoever opened the link.
+        shell: pwsh
+        run: ./tools/run-wasm-smoke.ps1 -OutDir ${{ runner.temp }}/demo-publish
+
+      - name: The runtime's own folder must survive Jekyll
+        # .nojekyll is committed in wwwroot and published with it, so this checks rather than
+        # creates. "The default GitHub Action, which deploys pages, skips deployment of folders
+        # starting with underscore, the _framework folder for example" - learn.microsoft.com,
+        # aspnet/core/blazor/host-and-deploy/webassembly/github-pages, fetched 2026-09-16. Without
+        # the file the app serves a 404 for its own runtime, and the deployment still says it
+        # succeeded.
+        shell: pwsh
+        run: |
+          $root = '${{ runner.temp }}/demo-publish/wwwroot'
+          if (-not (Test-Path "$root/.nojekyll")) {
+            throw "No .nojekyll in $root. Pages would run Jekyll and drop _framework/."
+          }
+          Write-Host '.nojekyll is in the publish root.'
+
+      # No base-href rewrite step, and that is a divergence from the documented recipe worth being
+      # explicit about. Microsoft's uses SteveSandersonMS/ghaction-rewrite-base-href because a Blazor
+      # app's index.html is generated and its framework resolves assets against <base href>. This
+      # page is ours: every URL in it is relative to the document, and app.js resolves the worker
+      # against `import.meta.url`, so the same artefact boots at the repository subpath on Pages, at
+      # the root of a local server and at a preview path on a fork. Nothing third-party to pin, and
+      # no second place for the path to drift out of step with.
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/demo-publish/wwwroot
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

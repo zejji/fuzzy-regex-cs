@@ -128,6 +128,7 @@ Not rehearsed here - S66 stops before anything leaves the local machine.
   and nowhere else.
 - **Post-publish checks** (S69's own verification list): the nuget.org package page renders the
   README; the symbol package resolves (`snupkg`, already produced by every pack in this file);
-  the demo link in `README.md` (`<!-- demo-link -->`, S71's placeholder) works; a consumer AOT
+  the demo link in `README.md` (`https://zejji.github.io/fuzzy-regex-cs/`, filled in by S71 over the
+  `<!-- demo-link -->` placeholder) works, from nuget.org's rendered README as well as GitHub's; a consumer AOT
   sample builds against the *published* package, not a local feed - i.e. Step 2 above run once
   more with `nuget.org` as the only source.

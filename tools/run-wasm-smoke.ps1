@@ -188,6 +188,18 @@ $required = @(
     'worker.js'
     'harness.html'
     '_framework/dotnet.js'
+    # The v1 page and everything it loads (S71). Each of these is a file the page fetches by name at
+    # run time, so a publish that dropped one would deploy a demo that boots into a blank screen -
+    # which is precisely the failure this script exists to catch before Pages does.
+    'index.html'
+    'app.js'
+    'checks.html'
+    'examples.json'
+    'lib/caps.js'
+    'lib/fragment.js'
+    'lib/highlight.js'
+    'lib/pool.js'
+    'vendor/vue.esm-browser.prod.js'
 )
 foreach ($relative in $required) {
     $path = Join-Path $webRoot $relative

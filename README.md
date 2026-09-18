@@ -12,7 +12,11 @@ upstream test suite passes (`docs/STATUS.md`) - and the public API is frozen. Wh
 1.0 - performance work, packaging, mutation-test coverage, the rest of this documentation and a
 browser demo - is tracked in [`docs/plan/ROADMAP.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/ROADMAP.md).
 
-A browser demo is planned before 1.0. <!-- demo-link -->
+**Try it in your browser: [the FuzzyRegex demo](https://zejji.github.io/fuzzy-regex-cs/).** This is
+v1 of the page: pattern, flags and subject, the matches highlighted, every group and capture in a
+table, and eight worked examples. The engine runs in a Web Worker in your own browser and nothing is
+sent anywhere. Its source, and how to run it locally, is in
+[`demo/`](https://github.com/zejji/fuzzy-regex-cs/blob/main/demo/README.md).
 
 See [`docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/superpowers/specs/2026-08-29-fuzzy-regex-port-design.md)
 for the design and [`docs/plan/OPERATIONS.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/plan/OPERATIONS.md) for how the port is run.

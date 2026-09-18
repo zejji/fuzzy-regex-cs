@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FuzzyRegex demo checks (S71)</title>
+</head>
+
+<body>
+  <h1>FuzzyRegex demo checks</h1>
+  <p>
+    What only a real browser can settle about the v1 page. The pure parts - the fragment, the display
+    cap, the worker pool's promotion - are checked by <code>node --test</code> in
+    <code>demo/tests/</code>; <code>harness.html</code> checks the engine in a worker (S70); this
+    page checks the PAGE, by loading the real <code>index.html</code> in a frame and reading what it
+    believes. Every verdict is also on <code>window.__checks</code> for a driver to read.
+  </p>
+  <ol id="checks"></ol>
+  <p id="verdict">running...</p>
+  <p id="measurements"></p>
+  <iframe id="page" title="the demo page under test" style="width: 100%; height: 30rem; border: 1px solid grey"></iframe>
+
+  <script type="module">
+    // Expected answers come from a real upstream run, never from this port's own output (port-slice
+    // rule, owner 2026-09-15). tools/probes/demo-examples-expectations.py reads the same
+    // examples.json this page loads; run 2026-09-18 against regex 2026.9.10 under VERSION1 (the
+    // port's default, where upstream's is VERSION0 - docs/DIVERGENCES.md) it printed:
+    //   Up to two errors              (?:colour){e<=2}   "the color of the collar"  spans [[3,6],[17,6]]
+    //   Per-error-type limits         (?:foobar){i<=1,d<=1,s<=1}  "xfoobat"         spans [[0,6]]
+    //   Best match, not first match   (?:kitten){e<=3} BestMatch  "the sitting kitten"  spans [[12,6]]
+    //   Enhanced match                (?:organise){e<=3} EnhanceMatch  "the organisers organized it"
+    //                                                                        spans [[4,8],[15,8]]
+    //   Named groups and every capture  (?:(?<word>\w+),?\s*)+  "alpha, beta, gamma"  spans [[0,18]],
+    //                                     group 1 (word) captures [[0,5],[7,4],[13,5]]
+    //   Set operations                [\w--[\d]]+        "abc123def456"            spans [[0,3],[6,3]]
+    //   Unicode properties            \p{Greek}+         "alpha then αβγ then beta" spans [[11,3]]
+    //   Case-insensitive, with a flag \bfuzzy\b IgnoreCase "Fuzzy FUZZY fuzzy"      spans [[0,5],[6,5],[12,5]]
+    // tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs asserts the same values against the
+    // engine under the JIT, so what this page adds is that the PAGE asks the right question and
+    // renders the answer - not that the engine is right, which is already pinned.
+    const UPSTREAM_SPANS = {
+      'Up to two errors': [[3, 6], [17, 6]],
+      'Per-error-type limits': [[0, 6]],
+      'Best match, not first match': [[12, 6]],
+      'Enhanced match': [[4, 8], [15, 8]],
+      'Named groups and every capture': [[0, 18]],
+      'Set operations': [[0, 3], [6, 3]],
+      'Unicode properties': [[11, 3]],
+      'Case-insensitive, with a flag': [[0, 5], [6, 5], [12, 5]],
+    };
+
+    const results = [];
+    const measurements = {};
+
+    const check = (name, ok, detail) => {
+      results.push({ name, ok, detail });
+      const li = document.createElement('li');
+      li.textContent = `${ok ? 'PASS' : 'FAIL'}  ${name}  -  ${detail}`;
+      document.getElementById('checks').appendChild(li);
+    };
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** Waits for a condition, and gives up rather than hanging: a stuck page must produce a verdict. */
+    async function until(what, condition, timeoutMs = 30000) {
+      const deadline = performance.now() + timeoutMs;
+      while (performance.now() < deadline) {
+        if (condition()) return true;
+        await sleep(25);
+      }
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    }
+
+    /** Loads the real page at a fragment and hands back its live component state. */
+    async function openPage(fragment = '') {
+      const frame = document.getElementById('page');
+      const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      // A cache-busting query is deliberately NOT used: the page must work at the URL a visitor
+      // gets. The fragment is enough to make each load distinct.
+      frame.src = './index.html' + fragment;
+      await loaded;
+
+      const demo = frame.contentWindow.__demo;
+      if (demo === undefined) throw new Error('the page did not mount: window.__demo is undefined');
+      await until('the engine to boot', () => demo.engine !== 'starting');
+      return demo;
+    }
+
+    const spans = (demo) => demo.matches.map((m) => [m.index, m.length]);
+
+    /**
+     * The page settles asynchronously: a Vue flush, then a debounce, then a worker round trip.
+     *
+     * Two things here are load-bearing, and both were got wrong first time round. The `sleep(0)` is
+     * because setting an input only schedules the watcher, and `until` tests its condition before it
+     * waits at all - so without it this returns having seen the state BEFORE the keystroke. And the
+     * condition is `busy`, not `running`: `running` is false for the whole 250 ms debounce window,
+     * during which the page still holds the previous case's answer. Either mistake makes every check
+     * after the first assert about the wrong inputs, which is worse than no check at all.
+     */
+    const settled = async (demo) => {
+      await sleep(0);
+      return until('the page to answer', () => !demo.busy && (demo.answer !== null || demo.failure !== ''), 30000);
+    };
+
+    // 1. Every worked example, asked BY THE PAGE and answered by the engine in the worker. A broken
+    //    promise on the front page of the project is what this catches: the C# test pins the
+    //    engine's answer, and this pins that the sidebar's entry reaches it unaltered.
+    async function everyExampleAnswersWhatUpstreamSays() {
+      const demo = await openPage();
+      await until('the examples to load', () => demo.examples.length > 0);
+
+      const wrong = [];
+      for (const example of demo.examples) {
+        demo.load(example);
+        await sleep(0);
+        await settled(demo);
+        const found = JSON.stringify(spans(demo));
+        const expected = JSON.stringify(UPSTREAM_SPANS[example.title]);
+        if (found !== expected) wrong.push(`${example.title}: page ${found}, upstream ${expected}`);
+      }
+
+      check(
+        'every worked example answers what upstream answers',
+        demo.examples.length === 8 && wrong.length === 0,
+        wrong.length === 0
+          ? `all ${demo.examples.length} examples agree with regex 2026.9.10`
+          : wrong.join('; ')
+      );
+    }
+
+    // 2. The fragment round trip, which is the feature's whole point: a case pasted into a bug report
+    //    opens as the same three inputs.
+    async function aSharedLinkOpensTheSameCase() {
+      const demo = await openPage('#p=%28%3F%3Afoobar%29%7Bi%3C%3D1%2Cd%3C%3D1%2Cs%3C%3D1%7D&f=&s=xfoobat');
+      await settled(demo);
+
+      check(
+        'a pasted link opens the case it encoded',
+        demo.pattern === '(?:foobar){i<=1,d<=1,s<=1}' && demo.subject === 'xfoobat'
+        && JSON.stringify(spans(demo)) === '[[0,6]]',
+        `pattern=${JSON.stringify(demo.pattern)} subject=${JSON.stringify(demo.subject)} spans=${JSON.stringify(spans(demo))}`
+      );
+
+      // And the address bar keeps up with typing, so the link is always a link to what is on screen.
+      demo.subject = 'xfoobat and xfoobar';
+      await settled(demo);
+      const hash = document.getElementById('page').contentWindow.location.hash;
+      check(
+        'the address bar follows the inputs',
+        decodeURIComponent(hash).includes('xfoobat and xfoobar'),
+        hash.slice(0, 120)
+      );
+    }
+
+    // 3. The page's own caps. The engine has its own and they are tested in C#; these are the ones
+    //    that protect the MAIN THREAD, which no worker can do.
+    async function thePagesCapsHold() {
+      const demo = await openPage();
+      // The page asks its own first question as it mounts. Waiting for that one to land before
+      // starting is what keeps the assertions below about the inputs THIS check sets.
+      await settled(demo);
+
+      // Over the subject cap: refused with a message, and nothing sent. Truncating instead would
+      // give wrong answers that look right.
+      demo.pattern = 'a';
+      demo.subject = 'a'.repeat(demo.maxSubjectLength + 1);
+      await settled(demo);
+      check(
+        'a subject over the cap is refused, not truncated',
+        demo.answer === null && demo.failure.includes("limit of"),
+        demo.failure.slice(0, 160)
+      );
+
+      // Over the DISPLAY cap: the true total is reported beside what is drawn. Showing the cap at
+      // work needs more matches than the cap, so this subject is longer than the hundred characters
+      // the memory rule sets for engine work (owner, 2026-09-18). The rule is there to stop a
+      // pathological COMPILE or an exponential walk from taking the machine down; this is a
+      // single-character class walked left to right over 450 characters, which is linear and costs
+      // microseconds. Nothing else on this page goes near the limit.
+      demo.pattern = '\\w';
+      demo.subject = 'ab '.repeat(150);
+      await settled(demo);
+      const marks = document.getElementById('page').contentDocument.querySelectorAll('mark').length;
+      check(
+        'the display cap draws its limit and reports the true total',
+        demo.view.shown === demo.maxDisplayedMatches && demo.view.total > demo.view.shown && marks === demo.view.shown,
+        `${demo.view.shown} drawn of ${demo.view.total} found, ${marks} <mark> elements in the page`
+      );
+    }
+
+    // 4. A group that did not participate is shown as such and not as an empty string - the two are
+    //    different answers, and the demo exists to show real ones.
+    async function aGroupThatDidNotParticipateSaysSo() {
+      // Upstream, tools/probes/demo-json-contract-expectations.py run 2026-09-18 against
+      // regex 2026.9.10: compile(r"(a)|(b)").search("b") matches at 0 length 1, group 1 no match,
+      // group 2 index 0 length 1.
+      const demo = await openPage();
+      await settled(demo);  // the mount question first, as in check 3
+      demo.pattern = '(a)|(b)';
+      demo.flags = '';
+      demo.subject = 'b';
+      await settled(demo);
+
+      const groups = demo.matches[0].groups;
+      const text = document.getElementById('page').contentDocument.body.textContent;
+      check(
+        'a group that did not take part is shown as such',
+        groups[1].success === false && groups[2].success === true && text.includes('did not participate'),
+        `group 1 success=${groups[1].success}, group 2 index=${groups[2].index}, the page says "did not participate": ${text.includes('did not participate')}`
+      );
+    }
+
+    // 5. The control that matters most: a pattern that runs away is killed, the page keeps painting
+    //    throughout, and the next question is answered by the spare rather than by a cold boot.
+    //    "(a|a)*b" against 30 a's is the pathological pattern the test suite already uses -
+    //    exponential backtracking with no way to succeed.
+    async function stopKillsARunawayAndTheSpareTakesOver() {
+      const demo = await openPage();
+      demo.pattern = 'a';
+      demo.subject = 'a';
+      await settled(demo);
+
+      let frames = 0;
+      let painting = true;
+      const tick = () => { if (painting) { frames++; requestAnimationFrame(tick); } };
+      requestAnimationFrame(tick);
+
+      demo.pattern = '(a|a)*b';
+      demo.subject = 'a'.repeat(30);
+      await until('the page to start matching', () => demo.running);
+      await sleep(500);
+      painting = false;
+
+      check(
+        'the page keeps painting while a runaway pattern runs',
+        frames > 3,
+        `${frames} animation frames in the 500 ms the runaway was running`
+      );
+
+      const startedAt = performance.now();
+      demo.stop();
+      // The spare is already booted, so the next answer costs a round trip and not a runtime boot.
+      demo.pattern = '\\d+';
+      demo.subject = 'a1 b22 c333';
+      await settled(demo);
+      // Named for what it actually contains: this is the PAGE's recovery, Stop to answer on screen,
+      // and it includes the 250 ms debounce the new inputs have to wait out. The spare's own cost is
+      // check 6's pair of numbers, measured on raw pools where there is no debounce to include.
+      measurements.stopToNextAnswerOnScreenMs = performance.now() - startedAt;
+
+      check(
+        'stopping a runaway leaves a working page',
+        JSON.stringify(spans(demo)) === '[[1,1],[4,2],[8,3]]',
+        `${JSON.stringify(spans(demo))}, upstream says [[1,1],[4,2],[8,3]]`
+      );
+    }
+
+    // 6. What the spare is worth, measured rather than asserted: there is no published figure for a
+    //    .NET WebAssembly respawn and none had been measured here (ROADMAP). Taken with the spare
+    //    DISABLED, so the number means "what a respawn costs", and again with it enabled, so the
+    //    difference means "what the spare saves".
+    async function measureRespawn() {
+      const { createPool } = await import('./lib/pool.js');
+      const { spawnEngineWorker } = await import('./app.js');
+
+      const cold = createPool({ spawn: spawnEngineWorker, spare: false });
+      await cold.ready;
+      await cold.ask({ pattern: 'a', flags: '', subject: 'a' });
+      let startedAt = performance.now();
+      cold.stop();
+      await cold.ask({ pattern: 'a', flags: '', subject: 'a' });
+      measurements.respawnWithoutSpareMs = performance.now() - startedAt;
+      cold.dispose();
+
+      const warm = createPool({ spawn: spawnEngineWorker });
+      await warm.ready;
+      await warm.ask({ pattern: 'a', flags: '', subject: 'a' });
+      await sleep(3000);  // let the spare finish booting, which is the state the page is normally in
+      startedAt = performance.now();
+      warm.stop();
+      await warm.ask({ pattern: 'a', flags: '', subject: 'a' });
+      measurements.respawnWithSpareMs = performance.now() - startedAt;
+      warm.dispose();
+
+      check(
+        'a respawn is faster with the warm spare than without it',
+        measurements.respawnWithSpareMs < measurements.respawnWithoutSpareMs,
+        `${measurements.respawnWithSpareMs.toFixed(1)} ms with the spare, ${measurements.respawnWithoutSpareMs.toFixed(1)} ms without`
+      );
+    }
+
+    try {
+      await everyExampleAnswersWhatUpstreamSays();
+      await aSharedLinkOpensTheSameCase();
+      await thePagesCapsHold();
+      await aGroupThatDidNotParticipateSaysSo();
+      await stopKillsARunawayAndTheSpareTakesOver();
+      await measureRespawn();
+    } catch (error) {
+      check('the checks ran to completion', false, String(error));
+    }
+
+    const ok = results.length > 0 && results.every((r) => r.ok);
+    window.__checks = { ok, checks: results, measurements };
+    document.getElementById('verdict').textContent = ok ? 'CHECKS GREEN' : 'CHECKS RED';
+    document.getElementById('measurements').textContent = JSON.stringify(measurements);
+  </script>
+</body>
+
+</html>
