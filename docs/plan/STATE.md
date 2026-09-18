@@ -2,25 +2,27 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase 8 (`docs` worktree, branch `phase8-docs`). S64 closed 2026-09-18.** README.md is now the
-complete getting-started page (status, install, three worked samples pinned by
-`tests/FuzzyRegex.Tests/Docs/ReadmeSamples.cs`, differences from Python `regex` and from
-`System.Text.RegularExpressions`, thread safety, licensing, "where the docs are"). Every
-repo-relative link in it is now an absolute `github.com/zejji/fuzzy-regex-cs/blob/main/...` URL,
-because nuget.org does not rewrite relative links itself (DECISIONS.md, 2026-09-18). Symbol
-packages ship (`IncludeSymbols`/`SymbolPackageFormat=snupkg` on `FuzzyRegex.csproj`).
+**Phase 8 (`docs` worktree, branch `phase8-docs`). S65 closed 2026-09-18.** `docs/COMPARISON.md`
+checked row by row against every SHIPPED row in `docs/DIVERGENCES.md` (34 rows, all named); its
+runnable examples are pinned (`tests/FuzzyRegex.Tests/Docs/ComparisonSamples.cs`, 27 tests). Two
+new convention tests keep it that way: `Conventions/ComparisonCoversDivergencesTests.cs` and
+`Conventions/PublicApiDocumentationTests.cs` (every public type/member carries an XML
+`<summary>`/`<inheritdoc/>`, read from the generated `FuzzyRegex.xml` against the real reflected
+surface). Found and fixed two real bugs along the way (DECISIONS.md, 2026-09-18): a naive
+`Split('|')` desynchronised by a literal `|` inside a code span was silently dropping a row from
+the scan, and a whole-file substring check let a COMPARISON cross-reference stand in for a
+deleted section. Both proved by negative control, both fixed, both re-proved. COMPARISON.md's
+`##`/`###` headings are frozen for S72 (full list in the slice's closing notes,
+`docs/plan/slices/done/S65-comparison-completeness-and-convention-tests.md`).
 
-**Next: S65**, `docs/plan/slices/S65-comparison-completeness-and-convention-tests.md` -
-`COMPARISON.md` checked row by row against `DIVERGENCES.md`'s SHIPPED rows and the two convention
-tests. Two things S65 (or S66) should pick up from S64's closing notes:
-- `README.md`'s `<!-- demo-link -->` placeholder (in "A browser demo is planned before 1.0.") is
-  S71's to replace, not S65's.
-- Package metadata gaps found but left open (S64's csproj edit was scoped to the two symbol-package
-  lines only): no `Authors`, no `PackageProjectUrl`; `PackageLicenseFile` used instead of
-  `PackageLicenseExpression` (valid SPDX would be `Apache-2.0 AND CNRI-Python`, not changed since
-  it's a choice, not a gap). S66 (pack/validate/dry-run) or the owner should settle these.
+**Next: S66**, `docs/plan/slices/S66-pack-validate-and-release-dry-run.md` - pack/validate/dry-run.
+S64's closing notes flagged two package-metadata gaps still open for S66 or the owner to settle:
+no `Authors`, no `PackageProjectUrl`; `PackageLicenseFile` used instead of
+`PackageLicenseExpression` (a deliberate choice, not a gap - valid SPDX would be
+`Apache-2.0 AND CNRI-Python`).
 
-Ratchet: GREEN, 6272/6272, baseline 6164 (updated this session). `docs/STATUS.md` regenerated.
+Ratchet: GREEN, 6307/6307 (6199 distinct ids), baseline 6199 (unchanged - S65 added tests, not
+ported behaviour). `docs/STATUS.md` regenerated.
 
 **Not carried from the pre-fork STATE.md**: this branch forked from `main` at the S55 Stryker
 checkpoint. That content belongs to the mutation-testing worktree working Phase 6, not to Phase 8;
