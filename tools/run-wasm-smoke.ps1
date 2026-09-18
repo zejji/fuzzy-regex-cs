@@ -11,7 +11,7 @@
 
       - the publish succeeds with zero warnings. Directory.Build.props sets TreatWarningsAsErrors,
         so a trim warning from PublishTrimmed is a failed publish, which is the point of publishing
-        trimmed at all;
+        trimmed at all. This one, and only this one, is skipped by -SkipPublish;
       - _framework/ exists and is not empty, and _framework/dotnet.js is present. That is the file
         worker.js imports, so its absence is the difference between a demo and a blank page;
       - .nojekyll is at the web root. Without it GitHub Pages runs Jekyll, Jekyll drops every
@@ -37,14 +37,23 @@
     re-publish does not re-emit trim warnings, so a run with this switch cannot claim there were
     none (S53's verifier found exactly that).
 
+.PARAMETER SkipPublish
+    Check the publish that is already on disk instead of producing a new one. This exists to make
+    the missing-artefact branch testable at all: the script publishes before it checks, so a file
+    deleted to exercise that branch is restored by the publish before the check can see it. With
+    this switch, `Remove-Item <webRoot>/_framework/*.wasm` then a re-run is expected to throw.
+    It asserts nothing about the build, so it is a check of the last publish, not a smoke run.
+
 .EXAMPLE
     tools/run-wasm-smoke.ps1
     tools/run-wasm-smoke.ps1 -SkipClean
+    tools/run-wasm-smoke.ps1 -SkipPublish
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
-    [switch]$SkipClean
+    [switch]$SkipClean,
+    [switch]$SkipPublish
 )
 
 Set-StrictMode -Version Latest
@@ -61,18 +70,23 @@ $project = Join-Path $repoRoot 'demo/FuzzyRegex.Demo.Wasm'
 $publishDir = Join-Path $project "bin/$Configuration/net10.0/publish"
 $webRoot = Join-Path $publishDir 'wwwroot'
 
-if (-not $SkipClean) {
-    Write-Host 'Clearing obj/ and bin/ so the publish re-emits any trim warning it has.'
-    foreach ($dir in @((Join-Path $project 'obj'), (Join-Path $project 'bin'))) {
-        if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
-    }
+if ($SkipPublish) {
+    Write-Host 'Checking the publish already on disk. This run asserts nothing about the build.'
 }
+else {
+    if (-not $SkipClean) {
+        Write-Host 'Clearing obj/ and bin/ so the publish re-emits any trim warning it has.'
+        foreach ($dir in @((Join-Path $project 'obj'), (Join-Path $project 'bin'))) {
+            if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+        }
+    }
 
-Write-Host "Publishing the browser demo ($Configuration)."
+    Write-Host "Publishing the browser demo ($Configuration)."
 
-dotnet publish $project --configuration $Configuration -nodeReuse:false
-if ($LASTEXITCODE -ne 0) {
-    throw 'The WebAssembly publish of the browser demo failed.'
+    dotnet publish $project --configuration $Configuration -nodeReuse:false
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The WebAssembly publish of the browser demo failed.'
+    }
 }
 
 if (-not (Test-Path $webRoot)) {
@@ -150,8 +164,11 @@ foreach ($endpoint in $endpoints) {
 }
 
 if ($missing.Count -gt 0) {
-    $missing | Select-Object -Unique | ForEach-Object { Write-Host "missing: $_" -ForegroundColor Red }
-    throw "$($missing.Count) file(s) named by the manifest are not in the publish. The app cannot boot without them."
+    # Count the distinct files, not the endpoints: each asset is named by both a fingerprinted route
+    # and a plain one, so one deleted file was reported as "2 file(s)" until this was made unique.
+    $missingFiles = @($missing | Select-Object -Unique)
+    $missingFiles | ForEach-Object { Write-Host "missing: $_" -ForegroundColor Red }
+    throw "$($missingFiles.Count) file(s) named by the manifest are not in the publish. The app cannot boot without them."
 }
 
 if ($mismatched.Count -gt 0) {
@@ -192,4 +209,13 @@ $served |
 
 Write-Host ''
 Write-Host "integrity: $checked published endpoints recomputed and matched"
-Write-Host 'WASM SMOKE GREEN.'
+# The banner has to say which run this was. A -SkipPublish run asserts nothing about the build, and
+# printed a verdict indistinguishable from a real one until the qualifier was added: a log tail, or
+# anything grepping for the banner, could not tell a publish-and-check from a check over whatever
+# happened to be on disk.
+if ($SkipPublish) {
+    Write-Host 'WASM SMOKE GREEN (artefacts only - nothing was published, so this says nothing about the build).'
+}
+else {
+    Write-Host 'WASM SMOKE GREEN.'
+}
