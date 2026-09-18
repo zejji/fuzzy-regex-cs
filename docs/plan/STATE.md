@@ -33,7 +33,12 @@ Chrome 153.
 - `.github/workflows/pages.yml` is committed here but the MAIN checkout also has a stray copy.
 - The README's demo link 404s until the owner pushes and sets Settings > Pages > Source = GitHub
   Actions. **No pushing; the owner pushes.**
-- `docs/STATUS.md:9`'s generator bug (unrelated to S71).
+- `docs/STATUS.md:9`'s generator bug (unrelated to S71). Diagnosed 2026-09-18: in this worktree the
+  `upstream` submodule is not checked out (`git submodule status upstream` prints
+  `-7dd71c15c4fb5c94206bed1763abd4c2bd2f1b33`), and `PortTools.psm1:311` then writes *our* HEAD as
+  the upstream commit. A run here produced "Parity against upstream commit `b393e63...`", which is
+  the S71 commit. That dirty line was discarded, not committed. Fix: make the generator fail loudly
+  when the submodule is absent rather than falling back to repo HEAD.
 - `DemoEngine.cs`'s capture-list comment is wrong (unrelated to the front end).
 - A `python -m http.server 8090` (PID 3440) and a Playwright browser are still running from this
   sitting; nothing was killed, per the owner's rule.
