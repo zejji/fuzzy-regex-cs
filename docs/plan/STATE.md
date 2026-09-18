@@ -2,58 +2,35 @@
 
 Rewritten at the end of every session. Never appended to. Thirty lines maximum.
 
-**Phase 8 (`docs` worktree, branch `phase8-docs`). S66 closed 2026-09-18.** `docs/plan/RELEASE.md`
-is the full 1.0 release checklist; S69 follows it exactly. Versioning is a hand-bumped
-`VersionPrefix` (`1.0.0`), no MinVer. `src/FuzzyRegex/FuzzyRegex.csproj` gained the metadata S64
-flagged missing (`Authors`, `PackageProjectUrl`) plus SourceLink and `EnablePackageValidation`.
-Two rehearsal scripts: `tools/pack-and-validate.ps1` (CI's `pack` job, every push - fails locally
-on three SourceLink findings that only resolve once the packed commit is pushed to GitHub, by
-design) and `tools/run-release-rehearsal.ps1` (install from a local feed into a fresh consumer,
-run the README sample, publish trimmed Native AOT - rehearsed green, see DECISIONS.md 2026-09-18
-for the log). `dotnet nuget verify` is skipped (no signing cert; `NU3004` confirmed). Caught and
-fixed mid-slice: `dotnet add package` run inside a repo-tree scratch folder can leak into the real
-root `Directory.Packages.props` via MSBuild's central-package-management search - the rehearsal
-script now writes empty `<Project />` overrides into the scratch consumer first. Full account:
-`docs/plan/slices/done/S66-pack-validate-and-release-dry-run.md`.
+**S55 closed on `main` 2026-09-18.** Mutation testing tooling built (`tools/run-stryker.ps1`,
+`stryker-config.json`, `tools/stryker-queue.json`), calibrated, and its three in-scope chunks -
+API layer (`*.cs`), `Parsing/*.cs`, `Engine/Substitution.cs` - all ran to completion with **zero
+survivors** (237/237, 2156+29 Timeout+4 RuntimeError/2189, 261/261). The 4 RuntimeError mutants
+are recursion-bound-removing mutations in `ParseFunctions.cs`, correctly detected by crashing
+the host rather than a scored result. Full numbers and mechanism analysis:
+`docs/plan/mutation/2026-09-17-api-parser.md`. Blind review (0 findings) then an independent
+verifier pass (6 real corrections, all fixed) ran before commit; full account:
+`docs/plan/slices/done/S55-mutation-testing-tooling-and-calibration.md` and
+`docs/plan/slices/notes/S55-sittings.md`.
 
-**Next: S67**, `docs/plan/slices/S67-registries-context7-and-deepwiki.md`.
+**Next: S56**, `docs/plan/slices/S56-mutation-testing-engine-survivors.md`. Blocked on the engine
+mutation queue: 59 `engine-rand-*` chunks (~7,300 mutants over 12 files) running detached in the
+`stryker` worktree (branch `stryker-queue`), started 2026-09-18. Measured rate from S55's
+`parsing-remaining` (543 mutants, 4h05m, 2 runners = 2.2/min) puts that queue at roughly 55
+machine-hours at 2 runners - not something to wait on inline; check for finished reports before
+starting S56's sitting. That worktree's settings (`stryker-config.json`, `run-stryker.ps1`,
+`stryker-queue.json`, `TestThreadsLimit.cs`) are approved but stay on `stryker-queue`, not
+copied to `main` - they land at merge time.
 
-Ratchet: GREEN, 6307/6307 (6199 distinct ids), baseline 6199 (unchanged - S66 is packaging/infra,
-`delivers: []`). `docs/STATUS.md` unchanged.
+Ratchet: GREEN, 6343/6343 (6235 distinct ids), baseline 6235 (unchanged - S55 is
+tooling/measurement, `delivers: []`). `docs/STATUS.md` regenerated (upstream submodule moved
+independently to `7dd71c1`; no test-count change).
 
-**Not carried from the pre-fork STATE.md**: this branch forked from `main` at the S55 Stryker
-checkpoint. That content belongs to the mutation-testing worktree working Phase 6, not to Phase 8;
-it will reconcile at merge time, which is expected under the parallel-worktree plan (ROADMAP.md,
-2026-09-18 entry).
-**S70 IS A CHECKPOINT, NOT DONE (sitting 2, 2026-09-18, branch `phase9-demo`).** Slice file stays
-in `docs/plan/slices/`. Full detail: `docs/plan/slices/notes/S70-sittings.md`.
+**Parallel streams, untouched this session:** Phase 8 (`docs` worktree, branch `phase8-docs`) is
+at S67 (`docs/plan/slices/S67-registries-context7-and-deepwiki.md`), S66 already merged to
+`main`. Phase 9 (`demo` worktree, branch `phase9-demo`) has S70 parked as a checkpoint, not done
+- see `docs/plan/slices/notes/S70-sittings.md`; needs a Playwright permission grant for the
+browser leg. Neither is this slice's concern.
 
-**Green at this commit.** Ratchet GREEN, 6305 passing, 0 failing, 0 skipped (baseline 6197 ids).
-`dotnet build FuzzyRegex.slnx -c Release`: 0 warnings. `tools/run-wasm-smoke.ps1`: WASM SMOKE
-GREEN, 22 files, 6.94 MB on disk, 1.98 MB gzip, 44 integrity endpoints. The port itself is the
-largest file at 3.62 MB - half the bundle, twice the runtime.
-
-**The one thing left is the browser leg.** `harness.html` has never been run in a browser: the
-Playwright MCP tool was not permission-granted this session, so the round trip, the `terminate()`
-proof and the responsiveness counter are unexecuted and the warm-time baseline is unmeasured. Run
-`python -m http.server 8080` from `demo/FuzzyRegex.Demo.Wasm/bin/Release/net10.0/publish/wwwroot`,
-open `harness.html`, read `window.__harness`. **Owner: this needs a Playwright permission grant.**
-
-**Do not re-measure the compile blow-up.** `Run` has no clock over `FuzzyRegex` construction, so a
-pattern like `(((a{100}){100}){100}){100}` - inside `MaxPatternLength` - never returns. It is
-recorded in `DemoEngine.MatchTimeout`'s remarks and sliced as S56b on `main`. Probing it took the
-machine to 0 GB free on 2026-09-18. Every subagent brief now carries
-`DOTNET_GCHeapHardLimit=0x40000000`, a wall-clock timeout and a subject cap. **This is the argument
-for S71 treating `worker.terminate()` as its primary control, not an error path.**
-
-**Two blind passes ran** (16 findings, 9 fixed; then 6 over the fix delta, 4 fixed). The
-independent verifier has NOT run - it belongs to the closing commit.
-
-**Also left:** the smoke script's new missing-artefact branch is reasoned, not seen to fire; the
-zero-trim-warning claim needs restating from a clean publish against the committed code.
-
-**Carried from main:** benchmark baseline still needs retaking on a quiet machine
-(`pwsh -File tools/compare-benchmarks.ps1 -UpdateBaseline`, ~32 min). `.claude/skills/benchmark/
-SKILL.md` documents a stale run command. `_regex.c:22091`'s comment on `text_length` is wrong.
-**Open for the owner:** `slice-log.jsonl` marks S26 `failed`; `origin/main` needs a push;
-`stash@{0}` (S54 sitting 1's rescue stash) is safe to drop. The orchestrator merges `phase9-demo`.
+**Open for the owner (carried, unverified this session):** `slice-log.jsonl` marks S26
+`failed`; `origin/main` needs a push; benchmark baseline needs retaking on a quiet machine.
