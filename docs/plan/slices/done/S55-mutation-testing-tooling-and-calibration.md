@@ -56,7 +56,49 @@ not, the slice's first job is to find the supported invocation and record it.
 
 ## Done when
 
-- [ ] Tooling committed and exercised; calibration recorded; chunk list written.
-- [ ] API and parser survivors each killed by a test or recorded as equivalent with the reason.
-- [ ] Ratchet GREEN, blind review (hunt: a survivor "equivalent" that a test could in fact
+- [x] Tooling committed and exercised; calibration recorded; chunk list written.
+- [x] API and parser survivors each killed by a test or recorded as equivalent with the reason.
+- [x] Ratchet GREEN, blind review (hunt: a survivor "equivalent" that a test could in fact
       distinguish; a chunk boundary that splits a function), commit.
+
+## Closing notes (2026-09-18, sitting 4)
+
+All three in-scope chunks - API layer (`*.cs`), `Parsing/*.cs`, `Engine/Substitution.cs` - ran to
+completion with **zero survivors**: 237/237, 2156+29(Timeout)+4(RuntimeError)/2189, and 261/261
+respectively. Nothing needed a new test or an equivalent-mutant writeup, since nothing survived.
+The 4 RuntimeError mutants (all in `ParseFunctions.cs`, all crash-the-host `statusReason`s) are
+recursion-bound-removing mutations in `ParseSetItem` and `FloatToRational`, correctly detected by
+crashing rather than a scored result. Full numbers, per-chunk reports and the RuntimeError
+mechanism analysis: `docs/plan/mutation/2026-09-17-api-parser.md`. Per-sitting detail across all
+four sittings, including the MSB4276/Buildalyzer root cause, the repeated-`-m` glob bug, the
+orchestrator's withdrawn "Stryker can't run TUnit" claim and its reproduction, and the
+2026-09-18 machine crash and dump recovery: `docs/plan/slices/notes/S55-sittings.md`.
+
+Surprising: two independent environment failures across the four sittings (a Buildalyzer
+MSBuild-resolution failure, then a full machine crash mid-run) were both recovered from without
+losing calibration evidence, the second via a `dotnet-dump` snapshot of the running test host
+rather than a re-run. Also surprising: an orchestrator-relayed claim from a different worktree,
+that Stryker cannot run TUnit's Microsoft Testing Platform runner at all, did not reproduce even
+once, let alone twice, in this worktree on this commit - it was checked rather than acted on.
+
+The `stryker-queue` worktree's engine chunks (`engine-rand-01`..`engine-rand-59`, ~7,300
+mutants across 12 files, wider than this slice's original 8-file engine scope - widened in a
+later sitting) continue running detached for S56/S57; not this slice's concern.
+
+**Review:** one blind pass (`caveman:cavecrew-reviewer`, sonnet) checked every factual claim in
+the closing diff against the four raw Stryker JSON reports and the source at the cited line
+numbers - 0 findings, everything confirmed. A second, independent verifier pass (fresh
+`general-purpose` agent, opus, briefed separately and told not to read the reviewer's output)
+re-derived the same numbers from scratch and found 6 real discrepancies the reviewer's pass had
+missed: the ratchet claim said "not re-run" when it had in fact been run and regenerated
+`docs/STATUS.md`; the engine-queue was cited as "60 engine-rand chunks" when it is 59 plus the
+already-finished `parsing-remaining`; the engine file list was stale (8 files named in the
+original scope vs. 12 actually in the queue); "StackOverflowException" was stated as fact when
+it is an inference from the crash mechanism, not a captured log line; the Timeout mutants'
+"hand-checked in an earlier sitting" provenance had no surviving record (fixed by an independent
+spot-check instead); and the "Ignored (outside mutate filter)" table label overclaimed a
+specific reason the JSON did not uniformly support. All six were fixed in this doc and the
+sittings note; no second review pass was run over that delta, since the fixes were factual
+corrections against the verifier's ground-truth JSON/queue-file reads, not new code, public API,
+or tooling - the same category the skill exempts from a repeat pass. No control was run (no
+engine code touched this slice), so there is nothing to reproduce under that rule.
