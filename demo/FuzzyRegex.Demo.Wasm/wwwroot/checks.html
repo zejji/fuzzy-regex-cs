@@ -75,6 +75,17 @@
     /** Loads the real page at a fragment and hands back its live component state. */
     async function openPage(fragment = '') {
       const frame = document.getElementById('page');
+
+      // about:blank first, and this is load-bearing rather than tidiness. Assigning a src that
+      // differs from the current one only in its FRAGMENT is a same-document navigation: the
+      // browser scrolls, fires hashchange and does NOT reload, so the `load` event never comes and
+      // the await below hangs for ever. Found the first time this page was run in a real browser
+      // (2026-09-18): check 1 passed, check 2 sat at "running..." indefinitely. Clearing the frame
+      // makes every openPage a genuine document load whatever the previous URL was.
+      const blanked = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      frame.src = 'about:blank';
+      await blanked;
+
       const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
       // A cache-busting query is deliberately NOT used: the page must work at the URL a visitor
       // gets. The fragment is enough to make each load distinct.
@@ -147,10 +158,16 @@
       demo.subject = 'xfoobat and xfoobar';
       await settled(demo);
       const hash = document.getElementById('page').contentWindow.location.hash;
+      // Read the fragment the way it is written - URLSearchParams - rather than with
+      // decodeURIComponent. encode() builds it with URLSearchParams, which writes a space as `+`,
+      // and decodeURIComponent leaves `+` alone; comparing the two said the address bar had not
+      // followed the inputs when it had (first real browser run, 2026-09-18). Parsing it back is
+      // also the stronger assertion: it is what the page itself does on load.
+      const carried = new URLSearchParams(hash.replace(/^#/, '')).get('s');
       check(
         'the address bar follows the inputs',
-        decodeURIComponent(hash).includes('xfoobat and xfoobar'),
-        hash.slice(0, 120)
+        carried === 'xfoobat and xfoobar',
+        `s=${JSON.stringify(carried)} from ${hash.slice(0, 100)}`
       );
     }
 
@@ -212,7 +229,7 @@
       );
     }
 
-    // 5. The control that matters most: a pattern that runs away is killed, the page keeps painting
+    // 5. The control that matters most: a pattern that runs away is killed, the page keeps running
     //    throughout, and the next question is answered by the spare rather than by a cold boot.
     //    "(a|a)*b" against 30 a's is the pathological pattern the test suite already uses -
     //    exponential backtracking with no way to succeed.
@@ -222,21 +239,66 @@
       demo.subject = 'a';
       await settled(demo);
 
-      let frames = 0;
-      let painting = true;
-      const tick = () => { if (painting) { frames++; requestAnimationFrame(tick); } };
-      requestAnimationFrame(tick);
-
+      // What "the page survives a runaway" actually means is that the runaway is on the WORKER's
+      // thread while the page's own thread keeps working. Two counters, because the obvious one
+      // does not work on THIS page:
+      //
+      //   ticks  - a 16 ms interval on the checks page's thread and a second one inside the page
+      //     under test. A blocked main thread cannot service either, so a healthy count is direct
+      //     evidence that the runaway did not take the page with it. This is what is asserted.
+      //   frames - requestAnimationFrame. Reported, never asserted on, and the reason is measured
+      //     rather than assumed (2026-09-18, Chrome 153 under the Playwright MCP server, same
+      //     server, two 500 ms windows on IDLE pages): a page with nothing on it scored 31 and 31
+      //     frames, while THIS page - which boots two .NET WebAssembly workers - scored 1 and then
+      //     0, with its timers ticking 28 and 30 all the while. So the browser does drive rAF, but
+      //     not for this page, and a frame count here measures that interaction and not whether
+      //     the demo stayed responsive.
       demo.pattern = '(a|a)*b';
       demo.subject = 'a'.repeat(30);
       await until('the page to start matching', () => demo.running);
-      await sleep(500);
-      painting = false;
+
+      // The counters start HERE, after the wait above, so the window they measure is the 500 ms
+      // sleep and nothing else. Started before it, they would also span the 250 ms debounce and the
+      // poll, and the count would be reported as "in the 500 ms the runaway was running" when it
+      // covered about 750 ms of which a third had no runaway in it.
+      const pageWindow = document.getElementById('page').contentWindow;
+      let frames = 0;
+      let ticks = 0;
+      let pageTicks = 0;
+      let alive = true;
+      let ticking = null;
+      let pageTicking = null;
+      let pills = [];
+
+      try {
+        const frame = () => { if (alive) { frames++; requestAnimationFrame(frame); } };
+        requestAnimationFrame(frame);
+        ticking = setInterval(() => { ticks++; }, 16);
+        pageTicking = pageWindow.setInterval(() => { pageTicks++; }, 16);
+
+        await sleep(500);
+
+        // Read while the runaway is still going, not afterwards: the claim is that the page renders
+        // its state DURING the match, and once it has been stopped anything could be on screen.
+        // The STATUS PILLS specifically, not the page's whole text: the intro paragraph contains
+        // the words "...compiled to WebAssembly and matching in your browser", so a body-text search
+        // for "matching" passes on a page that is doing nothing at all.
+        pills = [...pageWindow.document.querySelectorAll('.status .pill')].map((p) => p.textContent.trim());
+      } finally {
+        // In a finally because `sleep` is not the only thing above that can fail: anything thrown
+        // between starting these and clearing them would leave both intervals running for the life
+        // of the checks page and of the frame it is driving.
+        alive = false;
+        clearInterval(ticking);
+        pageWindow.clearInterval(pageTicking);
+      }
 
       check(
-        'the page keeps painting while a runaway pattern runs',
-        frames > 3,
-        `${frames} animation frames in the 500 ms the runaway was running`
+        'the page keeps running while a runaway pattern runs',
+        ticks > 10 && pageTicks > 10 && pills.some((text) => text.startsWith('matching')),
+        `${ticks} timer ticks on the checks page and ${pageTicks} inside the demo during the 500 ms `
+        + `window, status pills ${JSON.stringify(pills)} `
+        + `(${frames} animation frames - reported only; this page does not get rAF in this browser)`
       );
 
       const startedAt = performance.now();
