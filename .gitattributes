@@ -8,5 +8,22 @@
 *.snk binary
 *.trx text eol=lf
 
+# JavaScript is byte-for-byte content here, not text to normalise. Below the `* text=auto` line on
+# purpose: the LAST matching pattern wins, so this has to come after it to take effect.
+#
+# Microsoft's reason, verbatim (learn.microsoft.com/aspnet/core/blazor/host-and-deploy/webassembly/
+# github-pages, fetched 2026-09-16): "Git treats JavaScript (JS) files, such as
+# blazor.webassembly.js, as text and converts line endings from CRLF to LF in the deployment
+# pipeline. These changes to JS files produce different file hashes than Blazor sends to the client.
+# The mismatches result in integrity check failures on the client."
+#
+# What it protects HERE is narrower than that quotation, and saying so is the point: their scenario
+# commits the published assets to a branch, whereas .github/workflows/pages.yml publishes in CI and
+# uploads the output directly, so no framework JavaScript ever passes through Git. This rule covers
+# the JavaScript this repository does commit - the demo's worker.js, its page modules and the
+# vendored Vue build, whose SHA-256 is recorded beside its import in demo/.../app.js and would no
+# longer match after a line-ending flip.
+*.js binary
+
 # The upstream submodule is vendored read-only; its diffs are not ours to review.
 upstream/** linguist-vendored

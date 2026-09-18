@@ -62,8 +62,10 @@ v2 (S72).
 
 ## Done when
 
-- [ ] Page delivers all seven v1 items above; Vue vendored with its version and hash recorded.
-- [ ] `pages.yml` green and the live URL answering; README link landed.
+- [x] Page delivers all seven v1 items above; Vue vendored with its version and hash recorded.
+- [ ] `pages.yml` green and the live URL answering; README link landed. (Workflow written and README
+      link landed in sitting 1; green run and live URL need the owner's push and the one-off Pages
+      setting, so this box stays open.)
 - [ ] Ratchet GREEN, blind review, commit. **Hunt:** an integrity failure after line-ending
       conversion - a Windows runner checking out with `core.autocrlf`, or any step that rewrites a
       published file between publish and upload, both of which produce a page that boots on the
@@ -72,6 +74,63 @@ v2 (S72).
       worker URL resolved relative to the page rather than the base, which is the same bug wearing a
       different hat; a match-count cap that caps the array but still builds one DOM node per match
       before slicing; a fragment long enough to be silently dropped by the browser.
+
+## Browser brief for the next sitting
+
+Per-sitting narrative is in `docs/plan/slices/notes/S71-sittings.md`. This section is the spec for the
+one thing sitting 1 could not do: sitting 1 had no browser tooling, and the owner's instruction was to
+commit a green checkpoint and write down exactly what to verify. Playwright is available from the next
+session started in this worktree.
+
+**Serve it yourself; do not reuse what is already running.** A `python -m http.server` on port 8080
+(PID 37516) belongs to the owner and serves S70's publish - leave it alone. Publish to a fresh
+directory and serve that on another port:
+
+```powershell
+pwsh -File tools/run-wasm-smoke.ps1 -OutDir .scratch/wasm-s71-browser
+cd .scratch/wasm-s71-browser/wwwroot
+python -m http.server 8090
+```
+
+**Run 1, served at the root** - `http://localhost:8090/checks.html`. Wait for the element with id
+`verdict` to read `CHECKS GREEN`, then read `window.__checks`:
+
+- `ok === true`, and `checks` is six entries, every `ok` true. Their names, in order: every worked
+  example answers what upstream answers; a pasted link opens the case it encoded; the address bar
+  follows the inputs; a subject over the cap is refused, not truncated; the display cap draws its
+  limit and reports the true total; a group that did not take part is shown as such; the page keeps
+  painting while a runaway pattern runs; stopping a runaway leaves a working page; a respawn is
+  faster with the warm spare than without it.
+- Expected values worth reading out of the detail strings rather than trusting the boolean: the
+  examples check must say `all 8 examples agree with regex 2026.9.10`; the display-cap check must
+  show `200 drawn of N found, 200 <mark> elements in the page` with N well above 200; the runaway
+  check must report more than 3 animation frames in the 500 ms the runaway ran.
+- `window.__checks.measurements`: `stopToNextAnswerOnScreenMs` (the page's Stop-to-answer recovery,
+  which includes the 250 ms debounce), `respawnWithoutSpareMs` and `respawnWithSpareMs` (raw pools,
+  no debounce). Record all three in the notes file with the browser and its version. There is no
+  published figure for a .NET WebAssembly respawn, so these are the slice's own measurements and the
+  ROADMAP wants them.
+
+**Run 2, served at a repository subpath** - the whole point of shipping no `<base href>`. Make the
+publish sit under a subpath and load `http://localhost:8091/fuzzy-regex-cs/checks.html`:
+
+```powershell
+mkdir .scratch/subpath-root/fuzzy-regex-cs
+xcopy .scratch\wasm-s71-browser\wwwroot .scratch\subpath-root\fuzzy-regex-cs /E /I /Y
+cd .scratch/subpath-root
+python -m http.server 8091
+```
+
+Expect the same `CHECKS GREEN`. If it is red at the subpath and green at the root, the no-base-href
+decision is wrong and the fix belongs in this slice, not the next one.
+
+**Then check the page by hand, with the browser's cache disabled**, because that is the only run in
+which subresource integrity is actually exercised: `http://localhost:8090/` answers within a second
+or two, clicking each sidebar example changes the highlighted subject, and copying the URL into a new
+tab reopens the same three inputs.
+
+**Record the evidence in S70's format** in the notes file: the URL, the verdict, the six checks with
+their detail strings, the three measurements, and the browser version.
 
 ## Findings from the documentation (all fetched 2026-09-16)
 

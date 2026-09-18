@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FuzzyRegex - try it in your browser</title>
+  <meta name="description"
+    content="FuzzyRegex, a C# port of Python's regex module, running in your browser on WebAssembly. Approximate matching, named groups and full capture lists.">
+
+  <!--
+    No <base href>, deliberately, and this is a divergence from both the ROADMAP's note and
+    Microsoft's Blazor-on-Pages recipe, which rewrite it to the repository subpath. A Blazor app
+    needs that because its index.html is generated and its framework resolves assets from the base.
+    This page is ours and every URL in it is relative: the scripts to the document, _framework to
+    worker.js, and the worker itself to `import.meta.url` in app.js. So it boots at the repository
+    subpath on GitHub Pages, at the root of a local server, and at a preview path on a fork, with
+    nothing to keep in step. A hard-coded base href would work at exactly one of those, which is the
+    "works on the developer's machine, 404s on Pages" failure the slice file's Hunt names.
+  -->
+  <style>
+    :root {
+      color-scheme: light dark;
+      --edge: color-mix(in srgb, currentColor 20%, transparent);
+      --hint: color-mix(in srgb, currentColor 60%, transparent);
+      --hit: color-mix(in srgb, Highlight 35%, Canvas);
+      --hit-strong: color-mix(in srgb, Highlight 65%, Canvas);
+    }
+
+    body {
+      margin: 0 auto;
+      max-width: 72rem;
+      padding: 1.5rem 1rem 4rem;
+      font-family: system-ui, sans-serif;
+      line-height: 1.5;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 0.25rem;
+    }
+
+    code,
+    pre,
+    input,
+    textarea,
+    .subject {
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+
+    .layout {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: minmax(0, 2fr) minmax(14rem, 1fr);
+    }
+
+    @media (max-width: 55rem) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin: 1rem 0 0.25rem;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.5rem;
+      border: 1px solid var(--edge);
+      border-radius: 0.25rem;
+      background: Canvas;
+      color: CanvasText;
+      font-size: 0.95rem;
+    }
+
+    textarea {
+      min-height: 6rem;
+      resize: vertical;
+    }
+
+    .hint {
+      color: var(--hint);
+      font-size: 0.85rem;
+      margin: 0.25rem 0 0;
+    }
+
+    .status {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      margin: 1rem 0;
+      min-height: 2rem;
+    }
+
+    .pill {
+      border: 1px solid var(--edge);
+      border-radius: 1rem;
+      padding: 0.1rem 0.6rem;
+      font-size: 0.85rem;
+    }
+
+    .failed {
+      border-color: crimson;
+      color: crimson;
+    }
+
+    button {
+      font: inherit;
+      padding: 0.35rem 0.8rem;
+      border: 1px solid var(--edge);
+      border-radius: 0.25rem;
+      background: Canvas;
+      color: CanvasText;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: currentColor;
+    }
+
+    .subject {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid var(--edge);
+      border-radius: 0.25rem;
+      padding: 0.75rem;
+      margin: 0;
+    }
+
+    mark {
+      background: var(--hit);
+      color: inherit;
+      border-radius: 0.15rem;
+      padding: 0.05rem 0;
+      cursor: pointer;
+    }
+
+    mark.empty {
+      /* A zero-length match has nothing to paint, so it gets a caret of its own. */
+      border-left: 2px solid var(--hit-strong);
+      padding-left: 0;
+    }
+
+    mark[aria-current="true"] {
+      background: var(--hit-strong);
+      outline: 1px solid currentColor;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.9rem;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--edge);
+      padding: 0.3rem 0.5rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .examples button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 0.5rem;
+      padding: 0.5rem 0.6rem;
+    }
+
+    .examples .title {
+      font-weight: 600;
+    }
+
+    .examples .note {
+      display: block;
+      color: var(--hint);
+      font-size: 0.8rem;
+    }
+
+    .error {
+      border: 1px solid crimson;
+      border-radius: 0.25rem;
+      padding: 0.75rem;
+      white-space: pre-wrap;
+    }
+
+    .no-script {
+      border: 1px solid var(--edge);
+      border-radius: 0.25rem;
+      padding: 0.75rem;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>FuzzyRegex</h1>
+  <p>
+    A C# port of Python's <code>regex</code> module, compiled to WebAssembly and matching in your
+    browser. The engine runs in a Web Worker, so a pattern that runs away takes the worker with it
+    and not the page. This is v1: three inputs and the answers, nothing more.
+  </p>
+
+  <noscript>
+    <p class="no-script">This demo is a regular expression engine running in your browser, so it
+      needs JavaScript and WebAssembly. The library itself needs neither - see the repository.</p>
+  </noscript>
+
+  <div id="app" class="layout">
+    <main>
+      <label for="pattern">Pattern</label>
+      <input id="pattern" v-model="pattern" spellcheck="false" autocapitalize="off" autocomplete="off">
+
+      <label for="flags">Flags</label>
+      <input id="flags" v-model="flags" spellcheck="false" autocapitalize="off" autocomplete="off"
+        placeholder="e.g. IgnoreCase, BestMatch">
+      <p class="hint">
+        FuzzyRegexOptions member names, separated by commas or spaces. Names only, so a typo is an
+        error rather than a different set of flags. Version1 is the default.
+      </p>
+
+      <label for="subject">Subject</label>
+      <textarea id="subject" v-model="subject" spellcheck="false"></textarea>
+      <p class="hint">
+        Up to {{ maxSubjectLength.toLocaleString() }} characters. Currently
+        {{ subject.length.toLocaleString() }}.
+      </p>
+
+      <div class="status">
+        <span class="pill" v-if="engine === 'starting'">starting the engine...</span>
+        <span class="pill failed" v-else-if="engine === 'failed'">engine failed to load</span>
+        <!--
+          `busy`, not `running`: during the 250 ms debounce nothing is with the worker yet, and a pill
+          that went back to "3 matches" in that window would be labelling the previous case's answer
+          with the current case's inputs.
+        -->
+        <span class="pill" v-else-if="busy">matching...</span>
+        <span class="pill" v-else-if="answer">
+          {{ view.total }} match{{ view.total === 1 ? '' : 'es' }}
+          <template v-if="elapsedMs !== null">in {{ Math.round(elapsedMs) }} ms</template>
+        </span>
+
+        <button v-if="busy" @click="stop">Stop</button>
+
+        <span class="pill" v-if="answer && answer.truncated">
+          the engine stopped early at its own cap - this is not the whole answer
+        </span>
+        <span class="pill" v-if="capped">
+          showing the first {{ view.shown }} of {{ view.total }}
+        </span>
+        <span class="pill" v-if="!shareable">
+          too long to put in the address bar, so this case has no link
+        </span>
+      </div>
+
+      <p class="error" v-if="engine === 'failed'">{{ engineError }}</p>
+      <p class="error" v-else-if="failure">{{ failure }}</p>
+
+      <template v-if="answer && !failure">
+        <h2>Subject</h2>
+        <p class="subject"><template v-for="(part, i) in view.segments" :key="i"><mark v-if="part.match !== null"
+              :class="{ empty: part.text === '' }" :aria-current="part.match === selected"
+              @click="selected = part.match" :title="'match ' + (part.match + 1)">{{ part.text }}</mark><template
+              v-else>{{ part.text }}</template></template></p>
+
+        <template v-if="matches.length">
+          <h2>Matches</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Index</th>
+                <th>Length</th>
+                <th>Substitutions</th>
+                <th>Insertions</th>
+                <th>Deletions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(match, i) in matches.slice(0, view.shown)" :key="i"
+                @click="selected = i" :style="{ fontWeight: i === selected ? 600 : 400, cursor: 'pointer' }">
+                <td>{{ i + 1 }}</td>
+                <td>{{ match.index }}</td>
+                <td>{{ match.length }}</td>
+                <td>{{ match.counts.substitutions }}</td>
+                <td>{{ match.counts.insertions }}</td>
+                <td>{{ match.counts.deletions }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 v-if="current">Groups in match {{ selected + 1 }}</h2>
+          <table v-if="current">
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Index</th>
+                <th>Length</th>
+                <th>Text</th>
+                <th>Captures</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="group in current.groups" :key="group.number">
+                <td>{{ group.number }}<template v-if="group.name !== String(group.number)"> ({{ group.name }})</template>
+                </td>
+                <!--
+                  A group that did not take part shows as such and not as an empty string: those are
+                  two different answers, and showing them the same way is the confusion the demo
+                  exists to remove.
+                -->
+                <td colspan="3" v-if="!group.success"><em>did not participate</em></td>
+                <template v-else>
+                  <td>{{ group.index }}</td>
+                  <td>{{ group.length }}</td>
+                  <td><code>{{ subject.slice(group.index, group.index + group.length) }}</code></td>
+                </template>
+                <td>
+                  <template v-if="group.captures.length > 1">
+                    <code v-for="(capture, i) in group.captures" :key="i">{{ i ? ', ' : ''
+                    }}{{ subject.slice(capture.index, capture.index + capture.length) }}</code>
+                  </template>
+                  <span class="hint" v-else>-</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="hint" v-if="current">
+            A repeated group keeps every capture, not only the last - as <code>regex</code> does and
+            Python's standard <code>re</code> does not.
+          </p>
+        </template>
+      </template>
+    </main>
+
+    <aside class="examples">
+      <h2>Worked examples</h2>
+      <p class="hint">Each one fills the three boxes. The answers are checked against Python's
+        <code>regex</code> module in this project's test suite.</p>
+      <button v-for="example in examples" :key="example.title" @click="load(example)">
+        <span class="title">{{ example.title }}</span>
+        <span class="note">{{ example.note }}</span>
+      </button>
+      <p class="hint">
+        The address bar always holds the current case, so a link to this page is a link to what you
+        are looking at.
+      </p>
+    </aside>
+  </div>
+
+  <p class="hint">
+    <a href="https://github.com/zejji/fuzzy-regex-cs">Source and documentation</a>.
+    The library is a port of <a href="https://github.com/mrabarnett/mrab-regex">mrab-regex</a>.
+  </p>
+
+  <script type="module" src="./app.js"></script>
+</body>
+
+</html>
