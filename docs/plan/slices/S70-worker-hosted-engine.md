@@ -7,6 +7,14 @@ delivers: []
 
 # S70 - The demo's engine half
 
+> **BOUNDED PROBES ONLY (owner rule, 2026-09-18, after the machine crashed twice on unbounded
+> probes from this slice).** No probe project, no `dotnet run` of anything but the harness; exercise
+> `DemoEngine.Run` only through TUnit tests with subjects under 100 characters and repeat products
+> under 10,000. Any process that compiles or matches an untrusted or pathological pattern runs with
+> `DOTNET_GCHeapHardLimit=0x40000000`, a wall-clock timeout and a subject-length cap, and no probe is
+> delegated to a subagent without those limits written into its prompt. Do not re-measure the
+> compile blow-up: it is sliced as S56b on `main`.
+
 **Per-sitting notes: `docs/plan/slices/notes/S70-sittings.md`.** Sitting 2 (2026-09-18) committed a
 GREEN checkpoint; the browser leg is the open item.
 
