@@ -71,6 +71,21 @@ are not repeated here.
 - Every optimisation must keep the oracle GREEN at three seeds and `ExpectedDivergences` strict; an
   optimisation that changes an answer has ported an upstream bug (ROADMAP, owner rule 2026-09-12).
 
+## Measured by S58's allocation attribution (2026-09-19)
+
+Re-run any figure here with
+`dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution`.
+
+| Where | What is deferred | Notes |
+|---|---|---|
+| `FuzzyRegex.cs:444` (`IsMatch`), `:568` (`Run`'s `visibleCaptures: true`) | A predicate call that does not build the captures it will never be asked for | **`IsMatch` allocates byte-for-byte what `Match` does** - 1,392 B at one group, 9,576 B at 32, identical at every group count measured. `IsMatch` is `Run(...).Success` and `Run` passes `visibleCaptures: true` unconditionally, so 224 of the 264 B per group a match costs are paid to produce a `bool`. Upstream's `state_init_2` takes the same flag for the same reason. **Constraint**: `visibleCaptures` also drives repeated-capture retention, so a slice taking this must prove the oracle green at three seeds - `IsMatch` rows included - rather than assume the flag is only about the returned object. |
+
+**The paired source comment is owed.** The rule above is a `ponytail:` comment at the line plus a
+row here; S58 is a measurement slice forbidden from touching `src/`, and its whole verification
+claim is that `git diff -- src` is empty, so it recorded the row only. The next slice that is
+allowed into `src/FuzzyRegex/FuzzyRegex.cs` adds the comment at `:444` and `:568`. S60 is the first
+such slice.
+
 ## From the Rust fuzzy-regex library (reviewed 2026-09-18)
 
 `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` has the full table. Two items adopted, both

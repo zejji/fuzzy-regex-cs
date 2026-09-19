@@ -417,3 +417,116 @@ match count - from a medium run's `Allocated` column.
 `artifacts/prof/S58/` holds the Timeline snapshot (54 MB), both `.nettrace` captures and the
 speedscope conversions. `artifacts/` is gitignored and regenerable; the derived text is in
 `profiles/`.
+
+## Sitting 4 - 2026-09-19 - the slice closes
+
+The tail of scope item 4 (the arithmetic attribution demonstrated on real numbers), the skills
+re-probe, and the finish sequence. No `src/` change in this sitting either; the diff is one new
+bench file, one bench entry-point arm, and four documents.
+
+### Checklist
+
+- [x] Arithmetic attribution demonstrated from a medium run's `Allocated` column
+- [x] `.claude/skills/` re-probed for writability - still refused, stays parked for the owner
+- [x] Ratchet, oracle at three seeds, AOT, tool tests
+- [x] Blind review, second pass, verifier, closing notes
+
+### What this sitting settled: the state is 40 B of the 264
+
+The sweeps S58 already had give 264 B per capture group for a whole `Match`, and that was as far as
+subtraction could go, because `MatchState` is `internal` and no benchmark can call it. So the
+attribution got a third level. `bench/FuzzyRegex.Benchmarks/Attribution.cs`, run by
+
+```
+dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution
+```
+
+reads `GC.GetAllocatedBytesForCurrentThread()` around `MatchState.Create`, `IsMatch` and `Match` at
+every point of both sweeps. Output, group-count half, with the per-step slope lines the run
+interleaves between rows omitted (they carry the 40.00 / 224.00 / 264.00 split quoted below):
+
+```
+groups |     Create |    IsMatch |      Match | (first Create, first IsMatch)
+     1 |      1,024 |      1,392 |      1,392 | (1,872, 11,848)
+     2 |      1,064 |      1,656 |      1,656 | (1,064, 1,656)
+     4 |      1,144 |      2,184 |      2,184 | (1,144, 2,464)
+     8 |      1,304 |      3,240 |      3,240 | (1,304, 3,776)
+    16 |      1,624 |      5,352 |      5,352 | (1,624, 6,400)
+    32 |      2,264 |      9,576 |      9,576 | (2,264, 11,648)
+```
+
+Per group, at all five steps and with no residual: **state 40.00 B + rest of `Run` 224.00 B =
+264.00 B**. The 40 is `MatchState.cs:544-548`, an array slot plus one `GroupData` (header, the
+`Captures` reference, two `int`s) - which is what reading the type predicts, and the point of
+measuring was that reading it is not evidence.
+
+BenchmarkDotNet reached the same 264.00 B/group slope on the same sweep in run E, from a different
+harness and process. Its absolute figures are exactly 96 B below the probe's at every group count
+(1,296 against 1,392, 9,480 against 9,576). The constant is measured, not explained, and no claim
+here rests on it.
+
+**This corrected a recommendation already written for the owner.** Step 2 of
+`2026-09-19-span-threading-decision.md` said pooling the state was worth "1,296 bytes a step".
+Pooling removes the *state*, whose line is **984 B fixed plus 40 B per group** - that intercept
+reproduces all six `Create` rows exactly (984 + 40 = 1,024; 984 + 40x32 = 2,264), and it is 74% of
+a one-group match's bytes but 24% of a 32-group one. Both that section and the step now say so.
+
+### The finding nobody went looking for: `IsMatch` costs what `Match` costs
+
+The `IsMatch` and `Match` columns are equal at every group count, to the byte. `IsMatch` is
+`Run(...).Success` (`FuzzyRegex.cs:444`) and `Run` passes `visibleCaptures: true` unconditionally
+(`:568`), so a call that returns a `bool` pays the full 224 B per group to build captures nobody can
+read. Upstream's `state_init_2` takes that flag for exactly this reason.
+
+Recorded as a Phase 7 row in `OPTIMISATION-NOTES.md`, with the constraint that `visibleCaptures`
+also governs repeated-capture retention, so it is not a free flag flip. **The paired `ponytail:`
+source comment is owed, not written**: S58 may not touch `src/`, and its verification claim is that
+`git diff -- src` is empty. The notes row names `FuzzyRegex.cs:444` and `:568` and hands the comment
+to S60, the next slice allowed in. Nothing enforces that pairing today - `check-sync-divergence.ps1`
+covers only `sync-divergence:` markers - so this is a note to a human, and it is in DECISIONS too.
+
+### The pooling question, closed
+
+A flat allocation column has two explanations: nothing is allocated, or something is rented from
+`ArrayPool` and returned, which a steady-state counter cannot see. `MatchState.Dispose` returns three
+`ByteStack` buffers (`MatchState.cs:650-655`), so this was live. What settles it is the code: the
+stacks are rented lazily and grown by matching work (`ByteStack.cs:306`), never sized from the
+subject, so there is no subject-sized rental for the flat column to be hiding. The first-call
+column corroborates but cannot carry the claim on its own, and the probe's remarks say why -
+`ArrayPool<byte>.Shared` is process-wide, so only the group sweep's first row ever meets an unfilled
+pool. That row is where the one-time cost shows: first `IsMatch` **11,848 B** against a steady
+1,392. By the subject sweep the pool is warm and every first figure equals its steady one, which is
+a fact about run order rather than about subject length.
+
+Subject length costs **0 B** at all three levels across a 4,096x range, while the same sweep's time
+goes 266.5 ns to 8,406.2 ns. The time is `MatchState.cs:501`'s `IndexOfAnyInRange` surrogate scan -
+O(n) in time, O(1) in allocation - which is section 2 of the decision document's whole argument.
+
+### The skills re-probe: still refused, and it is the harness
+
+Two routes, both refused before reaching the filesystem: `Write` to
+`.claude/skills/optimise/WRITE-PROBE.txt`, and `touch .claude/skills/write-probe-tmp.txt` as a
+single uncompounded shell command. So it is the permission boundary, not a lock and not the
+compound-command rule. Scope item 5 stays parked in
+`phase7-research/optimise-skill-pending.md`, which holds the finished skill body and is linked from
+ROADMAP's Phase 7 entry, and the owner lands it with one move. No Phase 7 slice is blocked by it.
+
+### Gates, on the commit-ready tree
+
+- **Ratchet GREEN**, 6,399 passing, baseline 6,291 distinct ids. `check-sync-divergence.ps1` runs
+  inside it and is green.
+- **Oracle RED at 1 of 3 seeds**, and it is the divergence sitting 3 triaged, reproduced unchanged:
+  seeds 7 and 4242 green, seed 20260919 gives **1 diverging row of 6,380** (agree 6,356, expected 19,
+  resource 4), row 3655 `interactions`, fuzzy edit attribution `[s:1][i:2]` upstream against
+  `[s:2][i:1]` port on the same total `(1,1,0)`. Byte-identical to the row in
+  `docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`. `git diff 2c1e747 -- src` is
+  empty, so no S58 sitting can have caused it, and fixing it needs a slice allowed into `src/`.
+  (Sitting 3 wrote this as `git diff dfa8767 -- src`, and the verifier found that not empty: two
+  doc-comment lines in `Matcher.cs`. `dfa8767` is a pre-rebase duplicate of the same S56b work and
+  is not an ancestor of this branch - `2c1e747` is the S56b commit that is, and against it the
+  diff is empty. No executable line differs either way.)
+- **Tool tests 115/0** - 115, not sitting 3's 114: commits `e22c9dd` and `04de6d4` (driver work,
+  after sitting 3) added a `Read-Allowance` case. Not this slice's.
+- **AOT tests RED, identically**: `PublicApiDocumentationTests.cs(62): Trim analysis error IL2065`,
+  from S65's `3b09b76`. **AOT smoke GREEN**, binary **6,977,536 bytes**, the same figure sitting 3
+  recorded, which is the expected result for a diff that touches no `.cs` under `src/` or `tests/`.

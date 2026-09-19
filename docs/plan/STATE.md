@@ -1,46 +1,41 @@
 # State
 
-**S58 is IN FLIGHT (checkpoint, sitting 3).** Phase 7's measurement slice. Spec:
-`docs/plan/slices/S58-measurement-method-and-noise-floor.md`. Working notes, all sittings:
-`docs/plan/slices/notes/S58-sittings.md`. **No `src/` change, and none is allowed in this slice.**
-Sitting 3 ended on the allowance (94% of the window), not on a problem. Ratchet GREEN (6399).
+**S58 is DONE** (four sittings). Phase 7's measurement slice: no `src/` change, and
+`git diff 2c1e747 -- src` is empty. Closing notes and review record:
+`docs/plan/slices/done/S58-measurement-method-and-noise-floor.md`. Ratchet GREEN (6,399/6,291).
 
-## Scope items 1-4 are done. The measurement question that remains is item 4's tail
+**Next slice: S59** (`docs/plan/slices/S59-pattern-cache-and-cachesize.md`); S57 is Phase 6's close.
 
-Sittings 1-2 measured the floor (time 1.13, allocation 1.0001), answered BDN's affinity/GC
-question from a real run's artifacts, measured the Python floor at 1.11x with pyperf, and proved
-the EventPipe topN CPU route. Sitting 3 settled the allocation route:
-`docs/plan/phase7-research/profiles/README.md` has it with commands and output. Short form: an
-unattended session **can capture** an allocation profile (dotTrace Timeline, 54 MB; `dotnet-trace
---profile gc-verbose` by attaching, never by launching, which deadlocks) and **cannot read one**
-(no `Reporter.exe` in the package, no report verb in the CLI, Rider MCP `ConnectionRefused`, and
-the speedscope conversion carries milliseconds, not bytes).
+## What S58 leaves Phase 7
 
-**Next, and it is small:** demonstrate the arithmetic attribution the fallback rests on, from a
-medium run's `Allocated` column - `FuzzyShort` against `FuzzyLong` for subject length,
-`MatchesFirstTwo` against `MatchesToEnd` for match count, read against the allocation sites at
-`src/FuzzyRegex/Engine/MatchState.cs:544-568`. Then re-probe whether `.claude/skills/` is writable
-(the optimise checklist is parked in `phase7-research/`), and run the finish sequence: oracle at
-three seeds, AOT, tool tests, blind review, second pass, verifier, closing notes.
+- Noise floor committed (`bench/baselines/<machine-id>/noise-floor.md`): time 1.13, allocation
+  1.0001. `tools/compare-benchmarks.ps1` defaults to it and reports both ratios per workload.
+- The allocation **profiler** route is closed - nothing installed reads a captured trace back to a
+  source site. The arithmetic route is demonstrated:
+  `dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution`. A capture group
+  costs 264.00 B in a `Match`: 40.00 B state, 224.00 B outside. State's line: 984 B + 40 B/group.
+- **S60 owes a `ponytail:` comment** at `FuzzyRegex.cs:444` and `:568` - `IsMatch` allocates
+  byte-for-byte what `Match` does (`Run` passes `visibleCaptures: true` unconditionally). The
+  `OPTIMISATION-NOTES.md` row exists; the source half does not, because S58 may not touch `src/`.
+- Two decisions wait on the owner in `docs/plan/2026-09-19-span-threading-decision.md`: hoist the
+  per-subject work out of the per-step state, then pool the state; decline the `ref struct`.
 
-## Two gates are RED, and neither is S58's - triage these first
+## Two gates are RED, neither S58's
 
-This slice changed **no `.cs` file at all**, so neither can be its doing. Both need a slice that is
-allowed to touch code; S58 is not.
+1. **Oracle, 1 row of 6,380 at seed `20260919`** (7 and 4242 green). Triage:
+   `docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`. Not pinned on purpose;
+   needs a slice allowed into `src/`.
+2. **AOT publish: `IL2065`** at `tests/.../Conventions/PublicApiDocumentationTests.cs:62`, from S65
+   (`3b09b76`). AOT smoke GREEN at 6,977,536 bytes.
 
-1. **Oracle, 1 row of 6380 at seed `20260919`** (seeds 7 and 4242 green). `git diff dfa8767 -- src`
-   is empty. Reproduction and triage:
-   `docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`. **Not pinned on purpose.**
-2. **AOT publish fails**: `Trim analysis error IL2065` at
-   `tests/FuzzyRegex.Tests/Conventions/PublicApiDocumentationTests.cs:62`, a convention test added
-   by S65 (`3b09b76`).
+## Open
 
-## Open items
-
-- **Stryker is paused for this slice's benchmarks**; tell the orchestrator the floor is in.
-- Scope item 1's after-a-reboot floor repeat is parked - the owner's call.
-- `docs/STATUS.md`'s upstream-commit line is generated wrong when the `upstream` submodule is not
-  checked out (`tools/check-ratchet.ps1`, the `$upstreamCommit` line); it should fail loudly.
-- **The owner still has to push `phase9-demo` and set Settings > Pages > Source = GitHub Actions.**
-- Left running, nothing killed per the owner's rule: `python -m http.server` on 8090/8092/8137, a
-  Vite dev server (PID 34120) holding `demo/web/node_modules`, and a hung `VBCSCompiler.exe`.
+- `.claude/skills/optimise/SKILL.md` needs the owner; body parked in
+  `docs/plan/phase7-research/optimise-skill-pending.md`. Unattended sessions cannot write there.
+- **Stryker is paused for benchmarking** - the floor is in, it can resume. The after-a-reboot floor
+  repeat is parked on the owner.
+- `docs/STATUS.md`'s upstream-commit line is generated wrong when the `upstream` submodule is
+  absent (`tools/check-ratchet.ps1`, `$upstreamCommit`); it should fail loudly.
+- **Owner: push `phase9-demo`, set Settings > Pages > Source = GitHub Actions.**
+- Running, nothing killed per the owner's rule: `python -m http.server` on 8090/8092/8137, a Vite
+  dev server (PID 34120) holding `demo/web/node_modules`, a hung `VBCSCompiler.exe`.

@@ -197,6 +197,33 @@ One caveat stated rather than glossed: `MemoryDiagnoser` measures managed GC all
 `ArrayPool` rental is invisible to it. "Flat" here means "not GC-allocating per call", not "not
 using memory". It does not weaken the finding, because the finding is about the time slope.
 
+### How much of that 1,296 bytes is the state, measured
+
+Added 2026-09-19, after the tables above were written, because step 2 of the recommendation below
+turns on it and the sweeps alone cannot answer it: a benchmark cannot call `MatchState.Create`,
+which is `internal`. `bench/FuzzyRegex.Benchmarks/Attribution.cs` can, and
+`dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution` measures the same two
+sweeps at three levels - `Create` alone, `IsMatch`, and `Match`:
+
+| Groups | `Create` | `Match` | state's share |
+|---:|---:|---:|---:|
+| 1 | 1,024 B | 1,392 B | 74% |
+| 32 | 2,264 B | 9,576 B | 24% |
+
+The `Match` column is 1,392 B where the tables above say 1,296 B: the probe's absolutes sit exactly
+96 B above `MemoryDiagnoser`'s at every group count, a constant that is measured and not explained
+(`phase7-research/profiles/README.md`). Every share here is taken inside the probe's own numbers,
+so the offset cancels; against the 1,296 B figure the one-group share would read 79% instead of
+74%, and no step of the recommendation turns on which of the two is quoted.
+
+Per group the 264 B splits **40 B in the state** (`MatchState.cs:544-548`: an array slot plus one
+`GroupData`) and **224 B outside it**, at all five steps of the sweep with no residual. The state's
+own line is **984 B fixed plus 40 B per group** - that intercept fits all six measured rows
+exactly, and a one-group state's 1,024 B is 984 + 40, not a fixed 1,024 with the first group free.
+So the state is most of a one-group match and a quarter of a 32-group one, and **pooling the state
+removes 984 B plus 40 B per group, not the whole 264**. The profiles note
+(`phase7-research/profiles/README.md`) has the full run and the `IsMatch` finding that came with it.
+
 ### Where the 0.0321 ns per character comes from
 
 `MatchState.cs:501`, in the constructor:
@@ -263,8 +290,11 @@ cached flag - `Iteration` walks one subject, so this should be a read of the cod
    is where about 99% of the 12,643 ms lives. S61 measures the walk before and after against the
    committed baseline; `EnumerateMatchesToEndDense` is the row to read.
 2. **Then, if allocation still shows up, pool the state and release it on `Dispose`** - shape (a).
-   1,296 bytes a step is worth removing once it is no longer hiding behind 33.6 microseconds, and
-   `foreach`'s `try/finally` makes the contract real for every normal caller.
+   It is worth removing once it is no longer hiding behind 33.6 microseconds, and `foreach`'s
+   `try/finally` makes the contract real for every normal caller. Size it honestly first: pooling
+   removes the state, which the attribution above measures at 984 B a step plus 40 B per group -
+   74% of a one-group match's bytes but 24% of a 32-group one - and not the other 224 B per group,
+   which is the capture copy and lives outside the state.
 3. **Not the `ref struct` enumerator.** It buys the same fixed cost as pooling and costs
    `IEnumerable<T>`: no LINQ, no field, no `async`, and either a breaking change to shipped API or a
    second parallel enumeration surface to document and test forever. That is a large permanent price

@@ -131,3 +131,118 @@ that varies group count or match count attributes the bytes by subtraction. A Ph
 should reach for a profiler only when that subtraction stops explaining the number - and when it
 does, the honest options are a TraceEvent reader of our own or the owner opening a Timeline
 snapshot in Rider.
+
+## 2026-09-19, S58: the arithmetic route, run on real numbers
+
+The section above concluded that subtraction is the route. This is that route carried out, so the
+fallback is a demonstrated method rather than a plan. It is committed as a mode of the benchmark
+project, because `MatchState` is `internal` and no benchmark can call it:
+
+```
+dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution
+```
+
+`bench/FuzzyRegex.Benchmarks/Attribution.cs`. It reads
+`GC.GetAllocatedBytesForCurrentThread()` - the same counter `MemoryDiagnoser` reads - around three
+levels of the same call, at each point of the two sweeps `MatchStateCostBenchmarks.cs` already
+defines: `MatchState.Create` alone, `IsMatch`, and `Match`.
+
+### Group count: the state is 40 B of the 264
+
+The run's own output, with the per-step slope lines it interleaves between rows omitted here
+because the table below says the same thing:
+
+```
+groups |     Create |    IsMatch |      Match | (first Create, first IsMatch)
+     1 |      1,024 |      1,392 |      1,392 | (1,872, 11,848)
+     2 |      1,064 |      1,656 |      1,656 | (1,064, 1,656)
+     4 |      1,144 |      2,184 |      2,184 | (1,144, 2,464)
+     8 |      1,304 |      3,240 |      3,240 | (1,304, 3,776)
+    16 |      1,624 |      5,352 |      5,352 | (1,624, 6,400)
+    32 |      2,264 |      9,576 |      9,576 | (2,264, 11,648)
+```
+
+Every consecutive pair gives the same slope, to the hundredth of a byte, at all five steps:
+
+| Term | B/group | What it is |
+|---|---|---|
+| state | 40.00 | `MatchState.cs:544-548`: one `GroupData[]` slot (8 B) plus one `GroupData` (32 B: header, the `Captures` reference, two `int`s) |
+| rest of `Run` | 224.00 | everything after the state - the capture copy and what hangs off it |
+| `Match` over `IsMatch` | 0.00 | nothing; see below |
+| **total** | **264.00** | |
+
+**The state is 15% of the per-group cost.** That is the number the lazy-walk decision turns on:
+pooling a state on `Dispose` saves the state's whole line and does not touch the other 224. The
+line is **984 B fixed plus 40 B per group**: it reproduces all six `Create` rows exactly
+(984 + 40 = 1,024; 984 + 40x32 = 2,264), so a one-group state's 1,024 B already contains its group
+and must not be quoted as a fixed 1,024 with 40 B per group on top of it.
+
+**Independent confirmation.** BenchmarkDotNet's `MemoryDiagnoser`, on the same sweep in run E,
+gives 264.00 B/group at every one of the same five steps - a different harness and a different
+process reaching the same slope. Its absolute figures sit exactly 96 B below this probe's at every
+group count (1,296 against 1,392; 9,480 against 9,576), a constant offset that does not affect any
+slope here. That constant is not explained, only measured; nothing in this note rests on it.
+
+### `IsMatch` allocates exactly what `Match` does
+
+The `Match` column equals the `IsMatch` column at every group count. `IsMatch` is
+`Run(...).Success` (`FuzzyRegex.cs:444`) and `Run` passes `visibleCaptures: true` unconditionally
+(`:568`), so a call whose entire result is a `bool` pays the full 224 B per group for captures
+nobody can read. This was not what the sweep was built to find. It is recorded as a Phase 7 item in
+`docs/plan/OPTIMISATION-NOTES.md`, with the caveat that `visibleCaptures` also governs
+repeated-capture retention, so it is not a free flag flip.
+
+### Subject length: zero bytes, at every level
+
+```
+ length |     Create |    IsMatch |      Match | (first Create, first IsMatch)
+     64 |      1,024 |      1,392 |      1,392 | (1,024, 1,392)
+   1024 |      1,024 |      1,392 |      1,392 | (1,024, 1,392)
+  16384 |      1,024 |      1,392 |      1,392 | (1,024, 1,392)
+ 262144 |      1,024 |      1,392 |      1,392 | (1,024, 1,392)
+```
+
+Flat across a 4,096x range, on all three columns, while the same sweep's time rises from 266.5 ns
+to 8,406.2 ns. `MemoryDiagnoser` agrees on the workloads: `FuzzyLong` minus `FuzzyShort` is **0 B**
+(992 each) across a megabyte and a 17,909x time ratio.
+
+Two things had to be ruled out before "flat" could be read as "nothing is allocated":
+
+- **The pool.** `MatchState.Dispose` returns three `ByteStack` buffers to
+  `ArrayPool<byte>.Shared` (`MatchState.cs:650-655`), and a rented-and-returned buffer is invisible
+  to a steady-state figure. What settles it is the code, not the flat column: the stacks are rented
+  lazily and grown by matching work (`ByteStack.cs:306`), never sized from the subject, so there is
+  no subject-sized rental for the flat column to be hiding.
+- **Time without bytes.** The rising time with flat bytes is `MatchState.cs:501`'s
+  `IndexOfAnyInRange` surrogate scan - a vectorised pass over the subject, O(n) in time and O(1) in
+  allocation - plus the matching itself.
+
+**How to read the first-call column, and how not to.** It is a one-time-cost column and nothing
+else. Three limits, all visible in the two tables above:
+
+- `ArrayPool<byte>.Shared` is process-wide, so only the group sweep's first row ever meets a pool
+  this process has not filled - and it is the row that shows the cost, first `IsMatch` 11,848 B
+  against a steady 1,392 B. By the time the subject sweep runs, every first figure equals its
+  steady one because the pool is warm, which is a fact about run order, not about subject length.
+- A first figure is only honest for the level that reaches a path first. Within a row the probe
+  measures `Create`, then `IsMatch`, then `Match`; `IsMatch` and `Match` are the same `Run`, and
+  `Measure` calls its operation nine times, so `Match`'s "first" sample is that path's tenth walk.
+  The probe therefore reports a first figure for `Create` and `IsMatch` only.
+- Rows after the first still show first above steady at 4, 8, 16 and 32 groups: the excess is 280,
+  536, 1,048 and 2,072 B, which is 70.0, 67.0, 65.5 and 64.8 B **per group**, not a per-pattern
+  constant - the 2-group row shows no excess at all. Whatever that is, it scales with the pattern
+  and has not been isolated. Nothing above rests on it; no slope in this note uses a first figure.
+
+### The workload subtractions, for the record
+
+From run E's `Allocated` column (`artifacts/bench/2026-09-19-S58-noise-E`, medium job):
+
+| Subtraction | Bytes | What it isolates |
+|---|---|---|
+| `FuzzyLong` - `FuzzyShort` | 0 | subject length costs no allocation |
+| `MatchesToEnd` - `MatchesFirstTwo` | 14 of 35,083,858 | `Matches` is eager: reading two matches costs what reading all of them costs |
+| `MatchesFirstTwo` - `EnumerateMatchesFirstTwo` | 35,081,580 | what laziness buys when the walk stops early - 15,496x |
+| `EnumerateMatchesToEndDense` - `MatchesToEndDense` | +18,085,256 | what laziness costs when it does not: 6.10x more, the per-step state |
+
+The last two are the pair S54 pinned for the lazy-walk decision, and they are the reason that
+decision is a trade rather than a win.

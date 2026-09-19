@@ -9,6 +9,15 @@ to that path were refused for permission - this session cannot write under `.cla
 around a permission boundary with a shell copy is not something a slice gets to decide. The body is
 below, finished, so nothing is lost and the owner can land it with one move:
 
+**Re-probed 2026-09-19 (sitting 4), and the answer has not changed.** Both routes were tried and
+both were refused before reaching the filesystem: `Write` to
+`.claude/skills/optimise/WRITE-PROBE.txt` ("Claude requested permissions to write to ... but you
+haven't granted it yet") and `touch` on `.claude/skills/write-probe-tmp.txt` through the shell, as a
+single uncompounded command, refused identically. So this is the harness's permission boundary
+rather than a file lock or a decomposition rule, an unattended session cannot cross it, and the item
+stays parked for the owner. It is not a blocker for any Phase 7 slice: this file is the checklist
+and ROADMAP's Phase 7 entry links it.
+
 ```powershell
 New-Item -ItemType Directory -Force -Path .claude/skills/optimise
 # then move the content below the rule into .claude/skills/optimise/SKILL.md, frontmatter first,

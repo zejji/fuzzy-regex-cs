@@ -96,19 +96,96 @@ workload S60 item 10 exists for; without a baseline here that item cannot be jud
 
 ## Done when
 
-- [ ] Noise floor measured and committed with date, SHA, job and machine state; the BDN affinity
+- [x] Noise floor measured and committed with date, SHA, job and machine state; the BDN affinity
       and GC-mode question answered from a real run's artifacts.
-- [ ] pyperf installed; `pyperf system show` and `pyperf check` output archived with verdicts.
-- [ ] EventPipe topN and the dotTrace/Rider MCP allocation route each proven on one real capture,
-      with the text archived, or the failure and the fallback recorded.
-- [ ] `.claude/skills/optimise/SKILL.md`, `SYNC-DIVERGENCE.md` and `check-sync-divergence.ps1`
-      landed and wired into the ratchet.
-- [ ] `compare-benchmarks.ps1` reports the allocation ratio and honours the floor, tool tests cover
+- [x] pyperf installed; `pyperf system show` and `pyperf check` output archived with verdicts.
+- [x] EventPipe topN and the dotTrace/Rider MCP allocation route each proven on one real capture,
+      with the text archived, or the failure and the fallback recorded. (The allocation route
+      **failed**: nothing installed reads a captured trace back to a source site. The failure, both
+      attempted routes and the arithmetic fallback - now demonstrated on real numbers - are in
+      `phase7-research/profiles/README.md`.)
+- [~] `.claude/skills/optimise/SKILL.md`, `SYNC-DIVERGENCE.md` and `check-sync-divergence.ps1`
+      landed and wired into the ratchet. (Ledger and script landed and wired. The skill file is
+      **not landed**: this session cannot write under `.claude/`, proven by two independently
+      refused routes on two days. Finished body parked in
+      `phase7-research/optimise-skill-pending.md`, linked from ROADMAP's Phase 7 entry, one move
+      for the owner. Blocks no slice.)
+- [x] `compare-benchmarks.ps1` reports the allocation ratio and honours the floor, tool tests cover
       both; span-copy and lazy-walk costs measured, both decisions written up with numbers and put
       to the owner, neither implemented here.
-- [ ] Every finding not acted on carries a `ponytail:`/`Phase 7` comment and an OPTIMISATION-NOTES
-      row; no oracle answer changed.
-- [ ] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a floor taken with the
+- [x] Every finding not acted on carries a `ponytail:`/`Phase 7` comment and an OPTIMISATION-NOTES
+      row; no oracle answer changed. (One exception, deliberate and recorded: the `IsMatch`
+      `visibleCaptures` finding has its OPTIMISATION-NOTES row but **not** its source comment,
+      because this slice may not touch `src/`. Handed to S60; see DECISIONS 2026-09-19.)
+- [x] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a floor taken with the
       driver running; a compare script that averages across workloads or ignores its own floor; a
       span benchmark whose result is dead-code eliminated; a pyperf baseline recorded although
-      `check` warned; a `sync-divergence:` marker the script would not catch), commit.
+      `check` warned; a `sync-divergence:` marker the script would not catch), commit. (Oracle red
+      at 1 of 3 seeds on one pre-existing triaged row, and AOT tests red on a pre-existing IL2065,
+      both reproduced byte-identically against an untouched `src/`; see the sittings notes.)
+
+---
+
+## Closing notes - 2026-09-19, four sittings
+
+Per-sitting detail is `docs/plan/slices/notes/S58-sittings.md`; this is what a later slice needs.
+
+**What landed.** This machine's noise floor (`bench/baselines/<machine-id>/noise-floor.md`) with the
+BDN affinity and GC-mode question answered from a real run's generated `.csproj` and
+`runtimeconfig.json`; pyperf installed, `system show` and `check` archived with verdicts and the
+Python side's own floor measured; the CPU profile route proven end to end and archived under
+`artifacts/prof/S58/`; `compare-benchmarks.ps1` with an allocation-ratio column and a `-NoiseFloor`
+default, covered by tool tests; `SYNC-DIVERGENCE.md` and `check-sync-divergence.ps1`, wired into the
+ratchet; and two written decisions for the owner - the span-threading and lazy-walk document
+(`docs/plan/2026-09-19-span-threading-decision.md`) and the allocation attribution behind it.
+**No `src/` change:** `git diff 2c1e747 -- src` is empty, which is the slice's own claim about
+itself.
+
+**The two things a later slice should know.**
+
+1. **The allocation profiler route is closed, and the arithmetic route is now a demonstrated
+   method rather than a plan.** Nothing installed reads a captured .NET allocation trace back to a
+   source site; the fallback is `bench/FuzzyRegex.Benchmarks/Attribution.cs`, run with
+   `dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution`, which measures
+   `MatchState.Create`, `IsMatch` and `Match` at every point of both sweeps. Its result: a capture
+   group costs **264.00 B** in a `Match`, of which **40.00 B is the state** and **224.00 B is
+   outside it**, at all five steps with no residual; the state's own line is **984 B + 40 B per
+   group**. That corrected step 2 of the decision document, which had told the owner pooling was
+   worth 1,296 B a step.
+2. **`IsMatch` allocates byte-for-byte what `Match` allocates**, because `IsMatch` is
+   `Run(...).Success` and `Run` passes `visibleCaptures: true` unconditionally - a predicate call
+   pays 224 B per group for captures nobody can read. It has its `OPTIMISATION-NOTES.md` row but
+   **not** its paired `ponytail:` source comment, because this slice may not touch `src/`. **S60
+   owes that comment**, and nothing enforces the pairing automatically.
+
+**Still open for the owner, blocking nothing.** `.claude/skills/optimise/SKILL.md` cannot be written
+by an unattended session - two independent routes refused at the permission layer, on two days. The
+finished body is in `docs/plan/phase7-research/optimise-skill-pending.md`, linked from ROADMAP's
+Phase 7 entry, and moving it is one command.
+
+**No negative control was run**: this slice runs no oracle wave of its own and changes no engine
+behaviour, so there is nothing for a control to detect.
+
+**Review.** One blind pass over the sitting-4 diff raised **2 findings; both reproduced; both
+fixed.** (1) The state's line was written as "1,024 B a step plus 40 B per group", which
+double-counts the first group - `984 + 40n` fits all six measured `Create` rows and `1,024 + 40n`
+fits none. (2) The probe's `(first Match)` column was not a first call: `Measure` runs each
+operation nine times and `IsMatch` shares `Match`'s `Run` path, so `Match`'s "first" sample is that
+path's tenth walk. The probe now reports a first figure for `Create` and `IsMatch` only, which
+exposed a genuinely-first `Run` at **11,848 B against a steady 1,392 B** - a one-time cost the old
+column hid. Because those fixes changed `Attribution.cs` and re-quoted every table, **a second blind
+pass over that delta was required and was run**: it raised **6 findings, all 6 reproduced and
+fixed** - a first-call figure in a source comment quoted from the reviewer's own control rather than
+from this tree (12,504 B, corrected to this run's 11,848 B); "nineteenth walk" for what the code
+makes the tenth; "five rows" for six; a 74% share taken against 1,392 B in a section headed 1,296 B,
+now stated with the 96 B offset; a per-pattern explanation for a first-call excess that the numbers
+show scales per group and has not been isolated; and two quoted output blocks that silently dropped
+the run's interleaved slope lines. **The independent verifier** (fresh Opus, briefed only with the
+tree) re-ran the probe, the ratchet, the tool tests, the AOT smoke and the archived BDN artifacts
+and reported every quoted number CONFIRMED, with one DIFFERENT and three COULD NOT RUN: the
+DIFFERENT was the gates paragraph citing `git diff dfa8767 -- src` as empty when `dfa8767` is a
+pre-rebase duplicate of S56b that is not an ancestor of this branch - corrected to `2c1e747`, the
+S56b commit that is, against which it is empty. The three COULD NOT RUN were the oracle wave, the
+AOT test run and S54's 12,643 ms figure, none in its commanded set, all run by the session itself
+and quoted from that output. Sitting 1's calibration wall-clock times are one run's medians and are
+not reproducible by re-running; no conclusion rests on them.
