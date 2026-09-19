@@ -578,3 +578,64 @@ survived that gate; the usual ratio is about one in five. The explanation is tha
 passes were reading code no reviewer had ever seen, and the third was reading code written in the
 same hour. Pass 3's findings needed no fourth pass: the changes it produced are covered by the tests
 it asked for, all of which were proved to fail without their fix, and by the verifier's re-run.
+
+## Post-landing review fixes (2026-09-19)
+
+A fourth blind pass over the landed slice raised 11 findings; all 11 reproduced here and all 11 are
+fixed. Every behavioural one was pinned by a test written first and watched fail.
+
+**Major.**
+
+1. **A cap refusal never cleared `running`.** The keystroke that breaches the subject cap usually
+   supersedes a question that is still with a worker, and the early return left `running` set, so
+   `busy` stayed true for ever: "matching..." and a Stop button beside a message saying nothing was
+   sent to the engine. `demo.ts` clears it before the return; the existing cap test now asserts
+   `running` and `busy` as well as the message.
+2. **The page drew the live subject against the previous answer's offsets.** For the debounce plus
+   the round trip - a quarter of a second of every keystroke - the highlights, the group Text column
+   and the capture list sliced text the engine never saw: an answer of `{index: 0, length: 6}` over
+   a subject changed to "ZZ" rendered "ZZ" as a six-character match. The subject is now snapshotted
+   beside the answer (`answeredSubject`) and everything that indexes into it renders from the
+   snapshot. Pinned twice: in the state machine, and in the DOM.
+3. **A shared link asked its question twice and burned the warm spare.** `initialise()` wrote the
+   three refs from the fragment and then asked; the watcher saw those writes and scheduled the same
+   question 250 ms later, which killed the worker answering the first one. Measured before the fix:
+   2 questions posted, 1 worker killed, 3 constructed, on a page nobody had typed into. The refs are
+   now seeded from the fragment before the watcher exists, so the mount path asks once.
+4. **Match selection was mouse-only.** `<mark @click>` and `<tr @click>` with no tab stop, no role
+   and no key handling, and the group table is only reachable by choosing a match (WCAG 2.1.1). The
+   highlights are now `role="button"`, tabbable, and answer Enter and Space; each table row carries a
+   real button rather than a role on the `<tr>`, which would have cost the row its semantics.
+
+**Minor.**
+
+5. Both `overflow-x-auto` wrappers are now `tabindex="0"`, `role="region"` with a name, so the column
+   clipped at 390 px (`docs/demo/page-390.png`) is reachable without a pointer; `.data-table` gained
+   `min-w-max` so a narrow window scrolls the region instead of crushing six columns, and a hint
+   below each table says so on small screens.
+6. `JSON.parse(...) as Reply` and `(await response.json()) as readonly Example[]` were claims, not
+   checks - and a parse throw inside the pool's message listener left the waiting promise unsettled,
+   which is the permanent "matching..." the pool exists to prevent. `src/lib/shapes.ts` validates
+   both shapes; a reply the page cannot read now settles the question with an error.
+7. The Captures column tested `> 1`, so the ordinary one-capture group showed "-", the same mark the
+   row above uses for a group that did not participate. Now `>= 1`.
+8. `--color-hit-b-dark` was oklch(0.55 0.11 85): slate-100 on it measures 4.48:1, under AA's 4.5 for
+   the mark that carries the answer. Both dark tints were darkened by 0.05 - to 8.41:1 and 5.50:1 -
+   rather than only the failing one, because the 0.10 lightness step between them is what keeps
+   adjacent matches from reading as one block.
+9. `pages: write` and `id-token: write` moved from the workflow to the `deploy` job, which is the
+   only job that deploys; the build job, where `npm ci` and a WebAssembly publish run third-party
+   code, is left with `contents: read`. actions/deploy-pages grants them at job level for the same
+   reason (read 2026-09-19).
+10. `.nvmrc` pinned the floating major `24`; it now pins 24.16.0, the version every run in these
+    notes used. `package.json`'s `engines` stays a floor (Vite 8's 22.12), and the workflow comment,
+    `tools/build-demo-web.ps1` and `demo/README.md` say which is which.
+11. A `hashchange` listener applies an edited fragment, a same-page link, or Back between two shared
+    cases. It compares before assigning, so the page's own `replaceState` cannot start a loop.
+
+**Testing.** `tests/page.test.ts` is new: App.vue mounted into jsdom with `createApp`, over the same
+fake worker, which is what let findings 4, 5, 7 and the rendering half of 2 be pinned without adding
+@vue/test-utils. The fake worker now answers with the whole `DemoMatch` shape, `counts` included -
+it did not, and the new validation rejected it, which is a fake that was testing itself.
+62 tests green, `vue-tsc --noEmit` clean, `npm run build` green, `tools/run-wasm-smoke.ps1
+-SkipWebBuild` green (28 files, 7.66 MB, 56 endpoints matched).

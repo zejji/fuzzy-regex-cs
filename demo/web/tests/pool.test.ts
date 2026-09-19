@@ -23,7 +23,10 @@ test('a warm spare is booted alongside the serving worker', async () => {
 test("a question gets the engine's answer, parsed", async () => {
     const pool = createPool({ spawn: spawnFake() });
     const answer = await pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
-    expect(answer).toEqual({ matches: [{ index: 0, length: 3, groups: [] }], truncated: false });
+    expect(answer).toEqual({
+        matches: [{ index: 0, length: 3, counts: { substitutions: 0, insertions: 0, deletions: 0 }, groups: [] }],
+        truncated: false,
+    });
     pool.dispose();
 });
 
@@ -148,4 +151,29 @@ test('dispose() leaves nothing running', async () => {
 
     pool.dispose();
     expect(FakeWorker.live).toBe(0);
+});
+
+test('a reply the page cannot read settles the question rather than leaving it waiting', async () => {
+    // `JSON.parse` on whatever the worker sent, straight into a cast. A half-written reply throws
+    // inside the message listener, where nothing is waiting to catch it, and the question it
+    // answered is never settled: the page sits on "matching..." with a live worker behind it, which
+    // is exactly the state the pool exists to make impossible.
+    const worker = new FakeWorker({ answers: false });
+    const pool = createPool({ spawn: () => worker });
+    await pool.ready;
+
+    const truncated = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    worker.emit({ requestId: worker.posted[0]?.requestId ?? 0, json: '{"matches": [' });
+    const first = await truncated;
+    expect(first.error).toMatch(/could not be read/);
+    expect(first.matches).toBeUndefined();
+    expect(first.aborted).toBeUndefined(); // the worker was not killed, so this is not an abort
+
+    // Well-formed JSON of the wrong shape is the same problem wearing a suit: it survives the cast
+    // and dies later, in a template, as `undefined.substitutions`.
+    const wrongShape = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    worker.emit({ requestId: worker.posted[1]?.requestId ?? 0, json: '{"matches": [{"index": 0}]}' });
+    expect((await wrongShape).error).toMatch(/could not be read/);
+
+    pool.dispose();
 });

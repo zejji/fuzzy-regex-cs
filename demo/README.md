@@ -49,8 +49,11 @@ set), and `.github/workflows/pages.yml` (deploys).
   On Windows this writes into the SDK's own folder, so run it from a terminal that is allowed to:
   an elevated PowerShell if the SDK is installed under `C:\Program Files`.
 - **Node 22.12 or later**, and this one is required to build the page at all, not only to test it.
-  `web/.nvmrc` pins 24, which is what the runs recorded in the slice notes used; `nvm use` in
-  `demo/web` picks it up. `tools/build-demo-web.ps1` refuses below 22.12, which is Vite 8's floor.
+  `web/.nvmrc` pins **24.16.0**, the exact version every run recorded in the slice notes used and
+  the one CI installs; `nvm use` in `demo/web` picks it up. The full version and not a floating
+  `24`, so the toolchain cannot change under the project without a commit. `package.json`'s
+  `engines` is the floor rather than the pin: `tools/build-demo-web.ps1` refuses below 22.12, which
+  is Vite 8's minimum.
 - **Python 3**, only to serve the published files. Any static file server will do; Python's is used
   below because it is the one the browser runs in this repository were done with.
 

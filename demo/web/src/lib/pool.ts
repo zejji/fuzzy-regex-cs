@@ -13,6 +13,8 @@
 
 import type { BootState, Inputs, Reply, WorkerLike } from '../types';
 
+import { parseReply } from './shapes';
+
 /** What a pool tells its owner whenever its shape changes. */
 export interface PoolState {
     readonly generation: number;
@@ -106,7 +108,11 @@ function createClient(worker: WorkerLike): Client {
         const settle = waiting.get(data.requestId);
         if (settle === undefined) return;
         waiting.delete(data.requestId);
-        settle(JSON.parse(data.json) as Reply);
+        // Parsed and checked, never cast: a throw here escapes into the listener, where nobody
+        // catches it and - because the waiting entry has already been taken - nobody is ever
+        // settled either. `parseReply` returns the failure as an answer instead, so a reply the
+        // page cannot read ends the question rather than hanging it.
+        settle(parseReply(data.json));
     });
 
     return {

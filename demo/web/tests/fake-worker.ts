@@ -59,8 +59,18 @@ export class FakeWorker implements WorkerLike {
             if (this.terminated) return;
             this.emit({
                 requestId: request.requestId,
+                // The whole shape DemoEngine.cs sends, `counts` included. A fake that answered
+                // with less than the contract would be a fake the page's own validation rejects,
+                // and the tests would be testing the fake.
                 json: JSON.stringify({
-                    matches: [{ index: 0, length: request.subject.length, groups: [] }],
+                    matches: [
+                        {
+                            index: 0,
+                            length: request.subject.length,
+                            counts: { substitutions: 0, insertions: 0, deletions: 0 },
+                            groups: [],
+                        },
+                    ],
                     truncated: false,
                 }),
             });

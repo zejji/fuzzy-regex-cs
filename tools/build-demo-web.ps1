@@ -66,7 +66,7 @@ $parts = $version.TrimStart('v') -split '\.'
 $major = [int]$parts[0]
 $minor = [int]$parts[1]
 if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 12)) {
-    throw "Node $version is too old: demo/web needs 22.12 or newer (see demo/web/.nvmrc, which pins 24)."
+    throw "Node $version is too old: demo/web needs 22.12 or newer (see demo/web/.nvmrc, which pins 24.16.0)."
 }
 
 Write-Host "Building the demo's front end with node $version from $web."

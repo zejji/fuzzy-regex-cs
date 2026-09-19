@@ -25,13 +25,12 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
+# The default for every job: read the repository and nothing else. The two write permissions the
+# deployment needs are granted on the deploy job alone, not here - the build job runs `npm ci` and
+# a WebAssembly publish, which is where third-party code executes, and a token that could deploy to
+# Pages from inside that job is a token that did not need to exist.
 permissions:
   contents: read
-  # Both are required by actions/deploy-pages: `pages: write` "to deploy to Pages" and
-  # `id-token: write` "to verify the deployment originates from an appropriate source"
-  # (github.com/actions/deploy-pages, read 2026-09-16).
-  pages: write
-  id-token: write
 
 # One deployment at a time, and the newest wins. cancel-in-progress is false rather than true here,
 # unlike ci.yml: cancelling a deployment half way leaves Pages serving a half-uploaded artefact.
@@ -60,10 +59,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # From demo/web/.nvmrc, so the runner and a developer's machine use one pinned version and
-          # there is no second place to update. Vite 8 needs 22.12 or newer; tools/build-demo-web.ps1
-          # refuses below that so the failure names Node rather than surfacing as a missing API deep
-          # inside the toolchain.
+          # From demo/web/.nvmrc, which pins the FULL version (24.16.0) and not a floating major:
+          # `24` is whatever 24.x the runner has that week, so a runtime change would arrive here
+          # without a commit, and the runner and a developer's machine could differ while both
+          # claimed to be on 24. package.json's `engines` stays a floor - Vite 8 needs 22.12 or
+          # newer - and tools/build-demo-web.ps1 refuses below that, so the failure names Node
+          # rather than surfacing as a missing API deep inside the toolchain.
           node-version-file: demo/web/.nvmrc
           cache: npm
           cache-dependency-path: demo/web/package-lock.json
@@ -121,6 +122,14 @@ jobs:
     name: Deploy to Pages
     needs: build
     runs-on: ubuntu-latest
+    # Exactly what actions/deploy-pages asks for, on the one job that runs it: `pages: write` "to
+    # deploy to Pages" and `id-token: write` "to verify the deployment originates from an
+    # appropriate source" (github.com/actions/deploy-pages, read 2026-09-19, which grants them at
+    # job level for this reason). A job-level block replaces the default above rather than adding
+    # to it, and this job checks nothing out, so `contents` is not among them.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

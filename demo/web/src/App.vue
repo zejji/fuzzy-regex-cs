@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The page. Its state is demo.ts, which is testable without a DOM; what is here is layout only.
-import { onMounted, proxyRefs } from 'vue';
+import { onMounted, onUnmounted, proxyRefs } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { createPool } from './lib/pool';
@@ -10,6 +10,7 @@ const {
     pattern,
     flags,
     subject,
+    answeredSubject,
     examples,
     engine,
     engineError,
@@ -25,10 +26,15 @@ const {
     current,
     maxSubjectLength,
     load,
+    select,
     stop,
 } = demo;
 
 onMounted(demo.initialise);
+// The page's lifetime is the document's, so this never runs in production. It runs in the tests,
+// where a mount that left its `hashchange` listener and its two workers behind would answer the
+// next test's questions.
+onUnmounted(demo.dispose);
 
 // The page's own state, for a driver to read. Same contract as S70's window.__harness: a machine
 // can wait on it and read what the page believes rather than scraping rendered text.
@@ -145,6 +151,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <h2 class="mb-2 text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
                             Subject
                         </h2>
+                        <!--
+                          Each highlight is a control, so it says so and answers a keyboard:
+                          `role="button"` and a tab stop, Enter and Space, and an `aria-label`
+                          because the text inside it is the subject and not a name - a zero-length
+                          match has no text at all. WCAG 2.1.1 Keyboard: the group table below is
+                          only reachable by choosing a match, and before this it was only reachable
+                          with a pointer.
+                        -->
                         <p class="subject-pane"><template v-for="(part, i) in view.segments" :key="i"><mark
                                     v-if="part.match !== null"
                                     class="hit"
@@ -153,9 +167,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                         'hit-empty': part.text === '',
                                         'hit-current': part.match === selected,
                                     }"
+                                    role="button"
+                                    tabindex="0"
                                     :aria-current="part.match === selected"
+                                    :aria-label="'match ' + (part.match + 1)"
                                     :title="'match ' + (part.match + 1)"
-                                    @click="selected = part.match"
+                                    @click="select(part.match)"
+                                    @keydown.enter="select(part.match)"
+                                    @keydown.space.prevent="select(part.match)"
                                 >{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></p>
                         <p v-if="view.total === 0" class="field-hint">No matches.</p>
                     </section>
@@ -165,7 +184,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <h2 class="mb-2 text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
                                 Matches
                             </h2>
-                            <div class="card overflow-x-auto p-0 sm:p-0">
+                            <!--
+                              A scroll container with a tab stop, a role and a name. Six columns do
+                              not fit 390 px (docs/demo/page-390.png), and a region that can only be
+                              scrolled by dragging it hides its last column from anyone without a
+                              pointer. WCAG 2.1.1 again, and the hint below is the visible half of
+                              the same fix.
+                            -->
+                            <div
+                                class="card overflow-x-auto p-0 sm:p-0"
+                                tabindex="0"
+                                role="region"
+                                aria-label="Matches, scrollable sideways"
+                            >
                                 <table class="data-table">
                                     <thead>
                                         <tr>
@@ -178,14 +209,30 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                         </tr>
                                     </thead>
                                     <tbody>
+                                        <!--
+                                          The row stays a row: a `role="button"` on a <tr> replaces
+                                          the row semantics the rest of the answer is read by. The
+                                          keyboard control is a real button in the first cell, which
+                                          needs no ARIA and no key handling of its own.
+                                        -->
                                         <tr
                                             v-for="(match, i) in matches.slice(0, view.shown)"
                                             :key="i"
                                             class="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                                             :class="{ 'font-semibold': i === selected }"
-                                            @click="selected = i"
+                                            @click="select(i)"
                                         >
-                                            <td>{{ i + 1 }}</td>
+                                            <td>
+                                                <button
+                                                    class="row-select"
+                                                    type="button"
+                                                    :aria-pressed="i === selected"
+                                                    :aria-label="'match ' + (i + 1)"
+                                                    @click="select(i)"
+                                                >
+                                                    {{ i + 1 }}
+                                                </button>
+                                            </td>
                                             <td class="font-mono">{{ match.index }}</td>
                                             <td class="font-mono">{{ match.length }}</td>
                                             <td class="font-mono">{{ match.counts.substitutions }}</td>
@@ -195,13 +242,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     </tbody>
                                 </table>
                             </div>
+                            <p class="field-hint sm:hidden">Scroll the table sideways for the rest of the columns.</p>
                         </section>
 
                         <section v-if="current">
                             <h2 class="mb-2 text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
                                 Groups in match {{ selected + 1 }}
                             </h2>
-                            <div class="card overflow-x-auto p-0 sm:p-0">
+                            <div
+                                class="card overflow-x-auto p-0 sm:p-0"
+                                tabindex="0"
+                                role="region"
+                                :aria-label="'Groups in match ' + (selected + 1) + ', scrollable sideways'"
+                            >
                                 <table class="data-table">
                                     <thead>
                                         <tr>
@@ -233,16 +286,35 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                 <td class="font-mono">{{ group.index }}</td>
                                                 <td class="font-mono">{{ group.length }}</td>
                                                 <td>
+                                                    <!--
+                                                      `answeredSubject` and never the live box: these
+                                                      offsets are into the text the engine was given,
+                                                      which stops being the text on screen the moment
+                                                      somebody types.
+                                                    -->
                                                     <code class="font-mono">{{
-                                                        subject.slice(group.index, group.index + group.length)
+                                                        answeredSubject.slice(group.index, group.index + group.length)
                                                     }}</code>
                                                 </td>
                                             </template>
+                                            <!--
+                                              Every capture there is, and "-" only when there are
+                                              none - which happens exactly when the group did not
+                                              participate. The old test was `> 1`, so the ordinary
+                                              one-capture group, which is most of them, showed a
+                                              dash: the same mark the row above uses for "captured
+                                              nothing".
+                                            -->
                                             <td>
-                                                <template v-if="group.captures.length > 1">
+                                                <template v-if="group.captures.length >= 1">
                                                     <code v-for="(capture, i) in group.captures" :key="i" class="font-mono"
                                                         >{{ i ? ', ' : ''
-                                                        }}{{ subject.slice(capture.index, capture.index + capture.length) }}</code
+                                                        }}{{
+                                                            answeredSubject.slice(
+                                                                capture.index,
+                                                                capture.index + capture.length,
+                                                            )
+                                                        }}</code
                                                     >
                                                 </template>
                                                 <span v-else class="text-slate-500 dark:text-slate-400">-</span>
@@ -251,6 +323,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     </tbody>
                                 </table>
                             </div>
+                            <p class="field-hint sm:hidden">Scroll the table sideways for the rest of the columns.</p>
                             <p class="field-hint">
                                 A repeated group keeps every capture, not only the last - as
                                 <code class="font-mono">regex</code> does and Python's standard

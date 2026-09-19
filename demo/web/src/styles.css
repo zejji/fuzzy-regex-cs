@@ -13,8 +13,11 @@
     - NN/g, "Response Time Limits": the busy state has to appear within about a second, and a wait
       longer than that needs an animation rather than a word - hence .pill-busy's pulse.
     - W3C, WCAG 2.2: 2.5.8 Target Size (Minimum) is 24x24 CSS px, and every control here clears it
-      with room to spare; 2.4.13 wants a 2 px focus perimeter at 3:1 against the unfocused state,
-      which is what .focus-ring draws.
+      with room to spare - except the match highlights, which are sized by the text they mark and
+      take 2.5.8's own Inline exception ("the target is in a sentence, or its size is otherwise
+      constrained by the line-height of non-target text"); the row button in the matches table is
+      the pointer-sized way to the same selection. 2.4.13 wants a 2 px focus perimeter at 3:1
+      against the unfocused state, which is what the :focus-visible rule below draws.
 */
 
 @import 'tailwindcss';
@@ -34,11 +37,19 @@
       would render four answers as one block. Every mark also carries its own border, so the
       distinction survives a reader who cannot tell the two tints apart.
     */
+    /*
+      Measured against the text that sits on them, 2026-09-19 (WCAG 2.x contrast, sRGB after gamut
+      clipping): light slate-900 on hit-a 13.5:1 and on hit-b 10.9:1; dark slate-100 on hit-a-dark
+      8.4:1 and on hit-b-dark 5.5:1. The dark pair was L 0.45 / L 0.55, and L 0.55 measured 4.48:1
+      - under AA's 4.5 for body text, on the mark that carries the answer. Both were darkened by
+      the same 0.05 rather than only the failing one, because the 0.10 lightness step between them
+      is what keeps two adjacent matches from reading as one block.
+    */
     --color-hit-a: oklch(0.91 0.11 85);
     --color-hit-b: oklch(0.84 0.13 85);
     --color-hit-edge: oklch(0.55 0.13 85);
-    --color-hit-a-dark: oklch(0.45 0.09 85);
-    --color-hit-b-dark: oklch(0.55 0.11 85);
+    --color-hit-a-dark: oklch(0.4 0.09 85);
+    --color-hit-b-dark: oklch(0.5 0.11 85);
 }
 
 @layer base {
@@ -142,8 +153,19 @@
         border-left-color: var(--color-hit-edge);
     }
 
+    /* `min-w-max` with `w-full`: the table fills the card when there is room and refuses to squeeze
+       below its own content when there is not, so a narrow window scrolls the region instead of
+       crushing six columns into four. */
     .data-table {
-        @apply w-full border-collapse text-left text-sm;
+        @apply w-full min-w-max border-collapse text-left text-sm;
+    }
+
+    /* The keyboard's way into a row. 24x24, per 2.5.8, and in the accent because it is the only
+       thing in the row that can be pressed. */
+    .row-select {
+        @apply inline-flex min-h-6 min-w-6 items-center justify-center rounded-xs;
+        @apply font-semibold text-accent underline underline-offset-2;
+        @apply hover:bg-accent-soft dark:text-accent-dark dark:hover:bg-slate-800;
     }
 
     .data-table th {

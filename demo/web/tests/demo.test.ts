@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { useDemo } from '../src/demo';
+import { type Demo, useDemo } from '../src/demo';
 import { MAX_FRAGMENT_LENGTH } from '../src/lib/fragment';
 
 import { FakeWorker, type FakeWorkerOptions } from './fake-worker';
@@ -20,9 +20,26 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const replaced: (string | URL | null | undefined)[] = [];
 
+/**
+ * The demos a test started, disposed after it.
+ *
+ * `initialise()` listens for `hashchange` on the window, which outlives the test that started it:
+ * an undisposed demo reacts to the NEXT test's fragment, asks its own question and spends a worker
+ * doing it, which shows up as a failure in whichever test happens to count workers.
+ */
+const started: Demo[] = [];
+
+const track = (demo: Demo): Demo => {
+    started.push(demo);
+    return demo;
+};
+
 beforeEach(() => {
     replaced.length = 0;
     FakeWorker.killed = 0;
+    // The composable reads the fragment as it starts, so a fragment left behind by the previous
+    // test would seed the next one's inputs.
+    location.hash = '';
     vi.spyOn(history, 'replaceState');
     vi.mocked(history.replaceState).mockImplementation(((
         _state: unknown,
@@ -35,23 +52,28 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    for (const demo of started.splice(0)) demo.dispose();
     vi.restoreAllMocks();
 });
 
 /**
  * Starts the page's state machine and waits for its first answer.
  *
- * `initialise()` is not called - that is the mount path, which reads the fragment and asks directly
- * - so the first question is triggered by setting an input, which goes through the debounce.
+ * `initialise()` is not called - that is the mount path, which asks directly - so the first
+ * question is triggered by setting an input, which goes through the debounce.
  */
 async function start(options: FakeWorkerOptions = {}) {
-    const demo = useDemo({ spawn: () => new FakeWorker(options) });
+    const demo = track(useDemo({ spawn: () => new FakeWorker(options) }));
     demo.subject.value = 'abc';
     await sleep(DEBOUNCE_MS + 60);
     return demo;
 }
 
-const answeredLength = (demo: ReturnType<typeof useDemo>) => demo.answer.value?.matches?.[0]?.length ?? null;
+/** Answers the fetch for `examples.json` with `body`, so no test reaches the network. */
+const stubExamples = (body: string) =>
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+const answeredLength = (demo: Demo) => demo.answer.value?.matches?.[0]?.length ?? null;
 
 test('the page reports itself busy for the whole debounce window, not just the worker round trip', async () => {
     const demo = await start();
@@ -133,6 +155,90 @@ test('the subject-cap refusal survives the killing of the question it replaces',
 
     expect(demo.failure.value).toMatch(/^The subject is 100,001 characters, over the demo's limit of 100,000\./);
     expect(demo.answer.value).toBeNull();
+
+    // And the refusal ENDS the question. The refused keystroke supersedes one that was with a
+    // worker, so `running` is still true from that one; leaving it set puts "matching..." and a
+    // Stop button beside a message that says nothing was sent to the engine, for ever.
+    expect(demo.running.value).toBe(false);
+    expect(demo.busy.value).toBe(false);
+});
+
+test('the highlighted subject is the one that was answered, not the one being typed', async () => {
+    const demo = await start();
+    demo.subject.value = 'abcdef';
+    await sleep(DEBOUNCE_MS + 60);
+    expect(demo.view.value.segments).toEqual([{ text: 'abcdef', match: 0 }]);
+
+    demo.subject.value = 'ZZ';
+    await sleep(0); // the watcher has run; the debounce has not fired and nothing is with the worker
+
+    // The answer on screen is still {index: 0, length: 6}. Drawn against the text now in the box
+    // that is a highlight over characters the engine never saw - "ZZ" painted as a six-character
+    // match - and the group table's Text column is the same lie one row further down.
+    expect(demo.view.value.segments).toEqual([{ text: 'abcdef', match: 0 }]);
+    expect(demo.answeredSubject.value).toBe('abcdef');
+
+    await sleep(DEBOUNCE_MS + 60);
+    expect(demo.view.value.segments).toEqual([{ text: 'ZZ', match: 0 }]); // and it catches up
+    expect(demo.answeredSubject.value).toBe('ZZ');
+});
+
+test('a shared case is asked once, and spends no worker doing it', async () => {
+    // The mount path sets the three inputs and asks about them. If the watcher sees those writes it
+    // schedules the same question again 250 ms later, which kills the worker still answering the
+    // first one and burns the warm spare - measured before the fix: two questions posted, one
+    // worker killed, three constructed, on a page nobody had typed into.
+    location.hash = '#p=a%2Bb&f=&s=aab';
+    stubExamples('[]');
+
+    const workers: FakeWorker[] = [];
+    const demo = track(
+        useDemo({
+            spawn: () => {
+                const worker = new FakeWorker();
+                workers.push(worker);
+                return worker;
+            },
+        }),
+    );
+
+    await demo.initialise();
+    await sleep(DEBOUNCE_MS + 120);
+
+    expect(demo.pattern.value).toBe('a+b'); // the shared case did load
+    expect(demo.subject.value).toBe('aab');
+    expect(workers.reduce((total, worker) => total + worker.posted.length, 0)).toBe(1);
+    expect(FakeWorker.killed).toBe(0);
+    expect(workers).toHaveLength(2); // one serving, one spare: no replacement was needed
+});
+
+test('editing the fragment, or following a same-page link, applies the new case', async () => {
+    stubExamples('[]');
+    const demo = track(useDemo({ spawn: () => new FakeWorker() }));
+    await demo.initialise();
+    await sleep(DEBOUNCE_MS + 60);
+
+    location.hash = '#p=z&f=IgnoreCase&s=zzzz';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await sleep(DEBOUNCE_MS + 120);
+
+    expect(demo.pattern.value).toBe('z');
+    expect(demo.flags.value).toBe('IgnoreCase');
+    expect(demo.subject.value).toBe('zzzz');
+    expect(answeredLength(demo)).toBe(4); // and the new case was asked, not just typed into the boxes
+});
+
+test('an examples.json that is not a list of worked examples leaves the tour empty, not half-drawn', async () => {
+    // Fetched at runtime and cast, so nothing checks it: a file with a missing member renders as a
+    // sidebar of blank buttons, and one that is not even a list renders as `undefined` in the DOM.
+    stubExamples('[{"title": "half a case", "pattern": "a"}]');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const demo = track(useDemo({ spawn: () => new FakeWorker() }));
+    await demo.initialise();
+
+    expect(demo.examples.value).toEqual([]);
+    expect(errors).toHaveBeenCalled();
 });
 
 test('a worker killed while the runtime is still booting is not an engine failure', async () => {

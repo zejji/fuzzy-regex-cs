@@ -11,6 +11,7 @@ import { MAX_DISPLAYED_MATCHES, MAX_SUBJECT_LENGTH } from './lib/caps';
 import { MAX_FRAGMENT_LENGTH, decode, encode } from './lib/fragment';
 import { segments } from './lib/highlight';
 import { createPool } from './lib/pool';
+import { isExampleList } from './lib/shapes';
 import type { Answer, Example, Match, WorkerLike } from './types';
 
 /**
@@ -51,9 +52,16 @@ export interface DemoOptions {
 export type EngineState = 'starting' | 'ready' | 'failed';
 
 export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions = {}) {
-    const pattern = ref('(?:colour){e<=2}');
-    const flags = ref('');
-    const subject = ref('the color of the collar');
+    // The shared case is read HERE, before the watcher below exists, and not on the mount path.
+    // Writing these three from `initialise()` puts three changes through the watcher, which
+    // schedules the very question `initialise` is about to ask: the second one lands 250 ms later,
+    // kills the worker still answering the first and spends the warm spare, on a page nobody has
+    // typed into. Seeding the refs before anything watches them is the whole fix.
+    const shared = decode(location.hash);
+
+    const pattern = ref(shared?.pattern ?? '(?:colour){e<=2}');
+    const flags = ref(shared?.flags ?? '');
+    const subject = ref(shared?.subject ?? 'the color of the collar');
 
     const examples: Ref<readonly Example[]> = ref([]);
     const engine: Ref<EngineState> = ref('starting');
@@ -61,6 +69,17 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
     const running = ref(false); // a question is with the worker right now
     const pending = ref(false); // an input changed and the debounce has not fired yet
     const answer: Ref<Answer | null> = ref(null); // the engine's parsed JSON, or null before the first
+    /**
+     * The subject the answer above is an answer to.
+     *
+     * Every index in an answer is an offset into the text that was searched, and that text stops
+     * being what the box says the moment someone types: for the debounce plus the round trip, the
+     * live `subject` and the answer describe different strings. Drawing the highlights, the group
+     * Text column or a capture from the live one paints the old offsets over the new text - an
+     * answer of `{index: 0, length: 6}` renders "ZZ" as a six-character match - which is a wrong
+     * answer that looks exactly like a right one. This is the string the page renders from.
+     */
+    const answeredSubject = ref('');
     const failure = ref(''); // what to show instead of an answer
     const elapsedMs: Ref<number | null> = ref(null);
     const selected = ref(0);
@@ -79,11 +98,23 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
 
     const matches = computed<readonly Match[]>(() => answer.value?.matches ?? []);
 
-    const view = computed(() => segments(subject.value, matches.value, MAX_DISPLAYED_MATCHES));
+    const view = computed(() => segments(answeredSubject.value, matches.value, MAX_DISPLAYED_MATCHES));
 
     const capped = computed(() => view.value.total > view.value.shown);
 
     const current = computed<Match | null>(() => matches.value[selected.value] ?? null);
+
+    /**
+     * Selects a match, from a click or from the keyboard.
+     *
+     * A function and not `selected = i` in the template because the page offers two ways to reach
+     * each match - the highlight in the subject and the row in the table - and both a pointer and
+     * a keyboard reach each of those. One handler is what keeps the four in step.
+     */
+    const select = (index: number): void => {
+        if (!Number.isInteger(index) || index < 0 || index >= matches.value.length) return;
+        selected.value = index;
+    };
 
     /**
      * Is the answer on screen still the answer to what the inputs now say?
@@ -110,9 +141,17 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         failure.value = '';
 
         if (tooLong.value) {
+            // The refusal ENDS the question, including one that was still with a worker when this
+            // keystroke superseded it - the usual way the cap is reached is a long paste into a
+            // running demo. Leaving `running` set from that earlier question leaves `busy` true
+            // for ever, so the page shows "matching..." and a Stop button beside a message that
+            // says nothing was sent to the engine.
+            running.value = false;
+
             // Refused, never truncated: a truncated subject gives wrong answers that look
             // right, and every index in them would be a lie about text the visitor can see.
             answer.value = null;
+            answeredSubject.value = '';
             failure.value =
                 `The subject is ${subject.value.length.toLocaleString()} characters, over the demo's ` +
                 `limit of ${MAX_SUBJECT_LENGTH.toLocaleString()}. Nothing was sent to the engine: ` +
@@ -122,7 +161,11 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
 
         running.value = true;
         const startedAt = performance.now();
-        const reply = await pool.ask({ pattern: pattern.value, flags: flags.value, subject: subject.value });
+        // The subject as it was SENT. The answer's offsets belong to this string and to no other,
+        // so it is kept beside the reply rather than read back off the live ref, which has moved
+        // on by the time a slow answer lands.
+        const asked = subject.value;
+        const reply = await pool.ask({ pattern: pattern.value, flags: flags.value, subject: asked });
 
         // An answer to a question the page has moved on from. The pool already drops replies
         // whose requestId nobody is waiting for; this second guard covers the case where the
@@ -135,10 +178,12 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
 
         if (reply.aborted === true || typeof reply.error === 'string') {
             answer.value = null;
+            answeredSubject.value = '';
             failure.value = reply.error ?? 'stopped';
             return;
         }
 
+        answeredSubject.value = asked;
         answer.value = reply;
     };
 
@@ -171,6 +216,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         pending.value = false;
         running.value = false;
         answer.value = null;
+        answeredSubject.value = '';
 
         if (!wasRunning) {
             // Stop is offered during the debounce as well, when the question has not been
@@ -218,28 +264,60 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         schedule();
     });
 
-    /** The mount path: read the shared case, ask about it, and fetch the tour. */
-    const initialise = async (): Promise<void> => {
-        const shared = decode(location.hash);
-        if (shared !== null) {
-            pattern.value = shared.pattern;
-            flags.value = shared.flags;
-            subject.value = shared.subject;
+    /**
+     * Applies a case that arrived in the address bar after load: an edited fragment, Back or
+     * Forward between two shared cases, or a same-page link.
+     *
+     * The page owns the fragment and rewrites it on every keystroke, so it also sees its own
+     * writes here in a browser that reports them. Comparing before assigning is what stops that
+     * being a loop, and it costs nothing: identical inputs are not a new case.
+     */
+    const applyFragment = (): void => {
+        const incoming = decode(location.hash);
+        if (incoming === null) return;
+        if (
+            incoming.pattern === pattern.value &&
+            incoming.flags === flags.value &&
+            incoming.subject === subject.value
+        ) {
+            return;
         }
 
+        pattern.value = incoming.pattern;
+        flags.value = incoming.flags;
+        subject.value = incoming.subject;
+    };
+
+    /** The mount path: write the shared case back, ask about it, and fetch the tour. */
+    const initialise = async (): Promise<void> => {
+        // The three inputs already hold the shared case - they were seeded from the fragment
+        // before the watcher existed - so this asks once and nothing is scheduled behind it.
         share();
         void ask();
+
+        // Registered on the mount path rather than in the composable, so that a demo created for
+        // a test or for checks.html does not leave a listener on the window behind it.
+        window.addEventListener('hashchange', applyFragment);
 
         try {
             const response = await fetch(examplesUrl ?? beside('examples.json'));
             if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-            examples.value = (await response.json()) as readonly Example[];
+            const loaded: unknown = await response.json();
+            if (!isExampleList(loaded)) throw new Error('examples.json is not a list of worked examples');
+            examples.value = loaded;
         } catch (error) {
             // The tour failing to load must not take the page with it: the three inputs are
             // the demo, the sidebar is the tour around it.
             examples.value = [];
             console.error('the examples could not be loaded', error);
         }
+    };
+
+    /** Lets go of everything that outlives the page's own state: the listener and the workers. */
+    const dispose = (): void => {
+        window.removeEventListener('hashchange', applyFragment);
+        clearTimeout(timer);
+        pool.dispose();
     };
 
     return {
@@ -253,6 +331,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         pending,
         busy,
         answer,
+        answeredSubject,
         failure,
         elapsedMs,
         selected,
@@ -265,8 +344,10 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         maxSubjectLength: MAX_SUBJECT_LENGTH,
         maxDisplayedMatches: MAX_DISPLAYED_MATCHES,
         load,
+        select,
         stop,
         initialise,
+        dispose,
         // Exposed for checks.html, which drives the real page rather than a copy of it.
         pool,
     };
