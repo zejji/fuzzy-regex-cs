@@ -313,7 +313,7 @@ test('a table a narrow window clips can be scrolled by keyboard, is announced, a
     // At 390 px the six-column matches table runs off the card and the last column is simply gone
     // (docs/demo/page-390.png). The scroll container is the only way to it, and a container with
     // no tab stop cannot be scrolled without a pointer.
-    const panes = [...page.querySelectorAll('div.overflow-x-auto')];
+    const panes = [...page.querySelectorAll('div.table-scroll')];
     expect(panes).toHaveLength(2);
     for (const pane of panes) {
         expect(pane.getAttribute('tabindex')).toBe('0');
@@ -475,6 +475,13 @@ test('the help panel is the documentation, rendered as text and opened from the 
         },
     };
     demo.helpKey = 'fuzzy';
+    await nextTick();
+
+    // Since S73 the prose lives behind the Help tab, so the tab is where a visitor asks for it.
+    // Everything below is what it was: the tab decides whether the panel is on screen, not what
+    // the panel is.
+    const help = found(page.querySelector<HTMLElement>('#tab-help'), 'the help tab');
+    help.click();
     await nextTick();
 
     // A <details>, so it is operable from the keyboard by construction rather than by a handler -

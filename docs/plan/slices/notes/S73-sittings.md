@@ -104,3 +104,148 @@ driver's clean-tree check.
 **Chunk 2 starts here:** the `100dvh` shell, the tab set, the visual tokens, and the removal of the
 `prefers-color-scheme: dark` block. Every string it writes is already under the linter, so write
 them to the rules rather than fixing them afterwards.
+
+## Chunk 2 - the shell (2026-09-19)
+
+Deliverables (i), (iii) and (iv): the three-region shell, the tab set, the visual identity.
+
+**What landed.** `.shell` is a header, a `main` of two panes and a footer. Above
+`(min-width: 64rem) and (min-height: 600px)` it is `100dvh` with `html, body { overflow: hidden }`
+and the two panes own the only scrolls; below either line the whole thing releases and the page is
+an ordinary scrolling document. The examples and the help are one ARIA tab set at the foot of the
+input pane - roving tabindex, ends hold, automatic activation - and loading a sample that has a
+documented section switches to the Help tab. On one column the secondary inputs and the whole tab
+set fold behind two disclosures. The palette is the ink shell plus one raised white island, with
+three edit hues that each carry their letter (`2 s`, `1 i`, `1 d`) so nothing rests on colour alone.
+`prefers-color-scheme: dark` is gone, per the owner's decision 3.
+
+**Measured in a real browser** (Chrome 153 under Playwright, serving `.scratch/demo-publish/wwwroot`
+from `tools/run-wasm-smoke.ps1`):
+
+| Window | Document scrolls | Header | Where the answer is |
+|---|---|---|---|
+| 1366x768 | no (`scrollHeight` 768 = `innerHeight`) | 48 px | count at y=92, third match row bottom at y=425 |
+| 1440x900 | no | 48 px | same, and the fourth row is inside too |
+| 1366x500 | yes, and neither pane does | 48 px | below the gate, as intended |
+| 390x844 | yes | 88 px (the tagline wraps) | count at y=513, table and its hint inside the first screen |
+
+The done-when box asks for three match rows, so the two wide runs used a four-match case. Both are
+one navigation and one `evaluate`:
+
+    http://localhost:8181/#p=%28%3F%3Acolour%29%7Be%3C%3D2%7D&f=&s=the+color+of+the+collar+and+the+colour+coller&m=&r=&l=
+
+    const inside = (sel) => { const r = document.querySelector(sel).getBoundingClientRect();
+                              return r.top >= 0 && r.bottom <= innerHeight; };
+    const rows = [...document.querySelectorAll('tbody.match-rows tr')];
+    ({ pageScrolls: document.documentElement.scrollHeight > innerHeight,
+       pattern: inside('#pattern'), subject: inside('#subject'), count: inside('.answer-count'),
+       threeRows: rows.slice(0, 3).every((el) => el.getBoundingClientRect().bottom <= innerHeight) })
+
+Both answered `{ pageScrolls: false, pattern: true, subject: true, count: true, threeRows: true }`,
+with `4 matches` on the page and the engine reporting 280-300 ms.
+
+**Three faults the browser found that the tests could not.** All three are now pinned by a test that
+fails without the fix:
+
+1. **The mode radios had invisible labels.** `body` painted the ink shell but set the white side's
+   `text-slate-900`, so every word on the ink that did not name its own colour was near-black on
+   near-black. Inverted: `body` is `text-shell-text`, `.results-pane` names `text-slate-900`.
+   Pinned by `contrast.test.ts > body inherits a measured pair ...`, which requires the `bg-`/`text-`
+   pair of each inheriting region to be in the measured table.
+2. **Three stacked scroll regions at 1366x500.** The panes kept `lg:overflow-y-auto`, which asks
+   about width alone, so below the height gate the document scrolled and both panes scrolled inside
+   it. The two `overflow-y: auto` declarations moved into the gated block. Pinned by
+   `layout.test.ts > the panes scroll only inside the gate that fixes the shell`.
+3. **The one-column disclosures did not look like controls.** Written with the `.tab` class they
+   rendered as two lines of prose. Now `.disclosure`: a full-width row, a chevron that rotates, and
+   `min-h-11` (44 px, over 2.5.8's 24x24). Pinned by
+   `layout.test.ts > a disclosure is a control and not a line of text`.
+
+**Colour, measured rather than asserted.** `tests/colour.ts` converts OKLCH to sRGB (CSS Color 4
+sections 9 and 10) and computes the WCAG 2.2 ratio; `tests/contrast.test.ts` holds 22 pairs with the
+floor each use asks for, and fails if a token moves. Four tokens had to change to clear their floor,
+and **three tokens already in the tree were outside the sRGB gamut** - `accent-soft` (chroma 0.03),
+`hit-a` (0.11) and `hit-edge` (0.13). A browser gamut-maps rather than clips, so S72's recorded hit
+ratios were measuring a colour nobody sees. Reduced to 0.018 / 0.095 / 0.11 and the reason is in a
+comment beside them. The converter itself is checked against what Chrome actually paints: every one
+of the 17 tokens agrees to within one 8-bit step, read back off a 1x1 canvas, and the snippet that
+produced those bytes is in the comment above the table so it can be re-run.
+
+The changed values, and what they now measure: `accent-bright` 0.72/0.12 (7.12:1 on the shell,
+6.05:1 on raised - it was outside the gamut at chroma 0.15), `shell-edge` L 0.56 (3.81:1 and 3.24:1,
+1.4.11's 3:1 - it was 2.28:1), `edit-sub` 0.52/0.1 on a 0.94/0.035 tint (4.7:1 - it was 4.23:1).
+
+**Word count.** 946 over the six original sources, against 921 at the end of chunk 1: the shell put
+25 words back - two disclosure labels, two tab labels and the line the Help tab shows before a
+sample is loaded. The printed total is 1,103. The doc comment of `tests/word-count.test.ts` carries
+the history and the command.
+
+**Not in this chunk, and why.** The spec's per-edit underlay inside a highlight is not buildable
+yet: `types.ts`'s `Counts` carries only totals, and `Match.FuzzyChanges` would have to be threaded
+through `DemoEngine.cs`, `types.ts` and `highlight.ts` first. The edit hues are delivered on the
+count chips instead. The mode radios stayed in the input pane rather than moving to the header: the
+layout table's "mode control" most plausibly meant the colour-scheme toggle that decision 3 removed,
+and the input pane has its own scroll, so moving them buys deliverable (i) nothing.
+
+### The verdict page, back to green
+
+`checks.html`, run against the fresh publish on 8181, went eight of nine: **"a subject over the cap
+is refused, not truncated"** was red. Not a chunk-2 fault and not a page fault - chunk 1 rewrote the
+refusal to "the demo's limit is 100,000" and the check matched the literal `"limit of"`. Reproduced
+in the browser, `window.__demo` with a 100,001-character subject:
+
+```
+{"answerNull":true,
+ "failure":"The subject is 100,001 characters and the demo's limit is 100,000, so nothing was sent
+            to the engine. Shortening it here would move every offset in the answer."}
+```
+
+The check now matches `demo.maxSubjectLength.toLocaleString()`. That is the number the visitor
+needs, it cannot be reworded away, and both of the check's clauses are proven by the probe above.
+
+### Review (chunk 2)
+
+One blind pass over the whole chunk-2 diff. **Seven findings, none yet fixed** - the sitting's
+allowance ran out at the report. The reviewer left the tree byte-identical and its own suite run
+green (181 passing). Each finding carries a reproduction, so the next sitting's job is to confirm
+and fix, not to re-derive:
+
+1. **`App.vue:489` - the unselected tab's `aria-controls` dangles.** Only the selected panel is
+   rendered, so `#tab-help` points at `panel-help`, which is not in the DOM. `layout.test.ts:234`
+   checks `tabs[0]` only, so the suite cannot see it.
+2. **`App.vue:467` - the "Examples and help" disclosure hard-codes `aria-controls="panel-examples"`**
+   while the rendered panel id follows the selected tab; and when either disclosure is collapsed its
+   target does not exist at all (`App.vue:358`, `:467`). The APG disclosure keeps the element in the
+   DOM and hides it.
+3. **`styles.css:145` - the shell is sized in `vh` after all.** `.shell { @apply flex min-h-screen
+   flex-col }` compiles to `min-height: 100vh`, and the gate adds `height: 100dvh` to the same
+   selector; where `100vh > 100dvh`, `min-height` wins - exactly the case the comment at `:445` says
+   `dvh` avoids. Confirmed here against the real Vite build, not a re-implementation: `npm run build`
+   then read `.shell` out of `wwwroot/assets/index-*.css`. `layout.test.ts:80` asserts "never vh"
+   against the *source* string, which is why it passes. Fix is `min-h-dvh`, and the test should read
+   the built CSS.
+4. **`App.vue:501-506` - the Help panel with no loaded sample is not keyboard-reachable**: its only
+   content is a `<p>` and the `tabpanel` carries no `tabindex="0"`.
+5. **`App.vue:473` - focus drops to `<body>` when the media gate narrows** while a tab has focus, the
+   `v-if` removing the focused button. Lowest value of the seven; judge it against the cost.
+6. **`layout.test.ts:43, 67, 93, 108` read `styles.css` as a string** and break on CSS edits that
+   change nothing: swapping two rules inside the media block fails two tests, and merging the two
+   identical `overflow-y` rules (what a minifier does) fails two more. Same fix as 3 - assert over
+   the built stylesheet.
+7. **`contrast.test.ts:60`** describes `accent-soft` as "the tab panel"; `.tab-panel` is
+   `bg-shell-raised`. `accent-soft` is used at `styles.css:367` only, the hovered row.
+
+Checked and **not** defects: the `useWide` listener is removed exactly once on unmount; the
+`App.vue:73-75` claim that jsdom has no `matchMedia` holds; the word-count figures are right.
+
+**The independent verifier has not run on chunk 2.** It is owed before the slice closes, over this
+chunk's numbers as well as chunk 3's.
+
+### State at the checkpoint (chunk 2)
+
+`demo/web`: **181 tests in 11 files** green, `npm run typecheck` clean, `npm run build` clean.
+`tools/check-ratchet.ps1`: **GREEN, 6,399 passing** against a 6,291 baseline - nothing in the .NET
+suite changed this chunk, so the baseline was not updated. `tools/run-wasm-smoke.ps1` green, 29
+files published. The browser work was done against that publish on
+`http://localhost:8181`, not against the dev server: the source `wwwroot` has no `_framework`, so
+only a publish runs the engine.

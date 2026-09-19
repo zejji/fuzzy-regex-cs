@@ -1,65 +1,113 @@
 /*
-  The demo's design system, such as it is: one palette, one spacing scale, one type scale.
+  The demo's design system: one palette, one spacing scale, one type scale, one scheme.
 
   Tailwind supplies the scales, so "consistent spacing" is a matter of using its steps and no
   arbitrary values - there is not a single `[13px]` in this project. What is defined here is the
-  handful of things a utility class cannot say once: the palette tokens, and the four repeated
-  shapes (field, button, pill, mark) whose classes are also what checks.html selects on.
+  handful of things a utility class cannot say once: the palette tokens, the shell, and the
+  repeated shapes (field, button, pill, mark, tab) whose classes are also what checks.html selects
+  on.
 
-  The sources behind the layout decisions are named in the slice's closing notes. The three that
+  The sources behind the layout decisions are named in the slice's closing notes. The five that
   changed something visible here:
     - NN/g, "Website Forms Usability" and "Placeholders in Form Fields Are Harmful": one column,
       labels above their field, hints persistent rather than inside the box as a placeholder.
     - NN/g, "Response Time Limits": the busy state has to appear within about a second, and a wait
       longer than that needs an animation rather than a word - hence .pill-busy's pulse.
+    - NN/g, "Scrolling and Attention": 57 % of viewing time is spent above the fold. The answer
+      goes in the first screen, which is what the shell below is for.
+    - Smashing Magazine, "Sticky Menus": stacked scroll panes cause discoverability errors, so the
+      page has two scrolling regions and no more.
     - W3C, WCAG 2.2: 2.5.8 Target Size (Minimum) is 24x24 CSS px, and every control here clears it
       with room to spare - except the match highlights, which are sized by the text they mark and
       take 2.5.8's own Inline exception ("the target is in a sentence, or its size is otherwise
       constrained by the line-height of non-target text"); the row button in the matches table is
       the pointer-sized way to the same selection. 2.4.13 wants a 2 px focus perimeter at 3:1
-      against the unfocused state, which is what the :focus-visible rule below draws.
+      against the unfocused state, which is what the :focus-visible rules below draw.
+
+  Every colour pair is measured by `tests/contrast.test.ts` rather than in a comment, so a token
+  that drifts fails a test instead of a review.
 */
 
 @import 'tailwindcss';
 
 @theme {
     /*
-      Neutrals plus ONE accent. The accent is reserved for interactive things - focus, the primary
-      action, links - so that a highlighted match can never be read as something to click.
+      ONE accent, reserved for interactive things - focus, links, the selected tab - so that a
+      highlighted match can never be read as something to click. Two lightnesses of it, because
+      half this page sits on an ink surface and half on white: `accent` is the one for white,
+      `accent-bright` the one for the ink.
     */
     --color-accent: oklch(0.52 0.19 258);
-    --color-accent-soft: oklch(0.96 0.03 258);
-    --color-accent-dark: oklch(0.72 0.15 258);
+    --color-accent-bright: oklch(0.72 0.12 258);
+    --color-accent-soft: oklch(0.96 0.018 258);
+
+    /*
+      The ink surface: the header, the input pane and the footer. It is what makes the page read as
+      an application frame rather than a form on white, and it is the only place the page is dark -
+      the answer itself stays on white, one elevation step above this.
+    */
+    --color-shell: oklch(0.21 0.02 258);
+    --color-shell-raised: oklch(0.27 0.02 258);
+    --color-shell-edge: oklch(0.56 0.02 258);
+    --color-shell-text: oklch(0.97 0.005 258);
+    --color-shell-muted: oklch(0.79 0.02 258);
 
     /*
       Match highlights, in a hue nothing else on the page uses. TWO tints, alternating, because
       adjacent matches are the normal case - `\w` over "abab" is four of them - and one flat colour
       would render four answers as one block. Every mark also carries its own border, so the
       distinction survives a reader who cannot tell the two tints apart.
+
+      The chroma of two of these came down in S73 (a from 0.11, the edge from 0.13) because they
+      were outside sRGB. A browser does not clip an out-of-gamut colour, it reduces the chroma
+      until the colour fits (CSS Color 4, section 13), so the pair that had been measured was not
+      the pair being painted - close, but not the number in the comment. `contrast.test.ts` now
+      refuses a token that is outside the gamut, which is what keeps every figure honest.
     */
-    /*
-      Measured against the text that sits on them, 2026-09-19 (WCAG 2.x contrast, sRGB after gamut
-      clipping): light slate-900 on hit-a 13.5:1 and on hit-b 10.9:1; dark slate-100 on hit-a-dark
-      8.4:1 and on hit-b-dark 5.5:1. The dark pair was L 0.45 / L 0.55, and L 0.55 measured 4.48:1
-      - under AA's 4.5 for body text, on the mark that carries the answer. Both were darkened by
-      the same 0.05 rather than only the failing one, because the 0.10 lightness step between them
-      is what keeps two adjacent matches from reading as one block.
-    */
-    --color-hit-a: oklch(0.91 0.11 85);
+    --color-hit-a: oklch(0.91 0.095 85);
     --color-hit-b: oklch(0.84 0.13 85);
-    --color-hit-edge: oklch(0.55 0.13 85);
-    --color-hit-a-dark: oklch(0.4 0.09 85);
-    --color-hit-b-dark: oklch(0.5 0.11 85);
+    --color-hit-edge: oklch(0.55 0.11 85);
+
+    /*
+      The three kinds of edit a fuzzy match can spend, each with its own hue AND its own letter.
+      The letter is not decoration: a reader with deuteranopia sees the amber and the red as the
+      same colour, so `s`, `i` and `d` are what actually separate them, and the hue is the fast
+      path for everyone else. The three lightnesses differ as well, so the columns stay apart in
+      greyscale and for anyone who prints the page.
+    */
+    --color-edit-sub: oklch(0.52 0.1 70);
+    --color-edit-ins: oklch(0.48 0.12 150);
+    --color-edit-del: oklch(0.5 0.18 25);
+    --color-edit-sub-soft: oklch(0.94 0.035 70);
+    --color-edit-ins-soft: oklch(0.94 0.06 150);
+    --color-edit-del-soft: oklch(0.94 0.028 25);
+
+    /*
+      Two families and no webfont: a grotesque for the interface and a monospace for anything whose
+      every character matters - the pattern, the flags, the subject, the counts. A downloaded font
+      would be a network round trip in front of a page whose whole point is that the answer is
+      already there.
+    */
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', Menlo, Consolas, monospace;
 }
 
 @layer base {
+    /*
+      One scheme, light, done well (owner decision, 2026-09-19). The `dark` half of this page was
+      removed rather than left half-maintained: every pair above is measured, and a variant nobody
+      measures is a contrast failure waiting for the first visitor whose system is set that way.
+      It can come back as its own slice, with its own measurements.
+    */
     html {
-        color-scheme: light dark;
+        color-scheme: light;
     }
 
+    /* The ink is the default, because the shell is most of the page: a word that names no colour
+       of its own is on the dark surface unless it is inside the results pane, which names its own.
+       The other way round cost three unreadable radio labels. */
     body {
-        @apply bg-slate-50 text-slate-900 antialiased;
-        @apply dark:bg-slate-950 dark:text-slate-100;
+        @apply bg-shell text-shell-text antialiased;
     }
 
     /* 2.4.13 Focus Appearance: a 2 px perimeter of its own, not the browser's hairline.
@@ -68,40 +116,98 @@
        none of the others, so the help panels - every one of them a <details> - were the one set of
        controls on the page left with the browser's hairline (S72 review, 2026-09-19). */
     :where(a, button, input, textarea, summary, [tabindex]):focus-visible {
-        @apply outline-2 outline-offset-2 outline-accent dark:outline-accent-dark;
+        @apply outline-2 outline-offset-2 outline-accent;
+    }
+
+    /* The same ring, in the lightness the ink surface can carry: the accent measures about 2:1 on
+       the shell, which is under 2.4.13's 3:1, so a focus ring in it would be a focus ring nobody
+       can see on half the page. */
+    :where(.shell-header, .input-pane, .shell-footer) :where(a, button, input, textarea, summary, [tabindex]):focus-visible {
+        @apply outline-accent-bright;
     }
 
     a {
-        @apply text-accent underline underline-offset-2 dark:text-accent-dark;
+        @apply text-accent underline underline-offset-2;
+    }
+
+    :where(.shell-header, .input-pane, .shell-footer) a {
+        @apply text-accent-bright;
     }
 }
 
 @layer components {
-    .card {
-        @apply rounded-lg border border-slate-200 bg-white p-4 sm:p-6;
-        @apply dark:border-slate-800 dark:bg-slate-900;
+    /* --- the shell ---------------------------------------------------------------------------
+
+       Three regions in one viewport: a header, two panes, and a footer. Below the gate in the
+       media query further down, none of this applies and the page is an ordinary scrolling
+       document - which is what a short window, a phone and a 200 % zoom all get. */
+    .shell {
+        @apply flex min-h-screen flex-col;
     }
 
+    .shell-header {
+        @apply flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 sm:px-6;
+        @apply bg-shell text-shell-text;
+    }
+
+    .shell-body {
+        @apply flex flex-1 flex-col gap-4 p-4 sm:px-6;
+        @apply lg:grid lg:grid-cols-[minmax(23rem,27rem)_minmax(0,1fr)] lg:gap-6;
+    }
+
+    .shell-footer {
+        @apply bg-shell px-4 py-2 text-xs text-shell-muted sm:px-6;
+    }
+
+    /* The inputs, on the ink. `min-h-0` is what lets it scroll inside a grid row rather than
+       stretching the row to its own content, which is the whole trick of a fixed shell. The scroll
+       itself is at the foot of this file: it belongs to the fixed shell, not to a width. */
+    .input-pane {
+        @apply flex min-h-0 flex-col gap-4 lg:pr-2;
+    }
+
+    /* The answer, one elevation step above the shell: a white surface, a hairline and a soft
+       shadow. Nothing else on the page is raised, so the eye lands here first. */
+    .results-pane {
+        @apply flex min-h-0 flex-col gap-5 rounded-lg border border-slate-300 bg-white p-4 text-slate-900 sm:p-5;
+        @apply shadow-[0_1px_3px_rgb(0_0_0/0.18),0_8px_24px_-12px_rgb(0_0_0/0.35)];
+    }
+
+    /* --- the ink surface's own controls ------------------------------------------------------ */
+
     .field-label {
-        @apply mb-1 block text-sm font-semibold text-slate-700 dark:text-slate-200;
+        @apply mb-1 block text-xs font-semibold tracking-wide text-shell-muted uppercase;
     }
 
     .field {
-        @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2;
-        @apply font-mono text-sm text-slate-900 placeholder:text-slate-400;
-        @apply dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+        @apply w-full rounded-md border border-shell-edge bg-shell-raised px-3 py-2;
+        @apply font-mono text-sm text-shell-text placeholder:text-shell-muted;
     }
 
     /* Persistent, under the field. Never a placeholder: a hint that vanishes as you type is a hint
        you cannot re-read while you need it. */
     .field-hint {
-        @apply mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400;
+        @apply mt-1 text-xs leading-relaxed text-shell-muted;
+    }
+
+    /* The same hint, on the white side of the page. */
+    .note {
+        @apply mt-1 text-xs leading-relaxed text-slate-600;
+    }
+
+    /* --- the results region ------------------------------------------------------------------ */
+
+    .section-label {
+        @apply mb-2 text-xs font-semibold tracking-wide text-slate-600 uppercase;
+    }
+
+    .status {
+        @apply flex min-h-11 flex-wrap items-center gap-2;
     }
 
     .pill {
         @apply inline-flex min-h-6 items-center gap-1.5 rounded-full border border-slate-300 px-3 py-0.5;
         @apply text-xs font-medium text-slate-700;
-        @apply dark:border-slate-700 dark:text-slate-300;
     }
 
     .pill-busy {
@@ -109,7 +215,13 @@
     }
 
     .pill-alert {
-        @apply border-red-400 text-red-700 dark:border-red-500 dark:text-red-300;
+        @apply border-red-400 text-red-700;
+    }
+
+    /* The count that matters, said once and said large: 28 px, which is the top of the type scale
+       and the only thing on the page set at it besides the product name. */
+    .answer-count {
+        @apply text-[1.75rem] leading-none font-semibold tracking-tight text-slate-900;
     }
 
     /* 44 px tall, comfortably over WCAG 2.2's 24x24 minimum (2.5.8). */
@@ -117,27 +229,67 @@
         @apply inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2;
         @apply border border-slate-300 bg-white text-sm font-semibold text-slate-800;
         @apply hover:border-slate-400 hover:bg-slate-100;
-        @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
     }
 
     .button-primary {
         @apply border-transparent bg-accent text-white hover:bg-accent/90;
-        @apply dark:bg-accent-dark dark:text-slate-950 dark:hover:bg-accent-dark/90;
+    }
+
+    /* The one-column disclosures. A row of its own with a chevron, because written as a tab they
+       read as two lines of prose and nothing said they could be pressed (seen at 390 px). 44 px
+       tall, which is 2.5.8's 24x24 with room for a thumb. */
+    .disclosure {
+        @apply flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-3 py-2;
+        @apply border border-shell-edge bg-shell-raised text-sm font-semibold text-shell-text;
+        @apply hover:border-accent-bright;
+    }
+
+    .chevron {
+        @apply text-shell-muted transition-transform;
+    }
+
+    .chevron-open {
+        @apply rotate-180;
+    }
+
+    /* --- the tab set, at the foot of the input pane ------------------------------------------
+
+       NN/g's rules: one row, one tab always selected, the panel below the list, labels of one or
+       two words, and two indicators of which tab is selected - here the accent underline and the
+       raised panel it sits on, so it does not rest on colour alone. */
+    .tab-list {
+        @apply flex gap-1 border-b border-shell-edge;
+    }
+
+    .tab {
+        @apply -mb-px min-h-9 rounded-t-md border-b-2 border-transparent px-3 py-2;
+        @apply text-sm font-semibold text-shell-muted hover:text-shell-text;
+    }
+
+    .tab-selected {
+        @apply border-accent-bright bg-shell-raised text-shell-text;
+    }
+
+    .tab-panel {
+        @apply flex flex-col gap-2 rounded-b-md bg-shell-raised p-3;
     }
 
     .example-button {
-        @apply block w-full rounded-md border border-slate-200 bg-white p-3 text-left;
-        @apply hover:border-accent hover:bg-accent-soft;
-        @apply dark:border-slate-800 dark:bg-slate-900 dark:hover:border-accent-dark dark:hover:bg-slate-800;
+        @apply block w-full rounded-md border border-shell-edge bg-shell p-3 text-left;
+        @apply hover:border-accent-bright;
     }
+
+    /* --- the subject and the matches --------------------------------------------------------- */
 
     /* Two names, one rule: the rewritten subject is the same kind of thing as the subject - a block
        of text whose every character matters - and two rules would be two places to keep in step. */
     .subject-pane,
     .replaced-pane {
-        @apply rounded-md border border-slate-200 bg-white p-4 font-mono text-sm leading-7;
+        @apply rounded-md border border-slate-200 bg-slate-50 p-3 font-mono text-sm leading-7;
         @apply whitespace-pre-wrap [overflow-wrap:anywhere];
-        @apply dark:border-slate-800 dark:bg-slate-950;
+        /* 90ch, because a line of text longer than that is one the eye loses its place in - and
+           the subject is the one block here that is read rather than scanned. */
+        @apply max-w-[90ch];
     }
 
     .hit {
@@ -151,7 +303,7 @@
     }
 
     .hit-current {
-        @apply outline-2 outline-offset-1 outline-slate-900 dark:outline-slate-100;
+        @apply outline-2 outline-offset-1 outline-slate-900;
     }
 
     /* A zero-length match has nothing to paint, so it gets a caret of its own. */
@@ -168,11 +320,11 @@
        differently by every engine (and not at all under some border-collapse rules), so the row
        takes a background instead - which is also what it had as a plain hover before the link. */
     .hit-linked {
-        @apply outline-2 outline-dashed outline-offset-1 outline-slate-500 dark:outline-slate-400;
+        @apply outline-2 outline-dashed outline-offset-1 outline-slate-500;
     }
 
     .row-linked {
-        @apply bg-slate-100 dark:bg-slate-800;
+        @apply bg-slate-100;
     }
 
     /* The subject ran out before the pattern did, so the mark runs off its own right edge. A
@@ -183,30 +335,73 @@
         border-right-color: var(--color-hit-edge);
     }
 
-    /* `min-w-max` with `w-full`: the table fills the card when there is room and refuses to squeeze
-       below its own content when there is not, so a narrow window scrolls the region instead of
-       crushing six columns into four. */
+    /* `min-w-max` with `w-full`: the table fills its region when there is room and refuses to
+       squeeze below its own content when there is not, so a narrow window scrolls the region
+       instead of crushing six columns into four. */
     .data-table {
         @apply w-full min-w-max border-collapse text-left text-sm;
     }
 
-    /* The keyboard's way into a row. 24x24, per 2.5.8, and in the accent because it is the only
-       thing in the row that can be pressed. */
-    .row-select {
-        @apply inline-flex min-h-6 min-w-6 items-center justify-center rounded-xs;
-        @apply font-semibold text-accent underline underline-offset-2;
-        @apply hover:bg-accent-soft dark:text-accent-dark dark:hover:bg-slate-800;
+    .data-table th {
+        @apply border-b border-slate-300 px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase;
+        /* Sticky against the results region, so the column names survive a long answer. It needs
+           an opaque background of its own: sticky content is painted over the rows it passes. */
+        @apply sticky top-0 z-10 bg-white;
     }
 
-    /* The parse error, under the field it is about. Same red pair as the failure block below the
-       inputs, so it is one measured colour pair on the page and not two.
+    .data-table td {
+        @apply border-b border-slate-200 px-3 py-2 align-top;
+    }
+
+    /* The table's own scroll container. It keeps `overflow-x` at every width - six columns do not
+       fit 390 px - but nothing here ever scrolls vertically: the results region owns that, and a
+       second vertical scroller inside it is what would make the sticky header stick to nothing. */
+    .table-scroll {
+        @apply overflow-x-auto rounded-md border border-slate-200;
+    }
+
+    /* The keyboard's way into a row. 24x24, per 2.5.8. It is a control, so it takes the accent and
+       a hover box - and no underline, because nothing on this page is underlined but a link. */
+    .row-select {
+        @apply inline-flex min-h-6 min-w-6 items-center justify-center rounded-xs;
+        @apply font-semibold text-accent hover:bg-accent-soft;
+    }
+
+    /* One count, in the hue of the kind of edit it counts, with its letter beside it. The letter
+       is what a red-green reader separates `s` from `d` by. */
+    .count {
+        @apply inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 font-mono text-sm font-semibold;
+    }
+
+    .count-zero {
+        @apply text-slate-500;
+    }
+
+    .count-sub {
+        color: var(--color-edit-sub);
+        background: var(--color-edit-sub-soft);
+    }
+
+    .count-ins {
+        color: var(--color-edit-ins);
+        background: var(--color-edit-ins-soft);
+    }
+
+    .count-del {
+        color: var(--color-edit-del);
+        background: var(--color-edit-del-soft);
+    }
+
+    /* --- failures ---------------------------------------------------------------------------- */
+
+    /* The parse error, under the field it is about. Same red pair as the failure block in the
+       results region, so it is one measured colour pair on the page and not two.
 
        Measured on the published page, 2026-09-19, by resolving the computed colours through a
-       canvas (oklch does not parse as sRGB): 9.16:1 light (130,24,26 on 254,242,242) and 13.26:1
-       dark (255,226,226 on 70,8,9). The caret <pre> inherits both, at 12px. */
+       canvas (oklch does not parse as sRGB): 9.16:1 (130,24,26 on 254,242,242). The caret <pre>
+       inherits both, at 12px. */
     .parse-error {
         @apply mt-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm leading-relaxed text-red-900;
-        @apply dark:border-red-800 dark:bg-red-950 dark:text-red-100;
     }
 
     /* The pattern and the caret, in one box. `overflow-x-auto` rather than wrapping: a wrapped
@@ -215,45 +410,63 @@
         @apply mt-2 overflow-x-auto font-mono text-xs leading-5;
     }
 
+    /* --- the help panels --------------------------------------------------------------------- */
+
     .help-panel {
-        @apply rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900;
+        @apply rounded-md border border-shell-edge bg-shell;
     }
 
     /* The disclosure's own control. 40 px tall against WCAG 2.2's 24x24 (2.5.8), and the pointer
        cue is a real one because the whole row is the target. */
     .help-panel > summary {
-        @apply cursor-pointer rounded-md px-3 py-2 text-sm font-semibold;
-        @apply hover:bg-slate-50 dark:hover:bg-slate-800;
+        @apply cursor-pointer rounded-md px-3 py-2 text-sm font-semibold text-shell-text;
+        @apply hover:bg-shell-raised;
     }
 
-    /* The help prose, at 12px, so AA wants 4.5:1. Measured the same way and the same day as
-       .parse-error above: summary 17.83:1 light / 16.28:1 dark, .help-body 10.36 / 12, and the
-       code block 9.45 / 13.56 - the tinted background is the only thing that moves. */
     .help-body {
-        @apply flex flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs leading-relaxed;
-        @apply text-slate-700 dark:border-slate-800 dark:text-slate-300;
+        @apply flex flex-col gap-2 border-t border-shell-edge px-3 py-2 text-xs leading-relaxed;
+        @apply text-shell-muted;
     }
 
     .help-code {
-        @apply overflow-x-auto rounded-xs bg-slate-100 p-2 font-mono text-xs dark:bg-slate-950;
-    }
-
-    .data-table th {
-        @apply border-b border-slate-300 px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase;
-        @apply dark:border-slate-700 dark:text-slate-400;
-    }
-
-    .data-table td {
-        @apply border-b border-slate-200 px-3 py-2 align-top dark:border-slate-800;
+        @apply overflow-x-auto rounded-xs bg-shell-raised p-2 font-mono text-xs text-shell-text;
     }
 }
 
-@media (prefers-color-scheme: dark) {
-    .hit {
-        background: var(--color-hit-a-dark);
+/*
+  The shell becomes a fixed frame only when the window has the room for one.
+
+  Both halves of the condition matter. Under 64rem there is one column, so two panes side by side
+  would be two half-width panes. Under 600 px of height - a phone in landscape, or a laptop at
+  200 % zoom, where the CSS viewport halves in both directions - a frame that refuses to scroll is
+  a frame whose last control cannot be reached, which is the trap the slice's Hunt names and what
+  WCAG 1.4.10 Reflow is about. Below either line the page is an ordinary scrolling document.
+
+  `dvh` and not `vh`: on mobile Safari `100vh` is the window without its toolbar, so a shell sized
+  in it is taller than the space it has and its last row sits under the chrome.
+*/
+@media (min-width: 64rem) and (min-height: 600px) {
+    html,
+    body {
+        height: 100%;
+        overflow: hidden;
     }
 
-    .hit-alt {
-        background: var(--color-hit-b-dark);
+    .shell {
+        height: 100dvh;
+    }
+
+    .shell-body {
+        min-height: 0;
+    }
+
+    /* The two scroll owners, and only inside this gate. Outside it the document scrolls, and a pane
+       that still owned a scroll of its own would stack a second one inside the first. */
+    .input-pane {
+        overflow-y: auto;
+    }
+
+    .results-pane {
+        overflow-y: auto;
     }
 }

@@ -200,8 +200,9 @@ naming the string and the rule. Keep the rules in one exported array.
 
 ## Done when
 
-- [ ] At 1366x768 and 1440x900, with no page-level scrolling, the pattern, the subject, the match
+- [x] At 1366x768 and 1440x900, with no page-level scrolling, the pattern, the subject, the match
       count and three match rows are in the first viewport, and the Playwright assertion proves it.
+      (Chunk 2. The navigation, the `evaluate` and both answers are in the sittings notes.)
 - [ ] Every string in the scope list rewritten; `copy.test.ts` green and seen to fail on a planted
       violation; the page's word count recorded before and after.
 - [ ] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the

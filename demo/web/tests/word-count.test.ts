@@ -21,6 +21,11 @@
  * the comparison rather than guessed at. The after-extraction also reads bound `:aria-label`
  * attributes the before-extraction missed, which can only raise the after figure, so 1,185 -> 921
  * understates the cut rather than flattering it.
+ *
+ * Chunk 2 (the shell) put 25 words back: two disclosure labels, two tab labels and the line the
+ * Help tab shows before a sample is loaded. On the six original sources that is 921 -> 946, and the
+ * total the test prints is 1,103. Structure costs words; it is meant to cost fewer than the prose
+ * it replaced.
  */
 import { expect, it } from 'vitest';
 

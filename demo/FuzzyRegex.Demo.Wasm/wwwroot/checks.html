@@ -191,8 +191,12 @@
       demo.subject = 'a'.repeat(demo.maxSubjectLength + 1);
       await settled(demo);
       check(
+        // Match on the CAP, not on a phrase. This read `includes("limit of")` until S73 chunk 1
+        // rewrote the message to "the demo's limit is 100,000" and turned the check red without
+        // anything being wrong with the page (browser run, 2026-09-19). The number is what the
+        // visitor needs and it cannot be reworded away.
         'a subject over the cap is refused, not truncated',
-        demo.answer === null && demo.failure.includes("limit of"),
+        demo.answer === null && demo.failure.includes(demo.maxSubjectLength.toLocaleString()),
         demo.failure.slice(0, 160)
       );
 
