@@ -553,7 +553,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void An_unknown_mode_is_an_error_naming_it()
     {
-        Error(DemoEngine.Run("a", "", "aaa", "split", "", "")).Should().Contain("'split' is not a mode");
+        Error(DemoEngine.Run("a", "", "aaa", "split", "", "")).Should().Contain("Unknown mode 'split'");
     }
 
     /// <summary>

@@ -23,20 +23,20 @@ const reply = (value: unknown) => parseReply(JSON.stringify(value));
 
 test('the rewritten subject is read, and anything that is not a string in its place is refused', () => {
     expect(reply({ matches: [match()], truncated: false, replaced: 'bb' }).replaced).toBe('bb');
-    expect(reply({ matches: [match()], truncated: false, replaced: 12 }).error).toContain('not an answer');
+    expect(reply({ matches: [match()], truncated: false, replaced: 12 }).error).toContain('wrong shape');
 });
 
 test('a partial match says so with a boolean, and with nothing else', () => {
     expect(reply({ matches: [match({ partialMatch: true })] }).matches?.[0]?.partialMatch).toBe(true);
     // Absent on every match that is not partial, which is most of them.
     expect(reply({ matches: [match()] }).matches?.[0]?.partialMatch).toBeUndefined();
-    expect(reply({ matches: [match({ partialMatch: 'yes' })] }).error).toContain('not an answer');
+    expect(reply({ matches: [match({ partialMatch: 'yes' })] }).error).toContain('wrong shape');
 });
 
 test('a parse error may carry the position it failed at, and it must be a number', () => {
     expect(reply({ error: 'missing )', errorOffset: 1 }).errorOffset).toBe(1);
     expect(reply({ error: 'missing )' }).errorOffset).toBeUndefined();
-    expect(reply({ error: 'missing )', errorOffset: '1' }).error).toContain('not an answer');
+    expect(reply({ error: 'missing )', errorOffset: '1' }).error).toContain('wrong shape');
 });
 
 test('a parse error position must be an index a pattern the page could have sent really has', () => {
@@ -49,10 +49,10 @@ test('a parse error position must be an index a pattern the page could have sent
     // is reported at the character after the last one.
     expect(reply({ error: 'missing )', errorOffset: MAX_PATTERN_LENGTH }).errorOffset).toBe(MAX_PATTERN_LENGTH);
 
-    expect(reply({ error: 'missing )', errorOffset: -1 }).error).toContain('not an answer');
-    expect(reply({ error: 'missing )', errorOffset: 1.5 }).error).toContain('not an answer');
-    expect(reply({ error: 'missing )', errorOffset: MAX_PATTERN_LENGTH + 1 }).error).toContain('not an answer');
-    expect(reply({ error: 'missing )', errorOffset: 1e9 }).error).toContain('not an answer');
+    expect(reply({ error: 'missing )', errorOffset: -1 }).error).toContain('wrong shape');
+    expect(reply({ error: 'missing )', errorOffset: 1.5 }).error).toContain('wrong shape');
+    expect(reply({ error: 'missing )', errorOffset: MAX_PATTERN_LENGTH + 1 }).error).toContain('wrong shape');
+    expect(reply({ error: 'missing )', errorOffset: 1e9 }).error).toContain('wrong shape');
 });
 
 test('an example may name a feature, a mode, a template and word lists', () => {

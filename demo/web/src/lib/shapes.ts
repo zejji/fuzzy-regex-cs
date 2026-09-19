@@ -88,7 +88,7 @@ export function parseReply(json: string): Reply {
         return { error: `the engine's reply could not be read: ${error instanceof Error ? error.message : String(error)}` };
     }
 
-    if (!isReply(value)) return { error: "the engine's reply could not be read: it is not an answer" };
+    if (!isReply(value)) return { error: "the engine's reply could not be read: it arrived in the wrong shape" };
     return value;
 }
 

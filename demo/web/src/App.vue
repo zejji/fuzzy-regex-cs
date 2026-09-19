@@ -170,11 +170,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
         <header class="mb-8">
             <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">FuzzyRegex</h1>
             <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                A C# port of Python's <code class="font-mono">regex</code> module, compiled to
-                WebAssembly and running in your browser. The engine runs in a Web Worker, so a
-                pattern that runs away takes the worker with it and not the page. Every sample in
-                the sidebar is a starting point rather than a demonstration: edit any box and the
-                answer follows.
+                A C# port of Python's <code class="font-mono">regex</code> module, running in your
+                browser on WebAssembly. Edit any box and the answer follows.
             </p>
         </header>
 
@@ -223,8 +220,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <!-- Not `.field-hint`: its slate grey is measured against the page, not
                                  against this red. The sentence inherits the box's own colour. -->
                             <p id="caret-hint" class="mt-1 text-xs leading-relaxed">
-                                The caret is under character {{ failureOffset + 1 }} of the pattern,
-                                and the line scrolls sideways when the pattern is wider than the box.
+                                The caret is under character {{ failureOffset + 1 }}. The line
+                                scrolls sideways.
                             </p>
                         </div>
                     </div>
@@ -241,10 +238,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             aria-describedby="flags-hint"
                         />
                         <p id="flags-hint" class="field-hint">
-                            FuzzyRegexOptions member names, separated by commas or spaces - for
-                            example <code class="font-mono">IgnoreCase, BestMatch</code>. Names only,
-                            so a typo is an error rather than a different set of flags. Version1 is
-                            the default.
+                            FuzzyRegexOptions names, separated by commas or spaces:
+                            <code class="font-mono">IgnoreCase, BestMatch</code>. A typo is an error.
+                            Version1 is the default.
                         </p>
                     </div>
 
@@ -284,9 +280,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             </div>
                         </div>
                         <p id="mode-hint" class="field-hint">
-                            Partial mode asks for one match and reports whether the subject ran out
-                            before the pattern did. Replace mode rewrites every match with the
-                            template.
+                            Partial asks for one match and says whether the subject ran out first.
+                            Replace rewrites every match with the template.
                         </p>
                     </fieldset>
 
@@ -306,7 +301,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             aria-describedby="replacement-hint"
                         />
                         <p id="replacement-hint" class="field-hint">
-                            Upstream's language, not .NET's: <code class="font-mono">\1</code> and
+                            Upstream's syntax: <code class="font-mono">\1</code> or
                             <code class="font-mono">\g&lt;name&gt;</code> for a group,
                             <code class="font-mono">\g&lt;0&gt;</code> for the whole match.
                         </p>
@@ -323,9 +318,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             aria-describedby="named-lists-hint"
                         ></textarea>
                         <p id="named-lists-hint" class="field-hint">
-                            For a pattern using <code class="font-mono">\L&lt;name&gt;</code>: one
-                            list per line, as <code class="font-mono">name: word, word</code>. Empty
-                            for a pattern with none.
+                            For <code class="font-mono">\L&lt;name&gt;</code> in a pattern: one list
+                            per line, as <code class="font-mono">name: word, word</code>.
                         </p>
                     </div>
                 </section>
@@ -353,15 +347,13 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     <button v-if="busy" class="button button-primary" type="button" @click="stop">Stop</button>
 
                     <span v-if="answer && answer.truncated" class="pill pill-alert">
-                        the engine stopped early at its own cap - this is not the whole answer
+                        the engine hit its own cap, so this is part of the answer
                     </span>
                     <span v-if="partial" class="pill">
-                        the subject ran out before the pattern did - this match is partial
+                        partial: the subject ran out before the pattern did
                     </span>
                     <span v-if="capped" class="pill">showing the first {{ view.shown }} of {{ view.total }}</span>
-                    <span v-if="!shareable" class="pill">
-                        too long to put in the address bar, so this case has no link
-                    </span>
+                    <span v-if="!shareable" class="pill">too long for the address bar, so no link</span>
                 </div>
 
                 <!-- Everything the pattern's own text cannot be pointed at for. A failure WITH a
@@ -435,8 +427,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         </h2>
                         <p class="replaced-pane" :class="{ 'opacity-60': busy }" :aria-busy="busy">{{ replaced }}</p>
                         <p class="field-hint">
-                            Every match rewritten with the template. The highlights above are where
-                            those matches were in the original subject.
+                            Every match rewritten with the template. The highlights above show where
+                            they were.
                         </p>
                     </section>
 
@@ -609,9 +601,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 Scroll the table sideways for the rest of the columns.
                             </p>
                             <p class="field-hint">
-                                A repeated group keeps every capture, not only the last - as
-                                <code class="font-mono">regex</code> does and Python's standard
-                                <code class="font-mono">re</code> does not.
+                                A repeated group keeps every capture it made. Python's standard
+                                <code class="font-mono">re</code> keeps only the last.
                             </p>
                         </section>
                     </template>
@@ -663,8 +654,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         </div>
                     </details>
                     <p class="field-hint">
-                        Generated from <code class="font-mono">docs/COMPARISON.md</code> when the page
-                        was built, so this is the documentation itself and not a second copy of it.
+                        Lifted from <code class="font-mono">docs/COMPARISON.md</code> when the page
+                        was built.
                     </p>
                 </template>
 
@@ -672,8 +663,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     Worked examples
                 </h2>
                 <p class="field-hint mt-0">
-                    Each one fills the boxes it needs and empties the rest, and every box stays
-                    editable. The answers are checked against Python's
+                    Every box stays editable. The answers are checked against Python's
                     <code class="font-mono">regex</code> module in this project's test suite.
                 </p>
                 <button
@@ -689,8 +679,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     </span>
                 </button>
                 <p class="field-hint">
-                    The address bar always holds the current case, so a link to this page is a link
-                    to what you are looking at.
+                    The address bar holds the current case, so you can link to what you see.
                 </p>
             </aside>
         </div>

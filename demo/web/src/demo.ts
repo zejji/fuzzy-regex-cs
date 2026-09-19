@@ -212,9 +212,9 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
             answer.value = null;
             answeredSubject.value = '';
             failure.value =
-                `The subject is ${subject.value.length.toLocaleString()} characters, over the demo's ` +
-                `limit of ${MAX_SUBJECT_LENGTH.toLocaleString()}. Nothing was sent to the engine: ` +
-                'the demo refuses rather than matching against a shortened subject.';
+                `The subject is ${subject.value.length.toLocaleString()} characters and the demo's ` +
+                `limit is ${MAX_SUBJECT_LENGTH.toLocaleString()}, so nothing was sent to the engine. ` +
+                'Shortening it here would move every offset in the answer.';
             return;
         }
 
@@ -301,9 +301,8 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
 
         pool.stop('stopped');
         failure.value =
-            'Stopped. The worker running that match was killed and a warm spare took over, which is ' +
-            "the only way to recover a pattern whose compilation never returns - the engine's own " +
-            'timeout is a matching budget and does not cover that case.';
+            'Stopped. That worker was killed and a warm spare took over, which is the only way out ' +
+            'of a pattern that never finishes compiling.';
     };
 
     // --- the URL fragment --------------------------------------------------------------------
@@ -417,7 +416,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     const loaded: unknown = await response.json();
                     if (!isExampleList(loaded))
-                        throw new Error('examples.json is not a list of worked examples');
+                        throw new Error('examples.json must be a list of worked examples');
                     examples.value = loaded;
                 } catch (error) {
                     // The tour failing to load must not take the page with it: the three inputs are
@@ -431,7 +430,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
                     const response = await fetch(helpUrl ?? beside('help.json'));
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     const loaded: unknown = await response.json();
-                    if (!isHelp(loaded)) throw new Error('help.json is not the generated documentation');
+                    if (!isHelp(loaded)) throw new Error('help.json must be the generated documentation');
                     help.value = loaded;
                 } catch (error) {
                     // Softly, like the tour above, and for a sharper reason: help.json is GENERATED

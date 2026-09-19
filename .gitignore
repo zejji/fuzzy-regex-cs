@@ -74,3 +74,8 @@ ORCHESTRATOR-PROMPT.md
 # is ignored for the same reason as the line above: an unignored file at the repo root shows in
 # `git status --porcelain`, which is what fails a slice (S70, 2026-09-18).
 .serena/
+
+# Vite's dependency-optimiser cache. It normally lives in `demo/web/node_modules/.vite`, but a
+# vitest run started from the repository root writes `.vite/deps_temp_*` here instead, and an
+# unignored directory at the root fails a slice's clean-tree check (S73, 2026-09-19).
+.vite/

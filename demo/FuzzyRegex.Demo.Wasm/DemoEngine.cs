@@ -635,7 +635,7 @@ internal static class DemoEngine
                     token.Length > MaxQuotedTokenLength
                         ? string.Concat(token.AsSpan(0, MaxQuotedTokenLength), "...")
                         : token;
-                error = $"'{quoted}' is not a FuzzyRegexOptions member name.";
+                error = $"Unknown flag '{quoted}'. Flags are FuzzyRegexOptions member names.";
                 return false;
             }
 
@@ -690,7 +690,7 @@ internal static class DemoEngine
                     mode.Length > MaxQuotedTokenLength
                         ? string.Concat(mode.AsSpan(0, MaxQuotedTokenLength), "...")
                         : mode;
-                error = $"'{quoted}' is not a mode. The modes are 'match', 'partial' and 'replace'.";
+                error = $"Unknown mode '{quoted}'. The modes are 'match', 'partial' and 'replace'.";
                 return false;
         }
     }
@@ -723,7 +723,7 @@ internal static class DemoEngine
             int colon = line.IndexOf(':', StringComparison.Ordinal);
             if (colon <= 0)
             {
-                error = $"'{Quoted(line)}' is not a named list. Write one list per line, as: name: word, word, word";
+                error = $"Line '{Quoted(line)}' needs a colon. Write one list per line, as: name: word, word, word";
                 return false;
             }
 
