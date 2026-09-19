@@ -4,25 +4,21 @@
 `docs/plan/slices/S58-measurement-method-and-noise-floor.md`. Working notes, both sittings:
 `docs/plan/slices/notes/S58-sittings.md`. **No `src/` change, and none is allowed in this slice.**
 
-## A benchmark run is in flight - do not orient, block
+## The floor is measured. No benchmark run is in flight.
 
-Noise run **E**, launched detached by `.scratch/s58-run-e.ps1`. Its PID and its sampler's are in
-`.scratch/s58-run-e.pid`; it writes `.scratch/s58-run-e.done` when it finishes, and takes about
-**36 minutes**. Load log: `bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-E-load.log`.
-
-If you are reading this while that run is alive: **stop reading and block on the PID.** Reading
-state files and sampling the machine costs 3.6-4.3 cores through the Headroom proxy, which is what
-ruined run D. Rules: `bench/baselines/<machine-id>/noise-floor.md`, "Taking a run so it counts".
+Run **E** (11:56:31-12:29:55) is A's partner and the first attempt to pass its own gate: 0 of 49
+rows below 0.85, sampler log clean. **Time floor 1.13, allocation floor 1.0001**, both now the
+defaults in `tools/compare-benchmarks.ps1`; the derivation, the row each came from and how to
+tighten the time floor are in `bench/baselines/<machine-id>/noise-floor.md`. Self-test passes: A
+against E reads `same` for all 49 rows. Tool tests 113/0 - three of them had never run and were
+failing on a fixture defect, now fixed.
 
 ## Next action
 
-When E is done: read its load log and its own min/median line. If clean, compare against the
-committed run A with `tools/probes/compare-two-baselines.ps1`, set `-NoiseFloor` and
-`-AllocationNoiseFloor` in `tools/compare-benchmarks.ps1` from the largest time and allocation
-ratio, and replace noise-floor.md's "The floor" section with those two numbers and their rows.
-Runs B, C and D were discarded, each with its cause measured and committed; A needs no re-take and
-the tree is unchanged since it (`src/` last touched at `dfa8767`, `bench/` sources at 08:00-08:02,
-both before A started at 08:22).
+Verification for the slice so far: `tools/check-ratchet.ps1`, `tools/run-oracle.ps1` at its three
+default seeds, `tools/run-aot-tests.ps1` + `run-aot-smoke.ps1`. `src/` is untouched in this slice,
+so all three prove it changed nothing, which is the claim. Then blind review and the independent
+verifier. **Builds may need `-p:UseSharedCompilation=false`** while `VBCSCompiler` is hung.
 
 ## Open items
 

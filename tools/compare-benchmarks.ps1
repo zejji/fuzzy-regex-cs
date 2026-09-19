@@ -83,8 +83,11 @@ param(
     # which records how they were taken and what they cover. They are NOT a guess to be tuned: a
     # floor raised to make a red run green has stopped measuring the machine and started hiding the
     # change.
-    [double]$NoiseFloor = 1.0,
-    [double]$AllocationNoiseFloor = 1.0
+    # Measured 2026-09-19 (S58) from runs A and E, an unchanged tree on a quiet machine: the time
+    # ratios spanned 0.8892 to 1.0768, and 1/0.8892 = 1.1247 is the wider side. Allocation moved at
+    # most 307 bytes in 11.06 MB, 2.8e-5, so its floor is four orders of magnitude tighter.
+    [double]$NoiseFloor = 1.13,
+    [double]$AllocationNoiseFloor = 1.0001
 )
 
 Set-StrictMode -Version Latest

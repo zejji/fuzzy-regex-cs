@@ -199,26 +199,49 @@ Every line here was paid for on 2026-09-19.
 
 ## The floor
 
-**NOT YET MEASURED.** Run A is taken, sound and committed. Its partner is not, after three
-attempts: B was contaminated by the worktree episode above; C, started 09:44, had its first
-benchmark class inside that episode's tail and was stopped rather than finished, so there is no C
-baseline; D finished but its first eleven rows were taken while the measuring session's own proxy
-held 3.6-4.3 cores. What the next sitting does, and nothing else, before it touches anything
-else on this slice:
+| | Floor | Set by | Observed span |
+|---|---:|---|---|
+| **Time** | **1.13** | `WorkloadBenchmarks.ReverseFailedScan`, ratio **0.8892** (1/0.8892 = 1.1247) | 0.8892 - 1.0768 |
+| **Allocation** | **1.0001** | `WorkloadBenchmarks.SplitLong`, 11,060,299 B to 11,059,992 B | 0.99997 - 1.00001 |
 
-- Take **one** fresh run against the committed A, with the five rules above obeyed and the sampler
-  log committed beside it. One run is what is missing; A does not need re-taking, and the tree is
-  unchanged since it.
-- Then set `-NoiseFloor` and `-AllocationNoiseFloor` in `tools/compare-benchmarks.ps1` from the
-  largest per-workload time ratio and the largest allocation ratio that comparison prints, and
-  replace this section with those two numbers and the row each came from.
+Measured 2026-09-19 from **run A** (08:22-08:56) and **run E** (11:56:31-12:29:55), `--job medium`,
+49 benchmarks, an unchanged tree - `src/` last touched at `dfa8767` the previous evening and the
+benchmark sources at 08:00-08:02, both before A started. Both baselines are committed here, so the
+comparison re-runs from committed files alone:
 
-Until that exists, the parameters stay at `1.0` - no floor at all - which is the honest default:
-it never excuses a regression, it only over-reports.
+```powershell
+pwsh -File tools/probes/compare-two-baselines.ps1 `
+  -BaselineA bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-A.json `
+  -BaselineB bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-E.json
+```
 
-Scope item 1's second pair ("repeat the pair once after a reboot") is **not done and not scheduled
-here**: rebooting this machine would kill the owner's driver, Stryker and night-shift processes,
-which is the owner's call and not a slice's. It stays on the slice.
+E was the fourth attempt at A's partner and the first to pass its own gate: **0 of 49 rows below
+0.85**, against 19 for B and 6 for D. Its sampler log
+(`2026-09-19-S58-noise-E-load.log`) names nothing above 0.3 of a core for a single sample.
+
+**The time floor is set by the "improvement" side, and that is deliberate.** The widest regression
+direction was 1.0768 (`StateByGroupCount(Groups: 32)`); the widest movement in either direction was
+`ReverseFailedScan` running 11% *faster* in E than in A with no code between them. The band is
+two-sided because an unexplained improvement inside the floor is the same measurement artefact as a
+regression inside it, so the floor is the wider side: 1.1247, rounded up to 1.13.
+
+**How to tighten it, for a later slice that wants a sharper gate.** That row is the one to suspect
+rather than the machine: `ReverseFailedScan` had run A's *worst* contention signal (min/median 0.91,
+against 0.99 in E) and was one of A's four multimodal rows. A multimodal benchmark's median jumps
+between its two modes, which is real variation the floor has to cover - but it is variation in one
+row, not a property of the suite. Drop that row and the floor is 1.08. Re-measuring A would very
+likely buy back those five points; re-measuring it *after* stabilising the benchmark would be
+better still.
+
+**Allocation is nearly deterministic here, and that is the useful half of the result.** Forty-five
+rows allocate; the largest disagreement between two runs was 307 bytes in 11.06 MB, and 38 rows
+matched to the byte. So an allocation change of any size is signal - which matters, because
+allocation is Phase 7's first optimisation lever and the lazy-walk and span decisions both turn on
+allocated bytes rather than nanoseconds. The 1.0001 floor exists only to absorb that 2.8e-5 wobble.
+
+**Still not done:** scope item 1's second pair ("repeat the pair once after a reboot"). Rebooting
+this machine would kill the owner's driver, Stryker and night-shift processes, which is the owner's
+call and not a slice's. It stays on the slice.
 
 ## Using it
 

@@ -14,6 +14,11 @@
 BeforeAll {
     $script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'check-sync-divergence.ps1'
 
+    # The blank line before the terminator is load-bearing: a here-string's content stops at the
+    # newline before `'@`, so without it the header ends mid-line and every row a test appends is
+    # glued onto the separator row. The script then reads `---` as the first cell, finds no
+    # backticked path, and sees a ledger with no rows at all - which silently inverts three of the
+    # tests below. Found 2026-09-19 (S58), the first time this file was run.
     $script:LedgerHeader = @'
 # Structural divergences from upstream's shape
 
@@ -27,6 +32,7 @@ BeforeAll {
 
 | Where | Upstream's shape | Ours | Measured gain | Re-aligning | Decided |
 |---|---|---|---|---|---|
+
 '@
 }
 
