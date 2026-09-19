@@ -157,9 +157,30 @@ performance, always consume computed results so nothing is dead-code eliminated,
 scheduler jitter, Defender scans, Windows Update). Treat that as unstated, not as absent - which
 is exactly why section 4 measures the noise floor empirically instead of arguing about it.
 
-**UNVERIFIED**: whether BDN pins CPU affinity or forces a GC mode by default was not confirmed
-from any fetched BDN page. Do not assume either way; if it matters, read the generated
-`*.notcs`/runtimeconfig in the artifacts folder of an actual run, which is evidence.
+**VERIFIED on this machine, 2026-09-19 (S58)**, by reading the artifacts of a real `--keepFiles`
+run rather than a BDN page. Both halves are archived beside the noise floor as
+`2026-09-19-S58-bdn-generated-MediumRun.csproj.txt` and `-MediumRun.runtimeconfig.json`:
+
+- **GC: forced, and not to the host's settings.** The generated project writes
+  `<ServerGarbageCollection>false</ServerGarbageCollection>` and
+  `<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>`, and the generated
+  `runtimeconfig.json` carries `"System.GC.Server": false, "System.GC.Concurrent": true`. So every
+  measurement in this suite is workstation concurrent GC. A server-GC number needs an explicit job
+  (`.WithGcServer(true)`), and a server-GC production deployment is not what these rows measure.
+- **Affinity: not pinned.** The benchmark process ran with mask `0xfffffff` - all 28 logical
+  processors of this machine - sampled six times through a live run. BDN does raise the benchmark
+  process to `High` priority, and does set the High Performance power plan (above).
+- Also worth knowing, because it silently changes what is compiled: the generated project sets
+  `ImportDirectoryBuildProps=false` and `ImportDirectoryBuildTargets=false`, so this repo's
+  `Directory.Build.props` does **not** apply to the harness, and it sets `RunAnalyzers=false`,
+  `DebugSymbols=false`, `UseSharedCompilation=false` and `AllowUnsafeBlocks=true`. The
+  "copied settings from benchmarks project" block was empty for our project.
+
+Reproduce: `pwsh -File tools/compare-benchmarks.ps1` style working directory (`bench/`, so BDN's
+solution walk stops at `FuzzyRegex.Benchmarks.slnx`), then
+`dotnet run -c Release --project FuzzyRegex.Benchmarks --no-build -- --job medium --filter
+'*SpanOverloadBenchmarks.StringShort*' --keepFiles`, and read
+`bench/FuzzyRegex.Benchmarks/bin/Release/net10.0/FuzzyRegex.Benchmarks-MediumRun-1/`.
 
 ---
 
@@ -254,10 +275,13 @@ yet"*.
 
 ## 5. The Python side, with pyperf
 
-`regex` **2026.9.10** and Python **3.14.6** are installed on this machine; `pyperf` is **not**
-(checked 2026-09-16: `python -c "import regex; print(regex.__version__)"` → `2026.9.10`;
-`import pyperf` → `ModuleNotFoundError`). The `benchmark` skill's
-`python -m pip install regex pyperf` step is therefore still outstanding.
+`regex` **2026.9.10**, Python **3.14.6** and - since S58, 2026-09-19 - `pyperf` **2.10.0** are
+installed on this machine. The install is per-user
+(`%APPDATA%\Roaming\Python\Python314\site-packages`), which matters: pyperf's worker processes do
+not see it, so a script has to put that directory on `PYTHONPATH` **and** name PYTHONPATH on
+`--inherit-environ` or every run dies with `ModuleNotFoundError: No module named 'pyperf'` inside
+the worker and `RuntimeError: python.exe failed with exit code 1` in the parent.
+`tools/probes/s58-pyperf-floor.py` does both and documents why.
 
 ### 5.1 How pyperf runs
 
@@ -300,11 +324,22 @@ supports. The only Windows-specific statement anywhere on it is about the Runner
 `REALTIME_PRIORITY_CLASS`"* (same URL, fetched 2026-09-16).
 
 So: the docs' content is Linux-only and contains no Windows tuning procedure, and pyperf's Windows
-story is the `REALTIME_PRIORITY_CLASS` worker priority it already applies. **That is a strong
-inference, not a quote**, and it is exactly the sort of claim this repo settles with a probe:
-`python -m pyperf system show` on this machine, output pasted into the baseline folder, costs two
-minutes and converts the inference into evidence. Do that in the first Phase 7 slice that touches
-the Python baseline.
+story is the `REALTIME_PRIORITY_CLASS` worker priority it already applies. That was a strong
+inference rather than a quote; **S58 ran the probe on 2026-09-19 and it is now a measurement**:
+
+```
+> python -m pyperf system show
+WARNING: no operation available for your platform
+> python -m pyperf system tune
+WARNING: no operation available for your platform
+```
+
+Archived verbatim as `bench/baselines/<machine-id>/2026-09-19-S58-pyperf-system-show.txt`. pyperf
+has no system operations of any kind on Windows - not merely no tuning procedure - so the remedy
+its own `check` warning recommends is unavailable here. The consequence, measured in the same
+slice, is that `pyperf check` fails on every workload under 50 ms on this machine however many
+samples it is given, and `--rigorous` clears only the ~150 ms ones. The Python floor (1.11x) stands
+in for `check` as the admission test; the numbers and the reasoning are beside the .NET floor.
 
 The consequence either way: **the Python side is quieted by the same section 2 measures as the
 .NET side and by nothing else**, and its noise floor is measured the same way as section 4 - run
@@ -362,7 +397,7 @@ The rules that follow, for this port:
 
 | Gap | Cost to close | Who |
 |---|---|---|
-| pyperf not installed; its Windows behaviour inferred, not probed | 10 min: install, `pyperf system show`, paste output | first Phase 7 benchmark slice |
-| Noise floor of this machine unknown | 2 suite runs, unchanged build | before any optimisation |
-| Whether BDN pins affinity / forces a GC mode by default | read one run's generated artifacts | same slice |
+| ~~pyperf not installed; its Windows behaviour inferred, not probed~~ | | **closed by S58**: `2026-09-19-S58-pyperf-system-show.txt` beside the floor - no system operations on Windows at all, and `check` fails on every light workload |
+| ~~Noise floor of this machine unknown~~ | | **closed by S58**: 1.13 time, 1.0001 allocation |
+| ~~Whether BDN pins affinity / forces a GC mode by default~~ | | **closed by S58**, section 1.7: no affinity pin, workstation concurrent GC forced |
 | .NET 11 runtime installed or not (S54's two-runtime baseline) | `dotnet --list-runtimes` | S54 |

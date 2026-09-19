@@ -1,0 +1,31 @@
+Top 30 Functions (Inclusive)                                                  Inclusive           Exclusive           
+1.  Threads                                                                   100%                0%                  
+2.  UniqueProgramName.Main(class System.String[])                             99.77%              0%                  
+3.  UniqueProgramName.AfterAssemblyLoadingAttached(class System.String[])     99.77%              0%                  
+4.  MethodBaseInvoker.InterpretedInvoke_Method(class System.Object,int*)      99.32%              0.03%               
+5.  MethodBaseInvoker.InvokeWithFewArgs(class System.Object,value class Sy    99.32%              0%                  
+6.  RuntimeMethodInfo.Invoke(class System.Object,value class System.Reflec    99.32%              0%                  
+7.  MethodBaseInvoker.InvokeDirectByRefWithFewArgs(class System.Object,val    99.32%              0%                  
+8.  MethodBase.Invoke(class System.Object,class System.Object[])              99.32%              0%                  
+9.  Runnable_0.Run(class BenchmarkDotNet.Engines.IHost,class System.String    99.29%              0.1%                
+10. (Activities)                                                              98.13%              0%                  
+11. Runnable_0.WorkloadActionNoUnroll(int64)                                  97.47%              0.03%               
+12. WorkloadBenchmarks.FuzzyLong()                                            97.44%              0%                  
+13. FuzzyRegex.Match(class System.String,int32,int32,bool,value class Syst    96.41%              0%                  
+14. FuzzyRegex.Run(class System.String,int32,int32,bool,bool,bool,value cl    96.41%              0%                  
+15. Matcher.DoMatch(class Fuzzy.Text.RegularExpressions.Engine.MatchState,    96.31%              0%                  
+16. Matcher.DoSimpleFuzzyMatch(class Fuzzy.Text.RegularExpressions.Engine.    96.31%              0.43%               
+17. Matcher.DoMatch2(class Fuzzy.Text.RegularExpressions.Engine.MatchState    96.31%              0%                  
+18. Matcher.BasicMatch(class Fuzzy.Text.RegularExpressions.Engine.MatchSta    95.88%              30.1%               
+19. Engine.Run()                                                              88.95%              0.03%               
+20. Activity Benchmark(/#41124/1/76/,/benchmarkName=Fuzzy.Text.RegularExpr    88.95%              0%                  
+21. Engine.RunIteration(value class BenchmarkDotNet.Engines.IterationData)    87.2%               0.04%               
+22. Engine.Measure(class System.Action`1<int64>,int64)                        86.46%              0%                  
+23. Matcher.FuzzyMatchString(class Fuzzy.Text.RegularExpressions.Engine.Ma    33.01%              30.29%              
+24. Matcher.RetryFuzzyMatchString(class Fuzzy.Text.RegularExpressions.Engi    25.07%              24.45%              
+25. Engine.GetExtraStats(value class BenchmarkDotNet.Engines.IterationData    11.07%              0.03%               
+26. Engine.MeasureWithGc(int64)                                               11.01%              0%                  
+27. Activity WorkloadActual(/#41124/1/76/8/)                                  9.85%               0%                  
+28. Activity WorkloadActual(/#41124/1/76/9/)                                  9.6%                0%                  
+29. EngineFactory.CreateReadyToRun(class BenchmarkDotNet.Engines.EnginePar    9.53%               0%                  
+30. EngineFactory.Jit(class BenchmarkDotNet.Engines.Engine,int32,int32,int    9.41%               0.03%               

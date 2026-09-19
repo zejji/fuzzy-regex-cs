@@ -276,6 +276,110 @@ about 1.0001 is justified by the machine, not forced by it.
 this machine would kill the owner's driver, Stryker and night-shift processes, which is the owner's
 call and not a slice's. It stays on the slice.
 
+## The Python side's floor, measured 2026-09-19 (S58 scope item 2)
+
+The v1.0 gate compares our median against upstream `regex`'s median on the same machine, so the
+Python side needs a floor of its own. Probe: `tools/probes/s58-pyperf-floor.py`, six workloads
+mirroring `WorkloadBenchmarks` on the same corpus shapes. pyperf 2.10.0, regex 2026.9.10,
+Python 3.14.6.
+
+```powershell
+python tools/probes/s58-pyperf-floor.py -o run1.json
+python tools/probes/s58-pyperf-floor.py -o run2.json
+python -m pyperf compare_to run1.json run2.json --table
+python -m pyperf check run1.json
+```
+
+Both runs are committed here (`2026-09-19-S58-pyperf-floor-run1.json`, `-run2.json`), as are the
+verbatim `compare_to` and `check` outputs, so the table below is re-derivable from committed files.
+
+| Benchmark | run 1 | run 2 | ratio |
+|---|---:|---:|---:|
+| `literal_match` | 399 us | 391 us | 1.02x faster |
+| `class_scan` | 41.9 ms | 43.3 ms | 1.03x slower |
+| `words_findall` | 42.3 ms | 40.3 ms | 1.05x faster |
+| `fuzzy_long` | 150 ms | 146 ms | 1.03x faster |
+| `fuzzy_no_match_long` | 146 ms | 153 ms | 1.05x slower |
+| `best_match` | 78.8 us | 87.2 us | **1.11x slower** |
+
+**The Python floor on this machine is 1.11x**, set by `best_match` - two-sided, like the .NET one,
+because an unexplained 1.05x improvement is the same artefact as a 1.05x regression. It is wider
+than the .NET floor of 1.13x by less than it looks: the two are measured by different tools over
+different workloads, and neither transfers to the other.
+
+### `pyperf check` fails here, and the fix pyperf recommends does not exist on Windows
+
+**Every row of both runs fails `check`**, with the same verdict: *"WARNING: the benchmark result may
+be unstable / Not enough samples to get a stable result (95% certainly of less than 1% variation)"*.
+pyperf's own remedy in that message is `python -m pyperf system tune`, and on this machine:
+
+```
+> python -m pyperf system show
+WARNING: no operation available for your platform
+> python -m pyperf system tune
+WARNING: no operation available for your platform
+```
+
+That output is archived as `2026-09-19-S58-pyperf-system-show.txt`. It turns the research's
+inference - "`pyperf system tune` documents no Windows procedure" - into a measurement: pyperf has
+**no** system operations at all on Windows, so its documented route to a stable result is closed
+here.
+
+**A stricter run buys two of the six.** `--rigorous` (archived as `-pyperf-rigorous.json`, its check
+verdict beside it) clears the bar for `fuzzy_long` and `fuzzy_no_match_long` - the ~150 ms
+workloads, the second reported as *"run more times than necessary to get a stable result"* - and
+leaves `literal_match`, `class_scan`, `words_findall` and `best_match` unstable. The pattern is
+duration: the workloads long enough to swamp scheduler jitter settle, the sub-50 ms ones do not.
+
+**What that means for the gate (S63).** A Python baseline on this machine cannot be
+"check-clean" for the light workloads, so "passes `check`" cannot be the admission test for the
+gate's Python side. The honest substitute is the floor above: quote the ratio, and treat anything
+inside 1.11x as no difference. Where a clean row is wanted, `--rigorous` on a workload of 100 ms or
+more is the route that works. Note also that the rigorous run's means are 3-8% above run 1's on
+every row - it was taken later, with more of the machine busy - which is itself a reminder that a
+pyperf number and a BDN number are only comparable when taken in the same session, as the
+`benchmark` skill already requires.
+
+## What BenchmarkDotNet controls for you, measured 2026-09-19 (S58 scope item 1)
+
+Read out of a real run's generated artifacts rather than out of a documentation page, because the
+research left it **UNVERIFIED** and an assumption here changes what every row above means. Both
+files are committed beside this one - `2026-09-19-S58-bdn-generated-MediumRun.csproj.txt` and
+`2026-09-19-S58-bdn-generated-MediumRun.runtimeconfig.json` - so the claim is checkable without a
+re-run.
+
+| Question | Answer | Evidence |
+|---|---|---|
+| Does BDN force a GC mode? | **Yes - workstation, concurrent** | generated csproj `<ServerGarbageCollection>false</ServerGarbageCollection>`, `<ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>`; generated runtimeconfig `"System.GC.Server": false, "System.GC.Concurrent": true`; BDN's own summary line `GC = Concurrent Workstation` |
+| Does BDN pin CPU affinity? | **No** | the benchmark process sampled six times through a live run, mask `0xfffffff` every time - all 28 logical processors |
+| Does it change process priority? | **Yes, to `High`** | same samples |
+| Does it change the power plan? | **Yes, High Performance, reverted at the end** | run log: `Setup power plan (GUID: 8c5e7fda-... High performance)` / `Successfully reverted power plan` |
+| Does our `Directory.Build.props` apply to the harness build? | **No** | generated csproj `ImportDirectoryBuildProps=false`, `ImportDirectoryBuildTargets=false`; it also sets `RunAnalyzers=false`, `DebugSymbols=false`, `UseSharedCompilation=false`, `AllowUnsafeBlocks=true`, and its "copied settings from benchmarks project" block is empty |
+
+Two consequences worth carrying into Phase 7:
+
+- **Every number in this suite is a workstation-concurrent-GC number.** An allocation win measured
+  here is not automatically the same win under server GC, which is what a server deployment would
+  use. A server-GC row needs an explicit job (`.WithGcServer(true)`), and nobody should read these
+  rows as covering it.
+- **Nothing is pinned to a core**, so core-to-core migration and the OS scheduler are inside the
+  noise floor above rather than controlled away. That is consistent with the floor being wider on
+  time (1.13) than on allocation (1.0001).
+
+Reproduce (the working directory matters - BDN walks up for a solution file and `bench/` holds
+`FuzzyRegex.Benchmarks.slnx`, which stops the walk before the `.claude/worktrees` copies):
+
+```powershell
+Push-Location bench
+dotnet run -c Release --project FuzzyRegex.Benchmarks --no-build -- `
+    --job medium --filter '*SpanOverloadBenchmarks.StringShort*' --keepFiles
+Pop-Location
+# then read bench/FuzzyRegex.Benchmarks/bin/Release/net10.0/FuzzyRegex.Benchmarks-MediumRun-1/
+```
+
+A run **without** `--keepFiles` deletes those files on the way out ("Artifacts cleanup is
+finished"), which is how this measurement had to be taken twice.
+
 ## Using it
 
 `tools/compare-benchmarks.ps1` defaults `-NoiseFloor` and `-AllocationNoiseFloor` to the numbers

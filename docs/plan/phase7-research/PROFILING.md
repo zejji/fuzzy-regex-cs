@@ -175,6 +175,24 @@ fetched 2026-09-16).
    `.dtp`/`.dtt`, which needs the tool installed and Rider running. That probe is the first thing
    a profiling slice should do, and it is cheap.
 
+**S58 ran that probe on 2026-09-19. Capture works; reading does not.** The detail, with the
+commands and their output, is in `profiles/README.md`; the three findings that change this section:
+
+- `dotnet tool install --global JetBrains.dotTrace.GlobalTools` gives **2026.2.2**, and
+  `dottrace help` lists exactly three commands - `start`, `attach`, `xmlfile`. There is no report
+  verb, so the CLI captures and nothing more.
+- **`Reporter.exe` is not in the package.** Every `.exe` under
+  `~/.dotnet/tools/.store/jetbrains.dottrace.globaltools/2026.2.2/` is `dottrace.exe`, the
+  elevation agent, the Dpa/Etw collectors and `xperf.exe`. So the clumsy XML route above is not
+  merely clumsy here, it is absent - and it excluded Timeline anyway.
+- **The Rider MCP server was `ConnectionRefused` for the whole slice**, so
+  `dotTraceGetCallTree(filterEvent: "memory")` could not be called at all. It needs Rider running
+  with the MCP endpoint reachable; treat it as the owner's route, available when the owner's IDE
+  is up, and never as an unattended slice's dependency.
+
+A Timeline snapshot is therefore something a slice can produce and hand to the owner, not
+something it can read. Budget for that when planning: capture costs 30 s, reading costs a human.
+
 ---
 
 ## 4. dotMemory, and why it is not the allocation route
@@ -288,8 +306,14 @@ what an agent can actually read:
 
 1. dotTrace Timeline + `dotTraceGetCallTree(filterEvent: "memory")` - allocation bytes per call
    tree node, as text. Best answer, needs the one-off install-and-probe above.
-2. `EventPipeProfiler(EventPipeProfile.GcVerbose)` - writes a `.speedscope.json` that is machine
-   readable, so a small script can attribute allocation ticks without a GUI.
+2. ~~`EventPipeProfiler(EventPipeProfile.GcVerbose)` - writes a `.speedscope.json` that is machine
+   readable, so a small script can attribute allocation ticks without a GUI.~~ **Wrong, measured
+   2026-09-19 (S58).** A `gc-verbose` capture converts fine, but the speedscope it produces is an
+   *evented, millisecond-weighted* profile: 3 threads, 144 events, and the heaviest leaf on every
+   thread is `CPU_TIME`. There are no allocation weights in it, because the conversion weights
+   stacks by time and a GC-only trace carries almost no stacks. Attributing allocation from the
+   `.nettrace` means reading `GCAllocationTick` payloads with TraceEvent yourself - a program to
+   write, not a flag to pass. `profiles/README.md` has the commands and the output.
 3. `dotnet-gcdump report` - text, but it shows the **live** heap, not the allocation stream. For
    this engine, whose garbage is per-match and short-lived, it will mostly show what survived,
    which is the less interesting half.

@@ -363,3 +363,57 @@ COULD NOT RUN, and why: the pre-fix 110/3 and intermediate 113/0 tool-test count
 fixture is no longer on disk); the oracle at seeds 7 and 4242 (forbidden as expensive - **since
 run in this sitting: seed 7 is GREEN, `no row diverged from upstream`**); and the AOT IL2065
 failure (needs a native publish - **since re-run here, identical**).
+
+## Sitting 3 - 2026-09-19
+
+Scope item 4 only, the allocation-attribution route. Ended early on the allowance, as a
+checkpoint, with the session at 93% of its five-hour window.
+
+### Checklist (carried forward)
+
+- [x] BDN affinity / GC-mode question answered from a real run's artifacts (sitting 2)
+- [x] pyperf installed, `system show` + `check` archived, Python floor measured (sitting 2)
+- [x] EventPipe topN route proven (sitting 2)
+- [x] dotTrace/Rider allocation route proven, or failure + fallback recorded - **this sitting**
+- [ ] Optimise checklist skill: re-probe whether `.claude/skills/` is writable from a session
+- [ ] Scope item 1's after-a-reboot floor repeat (parked, owner's call)
+- [ ] Finish sequence for the slice: ratchet, oracle at three seeds, AOT, tool tests, blind
+      review, second pass, verifier, closing notes
+
+### What this sitting settled
+
+Written up in full in `docs/plan/phase7-research/profiles/README.md`, section
+"2026-09-19, S58: the allocation route, and exactly where it stops", with every command and its
+output. The four facts:
+
+1. **dotTrace captures a Timeline snapshot unattended.** 54 MB for a 30 s capture of the
+   benchmark assembly's `sizing` mode (one 558-byte `.dtt` plus 39 chunks). A second run over the
+   same path is refused - `The file ... already exists`, exit 1024 - not overwritten.
+2. **Nothing installed reads it.** `dottrace help` has `start`, `attach`, `xmlfile` and no report
+   verb; no `Reporter.exe` in the package at all (and Reporter excludes Timeline anyway); the
+   Rider MCP server was `ConnectionRefused` for the whole slice. The MCP call tree is the owner's
+   route, not a slice's.
+3. **The GcVerbose fallback captures only by attaching.** `dotnet-trace collect --profile
+   gc-verbose -- <bench.exe> -i ...` deadlocked - child at 6.08 s CPU and flat for eight minutes,
+   trace frozen at 161 KB, BDN log empty. The isolation run, the same command minus the tracer,
+   finished normally (157.0 ms, 992 B), so the tracer's launch path is the cause and `-i` is fine.
+   `--process-id` after a 3 s sleep wrote a 2.7 MB trace. A `--job short` single benchmark takes
+   six seconds, which loses the race with the attach: `Process with an Id of <pid> is not running.`
+4. **The captured trace cannot be attributed with the shipped tools.** `dotnet-trace convert
+   --format speedscope` gives an evented, millisecond-weighted profile - 3 threads, 144 events,
+   heaviest leaf `CPU_TIME` on every thread - with no allocation weights. `topN` over it ranks GC
+   event stacks and blames `EventPipeMetadataGenerator.GenerateEventMetadata` at 36%, which is
+   harness noise. `PROFILING.md` section 7's route 2 is struck through with that measurement
+   beside it.
+
+So the arithmetic route (`MemoryDiagnoser` plus the named allocation sites at
+`src/FuzzyRegex/Engine/MatchState.cs:544-568`) is the answer for Phase 7, not the consolation
+prize. **Not done, and it is the next thing:** demonstrating that subtraction on real numbers -
+`FuzzyShort` against `FuzzyLong` for subject length, `MatchesFirstTwo` against `MatchesToEnd` for
+match count - from a medium run's `Allocated` column.
+
+### Left behind, deliberately
+
+`artifacts/prof/S58/` holds the Timeline snapshot (54 MB), both `.nettrace` captures and the
+speedscope conversions. `artifacts/` is gitignored and regenerable; the derived text is in
+`profiles/`.
