@@ -673,3 +673,15 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   and not the library's, and a visitor's own code should rewrite the whole subject. The page says
   out loud when it truncates. Pinned by `snippet.test.ts > replace mode prints the rewritten
   subject`, which asserts the whole snippet, so a `count:` argument would fail it.
+- 2026-09-19 (S73): an arrow key in either half of the answer moves the selection and the focus and
+  does not bring the other half into view; Enter, Space and a click do. Both halves share one scroll
+  container, so a counterpart a screen away can only be shown by scrolling the focused control off
+  screen. Measured in Chrome at 1366x768 with 80 matches: the reveal scrolled the pane to the
+  counterpart and the focus call scrolled it straight back, so the reveal was a cancelled animation.
+  Keeping the focus visible is WCAG 2.4.3. Pinned by `page.test.ts > the keyboard reaches both views
+  of a match`; plant the reveal back in `rove()` to see the pin fail.
+- 2026-09-19 (S73): `layout.test.ts > nothing but a link is underlined` reads the compiled
+  stylesheet with regular expressions rather than parsing it, and rejects a Tailwind `underline`
+  utility even on a real link, because `.underline` names no element. Links are underlined in
+  `styles.css` against `a`. The ceiling and the lift (`postcss`, already in the tree) are a
+  `SHORTCUT:` in the test.

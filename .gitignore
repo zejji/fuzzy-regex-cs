@@ -79,3 +79,9 @@ ORCHESTRATOR-PROMPT.md
 # vitest run started from the repository root writes `.vite/deps_temp_*` here instead, and an
 # unignored directory at the root fails a slice's clean-tree check (S73, 2026-09-19).
 .vite/
+
+# Playwright MCP's own output: page snapshots, console logs and screenshots, written to the root
+# of whichever checkout the browser was driven from. Same reason again - driving the live page is
+# how a layout claim gets proved, and the evidence it drops must not fail the slice
+# (S73, 2026-09-19).
+.playwright-mcp/

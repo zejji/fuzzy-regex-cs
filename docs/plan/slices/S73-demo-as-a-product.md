@@ -208,11 +208,14 @@ naming the string and the rule. Keep the rules in one exported array.
 - [ ] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the
       owner has accepted the screenshots. Layout regions behave as the table says at all five
       widths, each decision traced to a source.
-- [ ] The snippet panel generates, colours and copies for all three modes; the clipboard fallback
+- [x] The snippet panel generates, colours and copies for all three modes; the clipboard fallback
       exercised with permission denied; one snippet compiled and its output quoted. The header
-      carries the GitHub link and the footer link still works.
-- [ ] Both directions of match linking work by pointer and by keyboard, with a selected state
-      distinct from hover, and nothing that is not a link is underlined.
+      carries the GitHub link and the footer link still works. (Chunks 3 and 4.)
+- [x] Both directions of match linking work by pointer and by keyboard, with a selected state
+      distinct from hover, and nothing that is not a link is underlined. (Chunk 4, measured on the
+      published page - the table in the sittings notes. By keyboard means Enter and Space on the
+      focused half: an arrow moves the selection and the focus only, because a browser scrolls what
+      it focuses and the counterpart reveal was measured being cancelled by it.)
 - [ ] `tools/build-demo-web.ps1` green, the Vitest suite green, the accessibility items met; then
       blind review and commit. **Hunt:** a fixed shell that traps content on a short window (768 px
       tall with browser chrome, or 200 % zoom, where "no page scroll" becomes "cannot reach the

@@ -599,3 +599,151 @@ a raw U+00A0 in a source file renders as an ordinary space. Two readers in a row
 mistake. Every non-ASCII whitespace character in `snippet.ts`, `snippet.test.ts` and the trim probe
 is therefore written as `\u{a0}`, `\u{2028}` and so on, where the reader can see which character it
 is; 229 tests still green and the probe still prints 0 disagreements afterwards.
+
+## Chunk 4 - two-way linking and the header link (2026-09-19, sitting 6)
+
+Deliverables (vi) and (vii). Starting tree clean at `c807f61`; the chunk adds 5 front-end tests, 234
+at the end.
+
+### What chunk 4 landed
+
+**One pair of selectors for both halves.** `HALVES` in `App.vue` names, for the subject and for the
+table, the container, the element the keyboard focuses and the element worth scrolling to. They
+differ on the table side on purpose: the keyboard's control is the 24 px number button, the thing
+worth revealing is the whole row. Every lookup is by `data-match`, never by position, because under
+RightToLeft the highlights are in subject order and the rows are in the answer's order.
+
+**A click in either half selects the match and brings the other half to it**, with
+`scrollIntoView({ block: 'nearest', inline: 'nearest' })` and `behavior` from
+`prefers-reduced-motion`. The row's own `@click` is the only handler: the press on the number
+bubbles to it, so the scroll is asked for once.
+
+**The header carries the repository**, `zejji/fuzzy-regex-cs` beside the GitHub mark, `ms-auto` and
+`whitespace-nowrap` so it cannot make the header two rows tall; the footer link stays. The colour
+and the underline come from the existing link rules - it is a link and it reads as one. No
+`rel="noopener"`: it does nothing without `target="_blank"`, and the footer links carry neither.
+
+**Chunk 2 had already de-underlined the row number**, so the rest of (vii)'s last sentence was a
+regression pin rather than a fix: `layout.test.ts` now reads the compiled stylesheet and fails if
+any rule that underlines something has a selector that is not a link.
+
+### Measured in Chrome, not in jsdom
+
+jsdom 30.1.0 has no `scrollIntoView` at all - `node -e` in `demo/web` prints `proto: undefined` and
+`TypeError: e.scrollIntoView is not a function` - so the tests install a recorder on
+`Element.prototype` and the page keeps its unguarded call. That makes the unit tests evidence about
+arguments and nothing at all about scrolling, so the published page was driven directly: the
+`tools/run-wasm-smoke.ps1` output served by `python -m http.server 8199`, Chrome at 1366x768.
+
+**To re-run it**, because every pixel below is a function of the subject: default pattern
+`(?:colour){e<=2}`, subject = 20 copies of `the color of the collar in colur and collor`. That gives
+**80 matches** in a results pane of `scrollHeight` 4,285 inside `clientHeight` 655. The numbers in
+the table are the independent verifier's re-run of 2026-09-19 against that subject; the sitting's own
+first run used a subject it failed to record and read 100 to 150 px lower throughout.
+
+| What was done | What the pane did |
+|---|---|
+| clicked row 75's number, pane at 3,489 | scrolled to 630, highlight 75 in view, `hit-current`, the only tab stop |
+| clicked highlight 70, pane at 0 | scrolled to 2,972, row 70 in view, `aria-current="true"` on both halves |
+| Enter on focused highlight 4 | scrolled 126 to 279, row 4 in view, focus unmoved |
+| Enter on row 60's focused number | scrolled 2,772 to 518, highlight 60 in view |
+| reduced motion on, clicked highlight 70 | first animation frame already at 2,972, one distinct value over 30 frames |
+| reduced motion off, same click | 30 distinct values over 30 frames, 0, 2, 7, 18 ... still climbing - the control that makes the row above mean something |
+
+**The arrows do not chase the counterpart, and that is the finding of this chunk.** The first
+version had every arrow reveal the other half. In Chrome, ArrowRight scrolled the pane to the
+counterpart row and the `focus()` on the next tick scrolled it straight back: both halves live in one
+scroll container, so when they are a screen apart only one can be on screen, and the one that must
+be is the one holding the focus (WCAG 2.4.3). The reveal was a cancelled animation. `rove()` now
+selects and focuses only; Enter, Space and the pointer are how the keyboard asks for the other half,
+and those keep the focus where it is, so their reveal survives. The unit test asserts no reveal from
+an arrow and says why.
+
+### For chunk 5: the column header does not stick
+
+Found while checking a comment that claimed it did. `.table-scroll` is `overflow-x: auto`, and CSS
+computes the other axis to `auto` with it, so `.table-scroll` - not `.results-pane` - is the
+scrollport the sticky `th` sticks to, and it never scrolls vertically. Measured on the published
+page with the subject above and the pane scrolled to 1,500: `overflowX` and `overflowY` both compute
+to `auto`, `.table-scroll` has `scrollHeight` 3,297 equal to its `clientHeight`, so it can never
+scroll and the sticky `th` has no scrollport to stick in - it sits at y = -697 with the pane top at
+y = 64, that far off screen. The stylesheet's own comment at `styles.css:382` names this
+exact hazard. Spec line 69 asks for a sticky header row, so chunk 5 owes it: try `overflow-y: clip`
+beside `overflow-x: auto` and measure whether the `th` then sticks to the pane, and pin whichever
+answer the browser gives.
+
+### Mutants
+
+Six, each planted, run and reverted:
+
+| Mutant | Result |
+|---|---|
+| `block: 'nearest'` becomes `'center'` | 2 tests fail |
+| the reveal looks up the half it was called from | 2 tests fail |
+| `behavior` hard-coded to `'smooth'` | the reduced-motion test fails |
+| the row's `:data-match="i"` removed | 2 tests fail, reveal list empty |
+| `rove()` reveals the counterpart again | the arrow test fails |
+| `.row-select` underlined with the `text-decoration` shorthand | the underline pin fails, after the review's fix |
+
+### Review (chunk 4)
+
+**First pass, over the whole diff: three findings raised, three reproduced, three acted on.**
+
+| Finding | Reproduced as | Outcome |
+|---|---|---|
+| the underline pin reads only the `text-decoration-line` longhand | `.row-select { text-decoration: underline }` compiled into the stylesheet, suite 234/234 green | fixed - both spellings, solid only |
+| the "once per activation" block dispatches on the `<tr>`, so the duplicate handler it names never runs | the mutant is killed 22 lines earlier; relaxing that line lets the block pass with two handlers | fixed by deleting the block and moving its reasoning into the assertion that does catch it |
+| two new comments say a 24 px button can be left "under the sticky header", and no header sticks | the live measurement above | comments corrected, and the stylesheet bug written up for chunk 5 |
+
+**Second pass, over the widened underline pin, which no reviewer had seen: seven findings, all
+reproduced, two fixed and five declined on the merits.** Fixed: a rule inside `@media (hover: hover)`
+was read with the media prelude as its selector, so every media-wrapped rule went unchecked - the
+at-rule preludes are dropped first now; and `split(',')` cut inside `:where(.shell-header,
+.input-pane, .shell-footer) a`, so the file's own scoped link rule would have failed the moment it
+carried the underline itself - a depth-aware split fixes it, proved by adding `underline` to that
+rule and watching the suite stay green. Declined, and written into the test as a `SHORTCUT:` with
+its lift: a keyword hidden behind `var(--deco)`, a `dotted` inside a `var()` fallback, and a
+selector that merely contains a link compound (`a:hover ~ .row-select`, or the same thing as a
+Tailwind arbitrary variant) all get past a regular expression. They are what someone writes to
+evade the test, not what someone writes by accident; the habit this pin guards is
+`class="underline"`, which it catches. A real parser is the lift and `postcss` is already in the
+tree. The reviewer also reported that `hover:underline` on a genuine link fails the test: it does,
+because `.hover\:underline:hover` says nothing about what wears it, and the assertion message now
+says to underline links in `styles.css` against `a`.
+
+### Verifier (chunk 4)
+
+A fresh Opus verifier re-ran every number above from the commit-ready tree: the suite and typecheck,
+the ratchet and the demo build, the jsdom probe, all six mutants (each planted, run and reverted,
+with `git diff --stat` identical afterwards), every Chrome measurement in a live browser, and the
+depth-aware-split proof. Nineteen claims CONFIRMED. Three were not, and all three are corrected
+above rather than kept:
+
+- **the pane pixels.** The sitting did not record its subject, and the verifier's subject gives a
+  pane 140 px taller and every scroll offset 100 to 150 px lower. The table now carries the
+  verifier's numbers and the subject that produces them.
+- **`overflow` computes to `["auto", "auto"]`.** It serialises to the single token `auto`. Right
+  substance, wrong reading; rewritten as `overflowX`/`overflowY`, and the finding restated in the
+  stronger form the verifier measured - `scrollHeight` equals `clientHeight`, so no scrollport.
+- **"40 distinct values".** Every frame of the control is distinct, so the count is the sample
+  length, not a property of the page; the row now says 30 of 30 and what that means.
+
+Two more, kept with the claim rewritten: the pre-fix arrow measurement (pane to 2,873, focus back to
+171) cannot be re-run from the committed code, so `App.vue`, `page.test.ts` and DECISIONS.md now
+describe the cancelled animation without the two figures and point at the mutant that reproduces it;
+and "229 tests at `c807f61`" needed a checkout the verifier was barred from, so the line now states
+the +5 the diff actually shows. The verifier also added a negative control the sitting had not run:
+with the scoped link rule underlined and `selectorList` replaced by a plain `split(',')`, the pin
+fails - the depth-aware split is load-bearing, not decoration.
+
+### Doing the rest of S73 in one sitting
+
+This is sitting 6, so: what is left is chunk 5, and it is one sitting if it is run as one pass
+rather than five. The order that does it - the sticky-header fix first, because it changes the
+layout every later measurement is taken against; then one Playwright pass that walks 1920x1080,
+1440x900, 1366x768, 1024x768 and 390x844 in a loop, taking the bounding-box assertions, the
+screenshot and the keyboard walk at each width from the same script rather than by hand; then the
+contrast measurements in that same browser session; then the blind review, the verifier and the
+closing notes. Two things must be written as files before the browser opens, because doing them by
+hand is what made chunks 2 and 3 take two sittings each: the width loop as a probe in
+`tools/probes/`, and the checklist of what each width must prove.

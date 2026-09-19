@@ -188,6 +188,79 @@ test('there is one colour scheme and it is light', () => {
     expect(declarations).toMatch(/color-scheme:\s*light\s*;/);
 });
 
+/**
+ * Underlining means "this navigates", and nothing else on the page may borrow it.
+ *
+ * The owner's first look at v2 said the match numbers looked like links and appeared to do nothing
+ * when clicked: `.row-select` was accent-coloured and underlined, so it made a promise the page
+ * could not keep. The rule is worth a test rather than a habit, because `underline` is one Tailwind
+ * utility away in any template, and the utility would arrive in the compiled stylesheet as a
+ * selector of its own - which is what this reads.
+ *
+ * Both spellings: Tailwind's `underline` utility compiles to the `text-decoration-line` longhand,
+ * but hand-written CSS in this file may say `text-decoration: underline` and a blind review's
+ * mutant proved the longhand-only read let that through (2026-09-19).
+ *
+ * The solid underline only. Tailwind's preflight gives `abbr:where([title])` an
+ * `underline dotted`, which is the browsers' own abbreviation convention and reads as nothing
+ * like a link; the style a visitor mistakes for one is the plain line this page's links carry.
+ *
+ * SHORTCUT: this reads the stylesheet with regular expressions rather than parsing it, so it sees
+ * what someone writes by accident and not what someone writes to get past it - a keyword behind
+ * `var(--deco)` is invisible to it, and a selector that merely contains a link compound
+ * (`a:hover ~ .row-select`) is taken for a link. Both were proved past it on 2026-09-19. The lift
+ * is a real CSS parser (`postcss` is already in the tree as a Tailwind dependency); the reason not
+ * to take it yet is that this test guards a habit, and the habit is `class="underline"`.
+ */
+
+/**
+ * The comma-separated selectors of one rule, cut at the top level only.
+ *
+ * A plain `split(',')` cuts inside `:where(.shell-header, .shell-footer) a` as well, and the
+ * fragment `:where(.shell-header` is then read as a selector that is not a link - so the file's
+ * own scoped link rule would have failed the test the moment it carried the underline itself.
+ */
+function selectorList(selector: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const character of selector) {
+        if (character === '(' || character === '[') depth += 1;
+        else if (character === ')' || character === ']') depth -= 1;
+
+        if (character === ',' && depth === 0) {
+            parts.push(current);
+            current = '';
+        } else {
+            current += character;
+        }
+    }
+    return [...parts, current].map((one) => one.trim()).filter((one) => one.length > 0);
+}
+test('nothing but a link is underlined', async () => {
+    // At-rule preludes dropped first, so a rule inside `@media (hover: hover)` is read as the rule
+    // it is. Left in, the prelude becomes the "selector" and the rule inside it is never checked -
+    // which is where `hover:underline` on a real link lands, so the common case was the broken one.
+    const rules = (await builtCss()).replace(/@[a-z-]+[^{;]*\{/gi, ' ');
+
+    const underlined = [...rules.matchAll(/([^{}@]+)\{([^}]*)\}/g)]
+        .filter(
+            ([, , body]) =>
+                /text-decoration(?:-line)?:[^;]*\bunderline\b/.test(body ?? '') &&
+                !/text-decoration[^;]*\b(?:dotted|dashed|wavy|double)\b/.test(body ?? ''),
+        )
+        .flatMap(([, selector]) => selectorList(selector ?? ''));
+
+    expect(underlined.length, 'no rule underlines anything, so the link style is gone').toBeGreaterThan(0);
+    for (const selector of underlined) {
+        // A selector naming the <a> element, which a utility class never does: `class="underline"`
+        // compiles to `.underline` and says nothing about what wears it, so an underline a link
+        // needs is written in this file against `a`, not in the template.
+        const why = `${selector} underlines something that is not a link - underline links in styles.css, against 'a'`;
+        expect(selector, why).toMatch(/(^|[\s>+~])a(?:[:[.]|$)/);
+    }
+});
+
 // --- the page ---------------------------------------------------------------------------------
 
 let app: VueApp<Element> | null = null;

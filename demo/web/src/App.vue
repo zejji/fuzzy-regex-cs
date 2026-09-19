@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The page. Its state is demo.ts, which is testable without a DOM; what is here is layout only.
-import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, watch, type ShallowRef } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, watch } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { copyText } from './lib/clipboard';
@@ -253,23 +253,81 @@ const subjectPane = useTemplateRef<HTMLElement>('subjectPane');
 const matchRows = useTemplateRef<HTMLElement>('matchRows');
 
 /**
+ * The answer's two halves, and how to find one match in each of them.
+ *
+ * Written once, because the keyboard and the linking both have to find the same element: the
+ * arrows move the focus inside the half being driven, and a click in either half moves the other
+ * one to the same match. Two copies of these selectors would be two chances for the two features
+ * to disagree about which element is match 3.
+ *
+ * `focusable` and `reveal` differ on the table side and that is deliberate: the keyboard's control
+ * is the little button in the first cell, while the thing worth scrolling to is the whole row -
+ * the row carries the answer, and `nearest` on a 24 px control in its first cell is satisfied by
+ * a sliver of the row at the edge of the pane, with the five columns of numbers still out of it.
+ *
+ * Every lookup is by `data-match` and never by position. Under RightToLeft the highlights sit in
+ * subject order while the rows sit in the answer's order, so the two halves disagree about which
+ * element is third.
+ */
+const HALVES = {
+    subject: { within: subjectPane, focusable: 'mark.hit', reveal: 'mark.hit' },
+    rows: { within: matchRows, focusable: 'button.row-select', reveal: 'tr' },
+} as const;
+
+type Half = keyof typeof HALVES;
+
+/** The element in one half that stands for a given match, or null while the answer has no such row. */
+function elementFor(half: Half, kind: 'focusable' | 'reveal', index: number): HTMLElement | null {
+    const { within } = HALVES[half];
+    return within.value?.querySelector<HTMLElement>(`${HALVES[half][kind]}[data-match="${index}"]`) ?? null;
+}
+
+/**
+ * How a reveal scrolls, which is the visitor's setting rather than this page's taste.
+ *
+ * A scroll nobody asked to watch is motion triggered by an interaction, and `prefers-reduced-motion`
+ * is how a browser passes on a visitor who does not want it (WCAG 2.3.3 Animation from
+ * Interactions). Asked through `matchMedia`, optionally, for the same reason the shell's own gate
+ * is: jsdom has none.
+ */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/**
+ * Brings the OTHER view of a match into view: the row for a highlight, the highlight for a row.
+ *
+ * Which of six numbers in a table belongs to which highlight is the question the table raises, and
+ * moving the counterpart into view is the answer that survives a long subject, where the two halves
+ * are a scroll apart. The half the visitor acted in is left where it is: nobody needs the thing
+ * under their pointer moved.
+ *
+ * `nearest` in both axes, so a counterpart already on screen does not jump - which is the
+ * commonest case of all, a short subject with both halves visible at once.
+ *
+ * @param origin The half the visitor acted in.
+ * @param index The match, numbered as the answer numbers it.
+ */
+function reveal(origin: Half, index: number): void {
+    elementFor(origin === 'subject' ? 'rows' : 'subject', 'reveal', index)?.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: window.matchMedia?.(REDUCED_MOTION).matches === true ? 'auto' : 'smooth',
+    });
+}
+
+/** Selects a match from one half of the answer and brings the other half to it. */
+function selectFrom(origin: Half, index: number): void {
+    select(index);
+    reveal(origin, index);
+}
+
+/**
  * Moves the selection with an arrow key and takes the focus with it.
  *
- * @param back The key that moves towards the first match, which differs by the group's direction:
+ * @param back The key that moves towards the first match, which differs by the half's direction:
  *   the highlights run along the subject and the rows run down the table.
- * @param within The element holding the controls, so the focus stays inside the group that was
- *   being driven.
- * @param control A selector for those controls. The destination is found by its `data-match`
- *   attribute and never by position: under RightToLeft the highlights sit in subject order while
- *   the rows sit in the answer's order, so the two groups disagree about which element is third.
+ * @param origin The half being driven, so the focus stays inside it.
  */
-function rove(
-    event: KeyboardEvent,
-    back: string,
-    forward: string,
-    within: Readonly<ShallowRef<HTMLElement | null>>,
-    control: string,
-): void {
+function rove(event: KeyboardEvent, back: string, forward: string, origin: Half): void {
     const last = view.value.shown - 1;
     if (last < 0) return;
 
@@ -288,21 +346,26 @@ function rove(
     // The ends hold rather than wrapping, and the page does not scroll: every one of these keys
     // scrolls something by default, and the table's own scroll container is right underneath.
     event.preventDefault();
+
+    // Selection only: an arrow does NOT bring the other half over. Both halves share one scroll
+    // container, so when they are a screen apart only one of them can be on screen, and the one
+    // that must be is the one holding the focus (WCAG 2.4.3 Focus Order). Measured in Chrome
+    // 2026-09-19, 80 matches at 1366x768: with a reveal here, ArrowRight scrolled the pane away to
+    // the counterpart row and the focus call on the next tick scrolled it straight back, so the
+    // reveal was a cancelled animation and nothing else. Enter, Space and a click keep focus put,
+    // and there the reveal survives - which is where the spec's two-way linking lives.
     select(to);
 
     // On the next render, because the destination is a tab stop only after it: moving focus first
     // would leave the focused control holding `tabindex="-1"` for a frame, and Tab out of it then
-    // resumes from the wrong place.
-    void nextTick(() =>
-        within.value?.querySelector<HTMLElement>(`${control}[data-match="${to}"]`)?.focus(),
-    );
+    // resumes from the wrong place. The focus is its own reveal - a browser scrolls what it focuses.
+    void nextTick(() => elementFor(origin, 'focusable', to)?.focus());
 }
 
 const onSubjectKeydown = (event: KeyboardEvent): void =>
-    rove(event, 'ArrowLeft', 'ArrowRight', subjectPane, 'mark.hit');
+    rove(event, 'ArrowLeft', 'ArrowRight', 'subject');
 
-const onRowsKeydown = (event: KeyboardEvent): void =>
-    rove(event, 'ArrowUp', 'ArrowDown', matchRows, 'button.row-select');
+const onRowsKeydown = (event: KeyboardEvent): void => rove(event, 'ArrowUp', 'ArrowDown', 'rows');
 
 // --- the case as C# ----------------------------------------------------------------------------
 
@@ -399,6 +462,22 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                 A C# port of Python's <code class="font-mono">regex</code> module, running in your
                 browser on WebAssembly. Edit any box and the answer follows.
             </p>
+            <!--
+              The repository, from the top of the page. The same link is in the footer, which the
+              fixed shell put beyond reach of a visitor who never scrolls the input pane.
+
+              Named by the repository rather than by "GitHub": the destination is this library, and
+              a visitor deciding whether to follow a link is owed which one it is (WCAG 2.4.4). It
+              opens in this tab - the case is in the address bar, so Back brings all of it home.
+            -->
+            <a class="header-link" href="https://github.com/zejji/fuzzy-regex-cs">
+                <svg class="size-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path
+                        d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.11.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.14.46.55.38A8 8 0 0 0 8 0Z"
+                    />
+                </svg>
+                zejji/fuzzy-regex-cs
+            </a>
         </header>
 
         <main class="shell-body">
@@ -839,11 +918,11 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     :aria-current="part.match === selected"
                                     :aria-label="markLabel(part.match, part.text)"
                                     :title="'match ' + (part.match + 1)"
-                                    @click="select(part.match)"
+                                    @click="selectFrom('subject', part.match)"
                                     @mouseenter="linked = part.match"
                                     @mouseleave="linked = null"
-                                    @keydown.enter="select(part.match)"
-                                    @keydown.space.prevent="select(part.match)"
+                                    @keydown.enter="selectFrom('subject', part.match)"
+                                    @keydown.space.prevent="selectFrom('subject', part.match)"
                                 >{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></p>
                         <p v-if="view.total === 0" class="note">No matches.</p>
                     </section>
@@ -904,7 +983,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             :key="i"
                                             class="cursor-pointer"
                                             :class="{ 'font-semibold': i === selected, 'row-linked': i === linked }"
-                                            @click="select(i)"
+                                            :data-match="i"
+                                            @click="selectFrom('rows', i)"
                                             @mouseenter="linked = i"
                                             @mouseleave="linked = null"
                                         >
@@ -915,6 +995,10 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                   current there - is two different claims about the
                                                   same state.
                                                 -->
+                                                <!-- No click handler of its own: the press bubbles
+                                                     to the row, whose handler selects and reveals.
+                                                     A second one here would run for the same
+                                                     press and ask for the same scroll twice. -->
                                                 <button
                                                     class="row-select"
                                                     type="button"
@@ -922,7 +1006,6 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                     :tabindex="i === selected ? 0 : -1"
                                                     :aria-current="i === selected"
                                                     :aria-label="'match ' + (i + 1)"
-                                                    @click="select(i)"
                                                 >
                                                     {{ i + 1 }}
                                                 </button>

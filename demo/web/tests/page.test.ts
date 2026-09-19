@@ -60,8 +60,34 @@ const match = (index: number, length: number, groups: readonly Group[] = []): Ma
 let app: VueApp<Element> | null = null;
 let host: HTMLDivElement | null = null;
 
+/** One call the page made to `scrollIntoView`: what it scrolled to, and how it asked. */
+interface Reveal {
+    readonly target: Element;
+    readonly options: ScrollIntoViewOptions | boolean | undefined;
+}
+
+/**
+ * Every reveal the page asked for, in order.
+ *
+ * jsdom implements no scrolling at all: `Element.prototype.scrollIntoView` is undefined in jsdom
+ * 30.1.0 and calling it throws `TypeError: e.scrollIntoView is not a function` (measured
+ * 2026-09-19). So the method is installed here rather than guarded in the page - every browser has
+ * had it for a decade, and a `?.()` in `App.vue` would be the page apologising for the test
+ * environment. It is installed for every test in this file because any click on a row or a
+ * highlight reaches it.
+ */
+let reveals: Reveal[] = [];
+
 beforeEach(() => {
     location.hash = '';
+    reveals = [];
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: function (this: Element, options?: ScrollIntoViewOptions | boolean): void {
+            reveals.push({ target: this, options });
+        },
+    });
     vi.stubGlobal('Worker', FakeWorker);
     // Routed by URL: the mount path fetches examples.json AND help.json, and one body for both hands
     // the empty tour to the help guard, which rejects it and writes a console error no test is about.
@@ -96,6 +122,7 @@ afterEach(() => {
     host?.remove();
     app = null;
     host = null;
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
@@ -544,6 +571,127 @@ test('hovering a match links the highlight to its row, and the row back to the h
     hover(found(rows()[1], 'second row'), 'mouseenter');
     await nextTick();
     expect(demo.selected).toBe(0);
+});
+
+/** The two ways the page offers each match: the highlight in the subject, the row in the table. */
+function bothViews(page: HTMLElement) {
+    return {
+        marks: () => [...page.querySelectorAll<HTMLElement>('mark.hit')],
+        rows: () => [...page.querySelectorAll<HTMLElement>('tbody.match-rows tr')],
+        buttons: () => [...page.querySelectorAll<HTMLElement>('button.row-select')],
+    };
+}
+
+/** An answer of three matches over a subject long enough for them to be apart. */
+async function threeMatches() {
+    const mounted = await mountPage();
+    mounted.demo.answeredSubject = 'abc abc abc';
+    mounted.demo.answer = { matches: [match(0, 3), match(4, 3), match(8, 3)], truncated: false };
+    await nextTick();
+    return mounted;
+}
+
+test('choosing a match in one place brings it into view in the other', async () => {
+    const { page, demo } = await threeMatches();
+    const { marks, rows, buttons } = bothViews(page);
+
+    // The row is the thing being pointed at, so what has to move is the SUBJECT: a number in a
+    // table says nothing about where in the text it is, and the answer to "which one is that" is
+    // the highlight, which on a long subject is off the region's screen.
+    found(buttons()[2], 'row control for the third match').click();
+    await settle();
+    expect(demo.selected).toBe(2);
+
+    // Exactly one reveal, which is why this asserts the whole list and not that it contains the
+    // highlight: the press on the number bubbles to the row, so a second handler on the button
+    // would ask for the same scroll twice and the list would hold it twice.
+    expect(reveals.map((reveal) => reveal.target)).toEqual([marks()[2]]);
+
+    // `block: 'nearest'` in both directions: a match already on screen must not jump, because the
+    // commonest click of all is on something the visitor can already see.
+    expect(reveals[0]?.options).toEqual({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+
+    // And the other way round, where the row is what a visitor cannot see.
+    reveals = [];
+    found(marks()[0], 'first highlight').click();
+    await settle();
+    expect(demo.selected).toBe(0);
+    expect(reveals.map((reveal) => reveal.target)).toEqual([rows()[0]]);
+
+    // The whole row and not the little number inside it: the row is what carries the answer, and
+    // `nearest` on a 24 px control is satisfied by a sliver of the row at the edge of the pane.
+    expect(reveals[0]?.target.tagName).toBe('TR');
+});
+
+test('the keyboard reaches both views of a match, and an arrow keeps the focus in sight', async () => {
+    const { page, demo } = await threeMatches();
+    const { marks, rows, buttons } = bothViews(page);
+
+    // Enter on a highlight does what a click does. A highlight is `role="button"` on a <mark>, so
+    // the browser gives it nothing: without this the keyboard reached the selection and never the
+    // row it belongs to.
+    found(marks()[1], 'second highlight').focus();
+    found(marks()[1], 'second highlight').dispatchEvent(keydown('Enter'));
+    await settle();
+    expect(demo.selected).toBe(1);
+    expect(reveals.map((reveal) => reveal.target)).toEqual([rows()[1]]);
+
+    // An arrow moves the selection and the focus, and asks for no reveal at all. Both halves are
+    // in one scroll container, so a counterpart a screen away can only be shown by scrolling the
+    // focused control off screen - and a real browser will not have it either way: measured in
+    // Chrome on 2026-09-19 with 80 matches at 1366x768, the reveal scrolled the pane to the
+    // counterpart and the focus call put it straight back. That is WCAG 2.4.3 Focus Order,
+    // and Enter above is how the keyboard asks for the other half.
+    reveals = [];
+    found(marks()[1], 'second highlight').dispatchEvent(keydown('ArrowRight'));
+    await settle();
+    expect(demo.selected).toBe(2);
+    expect(document.activeElement).toBe(marks()[2]);
+    expect(reveals).toEqual([]);
+
+    reveals = [];
+    found(buttons()[2], 'row control for the third match').dispatchEvent(keydown('ArrowUp'));
+    await settle();
+    expect(demo.selected).toBe(1);
+    expect(document.activeElement).toBe(buttons()[1]);
+    expect(reveals).toEqual([]);
+});
+
+test('a visitor who asked for less motion is moved there instantly, not animated', async () => {
+    // WCAG 2.3.3 Animation from Interactions: a scroll the visitor did not ask to watch is motion
+    // triggered by interaction, and `prefers-reduced-motion` is how a browser passes that setting
+    // on. `matchMedia` is what the page asks, so answering it is the whole simulation - the shell's
+    // own query is answered false here, which is a narrow window and changes nothing about linking.
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('prefers-reduced-motion'),
+        addEventListener() {},
+        removeEventListener() {},
+    }));
+
+    const { page } = await threeMatches();
+    const { buttons } = bothViews(page);
+
+    found(buttons()[2], 'row control for the third match').click();
+    await settle();
+    expect(reveals[0]?.options).toEqual({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+});
+
+test('the repository is one click from the header, and the footer still names it too', async () => {
+    const { page } = await mountPage();
+
+    // The footer link was the only one, at the bottom of a page the fixed shell now stops anyone
+    // scrolling to at all - so on the live page it was unreachable, not merely far away.
+    const header = found(page.querySelector<HTMLElement>('header.shell-header'), 'the header');
+    const link = found(header.querySelector<HTMLAnchorElement>('a'), 'a link in the header');
+    expect(link.getAttribute('href')).toBe('https://github.com/zejji/fuzzy-regex-cs');
+
+    // Named by the repository it goes to, in the text or in the label: "GitHub" alone is a
+    // destination a visitor cannot tell from any other GitHub link.
+    const name = (link.getAttribute('aria-label') ?? '') + (link.textContent ?? '');
+    expect(name).toContain('zejji/fuzzy-regex-cs');
+
+    const footer = found(page.querySelector<HTMLElement>('footer.shell-footer'), 'the footer');
+    expect(footer.querySelector('a[href="https://github.com/zejji/fuzzy-regex-cs"]')).not.toBeNull();
 });
 
 test('the focus ring covers every kind of control the page has, the help disclosure included', () => {

@@ -165,6 +165,15 @@
         @apply bg-shell text-shell-text;
     }
 
+    /* The repository link, at the trailing edge of the header. `ms-auto` takes the space between
+       it and the tagline, so the product name keeps the leading edge; `whitespace-nowrap` keeps
+       the repository's name in one piece, because a wrapped link makes the header two rows tall
+       and pushes the answer down, which is the fault this slice is about. Its colour and its
+       underline come from the link rules above: it is a link, and it reads as one. */
+    .header-link {
+        @apply ms-auto inline-flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap;
+    }
+
     .shell-body {
         @apply flex flex-1 flex-col gap-4 p-4 sm:px-6;
         @apply lg:grid lg:grid-cols-[minmax(23rem,27rem)_minmax(0,1fr)] lg:gap-6;
