@@ -8,7 +8,7 @@
  * What these tests hold is the structure those numbers depend on: if the scroll owners move, the
  * measurement stops meaning anything.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -16,6 +16,7 @@ import { createApp, nextTick, type App as VueApp } from 'vue';
 
 import App from '../src/App.vue';
 
+import { builtCss } from './built-css';
 import { FakeWorker } from './fake-worker';
 
 const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf8');
@@ -30,6 +31,44 @@ function found<T>(value: T | null | undefined, what: string): T {
     return value;
 }
 
+/**
+ * Every selector that declares a vertical scroll, one entry per selector in a list.
+ *
+ * Over compiled CSS, so `.input-pane{overflow-y:auto}.results-pane{overflow-y:auto}` and
+ * `.input-pane,.results-pane{overflow-y:auto}` give the same answer: they are the same stylesheet,
+ * and the old source-reading version failed on the difference. `overflow:auto` shorthand counts,
+ * and so does a `.overflow-y-auto` utility - it would arrive here as a selector of its own and
+ * break the equality, which is the point.
+ */
+function scrollOwners(css: string): string[] {
+    return [...css.matchAll(/([^{}@]+)\{([^}]*)\}/g)]
+        .filter(([, , body]) => /overflow(?:-y)?:\s*(?:auto|scroll)/.test(body ?? ''))
+        .flatMap(([, selector]) => (selector ?? '').split(',').map((one) => one.trim()))
+        .filter((selector) => selector !== '');
+}
+
+/** The media query that fixes the shell, read off the block that stops the document scrolling. */
+function gateQuery(css: string): string {
+    return found(
+        /@media([^{]+)\{[^{}]*(?:html,\s*)?body\{[^}]*overflow:\s*hidden/.exec(css),
+        'a media query that stops the document scrolling',
+    )[1] as string;
+}
+
+/** That query's whole block, so a test can ask what is inside the gate and what is outside it. */
+function gateBlock(css: string): string {
+    const start = css.indexOf(`@media${gateQuery(css)}`);
+    let depth = 0;
+    for (let at = css.indexOf('{', start); at < css.length; at += 1) {
+        if (css[at] === '{') depth += 1;
+        if (css[at] === '}') {
+            depth -= 1;
+            if (depth === 0) return css.slice(start, at + 1);
+        }
+    }
+    throw new Error('the gated block does not close');
+}
+
 // --- the stylesheet ---------------------------------------------------------------------------
 
 /**
@@ -40,12 +79,32 @@ function found<T>(value: T | null | undefined, what: string): T {
  * the number this page needs - the inputs and the answer - so a third arriving unnoticed is what
  * this test is for.
  */
-test('exactly two regions own a vertical scroll', () => {
-    const owners = [...declarations.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-        .filter(([, , body]) => /overflow-y-auto|overflow-y:\s*auto|@apply[^;]*\boverflow-auto/.test(body ?? ''))
-        .map(([, selector]) => (selector ?? '').trim().split('\n').pop()?.trim());
+test('exactly two regions own a vertical scroll', async () => {
+    expect(scrollOwners(await builtCss()).sort()).toEqual(['.input-pane', '.results-pane']);
+});
 
-    expect(owners.sort()).toEqual(['.input-pane', '.results-pane']);
+/**
+ * All the CSS is in `styles.css`, because the tests above read what `styles.css` compiles to.
+ *
+ * A `<style>` block inside a single-file component ships - `.probe-third-scroller { overflow-y:
+ * auto }` appended to `App.vue` came out in `assets/index-D2ryK5O7.css`, measured - and the
+ * in-process build in `built-css.ts` cannot see it: its entry is the stylesheet, and an SFC's
+ * styles reach the bundle through the JavaScript graph that starts at `index.html`. So a third
+ * scroll region added that way would ship with every assertion above still green.
+ *
+ * Compiling the page's whole module graph in a test would close the gap and cost a JavaScript
+ * build per test file. Keeping every rule in one file closes it at the other end, costs nothing,
+ * and is what this project already does.
+ */
+test('no component brings a stylesheet of its own', () => {
+    const components = readdirSync(join(import.meta.dirname, '../src'), { recursive: true, encoding: 'utf8' })
+        .filter((name) => name.endsWith('.vue'))
+        .map((name) => join(import.meta.dirname, '../src', name));
+
+    expect(components.length, 'the glob found no components').toBeGreaterThan(0);
+    for (const component of components) {
+        expect(readFileSync(component, 'utf8'), `${component} declares styles`).not.toMatch(/<style[\s>]/);
+    }
 });
 
 // A utility class in the template would slip past the rule above, because it never appears in the
@@ -64,22 +123,24 @@ test('no vertical scroll is declared in the markup', () => {
  * Below the gate the shell releases and the document scrolls as a document, which is also what
  * WCAG 1.4.10 Reflow asks for at 320 CSS px.
  */
-test('the page stops scrolling only when the window has the height for it', () => {
-    const query = found(
-        /@media([^{]*)\{\s*(?:html,\s*)?body\s*\{[^}]*overflow:\s*hidden/.exec(declarations),
-        'a media query that stops the document scrolling',
-    );
+test('the page stops scrolling only when the window has the height for it', async () => {
+    const query = gateQuery(await builtCss());
 
-    expect(query[1]).toMatch(/min-width:/);
-    expect(query[1]).toMatch(/min-height:/);
+    expect(query).toMatch(/min-width:\s*64rem|width\s*>=\s*64rem/);
+    expect(query).toMatch(/min-height:|height\s*>=/);
 });
 
 // `100vh` on mobile Safari is the window without its toolbar, so a shell sized with it is taller
 // than the space it has and its last row sits under the chrome. `dvh` is the same number after the
 // toolbar is accounted for, and it is what the shell is sized in.
-test('the shell is sized in dvh, never vh', () => {
-    expect(declarations).toMatch(/height:\s*100dvh/);
-    expect(declarations).not.toMatch(/100vh/);
+// Over the BUILT stylesheet because the source cannot answer the question: `@apply min-h-screen`
+// says nothing about `vh`, and it is what compiled to `min-height: 100vh` and beat the gate's
+// `height: 100dvh` on the same selector. Chunk 2 shipped that, and this is the assertion that sees it.
+test('the shell is sized in dvh, never vh', async () => {
+    const css = await builtCss();
+
+    expect(css).toMatch(/\.shell\{[^}]*min-height:\s*100dvh/);
+    expect(css).not.toMatch(/100vh/);
 });
 
 /**
@@ -90,27 +151,31 @@ test('the shell is sized in dvh, never vh', () => {
  * three stacked scroll regions, which is the failure the two-region rule exists to stop. Both
  * owners therefore live inside the same block as the fixed shell.
  */
-test('the panes scroll only inside the gate that fixes the shell', () => {
-    const gated = found(
-        /@media[^{]+\{([\s\S]*?)\n\s{0,4}\}\s*$/.exec(declarations.trimEnd()),
-        'the gated block at the end of the stylesheet',
-    )[1];
+test('the panes scroll only inside the gate that fixes the shell', async () => {
+    const css = await builtCss();
 
-    expect(gated).toMatch(/\.input-pane\s*\{[^}]*overflow-y:\s*auto/);
-    expect(gated).toMatch(/\.results-pane\s*\{[^}]*overflow-y:\s*auto/);
+    expect(scrollOwners(gateBlock(css)).sort()).toEqual(['.input-pane', '.results-pane']);
     // And nowhere else: a `lg:` variant would put one back on a width-only question.
-    expect(declarations).not.toMatch(/overflow-y-auto/);
+    expect(scrollOwners(css.replace(gateBlock(css), ' '))).toEqual([]);
 });
 
 // The gate is written twice - as a media query here, as a string the script hands `matchMedia`
 // there - because CSS cannot pass a query to a script. Two copies of one decision is a drift
 // hazard, so this is the thing that notices.
-test('the script and the stylesheet gate the shell on the same window', () => {
+test('the script and the stylesheet gate the shell on the same window', async () => {
     const inScript = found(/SHELL_QUERY = '([^']+)'/.exec(appSource), 'the shell query in App.vue')[1];
-    const inStyles = found(/@media\s*\(([^{]+)\)\s*\{\s*html,/.exec(declarations), 'the shell media query')[1];
 
-    const tidy = (query: string): string => query.replace(/\s+/g, ' ').replace(/[()]/g, '').trim();
-    expect(tidy(inScript ?? '')).toBe(tidy(inStyles ?? ''));
+    // The script's query is what `matchMedia` is handed, so it is written the way a person writes
+    // one; the build rewrites the stylesheet's into CSS Media Queries 4 range syntax
+    // (`min-width: 64rem` becomes `width>=64rem`). Comparing them means putting one into the other's
+    // form, and the script's is the one with a fixed spelling.
+    const asRange = (query: string): string =>
+        query
+            .replace(/min-(width|height):\s*/g, '$1>=')
+            .replace(/max-(width|height):\s*/g, '$1<=')
+            .replace(/[\s()]/g, '');
+
+    expect(asRange(gateQuery(await builtCss()))).toBe(asRange(inScript ?? ''));
 });
 
 // One scheme, done well (owner decision, 2026-09-19). A half-maintained second scheme is worse
@@ -359,6 +424,207 @@ test('a narrow window folds the secondary inputs and the sample panel away', asy
     await nextTick();
     expect(closed('#examples-and-help')).toBe(false);
 });
+
+/**
+ * The two disclosures, so every rule below is asked of both.
+ *
+ * Each region has its own template ref, its own argument at its own `@click`, and its own line in
+ * the watcher, and the asymmetry is not theoretical: with these rules written for the samples panel
+ * alone, reverting one call site to `@click="advanced = !advanced"` left the suite green, and so did
+ * deleting the `advanced` half of the widen-close. A rule that holds for one region and is never
+ * asked of the other is half a rule.
+ */
+const disclosures = [
+    {
+        region: 'the samples panel',
+        id: 'examples-and-help',
+        other: 'advanced-inputs',
+        focus: '[role="tab"][aria-selected="true"]',
+    },
+    { region: 'the secondary inputs', id: 'advanced-inputs', other: 'examples-and-help', focus: '#flags' },
+] as const;
+
+/** Drive the width gate the page listens to, starting at `wide`. Returns the handle to change it. */
+function stubViewport(wide: boolean): (matches: boolean) => void {
+    let change = (matches: boolean): void => void matches;
+    vi.stubGlobal('matchMedia', () => ({
+        matches: wide,
+        addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => {
+            change = (matches) => listener({ matches } as MediaQueryListEvent);
+        },
+        removeEventListener() {},
+    }));
+    return (matches) => change(matches);
+}
+
+/**
+ * A window that narrows must not take the focus with it.
+ *
+ * Resize a wide window while a tab has focus and the two regions fold away, `hidden` taking the
+ * focused button out of the page. The browser then moves focus to `<body>`, and a keyboard visitor
+ * is back at the top of the document with nothing to say why - WCAG 3.2.2 On Input is the rule a
+ * layout change that moves focus breaks. Opening whichever disclosure holds the focus keeps the
+ * element in the page, so the focus stays where the visitor put it.
+ *
+ * Simulated through `matchMedia`, which is what the page asks and what a real resize would change.
+ *
+ * What is asserted is the CONDITION, not the effect, and the difference matters. The browser moves
+ * focus to `<body>` because the focused element stopped being rendered; jsdom does not implement
+ * that fixup at all, so `document.activeElement` here is whatever was last focused even inside a
+ * `hidden` subtree - measured, with the fix disabled: `hidden=true activeElementIsTab=true`. An
+ * assertion on `activeElement` would therefore pass with the fix removed and prove nothing. The
+ * thing that does differ is whether the focused control is still rendered, which is exactly what
+ * decides the browser's behaviour, so that is what the test asks.
+ */
+test.each(disclosures)(
+    'narrowing the window keeps the focused control in the page: $region',
+    async ({ id, other, focus }) => {
+        const change = stubViewport(true);
+        const { page } = await mountPage();
+
+        const control = found(page.querySelector<HTMLElement>(focus), `the focus target in ${id}`);
+        control.focus();
+        expect(document.activeElement).toBe(control);
+
+        change(false);
+        await nextTick();
+
+        expect(found(page.querySelector<HTMLElement>(`#${id}`), `the ${id} region`).hidden).toBe(false);
+        expect(control.closest('[hidden]')).toBeNull();
+        // And the disclosure that now controls it says it is open, rather than claiming a closed
+        // region the reader can see.
+        const disclosure = found(
+            page.querySelector<HTMLElement>(`button[aria-controls="${id}"]`),
+            `the ${id} disclosure`,
+        );
+        expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+
+        // The other one is untouched: only the region holding the focus opens.
+        expect(found(page.querySelector<HTMLElement>(`#${other}`), `the ${other} region`).hidden).toBe(true);
+    },
+);
+
+/**
+ * What the gate opened, the gate closes again.
+ *
+ * The rule above opens a region without anybody clicking it, so widening the window has to put that
+ * back - otherwise maximising and restoring a window leaves the samples panel expanded above the
+ * answer, which is the screenful this slice exists to remove. A region the VISITOR opened is left
+ * alone: that is their decision and it survives a resize, as it does today.
+ */
+test.each(disclosures)(
+    'a region the gate opened closes again when the window widens: $region',
+    async ({ id, focus }) => {
+        const change = stubViewport(true);
+        const { page } = await mountPage();
+        const region = () => found(page.querySelector<HTMLElement>(`#${id}`), `the ${id} region`);
+
+        found(page.querySelector<HTMLElement>(focus), `the focus target in ${id}`).focus();
+        change(false);
+        await nextTick();
+        expect(region().hidden).toBe(false);
+
+        // Wide again, and the focus has moved somewhere outside both regions.
+        change(true);
+        await nextTick();
+        found(page.querySelector<HTMLElement>('#pattern'), 'the pattern field').focus();
+
+        change(false);
+        await nextTick();
+        expect(region().hidden).toBe(true);
+    },
+);
+
+/**
+ * Touching a disclosure hands it back to the visitor, whoever opened it first.
+ *
+ * The case is a real one: the gate opens the samples region because the focus was in it, the
+ * visitor collapses it, then expands it again because they want it - and it is theirs from that
+ * point, so the next widening must not take it away. Ownership that is only ever written by the
+ * gate would still be the gate's here, which is what this pins.
+ */
+test.each(disclosures)(
+    'a region the gate opened belongs to the visitor once they touch it: $region',
+    async ({ id, focus }) => {
+        const change = stubViewport(true);
+        const { page } = await mountPage();
+        const region = () => found(page.querySelector<HTMLElement>(`#${id}`), `the ${id} region`);
+        const disclosure = () =>
+            found(page.querySelector<HTMLElement>(`button[aria-controls="${id}"]`), `the ${id} disclosure`);
+
+        found(page.querySelector<HTMLElement>(focus), `the focus target in ${id}`).focus();
+        change(false);
+        await nextTick();
+        expect(region().hidden).toBe(false);
+
+        disclosure().click();
+        await nextTick();
+        expect(region().hidden).toBe(true);
+        disclosure().click();
+        await nextTick();
+        expect(region().hidden).toBe(false);
+
+        // Wide and narrow again, with the focus nowhere near it. The visitor asked for it open.
+        change(true);
+        await nextTick();
+        found(page.querySelector<HTMLElement>('#pattern'), 'the pattern field').focus();
+        change(false);
+        await nextTick();
+        expect(region().hidden).toBe(false);
+    },
+);
+
+// A region the visitor opened is theirs, and a resize does not take it away.
+test.each(disclosures)('a region the visitor opened survives the window widening: $region', async ({ id }) => {
+    const change = stubViewport(false);
+    const { page } = await mountPage();
+    const region = () => found(page.querySelector<HTMLElement>(`#${id}`), `the ${id} region`);
+
+    found(page.querySelector<HTMLElement>(`button[aria-controls="${id}"]`), `the ${id} disclosure`).click();
+    await nextTick();
+    expect(region().hidden).toBe(false);
+
+    change(true);
+    await nextTick();
+    change(false);
+    await nextTick();
+    expect(region().hidden).toBe(false);
+});
+
+/**
+ * Ownership is per region, not a single flag.
+ *
+ * The gate opens one region because the focus is in it; the visitor then opens the OTHER one for
+ * their own reasons. Their press says nothing about the first, so widening still closes it. Written
+ * as one "somebody has touched something" flag this passes every rule above and fails here, which is
+ * why the test exists: the press clears ownership only of the region pressed.
+ */
+test.each(disclosures)(
+    'pressing one disclosure leaves the other with the gate: $region',
+    async ({ id, other, focus }) => {
+        const change = stubViewport(true);
+        const { page } = await mountPage();
+        const hidden = (selector: string) => found(page.querySelector<HTMLElement>(selector), selector).hidden;
+
+        found(page.querySelector<HTMLElement>(focus), `the focus target in ${id}`).focus();
+        change(false);
+        await nextTick();
+        expect(hidden(`#${id}`)).toBe(false);
+
+        found(page.querySelector<HTMLElement>(`button[aria-controls="${other}"]`), `the ${other} disclosure`).click();
+        await nextTick();
+        expect(hidden(`#${other}`)).toBe(false);
+
+        change(true);
+        await nextTick();
+        found(page.querySelector<HTMLElement>('#pattern'), 'the pattern field').focus();
+        change(false);
+        await nextTick();
+
+        expect(hidden(`#${id}`)).toBe(true);
+        expect(hidden(`#${other}`)).toBe(false);
+    },
+);
 
 /**
  * A disclosure looks like a control, and is the size of one.

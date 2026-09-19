@@ -308,3 +308,164 @@ the Help panel from empty to loaded and back over `tabindex`.
 **State.** `demo/web`: **182 tests in 11 files** green (181 before), `npm run typecheck` clean,
 `npm run build` clean. `tools/check-ratchet.ps1`: **GREEN, 6,399 passing** against the 6,291
 baseline - no .NET file was touched, so the baseline was not updated.
+
+## Chunk 2 closed: findings 6 and 5 (2026-09-19, sitting 4)
+
+The two the last sitting left open. Both fixed, both pinned by a test that was seen to fail first.
+
+**Finding 6, the assertions that read the CSS source.** Confirmed before anything was touched, with
+the edit the finding names - merging
+
+    .input-pane { overflow-y: auto }
+    .results-pane { overflow-y: auto }
+
+inside the gated block into one selector list, which is identical CSS and what a minifier does
+anyway. Two tests failed on it:
+
+    × exactly two regions own a vertical scroll
+      AssertionError: expected [ '.results-pane' ] to deeply equal [ '.input-pane', '.results-pane' ]
+    × the panes scroll only inside the gate that fixes the shell
+
+`tests/built-css.ts` now compiles the stylesheet the way the production build does - Vite's
+JavaScript API, the same Tailwind plugin, `write: false` so nothing reaches `wwwroot`, and
+`configFile: false` so the shipping config's `outDir` and dev middleware stay out of a test's way -
+and caches one compile per test file. **Byte-identical to `npm run build`**, and this is the probe
+that says so rather than a description of one: `tools/probes/demo-built-css-matches-production.test.ts`
+carries the commands.
+
+    LENGTH 24144 MD5 ebc4e84e067ef6dbfc926c70e5a4984a       (the in-process compile)
+    24144 FuzzyRegex.Demo.Wasm/wwwroot/assets/index-cz1TZNmf.css
+    ebc4e84e067ef6dbfc926c70e5a4984a *...index-cz1TZNmf.css  (what npm run build wrote)
+
+Four assertions moved onto it, each now asking the question in the form the browser answers: the
+scroll owners are read off compiled rules through one `scrollOwners` helper, so a selector list and
+two separate rules give the same answer; the gate's block is extracted by brace-matching; and
+`.shell` must compile to `min-height: 100dvh` with **no `100vh` anywhere in the shipped
+stylesheet**, which is the assertion chunk 2's finding 3 needed and could not have. The
+script-against-stylesheet gate test has to translate one into the other's spelling, because the
+build rewrites `min-width: 64rem` into the range syntax `width>=64rem`; the translation is three
+replacements and it is commented where it sits. After the move, the merged-rule edit above passes
+all 14 tests, and reverting it passes all 14 too.
+
+**Finding 5, focus dropping to `<body>`.** A `watch(wide, ...)` on the default pre-flush timing:
+it runs before the DOM update, so `document.activeElement` is still the focused element, and opening
+whichever region contains it means the element is never hidden and nothing has to be re-focused.
+Two template refs, no focus juggling, as the last sitting scoped it. WCAG 3.2.2 On Input is the
+rule a layout change that moves the focus breaks.
+
+Two tests, one per region, because each region has its own ref and one test would have left the
+other half free to be a typo. Both were seen to fail first - the samples one before the watcher
+existed, and the inputs one with `ref="advancedRegion"` renamed to `ref="advancedRegionTypo"`:
+
+    × narrowing the window opens the secondary inputs when the focus is in them
+      AssertionError: expected true to be false
+
+Each asserts three things: the region is not `hidden`, the focused control is still rendered, and
+the *other* region stays shut, so the fix is by containment and not a blanket open. Why the middle
+one is phrased that way rather than as `document.activeElement` is finding 1 below.
+
+### Review (sitting 4)
+
+One blind pass over the sitting's diff, briefed with the reproduction commands and nothing else.
+**Four findings raised, four reproduced here before anything was touched, four fixed.** A higher
+survival rate than this project's usual one in five, and for the same reason chunk 1's was: a first
+pass over a NEW test mechanism finds things about its reach, which is what it is for. Three of the
+four are about what the new assertions cannot see.
+
+1. **The focus assertions could not fail.** jsdom does not implement the focus fixup rule, so an
+   element stays `document.activeElement` after an ancestor gets `hidden`. Reproduced with the
+   watcher disabled (`if (1 > 0) return;` after the `isWide` guard):
+
+       PROBE hidden= true activeElementIsTab= true insideHidden= true
+
+   The tests did fail without the fix, but through their `.hidden` assertion; the line that named
+   the thing the test is about proved nothing. Both now assert `closest('[hidden]')` is null - the
+   focused control is still RENDERED, which is the condition that decides what the browser does,
+   and the one thing that differs between the two versions. The doc comment says so, with the
+   measurement, so nobody re-adds the assertion that reads better and tests less.
+2. **An SFC `<style>` block ships and the built-CSS tests cannot see it.** The in-process build's
+   entry is the stylesheet; an SFC's styles reach the bundle through the JavaScript graph from
+   `index.html`. Reproduced: `.probe-third-scroller { overflow-y: auto }` appended to `App.vue`
+   came out in `assets/index-D2ryK5O7.css` (`grep -c` gives 1) with **"exactly two regions own a
+   vertical scroll" still green**. Closed at the other end by a new test - no component declares
+   styles - because compiling the whole module graph would cost a JavaScript build per test file to
+   police a convention the project already keeps. Seen to fail on the planted block and pass once it
+   was removed.
+3. **A region the gate opened stayed open.** The watcher returned early on widening, so maximising
+   and restoring a window left the samples panel expanded above the answer with nothing focused in
+   it - the exact screenful this slice removes. It now remembers which region IT opened and closes
+   that one when the window widens; a region the visitor opened is left alone. Two tests, and the
+   second (the visitor's own click surviving a resize) passed before the fix, which is what says the
+   fix did not take the sticky behaviour away with it.
+4. **The helper's recorded verification named the previous sitting's numbers** (`DqmTS2AV`, 25,324
+   characters, from before `@source not '../tests'` shrank the bundle). Corrected to the measured
+   24,144 and `ebc4e84e...`, pointing at the probe rather than repeating it.
+
+Checked by the reviewer and sound, each with its own reproduction: the built-CSS assertions do
+catch a third scroll region, a scroll utility in the markup **including the `:class` array form the
+source-reading version could not see**, a shell compiled to `100vh`, and a gate that drifts from the
+script's copy; the watcher does not leak or double-fire and survives `unmount`; the cached promise
+is assigned before its first `await`, so concurrent callers share one build and a build error
+reaches all four tests without an unhandled rejection; and `gateBlock` fails rather than passes if
+its prelude is ever ambiguous.
+
+### Second pass, over the four fixes (the first reviewer never saw them)
+
+**One finding, reproduced and fixed.** `openedByGate` was written only by the watcher, so ownership
+stuck to the gate for as long as the window stayed narrow: gate opens the samples region because the
+focus was in it, visitor collapses it, visitor expands it again *because they want it* - and the
+next widening still closed it. The visitor loses a panel they asked for, and it contradicted the
+comment sitting three lines above the code.
+
+The press is now `toggleDisclosure(which)`, which hands the region back to the visitor before it
+toggles. Pinned by a test that walks that exact sequence and was seen to fail first
+(`expected true to be false`). Three tests now surround the state: the gate closes what the gate
+opened, the visitor's own press survives a resize, and a press after the gate's open takes
+ownership. The reviewer checked the first two discriminate in both directions - breaking the widen
+branch fails one and leaves the other green, and closing both regions unconditionally does the
+reverse.
+
+Checked by that reviewer and sound: the mirror hole does not exist (ownership is cleared only in the
+branch that closes), repeated `matches` values with the same value do not fire the watcher at all,
+the gate opening one region while the visitor holds the other survives a round trip, and the
+`closest('[hidden]')` assertions do fail on their own when the narrow branch is disabled -
+`expected <div id="examples-and-help" ...> to be null`.
+
+That reviewer saw five `dev-server.test.ts` tests fail in its own shell with empty response bodies.
+Not reproduced here: this sitting's runs are **188 passing in 11 files**, `dev-server.test.ts`
+included, before and after the fix. The dev server does not come up inside a subagent's sandbox.
+
+**A third pass covers `toggleDisclosure` itself**, for the same reason: it is code no reviewer had
+seen, and the second pass had just found a real hole in the same state machine.
+
+### Third pass, over `toggleDisclosure` and the watcher
+
+It found nothing wrong with the logic - 18 interleavings of gate-open, press, widen and narrow, all
+correct - and five things wrong with the tests around it. Each one was reproduced the same way: apply
+the mutant, `npx vitest run tests/layout.test.ts`, revert.
+
+| Mutant | Result then | Now |
+|---|---|---|
+| `src/App.vue:128` drop the `=== which` guard (`!== null`) | 20 passed | 2 failed |
+| `src/App.vue:128` narrow it to `&& which === 'samples'` | 20 passed | 1 failed |
+| `src/App.vue:412` revert one call site to `@click="advanced = !advanced"` | 20 passed | 1 failed |
+| `src/App.vue:135` delete `if (openedByGate.value === 'advanced') advanced.value = false;` | 20 passed | 2 failed |
+| `src/App.vue:149` delete `openedByGate.value = 'samples';` | new test still green | killed by its pair |
+
+One cause behind all five: every rule about ownership was written for the samples panel, and the
+`advanced` region has its own template ref, its own `@click` argument and its own line in the
+watcher. So the four rules are now `test.each` over a two-row table, and the fifth is new - *pressing
+one disclosure leaves the other with the gate*, which is the only test that can tell a per-region
+ownership from a single "somebody has touched something" flag. 188 tests became 193, and the table is
+`tests/layout.test.ts > disclosures` with the mutation evidence in its comment. Reverting each mutant
+restored 193 passed; `npm run build` is clean and the stylesheet is unmoved (`index-cz1TZNmf.css`,
+24.14 kB).
+
+One mutant is equivalent, not surviving: `src/App.vue:137` (`openedByGate.value = null` in the wide
+branch) is defensive - the two lines above it have already cleared whichever region it named.
+
+**Out of scope, reproduced, and left for chunk 5's keyboard pass:** the mirror of the fault this
+sitting fixed. The disclosure buttons are `v-if="!wide"`, so *widening* removes the button that has
+the focus and the reviewer measured `after widening, activeElement = BODY`. It is pre-existing, it is
+the same WCAG 3.2.2 case, and the fix needs a decision about where focus should land (the region it
+controlled, which is visible when wide), so it is a chunk of its own rather than an addition here.

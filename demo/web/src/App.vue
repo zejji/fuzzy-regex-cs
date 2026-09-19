@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The page. Its state is demo.ts, which is testable without a DOM; what is here is layout only.
-import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, type ShallowRef } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, watch, type ShallowRef } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { createPool } from './lib/pool';
@@ -95,6 +95,60 @@ const wide = useWide(SHELL_QUERY);
  */
 const advanced = ref(false);
 const panelOpen = ref(false);
+
+const advancedRegion = useTemplateRef<HTMLElement>('advancedRegion');
+const samplesRegion = useTemplateRef<HTMLElement>('samplesRegion');
+
+/**
+ * A window that narrows keeps the focus where the visitor put it.
+ *
+ * Both regions above are open on two columns and closed on one, so a window that crosses the gate
+ * while a control inside one of them has focus hides that control, and the browser drops focus to
+ * `<body>`. The visitor is then at the top of the document, by an act they did not perform - which
+ * is what WCAG 3.2.2 On Input is about.
+ *
+ * The watcher's default pre-flush timing is what makes this cheap: it runs before the DOM is
+ * updated, so `document.activeElement` is still the focused element and opening its disclosure
+ * means the element is never hidden at all. Nothing has to be re-focused afterwards.
+ *
+ * What the gate opens, the gate closes: a region left open would be back on the next narrowing with
+ * nothing in it, which is the screenful above the answer this slice is removing. A region the
+ * visitor opened is not the gate's to close, so which one it was is remembered.
+ */
+const openedByGate = ref<'advanced' | 'samples' | null>(null);
+
+/**
+ * The visitor's own press of a disclosure, which also takes the region back from the gate.
+ *
+ * Both halves matter. Without the first, the gate cannot undo what it did; without the second, a
+ * region the gate opened and the visitor then re-opened for themselves is still closed on the next
+ * widening, and they lose a panel they asked for.
+ */
+function toggleDisclosure(which: 'advanced' | 'samples'): void {
+    if (openedByGate.value === which) openedByGate.value = null;
+    if (which === 'advanced') advanced.value = !advanced.value;
+    else panelOpen.value = !panelOpen.value;
+}
+
+watch(wide, (isWide) => {
+    if (isWide) {
+        if (openedByGate.value === 'advanced') advanced.value = false;
+        if (openedByGate.value === 'samples') panelOpen.value = false;
+        openedByGate.value = null;
+        return;
+    }
+
+    const focused = document.activeElement;
+    if (focused === null) return;
+    if (advancedRegion.value?.contains(focused) === true && !advanced.value) {
+        advanced.value = true;
+        openedByGate.value = 'advanced';
+    }
+    if (samplesRegion.value?.contains(focused) === true && !panelOpen.value) {
+        panelOpen.value = true;
+        openedByGate.value = 'samples';
+    }
+});
 
 // --- examples and help, as one tab set ---------------------------------------------------------
 
@@ -355,7 +409,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         type="button"
                         :aria-expanded="advanced"
                         aria-controls="advanced-inputs"
-                        @click="advanced = !advanced"
+                        @click="toggleDisclosure('advanced')"
                     >
                         Flags, mode and lists
                         <span aria-hidden="true" :class="advanced ? 'chevron chevron-open' : 'chevron'">&#9662;</span>
@@ -371,6 +425,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     -->
                     <div
                         id="advanced-inputs"
+                        ref="advancedRegion"
                         class="flex flex-col gap-4"
                         :hidden="!wide && !advanced"
                     >
@@ -475,7 +530,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         type="button"
                         :aria-expanded="panelOpen"
                         aria-controls="examples-and-help"
-                        @click="panelOpen = !panelOpen"
+                        @click="toggleDisclosure('samples')"
                     >
                         Examples and help
                         <span aria-hidden="true" :class="panelOpen ? 'chevron chevron-open' : 'chevron'">&#9662;</span>
@@ -489,6 +544,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     -->
                     <div
                         id="examples-and-help"
+                        ref="samplesRegion"
                         class="flex flex-col"
                         :hidden="!wide && !panelOpen"
                     >
