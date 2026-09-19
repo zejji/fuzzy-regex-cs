@@ -67,22 +67,22 @@ Three regions inside one `100dvh` shell. The page body never scrolls; each regio
 | Header, 48-56 px | Product name, mode control, GitHub link. Fixed. | Same, title only |
 | Input pane | Left column, 380-440 px, fixed height, scrolls internally when replacement and named lists are open | Top pane: pattern and subject visible, the rest in a disclosure |
 | Results region | Right column, fills the rest, scrolls on its own: highlighted subject on top, match table below with a sticky header row | Below the input pane, scrolls |
-| Examples and help | Right rail at >= 1440 px; tabbed panel at the foot of the input pane below that | Two tabs, "Examples" and "Help", collapsed by default |
+| Examples and help | Tabbed panel at the foot of the input pane at every width (owner decision: one layout to maintain) | Two tabs, "Examples" and "Help", collapsed by default |
 
 Rules: at most two scroll regions reachable at once, since stacked scroll panes cause the
 discoverability errors Smashing describes; the examples panel is a disclosure or a tab set, never a
 hover panel, because a keyboard cannot reach hover; the tab set follows NN/g's rules (one row, one
 always selected, labels of one or two words, panel below the tabs, two selection indicators).
-Breakpoints follow Material's window size classes: one pane under 600 px, two from 840 px, the
-right rail from 1440 px. Gate the two-pane layout on height too, since 1366x768 is expanded in
-width and medium in height, and drop the right rail under 700 px of height.
+Breakpoints follow Material's window size classes: one pane under 600 px, two from 840 px. No
+third column at any width. Gate the two-pane layout on height too, since 1366x768 is expanded in
+width and medium in height.
 
 ## Visual identity
 
 Tokens extend `@theme` in `styles.css`; no new dependency.
 
 - **Palette.** Keep the OKLCH tokens and S72's measured match hues. Add one ink surface for the
-  header and input pane (`--color-shell: oklch(0.21 0.02 258)`, deepened for dark) so the panes read
+  header and input pane (`--color-shell: oklch(0.21 0.02 258)`) so the panes read
   as an application frame. The accent stays interactive-only.
 - **Meaning in colour.** Give the three fuzzy edit types their own hues, on the counts chips and on
   the per-edit underlay inside a highlight: substitution amber, insertion green, deletion red, each
@@ -92,8 +92,9 @@ Tokens extend `@theme` in `styles.css`; no new dependency.
   tracking. Subject line length capped near 90ch. **Spacing:** Tailwind steps only, as today, with
   4 / 8 / 12 / 16 / 24 the working set.
 - **Depth.** One elevation step for the results region over the shell (1 px border plus a soft
-  shadow) and a second for the snippet panel. No gradients, no glass. The dark scheme keeps parity,
-  and every new pair is measured and recorded.
+  shadow) and a second for the snippet panel. No gradients, no glass. One scheme, light, done well
+  (owner decision 2026-09-19): the `prefers-color-scheme: dark` block is removed rather than left
+  half-maintained, and every new colour pair is measured and recorded.
 
 ## The C# snippet
 
@@ -123,7 +124,9 @@ prints `string replaced = regex.Replace(subject, @"...");`; named lists print a
 `Dictionary<string, IReadOnlyCollection<string>>` initialiser as the fourth constructor argument.
 Literals: a verbatim string with `"` doubled, a raw string literal when the value holds a newline,
 a longer fence when it holds three quotes. The two-second timeout is the demo's own
-(`DemoEngine.cs:103`), and the comment beside it says so.
+(`DemoEngine.cs:103`), and the comment beside it says so; the owner wants visitors to see that a
+timeout is normal. The owner's one rule for the snippet: the method call and every option must
+be obvious at a glance, so each option gets its own line and the flags enum is never abbreviated.
 
 Presentation: a **revealed panel** docked to the foot of the results region, opened by a "C# for
 this case" button, closed by Escape or the same button, with focus moved into the panel and returned
@@ -201,7 +204,7 @@ naming the string and the rule. Keep the rules in one exported array.
       count and three match rows are in the first viewport, and the Playwright assertion proves it.
 - [ ] Every string in the scope list rewritten; `copy.test.ts` green and seen to fail on a planted
       violation; the page's word count recorded before and after.
-- [ ] The visual tokens landed, the dark scheme at parity, the contrast ratios recorded, and the
+- [ ] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the
       owner has accepted the screenshots. Layout regions behave as the table says at all five
       widths, each decision traced to a source.
 - [ ] The snippet panel generates, colours and copies for all three modes; the clipboard fallback
@@ -218,11 +221,14 @@ naming the string and the rule. Keep the rules in one exported array.
       never sees the strings it was written for; `scrollIntoView` moving the whole shell; hues for
       substitution and deletion that a red-green colour-blind reader cannot separate.
 
-## Questions for the owner
+## Owner decisions (2026-09-19, on the draft)
 
-1. The namespace is `Fuzzy.Text.RegularExpressions`, not `FuzzyRegex` (the package id). Confirm.
-2. Right rail from 1440 px with tabs below it, or tabs everywhere for one layout to maintain?
-3. Dark scheme by preference as now, or one scheme done well? Snippet with the demo's timeout?
+1. Snippet imports the namespace `Fuzzy.Text.RegularExpressions` with a `dotnet add package
+   FuzzyRegex` comment above it; clarity of the call and its options is what matters.
+2. Examples and help are tabs at every width; no right rail.
+3. Light scheme only, done well; dark can return later as its own slice.
+4. The snippet prints the demo's two-second timeout.
+5. `docs/plan/STATE.md` is amended by the sitting that starts S73, not before.
 
 ## Sources (all read 2026-09-19)
 
