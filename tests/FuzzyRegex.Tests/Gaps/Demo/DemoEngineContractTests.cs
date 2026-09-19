@@ -41,9 +41,17 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// fuzzy-with-counts: compile(r"(?:kitten){e&lt;=3}").search("sitting")
 ///     match       utf16 index=0 length=6
 ///     fuzzy_counts (sub, ins, del) = (2, 0, 0)
+///     fuzzy_changes (sub, ins, del) = ([0, 4], [], [])
 /// fuzzy-per-error-type: compile(r"(?:foobar){i&lt;=1,d&lt;=1,s&lt;=1}").search("xfoobat")
 ///     match       utf16 index=0 length=6
 ///     fuzzy_counts (sub, ins, del) = (1, 1, 1)
+///     fuzzy_changes (sub, ins, del) = ([0], [1], [6])
+///     deletions as subject positions = [6]
+/// fuzzy-two-deletions-at-one-place: compile(r"(?:abcdef){d&lt;=2}").search("abef")
+///     match       utf16 index=0 length=4
+///     fuzzy_counts (sub, ins, del) = (0, 0, 2)
+///     fuzzy_changes (sub, ins, del) = ([], [], [2, 3])
+///     deletions as subject positions = [2, 2]
 /// astral-subject: compile(r"\p{Deseret}+").search("ab\U00010400\U00010401cd")
 ///     match       utf16 index=2 length=4   (codepoints index=2 length=2)
 /// every-match: compile(r"\d+").finditer("a1 b22 c333")
@@ -172,6 +180,64 @@ public sealed class DemoEngineContractTests
         )
             .Should()
             .Be((substitutions, insertions, deletions));
+    }
+
+    /// <summary>
+    /// A fuzzy match also says WHERE it spent each error, so the page can draw the edit under the
+    /// characters it happened to rather than only count it in a chip.
+    /// </summary>
+    [Test]
+    [Arguments("(?:kitten){e<=3}", "sitting", "0,4", "", "")]
+    [Arguments("(?:foobar){i<=1,d<=1,s<=1}", "xfoobat", "0", "1", "6")]
+    public void A_fuzzy_match_says_where_it_spent_each_error(
+        string pattern,
+        string subject,
+        string substitutions,
+        string insertions,
+        string deletions
+    )
+    {
+        JsonElement edits = Matches(Run(pattern, "", subject)).First().GetProperty("edits");
+
+        using (new AssertionScope())
+        {
+            Positions(edits, "substitutions").Should().Be(substitutions);
+            Positions(edits, "insertions").Should().Be(insertions);
+            Positions(edits, "deletions").Should().Be(deletions);
+        }
+    }
+
+    /// <summary>
+    /// A deletion is reported where the page draws its caret, which is a position in the subject on
+    /// screen. Upstream reports where the missing character would sit in a string that had every
+    /// deletion put back, so its two deletions here are 2 and 3 - and both are the same place in
+    /// "abef", between "ab" and "ef".
+    /// </summary>
+    /// <remarks>
+    /// The shift is upstream's, at <c>_regex.c:20535-20537</c>, and this port keeps it in
+    /// <see cref="Match.FuzzyChanges"/>. Un-shifting belongs to the demo and not to the port: the
+    /// library's answer is upstream's answer, and the page is what needs a subject position.
+    /// </remarks>
+    [Test]
+    public void Two_deletions_in_one_place_are_reported_at_that_place_in_the_subject()
+    {
+        JsonElement edits = Matches(Run("(?:abcdef){d<=2}", "", "abef")).First().GetProperty("edits");
+
+        Positions(edits, "deletions").Should().Be("2,2");
+    }
+
+    /// <summary>
+    /// An exact match carries no <c>edits</c> member at all. A walk of a thousand exact matches
+    /// would otherwise ship a thousand copies of three empty arrays, which is the same reasoning
+    /// <c>partialMatch</c> is omitted under.
+    /// </summary>
+    [Test]
+    public void An_exact_match_carries_no_edits()
+    {
+        Matches(Run(@"\d+", "", "a1 b22 c333"))
+            .Select(static m => m.TryGetProperty("edits", out _))
+            .Should()
+            .AllSatisfy(static present => present.Should().BeFalse());
     }
 
     /// <summary>
@@ -802,6 +868,10 @@ public sealed class DemoEngineContractTests
     }
 
     private static IEnumerable<JsonElement> Groups(JsonElement match) => match.GetProperty("groups").EnumerateArray();
+
+    /// <summary>One list of edit positions as a comma-separated string, so a test can name it inline.</summary>
+    private static string Positions(JsonElement edits, string kind) =>
+        string.Join(',', edits.GetProperty(kind).EnumerateArray().Select(static p => p.GetInt32()));
 
     private static (int Index, int Length) Span(JsonElement spanned) =>
         (spanned.GetProperty("index").GetInt32(), spanned.GetProperty("length").GetInt32());

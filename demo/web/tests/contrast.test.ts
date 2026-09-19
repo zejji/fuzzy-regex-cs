@@ -70,6 +70,15 @@ const PAIRS: readonly (readonly [string, string, number, string])[] = [
     ['--color-edit-sub', '--color-white', 4.5, 'a substitution count in the table'],
     ['--color-edit-ins', '--color-white', 4.5, 'an insertion count in the table'],
     ['--color-edit-del', '--color-white', 4.5, 'a deletion count in the table'],
+    // The same three inside a highlight, where the surface is the match's own amber rather than
+    // white: the underline is a mark that carries meaning (1.4.11) and the letter beside it is
+    // text at 10 px (1.4.3).
+    ['--color-edit-sub', '--color-hit-a', 4.5, 'a substitution marked inside a match'],
+    ['--color-edit-ins', '--color-hit-a', 4.5, 'an insertion marked inside a match'],
+    ['--color-edit-del', '--color-hit-a', 4.5, 'a deletion marked inside a match'],
+    ['--color-edit-sub', '--color-hit-b', 4.5, 'a substitution inside the next match along'],
+    ['--color-edit-ins', '--color-hit-b', 4.5, 'an insertion inside the next match along'],
+    ['--color-edit-del', '--color-hit-b', 4.5, 'a deletion inside the next match along'],
 
     // The snippet panel, which sits on slate-50 rather than on the white around it. Tailwind's own
     // palette and no token of ours: these five are read at 12 px, so they are held to 4.5:1, and
@@ -172,9 +181,11 @@ const BROWSER: Readonly<Record<string, readonly [number, number, number]>> = {
     '--color-hit-a': [254, 221, 151],
     '--color-hit-b': [241, 196, 94],
     '--color-hit-edge': [143, 107, 9],
-    '--color-edit-sub': [141, 93, 28],
-    '--color-edit-ins': [25, 112, 55],
-    '--color-edit-del': [179, 34, 40],
+    // Re-recorded 2026-09-20, the same way, after S73 darkened these three to clear 4.5:1 against
+    // the two match fills: `tools/probes/s73-edit-underlay.mjs`.
+    '--color-edit-sub': [115, 76, 23],
+    '--color-edit-ins': [14, 89, 41],
+    '--color-edit-del': [148, 21, 29],
     '--color-edit-sub-soft': [251, 232, 211],
     '--color-edit-ins-soft': [208, 247, 214],
     '--color-edit-del-soft': [254, 228, 226],

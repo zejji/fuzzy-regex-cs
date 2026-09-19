@@ -20,6 +20,19 @@ export interface Counts {
 }
 
 /**
+ * Where a fuzzy match spent each kind of error, in subject positions. Mirrors `DemoEdits`.
+ *
+ * A substitution and an insertion name the character they were spent on. A deletion names the place
+ * a character is missing from, so it has no character of its own and two deletions in a row are the
+ * same position twice. `DemoEngine` un-shifts those back to the subject before they get here.
+ */
+export interface Edits {
+    readonly substitutions: readonly number[];
+    readonly insertions: readonly number[];
+    readonly deletions: readonly number[];
+}
+
+/**
  * One capturing group's result. Mirrors `DemoGroup`.
  *
  * `captures` is the full capture list - every repetition, not only the last - which is what makes a
@@ -39,6 +52,8 @@ export interface Group {
 export interface Match extends Span {
     readonly counts: Counts;
     readonly groups: readonly Group[];
+    /** Absent on an exact match, where the zero counts already say there is nothing to point at. */
+    readonly edits?: Edits;
     /**
      * The subject ran out before the pattern did. Present only in partial mode, and only on a match
      * that is partial - so `undefined` means "a complete match", not "we did not ask".

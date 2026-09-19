@@ -747,3 +747,68 @@ contrast measurements in that same browser session; then the blind review, the v
 closing notes. Two things must be written as files before the browser opens, because doing them by
 hand is what made chunks 2 and 3 take two sittings each: the width loop as a probe in
 `tools/probes/`, and the checklist of what each width must prove.
+
+## Chunk 5 (2026-09-19/20, sitting 7)
+
+Run as sub-chunks against `.scratch/chunk5-checklist.md`, each one committed on its own. 5a (the
+sticky column header, `6878d63`) and 5b (a widening window keeping the focus, `a637290`) have their
+measurements, mutants and controls in their own commit messages; what follows is 5c onwards.
+
+### 5c - the per-edit underlay
+
+The demo said how many errors a fuzzy match spent and never where. It does now: `DemoEngine.cs`
+puts an `edits` object on a match that spent any, `highlight.ts` breaks the highlight into runs, and
+the page paints the character each error was spent on in the hue of its kind, with the kind's letter
+under it.
+
+**What a deletion's position means, proved rather than read.** `regex 2026.9.10` under Python
+3.14.6, 2026-09-20:
+
+| call | `fuzzy_changes` |
+|---|---|
+| `compile(r"(?:kitten){e<=3}").search("sitting")` | `([0, 4], [], [])` |
+| `compile(r"(?:foobar){i<=1,d<=1,s<=1}").search("xfoobat")` | `([0], [1], [6])` |
+| `compile(r"(?:abcdef){d<=2}").search("abef")` | `([], [], [2, 3])` |
+
+A substitution and an insertion are subject positions. A deletion is not: upstream reports where the
+missing character would sit in a string that had every deletion put back, so the i-th is shifted by
+i (`_regex.c:20535-20537`, and our `Match.cs:448`). Two deletions in one place come back as `[2, 3]`
+and are both at subject position 2. The library keeps upstream's answer; the demo un-shifts, because
+the subject on screen is the string the page slices. All three cases are in
+`tools/probes/demo-json-contract-expectations.py`, which now prints the un-shifted positions beside
+the raw ones.
+
+**Seven mutants, all killed** (`tools/probes/s73-edit-mutants.mjs`, each planted, run and reverted,
+`git status` identical afterwards):
+
+| Mutant | Killed by |
+|---|---|
+| a deletion at the very end of the match is dropped | 2 tests |
+| two deletions in one place draw one mark | 1 |
+| a position outside the match is drawn anyway | 1 |
+| a position on the low half of a surrogate pair is sliced where it lands | 1 |
+| every character is one code unit wide | 1 |
+| upstream's deletion positions are passed through unshifted | 1 |
+| an exact match carries an empty `edits` object | 3 |
+
+The last one cannot be the obvious mutant - deleting the guard leaves `counts` unused, which is an
+analyzer error, not a test failure - so it is a guard that never fires. That is written at the line.
+
+**Two defects the tests could not have found, both from one screenshot at 4x**
+(`tools/probes/s73-edit-underlay.mjs`, Chrome 153, 1366x768). The mark's box ends 1px below the
+character, and both annotations were landing on it: an underline 3px below the baseline and a letter
+6px below it were drawn with the highlight's own dark border through the middle of them. The
+underline went inside the amber (offset 1px) and the letter below it (`-8px`). Separately the
+deletion caret, an `inline-block`, sat on the baseline and so stood 3px proud of the highlight it is
+inside - box `[564, 187, 6, 16]` against a mark at `[514, 190, 57, 18]`. With `align-text-bottom` it
+is `[564, 191, 6, 16]`: the same box the other two marks have.
+
+**The colours.** The three edit tokens were darkened (`sub` to `oklch(0.45 0.085 70)`, `ins` to
+`oklch(0.41 0.105 150)`, `del` to `oklch(0.43 0.16 25)`) because the underlay puts them on the match
+fill rather than on white, and at their chunk-4 values they were 4.3, 3.42, 3.76 and 4.01 against
+`--color-hit-a` and `--color-hit-b`. Six new pairs in `contrast.test.ts` hold them at 4.5, and the
+chroma of each was the thing that had to come down to stay inside sRGB. Chrome paints them
+`[115, 76, 23]`, `[14, 89, 41]` and `[148, 21, 29]`, re-recorded in the `BROWSER` table from the
+probe above.
+
+250 tests in `demo/web`, 61 in `DemoEngineContractTests`.

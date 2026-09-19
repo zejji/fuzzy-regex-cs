@@ -476,6 +476,52 @@ test('a partial match says so, rather than looking like an ordinary one', async 
     expect(found(page.querySelector('mark.hit'), 'match highlight').className).not.toMatch(/hit-partial/);
 });
 
+test('a fuzzy match shows where each error was spent, inside the highlight', async () => {
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xfoobat';
+    // Upstream's answer for (?:foobar){i<=1,d<=1,s<=1} against "xfoobat"
+    // (tools/probes/demo-json-contract-expectations.py, run 2026-09-20 against regex 2026.9.10):
+    // span (0,6), one error of each kind, at subject positions 0, 1 and 6.
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 1, insertions: 1, deletions: 1 },
+                edits: { substitutions: [0], insertions: [1], deletions: [6] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const mark = found(page.querySelector('mark.hit'), 'match highlight');
+    // The subject is unchanged by the marking: a deletion has no character of its own, so the text
+    // inside the highlight is still exactly the six characters the engine matched.
+    expect(mark.textContent).toBe('xfooba');
+    expect([...mark.querySelectorAll('span.edit')].map((edit) => `${edit.className} ${edit.textContent}`)).toEqual([
+        'edit edit-sub x',
+        'edit edit-ins f',
+        'edit edit-del ',
+    ]);
+
+    // Colour is never the only signal: each mark names its kind in a title, the stylesheet puts
+    // the letter under it, and the highlight's own label carries all three for a screen reader,
+    // which never sees any of the marks (the <mark> has an aria-label of its own).
+    expect([...mark.querySelectorAll('span.edit')].map((edit) => edit.getAttribute('title'))).toEqual([
+        'substitution',
+        'insertion',
+        'deletion',
+    ]);
+    expect(mark.getAttribute('aria-label')).toBe('match 1, xfooba, 1 substitution, 1 insertion, 1 deletion');
+
+    // An exact match keeps the plain highlight, and its label keeps the plain wording.
+    demo.answer = { matches: [match(0, 6)], truncated: false };
+    await nextTick();
+    const exact = found(page.querySelector('mark.hit'), 'match highlight');
+    expect(exact.querySelectorAll('span.edit')).toHaveLength(0);
+    expect(exact.getAttribute('aria-label')).toBe('match 1, xfooba');
+});
+
 test('the help panel is the documentation, rendered as text and opened from the keyboard', async () => {
     const { page, demo } = await mountPage();
     demo.help = {

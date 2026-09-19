@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplate
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { copyText } from './lib/clipboard';
+import type { EditKind } from './lib/highlight';
 import { createPool } from './lib/pool';
 import { toCSharp, tokenize } from './lib/snippet';
 import type { Example } from './types';
@@ -263,10 +264,43 @@ function loadExample(example: Example): void {
 // crossing the pane on its way elsewhere must not rewrite what is being examined.
 const linked = ref<number | null>(null);
 
-/** What a screen reader is told a highlight is: its number, its text, and whether it is partial. */
-const markLabel = (index: number, text: string): string =>
-    `match ${index + 1}, ${text === '' ? 'empty' : text}` +
-    (matches.value[index]?.partialMatch === true ? ', partial' : '');
+/** What each kind of edit is called, in the marks inside a highlight and in its label. */
+const EDIT_NAMES: Readonly<Record<EditKind, string>> = {
+    sub: 'substitution',
+    ins: 'insertion',
+    del: 'deletion',
+};
+
+const editName = (kind: EditKind): string => EDIT_NAMES[kind];
+
+/**
+ * What a screen reader is told a highlight is: its number, its text, what it spent, and whether it
+ * is partial.
+ *
+ * The errors are in the label because they are in the highlight: the marks inside it are the hue
+ * and the letter, and a `<mark>` with an `aria-label` is read as that label and nothing else. The
+ * counts are said in words here and shown as chips in the table, which is the same fact twice for
+ * two different readers.
+ */
+const markLabel = (index: number, text: string): string => {
+    const counts = matches.value[index]?.counts;
+    const spent = (
+        [
+            ['sub', counts?.substitutions ?? 0],
+            ['ins', counts?.insertions ?? 0],
+            ['del', counts?.deletions ?? 0],
+        ] as const
+    )
+        .filter(([, count]) => count > 0)
+        .map(([kind, count]) => `, ${count} ${editName(kind)}${count === 1 ? '' : 's'}`)
+        .join('');
+
+    return (
+        `match ${index + 1}, ${text === '' ? 'empty' : text}` +
+        spent +
+        (matches.value[index]?.partialMatch === true ? ', partial' : '')
+    );
+};
 
 /**
  * The second line of the caret box: spaces up to the character the engine blamed, then the hat.
@@ -965,7 +999,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     @mouseleave="linked = null"
                                     @keydown.enter="selectFrom('subject', part.match)"
                                     @keydown.space.prevent="selectFrom('subject', part.match)"
-                                >{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></p>
+                                ><template v-if="part.runs === undefined">{{ part.text }}</template><template
+                                        v-else
+                                    ><template v-for="(run, j) in part.runs" :key="j"><span
+                                            v-if="run.kind !== null"
+                                            class="edit"
+                                            :class="'edit-' + run.kind"
+                                            :title="editName(run.kind)"
+                                        >{{ run.text }}</span><template v-else>{{ run.text }}</template></template></template></mark><template v-else>{{ part.text }}</template></template></p>
                         <p v-if="view.total === 0" class="note">No matches.</p>
                     </section>
 

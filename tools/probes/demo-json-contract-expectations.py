@@ -77,6 +77,12 @@ CASES = [
         lambda: regex.compile(r"(?:foobar){i<=1,d<=1,s<=1}").search("xfoobat"),
     ),
     (
+        "fuzzy-two-deletions-at-one-place",
+        r'compile(r"(?:abcdef){d<=2}").search("abef")',
+        "abef",
+        lambda: regex.compile(r"(?:abcdef){d<=2}").search("abef"),
+    ),
+    (
         "astral-subject",
         r'compile(r"\p{Deseret}+").search("ab\U00010400\U00010401cd")',
         "ab\U00010400\U00010401cd",
@@ -117,6 +123,12 @@ def main() -> int:
             continue
         print(f"    match       {show(subject, m.start(), m.end())}")
         print(f"    fuzzy_counts (sub, ins, del) = {m.fuzzy_counts}")
+        subs, ins, dels = m.fuzzy_changes
+        print(f"    fuzzy_changes (sub, ins, del) = {m.fuzzy_changes}")
+        # Upstream reports a deletion where the missing character would sit in a string that had
+        # every deletion put back, so the i-th is shifted by i (_regex.c:20535-20537). The demo
+        # draws its caret in the subject that is on screen, so it un-shifts them again.
+        print(f"    deletions as subject positions = {[p - i for i, p in enumerate(dels)]}")
         for number in range(0, (m.re.groups or 0) + 1):
             name_of = {v: k for k, v in m.re.groupindex.items()}.get(number)
             label = f"{number}" if name_of is None else f"{number} ({name_of})"

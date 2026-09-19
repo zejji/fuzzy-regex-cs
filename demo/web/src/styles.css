@@ -86,9 +86,9 @@
       path for everyone else. The three lightnesses differ as well, so the columns stay apart in
       greyscale and for anyone who prints the page.
     */
-    --color-edit-sub: oklch(0.52 0.1 70);
-    --color-edit-ins: oklch(0.48 0.12 150);
-    --color-edit-del: oklch(0.5 0.18 25);
+    --color-edit-sub: oklch(0.45 0.085 70);
+    --color-edit-ins: oklch(0.41 0.105 150);
+    --color-edit-del: oklch(0.43 0.16 25);
     --color-edit-sub-soft: oklch(0.94 0.035 70);
     --color-edit-ins-soft: oklch(0.94 0.06 150);
     --color-edit-del-soft: oklch(0.94 0.028 25);
@@ -357,6 +357,77 @@
     .hit-partial {
         @apply border-r-2 border-dashed;
         border-right-color: var(--color-hit-edge);
+    }
+
+    /* One error inside a highlight: the character it was spent on, in the hue of its kind, with
+       the kind's letter under it.
+
+       Three signals, because colour is never allowed to be the only one: the hue is the fast path,
+       the letter is what a reader who sees the amber and the red as one colour separates them by,
+       and the line style differs as well. The `title` names the kind for a pointer, and the
+       highlight's own `aria-label` says all three in words - a <mark> carrying a label is read as
+       that label and nothing inside it.
+
+       Never a SOLID underline. On this page a solid line means "this navigates" and nothing else
+       may borrow it (`layout.test.ts`); a wavy or dotted one is the annotation convention, and
+       that difference is the third signal. */
+    /* The offset and the letter's `bottom` are both measured against the highlight's own border,
+       which a screenshot at 4x found both of them sitting on: the mark's box ends 1px under the
+       character, so an underline 3px below the baseline and a letter 6px below it were drawn with
+       the border's dark line through the middle. The line goes inside the amber, the letter goes
+       below it, and neither touches the border. */
+    .edit {
+        @apply relative;
+        text-decoration-line: underline;
+        text-decoration-style: wavy;
+        text-decoration-thickness: 2px;
+        text-underline-offset: 1px;
+    }
+
+    /* The letter is drawn by the stylesheet and not by the template, for two reasons: a visitor who
+       copies the subject out of the page gets the subject and not "xsfiooba", and an absolutely
+       positioned mark moves none of the characters around it. The subject is the one block here
+       whose every character sits where the engine said it does. */
+    .edit::after {
+        @apply absolute left-0 font-sans text-[0.625rem] leading-none font-semibold;
+        bottom: calc(var(--spacing) * -2);
+    }
+
+    .edit-sub {
+        color: var(--color-edit-sub);
+        text-decoration-style: wavy;
+        text-decoration-color: var(--color-edit-sub);
+    }
+
+    .edit-sub::after {
+        content: 's';
+    }
+
+    .edit-ins {
+        color: var(--color-edit-ins);
+        text-decoration-style: dotted;
+        text-decoration-color: var(--color-edit-ins);
+    }
+
+    .edit-ins::after {
+        content: 'i';
+    }
+
+    /* A deletion has no character of its own - the subject is missing the one the pattern asked
+       for - so it is drawn as the gap itself: a dashed edge where the character would have been,
+       the width of a narrow one.
+
+       `align-text-bottom` and not the default: an inline-block sits ON the baseline, so a 16px
+       caret beside 14px text stood 3px proud of the highlight it is inside (measured). Aligned to
+       the bottom of the text it spans exactly the box the other two marks do. */
+    .edit-del {
+        @apply inline-block h-4 w-1.5 align-text-bottom no-underline;
+        border-left: 2px dashed var(--color-edit-del);
+        color: var(--color-edit-del);
+    }
+
+    .edit-del::after {
+        content: 'd';
     }
 
     /* `min-w-max` with `w-full`: the table fills its region when there is room and refuses to
