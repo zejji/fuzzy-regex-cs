@@ -7,10 +7,17 @@ gitignored and would not survive the slice.
 
 ## It is not S58's doing
 
-`git diff dfa8767 -- src` is empty: the engine is byte-identical to `S56b` (2026-09-18 17:31), which
-is the last commit that touched `src/` at all - 28 commits back from this slice's first commit, and
-not one of those 28 touched `src/` (`git rev-list --count dfa8767..e30a4e8` = 28,
-`git log -n 2 --oneline -- src` reaches back past all of them). The third default oracle seed is `Get-Date -Format 'yyyyMMdd'`
+`git diff 2c1e747 b6e82db -- src` is empty: the engine is byte-identical to `S56b` (`2c1e747`,
+2026-09-18 17:31), which is the last commit before S59 that touched `src/` at all
+(`git log --oneline -1 b6e82db -- src`). Between the two there are 41 commits and not one of them
+touches `src/`: `git rev-list --count 2c1e747..b6e82db` = 41 and
+`git rev-list --count 2c1e747..b6e82db -- src` = 0.
+
+**Every SHA here is an ancestor of `main`, checked with `git merge-base --is-ancestor`.** This
+paragraph first cited `dfa8767` and `e30a4e8`, and neither is: they are pre-rebase duplicates, so
+the `git diff` it quoted as empty in fact had two doc-comment lines in it and the "28 commits" was
+a count over a branch nobody is on (the real figure on `main` is 41). Corrected 2026-09-19 during
+S59, from the DECISIONS entry that recorded the `dfa8767` trap on the same day. The third default oracle seed is `Get-Date -Format 'yyyyMMdd'`
 (`tools/run-oracle.ps1:256`), so every day generates a wave nobody has run before. This is a
 pre-existing divergence that today's seed happened to reach, not a regression.
 
@@ -20,11 +27,17 @@ Seeds 7 and 4242 are GREEN on the same tree: `diverge 0` of 6380 rows each.
 
 ```
 DIVERGE row 3655 (interactions) finditer-overlapped flags=0x2 version=V0
-  pattern  '(?b)(?r)^(?:\d{2}?\s){e<=2:.}(?P<g1>[^a-f]{0}?)(?:(?(1)(?=(?&g1))[\w\s]|\s))+'
+  pattern  '(?b)(?r)^(?:\\d{2}?\\s){e<=2:.}(?P<g1>[^a-f]{0}?)(?:(?(1)(?=(?&g1))[\\w\\s]|\\s))+'
   subject  'bb0\u000d\u000a0'
   upstream matches 1 | match 0:(0,5)[(0,5)] 1:(4,0)[(4,0)] last=1/g1 fuzzy=(1,1,0)[s:1][i:2][d:]
   port     matches 1 | match 0:(0,5)[(0,5)] 1:(4,0)[(4,0)] last=1/g1 fuzzy=(1,1,0)[s:2][i:1][d:]
 ```
+
+Copied verbatim from `TestResults/oracle/report.txt`, which renders a backslash doubled - the
+pattern itself has single ones. Corrected 2026-09-19 by S59's verifier, which compared a fresh
+report against this block and found these five lines identical but for that escaping, the
+transcription here having silently un-doubled them. Quote the report as it reads, so a later
+reader can diff the two.
 
 **Everything agrees except the attribution.** Same number of matches, same match span `(0,5)`, same
 group 1 span `(4,0)`, same `last`, and the same edit *totals* - `(1,1,0)`, one substitution and one

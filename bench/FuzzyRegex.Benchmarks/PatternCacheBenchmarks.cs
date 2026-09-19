@@ -81,7 +81,9 @@ public class PatternCacheBenchmarks
     /// <summary>
     /// The SAME CALL AS IT WAS BEFORE S59, so the before and after figures come out of one run of
     /// one process rather than two runs of two trees. The body is the one commit b6e82db compiled,
-    /// copied out of <c>git show HEAD:src/FuzzyRegex/FuzzyRegex.cs</c> at line 1497:
+    /// copied out of <c>git show b6e82db:src/FuzzyRegex/FuzzyRegex.cs</c> at line 1497 (name the
+    /// commit, not <c>HEAD</c>: a later reader resolves <c>HEAD</c> to a tree where that line is
+    /// something else, and a blind reviewer did exactly that on 2026-09-19):
     /// <code>
     /// ) => new FuzzyRegex(pattern, options).IsMatch(input, timeout: timeout, cancellationToken: cancellationToken);
     /// </code>
@@ -122,7 +124,7 @@ public class PatternCacheBenchmarks
     public bool StaticMatch() => FuzzyRegex.Match(Corpus.Short, _pattern).Success;
 
     /// <summary>
-    /// <see cref="StaticMatch"/>'s before row. HEAD's body at line 1518 was
+    /// <see cref="StaticMatch"/>'s before row. Commit <c>b6e82db</c>'s body at line 1518 was
     /// <c>new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).Match(...)</c>, and
     /// with no named lists that is this.
     /// </summary>

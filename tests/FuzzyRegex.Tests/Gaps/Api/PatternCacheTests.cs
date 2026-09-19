@@ -238,6 +238,9 @@ public sealed class PatternCacheTests
     {
         var cache = new PatternCache();
 
+        // "(" is a compile error upstream too, not a pattern that matches nothing: regex 2026.9.10
+        // on 2026-09-19 raised `error - missing ) at position 1` from regex.compile("(").
+        // Re-runnable as tools/probes/s59-cache-answers-upstream.py.
         Action get = () => Get(cache, "(", FuzzyRegexOptions.None);
 
         get.Should().Throw<FuzzyRegexParseException>();
@@ -319,7 +322,8 @@ public sealed class PatternCacheTests
     public void A_caller_s_named_lists_dictionary_bypasses_the_cache()
     {
         // A caller-supplied dictionary is mutable, caller-owned and unbounded, so it cannot be part
-        // of a key. The calls that take one therefore compile per call, and the proof is that
+        // of a key. The calls that CARRY one therefore compile per call - the bypass is per call,
+        // not per overload, since the same overloads cache when namedLists is null - and the proof is that
         // mutating the dictionary between two calls changes the answer.
         //
         // The two expected answers are upstream's, from regex 2026.9.10 on 2026-09-19: matching the
@@ -377,7 +381,11 @@ public sealed class PatternCacheTests
                 .Should()
                 .BeFalse("setting the bound to zero empties the cache");
 
-            // Still answers, just without caching.
+            // Still answers, just without caching. The answer is upstream's: regex 2026.9.10 on
+            // 2026-09-19 gave `regex.search("s59-purged-0123456789abcdef0123456789abcdef",
+            // "subject")` -> None, the same shape as the GUID-suffixed literal below, which is
+            // fresh per run only so its key cannot already be in the cache.
+            // Re-runnable as tools/probes/s59-cache-answers-upstream.py.
             string second = "s59-purged-" + Guid.NewGuid().ToString("N");
             FuzzyRegex.IsMatch("subject", second).Should().BeFalse();
             FuzzyRegex

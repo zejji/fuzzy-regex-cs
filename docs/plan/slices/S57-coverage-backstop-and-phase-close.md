@@ -21,6 +21,22 @@ coverage - and hands Phase 7 what it regresses against.
   default wave at three seeds, 6000 rows, plus `fuzzy` and `interactions` at 99991 and one fresh
   seed; S55/S56's mutation scores quoted; coverage backstop done. Anything red is judged, not
   deferred.
+- **The AOT test gate, back to green.** `tools/run-aot-tests.ps1` has been RED since S65 added
+  `tests/FuzzyRegex.Tests/Conventions/PublicApiDocumentationTests.cs` (`148c3bf`, 2026-09-18 -
+  NOT `3b09b76`, which adds the same file with the same subject and author date but is a
+  pre-rebase duplicate that `git merge-base --is-ancestor 3b09b76 HEAD` rejects; the `dfa8767`
+  trap in DECISIONS, hit again by S59's verifier):
+  `ilc` reports exactly one trim error, `IL2065` at that file's line 62, on a
+  `type.GetMembers(BindingFlags)` over types that are not statically known, and the publish then
+  fails with `MSB3077`. Reproduced identically by S58 and again by S59 from a DELETED
+  `tests/FuzzyRegex.Tests/obj` and `bin`, so it is neither an intermediate-directory artefact nor
+  either slice's doing. `src/FuzzyRegex` itself is clean - `tools/run-aot-smoke.ps1` is GREEN -
+  so this is the test project only. The fix is a real decision, which is why neither slice took
+  it mid-flight: annotate the scan with `DynamicallyAccessedMembers`, suppress it with
+  `UnconditionalSuppressMessage` and a written reason, or exclude that one convention test from
+  the native publish. Whichever is chosen, the gate must be GREEN at the end of this slice, and
+  the reason recorded. **This bullet exists because the record alone was not enough**: S58 wrote
+  the failure into its closing notes, and S59 still spent a full AOT publish re-deriving it.
 - **Gap-test provenance audit** (owner rule 2026-09-15): an independent Opus agent samples the
   gap tests written before the provenance rule existed (`tests/FuzzyRegex.Tests/Gaps/**`, at least
   one assertion per file and every assertion in the fuzzy, BESTMATCH, verb and partial files),
@@ -49,6 +65,8 @@ coverage - and hands Phase 7 what it regresses against.
 
 - [ ] Coverage backstop run; every untested file or branch tested or recorded.
 - [ ] Gate walked in order with numbers; ledger table shows no inherited-unfixed entry.
+- [ ] `tools/run-aot-tests.ps1` GREEN again, the IL2065 decided one of the three ways and the
+      reason written down.
 - [ ] Symbol accounting, controls, bookkeeping, Phase 7 handover.
 - [ ] Ratchet GREEN, blind review (hunt: a gate item ticked from an earlier slice's numbers rather
       than re-run; a ledger entry whose "fixed" has no test), commit.
