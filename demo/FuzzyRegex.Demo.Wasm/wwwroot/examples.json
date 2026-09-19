@@ -112,10 +112,10 @@
   {
     "key": "timeout",
     "title": "A pattern that runs out of time",
-    "note": "Nested unbounded repeats make the search exponential. The engine's own timeout stops it after two seconds and the page says so - and because the engine runs in a Web Worker, the page stays responsive while it happens.",
-    "pattern": "(a+a+)+b",
+    "note": "An alternation of two lengths, repeated, over a subject that cannot match: the engine has to try every way of splitting 36 a's before it can say no. The timeout stops it after two seconds and the page says so - and because the engine runs in a Web Worker, the page stays responsive while it happens.",
+    "pattern": "^(a|aa)+$",
     "flags": "",
-    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
   },
   {
     "title": "Named groups and every capture",

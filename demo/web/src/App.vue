@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The page. Its state is demo.ts, which is testable without a DOM; what is here is layout only.
-import { nextTick, onMounted, onUnmounted, proxyRefs, useTemplateRef, type ShallowRef } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, type ShallowRef } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { createPool } from './lib/pool';
@@ -10,13 +10,19 @@ const {
     pattern,
     flags,
     subject,
+    mode,
+    replacement,
+    namedLists,
     answeredSubject,
+    answeredPattern,
     examples,
+    helpSections,
     engine,
     engineError,
     busy,
     answer,
     failure,
+    failureOffset,
     elapsedMs,
     selected,
     shareable,
@@ -24,11 +30,58 @@ const {
     view,
     capped,
     current,
+    replaced,
+    partial,
     maxSubjectLength,
     load,
     select,
     stop,
 } = demo;
+
+/**
+ * The three modes the engine answers, in the order the page offers them.
+ *
+ * Radios and not a `<select>`: there are three, all three fit, and the one in force is readable
+ * without opening anything. `''` is the ordinary walk, which is what an empty mode means to the
+ * engine - so the default choice needs no special case anywhere.
+ */
+const MODES = [
+    { value: '', id: 'mode-walk', label: 'Find every match' },
+    { value: 'partial', id: 'mode-partial', label: 'Partial match' },
+    { value: 'replace', id: 'mode-replace', label: 'Replace' },
+];
+
+// --- linking a highlight to its row ----------------------------------------------------------
+//
+// Which of six numbers in a table belongs to which highlight is the question the table raises, and
+// pointing at either is the cheapest answer. It stays here rather than in demo.ts because it is
+// view state and pointer-only: it changes nothing the engine is asked, and the keyboard's
+// equivalent - the selection, which the arrows drive - already exists.
+//
+// Hovering deliberately does NOT select: the selection drives the group table below, and a pointer
+// crossing the pane on its way elsewhere must not rewrite what is being examined.
+const linked = ref<number | null>(null);
+
+/** What a screen reader is told a highlight is: its number, its text, and whether it is partial. */
+const markLabel = (index: number, text: string): string =>
+    `match ${index + 1}, ${text === '' ? 'empty' : text}` +
+    (matches.value[index]?.partialMatch === true ? ', partial' : '');
+
+/**
+ * The pattern with a caret under the character the engine blamed.
+ *
+ * One `<pre>` holding both lines, because the caret's whole job is to line up with the text above
+ * it: two elements would be two monospace boxes to keep in step, and any padding or wrapping
+ * applied to one of them moves the hat off its character.
+ *
+ * Drawn against `answeredPattern` and never the live box - the offset indexes the string the engine
+ * was given, which for the debounce plus the round trip is not what the field says.
+ */
+const caretLine = computed(() =>
+    failureOffset.value === null
+        ? ''
+        : answeredPattern.value + '\n' + ' '.repeat(failureOffset.value) + '^',
+);
 
 // --- one tab stop per group of matches, not one per match ------------------------------------
 //
@@ -46,7 +99,9 @@ const matchRows = useTemplateRef<HTMLElement>('matchRows');
  *   the highlights run along the subject and the rows run down the table.
  * @param within The element holding the controls, so the focus stays inside the group that was
  *   being driven.
- * @param control A selector for those controls, in the order the matches are numbered.
+ * @param control A selector for those controls. The destination is found by its `data-match`
+ *   attribute and never by position: under RightToLeft the highlights sit in subject order while
+ *   the rows sit in the answer's order, so the two groups disagree about which element is third.
  */
 function rove(
     event: KeyboardEvent,
@@ -78,7 +133,9 @@ function rove(
     // On the next render, because the destination is a tab stop only after it: moving focus first
     // would leave the focused control holding `tabindex="-1"` for a frame, and Tab out of it then
     // resumes from the wrong place.
-    void nextTick(() => within.value?.querySelectorAll<HTMLElement>(control)[to]?.focus());
+    void nextTick(() =>
+        within.value?.querySelector<HTMLElement>(`${control}[data-match="${to}"]`)?.focus(),
+    );
 }
 
 const onSubjectKeydown = (event: KeyboardEvent): void =>
@@ -114,8 +171,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
             <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                 A C# port of Python's <code class="font-mono">regex</code> module, compiled to
                 WebAssembly and running in your browser. The engine runs in a Web Worker, so a
-                pattern that runs away takes the worker with it and not the page. This is v1: three
-                inputs and the answers, nothing more.
+                pattern that runs away takes the worker with it and not the page. Every sample in
+                the sidebar is a starting point rather than a demonstration: edit any box and the
+                answer follows.
             </p>
         </header>
 
@@ -133,6 +191,24 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             autocapitalize="off"
                             autocomplete="off"
                         />
+                        <!--
+                          The failure that has a place in the pattern goes UNDER the pattern, with a
+                          caret at the character the engine named; everything else goes to the block
+                          below the inputs. Said in one place or the other, never both: a message
+                          repeated twice reads as two problems.
+                        -->
+                        <div v-if="failureOffset !== null" class="parse-error" role="status">
+                            <p>{{ failure }}</p>
+                            <!--
+                              Hidden from a screen reader, which gets the position as the sentence
+                              underneath instead: a line of spaces and a hat is read out as nothing
+                              at all, and the pattern above it would be read out twice.
+                            -->
+                            <pre aria-hidden="true">{{ caretLine }}</pre>
+                            <!-- Not `.field-hint`: its slate grey is measured against the page, not
+                                 against this red. The sentence inherits the box's own colour. -->
+                            <p class="mt-1 text-xs leading-relaxed">The caret is under character {{ failureOffset + 1 }} of the pattern.</p>
+                        </div>
                     </div>
 
                     <div>
@@ -168,9 +244,81 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             {{ subject.length.toLocaleString() }}.
                         </p>
                     </div>
+
+                    <!--
+                      A fieldset and a legend, which is how a set of radios is named: without one,
+                      each radio is announced with its own label and nothing says what the three of
+                      them together are choosing.
+                    -->
+                    <fieldset aria-describedby="mode-hint">
+                        <legend class="field-label">Mode</legend>
+                        <div class="flex flex-wrap gap-x-6 gap-y-2">
+                            <div v-for="option in MODES" :key="option.id" class="flex items-center gap-2">
+                                <input
+                                    :id="option.id"
+                                    v-model="mode"
+                                    class="size-4 accent-accent"
+                                    type="radio"
+                                    name="mode"
+                                    :value="option.value"
+                                />
+                                <label :for="option.id" class="text-sm">{{ option.label }}</label>
+                            </div>
+                        </div>
+                        <p id="mode-hint" class="field-hint">
+                            Partial mode asks for one match and reports whether the subject ran out
+                            before the pattern did. Replace mode rewrites every match with the
+                            template.
+                        </p>
+                    </fieldset>
+
+                    <!--
+                      The template belongs to replace mode and appears with it. A box that is shown
+                      in every mode is a box somebody fills in and then wonders why it was ignored.
+                    -->
+                    <div v-if="mode === 'replace'">
+                        <label class="field-label" for="replacement">Replacement template</label>
+                        <input
+                            id="replacement"
+                            v-model="replacement"
+                            class="field"
+                            spellcheck="false"
+                            autocapitalize="off"
+                            autocomplete="off"
+                            aria-describedby="replacement-hint"
+                        />
+                        <p id="replacement-hint" class="field-hint">
+                            Upstream's language, not .NET's: <code class="font-mono">\1</code> and
+                            <code class="font-mono">\g&lt;name&gt;</code> for a group,
+                            <code class="font-mono">\g&lt;0&gt;</code> for the whole match.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="field-label" for="named-lists">Named lists</label>
+                        <textarea
+                            id="named-lists"
+                            v-model="namedLists"
+                            class="field min-h-16 resize-y"
+                            spellcheck="false"
+                            autocapitalize="off"
+                            aria-describedby="named-lists-hint"
+                        ></textarea>
+                        <p id="named-lists-hint" class="field-hint">
+                            For a pattern using <code class="font-mono">\L&lt;name&gt;</code>: one
+                            list per line, as <code class="font-mono">name: word, word</code>. Empty
+                            for a pattern with none.
+                        </p>
+                    </div>
                 </section>
 
-                <div class="status flex min-h-11 flex-wrap items-center gap-3">
+                <!--
+                  Announced politely: the answer arrives without anyone pressing anything, so a
+                  screen reader is never told the count changed unless this region says so. Polite
+                  and not assertive - it is typed over constantly, and assertive would interrupt the
+                  visitor mid-word, every word.
+                -->
+                <div class="status flex min-h-11 flex-wrap items-center gap-3" aria-live="polite">
                     <span v-if="engine === 'starting'" class="pill pill-busy">starting the engine...</span>
                     <span v-else-if="engine === 'failed'" class="pill pill-alert">engine failed to load</span>
                     <!--
@@ -189,14 +337,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     <span v-if="answer && answer.truncated" class="pill pill-alert">
                         the engine stopped early at its own cap - this is not the whole answer
                     </span>
+                    <span v-if="partial" class="pill">
+                        the subject ran out before the pattern did - this match is partial
+                    </span>
                     <span v-if="capped" class="pill">showing the first {{ view.shown }} of {{ view.total }}</span>
                     <span v-if="!shareable" class="pill">
                         too long to put in the address bar, so this case has no link
                     </span>
                 </div>
 
+                <!-- Everything the pattern's own text cannot be pointed at for. A failure WITH a
+                     position is shown under the pattern field instead, not in both places. -->
                 <p
-                    v-if="engine === 'failed' || failure"
+                    v-if="engine === 'failed' || (failure && failureOffset === null)"
                     class="rounded-md border border-red-300 bg-red-50 p-4 text-sm leading-relaxed text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100"
                     role="status"
                 >
@@ -234,22 +387,39 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                         'hit-alt': part.match % 2 === 1,
                                         'hit-empty': part.text === '',
                                         'hit-current': part.match === selected,
+                                        'hit-linked': part.match === linked,
+                                        'hit-partial': matches[part.match]?.partialMatch === true,
                                     }"
                                     role="button"
+                                    :data-match="part.match"
                                     :tabindex="part.match === selected ? 0 : -1"
                                     :aria-current="part.match === selected"
-                                    :aria-label="
-                                        'match ' +
-                                        (part.match + 1) +
-                                        ', ' +
-                                        (part.text === '' ? 'empty' : part.text)
-                                    "
+                                    :aria-label="markLabel(part.match, part.text)"
                                     :title="'match ' + (part.match + 1)"
                                     @click="select(part.match)"
+                                    @mouseenter="linked = part.match"
+                                    @mouseleave="linked = null"
                                     @keydown.enter="select(part.match)"
                                     @keydown.space.prevent="select(part.match)"
                                 >{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></p>
                         <p v-if="view.total === 0" class="field-hint">No matches.</p>
+                    </section>
+
+                    <!--
+                      `replaced !== null` and not a truth test: replacing every match with nothing
+                      gives an empty string, which is a complete answer and the commonest way to see
+                      what a pattern really covers. A pane that vanished for it would look like a
+                      broken engine.
+                    -->
+                    <section v-if="replaced !== null">
+                        <h2 class="mb-2 text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
+                            Replaced
+                        </h2>
+                        <p class="replaced-pane" :class="{ 'opacity-60': busy }" :aria-busy="busy">{{ replaced }}</p>
+                        <p class="field-hint">
+                            Every match rewritten with the template. The highlights above are where
+                            those matches were in the original subject.
+                        </p>
                     </section>
 
                     <template v-if="matches.length">
@@ -282,7 +452,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             <th scope="col">Deletions</th>
                                         </tr>
                                     </thead>
-                                    <tbody ref="matchRows" @keydown="onRowsKeydown">
+                                    <tbody ref="matchRows" class="match-rows" @keydown="onRowsKeydown">
                                         <!--
                                           The row stays a row: a `role="button"` on a <tr> replaces
                                           the row semantics the rest of the answer is read by. The
@@ -293,9 +463,11 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                         <tr
                                             v-for="(match, i) in matches.slice(0, view.shown)"
                                             :key="i"
-                                            class="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            :class="{ 'font-semibold': i === selected }"
+                                            class="cursor-pointer"
+                                            :class="{ 'font-semibold': i === selected, 'row-linked': i === linked }"
                                             @click="select(i)"
+                                            @mouseenter="linked = i"
+                                            @mouseleave="linked = null"
                                         >
                                             <td>
                                                 <!--
@@ -307,6 +479,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                 <button
                                                     class="row-select"
                                                     type="button"
+                                                    :data-match="i"
                                                     :tabindex="i === selected ? 0 : -1"
                                                     :aria-current="i === selected"
                                                     :aria-label="'match ' + (i + 1)"
@@ -428,11 +601,49 @@ window.__demoInternals = { createPool, spawnEngineWorker };
             </main>
 
             <aside class="flex flex-col gap-3">
+                <!--
+                  The documentation's own words, above the tour that led here: a sample is loaded and
+                  the explanation of the feature it shows is the next thing on the page.
+
+                  <details>, so it is operable from a keyboard by construction rather than by a
+                  handler - and never a hover panel, which is a control a keyboard cannot reach at
+                  all. Every run is interpolated and none of it is `v-html`: help.json is generated
+                  from a markdown file, and a file that could put markup into this page could put a
+                  script here.
+                -->
+                <template v-if="helpSections.length">
+                    <h2 class="text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
+                        From the documentation
+                    </h2>
+                    <details v-for="(section, s) in helpSections" :key="s" class="help-panel" :open="s === 0">
+                        <summary><template v-for="(run, r) in section.heading" :key="r"><code
+                                    v-if="run.code"
+                                    class="font-mono"
+                                >{{ run.text }}</code><template v-else>{{ run.text }}</template></template></summary>
+                        <div class="help-body">
+                            <template v-for="(block, b) in section.blocks" :key="b">
+                                <p v-if="block.kind === 'paragraph'"><template
+                                        v-for="(run, r) in block.runs"
+                                        :key="r"
+                                    ><code v-if="run.code" class="font-mono">{{ run.text }}</code><template
+                                            v-else
+                                        >{{ run.text }}</template></template></p>
+                                <pre v-else class="help-code">{{ block.text }}</pre>
+                            </template>
+                        </div>
+                    </details>
+                    <p class="field-hint">
+                        Generated from <code class="font-mono">docs/COMPARISON.md</code> when the page
+                        was built, so this is the documentation itself and not a second copy of it.
+                    </p>
+                </template>
+
                 <h2 class="text-sm font-semibold tracking-wide text-slate-600 uppercase dark:text-slate-400">
                     Worked examples
                 </h2>
                 <p class="field-hint mt-0">
-                    Each one fills the three boxes. The answers are checked against Python's
+                    Each one fills the boxes it needs and empties the rest, and every box stays
+                    editable. The answers are checked against Python's
                     <code class="font-mono">regex</code> module in this project's test suite.
                 </p>
                 <button

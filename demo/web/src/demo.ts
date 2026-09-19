@@ -11,8 +11,8 @@ import { MAX_DISPLAYED_MATCHES, MAX_SUBJECT_LENGTH } from './lib/caps';
 import { MAX_FRAGMENT_LENGTH, decode, encode, fragmentText } from './lib/fragment';
 import { segments } from './lib/highlight';
 import { createPool } from './lib/pool';
-import { isExampleList } from './lib/shapes';
-import type { Answer, Example, Inputs, Match, WorkerLike } from './types';
+import { isExampleList, isHelp } from './lib/shapes';
+import type { Answer, Example, Help, HelpSection, Inputs, Match, WorkerLike } from './types';
 
 /**
  * How long the page waits after a keystroke before asking the engine.
@@ -51,6 +51,9 @@ const DEFAULTS: Inputs = {
     pattern: '(?:colour){e<=2}',
     flags: '',
     subject: 'the color of the collar',
+    mode: '',
+    replacement: '',
+    namedLists: '',
 };
 
 /** Makes a worker the way worker.js requires: a module worker, resolved against the page. */
@@ -59,11 +62,12 @@ export const spawnEngineWorker = (): WorkerLike => new Worker(beside('worker.js'
 export interface DemoOptions {
     spawn?: () => WorkerLike;
     examplesUrl?: URL;
+    helpUrl?: URL;
 }
 
 export type EngineState = 'starting' | 'ready' | 'failed';
 
-export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions = {}) {
+export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: DemoOptions = {}) {
     // The shared case is read HERE, before the watcher below exists, and not on the mount path.
     // Writing these three from `initialise()` puts three changes through the watcher, which
     // schedules the very question `initialise` is about to ask: the second one lands 250 ms later,
@@ -74,8 +78,20 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
     const pattern = ref(shared?.pattern ?? DEFAULTS.pattern);
     const flags = ref(shared?.flags ?? DEFAULTS.flags);
     const subject = ref(shared?.subject ?? DEFAULTS.subject);
+    const mode = ref(shared?.mode ?? DEFAULTS.mode);
+    const replacement = ref(shared?.replacement ?? DEFAULTS.replacement);
+    const namedLists = ref(shared?.namedLists ?? DEFAULTS.namedLists);
 
     const examples: Ref<readonly Example[]> = ref([]);
+    const help: Ref<Help | null> = ref(null);
+    /**
+     * Which feature the help panel is explaining: the key of the last sample loaded.
+     *
+     * It survives editing, deliberately. Somebody who loaded "POSIX" and then changed the subject
+     * is still reading about POSIX, and a panel that closed itself on the first keystroke would be
+     * help that is only available to somebody who has not started.
+     */
+    const helpKey = ref('');
     const engine: Ref<EngineState> = ref('starting');
     const engineError = ref('');
     const running = ref(false); // a question is with the worker right now
@@ -92,7 +108,25 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
      * answer that looks exactly like a right one. This is the string the page renders from.
      */
     const answeredSubject = ref('');
+    /**
+     * The pattern the answer above is an answer to, for the same reason and with the same trap.
+     *
+     * A parse error carries an offset into the pattern that was SENT, and the box has moved on by
+     * the time it arrives: drawing the caret against the live pattern puts it under whichever
+     * character now happens to sit at that index, which is a precise-looking claim about the wrong
+     * character. This is the string the caret is drawn against.
+     */
+    const answeredPattern = ref('');
     const failure = ref(''); // what to show instead of an answer
+    /**
+     * Where in the pattern the failure above was raised, or null when nothing in it is to blame.
+     *
+     * Null is a real answer and not a missing one: a misspelt flag, a cap refusal, a timeout and a
+     * bad replacement template all arrive without a position, deliberately - see
+     * `DemoAnswer.ErrorOffset` - and a page that defaulted to 0 would draw a caret under the first
+     * character of a pattern that parsed perfectly well.
+     */
+    const failureOffset: Ref<number | null> = ref(null);
     const elapsedMs: Ref<number | null> = ref(null);
     const selected = ref(0);
     const shareable = ref(true);
@@ -115,6 +149,18 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
     const capped = computed(() => view.value.total > view.value.shown);
 
     const current = computed<Match | null>(() => matches.value[selected.value] ?? null);
+
+    /**
+     * The whole rewritten subject, in replace mode, or null when the answer is not one.
+     *
+     * `??` and not a truth test: replacing every match with nothing gives `''`, which is a complete
+     * answer and the commonest way to see what a pattern actually covers. Treating it as "no
+     * answer" hides the result of the very case somebody is most likely to try.
+     */
+    const replaced = computed<string | null>(() => answer.value?.replaced ?? null);
+
+    /** Whether the engine ran out of subject before it ran out of pattern. Partial mode only. */
+    const partial = computed(() => matches.value.some((match) => match.partialMatch === true));
 
     /**
      * Selects a match, from a click or from the keyboard.
@@ -151,6 +197,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         // a microtask later and replaces the refusal below with the pool's bare reason.
         const mine = ++question;
         failure.value = '';
+        failureOffset.value = null;
 
         if (tooLong.value) {
             // The refusal ENDS the question, including one that was still with a worker when this
@@ -177,7 +224,15 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         // so it is kept beside the reply rather than read back off the live ref, which has moved
         // on by the time a slow answer lands.
         const asked = subject.value;
-        const reply = await pool.ask({ pattern: pattern.value, flags: flags.value, subject: asked });
+        const askedPattern = pattern.value;
+        const reply = await pool.ask({
+            pattern: pattern.value,
+            flags: flags.value,
+            subject: asked,
+            mode: mode.value,
+            replacement: replacement.value,
+            namedLists: namedLists.value,
+        });
 
         // An answer to a question the page has moved on from. The pool already drops replies
         // whose requestId nobody is waiting for; this second guard covers the case where the
@@ -187,11 +242,16 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         running.value = false;
         elapsedMs.value = performance.now() - startedAt;
         selected.value = 0;
+        answeredPattern.value = askedPattern;
 
         if (reply.aborted === true || typeof reply.error === 'string') {
             answer.value = null;
             answeredSubject.value = '';
             failure.value = reply.error ?? 'stopped';
+            // `typeof`, not `?? null`: 0 is the first character of the pattern and the commonest
+            // position upstream raises, and `0 ?? null` is 0 only by accident of which falsy value
+            // this is. A reply that omits the member has nothing to point at.
+            failureOffset.value = typeof reply.errorOffset === 'number' ? reply.errorOffset : null;
             return;
         }
 
@@ -229,6 +289,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         running.value = false;
         answer.value = null;
         answeredSubject.value = '';
+        failureOffset.value = null; // a stop is nothing the pattern did
 
         if (!wasRunning) {
             // Stop is offered during the debounce as well, when the question has not been
@@ -248,7 +309,14 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
     // --- the URL fragment --------------------------------------------------------------------
 
     const share = (): void => {
-        const fragment = encode({ pattern: pattern.value, flags: flags.value, subject: subject.value });
+        const fragment = encode({
+            pattern: pattern.value,
+            flags: flags.value,
+            subject: subject.value,
+            mode: mode.value,
+            replacement: replacement.value,
+            namedLists: namedLists.value,
+        });
         shareable.value = fragment.length <= MAX_FRAGMENT_LENGTH;
 
         // replaceState, not pushState: typing three characters must not put three entries in
@@ -265,13 +333,27 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         );
     };
 
+    /**
+     * Fills the boxes from a sample, and EMPTIES every box the sample does not name.
+     *
+     * The emptying is the part that matters. A row carries only what its feature needs, so clicking
+     * a replace sample and then a plain one would otherwise leave the previous template in place and
+     * run the plain sample in replace mode - an answer that is wrong and looks entirely ordinary.
+     */
     const load = (example: Example): void => {
         pattern.value = example.pattern;
         flags.value = example.flags;
         subject.value = example.subject;
+        mode.value = example.mode ?? '';
+        replacement.value = example.replacement ?? '';
+        namedLists.value = example.namedLists ?? '';
+        helpKey.value = example.key ?? '';
     };
 
-    watch([pattern, flags, subject], () => {
+    /** The documentation's own sections for the feature on screen, or none. */
+    const helpSections = computed<readonly HelpSection[]>(() => help.value?.entries[helpKey.value] ?? []);
+
+    watch([pattern, flags, subject, mode, replacement, namedLists], () => {
         share();
         schedule();
     });
@@ -298,7 +380,10 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         if (
             incoming.pattern === pattern.value &&
             incoming.flags === flags.value &&
-            incoming.subject === subject.value
+            incoming.subject === subject.value &&
+            incoming.mode === mode.value &&
+            incoming.replacement === replacement.value &&
+            incoming.namedLists === namedLists.value
         ) {
             return;
         }
@@ -306,6 +391,9 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         pattern.value = incoming.pattern;
         flags.value = incoming.flags;
         subject.value = incoming.subject;
+        mode.value = incoming.mode;
+        replacement.value = incoming.replacement;
+        namedLists.value = incoming.namedLists;
     };
 
     /** The mount path: write the shared case back, ask about it, and fetch the tour. */
@@ -319,18 +407,41 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         // a test or for checks.html does not leave a listener on the window behind it.
         window.addEventListener('hashchange', applyFragment);
 
-        try {
-            const response = await fetch(examplesUrl ?? beside('examples.json'));
-            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-            const loaded: unknown = await response.json();
-            if (!isExampleList(loaded)) throw new Error('examples.json is not a list of worked examples');
-            examples.value = loaded;
-        } catch (error) {
-            // The tour failing to load must not take the page with it: the three inputs are
-            // the demo, the sidebar is the tour around it.
-            examples.value = [];
-            console.error('the examples could not be loaded', error);
-        }
+        // Fetched together, and neither is awaited before the other is asked for: they are two
+        // static files off the same origin, and a page that waits for the first before asking for
+        // the second pays two round trips for one screen.
+        await Promise.all([
+            (async () => {
+                try {
+                    const response = await fetch(examplesUrl ?? beside('examples.json'));
+                    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                    const loaded: unknown = await response.json();
+                    if (!isExampleList(loaded))
+                        throw new Error('examples.json is not a list of worked examples');
+                    examples.value = loaded;
+                } catch (error) {
+                    // The tour failing to load must not take the page with it: the three inputs are
+                    // the demo, the sidebar is the tour around it.
+                    examples.value = [];
+                    console.error('the examples could not be loaded', error);
+                }
+            })(),
+            (async () => {
+                try {
+                    const response = await fetch(helpUrl ?? beside('help.json'));
+                    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                    const loaded: unknown = await response.json();
+                    if (!isHelp(loaded)) throw new Error('help.json is not the generated documentation');
+                    help.value = loaded;
+                } catch (error) {
+                    // Softly, like the tour above, and for a sharper reason: help.json is GENERATED
+                    // from docs/COMPARISON.md at build time, so the way it goes missing is a page
+                    // served straight out of the source tree. That page must still match patterns.
+                    help.value = null;
+                    console.error('the help could not be loaded', error);
+                }
+            })(),
+        ]);
     };
 
     /** Lets go of everything that outlives the page's own state: the listener and the workers. */
@@ -344,7 +455,13 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         pattern,
         flags,
         subject,
+        mode,
+        replacement,
+        namedLists,
         examples,
+        help,
+        helpKey,
+        helpSections,
         engine,
         engineError,
         running,
@@ -352,7 +469,9 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         busy,
         answer,
         answeredSubject,
+        answeredPattern,
         failure,
+        failureOffset,
         elapsedMs,
         selected,
         shareable,
@@ -361,6 +480,8 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
         view,
         capped,
         current,
+        replaced,
+        partial,
         maxSubjectLength: MAX_SUBJECT_LENGTH,
         maxDisplayedMatches: MAX_DISPLAYED_MATCHES,
         load,

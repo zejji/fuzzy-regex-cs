@@ -180,16 +180,25 @@ internal static class DemoEngine
     /// </param>
     /// <returns>
     /// <c>{"matches": [...], "truncated": false}</c> - with <c>"replaced"</c> beside it in replace
-    /// mode and <c>"partialMatch": true</c> on a match that is partial - or <c>{"error": "..."}</c>.
-    /// Every index and length is a UTF-16 code unit offset, because the page slices a JavaScript
-    /// string with it and JavaScript strings are UTF-16 too.
+    /// mode and <c>"partialMatch": true</c> on a match that is partial - or <c>{"error": "..."}</c>,
+    /// carrying <c>"errorOffset"</c> when the pattern failed to parse at a known position. Every
+    /// index and length is a UTF-16 code unit offset, because the page slices a JavaScript string
+    /// with it and JavaScript strings are UTF-16 too.
     /// </returns>
     /// <remarks>
+    /// <para>
+    /// <b>Only the pattern's own parse failure is reported with a position.</b> A replacement
+    /// template's is caught in <see cref="Replace"/> instead, because upstream parses a template
+    /// with the pattern parser and the position it raises indexes the template, not the pattern -
+    /// see <see cref="DemoAnswer.ErrorOffset"/>.
+    /// </para>
+    /// <para>
     /// <b>Partial matching is its own mode rather than a flag on the walk</b> because upstream's
     /// scanning functions take no <c>partial</c> argument and neither do this port's: a partial
     /// match is only ever the LAST thing a search finds, so "every match, and the last one may be
     /// partial" is not a question the engine answers. The mode asks the single-match entry point
     /// instead, which is the question that has an answer.
+    /// </para>
     /// </remarks>
     internal static string Run(
         string pattern,
@@ -228,7 +237,7 @@ internal static class DemoEngine
         }
         catch (FuzzyRegexParseException parseError)
         {
-            return Failed(parseError.Message);
+            return Failed(parseError.Message, parseError.Offset >= 0 ? parseError.Offset : null);
         }
         // A replacement template naming a group the pattern does not have arrives as an
         // ArgumentException whose message carries the .NET parameter name ("unknown group (Parameter
@@ -457,10 +466,21 @@ internal static class DemoEngine
     /// <remarks>
     /// <para>
     /// The replacement and the walk are two passes over the subject and they share ONE clock: the
-    /// deadline is taken before the first and handed to the second, so replace mode cannot spend
-    /// <see cref="MatchTimeout"/> twice. Measured by the blind review before the deadline was
-    /// shared, 2026-09-19: a subject of ten cheap chunks answered successfully after 3.4 seconds
-    /// against a stated budget of 2.
+    /// deadline is taken before the first and handed to the second, so neither pass BEGINS a step
+    /// after the budget is spent. Measured by the blind review before the deadline was shared,
+    /// 2026-09-19: a subject of ten cheap chunks answered successfully after 3.4 seconds against a
+    /// stated budget of 2.
+    /// </para>
+    /// <para>
+    /// It does not make the wall clock a hard 2 seconds, and the earlier wording here said it did.
+    /// A step already running when the deadline passes carries its own budget and is not
+    /// interrupted - the same one-step overrun the walk has had since S70, recorded on
+    /// <see cref="TryWalk"/> - so the ceiling is one budget plus one step. What the sharing buys is
+    /// that the second pass cannot start a fresh one. Measured 2026-09-19 on the catastrophic
+    /// subject of
+    /// <c>DemoEngineContractTests.Replace_mode_answers_inside_one_budget_when_the_pattern_runs_away</c>:
+    /// 2.08 s, with and without the sharing, because that subject spends the whole budget in the
+    /// replacement pass and never reaches the walk.
     /// </para>
     /// <para>
     /// <b>At most <see cref="MaxMatches"/> occurrences are replaced</b>, which is the same cap the
@@ -468,7 +488,9 @@ internal static class DemoEngine
     /// an in-cap template multiply out to a hundred million characters built in the worker's heap
     /// before <see cref="MaxReplacedLength"/> could clip them (measured by the same review: a peak
     /// working set of 695 MB for a 100,000-character subject and a 1,000-character template). The
-    /// answer says <c>truncated</c> when the cap was reached, exactly as the walk does.
+    /// answer says <c>truncated</c> when the cap left an occurrence unreplaced, and the walk is what
+    /// knows: counting the replacements cannot separate "one too many" from "exactly enough", and
+    /// reporting both as truncated cried truncation over complete answers until 2026-09-19.
     /// </para>
     /// <para>
     /// A template that references a group the pattern does not have is rejected by the template
@@ -479,13 +501,21 @@ internal static class DemoEngine
     private static string Replace(FuzzyRegex regex, string subject, string replacement)
     {
         long deadline = Deadline();
-        string replaced = regex.Replace(
-            subject,
-            replacement,
-            count: MaxMatches,
-            out int replacements,
-            timeout: MatchTimeout
-        );
+        string replaced;
+        try
+        {
+            replaced = regex.Replace(subject, replacement, count: MaxMatches, timeout: MatchTimeout);
+        }
+        // Caught HERE rather than beside the pattern's own parse failure, which is the only way to
+        // tell the two apart: upstream parses a replacement template with the pattern parser, so a
+        // bad template raises the same exception carrying a position that indexes the TEMPLATE. Left
+        // to the outer catch it would reach the page as an offset into the pattern, and the caret
+        // would sit under an unrelated character of a pattern that compiled perfectly well. The
+        // sentence is still shown; only the position is dropped. See DemoAnswer.ErrorOffset.
+        catch (FuzzyRegexParseException templateError)
+        {
+            return Failed(templateError.Message);
+        }
 
         bool clipped = replaced.Length > MaxReplacedLength;
         if (clipped)
@@ -494,14 +524,15 @@ internal static class DemoEngine
         }
 
         // The matches come back too, so the page can highlight what was replaced rather than only
-        // showing the result. A clipped replacement truncates the answer just as a clipped capture
-        // list does, and so does stopping at the cap with the subject not exhausted.
+        // showing the result. The walk is also what decides whether the REPLACEMENT was complete:
+        // it goes over the same matches in the same order, so it reaches an occurrence past the cap
+        // exactly when the replacement left one behind, and it can tell that from a subject holding
+        // exactly as many occurrences as the cap allows - where nothing was lost. The replacement's
+        // own count cannot: it is MaxMatches in both cases.
         if (!TryWalk(regex, subject, deadline, out List<DemoMatch> matches, out bool truncated))
         {
             return TimedOut();
         }
-
-        clipped = clipped || replacements == MaxMatches;
 
         return JsonSerializer.Serialize(
             new DemoAnswer(matches, truncated || clipped, null, replaced),
@@ -746,9 +777,9 @@ internal static class DemoEngine
     private static string Quoted(string text) =>
         text.Length > MaxQuotedTokenLength ? string.Concat(text.AsSpan(0, MaxQuotedTokenLength), "...") : text;
 
-    private static string Failed(string? message) =>
+    private static string Failed(string? message, int? offset = null) =>
         JsonSerializer.Serialize(
-            new DemoAnswer(null, null, message ?? "Unknown error.", null),
+            new DemoAnswer(null, null, message ?? "Unknown error.", null, offset),
             DemoJson.Default.DemoAnswer
         );
 }
@@ -803,7 +834,27 @@ internal sealed record DemoMatch(
 /// is omitted from the JSON, so a failure is literally <c>{"error": "..."}</c>. <c>Replaced</c> is
 /// the rewritten subject, present in replace mode only.
 /// </summary>
-internal sealed record DemoAnswer(IReadOnlyList<DemoMatch>? Matches, bool? Truncated, string? Error, string? Replaced);
+/// <param name="Matches">Every match found, or null when the answer is a failure.</param>
+/// <param name="Truncated">Whether the engine stopped at one of its own caps.</param>
+/// <param name="Error">The one sentence the page shows instead of an answer.</param>
+/// <param name="Replaced">The rewritten subject. Replace mode only.</param>
+/// <param name="ErrorOffset">
+/// Where in the PATTERN the parse failed, so the page can draw a caret under the character upstream
+/// blamed. Null - and so absent from the JSON - whenever the answer is not a pattern parse error
+/// with a position: a cap refusal, a misspelt flag, a timeout, a pattern no single character of
+/// which is at fault (<c>maxCompiledNodes</c>, and the three sites upstream raises with
+/// <c>pos=None</c>), and a parse error raised against some other string. That last one is the case
+/// worth naming: upstream parses a replacement template with the pattern parser, so a bad template's
+/// position is an offset into the TEMPLATE, and drawing it under the pattern field would be a right
+/// number in the wrong place. <see cref="DemoEngine"/>'s replace path catches that one itself.
+/// </param>
+internal sealed record DemoAnswer(
+    IReadOnlyList<DemoMatch>? Matches,
+    bool? Truncated,
+    string? Error,
+    string? Replaced,
+    int? ErrorOffset = null
+);
 
 /// <summary>
 /// The source-generated serialiser. Reflection-based <c>JsonSerializer</c> calls are trimmed away

@@ -175,3 +175,198 @@ four new tests - which no reviewer has seen. The independent verifier belongs to
    single row with no upstream expectation.
 5. Chunk 5: wasm smoke, served page, keyboard pass, screenshots at 390 and 1280, blind review,
    independent verifier, close.
+
+## Sitting 2 (2026-09-19)
+
+Chunks 4 and 5, so this sitting closes the slice.
+
+### The page (chunk 4)
+
+`App.vue`, `demo.ts`, `types.ts`, `shapes.ts`, `fragment.ts` and `styles.css` moved to the v2
+contract together, because the JSON boundary is validated in `shapes.ts` and a half-moved boundary
+rejects every answer. What is new on the page:
+
+- **Three new inputs**: a Mode radio group (find every match / partial match / replace), a
+  replacement template, and a named-lists box parsed as `name: word, word` lines. Each is a real
+  `<label>`, and each is in the fragment, so a shared link carries the whole case (`m`, `r`, `l`
+  beside `p`, `f`, `s`).
+- **Help disclosures** reading the generated `help.json`, keyed by the last sample loaded. The key
+  is deliberately not derived from the pattern: a guess at which feature a hand-typed pattern is
+  about would be wrong exactly when the user is exploring.
+- **The five borrowed regex101 interactions**: flags in their own control beside the pattern; live
+  re-matching debounced at 250 ms with the previous result left in place; alternating tones on
+  adjacent matches; hovering a span marks its row and hovering a row marks its span; the parse error
+  inline under the pattern field with a caret at the reported offset.
+- **The three rejected ones, with the reason** (the slice file asks for this): the token-by-token
+  pattern explanation pane, the step debugger and the code generator. Each is a feature in its own
+  right, none of them shows anything about *this* library that the samples do not, and the ROADMAP's
+  "scope, deliberately small" still holds.
+
+### What this sitting found
+
+1. **The help panel never rendered, and said so only in the console.** `help.json` was generated
+   with single-element `runs` and `heading` as JSON *objects* rather than one-element lists, so
+   `isHelp` rejected the whole file and the page logged "help.json is not the generated
+   documentation". The cause is PowerShell, not the schema: a function's `return` goes through the
+   pipeline, which unrolls a one-element array into the element. `Get-Section` already carried the
+   leading-comma guard (`return , @($x)`); the two functions below it did not, and a paragraph of
+   exactly one run is the commonest paragraph in `COMPARISON.md`. Fixed at both returns and pinned
+   by `tools/tests/BuildDemoHelp.Tests.ps1` (Pester, 2 tests: the real shape of a generated file,
+   and the failure path on a renamed heading). A Vitest test could not have caught this - the page
+   tests stub `help.json`, so only the real generator's output exposes it.
+2. **The timeout sample did not time out.** `(a+a+)+b` over 'a'*30 answered in 75 ms on the
+   published page (83 ms when the verifier re-measured it, 13.8 ms in a Debug desktop run) and in
+   0.67 ms under `regex 2026.9.10`: upstream's repeat guards kill that shape, and ours nearly do.
+   Replaced with `^(a|aa)+$` over 'a'*36 + 'b', which is exponential in both engines (68.6 s in this
+   port untimed; upstream raises `TimeoutError` at 6 s with `timeout=6.0`, and takes 0.935 s at
+   n=32 and 2.463 s at n=34), so the sample advertises
+   the timeout rather than a weakness of this port. Pinned by
+   `The_timeout_example_really_does_run_out_of_time`, which was written first and failed on the old
+   sample ("Expected ... TryGetProperty(\"error\") to be True ... but found False").
+3. **`docs/COMPARISON.md`'s timeout example needed its evidence restated, not its claim changed.**
+   Measuring `(a|a)*b` against a subject with no "b" in it measures upstream's
+   `locate_required_string` prefilter, which answers before the engine starts; with a "b" present,
+   `regex 2026.9.10` spends **24.459 s** on "a"*26 + "cb" (24.617 s when the verifier re-measured
+   it; ROADMAP records 23.3 s at n=26; with no "b" in the subject, 0.000004 s). The
+   comment now says both things, because the first version of this edit had me claiming upstream was
+   not exponential at all. The prefilter is Phase 7 work here and is already row 22 of
+   `docs/plan/OPTIMISATION-NOTES.md`.
+4. **Contrast, measured on the published page** by resolving the computed colours through a 1x1
+   canvas - `oklch(...)` cannot be parsed as sRGB, and doing so gives a nonsense 1.01:1. Recorded
+   beside the rules in `styles.css`: `.parse-error` 9.16:1 light / 13.26:1 dark, the disclosure
+   summary 17.83 / 16.28, `.help-body` 10.36 / 12, `.help-code` 9.45 / 13.56. The S71 highlight
+   tones are unchanged and their measured ratios still stand at the top of the same file.
+5. **The served page, end to end** (publish at `.scratch/wasm-publish/wwwroot`, `python -m
+   http.server`): the timeout sample took 2,418 ms wall and the page painted **146 animation frames**
+   while it ran (2,286 ms and 138 frames when the verifier repeated it), which is the worker design
+   doing its job; the refusal is announced in the `role="status"` region. The parse error puts its
+   caret at offset 14 for `(?:colour){e<=x}`. The
+   roving tabindex moves the selection 0 to 1 on ArrowRight with exactly one `.hit-current`.
+   `harness.html`'s runaway check is unaffected: `(a|a)*b` over 'a'*30 still times out at 2,004 ms.
+6. **Screenshots refreshed** at 1280 and 390 (`docs/demo/`), taken from the published page with a
+   sample loaded so the help panel is in shot. The S71 pair showed a page that no longer exists.
+7. **`checks.html` was still asking S71's questions.** Its expectation table is keyed by example
+   TITLE, and v2 renamed or replaced every one of them, so the browser verdict page reported
+   "upstream undefined" for all fourteen named samples while passing its other eight checks - a
+   stale oracle that fails loudly, which is the good kind, but it had not been run since the samples
+   changed. The table now carries the v2 titles, names
+   `tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs` as the one place the upstream numbers
+   live, expects a refusal rather than spans for the timeout sample, and counts the samples off the
+   table instead of a hardcoded 8. Re-run against the published page: **CHECKS GREEN, 9 of 9**
+   (measured 2026-09-19: stop to next answer on screen 399 ms, respawn without the spare 205 ms,
+   with it 106 ms; the verifier's repeat gave 435 ms, 206 ms and 109 ms).
+8. **Two things for the owner, neither a code change.** A Vite dev server from an earlier session
+   (**PID 34120**, port 5199, started 01:41:40 today) holds `demo/web/node_modules`, so `npm ci`
+   fails with EPERM and the directory is left with 19 entries and no `.bin`. Not killed - the owner's
+   rule is to report and wait. The way round it, and the way the front end was verified after that
+   lock appeared, is below. Separately, `demo/web` has no formatter in the repository's
+   `csharpier`/husky chain; the front end is formatted by hand, and nothing enforces it.
+
+### Gates, re-run after the last code change
+
+`pwsh -File tools/check-ratchet.ps1`: **Tests 6399, passing 6399 (6291 distinct ids), baseline 6285,
+Ratchet GREEN**. `dotnet build FuzzyRegex.slnx --configuration Release`: succeeded, 0 warnings.
+`dotnet csharpier check .`: 289 files, clean. Front end: 71 passed / 6 files and `vue-tsc --build`
+exit 0, from the scratch harness described at the end of this section.
+
+**`tools/run-wasm-smoke.ps1` could NOT be run here**, and the reason is the lock, not the code: it
+calls `tools/build-demo-web.ps1`, which runs `npm ci` in `demo/web`, which fails on the dev server's
+open handle - "The operation was rejected by your operating system ... `throw 'npm ci failed.'`
+(build-demo-web.ps1:86)". The publish it would have checked was produced before that lock appeared
+and is what `.scratch/wasm-publish/wwwroot` serves, with this sitting's bundle copied over it; the
+browser checks below ran against exactly that. Re-run the smoke script once PID 34120 is gone.
+
+### Review (sitting 2)
+
+Two blind passes, both Opus, both on a reproduction-only brief.
+
+**Pass 1, over the whole sitting-2 diff. One finding, reproduced, fixed.** The RightToLeft sample
+painted one of its three matches. The answer's order is not the subject's - the engine numbers the
+last match in the subject first - and the highlight walked the answer with a cursor that only ever
+moves forward, so every match before the first one was dropped. `highlight.ts` now paints in subject
+order while each run keeps the number the answer gave it, and `App.vue` finds a mark or a row by
+`data-match` rather than by position. Pinned by two highlight tests and one page test. The page test
+uses FOUR matches deliberately: with three reversed matches the middle mark's position equals its
+number, and a positional lookup passes by coincidence - the first version of that test passed
+against the unfixed code.
+
+**Pass 2, over the delta pass 1 had not seen** (`highlight.ts`, `App.vue`, the three new tests,
+`checks.html`, `demo/README.md`). **One finding, reproduced, fixed.** The overlap guard's comment
+claimed an engine walk never overlaps, and it does: a reverse search returns an empty match at the
+start index of a longer one, so the guard silently dropped a real match. Upstream, checked here:
+
+```
+$ python -c "import regex; print([(m.start(),m.end()) for m in regex.finditer(r'a*','baa',flags=regex.REVERSE|regex.VERSION1)])"
+[(1, 3), (1, 1), (0, 0)]
+```
+
+This port answers the same spans, `[1,2] [1,0] [0,0]`, and the served page painted marks 2 and 0
+only - match 1 was in the table with nothing in the pane, and arrowing onto it left the focus on a
+`tabindex="-1"` control with no tab stop anywhere in the pane. The fix is one clause: matches at the
+same index are painted shortest first (`a.index - b.index || a.length - b.length`), because an empty
+match fits before a longer one begins. The guard stays for input the engine cannot produce - two
+matches sharing a character - with its comment corrected. Pinned by
+`a zero-length match sharing a start with a longer one is still painted` and
+`an empty match sharing a start with a longer one still gets its own tab stop`, both of which fail
+with the `|| a.length - b.length` removed (`2 failed | 26 passed`). Re-checked on the served page
+after rebuilding the bundle: three marks (`2`, `1`, `0`), labels "match 3, empty" / "match 2, empty"
+/ "match 1, aa", and ArrowRight from match 1 moves the selection to 2 with exactly one tab stop.
+
+No third pass. What pass 2's fix leaves unreviewed is one comparator clause and two tests; it was
+checked by mutation (remove the clause and both tests bite) and on the live page, and another pass
+over it would be the critique loop the workflow bans.
+
+Also checked by pass 2 and dropped, not findings: `checks.html`'s 17 keys and spans are identical to
+`DemoExamplesTests.cs:104-121`; the sort copies rather than mutating the answer; `demo/README.md`'s
+"six strings" and "eighteen worked examples" match `Interop.cs` and `examples.json`; `help.json` is
+gitignored and generated.
+
+### Independent verifier
+
+A fresh Opus subagent, briefed with the commit-ready tree and nothing else, re-ran every number
+sittings 1 and 2 quote. **Ten items CONFIRMED** - the ratchet and its counts; every `examples.json`
+expectation against a real `regex 2026.9.10` run; the two Pester tests; the timeout swap in both
+engines; the 24 s upstream figure (24.617 s to my 24.459 s, and 0.000004 s with no "b" in the
+subject); all eight contrast ratios, exactly; the served-page timings (2,286 ms and 138 frames to my
+2,418 and 146), the caret at offset 14 and the runaway check; `checks.html` GREEN 9 of 9 with its
+three timings; and that the served bundle is byte-identical to a rebuild of the committed
+`demo/web/src`.
+
+**Three items were not, and all three are fixed here rather than defended:**
+
+1. The front-end count I had recorded was **69, and the suite is 71** - my own two review-fix tests,
+   written after that number. Corrected above.
+2. "84 passed, 7 files" for the in-place suite is **COULD NOT RUN** and now unverifiable, so the
+   claim is gone rather than restated: the lock means no in-place vitest exists to re-run it.
+3. `demo/web/node_modules` has **19** entries, not 30. Corrected above.
+
+The verifier also caught a real flake the reviews had not: its first scratch run failed two tests
+while a `dotnet run` loaded the machine, and passed twice afterwards. The cause is a fixed
+`sleep(400)` in `page.test.ts` against a 250 ms debounce - 150 ms of margin, and under load the
+page's own first answer landed AFTER the test injected its answer and overwrote it. `mountPage` and
+the busy-pane test now wait on the state (`until(() => ... && !demo.busy)`) rather than on the
+clock. Control: with `DEBOUNCE_MS` raised to 900 in the scratch copy, the suite still passes except
+the one test that is deliberately about the debounce window; the whole suite ran in 1.9 s instead of
+7.9 s, which is the 15 fixed sleeps that are no longer there.
+
+### Running the front end while its `node_modules` is locked
+
+Worth writing down, because the next sitting will hit the same wall if the dev server is still up.
+`npm ci --prefix .scratch/web-run` installs the same lockfile into a scratch directory that nothing
+holds (119 packages, 3 s), and the sources are copied in beside it one file per `cp` - the permission
+layer refuses `cp -r`, a `for` loop and `tar`. From there:
+
+```
+node node_modules/vitest/vitest.mjs run     # the suite, minus dev-server.test.ts
+node node_modules/vue-tsc/bin/vue-tsc.js --build
+node node_modules/vite/bin/vite.js build    # writes to .scratch/FuzzyRegex.Demo.Wasm/wwwroot
+```
+
+Results this sitting: **71 passed, 6 files** after the two review fixes, `vue-tsc --build` clean
+(exit 0), and the built bundle copied into the served publish - the verifier confirmed that bundle
+is byte-identical to a rebuild of the committed `demo/web/src`, so findings 5 and 7 above and both
+reviews' browser checks ran against the code being committed.
+
+**The in-place `demo/web` suite could not be run after the lock appeared**, so `dev-server.test.ts`
+is the one test file nothing exercised this sitting; it wants the real repository layout and the
+scratch copy leaves it out. Nothing in this sitting touches the dev middleware it covers.

@@ -43,11 +43,27 @@ export function segments(
     const pieces: Segment[] = [];
     let at = 0;
 
-    for (const [number, match] of drawn.entries()) {
-        // An engine walk returns matches in order and never overlapping, so this cannot fire from
-        // the engine. It can fire from a hand-written fragment or the console, and a negative slice
-        // length renders as an empty string rather than as an error - which is the kind of silent
-        // wrongness the demo exists to not have.
+    // The answer's order is NOT always the subject's order: a RightToLeft search starts at the end,
+    // so the match numbered 1 is the last one in the text. The page paints the subject, so the runs
+    // are built in subject order while each run keeps the number the answer gave it - which is what
+    // the table, the selection, the labels and the alternating tones all key off.
+    //
+    // Two matches CAN start at the same index, and that is an ordinary engine answer rather than a
+    // malformed one: a reverse search over "baa" for `a*` returns (1,3), (1,1), (0,0) upstream as
+    // start/end pairs (regex 2026.9.10, 2026-09-19) - a two-character match and an empty one at its
+    // start, which this port answers as the spans [1,2], [1,0], [0,0].
+    // The shorter goes first, because an empty match fits before a longer one begins and would
+    // otherwise be swallowed by the overlap guard below.
+    const inSubjectOrder = [...drawn.entries()].sort(
+        ([, a], [, b]) => a.index - b.index || a.length - b.length,
+    );
+
+    for (const [number, match] of inSubjectOrder) {
+        // Two matches that share a CHARACTER cannot both be painted in one flat run of text (two
+        // that share only a boundary can, which is the sort above). An engine walk does not overlap
+        // that way, so this cannot fire from the engine; it can fire from a hand-written fragment or
+        // the console, and a negative slice length renders as an empty string rather than as an
+        // error - the kind of silent wrongness the demo exists to not have.
         if (match.index < at) continue;
 
         if (match.index > at) {

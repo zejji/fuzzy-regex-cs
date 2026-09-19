@@ -13,9 +13,10 @@ below).
 
 | Path | What it is |
 | --- | --- |
-| `FuzzyRegex.Demo.Wasm/DemoEngine.cs` | The `[JSExport]` surface. Takes pattern, flags and subject; returns one JSON answer. Owns the engine-side caps. |
+| `FuzzyRegex.Demo.Wasm/DemoEngine.cs` | The `[JSExport]` surface. Takes six strings - pattern, flags, subject, mode, replacement, named lists - and returns one JSON answer. Owns the engine-side caps. |
 | `FuzzyRegex.Demo.Wasm/wwwroot/worker.js` | Boots the runtime inside a Web Worker and answers one request at a time. The engine never runs on the page's thread. |
-| `FuzzyRegex.Demo.Wasm/wwwroot/examples.json` | The eight worked examples in the sidebar. Their answers are pinned by a test, so this file is not free-form copy. |
+| `FuzzyRegex.Demo.Wasm/wwwroot/examples.json` | The eighteen worked examples in the sidebar, one per feature. Their answers are pinned by a test against upstream, so this file is not free-form copy. |
+| `FuzzyRegex.Demo.Wasm/wwwroot/help.json` | **Generated and gitignored**: `tools/build-demo-help.ps1` lifts the help panels out of `docs/COMPARISON.md`, and fails the build if a heading it needs was renamed. |
 | `FuzzyRegex.Demo.Wasm/wwwroot/checks.html` | The browser-side verdict page. Drives the real page in an iframe and prints CHECKS GREEN or CHECKS RED. |
 | `FuzzyRegex.Demo.Wasm/wwwroot/harness.html` | The engine-only harness from the previous slice. Kept because it isolates the worker from the page. |
 | `web/` | The front end: Vite, Vue 3, TypeScript (strict) and Tailwind. `npm run build` writes the page into the folder above. |

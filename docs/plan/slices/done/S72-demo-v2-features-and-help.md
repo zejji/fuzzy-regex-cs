@@ -78,13 +78,14 @@ owner's single-source instruction is aimed at.
 
 ## Done when
 
-- [ ] Eight editable samples landed, each with its counts or spans visible and its answer sourced
-      from outside the demo.
-- [ ] Help generated from `docs/COMPARISON.md` by a script that has been seen to fail on a rename;
+- [x] Eight editable samples landed, each with its counts or spans visible and its answer sourced
+      from outside the demo. **Eighteen**, not eight: seventeen pinned to a real `regex 2026.9.10`
+      run and one - the timeout - that has no upstream answer by construction.
+- [x] Help generated from `docs/COMPARISON.md` by a script that has been seen to fail on a rename;
       no second copy of the prose anywhere under `demo/`.
-- [ ] The five borrowed interactions in place, the three rejected ones named in the closing notes
+- [x] The five borrowed interactions in place, the three rejected ones named in the closing notes
       with the reason; accessibility items all met with the measured contrast ratios recorded.
-- [ ] Ratchet GREEN, blind review, commit. **Hunt:** a pathological pattern that freezes the page
+- [x] Ratchet GREEN, blind review, commit. **Hunt:** a pathological pattern that freezes the page
       despite the worker - the new live-as-you-type path spawning a request per keystroke so the
       terminate-and-respawn cycle never keeps up, or a sample whose subject is long enough that
       building the highlight DOM blocks the main thread on its own; a help panel that silently
@@ -94,6 +95,31 @@ owner's single-source instruction is aimed at.
       same with and without the flag, which demonstrates nothing and would pass any assertion
       written against the demo's own output; alternating highlight tones that pass contrast against
       the page background but not against each other.
-- [ ] Phase 9 closed in `docs/plan/STATE.md`, with the remaining v3 polish ideas listed there or
+- [x] Phase 9 closed in `docs/plan/STATE.md`, with the remaining v3 polish ideas listed there or
       dropped, and the ROADMAP's estimate for the phase compared against what the three slices
       actually cost.
+
+## Closing notes (2026-09-19)
+
+Two sittings; the per-sitting record, every measurement and the review outcomes are in
+`docs/plan/slices/notes/S72-sittings.md`. What landed:
+
+- **The engine contract v2.** `DemoEngine.Run` takes six strings (pattern, flags, subject, mode,
+  replacement, named lists) and returns one JSON answer carrying `replaced`, `partialMatch`, the
+  fuzzy counts and a parse-error offset. The three-argument overload stays, because a browser
+  holding the cached S71 page must keep getting the S71 answer.
+- **Eighteen worked examples**, one per feature, editable rather than read-only, seventeen of them
+  pinned by `DemoExamplesTests` to a real `regex 2026.9.10` run and the eighteenth - the timeout -
+  pinned to the refusal it is there to show.
+- **Help generated from `docs/COMPARISON.md`** by `tools/build-demo-help.ps1` into a gitignored
+  `wwwroot/help.json`, with the generator's failure-on-rename path reproduced and now covered by
+  `tools/tests/BuildDemoHelp.Tests.ps1`.
+- **The page**: three new inputs (mode, replacement, named lists), all in the shared-link fragment;
+  the help disclosures; the five borrowed regex101 interactions; the accessibility items, with the
+  contrast ratios measured on the published page and recorded beside the rules they belong to.
+
+What the next demo slice should know: the highlight's paint order is the SUBJECT's, the match
+numbering is the ANSWER's, and a RightToLeft search makes them differ - anything that finds a mark
+or a row by DOM position rather than by `data-match` is wrong under that one flag, which is how the
+bug the review found got in. `checks.html` is a real oracle again but only for titles and shapes;
+the upstream numbers live in `DemoExamplesTests.cs` and should stay in one place.

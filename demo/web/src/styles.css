@@ -127,7 +127,10 @@
         @apply dark:border-slate-800 dark:bg-slate-900 dark:hover:border-accent-dark dark:hover:bg-slate-800;
     }
 
-    .subject-pane {
+    /* Two names, one rule: the rewritten subject is the same kind of thing as the subject - a block
+       of text whose every character matters - and two rules would be two places to keep in step. */
+    .subject-pane,
+    .replaced-pane {
         @apply rounded-md border border-slate-200 bg-white p-4 font-mono text-sm leading-7;
         @apply whitespace-pre-wrap [overflow-wrap:anywhere];
         @apply dark:border-slate-800 dark:bg-slate-950;
@@ -153,6 +156,29 @@
         border-left-color: var(--color-hit-edge);
     }
 
+    /* The pointer's link between a highlight and its row: hovering either marks both. A hover cue
+       and nothing else - the keyboard's way of tying the two together is the selection, which
+       .hit-current and the row's own weight already show.
+
+       Two rules and not one, because a <tr> is not a <mark>: an outline on a table row is drawn
+       differently by every engine (and not at all under some border-collapse rules), so the row
+       takes a background instead - which is also what it had as a plain hover before the link. */
+    .hit-linked {
+        @apply outline-2 outline-dashed outline-offset-1 outline-slate-500 dark:outline-slate-400;
+    }
+
+    .row-linked {
+        @apply bg-slate-100 dark:bg-slate-800;
+    }
+
+    /* The subject ran out before the pattern did, so the mark runs off its own right edge. A
+       SECOND signal, never the only one: the status row says it in words and the highlight's
+       aria-label ends with "partial". */
+    .hit-partial {
+        @apply border-r-2 border-dashed;
+        border-right-color: var(--color-hit-edge);
+    }
+
     /* `min-w-max` with `w-full`: the table fills the card when there is room and refuses to squeeze
        below its own content when there is not, so a narrow window scrolls the region instead of
        crushing six columns into four. */
@@ -166,6 +192,46 @@
         @apply inline-flex min-h-6 min-w-6 items-center justify-center rounded-xs;
         @apply font-semibold text-accent underline underline-offset-2;
         @apply hover:bg-accent-soft dark:text-accent-dark dark:hover:bg-slate-800;
+    }
+
+    /* The parse error, under the field it is about. Same red pair as the failure block below the
+       inputs, so it is one measured colour pair on the page and not two.
+
+       Measured on the published page, 2026-09-19, by resolving the computed colours through a
+       canvas (oklch does not parse as sRGB): 9.16:1 light (130,24,26 on 254,242,242) and 13.26:1
+       dark (255,226,226 on 70,8,9). The caret <pre> inherits both, at 12px. */
+    .parse-error {
+        @apply mt-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm leading-relaxed text-red-900;
+        @apply dark:border-red-800 dark:bg-red-950 dark:text-red-100;
+    }
+
+    /* The pattern and the caret, in one box. `overflow-x-auto` rather than wrapping: a wrapped
+       pattern puts the hat under a character on a different line, which is worse than a scroll. */
+    .parse-error pre {
+        @apply mt-2 overflow-x-auto font-mono text-xs leading-5;
+    }
+
+    .help-panel {
+        @apply rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900;
+    }
+
+    /* The disclosure's own control. 40 px tall against WCAG 2.2's 24x24 (2.5.8), and the pointer
+       cue is a real one because the whole row is the target. */
+    .help-panel > summary {
+        @apply cursor-pointer rounded-md px-3 py-2 text-sm font-semibold;
+        @apply hover:bg-slate-50 dark:hover:bg-slate-800;
+    }
+
+    /* The help prose, at 12px, so AA wants 4.5:1. Measured the same way and the same day as
+       .parse-error above: summary 17.83:1 light / 16.28:1 dark, .help-body 10.36 / 12, and the
+       code block 9.45 / 13.56 - the tinted background is the only thing that moves. */
+    .help-body {
+        @apply flex flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs leading-relaxed;
+        @apply text-slate-700 dark:border-slate-800 dark:text-slate-300;
+    }
+
+    .help-code {
+        @apply overflow-x-auto rounded-xs bg-slate-100 p-2 font-mono text-xs dark:bg-slate-950;
     }
 
     .data-table th {

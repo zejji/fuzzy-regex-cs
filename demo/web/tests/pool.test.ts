@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { createPool } from '../src/lib/pool';
 
 import { FakeWorker, spawnFake } from './fake-worker';
+import { walk } from './inputs';
 
 test('a warm spare is booted alongside the serving worker', async () => {
     const workers: FakeWorker[] = [];
@@ -22,7 +23,7 @@ test('a warm spare is booted alongside the serving worker', async () => {
 
 test("a question gets the engine's answer, parsed", async () => {
     const pool = createPool({ spawn: spawnFake() });
-    const answer = await pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    const answer = await pool.ask(walk('a', '', 'abc'));
     expect(answer).toEqual({
         matches: [{ index: 0, length: 3, counts: { substitutions: 0, insertions: 0, deletions: 0 }, groups: [] }],
         truncated: false,
@@ -36,7 +37,7 @@ test('stop() settles the in-flight question rather than leaving the page waiting
     const pool = createPool({ spawn: spawnFake({ answers: false }) });
     await pool.ready;
 
-    const inFlight = pool.ask({ pattern: '(a|a)*b', flags: '', subject: 'a'.repeat(30) });
+    const inFlight = pool.ask(walk('(a|a)*b', '', 'a'.repeat(30)));
     pool.stop('stopped by the user');
 
     const answer = await inFlight;
@@ -65,7 +66,7 @@ test('the spare takes over immediately and a new spare is booted behind it', asy
     expect(pool.generation).toBe(1);
 
     // And it answers without waiting for anything to boot: this is what the spare buys.
-    const answer = await pool.ask({ pattern: 'a', flags: '', subject: 'xy' });
+    const answer = await pool.ask(walk('a', '', 'xy'));
     expect(answer.matches?.[0]?.length).toBe(2);
     expect(spare?.posted).toHaveLength(1); // the promoted spare is the one that was asked
     pool.dispose();
@@ -90,7 +91,7 @@ test('without a spare the pool still recovers, by booting one on the spot', asyn
 
     pool.stop();
     expect(workers).toHaveLength(2);
-    expect((await pool.ask({ pattern: 'a', flags: '', subject: 'z' })).matches?.[0]?.length).toBe(1);
+    expect((await pool.ask(walk('a', '', 'z'))).matches?.[0]?.length).toBe(1);
     pool.dispose();
 });
 
@@ -102,7 +103,7 @@ test('a failed boot is an answer, not a silence', async () => {
     expect(ready.ok === false && ready.error).toMatch(/the engine failed to load/);
 
     // And a question asked anyway settles rather than hanging.
-    const answer = await pool.ask({ pattern: 'a', flags: '', subject: 'a' });
+    const answer = await pool.ask(walk('a', '', 'a'));
     expect(answer.aborted).toBe(true);
     pool.dispose();
 });
@@ -115,7 +116,7 @@ test('a reply to a question nobody is waiting for is ignored', async () => {
     await pool.ready;
 
     worker.emit({ requestId: 999, json: JSON.stringify({ matches: [], truncated: false }) });
-    const answer = await pool.ask({ pattern: 'a', flags: '', subject: 'ab' });
+    const answer = await pool.ask(walk('a', '', 'ab'));
     expect(answer.matches?.[0]?.length).toBe(2); // the answer is to the question that was asked
     pool.dispose();
 });
@@ -162,7 +163,7 @@ test('a reply the page cannot read settles the question rather than leaving it w
     const pool = createPool({ spawn: () => worker });
     await pool.ready;
 
-    const truncated = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    const truncated = pool.ask(walk('a', '', 'abc'));
     worker.emit({ requestId: worker.posted[0]?.requestId ?? 0, json: '{"matches": [' });
     const first = await truncated;
     expect(first.error).toMatch(/could not be read/);
@@ -171,7 +172,7 @@ test('a reply the page cannot read settles the question rather than leaving it w
 
     // Well-formed JSON of the wrong shape is the same problem wearing a suit: it survives the cast
     // and dies later, in a template, as `undefined.substitutions`.
-    const wrongShape = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    const wrongShape = pool.ask(walk('a', '', 'abc'));
     worker.emit({ requestId: worker.posted[1]?.requestId ?? 0, json: '{"matches": [{"index": 0}]}' });
     expect((await wrongShape).error).toMatch(/could not be read/);
 
@@ -187,7 +188,7 @@ test('a worker claiming an abort the pool never performed is not read as an answ
     const pool = createPool({ spawn: () => worker });
     await pool.ready;
 
-    const asked = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    const asked = pool.ask(walk('a', '', 'abc'));
     worker.emit({ requestId: worker.posted[0]?.requestId ?? 0, json: '{"matches": [], "aborted": true}' });
 
     const reply = await asked;

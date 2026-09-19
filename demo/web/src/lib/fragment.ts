@@ -9,9 +9,20 @@ import type { Inputs } from '../types';
 
 import { MAX_FRAGMENT_LENGTH } from './caps';
 
-// Keys are one letter because the whole point is a link somebody can paste; `pattern=` three times
-// over is three times the length for no added clarity in a string nobody reads by eye.
-const KEYS: Readonly<Record<keyof Inputs, string>> = { pattern: 'p', flags: 'f', subject: 's' };
+// Keys are one letter because the whole point is a link somebody can paste; `pattern=` six times
+// over is six times the length for no added clarity in a string nobody reads by eye.
+//
+// The three v2 keys are additions and never renames: `p`, `f` and `s` still mean what they meant in
+// S71, so every link already pasted into an issue still loads, and the boxes it says nothing about
+// come up empty - which is the ordinary walk, and exactly what those links meant.
+const KEYS: Readonly<Record<keyof Inputs, string>> = {
+    pattern: 'p',
+    flags: 'f',
+    subject: 's',
+    mode: 'm',
+    replacement: 'r',
+    namedLists: 'l',
+};
 
 export { MAX_FRAGMENT_LENGTH };
 
@@ -55,5 +66,8 @@ export function decode(fragment: string | undefined | null): Inputs | null {
         pattern: parameters.get(KEYS.pattern) ?? '',
         flags: parameters.get(KEYS.flags) ?? '',
         subject: parameters.get(KEYS.subject) ?? '',
+        mode: parameters.get(KEYS.mode) ?? '',
+        replacement: parameters.get(KEYS.replacement) ?? '',
+        namedLists: parameters.get(KEYS.namedLists) ?? '',
     };
 }

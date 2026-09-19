@@ -79,9 +79,30 @@ async function start(options: FakeWorkerOptions = {}) {
     return demo;
 }
 
-/** Answers the fetch for `examples.json` with `body`, so no test reaches the network. */
-const stubExamples = (body: string) =>
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+/** The smallest `help.json` that satisfies `isHelp`: one key, one section, one paragraph. */
+const HELP = JSON.stringify({
+    source: 'docs/COMPARISON.md',
+    note: 'generated',
+    entries: {
+        fuzzy: [{ heading: [{ code: false, text: 'Fuzzy matching' }], blocks: [] }],
+    },
+});
+
+/**
+ * Answers both files the mount path fetches, so no test reaches the network.
+ *
+ * Routed by URL rather than answered with one body for everything: `initialise` asks for
+ * `examples.json` and `help.json`, and a single body would hand the examples file to the help
+ * guard, which would then report a load failure that no test is about.
+ */
+const stubFiles = (examples: string, help: string = HELP) =>
+    vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation((input) =>
+            Promise.resolve(
+                new Response(String(input).includes('help.json') ? help : examples, { status: 200 }),
+            ),
+        );
 
 const answeredLength = (demo: Demo) => demo.answer.value?.matches?.[0]?.length ?? null;
 
@@ -199,7 +220,7 @@ test('a shared case is asked once, and spends no worker doing it', async () => {
     // first one and burns the warm spare - measured before the fix: two questions posted, one
     // worker killed, three constructed, on a page nobody had typed into.
     location.hash = '#p=a%2Bb&f=&s=aab';
-    stubExamples('[]');
+    stubFiles('[]');
 
     const workers: FakeWorker[] = [];
     const demo = track(
@@ -223,7 +244,7 @@ test('a shared case is asked once, and spends no worker doing it', async () => {
 });
 
 test('editing the fragment, or following a same-page link, applies the new case', async () => {
-    stubExamples('[]');
+    stubFiles('[]');
     const demo = track(useDemo({ spawn: () => new FakeWorker() }));
     await demo.initialise();
     await sleep(DEBOUNCE_MS + 60);
@@ -243,7 +264,7 @@ test('Back onto a URL with no fragment restores the case the page boots with', a
     // hashchange to a URL with no fragment at all - Back onto the entry the visitor arrived on -
     // was ignored, which left the screen showing a case the address bar no longer held: the exact
     // mismatch the fragment exists to prevent, and a Back that appears not to work.
-    stubExamples('[]');
+    stubFiles('[]');
     const demo = track(useDemo({ spawn: () => new FakeWorker() }));
     await demo.initialise();
     await sleep(DEBOUNCE_MS + 60);
@@ -275,7 +296,7 @@ test("somebody else's anchor is not a case, and leaves the three boxes alone", a
     // `#install` in a link into this page carries none of the three keys. It is a place to scroll
     // to, not a case, and treating it as one - as an empty case or as the defaults - would throw
     // away what the visitor had typed.
-    stubExamples('[]');
+    stubFiles('[]');
     const demo = track(useDemo({ spawn: () => new FakeWorker() }));
     await demo.initialise();
     await sleep(DEBOUNCE_MS + 60);
@@ -293,7 +314,7 @@ test("somebody else's anchor is not a case, and leaves the three boxes alone", a
 test('an examples.json that is not a list of worked examples leaves the tour empty, not half-drawn', async () => {
     // Fetched at runtime and cast, so nothing checks it: a file with a missing member renders as a
     // sidebar of blank buttons, and one that is not even a list renders as `undefined` in the DOM.
-    stubExamples('[{"title": "half a case", "pattern": "a"}]');
+    stubFiles('[{"title": "half a case", "pattern": "a"}]');
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const demo = track(useDemo({ spawn: () => new FakeWorker() }));
@@ -301,6 +322,109 @@ test('an examples.json that is not a list of worked examples leaves the tour emp
 
     expect(demo.examples.value).toEqual([]);
     expect(errors).toHaveBeenCalled();
+});
+
+test('loading a sample empties the boxes it does not name', async () => {
+    // The trap the sidebar sets: a replace sample leaves a template behind, and the plain sample
+    // clicked after it then runs in replace mode against somebody else's template. Every box the
+    // new sample is silent about is a box it means to be empty.
+    const demo = await start();
+
+    demo.load({
+        key: 'replace',
+        title: 'Replace with a template',
+        note: 'why it matters',
+        pattern: '(a)',
+        flags: '',
+        subject: 'aa',
+        mode: 'replace',
+        replacement: '\\1!',
+    });
+    expect(demo.mode.value).toBe('replace');
+    expect(demo.replacement.value).toBe('\\1!');
+
+    demo.load({ title: 'Set operations', note: 'why', pattern: '[\\w--[\\d]]+', flags: '', subject: 'a1' });
+
+    expect(demo.mode.value).toBe('');
+    expect(demo.replacement.value).toBe('');
+    expect(demo.namedLists.value).toBe('');
+});
+
+test('all six inputs reach the worker, not only the three v1 ones', async () => {
+    // The sixth finding of sitting 1's blind review, as a test: the engine grew three inputs and
+    // the page posted three, so a replace sample would have been answered as an ordinary walk -
+    // an answer that is wrong and looks entirely plausible.
+    const worker = new FakeWorker();
+    const demo = track(useDemo({ spawn: () => worker }));
+
+    demo.pattern.value = '(a)';
+    demo.subject.value = 'aa';
+    demo.mode.value = 'replace';
+    demo.replacement.value = '\\1!';
+    demo.namedLists.value = 'fruit: apple';
+    await sleep(DEBOUNCE_MS + 60);
+
+    expect(worker.posted.at(-1)).toMatchObject({
+        pattern: '(a)',
+        flags: '',
+        subject: 'aa',
+        mode: 'replace',
+        replacement: '\\1!',
+        namedLists: 'fruit: apple',
+    });
+});
+
+test('a parse error keeps the position the caret is drawn at, and the next answer clears it', async () => {
+    // The engine reports where in the PATTERN it gave up so the page can put a caret under that
+    // character. Dropping the number on the way through leaves the sentence with nothing to point
+    // at; keeping it after the next answer points at a pattern that compiled.
+    const worker = new FakeWorker({ answers: false });
+    const demo = track(useDemo({ spawn: () => worker }));
+
+    demo.pattern.value = '(a';
+    await sleep(DEBOUNCE_MS + 60);
+    worker.emit({
+        requestId: worker.posted.at(-1)?.requestId ?? 0,
+        json: JSON.stringify({ error: 'missing ), unterminated subpattern at position 0', errorOffset: 0 }),
+    });
+    await sleep(20);
+
+    expect(demo.failure.value).toMatch(/^missing \)/);
+    expect(demo.failureOffset.value).toBe(0); // and 0 is a position, not "no position"
+    // The offset indexes the pattern that was SENT, so that string is kept beside it: the box has
+    // moved on by the time a slow answer lands, and a caret drawn against it points at a character
+    // the engine never saw.
+    expect(demo.answeredPattern.value).toBe('(a');
+
+    demo.pattern.value = '(a)';
+    await sleep(DEBOUNCE_MS + 60);
+    worker.emit({
+        requestId: worker.posted.at(-1)?.requestId ?? 0,
+        json: JSON.stringify({ matches: [], truncated: false }),
+    });
+    await sleep(20);
+
+    expect(demo.failure.value).toBe('');
+    expect(demo.failureOffset.value).toBeNull();
+});
+
+test('an error no single character of the pattern is to blame for carries no position', async () => {
+    // A misspelt flag, a cap refusal, a timeout, a bad replacement template: the engine sends the
+    // sentence and no offset, deliberately - a template's own position indexes the TEMPLATE. A page
+    // that defaulted to 0 would draw a caret under the first character of a pattern that parsed.
+    const worker = new FakeWorker({ answers: false });
+    const demo = track(useDemo({ spawn: () => worker }));
+
+    demo.flags.value = 'IgnoreCse';
+    await sleep(DEBOUNCE_MS + 60);
+    worker.emit({
+        requestId: worker.posted.at(-1)?.requestId ?? 0,
+        json: JSON.stringify({ error: "'IgnoreCse' is not a FuzzyRegexOptions member." }),
+    });
+    await sleep(20);
+
+    expect(demo.failure.value).toMatch(/^'IgnoreCse'/);
+    expect(demo.failureOffset.value).toBeNull();
 });
 
 test('a worker killed while the runtime is still booting is not an engine failure', async () => {

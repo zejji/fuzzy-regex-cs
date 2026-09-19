@@ -78,11 +78,20 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// <c>VERSION1</c>, and the sidebar's set-operations example only exists because of that default.
 /// </para>
 /// <para>
-/// <b>The timeout example has no upstream answer</b>, and the probe says so where it would have
-/// printed one. <c>(a+a+)+b</c> is deliberately exponential: the claim it makes is about the demo's
-/// own two-second <see cref="DemoEngine.MatchTimeout"/>, not about parity, and there is nothing to
-/// compare it with. <see cref="The_timeout_example_is_the_one_row_with_no_upstream_answer"/> pins
-/// that, and running it belongs in the wasm smoke check where the budget is the subject, not here.
+/// <b>The timeout example has no upstream answer to compare spans with</b>, and the probe says so
+/// where it would have printed one: the claim it makes is about the demo's own two-second
+/// <see cref="DemoEngine.MatchTimeout"/>, not about parity.
+/// <see cref="The_timeout_example_is_the_one_row_with_no_upstream_answer"/> pins that, and
+/// <see cref="The_timeout_example_really_does_run_out_of_time"/> runs it - because the claim was
+/// wrong for as long as nothing ran it. Until 2026-09-19 the example was <c>(a+a+)+b</c> against 36
+/// a's, described here as "deliberately exponential"; measured on the published page that day it
+/// answered in 75 ms with no match, and upstream answered the same input in 1 ms. Both engines
+/// really do optimise that shape away - upstream's 1 ms is its repeat guards and not its
+/// required-string prefilter, because it is just as fast on <c>"a" * 28 + "cb"</c>, where a "b" is
+/// there to be found. <c>^(a|aa)+$</c> against 36 a's and a b is exponential in both instead: this
+/// port spends its whole two-second budget, and upstream <c>regex 2026.9.10</c>, given the same
+/// input with <c>timeout=6.0</c>, spent 6.298 s before raising <c>TimeoutError</c> (2.252 s for 34
+/// a's, 0.985 s for 32 - the shape of the growth, and why the subject is 37 characters and not 60).
 /// </para>
 /// </remarks>
 public sealed class DemoExamplesTests
@@ -272,6 +281,41 @@ public sealed class DemoExamplesTests
             // Under 100 characters, so a subject that is already exponential cannot also be long
             // (memory rule, owner 2026-09-17).
             unanswered[0].Subject.Length.Should().BeLessThan(100);
+        }
+    }
+
+    /// <summary>
+    /// The timeout example times out. It is the one example whose claim is about the demo rather than
+    /// about matching, so it is also the one nothing else can check: its answer is an error message,
+    /// and an example that quietly started answering in 75 ms would still look right on the page.
+    /// </summary>
+    /// <remarks>
+    /// Two seconds of wall clock, and worth every one of them: that is exactly what happened, and
+    /// this test is what noticed it (see the file's remarks). The assertion is on the engine's own
+    /// timeout sentence, not on elapsed time, so a faster machine cannot turn it green by accident.
+    /// </remarks>
+    [Test]
+    public void The_timeout_example_really_does_run_out_of_time()
+    {
+        DemoExampleRow row = DemoExamples
+            .All()
+            .Single(static example => string.Equals(example.Key, "timeout", StringComparison.Ordinal));
+
+        using JsonDocument answer = JsonDocument.Parse(Run(row));
+
+        using (new AssertionScope())
+        {
+            answer
+                .RootElement.TryGetProperty("error", out JsonElement error)
+                .Should()
+                .BeTrue(
+                    "'{0}' promises the engine gives up, so an answer means the example is not exponential",
+                    row.Title
+                );
+            error
+                .GetString()
+                .Should()
+                .Contain("timed out", "the sidebar's note is about the timeout and not about some other refusal");
         }
     }
 

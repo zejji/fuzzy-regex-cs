@@ -7,7 +7,7 @@
 // in a template, as `undefined` rendered into the page or `Cannot read properties of undefined`
 // thrown out of a render. The guards below turn that into one message at the boundary it entered.
 
-import type { Example, Reply } from '../types';
+import type { Example, Help, Reply } from '../types';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
@@ -30,6 +30,12 @@ const isGroup = (value: unknown): boolean =>
     Array.isArray(value.captures) &&
     value.captures.every(isSpan);
 
+// A member that is allowed to be absent, and must be of its own type when it is present. Every
+// optional member below is optional because the engine omits it rather than sending a null, so
+// "absent" is a real answer and "present but the wrong type" is a reply from something else.
+const optional = (value: unknown, kind: 'string' | 'number' | 'boolean'): boolean =>
+    value === undefined || typeof value === kind;
+
 // Checked to the depth the page reads it: every member the tables and the highlighter touch. A
 // shallower check would pass a match with no `counts` straight into the render that needs it.
 const isMatch = (value: unknown): boolean =>
@@ -37,7 +43,8 @@ const isMatch = (value: unknown): boolean =>
     isObject(value) &&
     isCounts(value.counts) &&
     Array.isArray(value.groups) &&
-    value.groups.every(isGroup);
+    value.groups.every(isGroup) &&
+    optional(value.partialMatch, 'boolean');
 
 // `aborted` is rejected rather than ignored. It is the POOL's own field - "we killed this
 // worker" - and the page turns it into "Stopped." on screen, so a worker that sent one would make
@@ -47,8 +54,10 @@ const isReply = (value: unknown): value is Reply =>
     isObject(value) &&
     value.aborted === undefined &&
     (value.matches === undefined || (Array.isArray(value.matches) && value.matches.every(isMatch))) &&
-    (value.truncated === undefined || typeof value.truncated === 'boolean') &&
-    (value.error === undefined || typeof value.error === 'string');
+    optional(value.truncated, 'boolean') &&
+    optional(value.error, 'string') &&
+    optional(value.replaced, 'string') &&
+    optional(value.errorOffset, 'number');
 
 /**
  * Reads what a worker sent, or returns the failure as an answer.
@@ -79,5 +88,48 @@ export const isExampleList = (value: unknown): value is readonly Example[] =>
             typeof item.note === 'string' &&
             typeof item.pattern === 'string' &&
             typeof item.flags === 'string' &&
-            typeof item.subject === 'string',
+            typeof item.subject === 'string' &&
+            // The four v2 members. A row omits the ones it does not need - the page empties those
+            // boxes - but a row that names one and gives it a number is a file that would drive the
+            // engine with something that is not an input.
+            optional(item.key, 'string') &&
+            optional(item.mode, 'string') &&
+            optional(item.replacement, 'string') &&
+            optional(item.namedLists, 'string'),
+    );
+
+const isRun = (value: unknown): boolean =>
+    isObject(value) && typeof value.code === 'boolean' && typeof value.text === 'string';
+
+// The two kinds the generator emits, and no others: a third kind is the generated shape drifting
+// away from the page that renders it, and it would reach the screen as a blank space in the middle
+// of an explanation rather than as anything anybody could report.
+const isBlock = (value: unknown): boolean =>
+    isObject(value) &&
+    ((value.kind === 'paragraph' && Array.isArray(value.runs) && value.runs.every(isRun)) ||
+        (value.kind === 'code' && typeof value.language === 'string' && typeof value.text === 'string'));
+
+const isSection = (value: unknown): boolean =>
+    isObject(value) &&
+    Array.isArray(value.heading) &&
+    value.heading.every(isRun) &&
+    Array.isArray(value.blocks) &&
+    value.blocks.every(isBlock);
+
+/**
+ * Whether a fetched `help.json` is what `tools/build-demo-help.ps1` writes.
+ *
+ * A key with no sections is refused rather than accepted: on screen it is a disclosure that opens
+ * onto nothing, which is indistinguishable from a feature nobody documented. The build-time
+ * guarantee is that a renamed heading in `docs/COMPARISON.md` reddens the build; this is the same
+ * claim checked again at the moment the page believes the file.
+ */
+export const isHelp = (value: unknown): value is Help =>
+    isObject(value) &&
+    typeof value.source === 'string' &&
+    typeof value.note === 'string' &&
+    isObject(value.entries) &&
+    Object.keys(value.entries).length > 0 &&
+    Object.values(value.entries).every(
+        (sections) => Array.isArray(sections) && sections.length > 0 && sections.every(isSection),
     );

@@ -89,10 +89,10 @@ test('the cap is applied before any segment is built', () => {
     });
 
     segments('x'.repeat(2000), matches, 5);
-    // WHICH matches were touched, not how many times each was: the count per match is an internal
-    // detail (the overlap guard, two slices and the cursor all read it), but a match beyond the cap
-    // being looked at at all is the bug.
-    expect([...read]).toEqual([0, 1, 2, 3, 4]);
+    // WHICH matches were touched, not how many times each was nor in what order: both are internal
+    // details (the overlap guard, two slices, the cursor and the sort into subject order all read
+    // the index), but a match beyond the cap being looked at at all is the bug.
+    expect([...read].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
 });
 
 test("the display cap is below the engine's own match cap", () => {
@@ -101,10 +101,55 @@ test("the display cap is below the engine's own match cap", () => {
     expect(MAX_DISPLAYED_MATCHES).toBeLessThan(1000);
 });
 
-test('an out-of-order match is skipped rather than rendered as an empty slice', () => {
+test('a right-to-left answer paints every match, in subject order', () => {
+    // RightToLeft searches from the end, so the engine numbers the LAST match in the subject first.
+    // Upstream's answer for \w+ with REVERSE against "one two three"
+    // (tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs, from regex 2026.9.10): (8,5), (4,3),
+    // (0,3), in that order. The subject is still painted left to right.
+    const result = segments('one two three', [
+        { index: 8, length: 5 },
+        { index: 4, length: 3 },
+        { index: 0, length: 3 },
+    ]);
+    expect(texts(result)).toBe('[one] [two] [three]');
+    expect(result.segments.filter((s) => s.match !== null)).toHaveLength(3);
+});
+
+test('a match keeps its number in the answer, whatever order it is painted in', () => {
+    // The table numbers matches as the engine found them, and the highlight's label, its selection
+    // and its alternating tone all key off that number. Painting in subject order must not renumber.
+    const result = segments('one two three', [
+        { index: 8, length: 5 },
+        { index: 4, length: 3 },
+        { index: 0, length: 3 },
+    ]);
+    expect(result.segments.filter((s) => s.match !== null).map((s) => s.match)).toEqual([2, 1, 0]);
+});
+
+test('a zero-length match sharing a start with a longer one is still painted', () => {
+    // The engine DOES answer with two matches at the same index: a reverse search finds the longer
+    // one first and then the empty one at its start. Upstream, regex 2026.9.10, 2026-09-19:
+    //   regex.finditer(r'a*', 'baa', flags=regex.REVERSE|regex.VERSION1)
+    //   -> [(1, 3), (1, 1), (0, 0)]
+    // This port answers the same, as spans: [1,2], [1,0], [0,0]. The empty match fits before the
+    // longer one starts, so all three are paintable and none may be dropped.
+    const result = segments('baa', [
+        { index: 1, length: 2 },
+        { index: 1, length: 0 },
+        { index: 0, length: 0 },
+    ]);
+    expect(result.segments.filter((s) => s.match !== null).map((s) => s.match)).toEqual([2, 1, 0]);
+    expect(texts(result)).toBe('[]b[][aa]');
+});
+
+test('an overlapping match is skipped rather than rendered as an empty slice', () => {
+    // Two matches that share characters cannot both be painted in one flat run of text, and a
+    // negative slice length renders as an empty string rather than as an error - the kind of silent
+    // wrongness the demo exists to not have. No engine walk produces this; a hand-written fragment
+    // or the console can.
     const result = segments('abcdef', [
         { index: 2, length: 2 },
-        { index: 0, length: 1 },
+        { index: 3, length: 2 },
     ]);
     expect(texts(result)).toBe('ab[cd]ef');
 });

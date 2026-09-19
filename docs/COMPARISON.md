@@ -395,7 +395,10 @@ the shape here is closer to upstream than to `Regex`.
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-// (a|a)*b is exponential in this engine as in upstream (ROADMAP: 23.3 s at n=26 upstream);
+// (a|a)*b is exponential in this engine as in upstream: measured 2026-09-19, regex 2026.9.10
+// spends 24.5 s on "a"*26 + "cb" (ROADMAP records 23.3 s at n=26). It answers the subject below
+// in under a millisecond, but only because locate_required_string sees no "b" in it at all - a
+// start optimisation this port has yet to gain (Phase 7), so here the timeout is what stops it.
 // (a+)+b is NOT a good demonstration here, upstream's repeat guards answer it in milliseconds.
 var pattern = new FuzzyRegex("(a|a)*b");
 try

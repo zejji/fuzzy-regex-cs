@@ -639,6 +639,60 @@ public sealed class DemoEngineContractTests
     }
 
     /// <summary>
+    /// Replace mode answers a runaway pattern rather than running on, which is the promise the whole
+    /// mode is unusable without: the demo tells the reader it stops after two seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sibling of <see cref="The_whole_walk_shares_one_time_budget_rather_than_one_per_match"/>
+    /// for the mode that walks twice, and the bound is loose for the same reason: a step already
+    /// running when the deadline passes carries its own budget and is not interrupted.
+    /// </para>
+    /// <para>
+    /// This subject spends the budget inside the replacement pass, which the engine bounds itself
+    /// with one match state for the whole substitution - so the walk is never reached and the shared
+    /// deadline is not what makes the number. Measured 2026-09-19: 2.08 s here, and 2.09 s with the
+    /// sharing ablated (<c>TryWalk(regex, subject, Deadline(), ...)</c> in place of the shared
+    /// <c>deadline</c>). The ablation is recorded because it says what this test does NOT cover.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void Replace_mode_answers_inside_one_budget_when_the_pattern_runs_away()
+    {
+        string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "c", 10)) + "aaab";
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+
+        Error(DemoEngine.Run("(a|a)*b", "", subject, "replace", "X", "")).Should().Contain("timed out");
+
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(6));
+    }
+
+    /// <summary>
+    /// A replace that used its last permitted replacement on the last occurrence in the subject lost
+    /// nothing, and must not claim it did.
+    /// </summary>
+    /// <remarks>
+    /// The boundary the cap is easiest to get wrong at: <c>replacements == MaxMatches</c> is true
+    /// both for a subject with one occurrence too many and for one with exactly enough, and only the
+    /// first of those is a truncated answer. A demo that cries truncation over a complete answer
+    /// teaches the reader that the flag means nothing.
+    /// </remarks>
+    [Test]
+    public void A_replace_that_used_its_last_permitted_replacement_lost_nothing()
+    {
+        using JsonDocument json = JsonDocument.Parse(
+            DemoEngine.Run("a", "", new string('a', DemoEngine.MaxMatches), "replace", "bb", "")
+        );
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("replaced").GetString()!.Length.Should().Be(DemoEngine.MaxMatches * 2);
+            json.RootElement.GetProperty("matches").GetArrayLength().Should().Be(DemoEngine.MaxMatches);
+            json.RootElement.GetProperty("truncated").GetBoolean().Should().BeFalse();
+        }
+    }
+
+    /// <summary>
     /// A template naming a group the pattern does not have is an error a human can read: the .NET
     /// parameter name the exception carries is not part of the demo's vocabulary.
     /// </summary>
@@ -651,6 +705,72 @@ public sealed class DemoEngineContractTests
         {
             error.Should().NotContain("Parameter");
             error.Should().NotBeNullOrWhiteSpace();
+        }
+    }
+
+    /// <summary>
+    /// A parse error says where in the pattern it failed, so the page can put a caret under the
+    /// character upstream blamed rather than only printing the sentence.
+    /// </summary>
+    /// <remarks>
+    /// <c>compile('(')</c> raises <c>missing ) at position 1</c> - the class remarks above quote
+    /// that line from <c>tools/probes/demo-json-contract-expectations.py</c> run against
+    /// <c>regex 2026.9.10</c>, and the same row is in
+    /// <c>tests/FuzzyRegex.Tests/Gaps/CompileParity/corpus.json</c> as
+    /// <c>{"pattern": "(", "message": "missing )", "position": 1}</c>, recorded from upstream's own
+    /// suite.
+    /// </remarks>
+    [Test]
+    public void A_parse_error_says_where_in_the_pattern_it_failed()
+    {
+        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("(", "", "abc"));
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("error").GetString().Should().Contain("missing )");
+            json.RootElement.GetProperty("errorOffset").GetInt32().Should().Be(1);
+        }
+    }
+
+    /// <summary>
+    /// An error that no position in the pattern explains carries no offset at all, rather than a
+    /// zero the page would draw a caret under. A misspelt flag is the everyday one.
+    /// </summary>
+    [Test]
+    public void An_error_with_no_position_in_the_pattern_carries_no_offset()
+    {
+        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("a", "NoSuchFlag", "aaa"));
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("error").GetString().Should().Contain("NoSuchFlag");
+            json.RootElement.TryGetProperty("errorOffset", out _).Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// A template's own parse error carries no offset either. Upstream parses a replacement template
+    /// with the same machinery it parses a pattern with, so the exception's position is an offset
+    /// into the TEMPLATE - and the page's caret sits under the pattern field, where that number
+    /// points at an unrelated character.
+    /// </summary>
+    /// <remarks>
+    /// The offset is real and is pinned where it belongs, against upstream, in
+    /// <c>ReplacementTemplateTests.An_unknown_character_name_is_reported_at_the_closing_brace</c>
+    /// (<c>T '\\N{NO SUCH NAME}' !! error msg='undefined character name' pos=16</c>). Dropping it
+    /// here is the demo declining to draw a right number in the wrong place.
+    /// </remarks>
+    [Test]
+    public void A_parse_error_in_the_replacement_template_carries_no_pattern_offset()
+    {
+        using JsonDocument json = JsonDocument.Parse(
+            DemoEngine.Run("(a)", "", "a", "replace", @"\N{NO SUCH NAME}", "")
+        );
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("error").GetString().Should().Contain("undefined character name");
+            json.RootElement.TryGetProperty("errorOffset", out _).Should().BeFalse();
         }
     }
 

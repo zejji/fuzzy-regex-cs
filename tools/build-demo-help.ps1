@@ -128,7 +128,11 @@ function Split-Runs {
         }
     }
 
-    return @($runs)
+    # The leading comma, as in Get-Section above: a function's return goes through the pipeline,
+    # which unrolls a one-element array into the element. A paragraph of exactly one run - the
+    # commonest paragraph in COMPARISON.md - then serialised as a JSON object where the page's
+    # validator wants a list, and the whole help panel was rejected (S72, 2026-09-19).
+    return , @($runs)
 }
 
 <#
@@ -178,7 +182,8 @@ function ConvertTo-Blocks {
         $blocks += , [ordered]@{ kind = 'paragraph'; runs = Split-Runs ($paragraph -join ' ') }
     }
 
-    return @($blocks)
+    # Leading comma for the same reason: a section of one paragraph is a list of one block.
+    return , @($blocks)
 }
 
 $entries = [ordered]@{}
