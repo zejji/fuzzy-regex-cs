@@ -723,6 +723,62 @@ test.each(disclosures)(
     },
 );
 
+/**
+ * A window that WIDENS must not take the focus with it either, and this is the mirror of the rule
+ * above rather than the same rule twice.
+ *
+ * The disclosure buttons exist only on one column - they are `v-if="!wide"` - so a window crossing
+ * the gate upwards removes the very control the visitor has focused, and the browser drops the
+ * focus to `<body>`. Narrowing was fixed in chunk 2 by keeping the focused element rendered; that
+ * answer is not available here, because the button is not hidden, it is gone: on two columns the
+ * region it opened is open for good and a control that says "open this" has nothing left to say.
+ *
+ * So the focus needs a destination, and the destination is the first control INSIDE the region the
+ * button named. It is the nearest thing to where the visitor was: the same region, the same reading
+ * order, and a visible focus ring, which a `tabindex="-1"` container would not give them.
+ *
+ * Unlike the narrowing test, the assertion here is on `document.activeElement`, because jsdom does
+ * implement this half: removing the focused element moves the focus to `<body>`. Measured with the
+ * fix reverted, both regions: `activeElement` is `BODY`.
+ */
+test.each(disclosures)(
+    'widening the window moves the focus into the region the disclosure opened: $region',
+    async ({ id, focus }) => {
+        const change = stubViewport(false);
+        const { page } = await mountPage();
+
+        const disclosure = found(
+            page.querySelector<HTMLElement>(`button[aria-controls="${id}"]`),
+            `the ${id} disclosure`,
+        );
+        disclosure.focus();
+        expect(document.activeElement).toBe(disclosure);
+
+        change(true);
+        await nextTick();
+        await nextTick();
+
+        expect(page.querySelector(`button[aria-controls="${id}"]`), 'the disclosure survives a wide window').toBeNull();
+        expect(document.activeElement).toBe(page.querySelector(focus));
+    },
+);
+
+// The focus is moved only when the widening is what took the control away. A visitor typing in the
+// pattern field while their window grows keeps their caret.
+test('widening the window leaves a focus outside the disclosures alone', async () => {
+    const change = stubViewport(false);
+    const { page } = await mountPage();
+
+    const pattern = found(page.querySelector<HTMLElement>('#pattern'), 'the pattern field');
+    pattern.focus();
+
+    change(true);
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(pattern);
+});
+
 // A region the visitor opened is theirs, and a resize does not take it away.
 test.each(disclosures)('a region the visitor opened survives the window widening: $region', async ({ id }) => {
     const change = stubViewport(false);

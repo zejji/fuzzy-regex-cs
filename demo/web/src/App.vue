@@ -132,8 +132,50 @@ function toggleDisclosure(which: 'advanced' | 'samples'): void {
     else panelOpen.value = !panelOpen.value;
 }
 
+/**
+ * Anything a keyboard can land on, in document order, and nothing it cannot.
+ *
+ * `:not([tabindex="-1"])` is what keeps this honest inside a roving tabindex: the samples region is
+ * a tab set, where every tab but the selected one carries -1, and focusing one of those would leave
+ * the set with two entries the arrows disagree about. The selected tab carries 0 and is the one
+ * meant to be reachable, which is also the one a visitor would expect to arrive at.
+ */
+const FOCUSABLE = [
+    'a[href]',
+    'button:not([disabled]):not([tabindex="-1"])',
+    'input:not([disabled]):not([tabindex="-1"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+/**
+ * The mirror of the rule below, for the other direction, and it needs a different answer.
+ *
+ * The two disclosure buttons are `v-if="!wide"`, so a window that widens does not hide the focused
+ * control, it removes it, and the browser drops the focus to `<body>`. Keeping it rendered is not
+ * open to us - on two columns the region is open for good, and a button that says "open this" is a
+ * lie. So the focus is given a destination: the first control inside the region that button named.
+ * Same region, same reading order, and a visible focus ring, which a focusable container would not
+ * give a sighted keyboard visitor.
+ *
+ * Read before the DOM updates, like the narrowing rule, because after it the button is gone and
+ * with it any way to tell which region the visitor was at.
+ */
+function keepFocusInsideTheRegion(): void {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement) || !focused.classList.contains('disclosure')) return;
+    const id = focused.getAttribute('aria-controls');
+    if (id === null) return;
+
+    void nextTick(() => {
+        document.getElementById(id)?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    });
+}
+
 watch(wide, (isWide) => {
     if (isWide) {
+        keepFocusInsideTheRegion();
         if (openedByGate.value === 'advanced') advanced.value = false;
         if (openedByGate.value === 'samples') panelOpen.value = false;
         openedByGate.value = null;
