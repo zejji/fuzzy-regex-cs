@@ -8,11 +8,11 @@
 import { computed, ref, watch, type Ref } from 'vue';
 
 import { MAX_DISPLAYED_MATCHES, MAX_SUBJECT_LENGTH } from './lib/caps';
-import { MAX_FRAGMENT_LENGTH, decode, encode } from './lib/fragment';
+import { MAX_FRAGMENT_LENGTH, decode, encode, fragmentText } from './lib/fragment';
 import { segments } from './lib/highlight';
 import { createPool } from './lib/pool';
 import { isExampleList } from './lib/shapes';
-import type { Answer, Example, Match, WorkerLike } from './types';
+import type { Answer, Example, Inputs, Match, WorkerLike } from './types';
 
 /**
  * How long the page waits after a keystroke before asking the engine.
@@ -41,6 +41,18 @@ const DEBOUNCE_MS = 250;
  */
 const beside = (file: string) => new URL(file, document.baseURI);
 
+/**
+ * The case the page shows when the address bar does not name one.
+ *
+ * Written down once, because it is two answers and not one: the case a visitor arrives to, and the
+ * case to go back to when a fragment is removed from the address bar.
+ */
+const DEFAULTS: Inputs = {
+    pattern: '(?:colour){e<=2}',
+    flags: '',
+    subject: 'the color of the collar',
+};
+
 /** Makes a worker the way worker.js requires: a module worker, resolved against the page. */
 export const spawnEngineWorker = (): WorkerLike => new Worker(beside('worker.js'), { type: 'module' });
 
@@ -59,9 +71,9 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
     // typed into. Seeding the refs before anything watches them is the whole fix.
     const shared = decode(location.hash);
 
-    const pattern = ref(shared?.pattern ?? '(?:colour){e<=2}');
-    const flags = ref(shared?.flags ?? '');
-    const subject = ref(shared?.subject ?? 'the color of the collar');
+    const pattern = ref(shared?.pattern ?? DEFAULTS.pattern);
+    const flags = ref(shared?.flags ?? DEFAULTS.flags);
+    const subject = ref(shared?.subject ?? DEFAULTS.subject);
 
     const examples: Ref<readonly Example[]> = ref([]);
     const engine: Ref<EngineState> = ref('starting');
@@ -273,7 +285,15 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl }: DemoOptions 
      * being a loop, and it costs nothing: identical inputs are not a new case.
      */
     const applyFragment = (): void => {
-        const incoming = decode(location.hash);
+        // A URL with no fragment at all names a case too - the one the page boots with - and Back
+        // onto the entry the visitor arrived on is exactly that. Ignoring it left the screen
+        // showing a case the address bar no longer held, which is the mismatch the fragment exists
+        // to prevent, wearing a Back button that appears not to work.
+        //
+        // Somebody else's anchor (`#install`, a link into the page) is still left alone: it is a
+        // place to scroll to and says nothing about the three inputs, so treating it as the
+        // defaults would throw away what the visitor had typed.
+        const incoming = decode(location.hash) ?? (fragmentText(location.hash) === '' ? DEFAULTS : null);
         if (incoming === null) return;
         if (
             incoming.pattern === pattern.value &&

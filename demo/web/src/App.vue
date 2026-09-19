@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The page. Its state is demo.ts, which is testable without a DOM; what is here is layout only.
-import { onMounted, onUnmounted, proxyRefs } from 'vue';
+import { nextTick, onMounted, onUnmounted, proxyRefs, useTemplateRef, type ShallowRef } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { createPool } from './lib/pool';
@@ -29,6 +29,63 @@ const {
     select,
     stop,
 } = demo;
+
+// --- one tab stop per group of matches, not one per match ------------------------------------
+//
+// WAI-ARIA's roving tabindex: the selected match is the only tab stop in the subject, and the
+// selected row the only one in the table, with the arrow keys moving between them. A tab stop per
+// match reads as accessible and is not: a 200-match answer put 200 stops in the subject and
+// another 200 in the table, so Tab stopped being a way to cross the page at all.
+const subjectPane = useTemplateRef<HTMLElement>('subjectPane');
+const matchRows = useTemplateRef<HTMLElement>('matchRows');
+
+/**
+ * Moves the selection with an arrow key and takes the focus with it.
+ *
+ * @param back The key that moves towards the first match, which differs by the group's direction:
+ *   the highlights run along the subject and the rows run down the table.
+ * @param within The element holding the controls, so the focus stays inside the group that was
+ *   being driven.
+ * @param control A selector for those controls, in the order the matches are numbered.
+ */
+function rove(
+    event: KeyboardEvent,
+    back: string,
+    forward: string,
+    within: Readonly<ShallowRef<HTMLElement | null>>,
+    control: string,
+): void {
+    const last = view.value.shown - 1;
+    if (last < 0) return;
+
+    const to =
+        event.key === back
+            ? Math.max(selected.value - 1, 0)
+            : event.key === forward
+              ? Math.min(selected.value + 1, last)
+              : event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? last
+                  : null;
+    if (to === null) return;
+
+    // The ends hold rather than wrapping, and the page does not scroll: every one of these keys
+    // scrolls something by default, and the table's own scroll container is right underneath.
+    event.preventDefault();
+    select(to);
+
+    // On the next render, because the destination is a tab stop only after it: moving focus first
+    // would leave the focused control holding `tabindex="-1"` for a frame, and Tab out of it then
+    // resumes from the wrong place.
+    void nextTick(() => within.value?.querySelectorAll<HTMLElement>(control)[to]?.focus());
+}
+
+const onSubjectKeydown = (event: KeyboardEvent): void =>
+    rove(event, 'ArrowLeft', 'ArrowRight', subjectPane, 'mark.hit');
+
+const onRowsKeydown = (event: KeyboardEvent): void =>
+    rove(event, 'ArrowUp', 'ArrowDown', matchRows, 'button.row-select');
 
 onMounted(demo.initialise);
 // The page's lifetime is the document's, so this never runs in production. It runs in the tests,
@@ -153,13 +210,24 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         </h2>
                         <!--
                           Each highlight is a control, so it says so and answers a keyboard:
-                          `role="button"` and a tab stop, Enter and Space, and an `aria-label`
-                          because the text inside it is the subject and not a name - a zero-length
-                          match has no text at all. WCAG 2.1.1 Keyboard: the group table below is
-                          only reachable by choosing a match, and before this it was only reachable
-                          with a pointer.
+                          `role="button"`, Enter and Space, the arrows between them, and an
+                          `aria-label` because the text inside it is the subject and not a name - a
+                          zero-length match has no text at all. WCAG 2.1.1 Keyboard: the group table
+                          below is only reachable by choosing a match, and before this it was only
+                          reachable with a pointer.
+
+                          `aria-busy` while the page is waiting: the text here is the subject the
+                          answer belongs to, which for the debounce plus the round trip is not what
+                          the box says. Dimmed for the same reason - the pane is out of date and
+                          says so both ways.
                         -->
-                        <p class="subject-pane"><template v-for="(part, i) in view.segments" :key="i"><mark
+                        <p
+                            ref="subjectPane"
+                            class="subject-pane"
+                            :class="{ 'opacity-60': busy }"
+                            :aria-busy="busy"
+                            @keydown="onSubjectKeydown"
+                        ><template v-for="(part, i) in view.segments" :key="i"><mark
                                     v-if="part.match !== null"
                                     class="hit"
                                     :class="{
@@ -168,9 +236,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                         'hit-current': part.match === selected,
                                     }"
                                     role="button"
-                                    tabindex="0"
+                                    :tabindex="part.match === selected ? 0 : -1"
                                     :aria-current="part.match === selected"
-                                    :aria-label="'match ' + (part.match + 1)"
+                                    :aria-label="
+                                        'match ' +
+                                        (part.match + 1) +
+                                        ', ' +
+                                        (part.text === '' ? 'empty' : part.text)
+                                    "
                                     :title="'match ' + (part.match + 1)"
                                     @click="select(part.match)"
                                     @keydown.enter="select(part.match)"
@@ -196,6 +269,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 tabindex="0"
                                 role="region"
                                 aria-label="Matches, scrollable sideways"
+                                aria-describedby="matches-scroll-hint"
                             >
                                 <table class="data-table">
                                     <thead>
@@ -208,12 +282,13 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             <th scope="col">Deletions</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
+                                    <tbody ref="matchRows" @keydown="onRowsKeydown">
                                         <!--
                                           The row stays a row: a `role="button"` on a <tr> replaces
                                           the row semantics the rest of the answer is read by. The
                                           keyboard control is a real button in the first cell, which
-                                          needs no ARIA and no key handling of its own.
+                                          needs Enter and Space from nobody - and, as one of a set,
+                                          the same roving tabindex and arrow keys as the highlights.
                                         -->
                                         <tr
                                             v-for="(match, i) in matches.slice(0, view.shown)"
@@ -223,10 +298,17 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             @click="select(i)"
                                         >
                                             <td>
+                                                <!--
+                                                  `aria-current`, the same word the highlight uses:
+                                                  one selected match said two ways - pressed here,
+                                                  current there - is two different claims about the
+                                                  same state.
+                                                -->
                                                 <button
                                                     class="row-select"
                                                     type="button"
-                                                    :aria-pressed="i === selected"
+                                                    :tabindex="i === selected ? 0 : -1"
+                                                    :aria-current="i === selected"
                                                     :aria-label="'match ' + (i + 1)"
                                                     @click="select(i)"
                                                 >
@@ -242,7 +324,15 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     </tbody>
                                 </table>
                             </div>
-                            <p class="field-hint sm:hidden">Scroll the table sideways for the rest of the columns.</p>
+                            <!--
+                              Named by the region above through `aria-describedby`, so the hint is
+                              read out when the region takes focus. Unattached it was a sentence
+                              only a sighted visitor on a narrow window ever met, which is not who
+                              needs to be told the region scrolls.
+                            -->
+                            <p id="matches-scroll-hint" class="field-hint sm:hidden">
+                                Scroll the table sideways for the rest of the columns.
+                            </p>
                         </section>
 
                         <section v-if="current">
@@ -254,6 +344,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 tabindex="0"
                                 role="region"
                                 :aria-label="'Groups in match ' + (selected + 1) + ', scrollable sideways'"
+                                aria-describedby="groups-scroll-hint"
                             >
                                 <table class="data-table">
                                     <thead>
@@ -323,7 +414,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     </tbody>
                                 </table>
                             </div>
-                            <p class="field-hint sm:hidden">Scroll the table sideways for the rest of the columns.</p>
+                            <p id="groups-scroll-hint" class="field-hint sm:hidden">
+                                Scroll the table sideways for the rest of the columns.
+                            </p>
                             <p class="field-hint">
                                 A repeated group keeps every capture, not only the last - as
                                 <code class="font-mono">regex</code> does and Python's standard

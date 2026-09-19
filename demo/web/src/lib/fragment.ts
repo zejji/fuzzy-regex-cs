@@ -15,6 +15,15 @@ const KEYS: Readonly<Record<keyof Inputs, string>> = { pattern: 'p', flags: 'f',
 
 export { MAX_FRAGMENT_LENGTH };
 
+/**
+ * A fragment with its leading `#` off.
+ *
+ * Exported because the caller has to tell "no fragment at all" from "a fragment that is not a
+ * case": {@link decode} answers null to both, and they are different instructions to the page.
+ */
+export const fragmentText = (fragment: string | undefined | null): string =>
+    (fragment ?? '').replace(/^#/, '');
+
 /** Encodes the three inputs as a fragment, without the leading `#`. */
 export function encode(inputs: Inputs): string {
     const parameters = new URLSearchParams();
@@ -36,7 +45,7 @@ export function encode(inputs: Inputs): string {
  * @param fragment The location fragment, with or without its leading `#`.
  */
 export function decode(fragment: string | undefined | null): Inputs | null {
-    const text = (fragment ?? '').replace(/^#/, '');
+    const text = fragmentText(fragment);
     if (text === '') return null;
 
     const parameters = new URLSearchParams(text);

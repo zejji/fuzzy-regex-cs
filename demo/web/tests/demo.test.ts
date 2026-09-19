@@ -21,6 +21,16 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const replaced: (string | URL | null | undefined)[] = [];
 
 /**
+ * The real `history.replaceState`, kept before the spy goes over it.
+ *
+ * The stand-in below calls through to it rather than assigning `location.hash`. Assigning the hash
+ * is a NAVIGATION in jsdom, as it is in a browser, so it fires `hashchange` - and the page's own
+ * `share()` uses `replaceState`, which by specification fires nothing. A stand-in that fired one
+ * would have the page answering its own writes, which is a browser behaviour that does not exist.
+ */
+const realReplaceState = history.replaceState.bind(history);
+
+/**
  * The demos a test started, disposed after it.
  *
  * `initialise()` listens for `hashchange` on the window, which outlives the test that started it:
@@ -47,7 +57,7 @@ beforeEach(() => {
         url?: string | URL | null,
     ) => {
         replaced.push(url);
-        location.hash = typeof url === 'string' && url.includes('#') ? url.slice(url.indexOf('#')) : '';
+        realReplaceState(null, '', url ?? location.href);
     }) as typeof history.replaceState);
 });
 
@@ -226,6 +236,58 @@ test('editing the fragment, or following a same-page link, applies the new case'
     expect(demo.flags.value).toBe('IgnoreCase');
     expect(demo.subject.value).toBe('zzzz');
     expect(answeredLength(demo)).toBe(4); // and the new case was asked, not just typed into the boxes
+});
+
+test('Back onto a URL with no fragment restores the case the page boots with', async () => {
+    // The page rewrites the fragment on every keystroke, so the address bar is the case. A
+    // hashchange to a URL with no fragment at all - Back onto the entry the visitor arrived on -
+    // was ignored, which left the screen showing a case the address bar no longer held: the exact
+    // mismatch the fragment exists to prevent, and a Back that appears not to work.
+    stubExamples('[]');
+    const demo = track(useDemo({ spawn: () => new FakeWorker() }));
+    await demo.initialise();
+    await sleep(DEBOUNCE_MS + 60);
+
+    const booted = {
+        pattern: demo.pattern.value,
+        flags: demo.flags.value,
+        subject: demo.subject.value,
+    };
+
+    location.hash = '#p=z&f=IgnoreCase&s=zzzz';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await sleep(DEBOUNCE_MS + 120);
+    expect(demo.pattern.value).toBe('z');
+
+    location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await sleep(DEBOUNCE_MS + 120);
+
+    expect({
+        pattern: demo.pattern.value,
+        flags: demo.flags.value,
+        subject: demo.subject.value,
+    }).toEqual(booted);
+    expect(answeredLength(demo)).toBe(booted.subject.length); // and the restored case was asked
+});
+
+test("somebody else's anchor is not a case, and leaves the three boxes alone", async () => {
+    // `#install` in a link into this page carries none of the three keys. It is a place to scroll
+    // to, not a case, and treating it as one - as an empty case or as the defaults - would throw
+    // away what the visitor had typed.
+    stubExamples('[]');
+    const demo = track(useDemo({ spawn: () => new FakeWorker() }));
+    await demo.initialise();
+    await sleep(DEBOUNCE_MS + 60);
+
+    demo.subject.value = 'mine';
+    await sleep(DEBOUNCE_MS + 120);
+
+    location.hash = '#install';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await sleep(DEBOUNCE_MS + 120);
+
+    expect(demo.subject.value).toBe('mine');
 });
 
 test('an examples.json that is not a list of worked examples leaves the tour empty, not half-drawn', async () => {

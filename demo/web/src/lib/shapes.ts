@@ -39,8 +39,13 @@ const isMatch = (value: unknown): boolean =>
     Array.isArray(value.groups) &&
     value.groups.every(isGroup);
 
+// `aborted` is rejected rather than ignored. It is the POOL's own field - "we killed this
+// worker" - and the page turns it into "Stopped." on screen, so a worker that sent one would make
+// the page report a stop nobody performed, with neither a match nor an error to contradict it.
+// Rejected and not stripped, because a reply that claims it is not a reply this page understands.
 const isReply = (value: unknown): value is Reply =>
     isObject(value) &&
+    value.aborted === undefined &&
     (value.matches === undefined || (Array.isArray(value.matches) && value.matches.every(isMatch))) &&
     (value.truncated === undefined || typeof value.truncated === 'boolean') &&
     (value.error === undefined || typeof value.error === 'string');

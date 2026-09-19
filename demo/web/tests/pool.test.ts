@@ -177,3 +177,22 @@ test('a reply the page cannot read settles the question rather than leaving it w
 
     pool.dispose();
 });
+
+test('a worker claiming an abort the pool never performed is not read as an answer', async () => {
+    // `aborted` is the POOL's own field: it means "we killed this worker", and the page turns it
+    // into "Stopped." on screen. An engine reply is not entitled to it - a worker from an older
+    // deployment, or one that had been tampered with, could otherwise make the page report a stop
+    // that never happened, with no match and no error to say otherwise.
+    const worker = new FakeWorker({ answers: false });
+    const pool = createPool({ spawn: () => worker });
+    await pool.ready;
+
+    const asked = pool.ask({ pattern: 'a', flags: '', subject: 'abc' });
+    worker.emit({ requestId: worker.posted[0]?.requestId ?? 0, json: '{"matches": [], "aborted": true}' });
+
+    const reply = await asked;
+    expect(reply.aborted).toBeUndefined();
+    expect(reply.error).toMatch(/could not be read/);
+
+    pool.dispose();
+});

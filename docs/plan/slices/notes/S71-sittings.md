@@ -639,3 +639,52 @@ fake worker, which is what let findings 4, 5, 7 and the rendering half of 2 be p
 it did not, and the new validation rejected it, which is a fake that was testing itself.
 62 tests green, `vue-tsc --noEmit` clean, `npm run build` green, `tools/run-wasm-smoke.ps1
 -SkipWebBuild` green (28 files, 7.66 MB, 56 endpoints matched).
+
+**Second pass over the same code (2026-09-19).** A fifth blind pass, over the fixes above, raised 7
+more: 1 major, 6 minor. All 7 reproduced and all 7 are fixed, each behavioural one behind a test
+written first and watched fail.
+
+12. **The keyboard fix above scaled badly.** Making every highlight a tab stop is right for three
+    matches and wrong for two hundred: a 200-match answer put 200 stops in the subject pane and
+    another 200 in the table, so Tab stopped being a way to cross the page. Both groups now use
+    WAI-ARIA's roving tabindex - the selected match is the only stop, and ArrowLeft/ArrowRight in
+    the subject, ArrowUp/ArrowDown in the table, plus Home and End, move the selection and take the
+    focus with it. The focus move waits a tick, because the destination only becomes the tab stop
+    on the next render. The ends hold rather than wrapping, and the keys are prevented from
+    scrolling, which is what they would otherwise do inside the table's own scroll region.
+13. `aria-label="match 2"` REPLACES the text inside the mark, so a screen reader was read everything
+    about a highlight except the text it highlights. The label is now "match 2, colour", or
+    "match 3, empty" for a zero-length match, which is the one case with no text to read.
+14. Selection was `aria-current` on the highlight and `aria-pressed` on the row button: one state,
+    two different claims about it. `aria-current` on both, and no `aria-pressed` anywhere.
+15. The "scroll the table sideways" hint under each table was attached to nothing, so it reached
+    only a sighted visitor on a narrow window - not the person driving the scroll region from a
+    keyboard. Each region now names its hint with `aria-describedby`. The hint stays `sm:hidden`:
+    hidden content referenced that way is still part of the description.
+16. `applyFragment` ignored a `hashchange` to a URL with no fragment - Back onto the entry the
+    visitor arrived on - leaving the screen showing a case the address bar no longer held. A
+    fragment-less URL is now the case the page boots with, written down once as `DEFAULTS` and used
+    both to seed the refs and to restore them. Somebody else's anchor (`#install`) is still left
+    alone: `fragment.ts` exports the `#`-stripping so the caller can tell "no fragment" from "a
+    fragment that is not a case", which are different instructions to the page.
+17. While the page is waiting, the subject pane draws the previous answer's text, which is right -
+    the offsets belong to that string - but it looked like an answer to what the box now says. The
+    pane is `aria-busy` and dimmed until the answer catches up.
+18. `isReply` accepted extra members, so `{"aborted": true}` from a worker was read as a reply and
+    the page reported a stop nobody performed, with neither a match nor an error to contradict it.
+    `aborted` is the pool's own field; an engine reply carrying one is now rejected at the boundary.
+
+**Testing.** 67 tests green (5 new, 2 rewritten), `vue-tsc --noEmit` clean, `vite build` green
+(80.37 kB bundle, `aria-busy`, `aria-current` and both `aria-describedby` hints present in it).
+`demo.test.ts`'s `replaceState` stand-in was rewritten to call the real one rather than assigning
+`location.hash`: assigning the hash is a navigation and fires `hashchange`, which `replaceState`
+never does, so the stand-in had the page answering its own writes - a browser behaviour that does
+not exist, and one that finding 16 would otherwise have tripped over in the test suite alone.
+
+**Not fixed, and not ours.** `npm run build` is red on `tests/dev-server.test.ts`: its `afterAll`
+hook times out because Vite 8's `server.close()` does not return within 10 s. Reproduced on a clean
+`0a033be` worktree with every change stashed, so it predates this pass; all 18 assertions in the
+file pass, and `vite build` itself is green. Neither `server: { watch: null }` nor
+`httpServer.closeAllConnections()` before the close fixes it, and with a 120 s hook timeout it
+sometimes returned in a second and sometimes hung the full two minutes. Left for whoever owns the
+dev-server work, as a flake with a reproduction rather than a silenced test.

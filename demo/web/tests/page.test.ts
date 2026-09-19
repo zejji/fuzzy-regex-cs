@@ -61,22 +61,72 @@ async function mountPage() {
 
 const keydown = (key: string) => new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
 
+/** Lets a render, and the focus move queued behind it, both happen. */
+const settle = async (): Promise<void> => {
+    await nextTick();
+    await nextTick();
+};
+
+test('the match highlights are one tab stop, and the arrows move between them', async () => {
+    const { page, demo } = await mountPage();
+    demo.answer = { matches: [match(0, 3), match(4, 3), match(8, 0)], truncated: false };
+    demo.answeredSubject = 'abc abc ';
+    await nextTick();
+
+    const marks = () => [...page.querySelectorAll<HTMLElement>('mark.hit')];
+    expect(marks()).toHaveLength(3);
+
+    // A roving tabindex: one stop for the whole set, on the selected match. A tab stop per
+    // highlight puts 200 of them between the subject and the rest of the page for a 200-match
+    // answer, and another 200 in the table below it, which is a keyboard trap made of controls.
+    const stops = () => marks().filter((mark) => mark.getAttribute('tabindex') === '0');
+    expect(stops()).toHaveLength(1);
+    expect(stops()[0]).toBe(marks()[0]);
+    expect(marks()[0]?.getAttribute('role')).toBe('button');
+
+    // The matched text is in the label, because `aria-label` REPLACES the text inside the mark:
+    // "match 2" alone reads out everything except the one thing a highlight is for.
+    expect(marks()[0]?.getAttribute('aria-label')).toBe('match 1, abc');
+    expect(marks()[2]?.getAttribute('aria-label')).toBe('match 3, empty');
+
+    // One way of saying "this is the selected one", here and in the table: aria-current on both.
+    expect(marks()[0]?.getAttribute('aria-current')).toBe('true');
+    expect(marks()[1]?.getAttribute('aria-current')).toBe('false');
+    expect(page.querySelector('[aria-pressed]')).toBeNull();
+
+    found(marks()[0], 'first match highlight').focus();
+    found(marks()[0], 'first match highlight').dispatchEvent(keydown('ArrowRight'));
+    await settle();
+    expect(demo.selected).toBe(1);
+    expect(document.activeElement).toBe(marks()[1]); // the focus goes with the selection
+    expect(marks()[1]?.getAttribute('tabindex')).toBe('0');
+    expect(marks()[0]?.getAttribute('tabindex')).toBe('-1');
+
+    found(marks()[1], 'second match highlight').dispatchEvent(keydown('End'));
+    await settle();
+    expect(demo.selected).toBe(2);
+    expect(document.activeElement).toBe(marks()[2]);
+
+    found(marks()[2], 'third match highlight').dispatchEvent(keydown('Home'));
+    await settle();
+    expect(demo.selected).toBe(0);
+
+    found(marks()[0], 'first match highlight').dispatchEvent(keydown('ArrowLeft'));
+    await settle();
+    expect(demo.selected).toBe(0); // the ends hold rather than wrapping
+});
+
 test('a match highlight is operable from the keyboard, not only the mouse', async () => {
     const { page, demo } = await mountPage();
     demo.answer = { matches: [match(0, 3), match(4, 3)], truncated: false };
     demo.answeredSubject = 'abc abc';
     await nextTick();
 
-    const marks = [...page.querySelectorAll('mark.hit')];
+    // A click handler on a <mark> is a control only a pointer can reach: no role to announce,
+    // nothing to press. WCAG 2.1.1 Keyboard, and the whole group table below is only reachable
+    // through it.
+    const marks = [...page.querySelectorAll<HTMLElement>('mark.hit')];
     expect(marks).toHaveLength(2);
-    for (const mark of marks) {
-        // A click handler on a <mark> is a control only a pointer can reach: no tab stop, no role
-        // to announce, nothing to press. WCAG 2.1.1 Keyboard, and the whole group table below is
-        // only reachable through it.
-        expect(mark.getAttribute('role')).toBe('button');
-        expect(mark.getAttribute('tabindex')).toBe('0');
-        expect(mark.getAttribute('aria-label')).toMatch(/^match \d+$/);
-    }
 
     const enter = keydown('Enter');
     found(marks[1], 'second match highlight').dispatchEvent(enter);
@@ -104,25 +154,40 @@ test('a row of the matches table is operable from the keyboard, not only the mou
 
     // A real button in the row rather than a role on the <tr>: a row that claims to be a button
     // stops being a row, and the table's own semantics are what the rest of the answer is read by.
-    const buttons = page.querySelectorAll('button.row-select');
-    expect(buttons).toHaveLength(2);
+    const buttons = () => [...page.querySelectorAll<HTMLElement>('button.row-select')];
+    expect(buttons()).toHaveLength(2);
 
-    found(buttons[1], 'row control for the second match').dispatchEvent(
+    // The same roving tabindex the highlights use, for the same reason.
+    expect(buttons().filter((button) => button.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(buttons()[0]?.getAttribute('aria-current')).toBe('true');
+
+    found(buttons()[1], 'row control for the second match').dispatchEvent(
         new MouseEvent('click', { bubbles: true }),
     );
-    await nextTick();
+    await settle();
+    expect(demo.selected).toBe(1);
+    expect(buttons()[1]?.getAttribute('aria-current')).toBe('true');
+    expect(buttons()[0]?.getAttribute('aria-current')).toBe('false');
+    expect(buttons()[1]?.getAttribute('tabindex')).toBe('0');
+    expect(buttons()[0]?.getAttribute('tabindex')).toBe('-1');
+
+    found(buttons()[1], 'row control for the second match').dispatchEvent(keydown('ArrowUp'));
+    await settle();
+    expect(demo.selected).toBe(0);
+    expect(document.activeElement).toBe(buttons()[0]);
+
+    found(buttons()[0], 'row control for the first match').dispatchEvent(keydown('ArrowDown'));
+    await settle();
     expect(demo.selected).toBe(1);
 
-    const first = found(buttons[0], 'row control for the first match');
-    expect(first.getAttribute('aria-pressed')).toBe('false');
+    const first = found(buttons()[0], 'row control for the first match');
     first.dispatchEvent(keydown('Enter')); // a button's own keyboard contract, no handler needed
     first.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await nextTick();
     expect(demo.selected).toBe(0);
-    expect(first.getAttribute('aria-pressed')).toBe('true');
 });
 
-test('a table a narrow window clips can be scrolled by keyboard and is announced', async () => {
+test('a table a narrow window clips can be scrolled by keyboard, is announced, and says so', async () => {
     const { page, demo } = await mountPage();
     demo.answer = {
         matches: [match(0, 3, [{ number: 1, name: '1', success: true, index: 0, length: 3, captures: [{ index: 0, length: 3 }] }])],
@@ -140,7 +205,34 @@ test('a table a narrow window clips can be scrolled by keyboard and is announced
         expect(pane.getAttribute('tabindex')).toBe('0');
         expect(pane.getAttribute('role')).toBe('region');
         expect(pane.getAttribute('aria-label')).toMatch(/\S/);
+
+        // The visible half of the fix is the hint under the table, which said nothing to anyone
+        // who could not see it. Tied to the region, it is read out when the region takes focus.
+        const described = found(pane.getAttribute('aria-describedby'), 'aria-describedby on a scroll region');
+        const hint = found(page.querySelector('#' + described), 'hint element #' + described);
+        expect(hint.textContent).toMatch(/scroll/i);
     }
+});
+
+test('the subject pane says it is busy while it still shows the previous answer', async () => {
+    const { page, demo } = await mountPage();
+    demo.answer = { matches: [match(0, 3)], truncated: false };
+    demo.answeredSubject = 'abc';
+    await nextTick();
+
+    const pane = () => found(page.querySelector('p.subject-pane'), 'subject pane');
+    expect(pane().getAttribute('aria-busy')).toBe('false');
+
+    // A keystroke: for the debounce plus the round trip the pane draws text the box no longer
+    // says, which is right - the offsets belong to the answered subject - but it has to admit it.
+    demo.subject = 'ZZ';
+    await settle();
+    expect(pane().getAttribute('aria-busy')).toBe('true');
+    expect(pane().className).toMatch(/opacity-/);
+
+    await sleep(400);
+    expect(pane().getAttribute('aria-busy')).toBe('false');
+    expect(pane().className).not.toMatch(/opacity-/);
 });
 
 test('a group with exactly one capture lists it, rather than showing a dash', async () => {
