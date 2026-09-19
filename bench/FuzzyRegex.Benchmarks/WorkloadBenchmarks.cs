@@ -151,6 +151,16 @@ public class WorkloadBenchmarks
     public int FuzzyLong() => _fuzzyOne.Match(Corpus.Long).Index;
 
     /// <summary>
+    /// The same fuzzy pattern over a megabyte it cannot match anywhere, so nothing short-circuits
+    /// the scan. Added 2026-09-18 by the optimisation research sweep: it is the workload S60's
+    /// item 10 (a rarity gate on the fuzzy skip character) exists to move, and without a baseline
+    /// here that item cannot be judged.
+    /// </summary>
+    /// <returns>Whether it matched, which it does not.</returns>
+    [Benchmark]
+    public bool FuzzyNoMatchLong() => _fuzzyOne.IsMatch(Corpus.LongNoMatch);
+
+    /// <summary>
     /// A wider error budget, over the subject that actually contains a near miss. Answers span
     /// (54,63) with counts (0,2,1); the two ranking modes below move it to (56,63) and (0,0,1),
     /// which is how one can tell they are doing work rather than failing identically.

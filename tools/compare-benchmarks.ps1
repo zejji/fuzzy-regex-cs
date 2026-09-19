@@ -44,10 +44,31 @@
     BenchmarkDotNet's --filter. A partial run compares only what it measured; the missing-benchmark
     check is skipped, and the output says so.
 
+.PARAMETER Job
+    BenchmarkDotNet's --job. Recorded in the baseline, because two runs of different jobs are not
+    comparable and a baseline that does not say which job produced it cannot be checked.
+
+.PARAMETER BaselinePath
+    Compare against this baseline file rather than the committed one for this machine. What the
+    noise floor is measured with: two runs of an UNCHANGED tree, A recorded as a baseline and B
+    compared against it, so the ratios are the machine's own variation and nothing else.
+
+.PARAMETER NoiseFloor
+    The time ratio below which this machine cannot distinguish a change from its own noise. A ratio
+    inside the band [1/NoiseFloor, NoiseFloor] is reported `same` whatever the percentage, and is
+    never a regression. Per workload, never an average - the gate is per workload by design, and a
+    mean would let one badly regressed case hide behind twenty unchanged ones.
+
+.PARAMETER AllocationNoiseFloor
+    The same, for the allocated-bytes ratio. A separate number because allocation is very nearly
+    deterministic where time is not, so sharing one floor would throw away most of the allocation
+    signal - which is Phase 7's first optimisation lever.
+
 .EXAMPLE
     pwsh -File tools/compare-benchmarks.ps1
     pwsh -File tools/compare-benchmarks.ps1 -UpdateBaseline
     pwsh -File tools/compare-benchmarks.ps1 -Filter '*Fuzzy*'
+    pwsh -File tools/compare-benchmarks.ps1 -UseExisting -ArtifactsPath artifacts/bench/noise-B -BaselinePath artifacts/bench/noise-A.json
 #>
 [CmdletBinding()]
 param(
@@ -55,7 +76,15 @@ param(
     [switch]$UpdateBaseline,
     [switch]$UseExisting,
     [string]$Filter = '*',
-    [string]$ArtifactsPath = '.scratch/benchmark-artifacts'
+    [string]$ArtifactsPath = '.scratch/benchmark-artifacts',
+    [string]$Job = '',
+    [string]$BaselinePath = '',
+    # Defaults are this machine's measured floor - see bench/baselines/<machine-id>/noise-floor.md,
+    # which records how they were taken and what they cover. They are NOT a guess to be tuned: a
+    # floor raised to make a red run green has stopped measuring the machine and started hiding the
+    # change.
+    [double]$NoiseFloor = 1.0,
+    [double]$AllocationNoiseFloor = 1.0
 )
 
 Set-StrictMode -Version Latest
@@ -69,10 +98,11 @@ if (-not $UseExisting) {
     if (Test-Path -LiteralPath $artifacts) { Remove-Item -LiteralPath $artifacts -Recurse -Force }
 
     Write-Host "Running the benchmark suite (filter '$Filter'). This takes tens of minutes." -ForegroundColor Cyan
+    $jobArgs = if ($Job) { @('--job', $Job) } else { @() }
     Push-Location $benchDir
     try {
         dotnet run -c Release --project FuzzyRegex.Benchmarks -- `
-            --filter $Filter --exporters json --artifacts $artifacts
+            --filter $Filter --exporters json --artifacts $artifacts @jobArgs
     }
     finally {
         Pop-Location
@@ -148,7 +178,15 @@ $contended = @(
 $machineId = ("$($host_.OsVersion.Split(' ')[0])-$($host_.Architecture)-$($host_.ProcessorName)" `
         -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLowerInvariant()
 $baselineDir = Join-Path $repoRoot "bench/baselines/$machineId"
-$baselinePath = Join-Path $baselineDir 'net10.0.json'
+# -BaselinePath overrides where the comparison reads from AND where -UpdateBaseline writes to, so
+# that the A-against-B noise-floor measurement uses this same code path rather than a second one
+# written for the occasion. A floor measured by a different comparison than the gate applies is a
+# floor for a comparison nobody runs.
+$baselinePath = if ($BaselinePath) {
+    if ([System.IO.Path]::IsPathRooted($BaselinePath)) { $BaselinePath } else { Join-Path $repoRoot $BaselinePath }
+}
+else { Join-Path $baselineDir 'net10.0.json' }
+$baselineDir = Split-Path -Parent $baselinePath
 
 if ($unmeasured.Count -gt 0) {
     Write-Host "Benchmarks: RED - $($unmeasured.Count) benchmark(s) produced no measurement at all:" -ForegroundColor Red
@@ -177,6 +215,11 @@ if ($UpdateBaseline) {
             benchmarkDotNet = $host_.BenchmarkDotNetVersion
         }
         takenUtc   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        # Which BenchmarkDotNet job produced these numbers. Two runs of different jobs are not
+        # comparable - a Short job's three iterations and a Medium job's fifteen have different
+        # spreads before any code changes - so a baseline that does not say which job it is cannot
+        # be checked against a later run, only trusted.
+        job        = if ($Job) { $Job } else { 'default' }
         # Recorded rather than assumed: BenchmarkDotNet flags a multimodal distribution when the
         # machine was not quiet, and a median carrying that flag should not be read to two decimal
         # places. Listing them here means the next reader sees which rows to distrust without
@@ -214,6 +257,17 @@ $baseline = Get-Content -LiteralPath $baselinePath -Raw | ConvertFrom-Json
 Write-Host ''
 Write-Host "Baseline: $baselinePath (taken $($baseline.takenUtc))"
 Write-Host "Machine:  $($baseline.machine.processor), $($baseline.machine.os)"
+$baselineJob = if ($baseline.PSObject.Properties['job']) { $baseline.job } else { 'unrecorded' }
+$thisJob = if ($Job) { $Job } else { 'default' }
+Write-Host "Job:      baseline $baselineJob, this run $thisJob"
+if ($baselineJob -ne 'unrecorded' -and $baselineJob -ne $thisJob) {
+    Write-Host "CAUTION: the baseline was taken with --job $baselineJob and this run used $thisJob." -ForegroundColor Yellow
+    Write-Host '  Different jobs have different spreads before any code changes, so these ratios mix' -ForegroundColor Yellow
+    Write-Host '  a real difference with a measurement-method one. Re-run with the baseline"s job.' -ForegroundColor Yellow
+}
+if ($NoiseFloor -gt 1 -or $AllocationNoiseFloor -gt 1) {
+    Write-Host ("Floor:    time {0:N2}x, allocation {1:N2}x - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor)
+}
 $baselineContended = @(if ($baseline.PSObject.Properties['contended']) { $baseline.contended })
 if ($baselineContended.Count -gt 0) {
     Write-Host ''
@@ -242,6 +296,13 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     $now = $current[$name].medianNs
     $ratio = if ($was -gt 0) { $now / $was } else { 1 }
 
+    # Inside the noise floor this machine cannot tell a change from its own variation, so the ratio
+    # is reported `same` and is never a regression however large the percentage looks. The band is
+    # two-sided on purpose: an unexplained IMPROVEMENT inside the floor is the same measurement
+    # artefact as a regression inside it, and reporting one but not the other is how a run that
+    # measured nothing comes to look like a win.
+    $withinFloor = $NoiseFloor -gt 1 -and $ratio -le $NoiseFloor -and $ratio -ge (1 / $NoiseFloor)
+
     # Allocation is compared as well as time, and to the same threshold. Phase 7's first lever is
     # allocation elimination (`benchmark` skill), so a change that trades bytes for nanoseconds is
     # exactly what this has to be able to see; a baseline that recorded allocations and never read
@@ -258,22 +319,32 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     $allocLost = (-not $allocUnmeasured) -and $wasBytes -gt 0 -and $nowBytes -eq 0
     $allocAppeared = (-not $allocUnmeasured) -and $wasBytes -eq 0 -and $nowBytes -gt 0
     $allocRatio = if (-not $allocUnmeasured -and $wasBytes -gt 0) { $nowBytes / $wasBytes } else { 1 }
-    $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt $Threshold)
+    # A separate floor from the time one: allocation is very nearly deterministic, so sharing a
+    # floor sized for timing jitter would discard most of the allocation signal.
+    $allocWithinFloor = $AllocationNoiseFloor -gt 1 -and $allocRatio -le $AllocationNoiseFloor `
+        -and $allocRatio -ge (1 / $AllocationNoiseFloor)
+    # `lost` and `appeared` are NOT excused by the floor. Both mean the measurement changed kind
+    # rather than degree, and a floor is a statement about degree.
+    $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt $Threshold -and -not $allocWithinFloor)
 
     $allocCell =
     if ($allocUnmeasured) { '    n/a' }
     elseif ($allocLost) { '   lost' }
     elseif ($allocAppeared) { '    new' }
+    elseif ($allocWithinFloor) { '   same' }
     else { '{0,6:N2}x' -f $allocRatio }
 
-    $short = $name -replace '^Fuzzy\.Text\.RegularExpressions\.Benchmarks\.', ''
-    $colour =
-    if ($ratio -gt $Threshold -or $allocRegressed) { 'Red' }
-    elseif ($ratio -lt 0.9) { 'Green' }
-    else { 'Gray' }
-    Write-Host ('{0,-58} {1,12:N1} {2,12:N1} {3,6:N2}x {4,7}' -f $short, $was, $now, $ratio, $allocCell) -ForegroundColor $colour
+    $timeCell = if ($withinFloor) { '  same' } else { '{0,5:N2}x' -f $ratio }
 
-    if ($ratio -gt $Threshold) { $regressions += "$short slower ($([math]::Round($ratio, 2))x)" }
+    $short = $name -replace '^Fuzzy\.Text\.RegularExpressions\.Benchmarks\.', ''
+    $regressed = $ratio -gt $Threshold -and -not $withinFloor
+    $colour =
+    if ($regressed -or $allocRegressed) { 'Red' }
+    elseif ($ratio -lt 0.9 -and -not $withinFloor) { 'Green' }
+    else { 'Gray' }
+    Write-Host ('{0,-58} {1,12:N1} {2,12:N1} {3,6} {4,7}' -f $short, $was, $now, $timeCell, $allocCell) -ForegroundColor $colour
+
+    if ($regressed) { $regressions += "$short slower ($([math]::Round($ratio, 2))x)" }
     if ($allocRegressed) {
         $why =
         if ($allocLost) { 'allocation no longer measured (diagnoser lost?)' }
