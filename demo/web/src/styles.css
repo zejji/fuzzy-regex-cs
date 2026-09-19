@@ -446,6 +446,48 @@
     .help-code {
         @apply overflow-x-auto rounded-xs bg-shell-raised p-2 font-mono text-xs text-shell-text;
     }
+
+    /* --- the C# snippet -----------------------------------------------------------------------
+
+       Light, like the rest of the answer. A dark code block here would be the only dark thing on
+       the white island and would read as a different application; the colour that separates a
+       keyword from a string does the work instead, and every pair is in `contrast.test.ts`. */
+    .snippet-region {
+        @apply mt-6 flex flex-col items-start gap-2;
+    }
+
+    /* slate-500 and not the slate-300 the other boxes use: against this fill that line measures
+       1.42:1 and against the white around it 1.48:1, so the panel would have no visible edge. */
+    .snippet-panel {
+        @apply w-full rounded-md border border-slate-500 bg-slate-50;
+    }
+
+    .snippet {
+        @apply overflow-x-auto p-3 font-mono text-xs leading-5 text-slate-900;
+    }
+
+    .snippet-actions {
+        @apply flex flex-wrap items-center gap-3 border-t border-slate-200 px-3 py-2;
+    }
+
+    /* Four hues and an inherited one. A keyword and a string are the two runs a reader scans for;
+       a comment recedes; a number is the one literal that is not a string. Hue alone carries none
+       of the meaning - the code says the same thing in black and white. */
+    .tok-keyword {
+        @apply text-violet-700;
+    }
+
+    .tok-string {
+        @apply text-emerald-700;
+    }
+
+    .tok-comment {
+        @apply text-slate-600;
+    }
+
+    .tok-number {
+        @apply text-orange-700;
+    }
 }
 
 /*

@@ -409,10 +409,13 @@ test('a narrow window folds the secondary inputs and the sample panel away', asy
     expect(page.querySelector('#subject')).not.toBeNull();
 
     // Both disclosures say what they do and what state they are in, which is what `aria-expanded`
-    // on the button that controls them is for - and each names a region that exists.
-    const disclosures = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]')];
+    // on the button that controls them is for.
+    const disclosures = [...page.querySelectorAll<HTMLElement>('button.disclosure')];
     expect(disclosures.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'false']);
-    for (const button of disclosures) {
+
+    // Every control that reveals a region names one that exists - the snippet panel's button
+    // since chunk 3, which is in the answer and not in this pane.
+    for (const button of page.querySelectorAll<HTMLElement>('button[aria-expanded]')) {
         expect(page.querySelector(`#${button.getAttribute('aria-controls')}`)).not.toBeNull();
     }
 
@@ -638,13 +641,19 @@ test('a disclosure is a control and not a line of text', async () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
     const { page } = await mountPage();
 
-    const disclosures = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]')];
-    expect(disclosures).toHaveLength(2);
-    for (const button of disclosures) {
-        expect(button.classList.contains('disclosure')).toBe(true);
+    // Asked of every button that reveals a region, not only of the two that fold this pane: the
+    // snippet panel's button opens one in the answer and has the same job of looking pressable.
+    const revealers = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]')];
+    expect(revealers.filter((button) => button.classList.contains('disclosure'))).toHaveLength(2);
+    for (const button of revealers) {
         const chevron = found(button.querySelector('[aria-hidden="true"]'), 'a chevron on a disclosure');
         expect(chevron.textContent?.trim()).toMatch(/\S/);
-    }
 
-    expect(/\.disclosure\s*\{[^}]*\bmin-h-11\b/.test(declarations), 'the disclosure is 44 px tall').toBe(true);
+        // 44 px, from whichever rule dresses it: `.disclosure` on the ink pane, `.button` on white.
+        const shape = button.classList.contains('disclosure') ? '.disclosure' : '.button';
+        expect(
+            new RegExp(`\\${shape}\\s*\\{[^}]*\\bmin-h-11\\b`).test(declarations),
+            `${shape} is 44 px tall`,
+        ).toBe(true);
+    }
 });

@@ -20,7 +20,8 @@ import { createApp, nextTick, type App as VueApp } from 'vue';
 const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf8');
 
 import App from '../src/App.vue';
-import type { Group, Match } from '../src/types';
+import { toCSharp } from '../src/lib/snippet';
+import type { Group, Inputs, Match } from '../src/types';
 
 import { FakeWorker } from './fake-worker';
 
@@ -622,4 +623,100 @@ test('the page draws the subject that was answered, not the one being typed', as
         .slice(1)
         .flatMap((table) => [...table.querySelectorAll('tbody tr td')]);
     expect(cells.map((cell) => cell.textContent?.trim())).toContain('abcdef'); // the group's Text
+});
+
+/** The snippet panel's three parts: the button that reveals it, the panel, and the code inside. */
+function snippetParts(page: HTMLElement) {
+    const toggle = found(page.querySelector<HTMLButtonElement>('button.snippet-toggle'), 'the C# button');
+    const id = found(toggle.getAttribute('aria-controls'), 'aria-controls on the C# button');
+    const panel = found(page.querySelector<HTMLElement>('#' + id), `the panel #${id}`);
+    return { toggle, panel, code: found(panel.querySelector<HTMLElement>('pre'), 'the snippet') };
+}
+
+/** The six boxes the snippet is generated from, as the generator's own type. */
+const inputsOf = (demo: NonNullable<Window['__demo']>): Inputs => ({
+    pattern: demo.pattern,
+    flags: demo.flags,
+    subject: demo.subject,
+    mode: demo.mode,
+    replacement: demo.replacement,
+    namedLists: demo.namedLists,
+});
+
+test('the C# panel opens onto the case as code, and hands the focus back on Escape', async () => {
+    const { page, demo } = await mountPage();
+    const { toggle, panel, code } = snippetParts(page);
+
+    expect(toggle.textContent).toMatch(/C#/);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    // In the page and hidden, never absent: `aria-controls` pointing at an id that resolves to
+    // nothing names nothing, which is the fault the tab set had before chunk 2 fixed it.
+    expect(panel.hidden).toBe(true);
+
+    toggle.click();
+    await settle();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(panel.hidden).toBe(false);
+
+    // The snippet for the case on screen, character for character - the page owns no language
+    // rules of its own, so what it shows is what `toCSharp` returns for the boxes as they stand.
+    expect(code.textContent).toBe(toCSharp(inputsOf(demo)));
+
+    // Coloured by spans from the tokenizer, and every character still there.
+    const spans = [...panel.querySelectorAll<HTMLElement>('pre span')];
+    expect(spans.map((span) => span.textContent).join('')).toBe(code.textContent);
+    expect(spans.some((span) => span.className.includes('tok-keyword'))).toBe(true);
+    expect(spans.some((span) => span.className.includes('tok-string'))).toBe(true);
+
+    // Opening moves the focus into the panel: a revealed region nobody is standing in is a region
+    // a keyboard has to tab back through the whole answer to reach.
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    // Escape closes it and puts the focus back where it came from (WCAG 2.4.3 Focus Order).
+    found(document.activeElement, 'the focused element').dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(panel.hidden).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+
+    // The button closes it too, and the focus never leaves the button it was already on.
+    toggle.click();
+    await settle();
+    toggle.click();
+    await settle();
+    expect(panel.hidden).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+});
+
+test('the snippet is text and never markup, and copying says out loud what happened', async () => {
+    const { page, demo } = await mountPage();
+    demo.subject = '<script>alert(1)</script>';
+    await nextTick();
+
+    const { toggle, panel, code } = snippetParts(page);
+    toggle.click();
+    await settle();
+
+    // Spans with text in them, never `v-html`: the subject is whatever a visitor typed, and a page
+    // that rendered it as markup would run it.
+    expect(code.textContent).toContain('<script>alert(1)</script>');
+    expect(panel.innerHTML).toContain('&lt;script&gt;');
+    expect(panel.querySelector('script')).toBeNull();
+
+    const status = found(page.querySelector<HTMLElement>('.status'), 'the live region');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    const copy = found(panel.querySelector<HTMLButtonElement>('button.snippet-copy'), 'the copy button');
+    copy.click();
+    await until(() => /copied/i.test(status.textContent ?? ''), 'said the snippet was copied');
+    expect(writeText).toHaveBeenCalledWith(code.textContent);
+
+    // A refused write is ordinary - no permission, or no secure context - so the answer is the
+    // text selected and a sentence saying so, in the region that announces everything else.
+    writeText.mockRejectedValue(new DOMException('Write permission denied.', 'NotAllowedError'));
+    copy.click();
+    await until(() => /selected/i.test(status.textContent ?? ''), 'said the snippet was selected');
+    expect(window.getSelection()?.toString()).toBe(code.textContent);
 });

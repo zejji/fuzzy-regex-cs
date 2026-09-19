@@ -469,3 +469,133 @@ sitting fixed. The disclosure buttons are `v-if="!wide"`, so *widening* removes 
 the focus and the reviewer measured `after widening, activeElement = BODY`. It is pre-existing, it is
 the same WCAG 3.2.2 case, and the fix needs a decision about where focus should land (the region it
 controlled, which is visible when wide), so it is a chunk of its own rather than an addition here.
+
+## Chunk 3 - the C# snippet (2026-09-19, sitting 5)
+
+`demo/web/src/lib/snippet.ts` turns `Inputs` into the C# the demo itself runs, and a revealed panel
+at the foot of the results region shows it, coloured, with a Copy button. `toCSharp` is a pure
+function of the inputs and nothing else - no DOM, no engine, no clipboard - which is what lets
+`snippet.test.ts` assert whole snippets and `page.test.ts` assert the panel without owning the
+language rules. `tokenize` is eighty lines and five classes, not a highlighter: highlight.js, Prism
+and Shiki each weigh more than this whole page, and every character comes back out, which the round
+trip test pins.
+
+`demo/web/src/lib/clipboard.ts` is separate because it is asynchronous and browser-shaped.
+`navigator.clipboard` is undefined outside a secure context and rejects with `NotAllowedError` when
+the browser refuses, and neither is something the visitor did wrong, so `copyText` never throws and
+returns `'copied'` or `'select'`; the fallback selects the `<pre>` so the keyboard's own copy works.
+
+**Compiled for real, not reasoned about.** `tools/probes/demo-snippet-compiles.mjs` writes each
+emitted snippet into a throwaway `dotnet new console` project outside the repository (the repo's own
+`Directory.Build.props` would compile it under analyzer rules a visitor does not have) and runs it.
+Eight cases, all green on 2026-09-19:
+
+| Case | What `dotnet run` printed |
+|---|---|
+| the default case | `3+6 s=0 i=1 d=1` and `17+6 s=2 i=0 d=0` - the page's own two matches |
+| two flags, named in full | `11+5 s=0 i=0 d=1`, `16+3 s=3 i=0 d=3`, `19+0 s=0 i=0 d=6` |
+| partial | `0+7 partial=True` |
+| replace | `09/2026 and 12/1999` |
+| named lists | `0+4 s=0 i=0 d=1`, `5+7 s=0 i=1 d=0`, `13+6 s=0 i=0 d=0` |
+| quotes and a trailing backslash | `pattern OK`, `subject OK` |
+| newlines, a blank line, a whitespace-only line, three quotes | `10+1 s=0 i=0 d=0`, then `pattern OK`, `subject OK` |
+| a carriage return, U+2028, U+2029 and U+0085 (added by the review's finding) | `pattern OK`, `subject OK` |
+
+A second probe, `tools/probes/demo-trim-matches-dotnet.mjs`, settles the trim the same way: it
+compiles and runs the C# that enumerates `char.IsWhiteSpace` over the BMP (25 code points), drives
+every reachable code unit through `toCSharp` (65,531, zero disagreements), and times the index walk
+against the regex it replaced.
+
+The `OK` lines are a round trip: the probe compares the literal the generator built with one built by
+`JSON.stringify`, so the check does not use the code it is checking. `DemoSnippetTests.cs` holds the
+two halves that can rot silently - the printed timeout is `DemoEngine.MatchTimeout`, `FLAG_NAMES` is
+`Enum.GetNames<FuzzyRegexOptions>()`, and the default case's spans are the ones the compiled snippet
+printed above.
+
+**In a real browser**, not only in jsdom: published with `tools/run-wasm-smoke.ps1`, served over
+HTTP, and driven in Chrome 153 at 1366x768. Enter on the toggle opens the panel and the focus lands
+on the `<pre>`; the page does not grow a scrollbar (`scrollHeight === innerHeight`); the four token
+colours compute (keyword `oklch(0.491 0.27 292.581)`, string `oklch(0.508 0.118 165.612)`, comment
+`oklch(0.446 0.043 257.281)`, number `oklch(0.553 0.195 38.402)`); Tab reaches Copy, Enter writes to
+the real clipboard (`readText()` returned the snippet) and the live region reads "2 matches / in 263
+ms / copied to the clipboard"; Escape closes it and the focus returns to the toggle.
+
+**Colour.** The panel border wanted slate-300 and could not have it: measured 1.42:1 on slate-50 and
+1.48:1 on white against WCAG 1.4.11's 3:1, and slate-400 is 2.51:1. slate-500 passes and is what
+ships. Every new colour is a Tailwind palette value rather than a new `--color-` token, because
+`contrast.test.ts` requires a measured pair and a browser-recorded byte triple for each token.
+
+**Two mutants** over the code written alongside its tests: removing `select(fallback)` from the
+clipboard's catch, and removing the focus return from `closeSnippet`. Four tests failed, both
+reverted, 223 green again (229 with this sitting's new tests).
+
+### Review (chunk 3)
+
+**First pass, over the whole chunk: five findings raised, five reproduced, four fixed.**
+
+| Finding | Reproduced as | Outcome |
+|---|---|---|
+| a carriage return is dropped from a raw literal | `literal("a\r\nb")` is `"""\na\nb\n"""`; the compiled snippet printed `DIFFERENT` | fixed - a third literal form |
+| U+2028/U+2029 in a raw literal will not compile | `error CS8999: Line does not start with the same whitespace as the closing line of the raw string literal` | fixed by the same form |
+| the mode is compared exactly, the engine trims and lower-cases it | `mode: 'Partial'` and `' replace '` both emitted the walk | fixed - `trimmed(...).toLowerCase()` |
+| a trailing backslash in a verbatim string swallows the rest | one string token held the constructor and the whole walk | fixed - `\` is an escape only when the string is not verbatim |
+| `Replace` carries no `count: MaxMatches` | `DemoEngine.cs:488` | not a defect - see the decision below |
+
+The fifth is the page's display cap, and the answer is the claim rather than the code: 1,000 is what
+this page shows, not what the library does, and a visitor's own `Replace` should rewrite the whole
+subject. The comment above the branch says so and the whole-output test is what holds it.
+
+The first three are one bug with one cause. C# ends a line on a carriage return, U+0085, U+2028 and
+U+2029, so any of them inside a raw string literal makes a literal whose lines are not the lines the
+generator laid out. `literal()` now has a third form - an ordinary escaped literal, one line, every
+character spelt out - and `tools/probes/demo-snippet-compiles.mjs` has a case with all four
+terminators in one value, which compiles and prints `subject OK`.
+
+**Second pass, over the fixes, which no reviewer had seen: one finding, reproduced, fixed.**
+JavaScript's `trim()` is not `String.Trim()`: .NET trims U+0085 and JavaScript does not, and
+JavaScript trims U+FEFF where .NET does not, so `#m=partial%C2%85` was a partial answer on the page
+with a walk in the panel. `char.IsWhiteSpace` is true for 25 BMP code points - printed by
+`tools/probes/demo-trim-matches-dotnet.mjs`, which compiles and runs the C# that enumerates them -
+and the two sets differ in exactly those two characters. `snippet.ts` now has a `trimmed()` of its
+own at all four places `DemoEngine` trims (`DemoEngine.cs:623,675,730,734`). The same pass killed a
+test of mine:
+`not.toContain('count:')` cannot fail unless the whole-output test fails first, so it is gone and
+its reasoning moved into that test's comment.
+
+**Third pass, over `trimmed()` itself: one finding, reproduced, fixed.** Written as
+`^[ws]+|[ws]+$` the trailing alternative restarts inside every interior run of whitespace, and the
+panel recomputes the snippet on every keystroke into a flag box nothing caps. The probe times both
+forms over the same inputs - 12.5k, 25k, 50k and 100k characters of U+00A0 in the flag box. Three
+runs on this machine on 2026-09-19, one of them the verifier's: the regex took 101-422 ms at 12.5k
+and 5.4-10.3 seconds at 100k, roughly four times per doubling, while the whole snippet with the
+index walk took 0-2 ms at every size. The absolute figures move with what else the machine is
+doing; the shape does not. `snippet.test.ts` holds a 200 ms budget: put the regex body back into
+`trimmed()` for one run and the committed test fails, measured at 3,723 ms and 3,882 ms here and at
+11,938 ms and 18,650 ms in the verifier's run. Equivalence re-checked afterwards by
+driving every BMP code unit through `toCSharp` as a list name - 65,531 of them (a colon, a comma, a
+semicolon and the two line separators are read by the block parser before any trim), zero
+disagreements with the .NET set the probe measured.
+
+**Fourth pass, over `trimmed()` and its budget test, which the third pass's fix created: no
+findings.** That is the pass the chunk ends on - every line of code in it has now been read by a
+reviewer who did not write it.
+
+### The independent verifier (chunk 3)
+
+A fresh Opus, given the tree and these notes and told to re-run every number. Thirty-one claims
+CONFIRMED, four COULD NOT RUN (the browser session, the two pre-fix compiler errors, the mid-sitting
+mutation counts - each needs a machine state this tree no longer has), and four DIFFERENT, all four
+of them the notes being wrong rather than the code:
+
+- the eight-case table dropped case 7's match line, `10+1 s=0 i=0 d=0`. Added.
+- `tokenize` is 79 lines, not sixty. Corrected here and in STATE.md.
+- `DemoEngine`'s flag trim is line 623, not 622. Corrected.
+- the timing figures were a single run and reproduce only in shape, not in value. The claim now
+  gives the range over three runs, the verifier's among them.
+
+The fourth of those is the useful one, and it has a cause worth keeping: the verifier read the
+100,000-character filler in the budget test as U+0020 and concluded the mutant was harmless, because
+a raw U+00A0 in a source file renders as an ordinary space. Two readers in a row have now made that
+mistake. Every non-ASCII whitespace character in `snippet.ts`, `snippet.test.ts` and the trim probe
+is therefore written as `\u{a0}`, `\u{2028}` and so on, where the reader can see which character it
+is; 229 tests still green and the probe still prints 0 disagreements afterwards.

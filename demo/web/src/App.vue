@@ -3,7 +3,9 @@
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, watch, type ShallowRef } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
+import { copyText } from './lib/clipboard';
 import { createPool } from './lib/pool';
+import { toCSharp, tokenize } from './lib/snippet';
 import type { Example } from './types';
 
 const demo = useDemo();
@@ -301,6 +303,73 @@ const onSubjectKeydown = (event: KeyboardEvent): void =>
 
 const onRowsKeydown = (event: KeyboardEvent): void =>
     rove(event, 'ArrowUp', 'ArrowDown', matchRows, 'button.row-select');
+
+// --- the case as C# ----------------------------------------------------------------------------
+
+/**
+ * The snippet panel: shut until asked for, and generated from the boxes as they stand.
+ *
+ * Shut by default because the page's job is the answer, and a block of code above the fold is a
+ * screenful between a visitor and it. Generated from the live inputs rather than the answered ones
+ * so that what it hands over is the case the visitor is looking at - `answeredPattern` exists for
+ * the caret, which has to index the exact string the engine was given, and code to paste has no
+ * such constraint.
+ */
+const snippetOpen = ref(false);
+const snippetToggle = useTemplateRef<HTMLElement>('snippetToggle');
+const snippetCode = useTemplateRef<HTMLElement>('snippetCode');
+
+const snippet = computed(() =>
+    toCSharp({
+        pattern: pattern.value,
+        flags: flags.value,
+        subject: subject.value,
+        mode: mode.value,
+        replacement: replacement.value,
+        namedLists: namedLists.value,
+    }),
+);
+
+/** The same text as coloured runs. Spans with text in them, so nothing here can become markup. */
+const snippetTokens = computed(() => tokenize(snippet.value));
+
+/** What the last copy did, said in the region that announces the answer. Cleared on every open. */
+const copyNote = ref('');
+
+/**
+ * Opens the panel and stands in it; closes it and goes back to the button.
+ *
+ * The focus move is the whole of the keyboard story here. Revealing a region and leaving the focus
+ * on the button means tabbing through the code to reach the copy control, and closing it without
+ * putting the focus back drops the visitor at the top of the document (WCAG 2.4.3 Focus Order).
+ */
+function toggleSnippet(): void {
+    snippetOpen.value = !snippetOpen.value;
+    copyNote.value = '';
+    if (!snippetOpen.value) {
+        snippetToggle.value?.focus();
+        return;
+    }
+    // After the render, because a hidden element cannot take focus.
+    void nextTick(() => snippetCode.value?.focus());
+}
+
+/** Escape, from anywhere inside the panel. */
+function closeSnippet(): void {
+    if (!snippetOpen.value) return;
+    snippetOpen.value = false;
+    copyNote.value = '';
+    snippetToggle.value?.focus();
+}
+
+/** Copies, or selects the code and says which happened. `copyText` never throws. */
+async function copySnippet(): Promise<void> {
+    const outcome = await copyText(snippet.value, snippetCode.value);
+    copyNote.value =
+        outcome === 'copied'
+            ? 'copied to the clipboard'
+            : 'the browser refused the clipboard, so the code is selected';
+}
 
 onMounted(demo.initialise);
 // The page's lifetime is the document's, so this never runs in production. It runs in the tests,
@@ -717,6 +786,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     </span>
                     <span v-if="capped" class="pill">showing the first {{ view.shown }} of {{ view.total }}</span>
                     <span v-if="!shareable" class="pill">too long for the address bar, so no link</span>
+                    <!-- What the copy button did. Here and not beside the button, because this is
+                         the region a screen reader is already listening to. -->
+                    <span v-if="copyNote" class="pill">{{ copyNote }}</span>
                 </div>
 
                 <!-- Everything the pattern's own text cannot be pointed at for. A failure WITH a
@@ -986,6 +1058,65 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             </p>
                         </section>
                     </template>
+
+                    <!--
+                      The case as code, at the foot of the answer: the question a visitor asks after
+                      "what does this pattern do" is "what do I write", and this is the demo's own
+                      call with their inputs in it. Shut until asked for, because a block of code
+                      above the answer is a screenful between them and what they came for.
+                    -->
+                    <section class="snippet-region" aria-label="The case as C#">
+                        <button
+                            ref="snippetToggle"
+                            class="button snippet-toggle"
+                            type="button"
+                            :aria-expanded="snippetOpen"
+                            aria-controls="snippet-panel"
+                            @click="toggleSnippet"
+                        >
+                            C# for this case
+                            <span aria-hidden="true" :class="snippetOpen ? 'chevron chevron-open' : 'chevron'">&#9662;</span>
+                        </button>
+
+                        <!--
+                          Rendered whether it is open or not and `hidden` when it is shut, because
+                          the button above names it and an id that resolves to nothing names nothing
+                          - the same fault the tab set had. `hidden` also keeps the closed panel out
+                          of the accessibility tree and out of the tab order.
+                        -->
+                        <div
+                            id="snippet-panel"
+                            class="snippet-panel"
+                            :hidden="!snippetOpen"
+                            @keydown.esc="closeSnippet"
+                        >
+                            <!--
+                              A tab stop, a role and a name, as the tables and the caret line are
+                              (S71): code does not wrap, so this is one more region only a pointer
+                              could scroll otherwise. It is also where the focus lands on opening.
+                            -->
+                            <pre
+                                ref="snippetCode"
+                                class="snippet"
+                                tabindex="0"
+                                role="region"
+                                aria-label="C# for this case, scrollable sideways"
+                            ><span
+                                v-for="(token, i) in snippetTokens"
+                                :key="i"
+                                :class="'tok tok-' + token.kind"
+                            >{{ token.text }}</span></pre>
+                            <div class="snippet-actions">
+                                <button class="button snippet-copy" type="button" @click="copySnippet">
+                                    Copy
+                                </button>
+                                <p class="note">
+                                    Paste it into a console project after
+                                    <code class="font-mono">dotnet add package FuzzyRegex</code>.
+                                </p>
+                            </div>
+                        </div>
+                    </section>
                 </template>
             </section>
         </main>

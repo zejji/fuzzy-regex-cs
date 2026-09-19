@@ -640,3 +640,36 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-19 (S73): a layout test asserts over the stylesheet the browser RECEIVES, not the one the repository holds. `demo/web/tests/built-css.ts` runs Vite's JavaScript API in process (`configFile: false`, `write: false`, the same Tailwind plugin) and its output is byte-identical to `npm run build` - 24,144 characters, md5 `ebc4e84e067ef6dbfc926c70e5a4984a`, in about 130 ms, re-runnable from `tools/probes/demo-built-css-matches-production.test.ts`. The source-reading version both failed on edits that changed nothing (two tests broke on merging two identical `overflow-y` rules into one selector list) and passed while the shipped shell was sized in `100vh`, which is the bug chunk 2 shipped.
 - 2026-09-19 (S73): a window that narrows past the shell's media gate opens whichever disclosure holds the focus, rather than re-focusing something afterwards. Vue's default pre-flush watcher runs before the DOM update, so `document.activeElement` is still the focused control and the region is never hidden at all - the focus does not move, which is what WCAG 3.2.2 asks, and there is no focus restoration to get wrong.
 - 2026-09-19 (S73): which disclosure the gate opened is remembered per region (`openedByGate`), not as one flag, and a visitor's press clears ownership only of the region they pressed. Both halves are load-bearing and neither was tested until a mutation run said so: with the rules written for the samples panel alone, five mutants survived the suite - dropping the `=== which` guard, narrowing it to samples, reverting one `@click` to the inline toggle, and deleting the `advanced` line of the widen-close. `tests/layout.test.ts` therefore runs every ownership rule as `test.each` over both regions.
+- 2026-09-19 (S73): the snippet panel's C# literals use three forms, not two. A value holding a
+  carriage return, U+0085, U+2028 or U+2029 cannot be a raw string literal - C# ends a line on all
+  four, so `a\r\nb` came back from the compiler as `a\nb` and a U+2028 in an indented one is
+  `error CS8999` - so those values take an ordinary escaped literal instead, one line, every
+  character spelt out. Reachable from the page through the fragment (`#s=a%0D%0Ab`), not through the
+  textarea. Evidence: `tools/probes/demo-snippet-compiles.mjs`, case "a carriage return, U+2028,
+  U+2029 and U+0085", prints `subject OK`.
+- 2026-09-19 (S73): the snippet reads the mode the way `DemoEngine.TryParseMode` does
+  (`Trim().ToLowerInvariant()`), because the fragment carries it as typed and `#m=Partial` is a case
+  the engine answers - compared exactly, the panel showed a walk under a partial answer.
+- 2026-09-19 (S73): the snippet generator trims the way .NET trims, not the way JavaScript does.
+  `tools/probes/demo-trim-matches-dotnet.mjs` compiles and runs the C# that walks the BMP:
+  `char.IsWhiteSpace` is true for 25 code points, .NET trims U+0085 and JavaScript does not,
+  JavaScript trims U+FEFF and .NET does not, the other twenty-four agree. `snippet.ts` therefore has
+  a `trimmed()` of its own at all four places `DemoEngine` trims, so `#m=partial%C2%85` shows a
+  partial answer with a partial snippet rather than a walk. The same probe drives all 65,531
+  reachable code units through `toCSharp` and reports 0 disagreements.
+- 2026-09-19 (S73): `snippet.ts`'s `trimmed()` is an index walk and must not go back to
+  `^[ws]+|[ws]+$`. The trailing alternative restarts inside every interior whitespace run, which is
+  quadratic: over three runs of `tools/probes/demo-trim-matches-dotnet.mjs` on 2026-09-19 the regex
+  took 101-422 ms for 12.5k characters of U+00A0 and 5.4-10.3 s for 100k, four times per doubling,
+  against 0-2 ms for the walk at every size, and the panel regenerates on every keystroke. Pinned by
+  `snippet.test.ts > a long run of whitespace does not freeze the panel` (200 ms budget).
+- 2026-09-19 (S73): a non-ASCII whitespace character in `demo/web` source is written as an escape
+  (`\u{a0}`, `\u{2028}`), never as the character itself. A raw U+00A0 renders as a space in every
+  reader: it sent this sitting's blind reviewer and then its independent verifier to opposite wrong
+  conclusions about the same test in one afternoon. The `u` flag is what makes `\u{...}` legal in a
+  regex literal, so the flag stays.
+- 2026-09-19 (S73): the snippet deliberately omits the page's display caps. `DemoEngine` passes
+  `count: MaxMatches` to `Replace` and stops its walk at 1,000 matches; 1,000 is this page's limit
+  and not the library's, and a visitor's own code should rewrite the whole subject. The page says
+  out loud when it truncates. Pinned by `snippet.test.ts > replace mode prints the rewritten
+  subject`, which asserts the whole snippet, so a `count:` argument would fail it.

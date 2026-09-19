@@ -71,6 +71,19 @@ const PAIRS: readonly (readonly [string, string, number, string])[] = [
     ['--color-edit-ins', '--color-white', 4.5, 'an insertion count in the table'],
     ['--color-edit-del', '--color-white', 4.5, 'a deletion count in the table'],
 
+    // The snippet panel, which sits on slate-50 rather than on the white around it. Tailwind's own
+    // palette and no token of ours: these five are read at 12 px, so they are held to 4.5:1, and
+    // the code says the same thing without any of them.
+    ['--color-slate-900', '--color-slate-50', 4.5, 'the uncoloured part of the snippet'],
+    ['--color-violet-700', '--color-slate-50', 4.5, 'a keyword in the snippet'],
+    ['--color-emerald-700', '--color-slate-50', 4.5, 'a string in the snippet'],
+    ['--color-slate-600', '--color-slate-50', 4.5, 'a comment in the snippet'],
+    ['--color-orange-700', '--color-slate-50', 4.5, 'a number in the snippet'],
+    // slate-300, which every other box on the white side uses, is 1.42:1 against this fill and
+    // 1.48:1 against the white around it - measured, not guessed - so the panel would have no
+    // visible edge at all. slate-400 is 2.51:1 and still short of it.
+    ['--color-slate-500', '--color-slate-50', 3, "the snippet panel's border: 1.4.11"],
+
     // The match highlights, measured in S72 and held here so the figures cannot drift silently.
     ['--color-slate-900', '--color-hit-a', 4.5, 'the subject inside a match'],
     ['--color-slate-900', '--color-hit-b', 4.5, 'the subject inside the next match along'],
