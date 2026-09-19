@@ -84,9 +84,11 @@ a non-backtracking automaton or a different fuzzy algebra and must not be copied
 
 `docs/plan/2026-09-18-optimisation-research.md` is the record: regex-automata/RE2/Navarro (§1), .NET
 Regex and PCRE2 (§2), literature 2018-2026 and hardware (§3), with every quote and URL. Ten items
-went into S60 (8-17), one workload into S58, one verification item into S62. Two bets are recorded
-for the owner's decision and are NOT in any slice: auto-atomicity/auto-possessification (a compile
-time rewrite, proposed as S62b) and selective memoisation of failed positions (Davis et al. 2021,
-extended to lookaround and atomic groups by Fujinami and Hasuo 2024), which is the one published
-technique that makes a backtracker linear without changing its answers and the fix for the
-`(a|a)*b` class; it needs the fuzzy counters in its key and is off for backreferences and verbs.
+went into S60 (8-17), one workload into S58, one verification item into S62. Two bets went to the
+owner and, on 2026-09-19, into the plan as experiment slices (spec amendment 28), each free to end
+in "reverted, recorded": **`docs/plan/slices/S62b-auto-atomicity-experiment.md`**,
+auto-atomicity/auto-possessification (a compile time rewrite), and
+**`docs/plan/slices/S62c-memoisation-spike.md`**, selective memoisation of failed positions (Davis
+et al. 2021, extended to lookaround and atomic groups by Fujinami and Hasuo 2024), which is the one
+published technique that makes a backtracker linear without changing its answers and the fix for
+the `(a|a)*b` class; it needs the fuzzy counters in its key and is off for backreferences and verbs.

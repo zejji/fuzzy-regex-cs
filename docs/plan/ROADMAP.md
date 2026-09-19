@@ -359,7 +359,12 @@ strict manifest, until upstream itself is fixed.
 library has anything to borrow. Two prefilter refinements were folded into S60 (a rarity gate on the
 skip character; a large-list fast path for `\L<name>`); its automaton design and fuzzy algebra are
 out of bounds because this port returns mrab-regex's answers exactly. Full table in
-`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`.
+`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`. The two bets the wider research sweep of
+2026-09-18 left for the owner are now planned as experiments rather than left on a list (spec
+amendment 28, owner decision 2026-09-19): **S62b** rewrites loops nothing can backtrack into as
+atomic behind PCRE2's guard list, and **S62c** is a one-sitting spike on selective memoisation of
+failed positions, both bounded by the oracle at three seeds and both allowed to end in "reverted,
+recorded".
 
 **Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
@@ -704,6 +709,23 @@ the release and the README carries the link at 1.0. Phases 8 and 9 start now, in
 Phase 6 mutation queue and Phase 7, each in its own worktree with `-Phase`. Running the demo
 locally and deploying it to GitHub Pages are documented step by step in `demo/README.md`, written
 by S71.
+
+**Phase 9 reopens for one slice, S73 (owner decision, 2026-09-19; spec amendment 29).** S72 closed
+the phase on features. The owner's first look at the live page judged it as a product and found
+seven faults: the match results sit below the fold on a laptop ("not intuitive at all"); the copy
+is "horrible AI-speak"; the design is flat; the layout is a web page rather than an application;
+there is no way to take the current case away as C#; the GitHub link is only in the footer; and the
+match numbers look like links while appearing to do nothing. **S73** answers all seven in one
+slice: a fixed shell with its own scroll regions so the answer is above the fold at 1366x768 and
+1440x900, every user-facing string rewritten against a banned-phrase list that a test enforces, one
+visual identity with the fuzzy edit types given meaning in colour, a "C# for this case" panel that
+prints the API `DemoEngine` itself calls and copies to the clipboard, the GitHub link in the header,
+and two-way linking between a highlight and its match row. Layout and copy decisions are cited to
+NN/g, Material's window size classes, GOV.UK's style guide and Wikipedia's signs-of-AI-writing list,
+named in the slice. Nothing in the engine, the worker, the caps or the single-source help changes,
+and the accessibility rules from S71 and S72 are met again rather than traded away. The draft is
+`docs/plan/slices/S73-demo-as-a-product.md`; the owner reviews it before any sitting runs, and the
+phase closes again when it lands.
 
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,

@@ -904,3 +904,51 @@ amended text is inline above; this list is the record of what changed and why.
     S71 absorbs the change (its slice file carries the design bar and toolchain rule); the
     vendored `vue.esm-browser.prod.js` and the hand-written ESM modules from the S71 checkpoint are
     superseded, their logic ported into typed modules with their tests kept.
+
+28. **Phase 7 gains two experiment slices, S62b (auto-atomicity) and S62c (a memoisation spike)
+    (2026-09-19, owner decision).** The research sweep of 2026-09-18 ended with two bets recorded
+    for the owner and in no slice: the compile-time rewrite that makes loops nothing can backtrack
+    into atomic, which .NET and PCRE2 both ship, and selective memoisation of failed positions
+    (Davis et al. 2021, extended to lookaround and atomic grouping by Fujinami and Hasuo 2024),
+    the one published technique that makes a backtracker linear without changing its answers. Both
+    attack the class this port measured as catastrophic - `(a|a)*b` at 10.6 s for n=24 - from
+    opposite ends, and the owner's ruling is that no stone should be left unturned: they are
+    planned, not left on a list. **S62b** is a bounded experiment after S62, so the inner loop is
+    measured first and the rewrite's win is attributed honestly; PCRE2's guard list is ported
+    verbatim and this port's own three guards - fuzzy sections, the backtracking verbs,
+    conditionals - are added, with the analysis stopping rather than guessing wherever it cannot
+    prove the premise. **S62c** is a spike of one sitting that merges no production code unless its
+    exit criteria pass, and whose deliverable is a measured answer plus a recommendation: promote
+    to a full slice, or record why not. What does not change is the rule everything else in this
+    plan rests on: the answer-identity rule stands, so the oracle at three seeds with
+    `ExpectedDivergences` strict decides both, and an optimisation that changes an answer has
+    ported a bug (ROADMAP, owner rule 2026-09-12); the permanent pins in `BacktrackingVerbTests`,
+    `PartialMatchingTests` and `ReverseMatchingTests` are not negotiable for either. **Both may end
+    in "reverted, recorded"** - a negative number written into `OPTIMISATION-NOTES.md` with its
+    shapes and its reason is the successful outcome of an experiment, not a failed slice, and is
+    what stops it being re-attempted blind. Phase 7's six committed slices (S58-S63) stand as
+    drafted and gain these two experiments between S62 and S63; estimates unchanged.
+
+29. **Phase 9 reopens for S73, which judges the demo as a product rather than as a feature tour
+    (2026-09-19, owner decision).** S72 closed the phase on the strength of its features. The
+    owner's first look at the live page judged it on what a visitor meets, and named seven faults:
+    the match results sit below the fold on a laptop and are "not intuitive at all"; the copy is
+    "horrible AI-speak"; the visual design is flat; the layout is a web page rather than an
+    application; there is no way to take the case away as C#; the GitHub link is only in the
+    footer; and the match numbers look like links and appear to do nothing when clicked. S73 is one
+    slice against those seven, drafted as `docs/plan/slices/S73-demo-as-a-product.md` and reviewed
+    by the owner before any sitting runs. Three of the seven are specified rather than left to
+    taste, because taste is what produced the current page: the layout is a fixed shell with its
+    own scroll regions, at breakpoints taken from Material's window size classes and with panel and
+    tab behaviour from NN/g, each decision cited; the copy is enforced by a banned-phrase test built
+    from Wikipedia's signs-of-AI-writing list and GOV.UK's words to avoid, so a regression is a red
+    test rather than an opinion; and the C# snippet prints the API `DemoEngine` itself calls, is
+    compiled for real during the sitting, and is coloured by a hand-written tokenizer, since a
+    highlighter library would be larger than the feature it serves. **What does not change:** no
+    CDN and every dependency pinned (amendment 27); `npm run build` type-checks and runs the tests
+    before it bundles; the worker, the caps and the warm spare from S70 and S71; the help panels
+    generated from `docs/COMPARISON.md`, which stays the single source; the accessibility rules
+    S71 and S72 set, which are met again rather than traded for the new look; and the engine, which
+    S73 does not touch, so the answer-identity rule is not in play. S72's decision to leave
+    regex101's code generator out is reversed in one narrow respect: one language, this library's
+    own API. One slice, sittings unestimated; the phase closes again when it lands.
