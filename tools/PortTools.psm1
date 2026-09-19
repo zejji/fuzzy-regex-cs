@@ -799,9 +799,9 @@ function Read-Allowance {
     param([string[]]$Paths = @(
         (Join-Path $env:USERPROFILE '.claude\last-usage.json'),
         (Join-Path $env:USERPROFILE '.claude\last-status.json')))
-    $file = Get-ChildItem -LiteralPath ($Paths | Where-Object { Test-Path -LiteralPath $_ }) -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $file) { return $null }
+    $existing = @($Paths | Where-Object { Test-Path -LiteralPath $_ })
+    if ($existing.Count -eq 0) { return $null }
+    $file = Get-ChildItem -LiteralPath $existing | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     # The driver runs under Set-StrictMode, where a missing property throws rather than yielding
     # $null, and the statusline snapshot is rewritten non-atomically on every prompt, so a read can
     # meet a half-written or shape-less file (it did, 2026-09-19 04:12: "The property 'rate_limits'
