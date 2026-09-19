@@ -229,6 +229,80 @@ foreach (Match m in matches)
 
 `"cot"` matches `"cat"` from the list with one substitution; `"dog"` matches exactly.
 
+## Matching modes the built-in engine does not have
+
+Three switches that change how a search is run rather than what the pattern means. All three are
+upstream's, and none of them has an equivalent in `System.Text.RegularExpressions`.
+
+### `FuzzyRegexOptions.Posix` / `(?p)`: leftmost-longest instead of leftmost-first
+
+An alternation normally takes the first branch that matches at the leftmost position - what Perl,
+.NET and Python all do. With POSIX matching the engine keeps looking at that same position and takes
+the longest match instead, which is the rule `grep` and `awk` follow.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match first = FuzzyRegex.Match("abcd", "a|ab|abc");
+Console.WriteLine(first.Value);   // a
+
+Match longest = FuzzyRegex.Match("abcd", "a|ab|abc", FuzzyRegexOptions.Posix);
+Console.WriteLine(longest.Value);   // abc
+```
+
+It costs time, because the position is not settled until every branch has been tried, and it is the
+right answer when a rule set has to agree with a POSIX tool rather than with Perl.
+
+### Partial matching: `partial: true` means "so far, so good"
+
+A partial match is one that ran out of subject before it ran out of pattern. It is how a search box
+tells a half-typed entry from a wrong one: keep accepting while the match is partial, reject when it
+is neither partial nor complete. `Match.PartialMatch` says which of the two a successful match is,
+and it is only ever true when a complete match was not available at that position.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var date = new FuzzyRegex(@"\d{4}-\d{2}-\d{2}");
+
+Match sofar = date.Match("2026-09", partial: true);
+Console.WriteLine((sofar.Success, sofar.PartialMatch, sofar.Value));   // (True, True, 2026-09)
+
+Match whole = date.Match("2026-09-19", partial: true);
+Console.WriteLine((whole.Success, whole.PartialMatch));   // (True, False)
+
+Match wrong = date.Match("not a date", partial: true);
+Console.WriteLine((wrong.Success, wrong.PartialMatch, wrong.Index));   // (True, True, 10)
+```
+
+The third answer is the one to read twice: an empty partial match at the end of the subject is
+upstream's way of saying "nothing here contradicts the pattern yet", because the empty tail of the
+subject is a prefix of something the pattern could still accept. `partial` is available on
+`Match`, `MatchAtStart` and `FullMatch` only. The scanning entry points do not take it, because
+upstream's `finditer` and `findall` do not either; neither does `IsMatch`, which asks a yes/no
+question that a partial match cannot answer without the match itself to inspect.
+
+### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right
+
+The search starts at the end of the subject and works backwards, so the first match found is the
+last one in the text. The pattern itself is not reversed: it still reads left to right.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match forwards = FuzzyRegex.Match("one two three", @"\w+");
+Console.WriteLine(forwards.Value);   // one
+
+Match backwards = FuzzyRegex.Match("one two three", @"\w+", FuzzyRegexOptions.RightToLeft);
+Console.WriteLine(backwards.Value);   // three
+```
+
+This is not `RegexOptions.RightToLeft`'s meaning by accident - the built-in engine's flag does the
+same thing - but the name is the only part the two share: `FuzzyRegexOptions` carries upstream's bit
+values, not `RegexOptions`'s. The one place a reversed search answers differently from upstream is a
+reversed *partial* match at a slice start; see "**Reversed partial matches run out of text at the
+slice start**" below.
+
 ## Behaviour that differs and why
 
 One section per SHIPPED row in `docs/DIVERGENCES.md`, quoting each row's heading exactly. See that
@@ -750,11 +824,13 @@ try
 }
 catch (FuzzyRegexParseException e)
 {
-    Console.WriteLine(e.Message);   // compiling this pattern needs more than 1000000 nodes, ...
+    // The rest of the message names the limit that was set and how to raise it.
+    Console.WriteLine(e.Message.Split(',')[0]);   // compiling this pattern needs more than 1000000 nodes
 }
 
 // Or lower the budget, which is the point of it: compiling a pattern that arrived from outside
 // the process under a ceiling you chose rather than the default quarter of a gigabyte.
+string untrustedPattern = @"(\w+)\s*=\s*(\w+)";   // whatever arrived from outside
 var strict = new FuzzyRegex(
     untrustedPattern,
     FuzzyRegexOptions.None,

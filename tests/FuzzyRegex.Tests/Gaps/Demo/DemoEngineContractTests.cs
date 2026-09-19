@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using AwesomeAssertions;
+using AwesomeAssertions.Execution;
 using FuzzyRegexDemo.Wasm;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
@@ -98,6 +100,10 @@ public sealed class DemoEngineContractTests
         )
             .Should()
             .Be((100_000, 1_000, 200, 1_000, 50_000, 40, TimeSpan.FromSeconds(2)));
+
+        (DemoEngine.MaxReplacementLength, DemoEngine.MaxNamedListsLength, DemoEngine.MaxReplacedLength)
+            .Should()
+            .Be((1_000, 2_000, 200_000));
     }
 
     [Test]
@@ -389,6 +395,263 @@ public sealed class DemoEngineContractTests
         (json.RootElement.TryGetProperty("matches", out _) || json.RootElement.TryGetProperty("error", out _))
             .Should()
             .BeTrue(answer);
+    }
+
+    /// <summary>
+    /// Partial mode reports the match that ran out of subject, and flags it. This is the whole point
+    /// of the mode: a search box has to tell "not yet" from "no".
+    /// </summary>
+    /// <remarks>
+    /// Provenance, <c>regex 2026.9.10</c> run 2026-09-19:
+    /// <c>regex.compile(r'\d{4}-\d{2}-\d{2}', VERSION1).search('2026-09', partial=True)</c> matches
+    /// <c>(0, 7)</c> with <c>partial=True</c>, and the same call without <c>partial=True</c> prints
+    /// <c>None</c>.
+    /// </remarks>
+    [Test]
+    public void Partial_mode_reports_the_match_that_ran_out_of_subject()
+    {
+        JsonElement[] partial = [.. Matches(DemoEngine.Run(@"\d{4}-\d{2}-\d{2}", "", "2026-09", "partial", "", ""))];
+
+        using (new AssertionScope())
+        {
+            partial.Should().ContainSingle();
+            Span(partial[0]).Should().Be((0, 7));
+            partial[0].GetProperty("partialMatch").GetBoolean().Should().BeTrue();
+
+            // The ordinary walk answers the other question, and answers it "no".
+            Matches(DemoEngine.Run(@"\d{4}-\d{2}-\d{2}", "", "2026-09")).Should().BeEmpty();
+        }
+    }
+
+    /// <summary>
+    /// A complete match found in partial mode is not flagged, so the page can tell the two apart
+    /// without re-running anything. The property is absent rather than <c>false</c>, which is what
+    /// keeps the S71 wire format unchanged for every answer that is not partial.
+    /// </summary>
+    /// <remarks>
+    /// Provenance, <c>regex 2026.9.10</c> run 2026-09-19:
+    /// <c>regex.compile(r'\d{4}-\d{2}-\d{2}', VERSION1).search('2026-09-19', partial=True)</c>
+    /// matches <c>(0, 10)</c> with <c>partial=False</c>.
+    /// </remarks>
+    [Test]
+    public void A_complete_match_found_in_partial_mode_is_not_flagged_as_partial()
+    {
+        JsonElement[] matches = [.. Matches(DemoEngine.Run(@"\d{4}-\d{2}-\d{2}", "", "2026-09-19", "partial", "", ""))];
+
+        using (new AssertionScope())
+        {
+            Span(matches[0]).Should().Be((0, 10));
+            matches[0].TryGetProperty("partialMatch", out _).Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// Replace mode returns the whole rewritten subject alongside the matches, so the page can show
+    /// the result and still highlight what produced it.
+    /// </summary>
+    /// <remarks>
+    /// Provenance, <c>regex 2026.9.10</c> run 2026-09-19:
+    /// <c>regex.compile(r'(a)(b)', VERSION1).sub(r'\2\1', 'ab')</c> is <c>'ba'</c>.
+    /// </remarks>
+    [Test]
+    public void Replace_mode_returns_the_rewritten_subject_and_the_matches()
+    {
+        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("(a)(b)", "", "ab", "replace", @"\2\1", ""));
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("replaced").GetString().Should().Be("ba");
+            json.RootElement.GetProperty("matches").GetArrayLength().Should().Be(1);
+        }
+    }
+
+    /// <summary>
+    /// A dollar sign in a template is ordinary text. .NET users arrive expecting <c>$1</c>, and the
+    /// demo has to show them upstream's answer rather than .NET's, because that is what this library
+    /// does.
+    /// </summary>
+    /// <remarks>
+    /// Provenance, <c>regex 2026.9.10</c> run 2026-09-19:
+    /// <c>regex.compile(r'(a)', VERSION1).sub('$1', 'a')</c> is <c>'$1'</c>.
+    /// </remarks>
+    [Test]
+    public void A_dollar_reference_in_a_template_is_literal_text()
+    {
+        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("(a)", "", "a", "replace", "$1", ""));
+
+        json.RootElement.GetProperty("replaced").GetString().Should().Be("$1");
+    }
+
+    /// <summary>
+    /// A replacement far larger than its subject is clipped, and the answer says it was truncated.
+    /// This is the one operation whose output is not bounded by the subject cap.
+    /// </summary>
+    [Test]
+    public void A_replacement_larger_than_the_cap_is_clipped_and_flagged()
+    {
+        // 1,000 matches, each rewritten as 1,000 characters: a million characters out of a subject
+        // of a thousand, which is the shape the cap exists for, reached without a subject at the
+        // cap and the slow walk that would come with it.
+        using JsonDocument json = JsonDocument.Parse(
+            DemoEngine.Run(
+                "a",
+                "",
+                new string('a', 1_000),
+                "replace",
+                new string('x', DemoEngine.MaxReplacementLength),
+                ""
+            )
+        );
+
+        using (new AssertionScope())
+        {
+            json.RootElement.GetProperty("replaced").GetString()!.Length.Should().Be(DemoEngine.MaxReplacedLength);
+            json.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// Named lists reach the engine, which is what makes <c>\L&lt;name&gt;</c> a demonstrable feature
+    /// rather than a documented one.
+    /// </summary>
+    /// <remarks>
+    /// Provenance, <c>regex 2026.9.10</c> run 2026-09-19:
+    /// <c>regex.compile(r'\L&lt;f&gt;', VERSION1, f=['apple', 'cherry']).finditer('apple pie cherry')</c>
+    /// gives spans <c>(0, 5)</c> and <c>(10, 6)</c>.
+    /// </remarks>
+    [Test]
+    public void A_named_list_reaches_the_engine()
+    {
+        JsonElement[] matches =
+        [
+            .. Matches(DemoEngine.Run(@"\L<f>", "", "apple pie cherry", "", "", "f: apple, cherry")),
+        ];
+        (int, int)[] upstream = [(0, 5), (10, 6)];
+
+        matches.Select(Span).Should().Equal(upstream);
+    }
+
+    [Test]
+    [Arguments("fruit apple, banana")] // no colon, so nothing says where the name ends
+    [Arguments(": apple")] // a list with no name
+    public void A_named_list_the_demo_cannot_read_is_an_error_showing_the_line(string namedLists)
+    {
+        Error(DemoEngine.Run(@"\L<fruit>", "", "apple", "", "", namedLists)).Should().Contain("one list per line");
+    }
+
+    [Test]
+    public void A_named_list_with_no_words_is_an_error()
+    {
+        Error(DemoEngine.Run(@"\L<fruit>", "", "apple", "", "", "fruit:")).Should().Contain("no words in it");
+    }
+
+    [Test]
+    public void A_named_list_defined_twice_is_an_error()
+    {
+        Error(DemoEngine.Run(@"\L<fruit>", "", "apple", "", "", "fruit: apple\nfruit: cherry"))
+            .Should()
+            .Contain("defined twice");
+    }
+
+    [Test]
+    public void An_unknown_mode_is_an_error_naming_it()
+    {
+        Error(DemoEngine.Run("a", "", "aaa", "split", "", "")).Should().Contain("'split' is not a mode");
+    }
+
+    /// <summary>
+    /// The two new inputs are capped like the three old ones, and for the same reason: everything
+    /// here arrives from a stranger's browser.
+    /// </summary>
+    [Test]
+    public void The_new_inputs_are_refused_over_their_caps()
+    {
+        using (new AssertionScope())
+        {
+            Error(DemoEngine.Run("a", "", "aaa", "replace", new string('x', DemoEngine.MaxReplacementLength + 1), ""))
+                .Should()
+                .Contain(DemoEngine.MaxReplacementLength.ToString(CultureInfo.InvariantCulture));
+
+            Error(DemoEngine.Run("a", "", "aaa", "", "", new string('x', DemoEngine.MaxNamedListsLength + 1)))
+                .Should()
+                .Contain(DemoEngine.MaxNamedListsLength.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    /// <summary>
+    /// An empty mode is the ordinary walk, pinned against the literal S71 answer rather than against
+    /// the three-argument overload - which is defined as this call, so comparing the two would be
+    /// comparing a value with its own definition and could not fail (blind review, 2026-09-19).
+    /// </summary>
+    [Test]
+    public void An_empty_mode_is_the_ordinary_walk()
+    {
+        DemoEngine
+            .Run(@"(\w)+", "", "abc", "", "", "")
+            .Should()
+            .Be(
+                """{"matches":[{"index":0,"length":3,"counts":{"substitutions":0,"insertions":0,"deletions":0},"groups":[{"number":0,"name":"0","success":true,"index":0,"length":3,"captures":[{"index":0,"length":3}]},{"number":1,"name":"1","success":true,"index":2,"length":1,"captures":[{"index":0,"length":1},{"index":1,"length":1},{"index":2,"length":1}]}]}],"truncated":false}"""
+            );
+    }
+
+    /// <summary>
+    /// A partial match that exhausts the span budget on its own says so. One match can: a repeated
+    /// group over a long subject is one capture per repetition.
+    /// </summary>
+    /// <remarks>
+    /// The blind review of 2026-09-19 found this reported <c>truncated: false</c> with 49,997 of
+    /// 60,000 captures rendered, which is an answer that is short of the truth and does not say so.
+    /// </remarks>
+    [Test]
+    public void A_partial_answer_whose_capture_list_was_clipped_says_truncated()
+    {
+        using JsonDocument json = JsonDocument.Parse(
+            DemoEngine.Run(@"(\w)+", "", new string('a', DemoEngine.MaxSpans + 10_000), "partial", "", "")
+        );
+
+        json.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Replace mode stops at <see cref="DemoEngine.MaxMatches"/> occurrences and says the answer was
+    /// truncated, which is what bounds the size of the string it builds in the worker's heap.
+    /// </summary>
+    /// <remarks>
+    /// The blind review of 2026-09-19 measured a 695 MB peak working set for a 100,000-character
+    /// subject and a 1,000-character template, both inside their own caps.
+    /// </remarks>
+    [Test]
+    public void Replace_stops_at_the_match_cap_and_says_so()
+    {
+        using JsonDocument json = JsonDocument.Parse(
+            DemoEngine.Run("a", "", new string('a', DemoEngine.MaxMatches + 500), "replace", "bb", "")
+        );
+
+        using (new AssertionScope())
+        {
+            // 1,000 replacements of two characters, then the 500 characters nothing replaced.
+            json.RootElement.GetProperty("replaced")
+                .GetString()!
+                .Length.Should()
+                .Be((DemoEngine.MaxMatches * 2) + 500);
+            json.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// A template naming a group the pattern does not have is an error a human can read: the .NET
+    /// parameter name the exception carries is not part of the demo's vocabulary.
+    /// </summary>
+    [Test]
+    public void A_template_naming_a_group_that_does_not_exist_is_a_readable_error()
+    {
+        string error = Error(DemoEngine.Run("(a)", "", "a", "replace", @"\g<nope>", ""));
+
+        using (new AssertionScope())
+        {
+            error.Should().NotContain("Parameter");
+            error.Should().NotBeNullOrWhiteSpace();
+        }
     }
 
     private static IEnumerable<JsonElement> Matches(string json)

@@ -62,15 +62,49 @@ def main():
     print(f"regex {regex.__version__}, {len(examples)} examples from {EXAMPLES}")
 
     for example in examples:
+        # The timeout sample is deliberately exponential and there is nothing upstream to compare:
+        # the demo's two-second budget is its own contract, not a parity claim. Running it here
+        # would hang this probe, which has no timeout of its own.
+        if example.get("key") == "timeout":
+            print()
+            print(f"{example['title']}  pattern={example['pattern']!r} - SKIPPED, no upstream expectation")
+            print("  the demo's MatchTimeout is its own contract; the expected answer is its error sentence")
+            continue
+
         subject = example["subject"]
         if not subject.isascii() and len(subject.encode("utf-16-le")) // 2 != len(subject):
             raise SystemExit(f"{example['title']}: subject is not BMP-only, so the spans below would not be UTF-16 offsets")
 
-        compiled = regex.compile(example["pattern"], parse_flags(example["flags"]))
-        matches = list(compiled.finditer(subject))
-        spans = [[m.start(), m.end() - m.start()] for m in matches]
+        # A named-list block is written the way the demo's own box takes it: one list per line, as
+        # `name: word, word`. Upstream takes the same lists as keyword arguments.
+        lists = {}
+        for line in example.get("namedLists", "").splitlines():
+            if not line.strip():
+                continue
+            name, _, words = line.partition(":")
+            lists[name.strip()] = [word.strip() for word in words.split(",") if word.strip()]
+
+        compiled = regex.compile(example["pattern"], parse_flags(example["flags"]), **lists)
+        mode = example.get("mode", "")
         print()
         print(f"{example['title']}  pattern={example['pattern']!r} flags={example['flags']!r} subject={subject!r}")
+        if lists:
+            print(f"  namedLists={json.dumps(lists)}")
+
+        if mode == "partial":
+            # The demo's partial mode asks the single-match entry point, because upstream's
+            # scanning functions take no `partial` argument and neither do the port's.
+            one = compiled.search(subject, partial=True)
+            matches = [one] if one else []
+            print(f"  mode=partial partial={bool(one and one.partial)}")
+        elif mode == "replace":
+            print(f"  mode=replace replacement={example['replacement']!r}")
+            print(f"  replaced={compiled.sub(example['replacement'], subject)!r}")
+            matches = list(compiled.finditer(subject))
+        else:
+            matches = list(compiled.finditer(subject))
+
+        spans = [[m.start(), m.end() - m.start()] for m in matches]
         print(f"  matches={len(matches)} spans={json.dumps(spans)}")
         for index, match in enumerate(matches[:3]):
             counts = match.fuzzy_counts  # (substitutions, insertions, deletions)

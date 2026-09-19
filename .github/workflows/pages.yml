@@ -22,6 +22,10 @@ on:
       - 'src/**'
       - 'tools/run-wasm-smoke.ps1'
       - 'tools/build-demo-web.ps1'
+      # The help panels are generated from this file by this script (S72), so an edit to either is
+      # a change to what the deployed page says.
+      - 'tools/build-demo-help.ps1'
+      - 'docs/COMPARISON.md'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 

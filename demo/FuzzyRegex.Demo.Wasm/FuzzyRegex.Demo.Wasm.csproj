@@ -15,7 +15,6 @@
       RID does not fix the one thing it looked like it would - see Properties/AssemblyInfo.cs.
     -->
 
-
     <!--
       Required, not advisory: "The JS interop API requires enabling AllowUnsafeBlocks"
       (learn.microsoft.com/aspnet/core/client-side/dotnet-interop/wasm-browser-app, fetched

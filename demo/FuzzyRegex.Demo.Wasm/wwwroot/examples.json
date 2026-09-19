@@ -1,31 +1,121 @@
 [
   {
-    "title": "Up to two errors",
-    "note": "The library's reason to exist: a pattern that still matches when the subject is not quite right. {e<=2} allows up to two errors of any kind.",
-    "pattern": "(?:colour){e<=2}",
+    "key": "fuzzy",
+    "title": "Up to one error",
+    "note": "The library's reason to exist: a pattern that still matches when the subject is not quite right. Raise the budget to 2 and \"collar\" is reached as well.",
+    "pattern": "(?:colour){e<=1}",
     "flags": "",
     "subject": "the color of the collar"
   },
   {
-    "title": "Per-error-type limits",
+    "key": "fuzzy",
+    "title": "A budget per kind of error",
     "note": "Errors are counted separately, so a pattern can allow a substitution without allowing a deletion. Every match reports what it actually spent.",
     "pattern": "(?:foobar){i<=1,d<=1,s<=1}",
     "flags": "",
     "subject": "xfoobat"
   },
   {
-    "title": "Best match, not first match",
-    "note": "Without BestMatch the engine returns the leftmost match it can reach. With it, the engine keeps looking and returns the cheapest one.",
-    "pattern": "(?:kitten){e<=3}",
-    "flags": "BestMatch",
-    "subject": "the sitting kitten"
+    "key": "fuzzy",
+    "title": "Weighted cost, not a count",
+    "note": "A cost equation prices each kind of error. A kind the equation never names is free, and the weighted total is what has to stay under the limit.",
+    "pattern": "(foobar){i<=1,d<=2,s<=3,2d+1s<4}",
+    "flags": "",
+    "subject": "3oifaowefbaoraofuiebofasebfaobfaorfeoaro"
   },
   {
-    "title": "Enhanced match",
-    "note": "EnhanceMatch keeps the same span and reduces the errors inside it, so the reported cost is the honest one.",
-    "pattern": "(?:organise){e<=3}",
+    "key": "bestmatch",
+    "title": "The first match the budget allows",
+    "note": "With an unbounded budget and no ranking, the engine stops at the leftmost thing that fits - six substitutions deep, and not what anyone was looking for. Compare the next two samples on this same subject.",
+    "pattern": "(foobar){e}",
+    "flags": "",
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "bestmatch",
+    "title": "BestMatch: the closest fit instead",
+    "note": "BestMatch keeps looking and returns the cheapest match in the whole subject. Same pattern, same subject, one deletion instead of six substitutions.",
+    "pattern": "(foobar){e}",
+    "flags": "BestMatch",
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "enhancematch",
+    "title": "EnhanceMatch: tighten what was found",
+    "note": "EnhanceMatch keeps the first match's position and improves its fit there, rather than searching elsewhere: the span shrinks from six characters to three.",
+    "pattern": "(foobar){e}",
     "flags": "EnhanceMatch",
-    "subject": "the organisers organized it"
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "namedlists",
+    "title": "Fuzzy matching against a word list",
+    "note": "A named list is a set of literal alternatives supplied beside the pattern. With a budget on top, one pattern fuzzy-matches every word in the list at once.",
+    "pattern": "\\b(?:\\L<fruit>){e<=1}\\b",
+    "flags": "",
+    "subject": "aple bananna cherry",
+    "namedLists": "fruit: apple, banana, cherry"
+  },
+  {
+    "key": "posix",
+    "title": "Leftmost-first, as Perl and .NET do it",
+    "note": "An alternation normally takes the first branch that matches at the leftmost position, however short it is.",
+    "pattern": "a|ab|abc",
+    "flags": "",
+    "subject": "abcd"
+  },
+  {
+    "key": "posix",
+    "title": "POSIX: leftmost-longest",
+    "note": "The same pattern under POSIX rules takes the longest match at that position, which is what grep and awk do.",
+    "pattern": "a|ab|abc",
+    "flags": "Posix",
+    "subject": "abcd"
+  },
+  {
+    "key": "partial",
+    "title": "Partial: so far, so good",
+    "note": "The subject ran out before the pattern did. That is how a search box tells a half-typed entry from a wrong one. Finish the date and the match stops being partial.",
+    "pattern": "\\d{4}-\\d{2}-\\d{2}",
+    "flags": "",
+    "subject": "2026-09",
+    "mode": "partial"
+  },
+  {
+    "key": "reverse",
+    "title": "Search from the right",
+    "note": "The search starts at the end of the subject, so the first match found is the last one in the text. The pattern is not reversed; only the direction of the search is.",
+    "pattern": "\\w+",
+    "flags": "RightToLeft",
+    "subject": "one two three"
+  },
+  {
+    "key": "replace",
+    "title": "Replace with a template",
+    "note": "Replacement templates speak upstream's language: \\1 and \\g<name>, not $1. A dollar sign is ordinary text here.",
+    "pattern": "(?<year>\\d{4})-(?<month>\\d{2})",
+    "flags": "",
+    "subject": "2026-09 and 1999-12",
+    "mode": "replace",
+    "replacement": "\\g<month>/\\g<year>"
+  },
+  {
+    "key": "replace",
+    "title": "Replace what was only nearly right",
+    "note": "Replacement and fuzzy matching compose: match the misspelling within a budget, write the correct spelling back.",
+    "pattern": "(?:colour){e<=1}",
+    "flags": "",
+    "subject": "the color of the collar",
+    "mode": "replace",
+    "replacement": "colour"
+  },
+  {
+    "key": "timeout",
+    "title": "A pattern that runs out of time",
+    "note": "Nested unbounded repeats make the search exponential. The engine's own timeout stops it after two seconds and the page says so - and because the engine runs in a Web Worker, the page stays responsive while it happens.",
+    "pattern": "(a+a+)+b",
+    "flags": "",
+    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   {
     "title": "Named groups and every capture",

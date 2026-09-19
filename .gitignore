@@ -36,6 +36,10 @@ demo/web/node_modules/
 demo/web/*.tsbuildinfo
 demo/FuzzyRegex.Demo.Wasm/wwwroot/index.html
 demo/FuzzyRegex.Demo.Wasm/wwwroot/assets/
+# help.json is lifted out of docs/COMPARISON.md by tools/build-demo-help.ps1 at build time (S72).
+# Committing it would give the prose a second copy that a renamed heading no longer updates, which
+# is exactly what that script fails the build to prevent.
+demo/FuzzyRegex.Demo.Wasm/wwwroot/help.json
 
 # Local-only
 *.local.*

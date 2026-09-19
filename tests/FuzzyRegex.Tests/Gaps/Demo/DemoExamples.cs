@@ -8,7 +8,27 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// <param name="Pattern">The regular expression.</param>
 /// <param name="Flags">Zero or more <see cref="FuzzyRegexOptions"/> member names.</param>
 /// <param name="Subject">The text to search.</param>
-public sealed record DemoExampleRow(string Title, string Note, string Pattern, string Flags, string Subject)
+/// <param name="Key">
+/// The feature this example demonstrates, and the key its help panel is generated under by
+/// <c>tools/build-demo-help.ps1</c>. Empty for the syntax-tour rows, which have no help panel.
+/// </param>
+/// <param name="Mode">
+/// <c>""</c> for the ordinary walk, <c>"partial"</c> or <c>"replace"</c>. See
+/// <see cref="FuzzyRegexDemo.Wasm.DemoMode"/>.
+/// </param>
+/// <param name="Replacement">The replacement template, in replace mode only.</param>
+/// <param name="NamedLists">The pattern's <c>\L&lt;name&gt;</c> lists, one per line, as <c>name: word, word</c>.</param>
+public sealed record DemoExampleRow(
+    string Title,
+    string Note,
+    string Pattern,
+    string Flags,
+    string Subject,
+    string Key,
+    string Mode,
+    string Replacement,
+    string NamedLists
+)
 {
     /// <summary>The title, so a failing row names itself in the test report.</summary>
     public override string ToString() => Title;
@@ -59,8 +79,20 @@ internal static class DemoExamples
                     element.GetProperty("note").GetString()!,
                     element.GetProperty("pattern").GetString()!,
                     element.GetProperty("flags").GetString()!,
-                    element.GetProperty("subject").GetString()!
+                    element.GetProperty("subject").GetString()!,
+                    Optional(element, "key"),
+                    Optional(element, "mode"),
+                    Optional(element, "replacement"),
+                    Optional(element, "namedLists")
                 )),
         ];
     }
+
+    /// <summary>
+    /// A field only some rows carry, read as the empty string when it is absent - which is exactly
+    /// what the page posts and what the engine reads as "not asked", so the tests see the same
+    /// value the browser does rather than a null the JSON never contained.
+    /// </summary>
+    private static string Optional(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) ? value.GetString()! : string.Empty;
 }

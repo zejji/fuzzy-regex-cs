@@ -77,7 +77,16 @@ const answer = (event) => {
     try {
         const message = event.data ?? {};
         requestId = message.requestId;
-        json = run(message.pattern ?? '', message.flags ?? '', message.subject ?? '');
+        // Every field defaults to the empty string, which is what the engine reads as "not asked":
+        // an older page that posts only the three S71 fields still gets the S71 answer.
+        json = run(
+            message.pattern ?? '',
+            message.flags ?? '',
+            message.subject ?? '',
+            message.mode ?? '',
+            message.replacement ?? '',
+            message.namedLists ?? '',
+        );
     } catch (error) {
         // DemoEngine.Run does not throw, so reaching here means the interop layer itself failed.
         json = JSON.stringify({ error: `interop: ${error}` });

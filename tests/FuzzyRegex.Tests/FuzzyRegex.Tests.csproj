@@ -103,9 +103,6 @@
       tour has one source (S71). Gaps/Demo/DemoExamplesTests.cs checks each one against upstream's
       answer; tools/probes/demo-examples-expectations.py is where those answers come from.
     -->
-    <EmbeddedResource
-      Include="../../demo/FuzzyRegex.Demo.Wasm/wwwroot/examples.json"
-      Link="Gaps/Demo/examples.json"
-    />
+    <EmbeddedResource Include="../../demo/FuzzyRegex.Demo.Wasm/wwwroot/examples.json" Link="Gaps/Demo/examples.json" />
   </ItemGroup>
 </Project>

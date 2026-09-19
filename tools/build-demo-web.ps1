@@ -69,6 +69,12 @@ if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 12)) {
     throw "Node $version is too old: demo/web needs 22.12 or newer (see demo/web/.nvmrc, which pins 24.16.0)."
 }
 
+# The help panels come out of docs/COMPARISON.md, and this is the step that fails when a heading
+# there has been renamed (S72). It runs FIRST because it is the cheapest of the three gates: a
+# rename should not cost an npm ci and a bundle before it is reported.
+& (Join-Path $PSScriptRoot 'build-demo-help.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Generating the demo help from docs/COMPARISON.md failed.' }
+
 Write-Host "Building the demo's front end with node $version from $web."
 Push-Location $web
 try {

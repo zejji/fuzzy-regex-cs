@@ -74,6 +74,14 @@ jobs:
         shell: pwsh
         run: ./tools/check-doc-examples.ps1
 
+      - name: The demo's help must still be generatable from the documentation
+        # The demo's help panels are lifted out of docs/COMPARISON.md at build time (S72). A pull
+        # request that renames or deletes a heading the panels quote has to go red HERE, on the
+        # change that renames it, rather than on the next Pages deployment - so this runs in the
+        # library's own CI even though nothing else about the demo does.
+        shell: pwsh
+        run: ./tools/build-demo-help.ps1 -Destination $env:RUNNER_TEMP/help.json
+
       - name: The generated status board must be up to date
         shell: pwsh
         run: |
