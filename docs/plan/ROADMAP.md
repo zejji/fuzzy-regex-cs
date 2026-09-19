@@ -370,7 +370,9 @@ recorded".
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
 measurement only and changes no engine code: this machine's noise floor from two runs of an
 unchanged build, pyperf installed and probed, the EventPipe and dotTrace/Rider MCP routes proven
-end to end, `.claude/skills/optimise/SKILL.md` written from the research checklist,
+end to end, the optimise checklist written from the research (in
+`docs/plan/phase7-research/optimise-skill-pending.md`, because S58's session was refused permission
+to write under `.claude/`; it becomes `.claude/skills/optimise/SKILL.md` when the owner moves it),
 `tools/compare-benchmarks.ps1` extended with an allocation ratio and the floor, the span-copy and
 lazy-walk costs measured and written up for the owner, and `docs/plan/SYNC-DIVERGENCE.md` created
 with a script that pairs a `sync-divergence:` marker to a ledger row. **S59** adds the bounded MRU

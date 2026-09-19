@@ -850,6 +850,14 @@ Describe 'Test-AllowanceFloor' {
     It 'lets a sitting start below the floor' {
         (Test-AllowanceFloor -Allowance (Snapshot 87) -Now $script:Now).Allowed | Should -BeTrue
     }
+    It 'spends the weekly window to 98% before blocking (owner 2026-09-19)' {
+        $a = Snapshot 40; $a.SevenDayPercent = 97
+        (Test-AllowanceFloor -Allowance $a -Now $script:Now).Allowed | Should -BeTrue
+        $a.SevenDayPercent = 98
+        $v = Test-AllowanceFloor -Allowance $a -Now $script:Now
+        $v.Allowed | Should -BeFalse
+        $v.Reason | Should -Match 'seven-day'
+    }
     It 'blocks at the floor and waits for the five-hour reset' {
         $v = Test-AllowanceFloor -Allowance (Snapshot 88) -Now $script:Now
         $v.Allowed | Should -BeFalse
@@ -883,6 +891,7 @@ Describe 'Read-Allowance' {
         $a = Read-Allowance -Paths @($p)
         $a.FiveHourPercent | Should -Be 45
         $a.FiveHourResetsAt.ToUnixTimeSeconds() | Should -Be 1789794600
+        $a.FiveHourResetsAt.Offset | Should -Be ([DateTimeOffset]::Now.Offset)  # printed as local time, not UTC
     }
     It 'returns unknown, not an error, for a snapshot without rate_limits (the 2026-09-19 04:12 crash)' {
         $p = Join-Path $script:Dir 'shapeless.json'

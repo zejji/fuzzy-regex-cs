@@ -812,7 +812,7 @@ function Read-Allowance {
     if ($null -eq $rl) { return $null }
     $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
     $pct = { param($w) $v = & $prop $w 'used_percentage'; if ($null -ne $v) { [int]$v } else { $null } }
-    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t) } else { $null } }
+    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t).ToLocalTime() } else { $null } }  # local time, so the driver's 'waiting until' line reads right (it printed UTC on 2026-09-19)
     [pscustomobject]@{
         Source           = $file.Name
         AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
@@ -840,7 +840,7 @@ function Test-AllowanceFloor {
     param(
         [AllowNull()][object]$Allowance,
         [int]$FiveHourFloor = 88,
-        [int]$SevenDayFloor = 97,
+        [int]$SevenDayFloor = 98,  # owner 2026-09-19: spend the week to the end; the hook orders a checkpoint at the same mark, so a sitting that starts below it gets its run
         [int]$MaxAgeMinutes = 45,
         [datetimeoffset]$Now = [datetimeoffset]::Now
     )
