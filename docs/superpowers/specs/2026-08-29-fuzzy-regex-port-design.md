@@ -904,3 +904,27 @@ amended text is inline above; this list is the record of what changed and why.
     S71 absorbs the change (its slice file carries the design bar and toolchain rule); the
     vendored `vue.esm-browser.prod.js` and the hand-written ESM modules from the S71 checkpoint are
     superseded, their logic ported into typed modules with their tests kept.
+
+28. **Phase 7 gains two experiment slices, S62b (auto-atomicity) and S62c (a memoisation spike)
+    (2026-09-19, owner decision).** The research sweep of 2026-09-18 ended with two bets recorded
+    for the owner and in no slice: the compile-time rewrite that makes loops nothing can backtrack
+    into atomic, which .NET and PCRE2 both ship, and selective memoisation of failed positions
+    (Davis et al. 2021, extended to lookaround and atomic grouping by Fujinami and Hasuo 2024),
+    the one published technique that makes a backtracker linear without changing its answers. Both
+    attack the class this port measured as catastrophic - `(a|a)*b` at 10.6 s for n=24 - from
+    opposite ends, and the owner's ruling is that no stone should be left unturned: they are
+    planned, not left on a list. **S62b** is a bounded experiment after S62, so the inner loop is
+    measured first and the rewrite's win is attributed honestly; PCRE2's guard list is ported
+    verbatim and this port's own three guards - fuzzy sections, the backtracking verbs,
+    conditionals - are added, with the analysis stopping rather than guessing wherever it cannot
+    prove the premise. **S62c** is a spike of one sitting that merges no production code unless its
+    exit criteria pass, and whose deliverable is a measured answer plus a recommendation: promote
+    to a full slice, or record why not. What does not change is the rule everything else in this
+    plan rests on: the answer-identity rule stands, so the oracle at three seeds with
+    `ExpectedDivergences` strict decides both, and an optimisation that changes an answer has
+    ported a bug (ROADMAP, owner rule 2026-09-12); the permanent pins in `BacktrackingVerbTests`,
+    `PartialMatchingTests` and `ReverseMatchingTests` are not negotiable for either. **Both may end
+    in "reverted, recorded"** - a negative number written into `OPTIMISATION-NOTES.md` with its
+    shapes and its reason is the successful outcome of an experiment, not a failed slice, and is
+    what stops it being re-attempted blind. Phase 7's six committed slices (S58-S63) stand as
+    drafted and gain these two experiments between S62 and S63; estimates unchanged.

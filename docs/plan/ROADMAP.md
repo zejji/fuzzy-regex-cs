@@ -359,7 +359,12 @@ strict manifest, until upstream itself is fixed.
 library has anything to borrow. Two prefilter refinements were folded into S60 (a rarity gate on the
 skip character; a large-list fast path for `\L<name>`); its automaton design and fuzzy algebra are
 out of bounds because this port returns mrab-regex's answers exactly. Full table in
-`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`.
+`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`. The two bets the wider research sweep of
+2026-09-18 left for the owner are now planned as experiments rather than left on a list (spec
+amendment 28, owner decision 2026-09-19): **S62b** rewrites loops nothing can backtrack into as
+atomic behind PCRE2's guard list, and **S62c** is a one-sitting spike on selective memoisation of
+failed positions, both bounded by the oracle at three seeds and both allowed to end in "reverted,
+recorded".
 
 **Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
