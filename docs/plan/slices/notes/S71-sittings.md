@@ -434,3 +434,147 @@ committed. The generator fix is still an open item.
 
 The sitting-3 next actions are unchanged and are still the next actions: ratchet, blind review over
 the sitting-3 diff, independent verifier, then close the slice.
+
+---
+
+## Sitting 5 (2026-09-19) - ratchet, the reviews, the verifier, close
+
+The sitting the previous three deferred their verification to. No feature work: the page, the
+toolchain, the workflow, the screenshots and both READMEs landed in sitting 3 and are unchanged.
+
+### The ratchet, and a committed number that was wrong
+
+`pwsh -File tools/check-ratchet.ps1`: **6365 passing, 0 failing, 0 skipped, 6257 distinct ids,
+baseline 6257, GREEN**, then `-UpdateBaseline`.
+
+Running it reproduced the open item about `docs/STATUS.md` and settled it. `check-ratchet.ps1:94`
+resolves the upstream commit with `git -C <root>/upstream rev-parse HEAD`; with the submodule
+directory present but empty, git walks up to the parent repository and answers with OUR head. The
+fix applied here was to check the submodule out (`git submodule update --init upstream`, which this
+worktree had never had), after which the generator writes the truth. That also corrects a value
+already committed: `docs/STATUS.md` said `Parity against upstream commit 611be7e3...`, which
+`git log -1 611be7e3` shows is our own `Merge branch 'phase9-demo'`, written by sitting 2 from this
+worktree. It now says `7dd71c15...`, which is what both `git -C upstream rev-parse HEAD` and
+`git ls-tree HEAD upstream` say. **The generator is still wrong and is left as an open item**: it
+should fail loudly when the submodule is absent rather than falling back to repo HEAD.
+
+### What the reviews found: the dev server never worked
+
+Three blind passes (see Review, below). The substance was in one place - `npm run dev` - and none of
+it was reachable from the production build, which is why three sittings of green builds never saw it.
+
+1. **The dev server served the last production build.** `build.outDir` IS the .NET web root, and the
+   web root is also the dev middleware's last fallback root, so a previous `vite build` answered for
+   the page: 1,750 bytes of built HTML instead of the 1,706-byte source entry, with neither
+   `@vite/client` nor `/src/main.ts` in it. No module graph, no hot reload, and `demo/README.md`
+   claiming both.
+2. **`GET /worker.js` returned HTML.** Vite's own `htmlFallbackMiddleware` rewrites `req.url` to
+   `/index.html` for any request whose `Accept` header holds `text/html` or the wildcard catch-all -
+   which is exactly what `new Worker()` and `fetch()` send - and it runs BEFORE a post-hook
+   middleware. So the middleware written to serve `worker.js`, `examples.json`, `checks.html` and
+   `_framework/` never saw any of them: all four came back as 1,706 bytes of `text/html`. The demo
+   could not boot in dev at all.
+
+   Fix: the middleware is a PRE hook (`server.middlewares.use` in the body, no `return () => ...`),
+   so it sees the URL that was asked for, plus a guard, `isOwnBuildOutput`, that declines
+   `index.html` and `assets/` so Vite keeps the page and the module graph. Running first costs
+   nothing, because the only thing in a fallback root that Vite also serves is this project's own
+   output, which the guard declines.
+3. **Three ways past that guard**, each found by a later pass and each fixed: the guard was
+   case-sensitive while the `existsSync` behind it is not (`/Index.html` served the built page);
+   NTFS resolves an 8.3 short name, so `/INDEX~1.HTM` reached the same file (now re-tested against
+   `realpathSync.native`); and `decodeURIComponent` threw `URIError` on `/%zz`, turning Vite's 404
+   into a 500.
+4. **`tools/build-demo-web.ps1` could not report a bad Node.** With `$ErrorActionPreference = 'Stop'`
+   a missing executable throws `CommandNotFoundException` before any exit code exists, so the
+   `$LASTEXITCODE` test after the call was unreachable and the diagnostic naming the 22.12 floor and
+   `.nvmrc` was never printed. Both checks are there now - `Get-Command` for a node that does not
+   resolve, the exit code and empty output for one that resolves but cannot run - and the third path
+   (a version below the floor) was already right. All three verified by the verifier.
+5. **Two comments had outlived their subject**: `checks.html` sent the reader to `node --test` in
+   `demo/tests/`, a directory this slice deleted, and `.gitattributes` justified `*.js binary` by a
+   vendored Vue build and an `app.js` that no longer exist. Both corrected; the `.gitattributes` note
+   now says what the rule does cover (`wwwroot/worker.js`, the one committed file that a browser
+   fetches with an integrity attribute) and why it deliberately does not extend to
+   `demo/web/scripts/clean.mjs`, the only other committed module, which runs on the build machine.
+
+New test: `demo/web/tests/dev-server.test.ts`, 18 cases. It boots a real dev server on port 0 and
+asserts the page comes from source, that `worker.js` and `examples.json` come from the web root under
+a wildcard `Accept`, that the three alternative spellings cannot reach a build, and that a malformed
+escape is a 404. **It writes its own shadow `index.html` and `assets/` first**, because the built page
+is gitignored: on a fresh checkout - which is what the Pages workflow does - there would be nothing in
+the web root to shadow the source page, and a test that needs a previous build to go red is a test CI
+can never fail. It deletes only what it created, directories included, because
+`build-demo-web.ps1` decides the bundle landed by testing for `wwwroot/assets`.
+
+Each fix was proved load-bearing by reverting it and watching the suite go red: without the pre hook,
+the `worker.js` and `examples.json` cases fail; without the guard, the two `index.html` cases fail
+(on a cleaned web root, so the shadow is doing the work); without the `realpathSync` re-test, the
+8.3 case fails.
+
+### Runs, on the tree that was committed
+
+| What | Command | Result |
+| --- | --- | --- |
+| Front end | `pwsh -File tools/build-demo-web.ps1 -SkipInstall` | vue-tsc clean, **52 tests / 5 files**, DEMO WEB BUILD GREEN |
+| C# suite + parity | `pwsh -File tools/check-ratchet.ps1` | **6365 passing, 0 failing, 0 skipped**, baseline 6257, GREEN |
+| Publish + artefacts | `pwsh -File tools/run-wasm-smoke.ps1 -OutDir .scratch/verify-publish -SkipWebBuild` | **WASM SMOKE GREEN**: 28 files, **8,009,524 bytes**, 56 integrity endpoints |
+| Browser, root | `http://localhost:8092/checks.html?v=9` | **CHECKS GREEN, 9 of 9** |
+| Browser, subpath | `http://localhost:8092/fuzzy-regex-cs/checks.html?v=9` | **CHECKS GREEN, 9 of 9** |
+
+Chrome 153.0.0.0 via the Playwright MCP server, one `python -m http.server 8092` over
+`.scratch/verify-serve`, which holds the publish at the root and under `fuzzy-regex-cs/`.
+
+The publish is **8,009,524 bytes, not the 8,007,899 sitting 3 recorded** - the difference is 1,625
+bytes of differently-hashed bundle and an edited `checks.html`, not a regression; file count and
+integrity-endpoint count are unchanged. Sitting 3's figure was correct for sitting 3's bundle, which
+is the reason this skill asks for the final re-run.
+
+Measurements, this sitting, root layout then subpath: display cap `200 drawn of 300 found, 200
+<mark> elements in the page` at both; runaway `32 timer ticks on the checks page and 32 inside the
+demo during the 500 ms window, status pills ["matching..."]` at both; respawn **69.2 ms with the warm
+spare, 164.2 ms without** (subpath: 67.4 and 135.3); stop-to-next-answer-on-screen **413.8 ms**
+(subpath: 366.2). Sitting 3 measured 71.2/175.9/414.3 at the root, so the warm spare is worth
+roughly 2.4x on this machine in both runs and the recovery time is stable to within a millisecond.
+The animation-frame count is reported but never asserted, and it varied again (31 at the root, 30 at
+the subpath); sitting 3's note that it is a property of the run rather than of the browser stands.
+
+### Independent verifier (amendment 16, limb d)
+
+A fresh Opus subagent, briefed with the commit-ready tree and nothing else, re-ran every number above
+plus the dev-server measurements, the three Node failure paths, the caps regex and the upstream SHA.
+**CONFIRMED: A, C, D, E1, E2, F, G.** **DIFFERENT: B**, the publish size, 8,009,524 against the
+8,007,899 in sitting 3's notes - which is why this sitting's table quotes its own figure. It also
+confirmed `docs/demo/page-1280.png` and `page-390.png` still depict the page (the only visible
+difference is the timing pill, 260 ms committed against 258 ms now), so the committed screenshots
+were left alone.
+
+Two things it hit that are worth knowing:
+
+- Its `run-wasm-smoke.ps1` run died in `npm ci` with `EPERM ... unlink ... lightningcss.win32-x64-msvc.node`,
+  held by **PID 34120**, a Node process belonging to another session. Nothing was killed. It re-ran
+  with `-SkipWebBuild` over the front end built in step A and restored the 31 entries the aborted
+  `npm ci` had stripped with `npm install --no-save` (79 packages, `package-lock.json` untouched -
+  confirmed by `git status`, and the build is green after it).
+- `tools/find-lock-holder.ps1` is how it identified the holder; worth remembering for the next
+  EPERM.
+
+### Processes left running
+
+Per the owner's rule nothing was killed. Still up at the end of this sitting: the
+`python -m http.server 8092` the verifier started over `.scratch/verify-serve` (**PID 14996**), a
+Vite dev server on port 5199 started by the second review pass, the `python -m http.server 8090`
+from sitting 3, and **PID 34120**, another session's Node process holding the lightningcss binary.
+
+### Review
+
+**Three blind passes: 12 findings raised, 12 reproduced, 12 fixed.** Pass 1 over the whole sitting-3
+diff (42 files, which had had no review): 4 findings. Pass 2 over the fixes, which introduced public
+surface the first reviewer never saw: 5 findings, including the one that mattered most - the new
+regression test could not go red on a fresh checkout, because the build output it needed to shadow is
+gitignored. Pass 3 over the ordering fix and the rewritten test: 3 findings. Every finding was
+reproduced here before any code changed, and the unusual thing about this slice is that all twelve
+survived that gate; the usual ratio is about one in five. The explanation is that the first two
+passes were reading code no reviewer had ever seen, and the third was reading code written in the
+same hour. Pass 3's findings needed no fourth pass: the changes it produced are covered by the tests
+it asked for, all of which were proved to fail without their fix, and by the verifier's re-run.

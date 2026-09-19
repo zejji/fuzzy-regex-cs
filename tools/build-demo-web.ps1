@@ -43,9 +43,20 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $web = Join-Path $repoRoot 'demo/web'
 
-$version = & $Node --version
-if ($LASTEXITCODE -ne 0) {
+# Resolved rather than run-and-check-$LASTEXITCODE: with $ErrorActionPreference = 'Stop', a missing
+# executable throws CommandNotFoundException before any exit code exists, so an exit-code test after
+# the call is unreachable and this diagnostic - the one that names the floor and .nvmrc - was never
+# printed (found by the blind review, 2026-09-19).
+if (-not (Get-Command $Node -ErrorAction SilentlyContinue)) {
     throw "Could not run '$Node'. The demo's front end needs Node 22.12 or newer; see demo/web/.nvmrc."
+}
+
+# Both checks are needed, and the second is not redundant: Get-Command resolves a node that exists
+# but cannot run (a stub, a broken install, an .exe for the wrong architecture), and that one fails
+# with an exit code and no output instead of a CommandNotFoundException.
+$version = & $Node --version
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
+    throw "'$Node' did not report a version (exit $LASTEXITCODE). The demo's front end needs Node 22.12 or newer; see demo/web/.nvmrc."
 }
 
 # The floor demo/web/package.json declares in `engines`, and it is Vite 8's own: below it the build

@@ -85,14 +85,12 @@ v2 (S72).
 - [x] Page delivers all seven v1 items above. (Delivered in sitting 1 as a vendored no-build page;
       the vendoring half of this box is superseded by the toolchain amendment and is re-delivered by
       the two boxes below, not re-ticked here.)
-- [ ] The front end is a Vite + Vue 3 + TypeScript project, strict, no `any`, Tailwind, pinned and
+- [x] The front end is a Vite + Vue 3 + TypeScript project, strict, no `any`, Tailwind, pinned and
       installed with `npm ci`; `npm run build` type-checks and runs the unit tests before building.
-      **Blocked 2026-09-18: `npm` is not in the driver session's Bash allowlist** - see the sitting-2
-      notes. Nothing of this was written blind.
-- [ ] The Design bar is met, with the researched UI/UX sources named and screenshots at 390 and
-      1280 px. (Not started deliberately: it would have been spent on a page the toolchain amendment
-      replaces. The research and the design decisions are recorded in the sitting-2 notes ready for
-      it.)
+      (Sitting 3, after the owner lifted the npm blocker. 52 tests in 5 files at the close.)
+- [x] The Design bar is met, with the researched UI/UX sources named and screenshots at 390 and
+      1280 px. (Sitting 3: `App.vue` + `styles.css`, sources in the sitting-2 notes, screenshots in
+      `docs/demo/`. Sitting 5's verifier re-took both and confirmed they still depict the page.)
 - [x] The browser leg: `checks.html` CHECKS GREEN at the server root **and** under a
       `/fuzzy-regex-cs/` subpath, with `stopToNextAnswerOnScreenMs`, `respawnWithoutSpareMs` and
       `respawnWithSpareMs` recorded. Done in sitting 2; the subpath run settles the no-base-href
@@ -100,7 +98,8 @@ v2 (S72).
 - [ ] `pages.yml` green and the live URL answering; README link landed. (Workflow written and README
       link landed in sitting 1; green run and live URL need the owner's push and the one-off Pages
       setting, so this box stays open.)
-- [ ] Ratchet GREEN, blind review, commit. **Hunt:** an integrity failure after line-ending
+- [x] Ratchet GREEN, blind review, commit. (Sitting 5: 6365 passing, three blind passes, the
+      independent verifier.) **Hunt:** an integrity failure after line-ending
       conversion - a Windows runner checking out with `core.autocrlf`, or any step that rewrites a
       published file between publish and upload, both of which produce a page that boots on the
       developer's machine and 404s or fails SRI on Pages; a base href that works at the repository
@@ -216,3 +215,61 @@ unless stated.
   S70's on-disk baseline; the wire one is what a visitor waits for. The documented workaround is a
   `decode.js` Brotli decoder wired into boot resource loading, **not** taken in v1: measure first,
   then decide whether the download is worth a decoder.
+
+---
+
+## Closing notes (2026-09-19, sitting 5)
+
+**What landed.** A demo page that is a real front-end project: Vite 8.3.0, Vue 3.5.43, TypeScript
+6.0.3 in strict mode, Tailwind 4.3.3, Vitest 5.0.1, every version pinned and installed with
+`npm ci`, building into the .NET web root so one publish carries page, worker and runtime. Three
+inputs, highlighted spans, a group table that distinguishes a group that did not participate from
+one that matched empty, eight worked examples whose answers a C# test pins, the case in the URL
+fragment, caps enforced in the page as well as in `Run`, and a warm spare worker. Around it:
+`tools/build-demo-web.ps1`, a smoke script that parses the published page rather than naming its
+assets, a Pages workflow that installs Node from `.nvmrc`, `demo/README.md`, the root README's link,
+and screenshots at both widths. The browser verdict page is green at a server root and at
+`/fuzzy-regex-cs/`, which is what makes one artefact deployable to both.
+
+**The one box left open**, deliberately, is the live URL: `pages.yml` has never run, because the
+owner pushes and only the owner can set Settings > Pages > Source = GitHub Actions. Everything up to
+that point is verified locally. **S72 should start by opening the deployed URL** with the browser
+cache disabled - that is the only run in which subresource integrity is really exercised - and by
+watching `gh run watch` on the first `pages.yml` run.
+
+**What was surprising.** Three sittings of green builds, a green ratchet and a green browser verdict
+all coexisted with a dev server that could not boot the demo at all: Vite's html fallback rewrites
+the URL before a post-hook middleware sees it, so `GET /worker.js` returned the HTML page, and the
+build output living in the middleware's own fallback root meant the page came back as the last
+production bundle. Nothing in the production path can see either. The lesson for the next slice that
+adds a dev-time convenience is that `npm run dev` needs a test as much as `npm run build` does, and
+that the test must create the state it guards against - the built page is gitignored, so a test
+relying on one being present is a test that can never fail on a fresh checkout.
+
+**What the next slice should know.**
+
+- `npm run dev` now works: the page from source with HMR, and `worker.js`, `examples.json`,
+  `checks.html` and `_framework/` from the publish or the web root behind it. A publish has to exist
+  for the runtime; `tools/run-wasm-smoke.ps1` produces one.
+- One displayed match must stay exactly one `<mark>`, and the phrase "did not participate" must stay
+  in the group table: `checks.html` asserts both, so a component rewrite that changes either
+  silently changes what the verdict page means.
+- The respawn figures are this project's own measurements, taken twice now on the same machine:
+  about 69 ms with the warm spare against 164 ms without, and about 414 ms from Stop to the next
+  answer on screen, which includes the 250 ms debounce.
+- `docs/STATUS.md`'s upstream-commit line is generated from `git -C upstream rev-parse HEAD`, and in
+  a worktree whose submodule is not checked out that silently answers with our own HEAD. Sitting 5
+  checked the submodule out here and the committed line is correct again, but **the generator still
+  needs to fail loudly instead of falling back**; it is the top open item in STATE.md.
+
+**Review.** Three blind passes over this slice's unreviewed changes: **12 findings raised, 12
+reproduced, 12 fixed.** Pass 1 read the whole sitting-3 diff, 42 files that had had no review at all,
+and raised 4. Pass 2 read the fixes, which had added exported surface and a new test file the first
+reviewer never saw, and raised 5 - including the finding that the new regression test could not go
+red on a fresh checkout. Pass 3 read the ordering fix and the rewritten test and raised 3. Every
+finding was reproduced in this session before any code changed; unusually, all twelve survived that
+gate, which is explained by the first two passes reading code nobody had reviewed and the third
+reading code an hour old. No fourth pass was needed: pass 3's changes are covered by tests that were
+each proved to fail without their fix, and by the independent verifier, which re-ran every number in
+the sitting-5 notes from the commit-ready tree and returned CONFIRMED on all of them but the publish
+byte count, which it corrected from 8,007,899 to 8,009,524.

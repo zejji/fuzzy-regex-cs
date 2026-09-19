@@ -1,7 +1,7 @@
 /// <reference types="vitest/config" />
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, relative as relativeTo } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -19,7 +19,7 @@ const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.u
  * .NET publish gathers the page, the worker and the runtime into one static-asset manifest, which is
  * what `tools/run-wasm-smoke.ps1` checks and what GitHub Pages uploads.
  */
-const webRoot = here('../FuzzyRegex.Demo.Wasm/wwwroot');
+export const webRoot = here('../FuzzyRegex.Demo.Wasm/wwwroot');
 
 /**
  * Where `npm run dev` finds the files this project does not build: the runtime under `_framework/`,
@@ -32,6 +32,22 @@ const devFallbackRoots = [
     here('../FuzzyRegex.Demo.Wasm/bin/Debug/net10.0/publish/wwwroot'),
     webRoot,
 ];
+
+/**
+ * This project's own build output, which a fallback root must never answer for.
+ *
+ * Every fallback root above holds a previous `vite build`: the web root IS the output directory, and
+ * a publish copies it. Serving those in dev means `npm run dev` shows the last production bundle,
+ * with no module graph and no hot reload - measured 2026-09-19, the dev server returned the 1,750
+ * byte built page rather than the 1,651 byte source entry, with neither `@vite/client` nor
+ * `/src/main.ts` in it. Declining them here hands the request back to Vite, which is the only one
+ * that should serve the page and its modules.
+ *
+ * Case-insensitive, because the lookup it guards is: `existsSync` on NTFS answers for `Index.html`
+ * and `Assets/`, so a case-sensitive guard declines a request the loop below would then serve.
+ */
+export const isOwnBuildOutput = (relative: string) =>
+    /^(index\.html|assets[\\/])/i.test(relative);
 
 const CONTENT_TYPES: Record<string, string> = {
     '.js': 'text/javascript',
@@ -46,36 +62,62 @@ const CONTENT_TYPES: Record<string, string> = {
 /**
  * Serves the published .NET assets in dev, for requests Vite itself cannot answer.
  *
- * Returned as a post hook (`return () => ...`) so it is installed *after* Vite's own middlewares:
- * Vite must keep winning for the module graph, and this only ever sees what it declined.
+ * Installed as a PRE hook - `server.middlewares.use` in the body, not the `return () => ...` post
+ * hook - because Vite's own `htmlFallbackMiddleware` rewrites `req.url` to `/index.html` for any
+ * request whose `Accept` header contains `text/html` or the wildcard catch-all, which is exactly
+ * what `new Worker()` and `fetch()` send. A post hook therefore never sees `/worker.js` at all:
+ * measured 2026-09-19, that request returned 1,706 bytes of HTML, so the dev server could not
+ * boot the engine's worker. Running first costs nothing, because the only things in the fallback
+ * roots that Vite also serves are this project's own build output, which `isOwnBuildOutput` declines.
  */
 const publishedAssets = (): Plugin => ({
     name: 'fuzzy-regex-demo:published-assets',
     apply: 'serve',
     configureServer(server) {
-        return () => {
-            server.middlewares.use((request, response, next) => {
-                const url = (request.url ?? '/').split('?')[0] ?? '/';
-                const relative = normalize(decodeURIComponent(url)).replace(/^[\\/]+/, '');
-                // A request that climbs out of the root is refused rather than resolved: this
-                // middleware serves a publish directory, and `..` in a URL is never a real asset.
-                if (relative === '' || relative.startsWith('..')) return next();
-
-                for (const root of devFallbackRoots) {
-                    const file = join(root, relative);
-                    if (!existsSync(file) || !statSync(file).isFile()) continue;
-
-                    response.setHeader(
-                        'Content-Type',
-                        CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-                    );
-                    createReadStream(file).pipe(response);
-                    return;
-                }
-
+        server.middlewares.use((request, response, next) => {
+            const url = (request.url ?? '/').split('?')[0] ?? '/';
+            let relative: string;
+            try {
+                relative = normalize(decodeURIComponent(url)).replace(/^[\\/]+/, '');
+            } catch {
+                // A malformed percent escape (`/%zz`) is not a path. Handing it back lets Vite
+                // answer it the way it answers any unknown URL, with a 404; letting the URIError
+                // out of here turned that into a 500.
                 return next();
-            });
-        };
+            }
+            // A request that climbs out of the root is refused rather than resolved: this
+            // middleware serves a publish directory, and `..` in a URL is never a real asset.
+            if (relative === '' || relative.startsWith('..')) return next();
+            if (isOwnBuildOutput(relative)) return next();
+
+            for (const root of devFallbackRoots) {
+                const file = join(root, relative);
+                if (!existsSync(file) || !statSync(file).isFile()) continue;
+
+                // The guard above tests the name in the URL; this tests the name the file system
+                // actually has. NTFS answers `existsSync` for a file's 8.3 short name and for an
+                // alternate data stream, so `/INDEX~1.HTM` and `/worker.js::$DATA` reach a file the
+                // spelling in the URL does not name. Measured 2026-09-19: the first served the last
+                // production build past the guard, the second served bytes Vite itself refuses.
+                let canonical: string;
+                try {
+                    canonical = relativeTo(root, realpathSync.native(file));
+                } catch {
+                    continue;
+                }
+                if (canonical !== relative && isOwnBuildOutput(canonical)) return next();
+                if (canonical.startsWith('..')) continue;
+
+                response.setHeader(
+                    'Content-Type',
+                    CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+                );
+                createReadStream(file).pipe(response);
+                return;
+            }
+
+            return next();
+        });
     },
 });
 
