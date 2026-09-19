@@ -1,41 +1,32 @@
 # State
 
-**S58 is DONE** (four sittings). Phase 7's measurement slice: no `src/` change, and
-`git diff 2c1e747 -- src` is empty. Closing notes and review record:
-`docs/plan/slices/done/S58-measurement-method-and-noise-floor.md`. Ratchet GREEN (6,399/6,291).
+**Slice in flight: S59 - pattern cache behind `FuzzyRegex.CacheSize`. CHECKPOINT, sitting 1 of 2.**
+The code is done and green; three finishing steps are left. Sitting notes, with every number and
+the full open list, are in `docs/plan/slices/notes/S59-sittings.md`. Read that first.
 
-**Next slice: S59** (`docs/plan/slices/S59-pattern-cache-and-cachesize.md`); S57 is Phase 6's close.
+Green at this commit: ratchet 6432/6432 (baseline 6324 ids), oracle clean at three seeds bar the
+already-triaged row 3655, benchmarks GREEN against the machine baseline, `run-aot-smoke.ps1` GREEN.
 
-## What S58 leaves Phase 7
+## Next actions, in order
 
-- Noise floor committed (`bench/baselines/<machine-id>/noise-floor.md`): time 1.13, allocation
-  1.0001. `tools/compare-benchmarks.ps1` defaults to it and reports both ratios per workload.
-- The allocation **profiler** route is closed - nothing installed reads a captured trace back to a
-  source site. The arithmetic route is demonstrated:
-  `dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- attribution`. A capture group
-  costs 264.00 B in a `Match`: 40.00 B state, 224.00 B outside. State's line: 984 B + 40 B/group.
-- **S60 owes a `ponytail:` comment** at `FuzzyRegex.cs:444` and `:568` - `IsMatch` allocates
-  byte-for-byte what `Match` does (`Run` passes `visibleCaptures: true` unconditionally). The
-  `OPTIMISATION-NOTES.md` row exists; the source half does not, because S58 may not touch `src/`.
-- Two decisions wait on the owner in `docs/plan/2026-09-19-span-threading-decision.md`: hoist the
-  per-subject work out of the per-step state, then pool the state; decline the `ref struct`.
+1. **Re-run the AOT test gate from a clean intermediate directory.** Delete
+   `tests/FuzzyRegex.Tests/obj` and `tests/FuzzyRegex.Tests/bin`, then
+   `pwsh -File tools/run-aot-tests.ps1`. It failed this sitting with `MSB3077` out of ilc and one
+   `IL2065` trim error in `Conventions/PublicApiDocumentationTests.cs`, a file S59 never touched;
+   the likely cause is that I built that project Release/win-x64 WITHOUT `PublishAot` first and
+   polluted `obj`. If a clean run still fails, the trim error is real and predates S59 - find out
+   why S58's gate was green before changing anything.
+2. Second blind pass over the delta the first reviewer never saw: `PatternCacheBenchmarks.cs`, the
+   `ThreadSafetyTests` edits, DIVERGENCES, PORTMAP, DECISIONS, the `CacheSize` XML docs.
+3. Fresh-Opus independent verifier (amendment 16 limb (d)), verbatim no-git-revert clause from
+   `docs/VERIFICATION.md`.
+4. `git mv docs/plan/slices/S59-*.md docs/plan/slices/done/`, closing notes from the sitting notes,
+   tick the "Done when" boxes, commit.
 
-## Two gates are RED, neither S58's
+## Blockers
 
-1. **Oracle, 1 row of 6,380 at seed `20260919`** (7 and 4242 green). Triage:
-   `docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`. Not pinned on purpose;
-   needs a slice allowed into `src/`.
-2. **AOT publish: `IL2065`** at `tests/.../Conventions/PublicApiDocumentationTests.cs:62`, from S65
-   (`3b09b76`). AOT smoke GREEN at 6,977,536 bytes.
-
-## Open
-
-- `.claude/skills/optimise/SKILL.md` needs the owner; body parked in
-  `docs/plan/phase7-research/optimise-skill-pending.md`. Unattended sessions cannot write there.
-- **Stryker is paused for benchmarking** - the floor is in, it can resume. The after-a-reboot floor
-  repeat is parked on the owner.
-- `docs/STATUS.md`'s upstream-commit line is generated wrong when the `upstream` submodule is
-  absent (`tools/check-ratchet.ps1`, `$upstreamCommit`); it should fail loudly.
-- **Owner: push `phase9-demo`, set Settings > Pages > Source = GitHub Actions.**
-- Running, nothing killed per the owner's rule: `python -m http.server` on 8090/8092/8137, a Vite
-  dev server (PID 34120) holding `demo/web/node_modules`, a hung `VBCSCompiler.exe`.
+Two wedged processes from this sitting's first AOT attempt are still running and were NOT killed
+(owner rule): `dotnet publish` PID 33360 and its child `csc.exe` PID 37192, both started 18:47,
+csc flat at 105.5 s of CPU across a 60 s sample. They do not block other builds - a fresh Release
+build finished in 17 s beside them - but they should be cleared before the next AOT attempt, and
+only the owner can clear them.

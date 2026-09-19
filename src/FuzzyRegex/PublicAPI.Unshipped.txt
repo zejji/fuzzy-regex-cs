@@ -3,6 +3,7 @@
 ~override Fuzzy.Text.RegularExpressions.FuzzyChanges.ToString() -> string
 ~override Fuzzy.Text.RegularExpressions.FuzzyCounts.Equals(object obj) -> bool
 ~override Fuzzy.Text.RegularExpressions.FuzzyCounts.ToString() -> string
+const Fuzzy.Text.RegularExpressions.FuzzyRegex.DefaultMaxCompiledNodes = 1000000 -> int
 Fuzzy.Text.RegularExpressions.Capture
 Fuzzy.Text.RegularExpressions.Capture.Index.get -> int
 Fuzzy.Text.RegularExpressions.Capture.Length.get -> int
@@ -123,11 +124,12 @@ override Fuzzy.Text.RegularExpressions.Capture.ToString() -> string!
 override Fuzzy.Text.RegularExpressions.FuzzyChanges.GetHashCode() -> int
 override Fuzzy.Text.RegularExpressions.FuzzyCounts.GetHashCode() -> int
 override Fuzzy.Text.RegularExpressions.FuzzyRegex.ToString() -> string!
-const Fuzzy.Text.RegularExpressions.FuzzyRegex.DefaultMaxCompiledNodes = 1000000 -> int
 static Fuzzy.Text.RegularExpressions.FuzzyChanges.operator !=(Fuzzy.Text.RegularExpressions.FuzzyChanges left, Fuzzy.Text.RegularExpressions.FuzzyChanges right) -> bool
 static Fuzzy.Text.RegularExpressions.FuzzyChanges.operator ==(Fuzzy.Text.RegularExpressions.FuzzyChanges left, Fuzzy.Text.RegularExpressions.FuzzyChanges right) -> bool
 static Fuzzy.Text.RegularExpressions.FuzzyCounts.operator !=(Fuzzy.Text.RegularExpressions.FuzzyCounts left, Fuzzy.Text.RegularExpressions.FuzzyCounts right) -> bool
 static Fuzzy.Text.RegularExpressions.FuzzyCounts.operator ==(Fuzzy.Text.RegularExpressions.FuzzyCounts left, Fuzzy.Text.RegularExpressions.FuzzyCounts right) -> bool
+static Fuzzy.Text.RegularExpressions.FuzzyRegex.CacheSize.get -> int
+static Fuzzy.Text.RegularExpressions.FuzzyRegex.CacheSize.set -> void
 static Fuzzy.Text.RegularExpressions.FuzzyRegex.Count(string! input, string! pattern, Fuzzy.Text.RegularExpressions.FuzzyRegexOptions options = Fuzzy.Text.RegularExpressions.FuzzyRegexOptions.None, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> int
 static Fuzzy.Text.RegularExpressions.FuzzyRegex.EnumerateMatches(string! input, string! pattern, Fuzzy.Text.RegularExpressions.FuzzyRegexOptions options = Fuzzy.Text.RegularExpressions.FuzzyRegexOptions.None, System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyCollection<string!>!>? namedLists = null, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IEnumerable<Fuzzy.Text.RegularExpressions.Match!>!
 static Fuzzy.Text.RegularExpressions.FuzzyRegex.EnumerateSplits(string! input, string! pattern, Fuzzy.Text.RegularExpressions.FuzzyRegexOptions options = Fuzzy.Text.RegularExpressions.FuzzyRegexOptions.None, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IEnumerable<string?>!

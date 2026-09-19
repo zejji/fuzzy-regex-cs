@@ -7,6 +7,8 @@ delivers: []
 
 # S59 - The pattern cache the static conveniences never had
 
+Per-sitting progress, measurements and what is still open: `docs/plan/slices/notes/S59-sittings.md`.
+
 Planned since 2026-09-16 as the first optimisation with an implementation
 (`OPTIMISATION-NOTES.md`, API-level table; DIVERGENCES row `regex.purge`/`regex.cache_all`,
 PLANNED). Upstream caches compiled patterns module-globally and exposes `purge` and `cache_all` to

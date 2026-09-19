@@ -545,6 +545,21 @@ public sealed class ThreadSafetyTests
                 continue;
             }
 
+            // S59: the pattern cache is left out for the same reason, and left out EXPLICITLY. Its
+            // contents move whenever anything anywhere compiles through a static convenience - this
+            // suite runs in parallel, so that is every few milliseconds - and it is the one static
+            // the library writes by design. Without this line it would still be snapshotted, as the
+            // `Convert.ToString` fall-through below, which renders any object as its type name: a
+            // line that can never move, which is a blind spot wearing the costume of coverage. What
+            // the cache does under threads is measured by PatternCacheStressTests instead.
+            //
+            // This does not narrow the test's claim. The workload it runs between the readings is
+            // instance matching, and instance matching does not reach the cache at all.
+            if (field.FieldType == typeof(PatternCache))
+            {
+                continue;
+            }
+
             snapshot[name] = value switch
             {
                 null => "null",
@@ -616,6 +631,19 @@ public sealed class ThreadSafetyTests
     private static bool IsThreadSafeStaticType(Type type)
     {
         if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(TimeSpan))
+        {
+            return true;
+        }
+
+        // S59's pattern cache, and the third category this rule names: a type whose own contract is
+        // thread-safe. It is not on the list because a slice needed it to be - it is the one static
+        // in the library that is written after its static constructor, deliberately, and the whole
+        // reason it is a class of its own is that every write is behind one Lock in one file
+        // (src/FuzzyRegex/PatternCache.cs). The entries it hands out are FuzzyRegex instances, which
+        // the rest of this file measures as immutable. That the locking holds is measured, not
+        // asserted, exactly as the Dictionary entry above is: PatternCacheStressTests runs four
+        // threads per core through one bounded cache and checks every answer and the bound.
+        if (type == typeof(PatternCache))
         {
             return true;
         }
