@@ -802,15 +802,24 @@ function Read-Allowance {
     $file = Get-ChildItem -LiteralPath ($Paths | Where-Object { Test-Path -LiteralPath $_ }) -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $file) { return $null }
-    $rl = (Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json).rate_limits
-    $reset = { param($w) if ($w -and $null -ne $w.resets_at) { [DateTimeOffset]::FromUnixTimeSeconds([long]$w.resets_at) } else { $null } }
+    # The driver runs under Set-StrictMode, where a missing property throws rather than yielding
+    # $null, and the statusline snapshot is rewritten non-atomically on every prompt, so a read can
+    # meet a half-written or shape-less file (it did, 2026-09-19 04:12: "The property 'rate_limits'
+    # cannot be found"). Any unreadable snapshot is "unknown", which the gate treats as go-ahead.
+    $prop = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.$n } else { $null } }
+    try { $data = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { return $null }
+    $rl = & $prop $data 'rate_limits'
+    if ($null -eq $rl) { return $null }
+    $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
+    $pct = { param($w) $v = & $prop $w 'used_percentage'; if ($null -ne $v) { [int]$v } else { $null } }
+    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t) } else { $null } }
     [pscustomobject]@{
         Source           = $file.Name
         AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
-        FiveHourPercent  = if ($rl.five_hour) { [int]$rl.five_hour.used_percentage } else { $null }
-        FiveHourResetsAt = & $reset $rl.five_hour
-        SevenDayPercent  = if ($rl.seven_day) { [int]$rl.seven_day.used_percentage } else { $null }
-        SevenDayResetsAt = & $reset $rl.seven_day
+        FiveHourPercent  = & $pct $five
+        FiveHourResetsAt = & $reset $five
+        SevenDayPercent  = & $pct $seven
+        SevenDayResetsAt = & $reset $seven
     }
 }
 

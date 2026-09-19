@@ -869,3 +869,32 @@ Describe 'Test-AllowanceFloor' {
         (Test-AllowanceFloor -Allowance $snap -Now $script:Now).WaitUntil | Should -Be $script:Now.AddMinutes(10)
     }
 }
+
+Describe 'Read-Allowance' {
+    BeforeAll {
+        Set-StrictMode -Version Latest
+        $script:Dir = Join-Path ([IO.Path]::GetTempPath()) ("allowance-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $script:Dir | Out-Null
+    }
+    AfterAll { Remove-Item -LiteralPath $script:Dir -Recurse -Force -ErrorAction SilentlyContinue }
+    It 'reads the shape both writers produce' {
+        $p = Join-Path $script:Dir 'good.json'
+        '{"rate_limits":{"five_hour":{"used_percentage":45,"resets_at":1789794600},"seven_day":{"used_percentage":68,"resets_at":1789995600}}}' | Set-Content -LiteralPath $p
+        $a = Read-Allowance -Paths @($p)
+        $a.FiveHourPercent | Should -Be 45
+        $a.FiveHourResetsAt.ToUnixTimeSeconds() | Should -Be 1789794600
+    }
+    It 'returns unknown, not an error, for a snapshot without rate_limits (the 2026-09-19 04:12 crash)' {
+        $p = Join-Path $script:Dir 'shapeless.json'
+        '{"model":{"id":"x"}}' | Set-Content -LiteralPath $p
+        Read-Allowance -Paths @($p) | Should -BeNullOrEmpty
+    }
+    It 'returns unknown for a half-written file' {
+        $p = Join-Path $script:Dir 'partial.json'
+        '{"rate_limits":{"five_hour":{"used_perc' | Set-Content -LiteralPath $p -NoNewline
+        Read-Allowance -Paths @($p) | Should -BeNullOrEmpty
+    }
+    It 'returns unknown when no file exists' {
+        Read-Allowance -Paths @((Join-Path $script:Dir 'missing.json')) | Should -BeNullOrEmpty
+    }
+}
