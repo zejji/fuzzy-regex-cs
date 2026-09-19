@@ -19,6 +19,16 @@
 export const MAX_SUBJECT_LENGTH = 100000;
 
 /**
+ * The longest pattern the page will accept a position inside. Mirrors DemoEngine.MaxPatternLength.
+ *
+ * The page does not refuse a long pattern itself - the engine does, and says so - but it does bound
+ * `errorOffset`, which is the one number in a reply the page turns into work rather than into text:
+ * `' '.repeat(offset)` builds the caret line. This is the largest offset any pattern the engine
+ * would have parsed can carry (`shapes.ts`).
+ */
+export const MAX_PATTERN_LENGTH = 1000;
+
+/**
  * The most matches the page will draw. Deliberately far below the engine's own cap of 1,000
  * (DemoEngine.MaxMatches): that one bounds the answer on the wire, this one bounds how much of it
  * becomes DOM. The true total is always shown beside it.

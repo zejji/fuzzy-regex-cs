@@ -137,25 +137,6 @@ internal static class DemoEngine
     private static readonly string[] _lineSeparators = ["\r\n", "\n", "\r"];
 
     /// <summary>
-    /// Matches <paramref name="pattern"/> against <paramref name="subject"/> and returns the answer
-    /// as JSON.
-    /// </summary>
-    /// <param name="pattern">The regular expression.</param>
-    /// <param name="flags">
-    /// Zero or more <see cref="FuzzyRegexOptions"/> member names, separated by commas, spaces or
-    /// <c>|</c>. Case-insensitive. Numbers are refused: the demo takes names so that a typo is an
-    /// error rather than a silently different set of flags.
-    /// </param>
-    /// <param name="subject">The text to search.</param>
-    /// <returns>
-    /// <c>{"matches": [...], "truncated": false}</c>, or <c>{"error": "..."}</c>. Every index and
-    /// length is a UTF-16 code unit offset, because the page slices a JavaScript string with it and
-    /// JavaScript strings are UTF-16 too.
-    /// </returns>
-    internal static string Run(string pattern, string flags, string subject) =>
-        Run(pattern, flags, subject, mode: "", replacement: "", namedLists: "");
-
-    /// <summary>
     /// Matches <paramref name="pattern"/> against <paramref name="subject"/> in one of the demo's
     /// three modes and returns the answer as JSON.
     /// </summary>
@@ -684,9 +665,9 @@ internal static class DemoEngine
         };
 
     /// <summary>
-    /// Reads the mode name, or says which one it could not read. Empty means the ordinary walk, so
-    /// that the three-argument <see cref="Run(string, string, string)"/> and any older caller keep
-    /// their meaning exactly.
+    /// Reads the mode name, or says which one it could not read. Empty means the ordinary walk - the
+    /// question the page asks unless it is asking for a partial match or a replacement - so a caller
+    /// that has nothing to say about the mode says nothing.
     /// </summary>
     private static bool TryParseMode(string mode, out DemoMode parsed, out string? error)
     {

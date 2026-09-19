@@ -7,8 +7,17 @@
 // below are ordinary DOM queries. What still needs a real browser - that the runtime boots, that
 // focus is visible, that the layout holds at 390 px - is checks.html and the screenshots.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createApp, nextTick, type App as VueApp } from 'vue';
+
+// The stylesheet as text, because jsdom applies no stylesheet at all: a rule that only a real
+// browser ever runs can still be asserted about as source, which is what DemoCapsTests.cs does to
+// caps.ts for the same reason. Read from disk and not imported: Vitest disables CSS processing, so
+// `import '../src/styles.css?raw'` resolves to the empty string (measured, 2026-09-19).
+const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf8');
 
 import App from '../src/App.vue';
 import type { Group, Match } from '../src/types';
@@ -69,7 +78,16 @@ beforeEach(() => {
 const EMPTY_HELP = JSON.stringify({
     source: 'docs/COMPARISON.md',
     note: 'generated',
-    entries: { fuzzy: [{ heading: [{ code: false, text: 'Fuzzy matching' }], blocks: [] }] },
+    entries: {
+        fuzzy: [
+            {
+                heading: [{ code: false, text: 'Fuzzy matching' }],
+                // One block, because `isHelp` refuses a section with none: an empty body is a
+                // panel that opens onto nothing.
+                blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Up to n errors.' }] }],
+            },
+        ],
+    },
 });
 
 afterEach(() => {
@@ -470,7 +488,14 @@ test('the help panel is the documentation, rendered as text and opened from the 
     // Interpolated, never `v-html`: help.json is generated from a markdown file, and a file that
     // could put markup into the page is a file that could put a script there.
     expect(panel.innerHTML).toContain('&lt;b&gt;n&lt;/b&gt;');
-    expect(found(panel.querySelector('pre'), 'a fenced code block').textContent).toBe('new FuzzyRegex("x");');
+    const fenced = found(panel.querySelector('pre'), 'a fenced code block');
+    expect(fenced.textContent).toBe('new FuzzyRegex("x");');
+
+    // A fenced sample is a line of code that does not wrap, so on a narrow window it is one more
+    // region only a pointer could scroll. Same treatment as the tables and the caret line.
+    expect(fenced.getAttribute('tabindex')).toBe('0');
+    expect(fenced.getAttribute('role')).toBe('region');
+    expect(fenced.getAttribute('aria-label')).toMatch(/scroll/i);
 
     // A feature with no documented section shows no panel, rather than an empty disclosure.
     demo.helpKey = 'undocumented';
@@ -513,6 +538,19 @@ test('hovering a match links the highlight to its row, and the row back to the h
     expect(demo.selected).toBe(0);
 });
 
+test('the focus ring covers every kind of control the page has, the help disclosure included', () => {
+    // WCAG 2.4.13 is what the rule is for, and a <summary> it forgets is a disclosure a keyboard
+    // user cannot see the focus on - the help panels are <details>, so that is every one of them.
+    const rule = found(/:where\(([^)]+)\):focus-visible/.exec(styles), 'focus-visible rule in styles.css');
+    const targets = found(rule[1], 'the selector list of the focus-visible rule')
+        .split(',')
+        .map((selector) => selector.trim());
+
+    expect(targets).toContain('summary');
+    // Every other kind the page puts on screen, so the list cannot be trimmed back either.
+    expect(targets).toEqual(expect.arrayContaining(['a', 'button', 'input', 'textarea', '[tabindex]']));
+});
+
 test('a parse error is shown under the pattern, with a caret under the character it names', async () => {
     const { page, demo } = await mountPage();
     // The pattern that was ANSWERED, not the box: the offset indexes the string the engine was
@@ -527,11 +565,27 @@ test('a parse error is shown under the pattern, with a caret under the character
     expect(inline.textContent).toContain('bad fuzzy constraint');
 
     // The caret is a monospace copy of the pattern with a hat under the character the engine named.
-    // Hidden from a screen reader, which is told the position as a sentence instead: a line of
-    // spaces and a `^` is read out as nothing at all.
     const caret = found(inline.querySelector('pre'), 'the caret line');
-    expect(caret.getAttribute('aria-hidden')).toBe('true');
     expect(caret.textContent).toBe('(?:colour){e<=x}\n' + ' '.repeat(13) + '^');
+
+    // It scrolls sideways rather than wrapping - a wrapped pattern puts the hat under a character
+    // on a different line - so it is a scroll region with a tab stop, a role and a name, as the
+    // tables are (S71). NOT `aria-hidden`: an element that can take focus and is hidden from
+    // assistive technology is a stop a screen reader lands on and is told nothing about.
+    expect(caret.getAttribute('aria-hidden')).toBeNull();
+    expect(caret.getAttribute('tabindex')).toBe('0');
+    expect(caret.getAttribute('role')).toBe('region');
+    expect(caret.getAttribute('aria-label')).toMatch(/\S/);
+    const caretHint = found(
+        page.querySelector('#' + found(caret.getAttribute('aria-describedby'), 'aria-describedby on the caret line')),
+        'the sentence describing the caret line',
+    );
+    expect(caretHint.textContent).toMatch(/scroll/i);
+
+    // Only the row of spaces and the hat is hidden: read out it is nothing at all, and the
+    // position is in the sentence underneath in words.
+    const hidden = found(caret.querySelector('[aria-hidden="true"]'), 'the hidden caret row');
+    expect(hidden.textContent).toBe('\n' + ' '.repeat(13) + '^');
     expect(inline.textContent).toMatch(/character 14/); // the offset is 0-based; people count from 1
 
     // Said once. The message is under the field it is about, so the block below the inputs - which

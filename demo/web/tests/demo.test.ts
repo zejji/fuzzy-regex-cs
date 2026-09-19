@@ -84,7 +84,12 @@ const HELP = JSON.stringify({
     source: 'docs/COMPARISON.md',
     note: 'generated',
     entries: {
-        fuzzy: [{ heading: [{ code: false, text: 'Fuzzy matching' }], blocks: [] }],
+        fuzzy: [
+            {
+                heading: [{ code: false, text: 'Fuzzy matching' }],
+                blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Up to n errors.' }] }],
+            },
+        ],
     },
 });
 

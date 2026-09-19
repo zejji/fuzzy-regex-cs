@@ -72,6 +72,11 @@ if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 12)) {
 # The help panels come out of docs/COMPARISON.md, and this is the step that fails when a heading
 # there has been renamed (S72). It runs FIRST because it is the cheapest of the three gates: a
 # rename should not cost an npm ci and a bundle before it is reported.
+#
+# Reading $LASTEXITCODE after a .ps1 is only sound because build-demo-help.ps1 exits explicitly on
+# both paths - the variable is written by a native command or by `exit` and by nothing else, so a
+# script that ran off its end would leave the `node --version` code above standing here instead.
+# tools/tests/BuildDemoHelp.Tests.ps1 pins that contract from the calling side.
 & (Join-Path $PSScriptRoot 'build-demo-help.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Generating the demo help from docs/COMPARISON.md failed.' }
 

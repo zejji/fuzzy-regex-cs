@@ -9,6 +9,8 @@
 
 import type { Example, Help, Reply } from '../types';
 
+import { MAX_PATTERN_LENGTH } from './caps';
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
 
@@ -46,6 +48,18 @@ const isMatch = (value: unknown): boolean =>
     value.groups.every(isGroup) &&
     optional(value.partialMatch, 'boolean');
 
+// The position a parse failed at, checked as an INDEX and not merely as a number, because the page
+// executes it rather than printing it: App.vue draws the caret with `' '.repeat(errorOffset)`, so a
+// negative one throws RangeError out of the render - which is a blank page and a console error, not
+// a misplaced hat - and a large one allocates that many characters on the main thread. The upper
+// bound is the longest pattern the engine will parse at all, so every honest offset fits.
+const isOffset = (value: unknown): boolean =>
+    value === undefined ||
+    (typeof value === 'number' &&
+        Number.isInteger(value) &&
+        value >= 0 &&
+        value <= MAX_PATTERN_LENGTH);
+
 // `aborted` is rejected rather than ignored. It is the POOL's own field - "we killed this
 // worker" - and the page turns it into "Stopped." on screen, so a worker that sent one would make
 // the page report a stop nobody performed, with neither a match nor an error to contradict it.
@@ -57,7 +71,7 @@ const isReply = (value: unknown): value is Reply =>
     optional(value.truncated, 'boolean') &&
     optional(value.error, 'string') &&
     optional(value.replaced, 'string') &&
-    optional(value.errorOffset, 'number');
+    isOffset(value.errorOffset);
 
 /**
  * Reads what a worker sent, or returns the failure as an answer.
@@ -109,11 +123,16 @@ const isBlock = (value: unknown): boolean =>
     ((value.kind === 'paragraph' && Array.isArray(value.runs) && value.runs.every(isRun)) ||
         (value.kind === 'code' && typeof value.language === 'string' && typeof value.text === 'string'));
 
+// A section with no blocks is refused for the reason a key with no sections is (see `isHelp`): the
+// generator maps a heading whose prose has since moved under a sub-heading, writes the section with
+// an empty body, and the panel opens onto nothing. `tools/build-demo-help.ps1` fails on it at build
+// time; this is the same claim checked again at the moment the page believes the file.
 const isSection = (value: unknown): boolean =>
     isObject(value) &&
     Array.isArray(value.heading) &&
     value.heading.every(isRun) &&
     Array.isArray(value.blocks) &&
+    value.blocks.length > 0 &&
     value.blocks.every(isBlock);
 
 /**

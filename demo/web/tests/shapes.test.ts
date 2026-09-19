@@ -7,6 +7,7 @@
 
 import { expect, test } from 'vitest';
 
+import { MAX_PATTERN_LENGTH } from '../src/lib/caps';
 import { isExampleList, isHelp, parseReply } from '../src/lib/shapes';
 
 /** One match in the engine's shape, so a test can vary a single member of it. */
@@ -36,6 +37,22 @@ test('a parse error may carry the position it failed at, and it must be a number
     expect(reply({ error: 'missing )', errorOffset: 1 }).errorOffset).toBe(1);
     expect(reply({ error: 'missing )' }).errorOffset).toBeUndefined();
     expect(reply({ error: 'missing )', errorOffset: '1' }).error).toContain('not an answer');
+});
+
+test('a parse error position must be an index a pattern the page could have sent really has', () => {
+    // App.vue draws the caret with `' '.repeat(errorOffset)`, so this member is not read, it is
+    // EXECUTED. A negative one throws RangeError out of a render - a blank page, not a bad caret -
+    // and a large one builds a string of that many spaces on the main thread. Neither is a reply
+    // this engine sends; both are what a cached older worker or a hand-driven one could send.
+    expect(reply({ error: 'missing )', errorOffset: 0 }).errorOffset).toBe(0);
+    // The end of the longest pattern the page will send is a real position to fail at: "missing )"
+    // is reported at the character after the last one.
+    expect(reply({ error: 'missing )', errorOffset: MAX_PATTERN_LENGTH }).errorOffset).toBe(MAX_PATTERN_LENGTH);
+
+    expect(reply({ error: 'missing )', errorOffset: -1 }).error).toContain('not an answer');
+    expect(reply({ error: 'missing )', errorOffset: 1.5 }).error).toContain('not an answer');
+    expect(reply({ error: 'missing )', errorOffset: MAX_PATTERN_LENGTH + 1 }).error).toContain('not an answer');
+    expect(reply({ error: 'missing )', errorOffset: 1e9 }).error).toContain('not an answer');
 });
 
 test('an example may name a feature, a mode, a template and word lists', () => {
@@ -89,6 +106,13 @@ test('help is read only in the shape the generator writes', () => {
     // A key with no sections is legitimate JSON and a blank panel on screen, so it is refused here
     // rather than rendered as an empty disclosure nobody can tell from a missing one.
     expect(isHelp({ ...generated, entries: { posix: [] } })).toBe(false);
+
+    // And a section with no BLOCKS is the same failure one level down: the generator maps a
+    // heading whose prose has since moved under a sub-heading, writes the section with an empty
+    // body, and the panel opens onto nothing. Refused here as well as at build time.
+    const hollow = { heading: [{ code: false, text: 'Leftmost-longest' }], blocks: [] };
+    expect(isHelp({ ...generated, entries: { posix: [hollow] } })).toBe(false);
+
     expect(isHelp({ ...generated, entries: { posix: 'some prose' } })).toBe(false);
     expect(isHelp({ entries: {} })).toBe(false);
     expect(isHelp(null)).toBe(false);

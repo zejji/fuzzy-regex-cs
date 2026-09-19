@@ -62,8 +62,12 @@
         @apply dark:bg-slate-950 dark:text-slate-100;
     }
 
-    /* 2.4.13 Focus Appearance: a 2 px perimeter of its own, not the browser's hairline. */
-    :where(a, button, input, textarea, [tabindex]):focus-visible {
+    /* 2.4.13 Focus Appearance: a 2 px perimeter of its own, not the browser's hairline.
+
+       `summary` is named explicitly: a <details> summary is focusable by construction and matches
+       none of the others, so the help panels - every one of them a <details> - were the one set of
+       controls on the page left with the browser's hairline (S72 review, 2026-09-19). */
+    :where(a, button, input, textarea, summary, [tabindex]):focus-visible {
         @apply outline-2 outline-offset-2 outline-accent dark:outline-accent-dark;
     }
 

@@ -68,19 +68,20 @@ const markLabel = (index: number, text: string): string =>
     (matches.value[index]?.partialMatch === true ? ', partial' : '');
 
 /**
- * The pattern with a caret under the character the engine blamed.
+ * The second line of the caret box: spaces up to the character the engine blamed, then the hat.
  *
- * One `<pre>` holding both lines, because the caret's whole job is to line up with the text above
- * it: two elements would be two monospace boxes to keep in step, and any padding or wrapping
- * applied to one of them moves the hat off its character.
+ * One `<pre>` holds both lines, because the caret's whole job is to line up with the text above it:
+ * two boxes would be two monospace boxes to keep in step, and any padding or wrapping applied to
+ * one of them moves the hat off its character. Only this row is a `<span>`, and only so that it can
+ * be hidden from a screen reader - read out, a row of spaces and a `^` is nothing at all.
  *
  * Drawn against `answeredPattern` and never the live box - the offset indexes the string the engine
- * was given, which for the debounce plus the round trip is not what the field says.
+ * was given, which for the debounce plus the round trip is not what the field says. `errorOffset`
+ * is bounded to a real index by `shapes.ts` before it gets here, so `repeat` can neither throw nor
+ * build a string worth noticing.
  */
-const caretLine = computed(() =>
-    failureOffset.value === null
-        ? ''
-        : answeredPattern.value + '\n' + ' '.repeat(failureOffset.value) + '^',
+const caretRow = computed(() =>
+    failureOffset.value === null ? '' : '\n' + ' '.repeat(failureOffset.value) + '^',
 );
 
 // --- one tab stop per group of matches, not one per match ------------------------------------
@@ -200,14 +201,31 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <div v-if="failureOffset !== null" class="parse-error" role="status">
                             <p>{{ failure }}</p>
                             <!--
-                              Hidden from a screen reader, which gets the position as the sentence
-                              underneath instead: a line of spaces and a hat is read out as nothing
-                              at all, and the pattern above it would be read out twice.
+                              A scroll region with a tab stop, a role and a name, exactly as the
+                              two tables below have (S71): the box does not wrap - a wrapped
+                              pattern puts the hat under a character on a different line - so a
+                              pattern wider than the card can only be read by scrolling, and a
+                              region only a pointer can drag fails WCAG 2.1.1.
+
+                              The whole <pre> was `aria-hidden` before this became focusable, and
+                              the two cannot both be true: an element that takes focus and is
+                              hidden from assistive technology is a stop a screen reader lands on
+                              and is told nothing about. So the CARET ROW alone is hidden - read
+                              out, a row of spaces and a hat is nothing at all - and the sentence
+                              underneath gives the position in words.
                             -->
-                            <pre aria-hidden="true">{{ caretLine }}</pre>
+                            <pre
+                                tabindex="0"
+                                role="region"
+                                aria-label="The pattern the engine was given"
+                                aria-describedby="caret-hint"
+                            >{{ answeredPattern }}<span aria-hidden="true">{{ caretRow }}</span></pre>
                             <!-- Not `.field-hint`: its slate grey is measured against the page, not
                                  against this red. The sentence inherits the box's own colour. -->
-                            <p class="mt-1 text-xs leading-relaxed">The caret is under character {{ failureOffset + 1 }} of the pattern.</p>
+                            <p id="caret-hint" class="mt-1 text-xs leading-relaxed">
+                                The caret is under character {{ failureOffset + 1 }} of the pattern,
+                                and the line scrolls sideways when the pattern is wider than the box.
+                            </p>
                         </div>
                     </div>
 
@@ -628,7 +646,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     ><code v-if="run.code" class="font-mono">{{ run.text }}</code><template
                                             v-else
                                         >{{ run.text }}</template></template></p>
-                                <pre v-else class="help-code">{{ block.text }}</pre>
+                                <!-- A fenced sample does not wrap either, so it is the third
+                                     scroll region on the page and gets the same tab stop, role and
+                                     name. The name carries the hint rather than a sentence under
+                                     every code block: one visible line per sample would be more
+                                     hint than help, and what a keyboard user needs is to be able
+                                     to land on the box at all. -->
+                                <pre
+                                    v-else
+                                    class="help-code"
+                                    tabindex="0"
+                                    role="region"
+                                    aria-label="Code sample, scrollable sideways"
+                                >{{ block.text }}</pre>
                             </template>
                         </div>
                     </details>

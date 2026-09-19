@@ -73,8 +73,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void The_wire_format_is_exactly_this()
     {
-        DemoEngine
-            .Run(@"(\w)+", "", "abc")
+        Run(@"(\w)+", "", "abc")
             .Should()
             .Be(
                 """{"matches":[{"index":0,"length":3,"counts":{"substitutions":0,"insertions":0,"deletions":0},"groups":[{"number":0,"name":"0","success":true,"index":0,"length":3,"captures":[{"index":0,"length":3}]},{"number":1,"name":"1","success":true,"index":2,"length":1,"captures":[{"index":0,"length":1},{"index":1,"length":1},{"index":2,"length":1}]}]}],"truncated":false}"""
@@ -109,7 +108,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_named_group_carries_its_name_and_its_span()
     {
-        JsonElement match = Matches(DemoEngine.Run(@"(?<word>\w+)\s+(\w+)", "", "hello world")).Single();
+        JsonElement match = Matches(Run(@"(?<word>\w+)\s+(\w+)", "", "hello world")).Single();
 
         Span(match).Should().Be((0, 11));
         Groups(match)
@@ -134,7 +133,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_group_that_took_no_part_reports_success_false_and_index_minus_one()
     {
-        JsonElement match = Matches(DemoEngine.Run("(a)|(b)", "", "b")).Single();
+        JsonElement match = Matches(Run("(a)|(b)", "", "b")).Single();
 
         Groups(match)
             .Select(static g =>
@@ -162,7 +161,7 @@ public sealed class DemoEngineContractTests
         int deletions
     )
     {
-        JsonElement match = Matches(DemoEngine.Run(pattern, "", subject)).First();
+        JsonElement match = Matches(Run(pattern, "", subject)).First();
 
         Span(match).Should().Be((index, length));
         JsonElement counts = match.GetProperty("counts");
@@ -184,7 +183,7 @@ public sealed class DemoEngineContractTests
     {
         const string subject = "ab\U00010400\U00010401cd";
 
-        JsonElement match = Matches(DemoEngine.Run(@"\p{Deseret}+", "", subject)).Single();
+        JsonElement match = Matches(Run(@"\p{Deseret}+", "", subject)).Single();
 
         Span(match).Should().Be((2, 4));
         subject.Substring(2, 4).Should().Be("\U00010400\U00010401");
@@ -193,7 +192,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void Every_match_is_reported_not_just_the_first()
     {
-        Matches(DemoEngine.Run(@"\d+", "", "a1 b22 c333")).Select(Span).Should().Equal((1, 1), (4, 2), (8, 3));
+        Matches(Run(@"\d+", "", "a1 b22 c333")).Select(Span).Should().Equal((1, 1), (4, 2), (8, 3));
     }
 
     [Test]
@@ -204,13 +203,13 @@ public sealed class DemoEngineContractTests
     [Arguments("IgnoreCase | Multiline")]
     public void The_flags_are_member_names_in_any_case_and_any_separator(string flags)
     {
-        Matches(DemoEngine.Run("ab", flags, "AB ab Ab")).Select(Span).Should().Equal((0, 2), (3, 2), (6, 2));
+        Matches(Run("ab", flags, "AB ab Ab")).Select(Span).Should().Equal((0, 2), (3, 2), (6, 2));
     }
 
     [Test]
     public void No_flags_means_no_flags()
     {
-        Matches(DemoEngine.Run("ab", "", "AB ab Ab")).Select(Span).Should().Equal((3, 2));
+        Matches(Run("ab", "", "AB ab Ab")).Select(Span).Should().Equal((3, 2));
     }
 
     [Test]
@@ -219,13 +218,13 @@ public sealed class DemoEngineContractTests
     [Arguments("IgnoreCase,NoSuchFlag")]
     public void An_unknown_flag_is_an_error_naming_it(string flags)
     {
-        Error(DemoEngine.Run("ab", flags, "ab")).Should().Contain(flags.Split(',')[^1].Trim());
+        Error(Run("ab", flags, "ab")).Should().Contain(flags.Split(',')[^1].Trim());
     }
 
     [Test]
     public void A_parse_error_comes_back_as_json_not_as_an_exception()
     {
-        Error(DemoEngine.Run("(", "", "abc")).Should().Contain("missing )");
+        Error(Run("(", "", "abc")).Should().Contain("missing )");
     }
 
     /// <summary>
@@ -239,7 +238,7 @@ public sealed class DemoEngineContractTests
     {
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        Error(DemoEngine.Run("(a|a)*b", "", new string('a', 30))).Should().Contain("timed out");
+        Error(Run("(a|a)*b", "", new string('a', 30))).Should().Contain("timed out");
 
         // The message alone is not the contract - returning is. Asserting only on the text is how
         // the suite stayed green while Run could take forever (S70 review). The bound is loose
@@ -265,7 +264,7 @@ public sealed class DemoEngineContractTests
         string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "cb", 200));
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        Error(DemoEngine.Run("(a|a)*b", "", subject)).Should().Contain("timed out");
+        Error(Run("(a|a)*b", "", subject)).Should().Contain("timed out");
 
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
     }
@@ -283,7 +282,7 @@ public sealed class DemoEngineContractTests
         string pattern = new string('(', 20) + @"\w" + new string(')', 20) + "+";
         string subject = new('a', 5_000);
 
-        string answer = DemoEngine.Run(pattern, "", subject);
+        string answer = Run(pattern, "", subject);
 
         using JsonDocument json = JsonDocument.Parse(answer);
         json.RootElement.GetProperty("matches").GetArrayLength().Should().Be(1);
@@ -294,7 +293,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_subject_over_the_cap_is_refused_before_anything_is_compiled()
     {
-        Error(DemoEngine.Run("a", "", new string('a', DemoEngine.MaxSubjectLength + 1)))
+        Error(Run("a", "", new string('a', DemoEngine.MaxSubjectLength + 1)))
             .Should()
             .Contain(DemoEngine.MaxSubjectLength.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -307,7 +306,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_flag_list_over_the_cap_is_refused()
     {
-        Error(DemoEngine.Run("a", new string('z', DemoEngine.MaxFlagsLength + 1), "aaa"))
+        Error(Run("a", new string('z', DemoEngine.MaxFlagsLength + 1), "aaa"))
             .Should()
             .Contain(DemoEngine.MaxFlagsLength.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -320,7 +319,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void An_unreadable_flag_token_is_quoted_back_briefly_not_in_full()
     {
-        string answer = DemoEngine.Run("a", new string('"', DemoEngine.MaxFlagsLength), "aaa");
+        string answer = Run("a", new string('"', DemoEngine.MaxFlagsLength), "aaa");
 
         answer.Length.Should().BeLessThan(500);
         Error(answer).Should().Contain("...");
@@ -334,7 +333,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void The_subject_cap_is_checked_before_the_pattern_is_compiled()
     {
-        Error(DemoEngine.Run("(", "", new string('a', DemoEngine.MaxSubjectLength + 1)))
+        Error(Run("(", "", new string('a', DemoEngine.MaxSubjectLength + 1)))
             .Should()
             .Contain("limit")
             .And.NotContain("missing )");
@@ -343,7 +342,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_pattern_over_the_cap_is_refused()
     {
-        Error(DemoEngine.Run(new string('a', DemoEngine.MaxPatternLength + 1), "", "aaa"))
+        Error(Run(new string('a', DemoEngine.MaxPatternLength + 1), "", "aaa"))
             .Should()
             .Contain(DemoEngine.MaxPatternLength.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -356,9 +355,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void The_match_list_stops_at_the_cap_and_says_so()
     {
-        using JsonDocument json = JsonDocument.Parse(
-            DemoEngine.Run("a", "", new string('a', DemoEngine.MaxMatches + 500))
-        );
+        using JsonDocument json = JsonDocument.Parse(Run("a", "", new string('a', DemoEngine.MaxMatches + 500)));
 
         json.RootElement.GetProperty("matches").GetArrayLength().Should().Be(DemoEngine.MaxMatches);
         json.RootElement.GetProperty("truncated").GetBoolean().Should().BeTrue();
@@ -367,7 +364,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void An_answer_that_fits_under_the_cap_is_not_flagged_as_truncated()
     {
-        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("a", "", "aaa"));
+        using JsonDocument json = JsonDocument.Parse(Run("a", "", "aaa"));
 
         json.RootElement.GetProperty("truncated").GetBoolean().Should().BeFalse();
     }
@@ -388,7 +385,7 @@ public sealed class DemoEngineContractTests
     [Arguments("a", "Version0,Version1", "a")] // two flags that contradict each other
     public void Run_always_returns_json_and_never_throws(string pattern, string flags, string subject)
     {
-        string answer = DemoEngine.Run(pattern, flags, subject);
+        string answer = Run(pattern, flags, subject);
 
         using JsonDocument json = JsonDocument.Parse(answer);
         json.RootElement.ValueKind.Should().Be(JsonValueKind.Object);
@@ -419,7 +416,7 @@ public sealed class DemoEngineContractTests
             partial[0].GetProperty("partialMatch").GetBoolean().Should().BeTrue();
 
             // The ordinary walk answers the other question, and answers it "no".
-            Matches(DemoEngine.Run(@"\d{4}-\d{2}-\d{2}", "", "2026-09")).Should().BeEmpty();
+            Matches(Run(@"\d{4}-\d{2}-\d{2}", "", "2026-09")).Should().BeEmpty();
         }
     }
 
@@ -580,8 +577,8 @@ public sealed class DemoEngineContractTests
 
     /// <summary>
     /// An empty mode is the ordinary walk, pinned against the literal S71 answer rather than against
-    /// the three-argument overload - which is defined as this call, so comparing the two would be
-    /// comparing a value with its own definition and could not fail (blind review, 2026-09-19).
+    /// this file's own <c>Run</c> helper - which is defined as this call, so comparing the two would
+    /// be comparing a value with its own definition and could not fail (blind review, 2026-09-19).
     /// </summary>
     [Test]
     public void An_empty_mode_is_the_ordinary_walk()
@@ -723,7 +720,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void A_parse_error_says_where_in_the_pattern_it_failed()
     {
-        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("(", "", "abc"));
+        using JsonDocument json = JsonDocument.Parse(Run("(", "", "abc"));
 
         using (new AssertionScope())
         {
@@ -739,7 +736,7 @@ public sealed class DemoEngineContractTests
     [Test]
     public void An_error_with_no_position_in_the_pattern_carries_no_offset()
     {
-        using JsonDocument json = JsonDocument.Parse(DemoEngine.Run("a", "NoSuchFlag", "aaa"));
+        using JsonDocument json = JsonDocument.Parse(Run("a", "NoSuchFlag", "aaa"));
 
         using (new AssertionScope())
         {
@@ -773,6 +770,17 @@ public sealed class DemoEngineContractTests
             json.RootElement.TryGetProperty("errorOffset", out _).Should().BeFalse();
         }
     }
+
+    /// <summary>The ordinary walk: the engine's one entry point, with its three mode arguments empty.</summary>
+    /// <remarks>
+    /// A test helper and not an overload on <see cref="DemoEngine"/>. The engine used to carry a
+    /// three-argument <c>Run</c> of its own, kept for a browser holding a cached S71 page - which it
+    /// could not do, because the <c>[JSExport]</c> the browser actually calls went from three
+    /// parameters to six in the same change (S72 review, 2026-09-19). What was left was a shape only
+    /// the tests called, so it lives with the tests.
+    /// </remarks>
+    private static string Run(string pattern, string flags, string subject) =>
+        DemoEngine.Run(pattern, flags, subject, mode: "", replacement: "", namedLists: "");
 
     private static IEnumerable<JsonElement> Matches(string json)
     {
