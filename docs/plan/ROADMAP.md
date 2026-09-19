@@ -710,6 +710,23 @@ Phase 6 mutation queue and Phase 7, each in its own worktree with `-Phase`. Runn
 locally and deploying it to GitHub Pages are documented step by step in `demo/README.md`, written
 by S71.
 
+**Phase 9 reopens for one slice, S73 (owner decision, 2026-09-19; spec amendment 29).** S72 closed
+the phase on features. The owner's first look at the live page judged it as a product and found
+seven faults: the match results sit below the fold on a laptop ("not intuitive at all"); the copy
+is "horrible AI-speak"; the design is flat; the layout is a web page rather than an application;
+there is no way to take the current case away as C#; the GitHub link is only in the footer; and the
+match numbers look like links while appearing to do nothing. **S73** answers all seven in one
+slice: a fixed shell with its own scroll regions so the answer is above the fold at 1366x768 and
+1440x900, every user-facing string rewritten against a banned-phrase list that a test enforces, one
+visual identity with the fuzzy edit types given meaning in colour, a "C# for this case" panel that
+prints the API `DemoEngine` itself calls and copies to the clipboard, the GitHub link in the header,
+and two-way linking between a highlight and its match row. Layout and copy decisions are cited to
+NN/g, Material's window size classes, GOV.UK's style guide and Wikipedia's signs-of-AI-writing list,
+named in the slice. Nothing in the engine, the worker, the caps or the single-source help changes,
+and the accessibility rules from S71 and S72 are met again rather than traded away. The draft is
+`docs/plan/slices/S73-demo-as-a-product.md`; the owner reviews it before any sitting runs, and the
+phase closes again when it lands.
+
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
 Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus

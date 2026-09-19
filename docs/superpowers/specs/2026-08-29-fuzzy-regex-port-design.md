@@ -928,3 +928,27 @@ amended text is inline above; this list is the record of what changed and why.
     shapes and its reason is the successful outcome of an experiment, not a failed slice, and is
     what stops it being re-attempted blind. Phase 7's six committed slices (S58-S63) stand as
     drafted and gain these two experiments between S62 and S63; estimates unchanged.
+
+29. **Phase 9 reopens for S73, which judges the demo as a product rather than as a feature tour
+    (2026-09-19, owner decision).** S72 closed the phase on the strength of its features. The
+    owner's first look at the live page judged it on what a visitor meets, and named seven faults:
+    the match results sit below the fold on a laptop and are "not intuitive at all"; the copy is
+    "horrible AI-speak"; the visual design is flat; the layout is a web page rather than an
+    application; there is no way to take the case away as C#; the GitHub link is only in the
+    footer; and the match numbers look like links and appear to do nothing when clicked. S73 is one
+    slice against those seven, drafted as `docs/plan/slices/S73-demo-as-a-product.md` and reviewed
+    by the owner before any sitting runs. Three of the seven are specified rather than left to
+    taste, because taste is what produced the current page: the layout is a fixed shell with its
+    own scroll regions, at breakpoints taken from Material's window size classes and with panel and
+    tab behaviour from NN/g, each decision cited; the copy is enforced by a banned-phrase test built
+    from Wikipedia's signs-of-AI-writing list and GOV.UK's words to avoid, so a regression is a red
+    test rather than an opinion; and the C# snippet prints the API `DemoEngine` itself calls, is
+    compiled for real during the sitting, and is coloured by a hand-written tokenizer, since a
+    highlighter library would be larger than the feature it serves. **What does not change:** no
+    CDN and every dependency pinned (amendment 27); `npm run build` type-checks and runs the tests
+    before it bundles; the worker, the caps and the warm spare from S70 and S71; the help panels
+    generated from `docs/COMPARISON.md`, which stays the single source; the accessibility rules
+    S71 and S72 set, which are met again rather than traded for the new look; and the engine, which
+    S73 does not touch, so the answer-identity rule is not in play. S72's decision to leave
+    regex101's code generator out is reversed in one narrow respect: one language, this library's
+    own API. One slice, sittings unestimated; the phase closes again when it lands.
