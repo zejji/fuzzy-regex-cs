@@ -111,7 +111,6 @@ const TABS = [
 ] as const;
 
 const tab = ref<(typeof TABS)[number]['value']>('examples');
-const openTab = computed(() => TABS.find((item) => item.value === tab.value) ?? TABS[0]);
 
 /**
  * Arrow keys across the tabs, with the selection following the focus.
@@ -362,7 +361,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <span aria-hidden="true" :class="advanced ? 'chevron chevron-open' : 'chevron'">&#9662;</span>
                     </button>
 
-                    <div v-if="wide || advanced" id="advanced-inputs" class="flex flex-col gap-4">
+                    <!--
+                      Hidden rather than dropped, so that `aria-controls` above names something that
+                      is there: an id that resolves to nothing is a reference to nothing. `hidden`
+                      takes the element out of the accessibility tree as well as off the screen
+                      (HTML-AAM maps it to "not exposed"), so a closed disclosure is closed for a
+                      screen reader too, and Tailwind's own reset gives it `!important` so a display
+                      utility on the same element cannot reopen it.
+                    -->
+                    <div
+                        id="advanced-inputs"
+                        class="flex flex-col gap-4"
+                        :hidden="!wide && !advanced"
+                    >
                         <div>
                             <label class="field-label" for="flags">Flags</label>
                             <input
@@ -463,14 +474,24 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         class="disclosure"
                         type="button"
                         :aria-expanded="panelOpen"
-                        aria-controls="panel-examples"
+                        aria-controls="examples-and-help"
                         @click="panelOpen = !panelOpen"
                     >
                         Examples and help
                         <span aria-hidden="true" :class="panelOpen ? 'chevron chevron-open' : 'chevron'">&#9662;</span>
                     </button>
 
-                    <template v-if="wide || panelOpen">
+                    <!--
+                      The disclosure controls the whole set, tabs included, so the id it names is
+                      this box rather than whichever panel happens to be open. It was naming
+                      `panel-examples`, which is not what it opens and, on the Help tab, was not in
+                      the page at all.
+                    -->
+                    <div
+                        id="examples-and-help"
+                        class="flex flex-col"
+                        :hidden="!wide && !panelOpen"
+                    >
                         <div
                             class="tab-list"
                             role="tablist"
@@ -495,16 +516,21 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         </div>
 
                         <!--
-                          One panel in the page at a time: the unselected tab's content is not
-                          hidden markup a screen reader can wander into, it is not rendered.
+                          Both panels are in the page and the unselected one is `hidden`, because
+                          each tab has to name the panel it controls (APG, Tabs: "Each element with
+                          role tab has the property aria-controls referring to its associated
+                          tabpanel element") and an id that resolves to nothing names nothing. It
+                          was rendering one panel, so the unselected tab pointed into thin air.
+                          `hidden` keeps the closed panel out of the accessibility tree, which is
+                          what the old comment here wanted and is why nothing can wander into it.
                         -->
                         <div
-                            :id="openTab.panel"
+                            id="panel-examples"
                             class="tab-panel"
                             role="tabpanel"
-                            :aria-labelledby="openTab.id"
+                            aria-labelledby="tab-examples"
+                            :hidden="tab !== 'examples'"
                         >
-                            <template v-if="tab === 'examples'">
                                 <button
                                     v-for="example in examples"
                                     :key="example.title"
@@ -525,18 +551,32 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                     project's test suite. The address bar holds the current case, so
                                     you can link to what you see.
                                 </p>
-                            </template>
+                        </div>
 
-                            <!--
-                              The documentation's own words, beside the sample that led here.
+                        <!--
+                          The documentation's own words, beside the sample that led here.
 
-                              <details>, so it is operable from a keyboard by construction rather
-                              than by a handler - and never a hover panel, which is a control a
-                              keyboard cannot reach at all. Every run is interpolated and none of it
-                              is `v-html`: help.json is generated from a markdown file, and a file
-                              that could put markup into this page could put a script here.
-                            -->
-                            <template v-else>
+                          <details>, so it is operable from a keyboard by construction rather
+                          than by a handler - and never a hover panel, which is a control a
+                          keyboard cannot reach at all. Every run is interpolated and none of it
+                          is `v-html`: help.json is generated from a markdown file, and a file
+                          that could put markup into this page could put a script here.
+
+                          `tabindex="0"` only while there is nothing to load - with no sample
+                          loaded the panel is one paragraph and a keyboard cannot reach it at all,
+                          which is the case APG's Tabs note 4 names ("When the tabpanel does not
+                          contain any focusable elements ... the tabpanel should set tabindex=0").
+                          With sections there are summaries and code boxes to tab to, and a stop
+                          on the panel itself would be one press in the way.
+                        -->
+                        <div
+                            id="panel-help"
+                            class="tab-panel"
+                            role="tabpanel"
+                            aria-labelledby="tab-help"
+                            :tabindex="helpSections.length ? undefined : 0"
+                            :hidden="tab !== 'help'"
+                        >
                                 <details
                                     v-for="(section, s) in helpSections"
                                     :key="s"
@@ -579,9 +619,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 <p v-else class="field-hint">
                                     Load a sample to read what it shows.
                                 </p>
-                            </template>
                         </div>
-                    </template>
+                    </div>
                 </section>
             </div>
 

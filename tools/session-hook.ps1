@@ -36,10 +36,19 @@ if (Test-Path -LiteralPath $deadlineFile) {
 $usage = @((Join-Path $env:USERPROFILE '.claude\last-usage.json'), (Join-Path $env:USERPROFILE '.claude\last-status.json')) |
     Where-Object { Test-Path -LiteralPath $_ } | Get-Item | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($usage -and ((Get-Date) - $usage.LastWriteTime).TotalMinutes -le 45) {
-    $five = (Get-Content -LiteralPath $usage.FullName -Raw | ConvertFrom-Json).rate_limits.five_hour
+    $limits = (Get-Content -LiteralPath $usage.FullName -Raw | ConvertFrom-Json).rate_limits
+    $five = $limits.five_hour
     if ($five -and [int]$five.used_percentage -ge 92) {
         $resets = [DateTimeOffset]::FromUnixTimeSeconds([long]$five.resets_at).ToLocalTime().ToString('HH:mm')
         $parts.Add("[allowance] the account's five-hour window is at $($five.used_percentage)% (resets $resets). COMMIT A GREEN CHECKPOINT NOW and end the session; the driver waits for the reset and a fresh sitting continues. Do not start new work.")
+    }
+    # The weekly window has no early reset; at 100% every session dies mid-work until the reset day.
+    # Owner 2026-09-19: spend the week to the end but lose as little as possible, so order the
+    # checkpoint at 96% (the driver's own gate lets sittings start up to 99%).
+    $seven = $limits.seven_day
+    if ($seven -and [int]$seven.used_percentage -ge 96) {
+        $resets = [DateTimeOffset]::FromUnixTimeSeconds([long]$seven.resets_at).ToLocalTime().ToString('ddd HH:mm')
+        $parts.Add("[allowance] the account's SEVEN-DAY window is at $($seven.used_percentage)% (resets $resets). COMMIT A GREEN CHECKPOINT NOW and end the session; at 100% every session stops mid-work until the reset. Do not start new work.")
     }
 }
 

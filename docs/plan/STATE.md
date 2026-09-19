@@ -8,23 +8,24 @@ for it: the owner's first look at the live demo judged it as a product and found
 Chunk 1 landed the copy linter and the rewrite of every user-facing string (1,185 words to 921).
 Chunk 2 landed the shell: a header/two-pane/footer frame gated on width AND height, the examples and
 help behind an ARIA tab set, two one-column disclosures, the ink-and-white palette with its 22
-measured contrast pairs, and `prefers-color-scheme: dark` removed. `checks.html` ran eight of nine;
-the red one was its own stale literal, not the page, and it now matches the cap instead. Re-run the
-whole page next sitting to see nine.
+measured contrast pairs, and `prefers-color-scheme: dark` removed. Sitting 3 fixed five of its seven
+review findings: the shell is `min-h-dvh` (the built CSS now holds no `100vh` at all), both tab
+panels are in the page with the unselected one `hidden` so every `aria-controls` resolves, the
+disclosures name the regions they open, the Help panel takes `tabindex="0"` while it is empty, and
+Tailwind no longer scans `tests/` for classes. `checks.html` still wants re-running whole: chunk 2
+saw eight of nine, and the red one was its own stale literal, since fixed.
 
 ## Next action
 
-**Chunk 2's seven review findings, before chunk 3.** The blind pass reported after the allowance
-ran out, so nothing is fixed. Every finding has a reproduction in the sittings notes ("Review (chunk
-2)"); confirm each yourself, then fix. The three that matter most:
+**The two open chunk-2 findings, then chunk 3.** Both are scoped in the sittings notes under
+"Chunk 2's review findings, fixed":
 
-- `.shell` compiles to `min-height: 100vh` under the gate's `height: 100dvh`, so the shell is still
-  `vh`-sized. Use `min-h-dvh`.
-- Four `layout.test.ts` tests assert over the stylesheet *source*, which is why they missed it and
-  why harmless CSS edits break them. Assert over the built CSS (`npm run build`, then
-  `wwwroot/assets/index-*.css`).
-- Three dangling or wrong `aria-controls`, and a `tabpanel` with no focusable content and no
-  `tabindex="0"`.
+- **Finding 6**: four `layout.test.ts` assertions still read the stylesheet SOURCE. The route is
+  proven - an in-process `vite build` of `src/styles.css` (`configFile: false`, `write: false`) gave
+  byte-identical output to `npm run build`, same hash, in 127 ms - but `tests/built-css.ts` is not
+  written.
+- **Finding 5**: focus drops to `<body>` when the media gate narrows with a tab focused. A
+  `watch(wide, ...)` opening whichever disclosure holds the focus is the cheap shape.
 
 **Then chunk 3**, from the spec's remaining deliverables. It inherits two things:
 

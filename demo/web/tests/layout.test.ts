@@ -228,10 +228,45 @@ test('examples and help are a tab set with one tab always selected', async () =>
     // tabindex the match highlights and the table rows already use.
     expect(tabs.map((tab) => tab.getAttribute('tabindex'))).toEqual(['0', '-1']);
 
-    const panel = found(page.querySelector<HTMLElement>('[role="tabpanel"]'), 'tab panel');
-    expect(page.querySelectorAll('[role="tabpanel"]')).toHaveLength(1);
-    expect(panel.getAttribute('aria-labelledby')).toBe(tabs[0]?.id);
-    expect(tabs[0]?.getAttribute('aria-controls')).toBe(panel.id);
+    // Both panels are in the page, the unselected one hidden, and every tab's `aria-controls`
+    // resolves. One panel rendered at a time left the unselected tab pointing at an id that was not
+    // there, and this assertion is over BOTH tabs because the version that checked `tabs[0]` alone
+    // could not see it (S73 chunk 2 review, finding 1).
+    const panels = [...page.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+    expect(panels.map((panel) => panel.hidden)).toEqual([false, true]);
+    for (const tab of tabs) {
+        const panel = found(
+            page.querySelector<HTMLElement>(`#${tab.getAttribute('aria-controls')}`),
+            `the panel ${tab.id} controls`,
+        );
+        expect(panel.getAttribute('role')).toBe('tabpanel');
+        expect(panel.getAttribute('aria-labelledby')).toBe(tab.id);
+        expect(panel.hidden).toBe(tab.getAttribute('aria-selected') !== 'true');
+    }
+});
+
+/**
+ * A panel a keyboard can reach, whether or not it holds anything to focus.
+ *
+ * APG's Tabs pattern, note 4: "When the tabpanel does not contain any focusable elements or the
+ * first element with content is not focusable, the tabpanel should set tabindex=0 to include it in
+ * the tab sequence of the page." With no sample loaded the Help panel is one paragraph, so without
+ * this its words are on screen and out of reach.
+ */
+test('the help panel is in the tab sequence exactly while it has nothing to focus', async () => {
+    served = SAMPLES;
+    const { page } = await mountPage();
+    const help = () => found(page.querySelector<HTMLElement>('#panel-help'), 'the help panel');
+
+    expect(help().getAttribute('tabindex')).toBe('0');
+
+    await until(() => page.querySelectorAll('button.example-button').length === 2, 'rendered its samples');
+    found([...page.querySelectorAll<HTMLElement>('button.example-button')][0], 'the documented sample').click();
+    await nextTick();
+
+    // Loaded: the panel now holds <details> summaries and code boxes, so a stop on the panel itself
+    // would be one press in the way of them.
+    expect(help().getAttribute('tabindex')).toBeNull();
 });
 
 test('the arrows move between the tabs and the ends hold', async () => {
@@ -297,25 +332,32 @@ test('a narrow window folds the secondary inputs and the sample panel away', asy
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
     const { page } = await mountPage();
 
-    expect(page.querySelector('#advanced-inputs')).toBeNull();
-    expect(page.querySelector('[role="tablist"]')).toBeNull();
-    expect(page.querySelector('#flags')).toBeNull();
+    // Hidden rather than absent: the button says `aria-controls`, so the thing it names has to be
+    // in the page for the reference to mean anything. `hidden` is what takes it off the screen and
+    // out of the accessibility tree, so nothing is reachable that is not visible.
+    const closed = (selector: string) =>
+        found(page.querySelector<HTMLElement>(selector), `the region ${selector}`).hidden;
+    expect(closed('#advanced-inputs')).toBe(true);
+    expect(closed('#examples-and-help')).toBe(true);
     // The two boxes that are the case at its shortest stay on screen.
     expect(page.querySelector('#pattern')).not.toBeNull();
     expect(page.querySelector('#subject')).not.toBeNull();
 
     // Both disclosures say what they do and what state they are in, which is what `aria-expanded`
-    // on the button that controls them is for.
+    // on the button that controls them is for - and each names a region that exists.
     const disclosures = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]')];
     expect(disclosures.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'false']);
+    for (const button of disclosures) {
+        expect(page.querySelector(`#${button.getAttribute('aria-controls')}`)).not.toBeNull();
+    }
 
     found(disclosures[0], 'the inputs disclosure').click();
     await nextTick();
-    expect(page.querySelector('#flags')).not.toBeNull();
+    expect(closed('#advanced-inputs')).toBe(false);
 
     found(disclosures[1], 'the samples disclosure').click();
     await nextTick();
-    expect(page.querySelector('[role="tablist"]')).not.toBeNull();
+    expect(closed('#examples-and-help')).toBe(false);
 });
 
 /**

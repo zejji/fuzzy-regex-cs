@@ -249,3 +249,62 @@ suite changed this chunk, so the baseline was not updated. `tools/run-wasm-smoke
 files published. The browser work was done against that publish on
 `http://localhost:8181`, not against the dev server: the source `wwwroot` has no `_framework`, so
 only a publish runs the engine.
+
+## Chunk 2's review findings, fixed (2026-09-19, sitting 3)
+
+The seven findings above, confirmed here before anything was touched, and five of them fixed. The
+sitting was cut short by the seven-day allowance (the orchestrator's 96 % gate), so this is a
+checkpoint commit and two findings are still open.
+
+**Finding 3, and the reason the test could not see it.** Confirmed against the real Vite build, not
+a reimplementation: `npm run build` and then the built stylesheet read back.
+
+    .shell{flex-direction:column;min-height:100vh;display:flex}
+    .shell{height:100dvh}
+
+`min-h-screen` compiles to `min-height: 100vh`, and where the browser chrome makes `100vh` the
+larger number it beats the `height: 100dvh` the gate sets on the same selector. Now `min-h-dvh`, and
+the same read-back gives `.shell{flex-direction:column;min-height:100dvh;display:flex}` with **zero
+occurrences of `100vh` in the whole built stylesheet**.
+
+**A third thing the built stylesheet showed.** `@media (width>=64rem){.lg\:overflow-y-auto{...}}` was
+in the shipped CSS, generated from a *sentence in `layout.test.ts`* explaining why the page no longer
+uses that class - Tailwind scans the test files too. `@source not '../tests'` in `styles.css` stops
+it: the bundle went 25.32 kB to 24.14 kB and the dead utility is gone (`grep -c` gives 0).
+
+**Findings 1, 2 and 4, all one change.** Both tab panels are now in the page with the unselected one
+`hidden`, because APG's Tabs pattern requires that "Each element with role `tab` has the property
+aria-controls referring to its associated `tabpanel` element" (w3.org/WAI/ARIA/apg/patterns/tabs,
+read 2026-09-19) and an id that resolves to nothing refers to nothing. `hidden` keeps the closed
+panel out of the accessibility tree, which is what the old "not rendered" comment wanted. The
+"Examples and help" disclosure now names `#examples-and-help`, the box it actually opens, and both
+disclosures hide their region rather than dropping it, so what `aria-controls` names is always
+there. The Help panel takes `tabindex="0"` only while `helpSections` is empty - APG's note 4, "When
+the tabpanel does not contain any focusable elements ... the tabpanel should set `tabindex=0`" -
+because with sections loaded there are summaries and code boxes to tab to.
+
+Three tests pin this and each was seen to fail without it: the tab-set test now walks **both** tabs
+(the version that checked `tabs[0]` alone is why the suite could not see finding 1), the narrow-window
+test asserts each region is `hidden` and that every `aria-controls` resolves, and a new test takes
+the Help panel from empty to loaded and back over `tabindex`.
+
+**Finding 7** was right: `accent-soft` is `.row-select`'s hover box, not the tab panel, which is
+`shell-raised`. The label says so now.
+
+**Still open, with the work already scoped.**
+
+- **Finding 6, the four `layout.test.ts` assertions over the stylesheet SOURCE.** The route is
+  proven, not written: an in-process `vite build` of `src/styles.css` with the Tailwind plugin and
+  `configFile: false`, `build.write: false`, run from a test, produced **byte-identical output to
+  `npm run build`** - same content hash `DqmTS2AV`, same 25,324 characters - in **127 ms**. So a
+  `tests/built-css.ts` helper can hand the four tests the CSS the browser receives, and they stop
+  breaking on harmless source edits. Two of the four assertions would need the utility-class exclusion
+  above to be in place first, which it now is.
+- **Finding 5, focus dropping to `<body>` when the media gate narrows.** Not attempted. The cheap
+  shape, if the next sitting wants it: a `watch(wide, ...)` with the default pre-flush, which still
+  sees the focused element, opening whichever disclosure contains it so the region never hides.
+  Two template refs, no focus juggling.
+
+**State.** `demo/web`: **182 tests in 11 files** green (181 before), `npm run typecheck` clean,
+`npm run build` clean. `tools/check-ratchet.ps1`: **GREEN, 6,399 passing** against the 6,291
+baseline - no .NET file was touched, so the baseline was not updated.

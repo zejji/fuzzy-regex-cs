@@ -57,7 +57,9 @@ const PAIRS: readonly (readonly [string, string, number, string])[] = [
     // The results region, which is light.
     ['--color-slate-900', '--color-white', 4.5, 'the answer'],
     ['--color-accent', '--color-white', 4.5, 'a link, and the focus ring, on light'],
-    ['--color-accent', '--color-accent-soft', 4.5, 'the row the pointer is over, and the tab panel'],
+    // `accent-soft` is the hover box on the row-number button and nothing else (`.row-select`);
+    // the tab panel is `shell-raised`, measured above.
+    ['--color-accent', '--color-accent-soft', 4.5, 'the row number the pointer is over'],
     ['--color-slate-600', '--color-white', 4.5, 'a column heading'],
 
     // The three kinds of edit, each also carrying its letter, because a red-green reader separates
