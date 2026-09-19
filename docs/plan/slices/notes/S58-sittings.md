@@ -174,6 +174,33 @@ the start, so a source edit halfway through a 34-minute run would have the later
 different library than the earlier ones. Everything touching `src/` or `bench/` waits until run B
 has printed its baseline. Docs and `tools/` are safe.
 
+### Sitting 2 - 2026-09-19, 11:21
+
+Inherited a clean tree at `e30a4e8` with one untracked file, and a running benchmark nobody had
+written down.
+
+**Run D was in flight and this sitting did not know.** Sitting 1 launched it detached at 11:16:18
+and was killed at 11:17 before recording it; `STATE.md` said "take the one missing noise run", which
+reads as an instruction to start one. Orientation - reading the state files, sampling the machine
+for two minutes to check it was quiet, enumerating processes to identify two busy `dotnet`
+processes - ran 11:19-11:21 through the Headroom proxy, which D's own sampler logged at
+**54.5s and 64.1s per 15-second window, 3.6 and 4.3 cores**. The orchestrator's message at 11:21
+named the run; by then the damage was done. D's first eleven rows are 1.10-2.06x A's with
+min/median down to 0.54, and its last 38 are inside 1.07x - the same episode shape as B, at the
+front of the run instead of the middle.
+
+D is discarded and committed as evidence (`-noise-D-discarded.json` + `-discarded-load.log`), and
+`noise-floor.md` gains a sixth rule from it: **write a detached run into `STATE.md` with its PID,
+log path and expected finish before launching it**, because the session that knows is the session
+that gets killed.
+
+**Rejected: a filtered re-run of just the eleven damaged rows.** It would have cost 12 minutes
+instead of 35, and the owner's cheapest-route rule points at it. Two things killed it.
+`compare-benchmarks.ps1:199` refuses `-UpdateBaseline` under a filter ("would record a partial
+suite"), so it would have meant weakening a guard to get a result - banned outright. And the
+cheap currency here is allowance, not wall time: a full run is four blocking waits and near-zero
+tokens, so the 23 minutes bought nothing worth having.
+
 ### Deviation from the slice file: where archived evidence goes
 
 The slice says to archive under `artifacts/bench/...` and `artifacts/prof/S58/`. **`artifacts/` is

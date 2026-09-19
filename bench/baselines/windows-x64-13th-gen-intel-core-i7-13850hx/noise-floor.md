@@ -27,18 +27,20 @@ pwsh -File tools/compare-benchmarks.ps1 -Job medium -Filter '*' `
   -BaselinePath bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-A.json
 
 pwsh -File tools/compare-benchmarks.ps1 -Job medium -Filter '*' `
-  -ArtifactsPath artifacts/bench/2026-09-19-S58-noise-C -UpdateBaseline `
-  -BaselinePath bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-C.json
+  -ArtifactsPath artifacts/bench/2026-09-19-S58-noise-<N> -UpdateBaseline `
+  -BaselinePath bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-<N>.json
 
-# and then the comparison itself, from the committed files:
-pwsh -File tools/compare-benchmarks.ps1 -UseExisting -Job medium `
-  -ArtifactsPath artifacts/bench/2026-09-19-S58-noise-C `
-  -BaselinePath bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-A.json
+# and then the comparison itself, from the committed baselines alone:
+pwsh -File tools/probes/compare-two-baselines.ps1 `
+  -BaselineA bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-A.json `
+  -BaselineB bench/baselines/windows-x64-13th-gen-intel-core-i7-13850hx/2026-09-19-S58-noise-<N>.json
 ```
 
-The second run is called C because the first attempt at it, B, was thrown away. Its baseline is
-committed beside the two that count, as `2026-09-19-S58-noise-B-discarded.json`, because a run that
-had to be discarded is evidence about the method - the next section is what it taught.
+A is the first of the pair. Its partner took several attempts, and **every discarded attempt is
+committed beside it** - `-noise-B-discarded.json`, `-noise-D-discarded.json` and the two
+`-load.log` files - because a run that had to be thrown away is evidence about the method. The two
+sections below are what they taught. The letter of the partner that finally counted is in "The
+floor" at the end.
 
 Both JSON files are committed beside this one, so the comparison is re-runnable from committed
 evidence; the raw BenchmarkDotNet output under `artifacts/` is not, because `artifacts/` is
@@ -60,7 +62,7 @@ rests on.
   contention signal), 4 with a multimodality warning: `ReferenceBenchmarks.BacktrackingBcl`,
   `SpanOverloadBenchmarks.CountSpanMegabyte`, `WorkloadBenchmarks.ReverseFailedScan`,
   `WorkloadBenchmarks.SplitLong`.
-- Run C (09:44 - 10:23): see below.
+- Runs B, C and D: discarded, each for a named and measured cause - see the two sections below.
 
 ## Run B, which was discarded, and what it taught
 
@@ -128,6 +130,51 @@ competitor is a run to throw away, knowing why. Its cost is measured, not assume
 pass per interval, under 0.2 s of CPU a sample, which is below 0.7% of one core at 15-second
 spacing.
 
+## Run D, which was discarded for the same cause with a different culprit
+
+D ran 11:16:18 - 11:51 and came back with **6 of 49 rows below 0.85** and a widest ratio of
+**2.06x** (`GroupCountStateBenchmarks.StateByGroupCount(Groups: 32)`). Read in run order it is B's
+shape again, and this time the damage is at the *front*:
+
+| Benchmark (in run order) | A min/med | D min/med | D/A |
+|---|---:|---:|---:|
+| `GroupCountStateBenchmarks.StateByGroupCount(1..32)` | 0.97-0.99 | **0.54-0.97** | **1.10-2.06** |
+| `ReferenceBenchmarks.LiteralPort` | 0.96 | **0.66** | **1.55** |
+| `ReferenceBenchmarks.LiteralBcl` | 0.98 | 0.88 | **1.39** |
+| `ReferenceBenchmarks.LiteralBclCompiled` | 0.94 | **0.60** | **1.51** |
+| `ReferenceBenchmarks.ClassScanPort` | 0.97 | **0.77** | **1.58** |
+| `ReferenceBenchmarks.ClassScanBcl` | 0.98 | **0.70** | **1.45** |
+| `ReferenceBenchmarks.ClassScanBclCompiled` and every row after it (38 rows) | 0.90-0.99 | 0.89-0.99 | 0.90-1.07 |
+
+Eleven damaged rows, then it stops dead and the remaining 38 are inside 1.07x. An episode at the
+start of the run rather than the middle of it.
+
+**The culprit is named in D's own load log, and it was the measuring session.** The sampler this
+method gained after B recorded, at 11:21:19 and 11:21:34, `python(21184) 54.5s` and `64.1s` in
+15-second windows - **3.6 and 4.3 cores** - from the Headroom context proxy. That is the same PID
+run C was thrown away for. The Claude session was orienting: reading state files, sampling the
+machine and enumerating processes, all of it through the proxy.
+
+**Why it did that while a run was in flight** is the part worth keeping, because it is a process
+fault and not a carelessness fault. The sitting that launched D was killed a minute later, at
+11:17, without writing down that it had launched anything: `STATE.md` said "take the one missing
+noise run", which reads as *start one*, and the next sitting started by doing exactly what a
+sitting should do - orient, check the machine is quiet - which was itself the contention. The
+sampler log's first four lines (`pwsh(30380)`, `msedge`, `python`) are that dead sitting's own
+launch traffic. So:
+
+- **A detached run must be recorded in `STATE.md` before it is launched, with its PID, its log path
+  and its expected finish time**, because the session that knows about it can be killed at any
+  moment and the next one inherits nothing else. D was found only because the orchestrator said so.
+- **Orientation is not free.** "Check the machine is quiet" costs 3.6 cores through the proxy, so on
+  this machine the check and the thing it checks for are the same event. Read the state files, and
+  if they say a run is in flight, stop reading and block.
+
+Both discarded runs are kept: `2026-09-19-S58-noise-D-discarded.json` and its
+`-discarded-load.log`. Between them B and D make the point twice over that the *detector* works -
+BDN's min/median flagged both without being told anything - and that what fails is always the
+watchman.
+
 ## Taking a run so it counts
 
 Every line here was paid for on 2026-09-19.
@@ -146,13 +193,17 @@ Every line here was paid for on 2026-09-19.
    suspect - the floor is a maximum over rows, so one contended row sets it.
 5. Back-to-back runs are fine on this machine: A and the discarded B agreed to 1.02-1.08x on every
    row the episode missed, so there is no evidence of thermal drift between consecutive runs.
+6. **Write the run into `STATE.md` before launching it** - PID, log path, expected finish - and
+   launch it detached. A session can be killed mid-run; the next one must be able to find the run
+   from committed files alone, and must block rather than orient. Run D was lost to this.
 
 ## The floor
 
-**NOT YET MEASURED.** Run A is taken, sound and committed. Its partner is not: B was contaminated
-by the worktree episode above, and the replacement run C, started 09:44, had its first benchmark
-class inside the same episode's tail (which ran to 09:50) and was stopped rather than finished, so
-there is no C baseline. What the next sitting does, and nothing else, before it touches anything
+**NOT YET MEASURED.** Run A is taken, sound and committed. Its partner is not, after three
+attempts: B was contaminated by the worktree episode above; C, started 09:44, had its first
+benchmark class inside that episode's tail and was stopped rather than finished, so there is no C
+baseline; D finished but its first eleven rows were taken while the measuring session's own proxy
+held 3.6-4.3 cores. What the next sitting does, and nothing else, before it touches anything
 else on this slice:
 
 - Take **one** fresh run against the committed A, with the five rules above obeyed and the sampler
