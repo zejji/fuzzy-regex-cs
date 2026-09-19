@@ -840,7 +840,7 @@ function Test-AllowanceFloor {
     param(
         [AllowNull()][object]$Allowance,
         [int]$FiveHourFloor = 88,
-        [int]$SevenDayFloor = 99,  # owner 2026-09-19: spend the week to the end; the hook orders a checkpoint at 96%
+        [int]$SevenDayFloor = 98,  # owner 2026-09-19: spend the week to the end; the hook orders a checkpoint at the same mark, so a sitting that starts below it gets its run
         [int]$MaxAgeMinutes = 45,
         [datetimeoffset]$Now = [datetimeoffset]::Now
     )

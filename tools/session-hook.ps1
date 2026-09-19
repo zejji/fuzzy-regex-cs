@@ -44,9 +44,9 @@ if ($usage -and ((Get-Date) - $usage.LastWriteTime).TotalMinutes -le 45) {
     }
     # The weekly window has no early reset; at 100% every session dies mid-work until the reset day.
     # Owner 2026-09-19: spend the week to the end but lose as little as possible, so order the
-    # checkpoint at 96% (the driver's own gate lets sittings start up to 99%).
+    # checkpoint at 98%, the same mark the gate uses: a sitting that starts below it gets its run, one at it never starts.
     $seven = $limits.seven_day
-    if ($seven -and [int]$seven.used_percentage -ge 96) {
+    if ($seven -and [int]$seven.used_percentage -ge 98) {
         $resets = [DateTimeOffset]::FromUnixTimeSeconds([long]$seven.resets_at).ToLocalTime().ToString('ddd HH:mm')
         $parts.Add("[allowance] the account's SEVEN-DAY window is at $($seven.used_percentage)% (resets $resets). COMMIT A GREEN CHECKPOINT NOW and end the session; at 100% every session stops mid-work until the reset. Do not start new work.")
     }
