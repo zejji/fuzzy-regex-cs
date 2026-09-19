@@ -369,7 +369,10 @@
     .data-table th {
         @apply border-b border-slate-300 px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 uppercase;
         /* Sticky against the results region, so the column names survive a long answer. It needs
-           an opaque background of its own: sticky content is painted over the rows it passes. */
+           an opaque background of its own: sticky content is painted over the rows it passes.
+           What it sticks TO is decided at the foot of this file, where `.table-scroll` gives up
+           its overflow inside the fixed-shell gate; outside the gate the document scrolls and
+           this rule has no scrollport to act in. */
         @apply sticky top-0 z-10 bg-white;
     }
 
@@ -377,9 +380,10 @@
         @apply border-b border-slate-200 px-3 py-2 align-top;
     }
 
-    /* The table's own scroll container. It keeps `overflow-x` at every width - six columns do not
-       fit 390 px - but nothing here ever scrolls vertically: the results region owns that, and a
-       second vertical scroller inside it is what would make the sticky header stick to nothing. */
+    /* The table's own sideways scroller, for the widths that need one: at 390 px the table is 479 px
+       wide in a 342 px pane. Inside the fixed-shell gate it gives this up again (foot of the file),
+       because an `overflow-x: auto` makes an element a scroll container on BOTH axes and the sticky
+       `th` above would stick to this box, which is as tall as its own rows and never scrolls. */
     .table-scroll {
         @apply overflow-x-auto rounded-md border border-slate-200;
     }
@@ -534,5 +538,36 @@
 
     .results-pane {
         overflow-y: auto;
+    }
+
+    /* And the table's own wrapper gives its overflow up here, because a sticky `th` sticks to the
+       nearest ancestor scrollport and `overflow-x: auto` makes the wrapper one on both axes (CSS
+       Overflow 3: an `auto` on one axis pulls the other's used value to `auto` with it). The wrapper
+       is as tall as its rows, so it never scrolls, and the header it captured scrolled away with
+       them - measured at 1366x768, `th` at y=-949 with the pane at 1500. With no overflow here the
+       scrollport is `.results-pane` and the header holds at the top of it, y=84.
+
+       `overflow-y: clip` beside the `auto` does not work: the same clause turns that `clip` into
+       `hidden`, which is still a scroll container, and the browser gave the same -949.
+
+       Nothing is lost inside the gate. At 1024x768, its narrowest window, the table is 479 px in a
+       503 px pane, and no region gains a sideways scroll. Below the gate the rule above applies
+       instead and the wrapper keeps `overflow-x: auto`, which is where the six columns need it:
+       at 390 px the same table is 479 px wide in a 342 px pane. */
+    .table-scroll {
+        overflow: visible;
+    }
+
+    /* A sticky `top: 0` is the scrollport's PADDING edge, and the pane is `sm:p-5`, so the header
+       docked 20 px below the pane's border and the rows kept scrolling past in the open band above
+       it - measured with the pane at 1200: pane top y=64, header top y=84, and
+       `elementFromPoint(900, 66)` a `TD`. Pulling the header up by the pane's own padding puts it
+       against the border, where its opaque background covers the band.
+
+       `calc(var(--spacing) * -5)` is `p-5` read from the same token the padding uses, so the two
+       cannot drift; `layout.test.ts` holds them equal. Inside the gate the window is at least
+       64rem, so the pane's padding is always the `sm:` one. */
+    .data-table th {
+        top: calc(var(--spacing) * -5);
     }
 }

@@ -261,6 +261,79 @@ test('nothing but a link is underlined', async () => {
     }
 });
 
+/** Every rule whose selector list names exactly this selector, in source order. */
+function rulesFor(css: string, selector: string): string[] {
+    return [...css.matchAll(/([^{}@]+)\{([^}]*)\}/g)]
+        .filter(([, list]) => selectorList(list ?? '').includes(selector))
+        .map(([, , body]) => body ?? '');
+}
+
+/**
+ * The sticky column header sticks to the region that scrolls, with nothing in between.
+ *
+ * `position: sticky` sticks to the nearest ancestor scrollport, and CSS Overflow 3 makes one axis
+ * enough: with `overflow-x: auto` the other axis's used value becomes `auto` too. So `.table-scroll`
+ * - which exists for the six columns at 390 px - was the `th`'s scrollport, and `.table-scroll`
+ * never scrolls vertically, because the table is as tall as its rows. The header therefore scrolled
+ * away with them: measured at 1366x768 with the pane scrolled to 1500, the `th` at y=-949, off the
+ * top of a window whose pane starts at y=64.
+ *
+ * `overflow-y: clip` was the fix chunk 4 proposed, and the browser refused it: the same clause of
+ * the spec turns a `clip` beside an `auto` into `hidden`, which is still a scroll container, and the
+ * measurement came back -949 unchanged. What works is giving the wrapper no overflow at all inside
+ * the gate, so the scrollport is `.results-pane`: the `th` then holds at y=84, the top of the pane.
+ * Both numbers are from `tools/probes/s73-sticky-column-header.mjs`, and the wrapper costs nothing
+ * to drop there - at 1024x768, the narrowest window inside the gate, the table is 479 px in a 503 px
+ * pane, and nothing gains a sideways scroll (`tools/probes/s73-sticky-header-fix-at-five-widths.mjs`).
+ */
+test('the sticky column header has no scroll container between it and the pane', async () => {
+    const css = await builtCss();
+    const gate = gateBlock(css);
+
+    expect(rulesFor(css, '.data-table th').join(' '), 'the column header is not sticky at all').toMatch(
+        /position:\s*sticky/,
+    );
+
+    // Inside the gate: no overflow on the wrapper, so the pane is the nearest scrollport.
+    const inside = rulesFor(gate, '.table-scroll').join(' ');
+    expect(inside, 'the table wrapper does not give up its overflow inside the gate').toMatch(
+        /overflow:\s*visible/,
+    );
+    for (const body of rulesFor(gate, '.table-scroll')) {
+        expect(body, 'a scroll container inside the gate takes the sticky header with it').not.toMatch(
+            /overflow(?:-x|-y)?:\s*(?:auto|scroll|hidden|clip)/,
+        );
+    }
+
+    // Outside it the document scrolls, the pane owns no overflow, and the six columns need the
+    // wrapper's own sideways scroller back - at 390 px the table is 479 px wide in a 342 px pane.
+    expect(
+        rulesFor(css.replace(gate, ' '), '.table-scroll').join(' '),
+        'below the gate the table has no way to scroll sideways',
+    ).toMatch(/overflow-x:\s*auto/);
+
+    // And the header docks at the pane's border, not 20 px inside it. A sticky `top: 0` is the
+    // scrollport's PADDING edge, so with the pane's `sm:p-5` the rows went on scrolling through the
+    // band above the docked header, in the open: measured at 1366x768 with the pane at 1200, pane
+    // top y=64, header top y=84, `elementFromPoint(900, 66)` a `TD`. The header is pulled up by the
+    // pane's own padding, and these two numbers are why this assertion exists rather than a comment:
+    // change `sm:p-5` alone and the band comes back with nothing on screen to say so.
+    const spacing = (declaration: string, property: string): number => {
+        const found = new RegExp(`${property}:\\s*calc\\(var\\(--spacing\\)\\s*\\*\\s*(-?\\d+)\\)`).exec(declaration);
+        return found ? Number(found[1]) : Number.NaN;
+    };
+    // The pane's padding at its widest - `p-4 sm:p-5`, and the gate starts at 64rem, so the `sm:`
+    // one is what applies wherever the header sticks. Taken as the largest rather than the last,
+    // because the order the build emits two rules for one selector in is not the point being made.
+    // At-rule preludes dropped first, or the `sm:` rule is read as a rule named `media (width>=40rem)`
+    // and its padding is never seen - the same trap the underline test above fell into.
+    const panePadding = rulesFor(css.replace(/@[a-z-]+[^{;]*\{/gi, ' '), '.results-pane')
+        .map((body) => spacing(body, '(?<!-)padding'))
+        .filter((step) => !Number.isNaN(step));
+    expect(panePadding.length, 'the pane declares no padding').toBeGreaterThan(0);
+    expect(spacing(rulesFor(gate, '.data-table th').join(' '), 'top')).toBe(-Math.max(...panePadding));
+});
+
 // --- the page ---------------------------------------------------------------------------------
 
 let app: VueApp<Element> | null = null;
