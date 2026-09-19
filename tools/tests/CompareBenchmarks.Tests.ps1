@@ -148,6 +148,27 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         $report | Should -Match 'lost'
     }
 
+    It 'does NOT fail a run for an allocation change between the allocation floor and -Threshold' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1200
+
+        # This pins current behaviour rather than desired behaviour, and it is here because the
+        # shipped defaults make it easy to read the opposite off S58's measurement. A floor can only
+        # EXCUSE a ratio: what fails a run is -Threshold, which governs both axes, and the floor
+        # forgives a ratio that is over -Threshold but inside the floor ("calls a slowdown inside
+        # the floor `same`" and "excuses an allocation ratio inside the allocation floor" pin that
+        # direction). A floor BELOW -Threshold therefore forgives nothing, so with the shipped
+        # defaults - -Threshold 1.25, floors 1.13 and 1.0001 - a benchmark allocating 1.20x its
+        # baseline is GREEN, even though the machine can resolve allocation to 2.8e-5.
+        # Whether allocation deserves a tighter threshold of its own is S63's call (its scope item
+        # 7), not a measurement slice's; if S63 changes it, this test is the one to invert.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $report | Should -Match 'GREEN'
+        $report | Should -Match '1\.20x'
+    }
+
     It 'prints the floor it is applying, so a comparison cannot silently use one' {
         New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000

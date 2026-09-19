@@ -85,13 +85,15 @@ number well under 1 means that benchmark's own iterations disagreed:
 | `SubjectLengthStateBenchmarks.StateBySubjectLength(16384)` | 0.99 | **0.77** | **2.10** |
 | `WorkloadBenchmarks.LiteralMatch` | 0.98 | **0.76** | **1.48** |
 | `WorkloadBenchmarks.ClassScan` | 0.98 | **0.71** | **1.43** |
-| `WorkloadBenchmarks.CaseFoldedScan` and every row after it (17 rows) | 0.90-0.99 | 0.93-0.99 | 0.92-1.03 |
+| `WorkloadBenchmarks.CaseFoldedScan` and every row after it (17 rows) | 0.90-0.99 | 0.83-0.99 | 0.92-1.03 |
 
 Reproduce it from the committed baselines with `tools/probes/compare-two-baselines.ps1`.
 
 Read that column downwards: the first class is clean, then everything from `LiteralBcl` to
 `WorkloadBenchmarks.ClassScan` is hurt, and then it stops - dead - and the last seventeen rows are
-inside 1.03x with a clean contention signal. That is not thermal throttling (which would get worse
+inside 1.03x. Their contention signal is nearly clean too, with one exception worth stating rather
+than rounding away: `MatchesFirstTwo` reads 0.83 in B, below the 0.85 line, while its ratio is
+1.01. That is not thermal throttling (which would get worse
 as the run went on, not better) and it is not a slow machine. It is an **episode**: something had
 the machine for roughly 25 minutes in the middle of the run and then stopped.
 
@@ -127,8 +129,8 @@ not optional.
 noise run, samples every 15 seconds, and logs the per-process CPU *delta* with the process named. A
 run whose sampler log is quiet is a run that can say so with evidence; a run whose sampler names a
 competitor is a run to throw away, knowing why. Its cost is measured, not assumed: one `Get-Process`
-pass per interval, under 0.2 s of CPU a sample, which is below 0.7% of one core at 15-second
-spacing.
+pass per interval, under 0.2 s of CPU a sample, which at 15-second spacing is 1.3% of one core -
+the script's own 0.7% figure is quoted for its default 30-second interval.
 
 ## Run D, which was discarded for the same cause with a different culprit
 
@@ -186,13 +188,20 @@ Every line here was paid for on 2026-09-19.
    request. Block on one long wait per poll; do the writing before the run or after it, never
    during. Pausing Stryker is necessary and not sufficient.
 3. **Run `tools/probes/sample-machine-load.ps1` beside the run** and read its log before trusting
-   the numbers. A run whose log names any process other than `dotnet`, `csc`, `MSBuild` and the
-   sampler is a run to discard. `csc` bursts to ten cores are BenchmarkDotNet building the next
-   benchmark class, which is expected and sequential with the measurement.
+   the numbers. Judge it on **how much CPU a non-benchmark process took**, not on whether one is
+   named at all: the kept run E's log names `msedge`, `msedgewebview2`, `python` and
+   `VBCSCompiler`, and its busiest such sample is 4.5 s in 15 - 0.3 of a core. Every discarded run
+   is an order of magnitude past that (C: `python` 2.6 cores, D: `python` 3.6 and 4.3 cores), so
+   the two populations do not overlap and nothing here fixes a line between them. Treat 0.3 of a
+   core as demonstrably harmless, 2.6 as demonstrably fatal, and anything in between as unproven -
+   re-take the run rather than argue about it. `dotnet` at 14.5 s in 15 is the benchmark working,
+   and `csc` bursts to ten cores are BenchmarkDotNet building the next benchmark class, which is
+   expected and sequential with the measurement.
 4. **Read the run's own contention line.** Any row with min/median below 0.85 makes the whole run
    suspect - the floor is a maximum over rows, so one contended row sets it.
-5. Back-to-back runs are fine on this machine: A and the discarded B agreed to 1.02-1.08x on every
-   row the episode missed, so there is no evidence of thermal drift between consecutive runs.
+5. Back-to-back runs are fine on this machine: A and the discarded B agreed within 0.92-1.03x on
+   the seventeen rows the episode missed, so there is no evidence of thermal drift between
+   consecutive runs.
 6. **Write the run into `STATE.md` before launching it** - PID, log path, expected finish - and
    launch it detached. A session can be killed mid-run; the next one must be able to find the run
    from committed files alone, and must block rather than orient. Run D was lost to this.
@@ -201,7 +210,7 @@ Every line here was paid for on 2026-09-19.
 
 | | Floor | Set by | Observed span |
 |---|---:|---|---|
-| **Time** | **1.13** | `WorkloadBenchmarks.ReverseFailedScan`, ratio **0.8892** (1/0.8892 = 1.1247) | 0.8892 - 1.0768 |
+| **Time** | **1.13** | `WorkloadBenchmarks.ReverseFailedScan`, ratio **0.88916** (1/0.88916 = 1.1247) | 0.88916 - 1.0768 |
 | **Allocation** | **1.0001** | `WorkloadBenchmarks.SplitLong`, 11,060,299 B to 11,059,992 B | 0.99997 - 1.00001 |
 
 Measured 2026-09-19 from **run A** (08:22-08:56) and **run E** (11:56:31-12:29:55), `--job medium`,
@@ -217,7 +226,8 @@ pwsh -File tools/probes/compare-two-baselines.ps1 `
 
 E was the fourth attempt at A's partner and the first to pass its own gate: **0 of 49 rows below
 0.85**, against 19 for B and 6 for D. Its sampler log
-(`2026-09-19-S58-noise-E-load.log`) names nothing above 0.3 of a core for a single sample.
+(`2026-09-19-S58-noise-E-load.log`) names no process other than the benchmark itself above 0.3 of a
+core for a single sample; `dotnet` reaches 14.5 s of CPU in a 15 s window, which is the run working.
 
 **The time floor is set by the "improvement" side, and that is deliberate.** The widest regression
 direction was 1.0768 (`StateByGroupCount(Groups: 32)`); the widest movement in either direction was
@@ -226,8 +236,9 @@ two-sided because an unexplained improvement inside the floor is the same measur
 regression inside it, so the floor is the wider side: 1.1247, rounded up to 1.13.
 
 **How to tighten it, for a later slice that wants a sharper gate.** That row is the one to suspect
-rather than the machine: `ReverseFailedScan` had run A's *worst* contention signal (min/median 0.91,
-against 0.99 in E) and was one of A's four multimodal rows. A multimodal benchmark's median jumps
+rather than the machine: `ReverseFailedScan` was one of run A's three shakiest rows on the
+contention signal (min/median 0.9148, behind `MatchesToEndDense` at 0.9008 and `MatchesFirstTwo` at
+0.9102; 0.99 in E) and one of A's four multimodal rows. A multimodal benchmark's median jumps
 between its two modes, which is real variation the floor has to cover - but it is variation in one
 row, not a property of the suite. Drop that row and the floor is 1.08. Re-measuring A would very
 likely buy back those five points; re-measuring it *after* stabilising the benchmark would be
@@ -235,9 +246,31 @@ better still.
 
 **Allocation is nearly deterministic here, and that is the useful half of the result.** Forty-five
 rows allocate; the largest disagreement between two runs was 307 bytes in 11.06 MB, and 38 rows
-matched to the byte. So an allocation change of any size is signal - which matters, because
-allocation is Phase 7's first optimisation lever and the lazy-walk and span decisions both turn on
-allocated bytes rather than nanoseconds. The 1.0001 floor exists only to absorb that 2.8e-5 wobble.
+matched to the byte. So an allocation change of almost any size is *measurable* here, which matters,
+because allocation is Phase 7's first optimisation lever and the lazy-walk and span decisions both
+turn on allocated bytes rather than nanoseconds. The 1.0001 floor exists only to absorb that 2.8e-5
+wobble.
+
+**Measurable is not the same as gated, and at these numbers it is not gated.** A floor in
+`tools/compare-benchmarks.ps1` can only ever *excuse* a ratio, never fail one: what fails a run is
+`-Threshold`, which defaults to 1.25 and governs both axes, and a ratio over `-Threshold` is
+forgiven if it is inside the floor. So a floor above `-Threshold` does change the verdict - a row
+doctored to 1.20x on both axes, run at `-Threshold 1.05`, is RED with the shipped floors and GREEN
+with `-NoiseFloor 1.25 -AllocationNoiseFloor 1.25` (both, because both axes moved) - but a floor
+*below* `-Threshold` forgives nothing that `-Threshold` would have failed. Both
+of these floors are below 1.25, so they move no verdict: a benchmark allocating 1.20x its baseline
+reports GREEN, byte-level determinism or not.
+
+Pinned as a test, `tools/tests/CompareBenchmarks.Tests.ps1`, "does NOT fail a run for an allocation
+change between the allocation floor and -Threshold", which is the reproduction that needs nothing
+but committed files. Confirmed on real data too, with `tools/probes/gate-scale-one-row.py`: scaling
+`WorkloadBenchmarks.SplitLong` to 1.20x on both axes inside a copy of run A's artifacts and
+comparing that against run A's committed baseline printed `1.20x 1.20x` on the row and `GREEN`
+overall. (That one needs the artifacts folder, which is gitignored.) That
+is pre-existing behaviour, not something these floors changed, and picking the allocation threshold
+is a gate decision rather than a measurement one, so it is left to **S63** (see its scope item 7).
+What this measurement establishes is the evidence S63 needs: an allocation threshold anywhere above
+about 1.0001 is justified by the machine, not forced by it.
 
 **Still not done:** scope item 1's second pair ("repeat the pair once after a reboot"). Rebooting
 this machine would kill the owner's driver, Stryker and night-shift processes, which is the owner's

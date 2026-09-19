@@ -50,7 +50,15 @@ overloads and the like) are measured and excluded, and the published table says 
    it; `grep -rn -i 'ponytail:\|Phase 7' src/FuzzyRegex --include=*.cs` and the file must agree row
    for row when the slice closes. Rows that remain are deliberate, dated deferrals, and the file
    says so.
-7. **Phase 7 close notes**: what moved and by how much per workload, what was declined and why, the
+7. **Decide whether allocation gets a threshold of its own.** `tools/compare-benchmarks.ps1` fails a
+   run on `-Threshold`, which is 1.25 for *both* axes; a floor can only excuse a ratio that is over
+   `-Threshold`, so `-AllocationNoiseFloor` at 1.0001 excuses nothing. The consequence, pinned as
+   a test in `tools/tests/CompareBenchmarks.Tests.ps1`: a benchmark allocating **1.20x** its
+   baseline is GREEN.
+   S58 measured the machine's allocation noise at 2.8e-5, so a tighter allocation threshold is
+   available on the evidence; whether the gate should use it is a gate decision, which is this
+   slice. Decide it either way, record the reason, and invert that test if the answer is yes.
+8. **Phase 7 close notes**: what moved and by how much per workload, what was declined and why, the
    negative results, the state of `SYNC-DIVERGENCE.md` (every row with its measured gain and its
    re-align instruction), the AOT binary size against the 6,972,928-byte baseline, and the refreshed
    startup timings on a quiet machine, which S53 explicitly asked for and never had.

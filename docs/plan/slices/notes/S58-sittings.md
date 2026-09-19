@@ -13,21 +13,25 @@ S57 is unaffected by machine load and can follow.
 
 - [x] New benchmarks added before the noise runs, so the floor covers them
 - [x] `compare-benchmarks.ps1`: `-Job`, `-BaselinePath`, `-NoiseFloor`, `-AllocationNoiseFloor`
-- [ ] Noise run A (in flight)
-- [ ] Noise run B
-- [ ] `noise-floor.md` committed with date, SHA, job, machine state
+- [x] Noise run A (sound, committed)
+- [x] Noise run B (discarded - worktree episode), C (stopped), D (discarded - our own proxy)
+- [x] Noise run E, and the floor set from A against E: time 1.13, allocation 1.0001
+- [x] `noise-floor.md` committed with date, SHA, job, machine state
 - [ ] BDN affinity / GC-mode question answered from a real run's artifacts
 - [ ] pyperf installed, `system show` + `check` archived, Python floor measured
 - [ ] EventPipe topN route proven
 - [ ] dotTrace/Rider allocation route proven, or failure + fallback recorded
 - [x] Optimise checklist written - BLOCKED from `.claude/`, parked in `phase7-research/`
 - [x] `SYNC-DIVERGENCE.md` + `check-sync-divergence.ps1` + ratchet wiring
-- [x] Tool tests over the floor and the divergence script (written; run after the noise runs)
+- [x] Tool tests over the floor and the divergence script - run at last, 114/0 after a fixture fix and one added test
 - [~] `2026-09-19-span-threading-decision.md` drafted (both decisions in one file, as the slice
       asks) - **two number tables and two recommendations still to fill from run A**
 - [ ] Lazy-walk decision document (same file, section 2)
-- [ ] Ratchet, oracle at three seeds, AOT, tool tests
-- [ ] Blind review, verifier, commit
+- [x] Ratchet GREEN (6399 passing), tool tests 114/0
+- [~] Oracle: 2 of 3 seeds green; the third is a pre-existing engine divergence, written up
+- [~] AOT: RED on a trim-analysis error in an S65 convention test, written up
+- [~] Blind review (two passes, nine findings, all fixed) and verifier done; committed as a
+      checkpoint - the slice's own unstarted scope is what keeps it open
 
 ### The machine: a hung compiler server (reported, not killed)
 
@@ -194,9 +198,70 @@ D is discarded and committed as evidence (`-noise-D-discarded.json` + `-discarde
 log path and expected finish before launching it**, because the session that knows is the session
 that gets killed.
 
+#### Run E, and the floor
+
+E ran 11:56:31-12:29:55 (33 m 24 s, 49 benchmarks) with the session blocked on `Wait-Process` the
+whole time and nothing else started anywhere. First attempt of four to pass its own gate: **0 of 49
+rows below 0.85**, two multimodal rows, and a sampler log whose busiest non-benchmark sample is
+`msedge 4.5s/15s` - 0.3 of a core, once.
+
+| | Floor | Set by |
+|---|---:|---|
+| Time | **1.13** | `ReverseFailedScan` 0.88916, inverted = 1.1247 |
+| Allocation | **1.0001** | `SplitLong`, 307 B in 11.06 MB |
+
+The time floor comes from the *improvement* side, which is worth understanding rather than
+memorising: the widest slowdown was 1.0768, but `ReverseFailedScan` ran 11% FASTER in E than in A
+with no code in between, and a band that ignores that direction would report the same artefact as a
+win. noise-floor.md records that dropping that one row gives 1.08, and that the row is the suspect
+rather than the machine - it was one of A's three shakiest rows on the contention signal (0.9148,
+behind `MatchesToEndDense` 0.9008 and `MatchesFirstTwo` 0.9102; 0.99 in E) and is one of A's four
+multimodal rows.
+
+Allocation is the half worth having: 38 of 45 allocating rows matched **to the byte**, so almost any
+allocation change is *measurable*, which is exactly what the span and lazy-walk decisions turn on.
+Measurable is not gated, though: `compare-benchmarks.ps1` fails a run on `-Threshold` (1.25 on both
+axes) and a floor only decides whether a ratio prints `same`, so a row allocating 1.20x its baseline
+is still GREEN. That is pre-existing behaviour, not something this slice's floors changed; it is now
+pinned as a test in `CompareBenchmarks.Tests.ps1` and handed to S63 as scope item 7, because picking
+a gate number is the gate slice's job and not a measurement slice's.
+
+Self-test green: `compare-benchmarks.ps1 -UseExisting` over A and E reads `same` on all 49 rows.
+
+#### Three tool tests that had never run, and were failing
+
+`tools/run-tool-tests.ps1` came back 110/3. All three failures were in
+`CheckSyncDivergence.Tests.ps1`, written last sitting and never executed. The script was innocent:
+the fixture's `$LedgerHeader` here-string ends at the newline BEFORE `'@`, so every row a test
+appended was glued onto the table's separator line. The script then read `---` as the first cell,
+found no backticked path, and saw a ledger with **no rows at all** - which flipped the three
+paired-case tests red and made two others (`marker with no ledger row`, `paths in the prose above
+the table`) pass for the wrong reason. One blank line fixes it; 113/0 after, and 114/0 once this sitting added a test.
+
+The lesson is the one the slice skill already states and this is a clean instance of: a test that
+has never been watched fail is not yet a test.
+
+#### Verification: two gates red, neither S58's
+
+- **Oracle: RED at 1 of 3 seeds**, one row of 6380. Seeds 7 and 4242 are `diverge 0`. The third
+  default seed is `Get-Date -Format 'yyyyMMdd'` (`run-oracle.ps1:256`), so it had never been run
+  before today. `git diff dfa8767 -- src` is EMPTY - `dfa8767` (S56b) is the last commit that
+  touched `src/` at all, 28 commits back from this slice's first - so it cannot be S58's. Match,
+  spans and edit totals all agree; only the
+  attribution of one substitution and one insertion to adjacent positions differs. Written up with
+  its reproduction in `docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`, because
+  the oracle's own evidence lives in gitignored `TestResults/`. **Not pinned**: pinning before
+  deciding which engine is right cements whichever answer happened to be there.
+- **AOT: RED**, and also not S58's - this slice changed no `.cs` file at all. `ilc` fails on
+  `Trim analysis error IL2065` in `tests/FuzzyRegex.Tests/Conventions/PublicApiDocumentationTests.cs:62`,
+  a `type.GetMembers(...)` over types that are not statically known. That convention test arrived
+  yesterday in S65 (`3b09b76`, 2026-09-18) and the AOT gate has not been run since. The fix is a
+  real decision between annotating, suppressing with a reason, or excluding the convention test
+  from the native publish, and it is a `.cs` change - so it is not taken mid-slice.
+
 **Rejected: a filtered re-run of just the eleven damaged rows.** It would have cost 12 minutes
 instead of 35, and the owner's cheapest-route rule points at it. Two things killed it.
-`compare-benchmarks.ps1:199` refuses `-UpdateBaseline` under a filter ("would record a partial
+`compare-benchmarks.ps1:201-203` refuses `-UpdateBaseline` under a filter ("would record a partial
 suite"), so it would have meant weakening a guard to get a result - banned outright. And the
 cheap currency here is allowance, not wall time: a full run is four blocking waits and near-zero
 tokens, so the 23 minutes bought nothing worth having.
@@ -210,3 +275,91 @@ BenchmarkDotNet output stays in `artifacts/` (it is large and regenerable), and 
 evidence is committed - the A and B baseline JSONs and `noise-floor.md` under
 `bench/baselines/<machine-id>/`, the profiler texts under `docs/plan/phase7-research/profiles/`.
 The comparison is then re-runnable from committed files alone.
+
+### Review: two blind passes, nine findings, all nine reproduced
+
+**Pass 1, over the committed floor (`14d4c53`).** Four findings raised, four reproduced, four fixed.
+
+1. *The floors gate nothing.* Substantive, and the only one that was about behaviour rather than
+   prose. See below - it changed what the slice claims and added a test.
+2. `ReverseFailedScan` was written up as run A's **worst** contention signal. It is the third worst
+   (0.9148, behind `MatchesToEndDense` 0.9008 and `MatchesFirstTwo` 0.9102). Corrected in
+   `noise-floor.md` and here.
+3. `noise-floor.md` said run E's sampler log "names nothing above 0.3 of a core". False as written:
+   `dotnet` itself reaches 14.5 s in a 15 s window. The qualifier "non-benchmark" was in these
+   notes and missing there. Corrected.
+4. `1/0.8892 = 1.1247` does not hold at the precision quoted; the ratio is 0.88916 and 1/0.8892
+   rounds to 1.1246. Every copy of the number now reads 0.88916.
+
+**Pass 2, over the delta pass 1 never saw** (the new test, the S63 scope item, the corrected prose).
+Five findings, five reproduced, five fixed - and the first of them corrected the fix for pass 1's
+finding 1, which is exactly what a second pass is for.
+
+1. *The fix for finding 1 was itself wrong.* It said a floor "only decides whether a ratio prints
+   `same`". A floor also **excuses**: `$regressed = $ratio -gt $Threshold -and -not $withinFloor`
+   (`compare-benchmarks.ps1:343`, and `:331` for allocation), so a floor **above** `-Threshold`
+   does change the verdict. Reproduced on run A's artifacts with one row scaled to 1.20x: at
+   `-Threshold 1.05` the run is RED with the shipped floors and GREEN with `-NoiseFloor 1.25
+   -AllocationNoiseFloor 1.25` - both, because the doctored row moved on both axes. The
+   true statement, now in all four places, is narrower: a floor can only ever excuse, never fail,
+   so a floor **below** `-Threshold` excuses nothing and moves no verdict.
+2. Three files still said "tool tests 113/0" after this sitting's own test made it 114.
+3. Run E was written up as 33 m 10 s; 11:56:31 to 12:29:55 is 33 m 24 s.
+4. "byte-identical to two commits before this slice" - `dfa8767` is 28 commits back, and is simply
+   the last commit that touched `src/`. Corrected here and in the oracle write-up.
+5. The new test would still pass if the allocation gate were deleted outright, so it does not by
+   itself prove `-Threshold` governs allocation. Left as it is: the pre-existing test "floors
+   allocation on its own number, not the timing one" fails under that mutation, so the pair covers
+   it, and the new test's comment no longer claims more than the test shows.
+
+#### The finding worth carrying: the floors move no verdict
+
+The measurement says this machine resolves allocation to 2.8e-5. The gate does not use that.
+`-Threshold` (1.25) is what fails a run and it governs both axes; a floor only forgives a ratio
+that is already over `-Threshold`. Both of this slice's floors are below 1.25, so a benchmark
+allocating **1.20x** its baseline is GREEN. That is pre-existing behaviour, not something these
+floors introduced, and tightening it is a gate decision - so it is now **S63 scope item 7** rather
+than a measurement slice's improvisation, and it is pinned as a test so nobody has to rediscover
+it. Probe: `tools/probes/gate-scale-one-row.py`.
+
+#### Two gate re-runs on the commit-ready tree, for the record
+
+- `tools/run-aot-tests.ps1` still RED, and identically:
+  `PublicApiDocumentationTests.cs(62): Trim analysis error IL2065 ... System.Type.GetMembers(BindingFlags)`.
+- `tools/run-aot-smoke.ps1` GREEN. Binary **6,977,536 bytes**, against the 6,972,928 that S63's
+  scope quotes as the baseline - 4,608 bytes larger, and no `.cs` changed in this slice, so the
+  growth is somewhere in S64-S66. A number for S63 to reconcile, not a finding here.
+- `tools/check-sync-divergence.ps1` GREEN, 0 marked files.
+
+### Verifier: 43 claims re-derived, 5 DIFFERENT, 3 COULD NOT RUN
+
+A fresh Opus session, briefed on nothing but the commit-ready tree, re-derived every number in
+`noise-floor.md`, these notes, the oracle write-up and S63's new scope item. It renders no opinion;
+it reports CONFIRMED, DIFFERENT or COULD NOT RUN. All five DIFFERENT are fixed, and all five were
+in the evidence rather than in the measurement - the floor, the spans, the row attributions, the
+run timings and the allocation determinism all re-derived exactly.
+
+1. Run B's tail was written up as `0.93-0.99` on the contention signal and "a clean contention
+   signal". It is **0.83-0.99**: `MatchesFirstTwo` reads 0.83, below the 0.85 line, with a ratio of
+   1.01. The exception is now stated instead of rounded away.
+2. Rule 5 said A and B "agreed to 1.02-1.08x on every row the episode missed". The seventeen rows
+   the episode missed span **0.92-1.03**, which the table two sections above already said. Rule 5
+   now agrees with the table.
+3. The sampler's overhead was quoted as "below 0.7% of one core at 15-second spacing". 0.2 s in
+   15 s is **1.3%**; 0.7% is the script's own figure for its default 30-second interval.
+4. The gate reproduction said RED at `-AllocationNoiseFloor 1.0001` and GREEN at 1.25. Widening the
+   allocation floor alone leaves the run RED on the **time** axis, because the doctored row moved
+   1.20x on both. Both floors have to be widened, and the text now says so. Re-run to confirm.
+5. The partial-baseline guard is at `compare-benchmarks.ps1:201-203`, not `:199` (a closing brace).
+
+It also raised one tension rather than an error: **rule 3 as written would have discarded run E.**
+"A run whose log names any process other than `dotnet`, `csc`, `MSBuild` and the sampler is a run
+to discard" - and E's log names `msedge`, `msedgewebview2`, `python` and `VBCSCompiler`. The rule
+was describing the wrong quantity. It now judges CPU taken rather than names present, and says what
+the evidence supports and no more: 0.3 of a core demonstrably harmless (E), 2.6 demonstrably fatal
+(C), nothing in between proven either way, so re-take rather than argue.
+
+COULD NOT RUN, and why: the pre-fix 110/3 and intermediate 113/0 tool-test counts (the broken
+fixture is no longer on disk); the oracle at seeds 7 and 4242 (forbidden as expensive - **since
+run in this sitting: seed 7 is GREEN, `no row diverged from upstream`**); and the AOT IL2065
+failure (needs a native publish - **since re-run here, identical**).
