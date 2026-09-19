@@ -850,6 +850,14 @@ Describe 'Test-AllowanceFloor' {
     It 'lets a sitting start below the floor' {
         (Test-AllowanceFloor -Allowance (Snapshot 87) -Now $script:Now).Allowed | Should -BeTrue
     }
+    It 'spends the weekly window to 99% before blocking (owner 2026-09-19)' {
+        $a = Snapshot 40; $a.SevenDayPercent = 98
+        (Test-AllowanceFloor -Allowance $a -Now $script:Now).Allowed | Should -BeTrue
+        $a.SevenDayPercent = 99
+        $v = Test-AllowanceFloor -Allowance $a -Now $script:Now
+        $v.Allowed | Should -BeFalse
+        $v.Reason | Should -Match 'seven-day'
+    }
     It 'blocks at the floor and waits for the five-hour reset' {
         $v = Test-AllowanceFloor -Allowance (Snapshot 88) -Now $script:Now
         $v.Allowed | Should -BeFalse
