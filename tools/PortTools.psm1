@@ -812,7 +812,7 @@ function Read-Allowance {
     if ($null -eq $rl) { return $null }
     $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
     $pct = { param($w) $v = & $prop $w 'used_percentage'; if ($null -ne $v) { [int]$v } else { $null } }
-    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t) } else { $null } }
+    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t).ToLocalTime() } else { $null } }  # local time, so the driver's 'waiting until' line reads right (it printed UTC on 2026-09-19)
     [pscustomobject]@{
         Source           = $file.Name
         AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes

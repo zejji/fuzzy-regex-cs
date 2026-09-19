@@ -34,7 +34,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="C:\Users\gerard.howell\source\repos\fuzzy-regex-cs\bench\FuzzyRegex.Benchmarks\FuzzyRegex.Benchmarks.csproj" />
+    <ProjectReference Include="<repo>\bench\FuzzyRegex.Benchmarks\FuzzyRegex.Benchmarks.csproj" />
   </ItemGroup>
 
   <!-- Begin copied settings from benchmarks project -->

@@ -883,6 +883,7 @@ Describe 'Read-Allowance' {
         $a = Read-Allowance -Paths @($p)
         $a.FiveHourPercent | Should -Be 45
         $a.FiveHourResetsAt.ToUnixTimeSeconds() | Should -Be 1789794600
+        $a.FiveHourResetsAt.Offset | Should -Be ([DateTimeOffset]::Now.Offset)  # printed as local time, not UTC
     }
     It 'returns unknown, not an error, for a snapshot without rate_limits (the 2026-09-19 04:12 crash)' {
         $p = Join-Path $script:Dir 'shapeless.json'
