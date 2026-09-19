@@ -688,3 +688,6 @@ file pass, and `vite build` itself is green. Neither `server: { watch: null }` n
 `httpServer.closeAllConnections()` before the close fixes it, and with a 120 s hook timeout it
 sometimes returned in a second and sometimes hung the full two minutes. Left for whoever owns the
 dev-server work, as a flake with a reproduction rather than a silenced test.
+
+**Fixed after all, and it was ours.** That hook timeout is a close-during-startup deadlock, not a slow `close()`: serving the page starts Vite's background pre-transform crawl and the first dependency pre-bundle, and `DevEnvironment.close()` cancels both and then waits for the very requests it cancelled, which never settle - measured 2026-09-19 on vite 8.3.0, five still in flight when the last test returned, `close()` sitting on them past 60 s, while letting them drain first (about 70 ms) made the same `close()` return in 2 ms; the HTTP server closed in 2 ms with 0 connections, which is why `closeAllConnections()` changed nothing.
+Awaiting `server.waitForRequestsIdle()` before `server.close()` is the whole fix: `npx vitest run` green three times in a row (67 tests, 6 files) and `npm run build` green again (80.37 kB bundle).

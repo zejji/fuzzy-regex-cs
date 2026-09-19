@@ -54,6 +54,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+    // Vite is still working after the last response. Serving the page starts a background
+    // pre-transform crawl of its imports and the first dependency pre-bundle, and closing on top
+    // of that deadlocks: `DevEnvironment.close()` cancels the deps optimizer and the crawl, then
+    // waits for its pending requests to drain, and the ones it just cancelled never settle.
+    // Measured 2026-09-19 on vite 8.3.0 - five requests were still in flight when the last test
+    // returned (`/src/styles.css`, `/src/demo.ts`, `/src/lib/pool.ts`, `plugin-vue:export-helper`
+    // and `.vite/deps/vue.js`), and `close()` sat on them past 60 s; letting them finish first,
+    // which takes about 70 ms, makes the same `close()` return in 2 ms. The sockets are a red
+    // herring: the HTTP server closed in 2 ms with 0 connections, because Vite destroys its own
+    // sockets before closing it, which is why `closeAllConnections()` changed nothing.
+    await server?.waitForRequestsIdle();
     await server?.close();
     // Only what this test made: a real build's output is not ours to delete, and an `assets/` left
     // behind is worse than untidy - tools/build-demo-web.ps1 checks for that directory to decide
