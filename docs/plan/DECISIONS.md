@@ -773,3 +773,21 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-20 (S74): `MULTILINE`'s doc comment says what the flag does, with no claim about the
   default - without it, `$` still matches before a trailing newline (`/$/` on `"a\nb\n"` is `[3,4]`,
   in this port and in `regex 2026.9.10`).
+- 2026-09-20 (S56): a Stryker report counts every mutant in every file it touched, not just the
+  ones in that chunk's own windows. Reading the raw totals over a chunked queue over-counts about
+  8x; map each mutant's line/column to a character offset in the report's embedded source first.
+- 2026-09-20 (S56): the embedded `source` in each mutation-report.json is what makes a long queue
+  auditable - hash it against `git cat-file` to learn which revision a chunk actually mutated.
+  Chunks 01-24 mutated an uncommitted tree; `tools/stryker-topup-windows.py` emits the gap.
+- 2026-09-20 (S56): Stryker Safe Mode drops every mutant in a method when one mutation there will
+  not compile, and the line number it prints is in its own generated file, not the original, so
+  the offending mutation cannot be identified from the logs. 191 mutants lost this way in
+  `Matcher.cs::BasicMatch` and `DoEnhancedFuzzyMatch`.
+- 2026-09-20 (S56): coverage-analysis off means Stryker never reports `NoCoverage`. Absence of
+  NoCoverage in these reports is a property of the settings, not evidence that lines are reached.
+- 2026-09-20 (S56): attributing a mutant to its enclosing method by scanning back for a
+  declaration needs `?` in the return-type character class. Without it `string?[] Split(` is
+  not a declaration and its mutants land on the method above. Blind review caught it.
+- 2026-09-20 (S56): Stryker takes a mutant only when its whole span fits the `File.cs{a..b}`
+  window, not when its first character does. Counting by start offset over-counts the engine queue
+  by 165 `Removed by mutate filter` and 32 CompileError; `tested` and `survivors` are unaffected.

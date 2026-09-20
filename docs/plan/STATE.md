@@ -1,5 +1,22 @@
 # State
 
+**S56 is closed (2026-09-20, one sitting, branch `stryker-queue`). S57 stays in flight.**
+
+**S56 - the engine's mutation survivors.** There are none: 4,673 in-window mutants across the 59
+`engine-rand-*` chunks, **0 Survived**, 46 Timeout, 14 RuntimeError, all 60 judged with probes
+(`tools/probes/s56-mutant-behaviour.py`) and all detections. Numbers and caveats:
+`docs/plan/mutation/2026-09-20-engine.md`; sitting detail: `notes/S56-sittings.md`.
+`Gaps/Engine/HangBoundTests.cs` now guards the assembly-wide 120 s `[Timeout]`.
+
+**Two caveats S57 and Phase 7 must carry.** 533 in-window mutants never compiled, 185 of them in
+`Matcher.cs::BasicMatch` and `DoEnhancedFuzzyMatch` (Stryker Safe Mode, on a `CS0165` it will not
+attribute); and 1,048 lines of today's `Matcher.cs`, `PatternObject.cs`, `NodeCompiler.cs` and
+`FuzzyRegex.cs` have never been mutated, because the engine moved under the three-day queue.
+`tools/stryker-queue.json` ends with `engine-topup-01..09` (54 windows) covering those lines -
+**queued, not run**, per the orchestrator's brief; regenerate with `tools/stryker-topup-windows.py`
+if those files change. `NoCoverage` is absent everywhere because coverage analysis was off, not
+because the lines are reached.
+
 **S74 is closed** (2026-09-20). The demo's flags text box is a collapsible checkbox panel: a summary
 row, ten checkboxes, two radio groups for the only two pairs the library refuses, and a per-flag help
 sentence that is the enum's own `<summary>`. The flags string stays the state, so old shared links

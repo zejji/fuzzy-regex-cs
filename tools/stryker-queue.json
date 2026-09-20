@@ -663,5 +663,17 @@
    "Engine/Matcher.cs{134252..136253}",
    "Engine/ByteStack.cs{6166..8201}"
   ]
- }
+ },
+
+{"_note":"2026-09-20 (S56): the engine queue took three days and the engine moved under it - S56b's compile budget (2c1e747) and S60's required-string prefilter (14aad0a) landed mid-queue, and chunks engine-rand-01..24 ran against an uncommitted working tree. Each chunk's report embeds the source it mutated, so tools/stryker-topup-windows.py compares those with HEAD and emits the regions no run has ever mutated: 492 lines of Matcher.cs, 152 of PatternObject.cs, 54 of NodeCompiler.cs and 350 of FuzzyRegex.cs. The chunks below cover exactly those, in HEAD's character offsets, and are stale the moment those files change again - re-generate rather than trust them."},
+{"chunk":"engine-topup-01","mutate":["Engine/Matcher.cs{9876..11069}","Engine/Matcher.cs{137590..138698}","Engine/Matcher.cs{200723..202765}","Engine/Matcher.cs{202765..204776}","Engine/Matcher.cs{204776..206836}","Engine/Matcher.cs{206836..208844}"]},
+{"chunk":"engine-topup-02","mutate":["Engine/Matcher.cs{208844..210865}","Engine/Matcher.cs{210865..212903}","Engine/Matcher.cs{212903..214912}","Engine/Matcher.cs{214912..216930}","Engine/Matcher.cs{216930..218173}","Engine/Matcher.cs{220811..221180}"]},
+{"chunk":"engine-topup-03","mutate":["Engine/Matcher.cs{224724..225386}","Engine/Matcher.cs{327906..328453}","Engine/Matcher.cs{331241..331671}","Engine/Matcher.cs{337775..338222}","Engine/Matcher.cs{340656..341103}","Engine/Matcher.cs{343413..343860}"]},
+{"chunk":"engine-topup-04","mutate":["Engine/Matcher.cs{346739..347169}","Engine/Matcher.cs{465048..465913}","Engine/NodeCompiler.cs{8038..9098}","Engine/NodeCompiler.cs{9337..10482}","Engine/NodeCompiler.cs{46340..47439}","Engine/PatternObject.cs{4209..5089}"]},
+{"chunk":"engine-topup-05","mutate":["Engine/PatternObject.cs{8147..10176}","Engine/PatternObject.cs{10176..12215}","Engine/PatternObject.cs{12215..12242}","Engine/PatternObject.cs{13180..14439}","Engine/PatternObject.cs{14681..14935}","Engine/PatternObject.cs{17013..17886}"]},
+{"chunk":"engine-topup-06","mutate":["Engine/PatternObject.cs{18319..18755}","FuzzyRegex.cs{4033..4975}","FuzzyRegex.cs{9085..10045}","FuzzyRegex.cs{10269..11612}","FuzzyRegex.cs{11906..13165}","FuzzyRegex.cs{13392..15407}"]},
+{"chunk":"engine-topup-07","mutate":["FuzzyRegex.cs{15407..15454}","FuzzyRegex.cs{15539..16261}","FuzzyRegex.cs{18782..20232}","FuzzyRegex.cs{75518..77522}","FuzzyRegex.cs{77522..79615}","FuzzyRegex.cs{79615..80195}"]},
+{"chunk":"engine-topup-08","mutate":["FuzzyRegex.cs{80638..81056}","FuzzyRegex.cs{81861..82260}","FuzzyRegex.cs{83240..83635}","FuzzyRegex.cs{84454..84900}","FuzzyRegex.cs{85677..86085}","FuzzyRegex.cs{87228..87575}"]},
+{"chunk":"engine-topup-09","mutate":["FuzzyRegex.cs{88306..88690}","FuzzyRegex.cs{89164..89526}","FuzzyRegex.cs{90781..91274}","FuzzyRegex.cs{92425..92916}","FuzzyRegex.cs{94304..94835}","FuzzyRegex.cs{95508..95878}"]}
+
 ]

@@ -131,7 +131,14 @@ function Invoke-StrykerChunk {
     # A compiler server or MSBuild node left over from an interrupted run holds bin\ files; the
     # initial `dotnet build` then fails and Stryker falls back to the BuildTools MSBuild, which
     # cannot resolve the SDK (MSB4276). Measured 2026-09-17 13:50. Cheap insurance per chunk.
-    dotnet build-server shutdown 2>&1 | Out-Null
+    # Bounded: on 2026-09-19 (04:18 and 07:25) this call hung for good against a wedged compiler
+    # server and the whole queue stalled with it. Give the graceful shutdown a minute, then end our
+    # own helper process and carry on; the build simply starts its own server.
+    $shutdown = Start-Process -FilePath 'dotnet' -ArgumentList 'build-server', 'shutdown' -NoNewWindow -PassThru
+    if (-not $shutdown.WaitForExit(60000)) {
+        Write-Host "  build-server shutdown did not return in 60 s; ending that helper and continuing" -ForegroundColor Yellow
+        try { $shutdown.Kill($true) } catch { }
+    }
 
     Write-Host "Stryker chunk '$ChunkName': mutate = $($MutateGlobs -join ' ')" -ForegroundColor Cyan
     # One -m per glob: a chunk may be many character spans across several files (the engine queue
