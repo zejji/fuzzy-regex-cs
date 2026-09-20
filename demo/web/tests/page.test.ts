@@ -956,8 +956,16 @@ test('the first thing the keyboard reaches is the way to the answer', async () =
     // somebody else's anchor alone, but the URL the visitor would copy no longer holds their case.
     location.hash = '#p=kitten&s=sitting';
     await settle();
-    first.click();
+    // Dispatched rather than `.click()` so the assertion can be on the event. jsdom performs no
+    // fragment navigation on an anchor click, so `location.hash` below reads the same with or
+    // without `@click.prevent` and cannot tell the two apart (measured 2026-09-20). What a real
+    // browser acts on is `defaultPrevented`, and that jsdom does report.
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    first.dispatchEvent(click);
     await settle();
     expect(document.activeElement).toBe(answer);
+    expect(click.defaultPrevented, 'the browser would navigate and drop the case').toBe(true);
+    // A weaker guard than it looks in jsdom, and kept for the other half of the claim: the handler
+    // focuses the region and writes nothing to the address bar itself.
     expect(location.hash).toBe('#p=kitten&s=sitting');
 });

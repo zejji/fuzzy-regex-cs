@@ -46,12 +46,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 ///     match       utf16 index=0 length=6
 ///     fuzzy_counts (sub, ins, del) = (1, 1, 1)
 ///     fuzzy_changes (sub, ins, del) = ([0], [1], [6])
-///     deletions as subject positions = [6]
 /// fuzzy-two-deletions-at-one-place: compile(r"(?:abcdef){d&lt;=2}").search("abef")
 ///     match       utf16 index=0 length=4
 ///     fuzzy_counts (sub, ins, del) = (0, 0, 2)
 ///     fuzzy_changes (sub, ins, del) = ([], [], [2, 3])
-///     deletions as subject positions = [2, 2]
 /// astral-subject: compile(r"\p{Deseret}+").search("ab\U00010400\U00010401cd")
 ///     match       utf16 index=2 length=4   (codepoints index=2 length=2)
 /// every-match: compile(r"\d+").finditer("a1 b22 c333")
@@ -209,14 +207,22 @@ public sealed class DemoEngineContractTests
 
     /// <summary>
     /// A deletion is reported where the page draws its caret, which is a position in the subject on
-    /// screen. Upstream reports where the missing character would sit in a string that had every
-    /// deletion put back, so its two deletions here are 2 and 3 - and both are the same place in
-    /// "abef", between "ab" and "ef".
+    /// screen.
     /// </summary>
     /// <remarks>
-    /// The shift is upstream's, at <c>_regex.c:20535-20537</c>, and this port keeps it in
-    /// <see cref="Match.FuzzyChanges"/>. Un-shifting belongs to the demo and not to the port: the
-    /// library's answer is upstream's answer, and the page is what needs a subject position.
+    /// <para>
+    /// Where "2,2" comes from, read off the subject rather than out of any implementation: matching
+    /// <c>(?:abcdef){d&lt;=2}</c> against "abef" means "abef" is "abcdef" with "c" and "d" missing.
+    /// Both are missing from one place, after "ab" and before "ef", which is index 2 of the subject
+    /// on screen - so a caret for each deletion is drawn at 2, twice.
+    /// </para>
+    /// <para>
+    /// Upstream says <c>fuzzy_changes = ([], [], [2, 3])</c> for the same match, because it reports
+    /// where a missing character would sit in a string that had every deletion put back, shifting
+    /// the i-th by i (<c>match_fuzzy_changes</c>, <c>_regex.c:20555-20558</c>). This port keeps that shift in
+    /// <see cref="Match.FuzzyChanges"/>: the library's answer is upstream's answer, and un-shifting
+    /// belongs to the demo, which is the thing that needs a subject position.
+    /// </para>
     /// </remarks>
     [Test]
     public void Two_deletions_in_one_place_are_reported_at_that_place_in_the_subject()

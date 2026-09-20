@@ -162,8 +162,11 @@ test('a fuzzy match is broken into the characters each error was spent on', () =
 });
 
 test('two deletions in the same place are two marks, not one', () => {
-    // (?:abcdef){d<=2} against "abef", same probe and run: both deletions are at subject position
-    // 2, between "ab" and "ef", because that is the one place characters are missing from.
+    // (?:abcdef){d<=2} against "abef", read off the subject: "abef" is "abcdef" with "c" and "d"
+    // missing, both from the one place, after "ab" and before "ef", which is subject position 2.
+    // Upstream's own answer for the same match is `fuzzy_changes = ([], [], [2, 3])`, shifted as if
+    // the deletions were put back; `DemoEngine.Edits` un-shifts it, and the derivation above is how
+    // that 2,2 is checked without going through either implementation.
     const result = segments('abef', [
         { index: 0, length: 4, edits: { substitutions: [], insertions: [], deletions: [2, 2] } },
     ]);

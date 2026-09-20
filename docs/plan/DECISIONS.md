@@ -685,3 +685,18 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   utility even on a real link, because `.underline` names no element. Links are underlined in
   `styles.css` against `a`. The ceiling and the lift (`postcss`, already in the tree) are a
   `SHORTCUT:` in the test.
+- 2026-09-20 (S73): a Vite dev server created in a test pins `root` to `projectRoot` exported from
+  `vite.config.ts`. Vite defaults the root to `process.cwd()`, so an unpinned server serves whatever
+  directory the caller started in. Pinning the root is enough - Vite looks for `vite.config.ts`
+  under the root it settled on, not under the cwd.
+- 2026-09-20 (S73): `tests/dev-server.test.ts` runs its whole file from the repository root, because
+  `npm test` already runs from `demo/web` and no assertion made from there can tell the root pin
+  from its absence. A guard for a cwd-dependent bug has to be somewhere else.
+- 2026-09-20 (S73): the copy linter strips `{...}` interpolation holes from C# sources only.
+  `{e<=2}` in a script string is fuzzy-regex syntax the page shows a visitor, not a hole.
+- 2026-09-20 (S73): a browser probe puts its case in the URL fragment and waits for
+  `mark.hit-current`, never typing it in and waiting for `mark.hit`. The page arrives with a case of
+  its own already answered, so that selector is true from the first paint and the probe measures the
+  wrong layout.
+- 2026-09-20 (S73): upstream's deletion shift is `match_fuzzy_changes`, `_regex.c:20555-20558`. Four
+  comments elsewhere cite `:20535-20537`, which is the top of that function; they are in STATE.md.

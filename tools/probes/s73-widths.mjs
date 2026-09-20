@@ -22,6 +22,22 @@ async (page) => {
         [390, 844],
     ];
 
+    // A case with something in every region: several matches, each fuzzy, so the underlay, the
+    // table and the group rows are all on screen while the boxes are measured. The keys are the
+    // fragment's own, from `src/lib/fragment.ts`; an empty box is written out because the page
+    // reads "cleared" and "not mentioned" differently. Spelt out with `encodeURIComponent` rather
+    // than `URLSearchParams`, which the runner that evaluates this file does not define.
+    const CASE = Object.entries({
+        p: '(?:kitten){e<=2}',
+        f: '',
+        s: 'sitting kitten mitten bitten kitty',
+        m: '',
+        r: '',
+        l: '',
+    })
+        .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+        .join('&');
+
     const widths = {};
     for (const [width, height] of WIDTHS) {
         // A fresh load per width, and the viewport set before it. Resizing one page across the five
@@ -30,14 +46,16 @@ async (page) => {
         // page, because the tab walk at 1024 had left the focus on an example button and chunk 2's
         // narrowing fix opens the region the focus is in rather than losing it.
         await page.setViewportSize({ width, height });
-        await page.goto(`http://localhost:8213/?v=${Date.now()}`);
+        // The case arrives in the fragment rather than being typed in, and `mark.hit-current` is
+        // what the wait is on. Typing it in cannot be waited for: the page comes up with a case of
+        // its own already answered, so `mark.hit` is on screen from the first paint and the wait
+        // returns before the typed case has been through the worker. Measured 2026-09-20 against
+        // this build - the typed version reported the phone as 1208 of 844 with the answer heading
+        // at 693 and the tab after the skip link landing on `button button-primary`, all of which
+        // are the DEFAULT case's layout, and a 2 s sleep after the wait changed every one of them.
+        await page.goto(`http://localhost:8213/?v=${Date.now()}#${CASE}`);
         await page.waitForSelector('#pattern', { timeout: 60000 });
-
-        // A case with something in every region: several matches, each fuzzy, so the underlay, the
-        // table and the group rows are all on screen while the boxes are measured.
-        await page.fill('#pattern', '(?:kitten){e<=2}');
-        await page.fill('#subject', 'sitting kitten mitten bitten kitty');
-        await page.waitForSelector('mark.hit', { timeout: 60000 });
+        await page.waitForSelector('mark.hit-current', { timeout: 60000 });
         // Blurring is not enough to walk the page from the top: Chrome resumes sequential focus
         // from where the last focused element was, so a walk after filling the subject starts at
         // the control AFTER it and never sees the two fields. Focusing the body moves the starting

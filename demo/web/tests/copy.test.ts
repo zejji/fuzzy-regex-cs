@@ -30,6 +30,10 @@ describe('the linter sees the strings it was written for', () => {
         ['App.vue template', 15, 'Pattern'],
         ['App.vue script', 2, 'Find every match'],
         ['demo.ts', 2, 'Stopped'],
+        // The two the chunk-1 fix added, and the two this table went without until the blind pass
+        // of 2026-09-20 noticed that the sources most likely to drift were the unguarded ones.
+        ['src/lib', 2, 'could not be read'],
+        ['DemoEngine.cs', 12, 'The page stays responsive'],
         ['index.html', 3, 'FuzzyRegex'],
         ['help generator', 1, 'GENERATED'],
     ])('finds at least %s strings in %s, including one saying %s', (source, floor, anchor) => {
@@ -41,6 +45,29 @@ describe('the linter sees the strings it was written for', () => {
     it('takes the comments out before linting a script', () => {
         const source = "// A robust, powerful, intuitive comment\nconst label = 'Find every match';";
         expect(literals(source, 'x').map(({ text }) => text)).toEqual(['Find every match']);
+    });
+
+    it('keeps a string holding a comment marker', () => {
+        // The regex this replaced truncated the literal at the slashes and left the quote open, so
+        // the whole string vanished from the linted set rather than being linted.
+        const source = "const a = 'read the notes // and the rest';\nconst b = 'a second string';";
+        expect(literals(source, 'x').map(({ text }) => text)).toEqual([
+            'read the notes // and the rest',
+            'a second string',
+        ]);
+    });
+
+    it('takes the holes out of a C# interpolated string', () => {
+        const source = 'error = $"The pattern is longer than the limit of {MaxPatternLength} characters.";';
+        expect(literals(source, 'x', 'csharp').map(({ text }) => text)).toEqual([
+            'The pattern is longer than the limit of characters.',
+        ]);
+    });
+
+    it('leaves a script string\'s braces alone, because the page shows them', () => {
+        // `{e<=2}` is fuzzy-regex syntax a visitor reads, not an interpolation.
+        const source = "const hint = 'Write {e<=2} after the group';";
+        expect(literals(source, 'x').map(({ text }) => text)).toEqual(['Write {e<=2} after the group']);
     });
 
     it('takes the interpolations out of a template literal', () => {

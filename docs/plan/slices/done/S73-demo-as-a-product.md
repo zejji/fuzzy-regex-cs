@@ -203,11 +203,15 @@ naming the string and the rule. Keep the rules in one exported array.
 - [x] At 1366x768 and 1440x900, with no page-level scrolling, the pattern, the subject, the match
       count and three match rows are in the first viewport, and the Playwright assertion proves it.
       (Chunk 2. The navigation, the `evaluate` and both answers are in the sittings notes.)
-- [ ] Every string in the scope list rewritten; `copy.test.ts` green and seen to fail on a planted
-      violation; the page's word count recorded before and after.
-- [ ] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the
+- [x] Every string in the scope list rewritten; `copy.test.ts` green and seen to fail on a planted
+      violation; the page's word count recorded before and after. (Chunk 1, with the extractor's two
+      defects fixed in 5f. 1,185 words before, 1,148 after, the table in the sittings notes.)
+- [x] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the
       owner has accepted the screenshots. Layout regions behave as the table says at all five
-      widths, each decision traced to a source.
+      widths, each decision traced to a source. (Chunks 5c to 5e. Seventeen tokens recorded as
+      Chrome paints them, every pair at or above 4.5:1, and the five-width table measured in one
+      scripted pass. **Owner acceptance of the screenshots is outstanding** - `docs/demo/` holds
+      the two re-taken reference layouts and it is in STATE.md.)
 - [x] The snippet panel generates, colours and copies for all three modes; the clipboard fallback
       exercised with permission denied; one snippet compiled and its output quoted. The header
       carries the GitHub link and the footer link still works. (Chunks 3 and 4.)
@@ -216,8 +220,10 @@ naming the string and the rule. Keep the rules in one exported array.
       published page - the table in the sittings notes. By keyboard means Enter and Space on the
       focused half: an arrow moves the selection and the focus only, because a browser scrolls what
       it focuses and the counterpart reveal was measured being cancelled by it.)
-- [ ] `tools/build-demo-web.ps1` green, the Vitest suite green, the accessibility items met; then
-      blind review and commit. **Hunt:** a fixed shell that traps content on a short window (768 px
+- [x] `tools/build-demo-web.ps1` green, the Vitest suite green, the accessibility items met; then
+      blind review and commit. (5f. Build gate green, 259 Vitest tests green, no focus stop off
+      screen or without a ring at any of the five widths, and the answer reachable in two keystrokes
+      from the top.) **Hunt:** a fixed shell that traps content on a short window (768 px
       tall with browser chrome, or 200 % zoom, where "no page scroll" becomes "cannot reach the
       button"); `100vh` on mobile Safari where the toolbar makes it wrong (`100dvh`); a snippet that
       compiles for the samples but not for a pattern holding three quotes or a trailing backslash; a
@@ -257,3 +263,53 @@ naming the string and the rule. Keep the rules in one exported array.
 - <https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText> - secure contexts only,
   widely available since March 2020, returns a promise, and rejects with `NotAllowedError` when
   writing is refused, which is why the fallback path exists.
+
+## Closed 2026-09-20
+
+Eight sittings over two days, in six chunks; the per-sitting record is
+`docs/plan/slices/notes/S73-sittings.md` and it is long, because the measurements live there.
+
+**What landed.** The demo is a product rather than a test page: a shell that fits 1366x768 and
+1440x900 with the answer in the first viewport, every string rewritten against a copy linter that
+runs in the suite, a light visual identity whose seventeen tokens are pinned to what Chrome actually
+paints, a C# snippet panel for all three modes with a clipboard fallback, two-way linking between
+the highlighted subject and the match table by pointer and by keyboard, a per-edit underlay that
+shows where a fuzzy match spent each error, a skip link that reaches the answer in two keystrokes,
+and reference layouts taken by a script rather than by hand.
+
+**Anything surprising.** Three things, each of which looked like something else first:
+
+- **A test can be green because it is asking the wrong process.** `tests/dev-server.test.ts` failed
+  five ways for a sitting and a half and the cause was not in the test's subject at all: Vite
+  defaults its root to `process.cwd()`, and the suite built its server without one, so it was
+  serving whichever directory the caller started in. The fix is one word in the config. The guard
+  then went through two unfalsifiable shapes before the third, because `npm test` already runs from
+  the right directory and nothing that stays there can tell the pin from its absence.
+- **A wait can be satisfied by the wrong answer.** `s73-widths.mjs` typed its case in and waited for
+  `mark.hit`, but the page arrives with a case of its own already answered, so the selector was
+  true from the first paint and every box was measured mid-render. The independent verifier found
+  it by failing to reproduce the numbers this slice had recorded.
+- **A machine-wide Roslyn stall looks exactly like a slow test suite.** A hung `VBCSCompiler.exe`
+  held by another checkout killed the ratchet at 1200 s with every .NET process at 0% CPU.
+  `-p:UseSharedCompilation=false` is the non-destructive way past it.
+
+**What the next slice should know.** The two `docs/demo/` reference layouts still need the owner's
+eye - that is the one part of a Done-when box that this slice could not close itself. The demo is
+not yet published: the owner has to push `phase9-demo` and set the Pages source. Four citations of
+`_regex.c:20535-20537` outside this slice's files name the top of `match_fuzzy_changes` rather than
+the deletion shift at `:20555-20558`; they are in STATE.md as maintenance. No oracle wave and no
+negative control: this slice touched no engine code.
+
+**Review.** Four blind passes and one independent verifier, all Opus, each briefed to hand over a
+reproduction rather than an opinion. Across the slice: chunk 2's pass raised 3 findings, all 3
+reproduced and fixed, with a second pass over the four fixes and a third over `toggleDisclosure`;
+chunk 3's raised 2, both fixed; chunk 4's raised 3, all fixed. Chunk 5's pass covered two bodies of
+unreviewed code at once - the chunk-5 diff and the chunk-1 fix delta no reviewer had seen - and
+**raised 8, of which 8 reproduced and 8 are fixed**. A further pass over the one test rewritten
+after that review found the rewrite unfalsifiable, with a reproduction; reproduced here and fixed by
+deleting the test and making the whole file run from somewhere else, which is the condition the
+regression needs. The verifier (amendment 16 limb (d)) re-ran roughly a hundred numbers from the
+committed tree: five were wrong - one bad upstream line citation, one token count, three timings
+that do not repeat, one claim attributed to the wrong file, and one probe that no longer produced
+its own table - and all five are corrected in the notes, with the probe fixed in code. Chunks 3 and
+4 had their own verifier runs at the time.

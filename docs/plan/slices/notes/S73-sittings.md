@@ -772,11 +772,15 @@ under it.
 
 A substitution and an insertion are subject positions. A deletion is not: upstream reports where the
 missing character would sit in a string that had every deletion put back, so the i-th is shifted by
-i (`_regex.c:20535-20537`, and our `Match.cs:448`). Two deletions in one place come back as `[2, 3]`
+i (`match_fuzzy_changes`, `_regex.c:20555-20558`, and our `Match.cs:448`). Two deletions in one place
+come back as `[2, 3]`
 and are both at subject position 2. The library keeps upstream's answer; the demo un-shifts, because
 the subject on screen is the string the page slices. All three cases are in
-`tools/probes/demo-json-contract-expectations.py`, which now prints the un-shifted positions beside
-the raw ones.
+`tools/probes/demo-json-contract-expectations.py`, which prints upstream's raw answer and nothing
+derived from it. (It printed the un-shifted positions too until 5f: doing the un-shift there made
+the probe re-implement `DemoEngine.Edits` and then check the port against its own algorithm. The
+subject position now lives in the test that asserts it, derived from the subject by hand - "abef" is
+"abcdef" with "c" and "d" missing, both from the one place after "ab", which is index 2.)
 
 **Seven mutants, all killed** (`tools/probes/s73-edit-mutants.mjs`, each planted, run and reverted,
 `git status` identical afterwards):
@@ -793,6 +797,9 @@ the raw ones.
 
 The last one cannot be the obvious mutant - deleting the guard leaves `counts` unused, which is an
 analyzer error, not a test failure - so it is a guard that never fires. That is written at the line.
+(Checked rather than assumed, 2026-09-20: with the four guard lines taken out,
+`dotnet build demo/FuzzyRegex.Demo.Wasm` fails with `error S1172` and `error IDE0060` at
+`DemoEngine.cs(628)`, both naming `counts`.)
 
 **Two defects the tests could not have found, both from one screenshot at 4x**
 (`tools/probes/s73-edit-underlay.mjs`, Chrome 153, 1366x768). The mark's box ends 1px below the
@@ -850,10 +857,15 @@ Measured before the handler existed: the probe run ended at `?v=...#results`. Wi
 `@click.prevent="skipToAnswer"` the same run ends at
 `?v=...#p=%28%3F%3Akitten%29%7Be%3C%3D2%7D&f=&s=sitting+kitten+mitten+bitten+kitty&m=&r=&l=`. The
 `href` stays for semantics and as the no-JS fallback. `page.test.ts` pins both halves: the focus
-moves to `#results` and the hash is untouched.
+moves to `#results`, and the click is `defaultPrevented`. (It asserted an untouched `location.hash`
+until 5f, which jsdom cannot falsify - it performs no fragment navigation on an anchor click, so
+that assertion read the same with and without `@click.prevent`. `defaultPrevented` is what jsdom
+does report, and removing `.prevent` now turns the test red.)
 
-**The colour table re-checked.** All eighteen `--color-` tokens the browser painted in this run equal
-the `BROWSER` record in `contrast.test.ts` byte for byte, including the three 5c darkened.
+**The colour table re-checked.** All seventeen tokens in the `BROWSER` record in `contrast.test.ts`
+equal what Chrome painted in this run, byte for byte, including the three 5c darkened. (The probe
+paints every `--color-` it can find, which is 36 with Tailwind's own palette in the sheet; the
+seventeen are the ones the demo defines and the record covers.)
 
 **Three probe artefacts, each measured rather than reasoned about.** They are written into the probe
 at the lines they affect, because every one of them looked like a defect first:
@@ -879,14 +891,19 @@ link, and the flow rows after it are still header, main, footer.
 9 of 9**. Not a subset and not a re-run of the ones a chunk touched - the whole page, after every
 chunk of S73 had landed. The three measurements it prints:
 
-| | ms |
-|---|---|
-| stop a runaway to the next answer on screen | 397.9 |
-| respawn a worker with no warm spare | 218.9 |
-| respawn with the spare | 114.5 |
+| | ms, first run | ms, verifier's re-run |
+|---|---|---|
+| stop a runaway to the next answer on screen | 397.9 | 400.8 |
+| respawn a worker with no warm spare | 218.9 | 211.7 |
+| respawn with the spare | 114.5 | 105.5 |
 
-The spare still halves the respawn, which is the claim `pool.ts` makes in its own comment, and check
-7 still reports 31 timer ticks inside the demo while a runaway pattern runs - the page is not frozen.
+Two columns because these are wall-clock figures on a loaded developer machine and they do not
+repeat to the tenth of a millisecond: the second column is the same three checks re-run from the
+same build by the independent verifier. What repeats is the ordering - the spare roughly halves the
+respawn in both runs - and that is the only thing anything depends on. `pool.ts` makes no numeric
+claim of its own; its comment says there is no published figure for a fresh .NET WebAssembly boot
+and that `checks.html` measures it both ways so the claim is not a guess. Check 7 still reports 31
+timer ticks inside the demo while a runaway pattern runs - the page is not frozen.
 
 **The reference layouts are re-taken from a script**, `tools/probes/s73-reference-screenshots.mjs`,
 rather than by hand as in S71: `docs/demo/page-1280.png` at 1280x900 (above the gate, so the window
@@ -907,12 +924,20 @@ subtitle above it and the panes below. No change made.
 | `App.vue` script | 32 |
 | `demo.ts` | 99 |
 | `src/lib` | 20 |
-| `DemoEngine.cs` | 137 |
+| `DemoEngine.cs` | 134 |
 | `index.html` | 55 |
 | help generator | 15 |
-| **TOTAL** | **1151** |
+| **TOTAL** | **1148** |
 
-On the six sources the before-figure covers that is 994, against 1,185 before the rewrite and 921
+(`DemoEngine.cs` was 137 and the total 1151 when this table was first taken. 5f's fix to the C#
+extraction took the interpolation holes out, which drops `$"{unexpected.GetType().Name}:
+{unexpected.Message}"` from the linted set altogether and turns "limit of {MaxPatternLength}
+characters" into "limit of characters"; the figures above are the ones the committed extractor
+prints. No other source moved.)
+
+The six sources the before-figure covers are the six rows above other than `src/lib` and
+`DemoEngine.cs`, which chunk 1 added to the linted set: 421 + 372 + 32 + 99 + 55 + 15 = 994, against
+1,185 before the rewrite and 921
 at the end of chunk 1. Chunk 2 put 25 words back (946) and chunks 3 to 5 another 48, across the C#
 panel, the underlay's labels and titles, and the skip link. Still a sixth below where the page
 started, and what has been added since is labelling on new structure rather than new prose.
@@ -963,3 +988,107 @@ Open, reproduced by the reviewer but not yet re-reproduced or fixed here:
 (`expected '' to contain '/src/main.ts'`) that are NOT caused by any change in this sitting - they
 reproduce identically with the working tree stashed, on `aa5b016`. The same file was green at 251 of
 251 earlier in this sitting, before `.scratch/sync-serve.ps1` ran a `vite build`. Not diagnosed.
+
+### 5f, part 2 - the five failures, the four open findings (2026-09-20, sitting 8)
+
+**The five failures were the harness, not a stale build.** Two commands disagreed - `npx vitest
+--root demo/web` gave 5 failures, `npm --prefix demo/web run test` gave 18 passes - and two things
+differed between them, so neither settled it. One probe holding everything else still did: a dev
+server created with no `root`, started from the repository root, resolves its root there, finds no
+`index.html` and answers `/index.html` with **status 404, 0 bytes**. That is the failure exactly.
+Vite defaults `root` to `process.cwd()`, and the suite created its server without one, so the suite
+was reading back the directory its caller happened to start in. Sitting 7's guess - a `vite build`
+leaving an artefact in the web root - was wrong, and the shadow file that test writes for itself was
+never the problem.
+
+The fix is in the config, not the test: `vite.config.ts` exports `projectRoot`, and the suite pins
+it. The config file needs no pin of its own - measured the same day, a server created from the
+repository root with only `root` pinned still resolved `configFile` to `demo/web/vite.config.ts` and
+loaded `vite:vue`, so Vite looks for the config under the root it settled on rather than under the
+cwd.
+
+**The guard for it went through two wrong shapes before the right one**, and the second blind pass
+is what caught the second. Asserting `server.config.root` proves nothing when the server was created
+with `root: projectRoot`: both sides of the assertion come from the same value, and the test stays
+green at 6 ms with `projectRoot` itself broken. What the regression actually needs is for the suite
+to BE somewhere else, so the whole file now `chdir`s to the repository root in `beforeAll` and
+restores the cwd in `afterAll`. That deleted the extra test rather than adding one, and the five
+tests that already exist are the guard. Both mutations are red:
+
+| Mutation | Result |
+| --- | --- |
+| `root: projectRoot` dropped from `createServer` | 5 failed, 13 passed - the same five, by name |
+| `projectRoot` = `here('../..')` in `vite.config.ts` | 5 failed, 13 passed |
+| Neither | 18 passed |
+
+The four open findings, each fixed with a test written first and watched to fail:
+
+4. **The hash assertion.** Replaced by a dispatched `MouseEvent` and an assertion on
+   `click.defaultPrevented`, which is what a real browser acts on and what jsdom does report. The
+   hash assertion is kept beside it, labelled as the weak half it is.
+5. **`//` inside a string literal.** `withoutComments` is now a character scanner that tracks the
+   quote it is inside, so a comment marker in a string survives and the string is still linted. An
+   unterminated `'` or `"` ends at the line break, the same rule the literal pattern applies.
+6. **C# interpolation holes.** `literals()` takes the spelling of a hole as a parameter: `${...}`
+   for a script, `{...}` for C#. C# only, because `{e<=2}` in a script string is fuzzy-regex syntax
+   the page shows a visitor, not a hole - there is a regression test for exactly that.
+7. **The guard table.** `src/lib` and `DemoEngine.cs` now have floor-and-anchor rows like the other
+   six. Both were proved able to fail.
+8. **The `2,2` provenance.** The probe no longer prints subject positions at all, and the C# test's
+   remarks derive `2,2` from the subject ("abef" is "abcdef" missing "c" and "d", both after "ab")
+   and then quote upstream's own `fuzzy_changes = ([], [], [2, 3])` and the shift at
+   `match_fuzzy_changes` (`_regex.c:20555-20558`). The asserted value did not change; only its
+   evidence did. The line reference did: every citation of that shift in the repository said
+   `:20535-20537`, which is the top of the function, and the verifier caught it. The four outside
+   this slice's files are in STATE.md as maintenance.
+
+Only `DemoEngine.cs` moved in the copy word counts when finding 6 landed, from 137 to 134 - the
+three words were the interpolation holes. The table in 5e above carries the corrected figures.
+
+**The verifier's own finding, and the one code change it caused.** Re-running `s73-widths.mjs` as
+committed, it got the phone as 1208 of 844 with the answer heading at 693 and the tab after the skip
+link landing on `button button-primary` - not the table above - and reproduced the table only by
+adding a 2 s settle. Reproduced here, then diagnosed: the probe typed its case in and then waited
+for `mark.hit`, but the page comes up with a case of its own already answered, so that selector was
+satisfied by the DEFAULT case's marks and every box was measured mid-render. A settle would have
+been a sleep over the top of that. The probe now puts its case in the fragment, where the page reads
+it on load, and waits for `mark.hit-current`; it reproduces the table above with no sleep, twice in
+a row. The recorded numbers did not move - what moved is that the committed probe now produces them.
+
+Gates: demo suite **259 passed (13 files)**, `tools/build-demo-web.ps1` **DEMO WEB BUILD GREEN**,
+ratchet **GREEN** at 6406 tests, 6298 distinct ids against a baseline of 6294.
+
+**The ratchet needed a workaround that is worth knowing.** Its first run was killed at 1200 s with
+every .NET process on the machine at ~0.00 CPU over a 30-second sample, including `VBCSCompiler.exe`
+- a hung Roslyn compiler server, held by concurrent jobs in the MAIN checkout, stalls every build in
+every worktree. Nothing was killed (owner's rule). Building both test projects first with
+`-p:UseSharedCompilation=false` took **11.81 s** and made the ratchet's own build a no-op, and the
+run then went green. The stall cleared later the same day on its own - a plain
+`dotnet build tests/FuzzyRegex.Tests` took 17.62 s - so the flag is a workaround for a machine
+state, not a property of this repository.
+
+### Verifier (chunk 5, including 5f)
+
+Amendment 16 limb (d). A fresh Opus verifier, briefed with the commit-ready tree and nothing else,
+over every number in chunk 5 and 5f - chunk 4 already had its own, above. .NET was excluded from its
+brief while the compiler server was hung, and those claims were checked here instead once it
+cleared. **Around a hundred claims, five wrong.** Each was reproduced before it was touched:
+
+1. **`_regex.c:20535-20537` is not the deletion shift**; it is the top of `match_fuzzy_changes`. The
+   shift is `pos += offset; ++offset;` at **20555-20558**. Corrected in this slice's four places.
+   Four more citations of the same wrong range are outside this slice - `Match.cs:389`,
+   `MatchState.cs:32`, `FuzzyMatchingTests.cs:75`, `record-oracle.py:1366` - and are in STATE.md.
+2. **"eighteen `--color-` tokens" is seventeen.** `styles.css` declares 17 and the `BROWSER` record
+   holds the same 17; the probe paints 36 because Tailwind's palette is in the sheet too.
+3. **The three `checks.html` timings do not repeat to a tenth of a millisecond.** They are wall
+   clock on a loaded machine. Both runs are now in the table and the claim kept is the ordering.
+4. **`pool.ts` makes no halving claim**, which the notes attributed to it. Its comment says there is
+   no published figure and that `checks.html` measures it both ways.
+5. **`s73-widths.mjs` as committed did not produce its own table** - it waited on `mark.hit`, which
+   the page's default case already satisfies. Diagnosed and fixed above; it is the only code change
+   the verifier caused.
+
+Everything else came back CONFIRMED, including all three upstream `fuzzy_changes` answers, the
+seven mutants, the five-width table, the seventeen painted tokens, the nine `checks.html` checks,
+the reference screenshots' dimensions and the whole word-count table. The rest of its COULD NOT RUNs
+are pre-fix states and historical one-offs, which are history in these notes rather than pins.
