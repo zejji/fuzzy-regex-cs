@@ -19,6 +19,12 @@
  *     24144 FuzzyRegex.Demo.Wasm/wwwroot/assets/index-cz1TZNmf.css
  *     ebc4e84e067ef6dbfc926c70e5a4984a *FuzzyRegex.Demo.Wasm/wwwroot/assets/index-cz1TZNmf.css
  *
+ * Asked again 2026-09-20 (S73 blind-review fixes, with `.hit-linked` newly scoped): still identical.
+ *
+ *     LENGTH 27486 MD5 3f31b6b17730c5af3d551096b4e09b13
+ *     27486 FuzzyRegex.Demo.Wasm/wwwroot/assets/index-hzG9Jqxy.css
+ *     3f31b6b17730c5af3d551096b4e09b13 *FuzzyRegex.Demo.Wasm/wwwroot/assets/index-hzG9Jqxy.css
+ *
  * The hash changes whenever the stylesheet does; what the probe checks is that the two routes agree
  * on the same tree, not that either equals a number recorded here.
  */

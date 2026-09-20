@@ -193,6 +193,14 @@ naming the string and the rule. Keep the rules in one exported array.
   that the pattern, the subject, the match count and three table rows sit inside the viewport, and
   that `document.body.scrollHeight <= window.innerHeight`. Repeat at 1920x1080, 1024x768, 390x844;
   screenshots into the closing notes.
+  **Those bounding-box numbers are a one-off measured record, not a gate.** They were taken on
+  2026-09-20 at 1920x1080, 1440x900, 1366x768, 1024x768 and 390x844 by `tools/probes/s73-widths.mjs`,
+  against a served wasm publish in Chrome, and the table is in the sittings notes; the probe is kept
+  as the script that took them and nothing in the build re-runs it, because a run needs a publish and
+  a browser. What the suite guards is the preconditions the numbers rest on, asserted by
+  `layout.test.ts` over the BUILT stylesheet: two scroll owners and no more, no scroll declared in
+  the markup, the shell sized in dvh, and one media query shared by the script and the stylesheet.
+  Re-measure when any of those moves.
 - Keyboard pass end to end: header link, every field, mode, the examples tabs, a match row, a
   highlight, the snippet panel open, copy, Escape, focus returned. Contrast measured for every new
   pair, including the three edit hues. The snippet compiled for real, its printed spans compared
@@ -205,7 +213,9 @@ naming the string and the rule. Keep the rules in one exported array.
       (Chunk 2. The navigation, the `evaluate` and both answers are in the sittings notes.)
 - [x] Every string in the scope list rewritten; `copy.test.ts` green and seen to fail on a planted
       violation; the page's word count recorded before and after. (Chunk 1, with the extractor's two
-      defects fixed in 5f. 1,185 words before, 1,148 after, the table in the sittings notes.)
+      defects fixed in 5f. 1,185 before, 994 after over the same six sources; 1,148 over all eight.
+      The table, and which two sources the before-figure has no number for, are in the sittings
+      notes.)
 - [x] The visual tokens landed, the dark block removed, the contrast ratios recorded, and the
       owner has accepted the screenshots. Layout regions behave as the table says at all five
       widths, each decision traced to a source. (Chunks 5c to 5e. Seventeen tokens recorded as

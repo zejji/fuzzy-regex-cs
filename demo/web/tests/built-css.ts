@@ -16,10 +16,12 @@
  * `configFile: false` keeps `vite.config.ts` - whose `outDir`, `publicDir` and dev middleware are
  * about shipping the page - out of a test's way.
  *
- * Verified 2026-09-19 against `npm run build`: byte-identical output, 24,144 characters, md5
- * `ebc4e84e067ef6dbfc926c70e5a4984a`, in about 130 ms. `tools/probes/demo-built-css-matches-production.test.ts`
- * is that check, with the commands to re-run it - the hash moves whenever the stylesheet does, and
- * what it is for is that the two routes agree on the same tree.
+ * Verified again 2026-09-20 against `npm run build`: byte-identical output, 27,486 characters, md5
+ * `3f31b6b17730c5af3d551096b4e09b13`, in about 130 ms. (First taken 2026-09-19 at 24,144 characters;
+ * the stylesheet has grown since.) `tools/probes/demo-built-css-matches-production.test.ts` is that
+ * check, with the commands to re-run it - the hash moves whenever the stylesheet does, and what it
+ * is for is that the two routes agree on the same tree, not that either equals a number written
+ * here.
  *
  * One thing it does NOT see: a `<style>` block inside a single-file component. Those reach the
  * bundle through the JavaScript graph that starts at `index.html`, and the entry here is the

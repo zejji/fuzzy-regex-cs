@@ -21,8 +21,8 @@ below).
 | `FuzzyRegex.Demo.Wasm/wwwroot/harness.html` | The engine-only harness from the previous slice. Kept because it isolates the worker from the page. |
 | `web/` | The front end: Vite, Vue 3, TypeScript (strict) and Tailwind. `npm run build` writes the page into the folder above. |
 | `web/src/demo.ts` | The page's state machine - debounce, worker pool, fragment, caps - with no DOM in it, which is why it can be unit tested. |
-| `web/src/App.vue` | The layout: six inputs, status pills, highlighted subject, match and group tables, examples sidebar. |
-| `web/src/lib/` | `caps.ts`, `fragment.ts`, `highlight.ts`, `pool.ts`. |
+| `web/src/App.vue` | The shell. A header above two panes: the input pane holds the six inputs and the examples/help tab set, the results pane holds the status line, the highlighted subject, the match and group tables, and the C# panel at the foot. Each pane scrolls on its own, so the page itself does not. |
+| `web/src/lib/` | `caps.ts`, `clipboard.ts`, `fragment.ts`, `highlight.ts`, `pool.ts`, `shapes.ts`, `snippet.ts`. |
 | `web/src/types.ts` | The TypeScript side of `DemoEngine`'s JSON, so a renamed field there is a build error here. |
 | `web/tests/` | Vitest unit tests for all of the above, with fake workers and jsdom. |
 
