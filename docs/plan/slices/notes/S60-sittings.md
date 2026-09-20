@@ -276,3 +276,96 @@ control sites back to their committed form.
    gate can go green at every seed. All three are proved pre-existing against `3f1bf91`.
 2. Benchmark before/after on a quiet machine, and say what `BacktrackingPort` now measures.
 3. Items 2, 3, 6, 8-14, 16, 17.
+
+## Sitting 3 - 2026-09-20 (05:56) - the route to close, written before the work
+
+The skill's third-sitting rule: write down how the rest could be done in ONE sitting, then do that.
+Deadline for this sitting is 09:54 local, so about 3h 45m.
+
+**Why the rest is not one sitting of porting.** Item 2 is not a wiring job. `do_search_start`
+dispatches roughly thirty `search_start_*` functions upstream (`_regex.c:7859-8400+`, one per
+boundary opcode plus a `_rev` twin each); that is a sitting on its own, and items 8-14, 16 and 17
+are ten further research-derived optimisations, each wanting its own measurement. Trying to land
+them here would end in a checkpoint, which is the outcome the rule exists to stop.
+
+**So the route is: close S60 on what a prefilter slice must prove, and move the unported items to
+a successor slice rather than to prose.** Scope item 7 of the slice file already sanctions this -
+"a partial landing is acceptable, a silent one is not". In order:
+
+1. **Judge the `(*SKIP)`-plus-partial family as ONE batch** (rows 5014, 3633, 5200). It blocks the
+   slice gate ("oracle GREEN at three seeds", and today's third default seed IS 20260920) and it is
+   S57's item 1 as well, so one judgement clears both. PCRE2 is the second engine: it has both
+   `(*SKIP)` and `PCRE2_PARTIAL_SOFT`; .NET has neither and TRE neither. One amendment-16 ceremony
+   over the batch, not one per row.
+2. **Benchmark before/after.** The machine is still not quiet - the Stryker queue is mid-chunk in
+   `.claude/worktrees/stryker` - and the owner's 2026-09-19 rule allows pausing a background job for
+   a blocking benchmark (`.scratch/pause-stryker.ps1` in that worktree, resume by relaunching
+   `.scratch/run-queue.ps1`). If the sandbox refuses the pause, the PIDs are reported and the
+   benchmark stays owed rather than being recorded from a loaded machine.
+3. **The unported items move to a successor slice file**, carried verbatim, with their
+   OPTIMISATION-NOTES rows kept and their in-code comments kept. That is a phase-plan change, so it
+   is a numbered spec amendment plus a ROADMAP row in the same commit.
+4. Close: boxes ticked or explicitly unticked with the reason, blind review over the whole diff,
+   independent verifier, commit.
+
+Checklist on disk, ticked as they land:
+
+- [x] 1. `(*SKIP)`-plus-partial judgement, three rows, one verdict
+- [ ] 2. Benchmark before/after (or the pause refused and it is recorded owed)
+- [ ] 3. Successor slice file + spec amendment + ROADMAP row
+- [ ] 4. Ratchet, AOT, oracle three seeds, blind review, verifier, commit
+
+### The judgement: three rows, three doors each, and one of them nearly went the wrong way
+
+All three are `(*SKIP)` plus a partial `search`, all three were proved pre-existing against
+`3f1bf91` by sitting 2, and all three turn out to be **new rows of families this file already
+judged** rather than a new question. Port right on each. The probe is
+`tools/probes/upstream-skip-partial-anchor-grid.py`, written this sitting because
+`gate-divergence-doors.py` caps its anchor sweep at three hits - which finds the leftmost `pos` on
+a forward row but not the highest `endpos` on a reversed one, and one of these rows is reversed.
+
+| Row | Upstream | Port | First anchor its own search tries | `(*PRUNE)` | Verb deleted |
+|---|---|---|---|---|---|
+| 20260920 / 5014, forward | (5, 5) | (4, 5) | pos 4 -> (4, 5) | (4, 5) | (4, 5) |
+| 31337 / 5200, forward, sliced | (4, 4) | (3, 4) | pos 3 -> (3, 4) | (3, 4) | (3, 4) |
+| 31337 / 3633, REVERSED | (0, 1) | (0, 0) | endpos 1 -> (0, 1) **see below** | (0, 0) | (1, 4) complete |
+
+Codepoints throughout. The two forward rows are `partial-retry-carried-slice-forward`'s rows 4 and
+5 exactly - upstream's zero-width partial at the far end of what it searched, where the first
+anchor it must try answers what this port answers - and they became its rows 8 and 9.
+
+**Row 3633 is the one that nearly went the wrong way, and it is worth writing down.** Read off the
+anchor sweep alone it says the PORT skipped an anchor: a reversed search tries the highest `endpos`
+first, upstream's own `match(0, 1, partial=True)` answers (0, 1), and that is upstream's answer,
+while this port answers (0, 0), the lowest anchor. That reading is wrong, and the reason is the one
+this file already states about the stepwise walk: **passing `endpos=1` sets `slice_end` to 1 and
+MAKES `$` true there**, so the sweep reproduces the defect instead of testing it. The pattern ends
+in `$`; upstream's own `$` is true at 0 and 4 alone. Upstream's answer ends at 1, where its own `$`
+is false - which is `end-of-line-reads-a-skip-moved-slice`'s whole signature
+(`try_match_END_OF_LINE`, `_regex.c:7110`, is the one edge predicate of eight that reads
+`slice_end`; `RE_OP_SKIP` under `(?r)` writes that field at `:14553`). The `(?w)` control runs here
+and is sharp, because `(?w)$` is true at [0, 4] too, so 1 is not a line end the twin would create:
+`$` spelled out as `(?:(?=\n)|(?!\n|.))`, `(?w)$` and `(*PRUNE)` all answer (0, 0), this port's
+answer. It became that entry's row 5 and its first PARTIAL SEARCH - every row there before it is a
+scan or a substitution.
+
+Gate after the three rows were added: `pwsh -File tools/run-oracle.ps1 -Seeds 20260920,31337` -
+**GREEN, no row diverged at either seed**. Seeds 7 and 4242 were green in sitting 2 and this change
+touches only the test project's judged-row lists, so no engine behaviour moved. Ratchet GREEN,
+6451 / 6451, baseline unchanged at 6343.
+
+**NO BLIND REVIEW AND NO VERIFIER OVER THIS DIFF.** The sitting was cut short at 92% of the
+five-hour allowance window with an instruction to commit a green checkpoint, so items 2, 3 and 4
+are untouched and the amendment-16 ceremony over this judgement is owed. A future sitting must run
+it over the whole S60 diff since `14aad0a`, not only over the code, because what landed here is
+evidence and prose.
+
+### For sitting 4
+
+1. **Blind review and the independent verifier over this sitting's diff** - the three judged rows,
+   their two entry paragraphs and `upstream-skip-partial-anchor-grid.py`. The probe is in
+   `tools/probes/`, so the verifier can re-run every number above.
+2. One pinning test for row 3633's shape in `Gaps/Engine/PartialMatchingTests.cs` - the entry is
+   row-keyed and its `PinnedBy` tests are all scans, so the first partial search in that family has
+   no permanent test of its own yet.
+3. Then items 2, 3 and 4 of this sitting's checklist, in that order.
