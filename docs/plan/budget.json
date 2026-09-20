@@ -76,11 +76,12 @@
     "caps are untouched and remain the circuit breaker that works.",
     "maxSlicesPerDay 20 -> 30 and maxSlicesPerWeek 30 -> 60 on 2026-09-13, by owner decision: 33% of the weekly account allowance was unused with the renewal at 14:00 UK on 2026-09-14, and Phase 5 had spent 25 of the 30 weekly sessions in one day, so the weekly cap would have stopped Phase 6 after S45 with allowance to spare. The token caps are again untouched - they are the breaker that measures the machine rather than the plan.",
     "maxSlicesPerWeek 60 -> 90 on 2026-09-16, by owner decision: S52 (oracle hardening) has run 18 sittings judging the seed sweep's divergence rows one family at a time, and the rolling-week count reached 60 at 01:32 UK with 22 of 37 rows still to judge and the rest of Phase 6 (S52b-S57) queued. The count would not have fallen below 60 until 2026-09-18. Tokens were at 8.66e9 of the 3.5e10 weekly breaker, which stays untouched.",
+    "sliceTimeoutMinutes 240 -> 285 on 2026-09-20: the owner asked for fewer restarts. Every fresh sitting spends 5M-10M tokens re-orienting, and 240 minutes forced a checkpoint inside almost every five-hour window; 285 lets one sitting span most of a window, with the allowance hook and the deadline line still ending it early when they must (spec amendment 34).",
     "sliceTimeoutMinutes 180 -> 240 on 2026-09-13: S42 and S43 each ran a sitting to 165 minutes and S43's second sitting to the wire. Safe to raise now because the kill is no longer the only backstop - the session hook tells the session its remaining time from 30 minutes out, the driver keeps a green checkpoint commit on a failed sitting, and the heartbeat alarm follows the sitting's deadline."
   ],
   "maxSlicesPerDay": 30,
   "maxSlicesPerWeek": 90,
   "maxTokensPerDay": 6000000000,
   "maxTokensPerWeek": 35000000000,
-  "sliceTimeoutMinutes": 240
+  "sliceTimeoutMinutes": 285
 }

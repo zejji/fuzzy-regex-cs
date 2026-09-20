@@ -77,10 +77,17 @@ four minutes) on any commit that stages a `.cs` file, and refuses the commit on 
 "Anonymous function can be made static" (IDE0320). That pause is not a hang: wait for it. If it goes
 RED, make the lambda `static` (or fix whatever it names) and commit again; never `--no-verify`.
 
-Then one blind review pass over the diff. Brief the subagent to hand over a **reproduction** -
-the exact command and its output, or a failing test - not prose. Do not ask it for explanations or
-proposed corrections: prompts that request those measurably raise misjudgement rates. Style
-opinions and speculative rewrites are out of scope; reject them unread.
+Then the blind review, as `docs/VERIFICATION.md` specifies it and nothing more (owner rule,
+restated 2026-09-20): brief the reviewer with the **Reviewer brief** from that file, filled in -
+the exact scope, what is deliberate and must not be reported, where the source of truth lives and
+how to run it, and the failure modes this change could plausibly have. A finding is a
+**reproduction** - the exact command and its output, or a failing test - never prose. Style,
+naming and structure are out of scope; reject them unread. Then the loop: reproduce each finding
+yourself (roughly four in five do not survive), fix the real ones, re-run the ratchet, and send
+**only the changed delta** back for another blind pass with the same brief. Repeat until a pass
+returns "No defects found." That is the whole ceremony for a sitting: one reviewer, one brief,
+as many passes as it takes to come back clean, and no second reviewer, second opinion or
+critique of reviewed-and-unchanged code.
 
 **Wait for the reviewer inside the same turn.** Dispatch it as a blocking call and read its
 report as the tool result. Never write a progress message like "review still running, commit to
@@ -107,15 +114,14 @@ Then, in this order:
    run one more blind pass over that delta only.** This is not a second opinion on reviewed code;
    it is a first pass over unreviewed code, and skipping it is how S01 shipped ~200 lines of
    unreviewed public API. Judge it by what changed, not by how the first pass went.
-3. **Then the independent verifier** (spec amendment 16 limb (d); owner-approved 2026-09-14, after an
-   audit found no slice since S44 had one). A FRESH Opus subagent, briefed with nothing but the
-   commit-ready tree, re-runs from the committed files every probe, second-engine command and wave
-   summary the slice's notes and ledger entries quote, and reports each number as CONFIRMED,
-   DIFFERENT (with its value) or COULD NOT RUN (with why). Anything not CONFIRMED is fixed or the
-   claim is removed before the commit; a pin whose evidence the verifier could not reproduce is not
-   kept. This is not a review and it renders no opinion - it is the second pair of hands the
-   standard asks for, and it is the step that turns a scratch-only probe into evidence, because a
-   probe the verifier cannot find in `tools/probes/` is COULD NOT RUN.
+3. **The independent verifier is for judged divergences, not for every sitting.** Spec
+   amendment 16 sets the standard of evidence for a divergence verdict, and one limb of it is a
+   fresh Opus subagent that did not see the first verdict re-running, from the committed files, the
+   probes and second-engine commands the verdict quotes, reporting each number CONFIRMED, DIFFERENT
+   (with its value) or COULD NOT RUN (with why). It runs **once over a slice's whole batch of
+   judged rows**, before the commit that pins them, and nowhere else: a sitting that judged no
+   divergence has no verifier step (owner, 2026-09-20; spec amendment 34). Anything not CONFIRMED
+   is fixed or the claim is removed; a pin whose evidence the verifier cannot reproduce is not kept.
 
 From phase 3 onward, also run the differential oracle locally before you commit any slice that
 touches the engine, and minimise every divergence into a permanent test. The ported suite passing
@@ -261,8 +267,13 @@ rejects, all of which have already burned turns on real slices:
   the blocker into STATE.md and commit *that*, so the next session starts from a clean tree.
   Work left uncommitted is work the driver throws away.
   A green commit that leaves the slice file in `docs/plan/slices/` is a **checkpoint**: the driver
-  keeps it and starts a fresh session on the same slice (three checkpoints stop the driver). Use it
-  only when the slice genuinely needs another sitting, and make STATE.md say exactly what is left.
+  keeps it and starts a fresh session on the same slice (three checkpoints stop the driver). **A
+  checkpoint is forced on you, never chosen** (owner, 2026-09-20): commit one when the
+  `[driver deadline]` line says under 25 minutes, when the allowance hook orders it, or when you are
+  blocked - and otherwise keep working in this session until the slice lands. Every fresh sitting
+  re-reads the state, the roadmap, the slice and its notes before it does anything, which is
+  5M-10M tokens spent on nothing new; today's slices restarted six times. Commit green work as you
+  go, by all means - that is not a checkpoint unless you then end the session.
   **Per-sitting notes go in `docs/plan/slices/notes/<slice>-sittings.md`, never in the slice file**,
   which stays its spec plus a one-line pointer; S52's slice file reached 3,400 lines and every fresh
   sitting re-read it.
@@ -272,7 +283,7 @@ rejects, all of which have already burned turns on real slices:
   the remaining 22 in an hour. So: a step done by hand more than twice is scripted and run over the
   whole set in one pass, and the classification is read off the output, never guessed first. The
   amendment-16 ceremony (mechanism, blind review, verifier) runs once over a slice's batch of pins,
-  not once per pin. A slice starting its THIRD sitting begins by writing into its notes file how the
+  not once per pin, and only in a sitting that judged divergences. A slice starting its THIRD sitting begins by writing into its notes file how the
   rest could be done in one sitting, and does that. Standards do not drop; the route does.
 - **A deferred optimisation is recorded twice** (owner request 2026-09-16): a `ponytail:` or
   `Phase 7` comment at the line naming the ceiling and the lift, and one row in

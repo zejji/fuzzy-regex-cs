@@ -1016,3 +1016,16 @@ amended text is inline above; this list is the record of what changed and why.
     the linter to `README.md` and `docs/*.md` with the same rule set. **What does not change:** the
     engine, the wire format, the examples already shipped, and every S73 and S74 rule. The phase
     closes again when it lands.
+
+34. **Review is one scoped loop until clear; the verifier is for judged divergences only; a
+    checkpoint is forced, never chosen** (owner, 2026-09-20, after two days in which thirteen
+    sittings cost more than the previous three weeks). The port-slice skill had grown a second
+    blind pass plus an independent verifier on every sitting's commit; the owner asked for neither.
+    The standing rule is `docs/VERIFICATION.md`: one reviewer, the Reviewer brief filled in with a
+    tight scope, findings as reproductions, the changed delta re-reviewed until a pass comes back
+    "No defects found." Amendment 16's verifier keeps its place - a divergence verdict is not
+    pinned until a fresh subagent has re-run its evidence - and runs once over a slice's batch of
+    judged rows, not once per sitting. A session ends at a checkpoint only when the driver
+    deadline, the allowance hook or a blocker forces it; `sliceTimeoutMinutes` rises from 240 to
+    285 so one sitting can span most of a five-hour window. Optimisation slices are not cut:
+    S62b and S62c stay in Phase 7 as written.
