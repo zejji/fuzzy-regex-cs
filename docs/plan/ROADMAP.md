@@ -366,6 +366,20 @@ atomic behind PCRE2's guard list, and **S62c** is a one-sitting spike on selecti
 failed positions, both bounded by the oracle at three seeds and both allowed to end in "reverted,
 recorded".
 
+**S60 splits into S60 and S60b (2026-09-20, spec amendment 30).** S60 was authored over seventeen
+scope items and three sittings measured what that is: it closes on the required-string half - the
+forward `locate_required_string` arm, `string_search`/`simple_string_search`, the per-pattern
+needle, the `(*SKIP)` constraint implemented rather than asserted, 19 gap tests and three judged
+oracle rows - and its items 2, 3, 6, 8-14, 16 and 17 move to
+`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md` with **S60's item numbers
+kept**, so the `ponytail:` comments and `OPTIMISATION-NOTES.md` rows already in the tree still
+resolve. Item 2 alone is upstream's `search_start` (`_regex.c:8385`), the dispatcher its
+`do_search_start` flag (`:588`) turns on, over about thirty `search_start_*` functions; items 8-14,
+16 and 17 are nine researched optimisations, each wanting its own measurement and each allowed to
+end in "measured, not worth it, recorded". Phase 7 is nine slices where it was eight (six as
+drafted, plus S62b and S62c from amendment 28); the 5-10 session band is unchanged, because it is
+the same work counted differently.
+
 **Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
 measurement only and changes no engine code: this machine's noise floor from two runs of an

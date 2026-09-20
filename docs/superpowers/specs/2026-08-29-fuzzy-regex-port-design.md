@@ -952,3 +952,25 @@ amended text is inline above; this list is the record of what changed and why.
     S73 does not touch, so the answer-identity rule is not in play. S72's decision to leave
     regex101's code generator out is reversed in one narrow respect: one language, this library's
     own API. One slice, sittings unestimated; the phase closes again when it lands.
+
+30. **S60 splits: the required-string half closes as S60, and everything else becomes S60b
+    (2026-09-20, decided by the S60 sitting under scope item 7's "a partial landing is acceptable, a
+    silent one is not").** S60 was authored as one slice over seventeen scope items, and three
+    sittings measured what that is: sittings 2 and 3 landed item 1's forward arm, item 5, item 15,
+    19 gap tests and three judged oracle rows, and left items 2, 3, 6, 8-14, 16 and 17 untouched.
+    They are not a tail to be squeezed in. Item 2 is upstream's `search_start`
+    (`upstream/src/_regex.c:8385`), the dispatcher its `do_search_start` flag (`:588`) turns on,
+    over about thirty `search_start_*` functions (`:7859-8385`, one per boundary opcode
+    plus a `_rev` twin), and items 8-14, 16 and 17 are nine research-derived optimisations, each
+    wanting its own before/after measurement against S58's noise floor and each allowed to end in
+    "measured, not worth it". Carrying them inside S60 could only produce further checkpoints, which
+    is the outcome the third-sitting rule exists to stop. They move to
+    `docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, **keeping S60's item
+    numbers** so that the `ponytail:`/`Phase 7` comments and `OPTIMISATION-NOTES.md` rows already in
+    the tree still resolve. **What does not change:** the verb constraint (ROADMAP, owner rule
+    2026-09-12) binds S60b exactly as it bound S60, with the three permanent test files green on
+    every sitting; the oracle at three seeds is the gate, not a formality; and nothing deferred
+    loses its comment or its OPTIMISATION-NOTES row until the commit that implements it. Phase 7 is
+    nine slices where it was eight - six as drafted, plus S62b and S62c from amendment 28, plus
+    S60b; the 5-10 session band is unchanged, because the work is the same work counted in a
+    different number of slices.

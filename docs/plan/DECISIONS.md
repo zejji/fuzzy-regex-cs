@@ -717,3 +717,18 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   wrong layout.
 - 2026-09-20 (S73): upstream's deletion shift is `match_fuzzy_changes`, `_regex.c:20555-20558`. Four
   comments elsewhere cite `:20535-20537`, which is the top of that function; they are in STATE.md.
+- 2026-09-20 (S60): a probe that sweeps `$` over a row's positions masks REVERSE off the row's
+  flags. Under REVERSE the `regex` module anchors `match` at `endpos`, so every position answers:
+  `'ab\ncd'` gives `[2, 5]` under MULTILINE and `[0, 1, 2, 3, 4, 5]` under `MULTILINE|REVERSE`.
+- 2026-09-20 (S60): a probe reading the oracle report matches `DIVERGE` and `EXPECTED` headings
+  both. Pinning a row rewrites its heading to `EXPECTED <entry> row <n>`, so a DIVERGE-only reader
+  goes blind on exactly the rows its slice judged.
+- 2026-09-20 (S60): the prefilter's cancellation poll is untestable and was deleted, not pinned.
+  `MatchState.InitMatch` zeroes `Iterations` on every attempt, so `basic_match`'s opening cancel
+  check is an open gate and a spent budget is always caught before the sweep starts.
+- 2026-09-20 (S60): `ReferenceBenchmarks.BacktrackingPort` now measures the prefilter refusing
+  `(a|a)*b`, not the backtracker (87,169,133 ns to 126.6 ns). A backtracking workload for Phase 7
+  has to defeat the required-string locator, or it is measuring the locator.
+- 2026-09-20 (S60): a benchmark on this machine pauses Stryker AND
+  `.claude/worktrees/stryker/.scratch/after-parsing.ps1`, whose watcher relaunched the queue at
+  08:54 mid-run; `pause-stryker.ps1` excludes the watcher from its kill patterns by design.
