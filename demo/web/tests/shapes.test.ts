@@ -33,6 +33,21 @@ test('a partial match says so with a boolean, and with nothing else', () => {
     expect(reply({ matches: [match({ partialMatch: 'yes' })] }).error).toContain('wrong shape');
 });
 
+test('the breakdown of a fuzzy match is three lists of numbers, or it is not believed', () => {
+    // The highlighter iterates all three (`for (const at of edits.substitutions)`), and it runs
+    // inside a computed the page renders: a member that is present and is not a list throws out of
+    // a render rather than being caught, which is a blank page and a console message. Absent is a
+    // real answer - the engine omits `edits` from a match that spent nothing.
+    const edits = { substitutions: [1], insertions: [], deletions: [2] };
+    expect(reply({ matches: [match({ edits })] }).matches?.[0]?.edits).toEqual(edits);
+    expect(reply({ matches: [match()] }).matches?.[0]?.edits).toBeUndefined();
+
+    expect(reply({ matches: [match({ edits: { ...edits, substitutions: 1 } })] }).error).toContain('wrong shape');
+    expect(reply({ matches: [match({ edits: { insertions: [], deletions: [] } })] }).error).toContain('wrong shape');
+    expect(reply({ matches: [match({ edits: { ...edits, deletions: ['2'] } })] }).error).toContain('wrong shape');
+    expect(reply({ matches: [match({ edits: 'two' })] }).error).toContain('wrong shape');
+});
+
 test('a parse error may carry the position it failed at, and it must be a number', () => {
     expect(reply({ error: 'missing )', errorOffset: 1 }).errorOffset).toBe(1);
     expect(reply({ error: 'missing )' }).errorOffset).toBeUndefined();

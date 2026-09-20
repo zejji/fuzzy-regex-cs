@@ -38,12 +38,23 @@ const isGroup = (value: unknown): boolean =>
 const optional = (value: unknown, kind: 'string' | 'number' | 'boolean'): boolean =>
     value === undefined || typeof value === kind;
 
+// Absent on a match that spent nothing, and three lists of numbers when it is there. The
+// highlighter iterates all three inside a computed the page renders, so a member of the wrong type
+// is not a bad breakdown - it is a `TypeError` thrown out of a render, and that is a blank page.
+const isEdits = (value: unknown): boolean =>
+    value === undefined ||
+    (isObject(value) &&
+        [value.substitutions, value.insertions, value.deletions].every(
+            (list) => Array.isArray(list) && list.every((at) => typeof at === 'number'),
+        ));
+
 // Checked to the depth the page reads it: every member the tables and the highlighter touch. A
 // shallower check would pass a match with no `counts` straight into the render that needs it.
 const isMatch = (value: unknown): boolean =>
     isSpan(value) &&
     isObject(value) &&
     isCounts(value.counts) &&
+    isEdits(value.edits) &&
     Array.isArray(value.groups) &&
     value.groups.every(isGroup) &&
     optional(value.partialMatch, 'boolean');

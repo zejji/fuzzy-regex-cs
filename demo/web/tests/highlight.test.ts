@@ -207,6 +207,33 @@ test('an error spent on half a surrogate pair marks the whole character', () => 
     expect(runs(result)).toBe('-:a|sub:\u{10400}|-:b');
 });
 
+test('a match that ends inside a surrogate pair paints its own text and no more', () => {
+    // Half a character at each end of the span is the other way a code-unit position lands badly,
+    // and the whole-character rule above made it worse rather than better: widening the run to the
+    // end of the pair took it past the end of the match, and the low half was then painted a second
+    // time by the segment after it. Whatever the indices, the runs are the match's own text - that
+    // is what the page renders instead of `text` when they are present.
+    const result = segments('a\u{10400}b', [
+        { index: 0, length: 2, edits: { substitutions: [1], insertions: [], deletions: [] } },
+    ]);
+
+    const match = result.segments.filter((s) => s.match !== null)[0];
+    expect((match?.runs ?? []).map((run) => run.text).join('')).toBe(match?.text);
+});
+
+test('a match that starts inside a surrogate pair still draws the error at its first character', () => {
+    // The mirror of it. The whole-character rule moves a position on the low half back to the high
+    // half, and there the high half is outside the match: the run was keyed to a position the walk
+    // never visits, so the error vanished while the chip beside the match still counted it.
+    const result = segments('a\u{10400}b', [
+        { index: 2, length: 2, edits: { substitutions: [2], insertions: [], deletions: [] } },
+    ]);
+
+    const match = result.segments.filter((s) => s.match !== null)[0];
+    expect((match?.runs ?? []).map((run) => run.kind)).toContain('sub');
+    expect((match?.runs ?? []).map((run) => run.text).join('')).toBe(match?.text);
+});
+
 test('an overlapping match is skipped rather than rendered as an empty slice', () => {
     // Two matches that share characters cannot both be painted in one flat run of text, and a
     // negative slice length renders as an empty string rather than as an error - the kind of silent

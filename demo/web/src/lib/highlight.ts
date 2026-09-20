@@ -121,11 +121,16 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
     const kinds = new Map<number, EditKind>();
     const carets = new Map<number, number>();
 
+    // Where the walk below will actually stand when it reaches this position. Widening a position
+    // to the start of its character can put it before the match - the pair straddles the span's
+    // edge - and a run keyed there is one the walk never visits, so the error would simply vanish.
+    const runFrom = (at: number): number => Math.max(startOfCharacter(subject, at), start);
+
     const mark = (at: number, kind: EditKind): void => {
         if (at < start || at >= end) return;
         // First kind wins. Two errors on one character is not an answer the engine gives, and the
         // alternative - the later kind overwriting the earlier - is no more true than this one.
-        const from = startOfCharacter(subject, at);
+        const from = runFrom(at);
         if (!kinds.has(from)) kinds.set(from, kind);
     };
 
@@ -135,7 +140,7 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
         // `<= end` and not `< end`: a deletion at the end of the match is the ordinary case of a
         // pattern that asked for one more character than the subject had.
         if (at < start || at > end) continue;
-        const from = startOfCharacter(subject, at);
+        const from = at === end ? end : runFrom(at);
         carets.set(from, (carets.get(from) ?? 0) + 1);
     }
 
@@ -159,14 +164,16 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
         if (at === end) break;
 
         const kind = kinds.get(at);
-        const width = widthOfCharacter(subject, at);
+        // Never past the end of the match: a pair whose second half is outside the span would take
+        // the run with it, and the segment after this one paints that half again.
+        const upto = Math.min(at + widthOfCharacter(subject, at), end);
         if (kind !== undefined) {
             flush(at);
-            runs.push({ text: subject.slice(at, at + width), kind });
-            plainFrom = at + width;
+            runs.push({ text: subject.slice(at, upto), kind });
+            plainFrom = upto;
         }
 
-        at += width;
+        at = upto;
     }
 
     flush(end);

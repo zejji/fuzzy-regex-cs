@@ -916,3 +916,50 @@ On the six sources the before-figure covers that is 994, against 1,185 before th
 at the end of chunk 1. Chunk 2 put 25 words back (946) and chunks 3 to 5 another 48, across the C#
 panel, the underlay's labels and titles, and the skip link. Still a sixth below where the page
 started, and what has been added since is labelling on new structure rather than new prose.
+
+### 5f, part 1 - the blind pass (unfinished, allowance gate at 93%)
+
+One blind pass over two bodies of unreviewed code: the chunk-5 diff (`84936ad..HEAD`) and the
+chunk-1 fix delta - `copy-rules.ts`, `copy-sources.ts`, `shapes.ts` and `DemoEngine.cs`'s refusal
+messages - which no reviewer had ever seen. **Eight findings raised.** Four reproduced and fixed in
+this sitting; four are still open and are the next sitting's first job.
+
+Reproduced and fixed, each by a test written before the fix and watched to fail:
+
+1. **`highlight.ts`: a match that ends inside a surrogate pair painted past its own end.** The
+   whole-character rule widened a run to the end of the pair, which is outside the span, and the
+   segment after it then painted the low half a second time - `a😀\ude00b` for a subject of `a😀b`.
+   The run is now clamped to `end`.
+2. **`highlight.ts`: the mirror of it.** A match that STARTS on the low half keyed its run to the
+   high half, which is before the match, and the walk never visits that position: the error was
+   silently not drawn while the chip beside the match still counted it. Positions are now clamped
+   to `start` as well (`runFrom`).
+3. **`shapes.ts` did not check `edits`.** Chunk 5c added the member and not its guard, so a reply
+   whose `edits.substitutions` is a number passed `parseReply` and threw `is not iterable` out of
+   the `view` computed - a render, not a caught boundary, so a blank page. `isEdits` now checks
+   three lists of numbers, and absence is still a real answer.
+4. **`page.test.ts:962`'s hash assertion cannot fail** - jsdom performs no fragment navigation on an
+   anchor click, so `location.hash` holds with or without `@click.prevent`. The FOCUS half of that
+   test is real (it failed before the handler existed); the hash half is not. NOT YET FIXED, see
+   below.
+
+Open, reproduced by the reviewer but not yet re-reproduced or fixed here:
+
+5. `copy-sources.ts:39` - `//` inside a string literal truncates the source mid-quote, and the whole
+   string then disappears from the linted set.
+6. `copy-sources.ts:52` - only `${...}` is stripped, so C# interpolations are linted as prose;
+   `SOURCES['DemoEngine.cs'][0].text` is `{unexpected.GetType().Name}: {unexpected.Message}` today.
+7. `copy.test.ts:28` - the guard table that exists so the linter cannot pass on an empty extraction
+   covers six of the eight sources, and the two it omits are `src/lib` and `DemoEngine.cs`: exactly
+   the two the chunk-1 fix added.
+8. `demo-json-contract-expectations.py:131` - the `2,2` expectation the C# contract test uses is the
+   probe applying the same un-shift `DemoEngine.Edits` applies, so the port is checked against its
+   own algorithm. Upstream's own answer is `[2, 3]`. The number is right and its provenance is not:
+   it can be derived from the subject without our code ("abef" against `(?:abcdef){d<=2}` is missing
+   "cd" from one place, subject position 2, twice), and that derivation is what the comment should
+   say.
+
+**Also found, and not the reviewer's:** `tests/dev-server.test.ts` has five failures
+(`expected '' to contain '/src/main.ts'`) that are NOT caused by any change in this sitting - they
+reproduce identically with the working tree stashed, on `aa5b016`. The same file was green at 251 of
+251 earlier in this sitting, before `.scratch/sync-serve.ps1` ran a `vite build`. Not diagnosed.
