@@ -183,6 +183,30 @@ Then:
 The commit is the slice. A session that ends without a green ratchet, a commit and a clean tree
 has not completed a slice, and the driver will treat it as a failure.
 
+## Writing for a reader
+
+Owner rule (2026-09-20), for every piece of prose a slice produces: README and docs pages, XML doc
+comments, help text, closing notes, decision records, and the slice spec itself. The text must
+read as if a skilled human writer wrote it.
+
+- **Clear, simple, succinct, logically ordered.** Build from what the reader already knows to
+  what is new. One idea per sentence. Cut a sentence that repeats its heading or its neighbour.
+- **Grounded in research.** A claim about an external system, a library, or a best practice
+  cites the source you read, with the date. Search the web when the answer is not in this repo or
+  in upstream; do not write from memory and call it fact.
+- **Illustrative examples where they help.** A short concrete case (a pattern, a subject, the
+  spans it gives) explains more than a paragraph of description.
+- **No unexplained jargon.** Define a term the first time it appears, or use the plain word.
+- **No AI tells.** The banned list in `docs/plan/slices/done/S73-demo-as-a-product.md` under
+  "Copy rules and the banned list" applies to all prose, not only to demo copy: triads, "not X
+  but Y", rhetorical set-ups, puffery, corporate verbs, the LLM vocabulary, trailing "-ing"
+  summaries, restating the obvious, em dashes (use a hyphen or a full stop). Read it before you
+  write, and run any new user-facing string through `demo/web/tests/copy.test.ts` where it can
+  reach.
+
+Before committing, read your prose once as the reader, not as the author, and cut what a good
+editor would cut.
+
 ## Working under the driver
 
 The unattended session runs with a scoped Bash allowlist and a sandbox. These are the shapes it
