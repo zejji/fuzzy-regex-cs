@@ -75,8 +75,16 @@ if ($build -match ' error ') {
     ($build -split "`n" | Where-Object { $_ -match ' error ' } | Select-Object -First 8) | ForEach-Object { $_.Trim() }
     exit 1
 }
-$exe = Get-ChildItem (Join-Path $dir 'bin/Release/net10.0') -Filter 'doc-examples.exe' -Recurse | Select-Object -First 1
-$out = & $exe.FullName 2>&1 | ForEach-Object { "$_" }
+# Run the managed .dll, not the native launcher beside it: that launcher is doc-examples.exe on
+# Windows but extensionless `doc-examples` on Linux and macOS, so looking for the .exe found
+# nothing there and the run dereferenced a null (CI run 35532078667, 2026-09-20). The project is
+# framework-dependent and has no RID, so the .dll is at the same path on every platform.
+$dll = Join-Path $dir 'bin/Release/net10.0/doc-examples.dll'
+if (-not (Test-Path -LiteralPath $dll)) {
+    Write-Host "doc examples: BUILD OUTPUT MISSING, expected $dll" -ForegroundColor Red
+    exit 1
+}
+$out = & dotnet $dll 2>&1 | ForEach-Object { "$_" }
 
 $fail = 0
 $k = 0
