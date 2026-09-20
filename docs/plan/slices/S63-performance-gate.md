@@ -63,6 +63,31 @@ overloads and the like) are measured and excluded, and the published table says 
    re-align instruction), the AOT binary size against the 6,972,928-byte baseline, and the refreshed
    startup timings on a quiet machine, which S53 explicitly asked for and never had.
 
+9. **External comparators, for context and never for the gate** (owner decision 2026-09-20).
+   A separate benchmark job, excluded from `compare-benchmarks.ps1` and from every threshold in
+   this slice, records three reference points beside our medians:
+   - **Python mrab-regex** on every workload: the true reference and the only comparator that must
+     return the same answer everywhere (item 2 already asserts that).
+   - **The Rust `fuzzy-regex` crate** (https://kakserpom.github.io/fuzzy-regex-rs/intro.html) on the
+     INTERSECTION ONLY: fuzzy literals and short alternations with one global error budget over a
+     large subject, each case first asserted to return the identical span set from both engines.
+     It answers a different question elsewhere (one global budget, its own tie-breaking, no
+     per-group constraints, costs, BestMatch or named lists; see
+     `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`), so a timing outside the intersection is
+     recorded as "not comparable", never as a number. Inside it the crate is the best available
+     ceiling for the automaton approach S60 and S62 chase: a 10x gap there is a signal, a 1.3x gap
+     says the remaining cost is elsewhere.
+   - **`System.Text.RegularExpressions`** on the non-fuzzy workloads, which is what a .NET reader
+     compares against in practice (the `Regex` column of item 4 already exists; this pins how it is
+     taken).
+   Mechanics: a small Rust CLI wrapper driven as a child process that times many iterations inside
+   the process and prints one number, so start-up is excluded; no FFI into the .NET benchmark host;
+   a Rust toolchain on the benchmark machine only, never in CI; the same quiet-machine and
+   load-sampler discipline as S58, a run discarded when the sampler shows a competitor. Output: one
+   reference table in `OPTIMISATION-NOTES.md` under "External comparators", one row per workload
+   with our median, Python's, the crate's or "not comparable", and `Regex`'s or blank, plus the
+   commit and date of each comparator. The gate verdict of item 4 does not read this table.
+
 ## Verification
 
 - `pwsh -File tools/compare-benchmarks.ps1` against the committed baseline at S58's floors, for the
@@ -93,6 +118,8 @@ overloads and the like) are measured and excluded, and the published table says 
 - [ ] `SYNC-DIVERGENCE.md` complete, every row carrying its measured gain and re-align instruction.
 - [ ] Phase 7 close notes written into this file, ROADMAP's Phase 7 row updated with the outcome,
       DECISIONS entry for the gate verdict.
+- [ ] The external-comparators table committed with every fuzzy-regex-rs row either asserted
+      identical or marked "not comparable", and no threshold in this slice reading it.
 - [ ] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a baseline taken with the
       driver still running; a gate table that averages or silently drops a failing workload; a
       Python pairing that answers something different; a `pyperf check` warning recorded as a pass;

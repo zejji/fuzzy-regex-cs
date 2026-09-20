@@ -96,6 +96,17 @@ a threshold ("Results are identical to the alternation; only the speed differs")
 there is either already in S59/S60, already deferred here (bounded-repeat unrolling), or rests on
 a non-backtracking automaton or a different fuzzy algebra and must not be copied.
 
+## External comparators (owner decision 2026-09-20; S63 item 9)
+
+Three reference points are recorded beside our medians, for context and never for the gate:
+Python mrab-regex on every workload, the Rust `fuzzy-regex` crate on the intersection only (fuzzy
+literals and short alternations with one global error budget, each case asserted to return the
+same spans before its time is recorded; anything else is "not comparable" because the crate uses a
+different fuzzy algebra), and `System.Text.RegularExpressions` on the non-fuzzy workloads. The
+table lands here when S63 runs. The crate is a ceiling for the automaton approach S60 and S62
+pursue, not a target: beating it on a pattern it interprets differently proves nothing, and
+losing to it may be the price of the semantics this port exists to keep.
+
 ## Research sweep of 2026-09-18 (three sources, one note)
 
 `docs/plan/2026-09-18-optimisation-research.md` is the record: regex-automata/RE2/Navarro (§1), .NET

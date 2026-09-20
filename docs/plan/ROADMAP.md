@@ -743,6 +743,12 @@ and the accessibility rules from S71 and S72 are met again rather than traded aw
 `docs/plan/slices/S73-demo-as-a-product.md`; the owner reviews it before any sitting runs, and the
 phase closes again when it lands.
 
+**S74 follows S73 in the reopened phase (owner decision 2026-09-20; spec amendment 31):** the
+flags text field becomes a collapsible checkbox panel with a summary row, radio groups for the
+exclusive pairs and per-flag help generated from the enum comments. Spec:
+`docs/plan/slices/S74-flags-control.md`. Design agreed with the owner in conversation; no review
+round before the sitting.
+
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
 Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus

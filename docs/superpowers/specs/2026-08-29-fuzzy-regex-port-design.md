@@ -974,3 +974,12 @@ amended text is inline above; this list is the record of what changed and why.
     nine slices where it was eight - six as drafted, plus S62b and S62c from amendment 28, plus
     S60b; the 5-10 session band is unchanged, because the work is the same work counted in a
     different number of slices.
+31. **Phase 9 gains S74, the flags control (owner decision, 2026-09-20).** The demo's free-text
+    flags field was inherited from S71's regex101 layout and never decided. S74 replaces it with a
+    collapsible panel: one summary row when closed, a checkbox grid with radio groups for the
+    exclusive pairs when open, opening in the page flow rather than floating, and a one-sentence
+    help note per flag generated from the enum's own doc comments. Grounded in NN/g's rule that a
+    multi-selection is a listbox with checkboxes and never a dropdown, and GOV.UK's checkbox and
+    exclusive-option guidance. **What does not change:** the engine and the wire format (the
+    flags string still crosses to `DemoEngine`), shared links, the examples file, and every S73
+    rule on copy, layout, typing and accessibility. One slice; the phase closes again when it lands.
