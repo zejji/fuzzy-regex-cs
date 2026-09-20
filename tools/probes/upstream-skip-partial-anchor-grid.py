@@ -32,14 +32,18 @@ WHAT IS ASKED, per row:
       "upstream answered a span its own matcher cannot make" is settled over the whole region
       rather than at the one point `record-oracle.py`'s `searchOnlyPartial` field asks about.
 
-Run it (the wave files are written by `pwsh -File tools/run-oracle.ps1`):
+Run it. The rows and the two RECORDED columns are read out of `TestResults/oracle/`, which is
+gitignored, so on a tree that has never run the gate those two seeds are regenerated first - both
+in one command, because seed 20260920 is only a default on the day it names:
 
+    pwsh -File tools/run-oracle.ps1 -Seeds 20260920,31337
     python tools/probes/upstream-skip-partial-anchor-grid.py
 
 Written by S60 sitting 3 against regex 2026.9.10.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -163,24 +167,48 @@ def dollar_positions(row: dict, spelling: str = "$") -> list[int]:
     (upstream/src/_regex.c:7110) reads `slice_end` where its seven sibling edge predicates read a
     text bound, and `RE_OP_SKIP` under `(?r)` writes that very field (:14553), so an answer that
     ENDS where upstream's own `$` is false is a bound the verb moved being read as a line end.
+
+    THE REVERSE BIT IS MASKED OFF, because a reversed `match` is anchored by its `endpos` and not
+    by its `pos`, so asking position by position with `endpos=len(subject)` would answer at EVERY
+    position and say nothing. Measured 2026-09-20 on regex 2026.9.10, 'ab<LF>cd' under MULTILINE:
+    `[2, 5]`, and under MULTILINE|REVERSE `[0, 1, 2, 3, 4, 5]`
+    (`tools/probes/upstream-dollar-positions-for-moved-slice-rows.py`, which prints both). The mask
+    changes no number this probe has already printed, because none of the three rows carries REVERSE
+    in its FLAGS - 0x400a, 0x108 and 0x8, and 0x400 is clear in all three. Row 3633 is reversed, but
+    it spells `(?r)` in its PATTERN, and what is compiled here is the spelling (`$` or `(?w)$`) with
+    the row's flags, never the row's pattern, so the inline verb cannot reach this call. The mask is
+    defensive: no generator sets the flag today either - 0 of the 6,380 rows of `wave-31337.jsonl`
+    have 0x400 set (counted 2026-09-20) - and it is here so that a hand-written row, or a generator
+    that starts passing the flag, cannot turn this sweep into an all-positions answer unnoticed.
     """
-    compiled = regex.compile(spelling, row.get("flags", 0), cache_pattern=False)
+    compiled = regex.compile(spelling, row.get("flags", 0) & ~REVERSE, cache_pattern=False)
     subject = row["subject"]
     return [p for p in range(len(subject) + 1)
             if compiled.match(subject, p, len(subject), timeout=CALL_TIMEOUT) is not None]
 
 
 def read_report(seed: int) -> dict[int, tuple[str, str]]:
-    """Each diverging row's recorded upstream and port answer, out of the gate's own report."""
+    """Each judged row's recorded upstream and port answer, out of the gate's own report.
+
+    Both prefixes, because a row changes prefix the moment it is pinned: an unjudged row heads
+    its block `DIVERGE row 3633 ...`, and once `ExpectedDivergences` claims it the same block
+    reads `EXPECTED end-of-line-reads-a-skip-moved-slice row 3633 ...`. Reading only `DIVERGE`
+    made this probe print NOT RECORDED for every row the slice had already pinned - which is
+    every row it is here to explain. Measured 2026-09-20 on `report-31337.txt`, written by that
+    morning's gate run: `grep -n 3633` finds the EXPECTED heading at line 23 and no DIVERGE one.
+    The pinned form carries the ledger entry's name between the prefix and `row`, which is why
+    the number is matched rather than read from a fixed field.
+    """
     report = REPORTS / f"report-{seed}.txt"
     answers: dict[int, tuple[str, str]] = {}
     if not report.exists():
         return answers
     lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
     for i, line in enumerate(lines):
-        if not line.startswith("DIVERGE row "):
+        heading = re.match(r"(?:DIVERGE|EXPECTED) (?:\S+ )?row (\d+) ", line)
+        if heading is None:
             continue
-        number = int(line.split()[2])
+        number = int(heading.group(1))
         block = lines[i:i + 8]
 
         def first(prefix: str) -> str:
@@ -208,9 +236,11 @@ def main() -> int:
     for seed, number in WANTED:
         row = read_wave_row(seed, number)
         if row is None:
-            print(f"\n--- seed {seed} row {number}: no wave-{seed}.jsonl - re-run the gate")
+            print(f"\n--- seed {seed} row {number}: no wave-{seed}.jsonl - regenerate it with "
+                  f"`pwsh -File tools/run-oracle.ps1 -Seeds {seed}`")
             continue
-        recorded = read_report(seed).get(number, ("?", "?"))
+        missing = f"NOT RECORDED - `pwsh -File tools/run-oracle.ps1 -Seeds {seed}` writes it"
+        recorded = read_report(seed).get(number, (missing, missing))
         lo, hi = slice_of(row)
         print(f"\n--- seed {seed} row {number}  {row.get('generator')}  {row['operation']}"
               f"  flags=0x{row.get('flags', 0):x}{'  REVERSED' if is_reversed(row) else ''}")

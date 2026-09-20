@@ -89,7 +89,8 @@ such slice.
 ## From the Rust fuzzy-regex library (reviewed 2026-09-18)
 
 `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` has the full table. Two items adopted, both
-into S60: a rarity gate on the prefilter's skip character (their highest-ROI roadmap item, borrowed
+into S60 as its items 8 and 9 and, from 2026-09-20, into **S60b** with S60's item numbers kept
+(spec amendment 30): a rarity gate on the prefilter's skip character (their highest-ROI roadmap item, borrowed
 from resharp) and an Aho-Corasick or `SearchValues<string>` path for large `\L<name>` lists behind
 a threshold ("Results are identical to the alternation; only the speed differs"). Everything else
 there is either already in S59/S60, already deferred here (bounded-repeat unrolling), or rests on
@@ -110,7 +111,10 @@ losing to it may be the price of the semantics this port exists to keep.
 
 `docs/plan/2026-09-18-optimisation-research.md` is the record: regex-automata/RE2/Navarro (§1), .NET
 Regex and PCRE2 (§2), literature 2018-2026 and hardware (§3), with every quote and URL. Ten items
-went into S60 (8-17), one workload into S58, one verification item into S62. Two bets went to the
+went into S60 (8-17); item 15 landed there and the other nine moved on 2026-09-20 to
+**`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`**, which keeps those
+numbers (spec amendment 30); one workload into S58,
+one verification item into S62. Two bets went to the
 owner and, on 2026-09-19, into the plan as experiment slices (spec amendment 28), each free to end
 in "reverted, recorded": **`docs/plan/slices/S62b-auto-atomicity-experiment.md`**,
 auto-atomicity/auto-possessification (a compile time rewrite), and

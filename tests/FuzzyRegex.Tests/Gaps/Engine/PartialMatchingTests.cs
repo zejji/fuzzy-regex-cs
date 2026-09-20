@@ -1336,6 +1336,89 @@ public sealed class PartialMatchingTests
         pattern.Match(subject).Success.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Seed 31337 row 3633 - an EXTRA seed S60 sitting 2 ran beyond the gate, not one of
+    /// <c>run-oracle.ps1</c>'s three defaults (7, 4242 and the date, <c>:256</c>) - and the first
+    /// PARTIAL SEARCH in <c>end-of-line-reads-a-skip-moved-slice</c>, whose sixth row it is. Every
+    /// other row of that entry is a split, a scan or a substitution, so the <c>$</c> tell had never
+    /// been read on this operation before.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream answers a partial ENDING AT codepoint 1, where its own <c>$</c> is false: asked one
+    /// anchored position at a time, upstream's <c>$</c> is true at 0 and 4 alone. A reversed
+    /// <c>(*SKIP)</c> writes <c>slice_end</c> (<c>upstream/src/_regex.c:14553</c>) and
+    /// <c>try_match_END_OF_LINE</c> (<c>:7110</c>) reads it, so the verb manufactures a line end at
+    /// the moved bound - this entry's whole signature.
+    /// </para>
+    /// <para>
+    /// The anchor sweep is NOT the control here and points the other way: upstream's own
+    /// <c>match(0, 1, partial=True)</c> does answer (0, 1), but passing that <c>endpos</c> sets
+    /// <c>slice_end</c> to 1 itself and makes <c>$</c> true there, so it reproduces the defect
+    /// rather than testing it. What does run is the <c>(?w)</c> twin, which reads <c>text_end</c>
+    /// instead: <c>(?w)$</c> is true at [0, 4] too, so 1 is not a line end the twin would create.
+    /// Measured 2026-09-20 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-skip-partial-anchor-grid.py</c>, in CODEPOINTS:
+    /// <code>
+    /// search(partial=True)          (0, 1) g1 unset PARTIAL   &lt;- upstream
+    /// (*SKIP) -&gt; (*PRUNE)           (0, 0) g1 unset PARTIAL   &lt;- THIS PORT'S ANSWER
+    /// (?w)$                         (0, 0) g1 unset PARTIAL
+    /// $ spelled (?:(?=\n)|(?!\n|.)) (0, 0) g1 unset PARTIAL
+    /// the verb deleted              (1, 4) g1=(1, 2) COMPLETE  &lt;- printed, not a control
+    /// </code>
+    /// The verb-free line is printed and not treated as a control, as everywhere in this family:
+    /// deleting a verb prunes nothing, so it may reach a match neither pruned spelling can.
+    /// </para>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_reversed_partial_search_of_a_skip_ends_where_the_line_really_ends()
+    {
+        // The row as the wave drew it: flags 264 is MULTILINE | VERSION1, and `[\p{L}||\p{N}]` is a
+        // set union, which only Version1 parses.
+        const string subject = "\n\U0001D7EE\U0001D518\U0001D518";
+        const string pattern = @"(?r)^(?P<g1>[\p{L}||\p{N}]){1,}(?:[a\d](*SKIP)[\w\s]|\w)$";
+        FuzzyRegexOptions options = FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Version1;
+
+        Match skipped = new FuzzyRegex(pattern, options).Match(subject, partial: true);
+
+        skipped.PartialMatch.Should().BeTrue();
+        (skipped.Index, skipped.Length).Should().Be((0, 0), "upstream ends at codepoint 1, where its own `$` is false");
+        skipped.Groups[1].Success.Should().BeFalse();
+
+        // The controls, run here rather than only quoted. `(*PRUNE)` prunes what `(*SKIP)` prunes
+        // and moves no bound; `(?w)$` reads `text_end` rather than the moved `slice_end`; and `$`
+        // spelled out has no end-of-line opcode to read a bound at all. All three agree with the
+        // answer above, on this port as they do on upstream.
+        Match pruned = new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), options).Match(
+            subject,
+            partial: true
+        );
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 0));
+
+        Match wordTwin = new FuzzyRegex(pattern, options | FuzzyRegexOptions.Word).Match(subject, partial: true);
+        wordTwin.PartialMatch.Should().BeTrue();
+        (wordTwin.Index, wordTwin.Length).Should().Be((0, 0));
+
+        Match spelledOut = new FuzzyRegex(
+            pattern.Replace("$", @"(?:(?=\n)|(?!\n|.))", StringComparison.Ordinal),
+            options
+        ).Match(subject, partial: true);
+        spelledOut.PartialMatch.Should().BeTrue();
+        (spelledOut.Index, spelledOut.Length).Should().Be((0, 0));
+
+        // Not a control, and the reason the three above are not vacuous: with no verb at all both
+        // engines reach a COMPLETE match over codepoints (1, 4), UTF-16 (1, 6). A zero-width partial
+        // at 0 is this pattern's answer to the verb, not this port's answer to everything.
+        Match noVerb = new FuzzyRegex(pattern.Replace("(*SKIP)", "", StringComparison.Ordinal), options).Match(
+            subject,
+            partial: true
+        );
+        noVerb.PartialMatch.Should().BeFalse();
+        (noVerb.Index, noVerb.Length).Should().Be((1, 6));
+    }
+
     // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
     [Test]
     public void A_reversed_partial_stops_at_the_anchor_where_the_text_really_ran_out()

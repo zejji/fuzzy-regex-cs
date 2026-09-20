@@ -1033,12 +1033,15 @@ internal static class ExpectedDivergences
         // 2026-09-15 on regex 2026.9.10, tools/probes/upstream-partial-anchor-reachability.py.
         "match 0:(8,2)[(8,2)] 1:unset last=-1/- partial",
         "match 0:(7,3)[(7,3)] 1:(7,2)[(7,2)] 2:(9,1)[(9,1)] last=2/g1 partial",
-        // Rows 8 and 9 are S60 sitting 3's, and they are the first this entry has taken from the
-        // DEFAULT three-seed gate rather than a widened wave - seed 20260920 row 5014 and seed 31337
-        // row 5200. Both are rows 4 and 5's symptom exactly: upstream answers the zero-width partial
-        // at the far end of what it searched, codepoints (5, 5) and (4, 4), where the first anchor
-        // its own forward search must try - pos 4 and pos 3 - answers the (4, 5) and (3, 4) this port
-        // answers, and so do `(*PRUNE)` and the verb-free spelling on both. Row 9 is
+        // Rows 8 and 9 are S60 sitting 3's, and row 8 is the first this entry has taken from the
+        // DEFAULT gate rather than a widened wave - seed 20260920 row 5014, and 20260920 is the date
+        // seed `run-oracle.ps1` runs by default (`:256`). Row 9 is seed 31337 row 5200, an EXTRA
+        // seed sitting 2 ran beyond the gate, not a default one. Both are rows 4 and 5's symptom
+        // exactly: upstream answers the zero-width partial at the far end of what it searched,
+        // codepoints (5, 5) and (4, 4), where the first anchor its own forward search tries THAT
+        // ANSWERS AT ALL - pos 4 and pos 3, the sweep's own first hits, not the first positions
+        // tried - gives the (4, 5) and (3, 4) this port answers, and so do `(*PRUNE)` and the
+        // verb-free spelling on both. Row 9 is
         // `partial-sliced`, so its searched region is the slice (1, 4) and not the subject. Measured
         // 2026-09-20 on regex 2026.9.10, tools/probes/upstream-skip-partial-anchor-grid.py.
         "match 0:(4,1)[(4,1)] 1:unset last=-1/- partial",
@@ -1105,8 +1108,9 @@ internal static class ExpectedDivergences
         "sub 0 '\\ud801\\udc28\\ud801\\udc28a\\u000d\\u000a'",
         "matches 1 | match 0:(7,4)[(7,4)] last=-1/-",
         "sub 0 's\\ufb00\\ufb00'",
-        // Row 5 is S60 sitting 3's, seed 31337 row 3633 of the default three-seed gate, and it is
-        // the FIRST PARTIAL SEARCH this entry has held - every row above it is a scan or a
+        // Row 6 is S60 sitting 3's, row 3633 of seed 31337 - an EXTRA seed sitting 2 ran beyond the
+        // gate, not one of `run-oracle.ps1`'s three defaults (`:256`) - and it is the FIRST PARTIAL
+        // SEARCH this entry has held: every row above it is a split, a scan or a
         // substitution. Upstream's partial ENDS AT codepoint 1, where its own `$` is true at 0 and 4
         // alone, and the `(?w)` control runs here because 1 is not a `(?w)$` position either: `$`
         // spelled out, `(?w)$` and `(*PRUNE)` all answer the zero-width partial at (0, 0) that this
@@ -2552,8 +2556,12 @@ internal static class ExpectedDivergences
                 + "    `$` written out                          no match, this port's answer\n"
                 + "    (*SKIP) -> (*PRUNE), or deleted          no match, this port's answer\n"
                 + "    `$` written as (?w)$, the TWIN           no match, this port's answer\n"
-                + "THE `(?w)` CONTROL IS THE SHARPEST ONE AND IT RUNS ON ONE ROW ONLY, and the reason "
-                + "is narrower than it first looks. `(?w)` compiles `$` to `END_OF_LINE_U` "
+                + "THE `(?w)` CONTROL IS THE SHARPEST ONE AND OF THE FIRST TWO ROWS IT RUNS ON ONE "
+                + "ONLY [S60 sitting 4: it runs on rows 38101, 5721 and 3633 - three of the six rows "
+                + "this entry now holds; measured with "
+                + "`python tools/probes/upstream-dollar-positions-for-moved-slice-rows.py`, which "
+                + "prints every row's `$` and `(?w)$` positions], and the reason is narrower than it "
+                + "first looks. `(?w)` compiles `$` to `END_OF_LINE_U` "
                 + "(regex/_regex_core.py:506-510), the twin that reads `text_end` - but it is NOT a "
                 + "clean swap of one bound for another, because it also changes WHICH POSITIONS ARE "
                 + "LINE ENDS, on both rows and in both directions:\n"
@@ -2606,25 +2614,6 @@ internal static class ExpectedDivergences
                 + "for row 24224. Measured 2026-09-15 on regex 2026.9.10, and re-runnable from the "
                 + "committed tree with no gate run: "
                 + "`python tools/probes/upstream-gate-drawn-skip-rows.py`.\n"
-                + "S60 SITTING 3 ADDED A PARTIAL SEARCH, seed 31337 row 3633, and it is the first row "
-                + "here that is neither a scan nor a substitution - so the `$` tell now reaches the "
-                + "operation the three `partial-retry-*` entries own, and which entry a row belongs to "
-                + "is decided by the tell rather than by the call. "
-                + "`(?r)^(?P<g1>[\\p{L}||\\p{N}]){1,}(?:[a\\d](*SKIP)[\\w\\s]|\\w)$` over "
-                + "'\\n\\U0001D7EE\\U0001D518\\U0001D518' with MULTILINE has upstream answering the "
-                + "partial (0, 1), which ENDS AT 1 where its own `$` is true at 0 and 4 alone. THE "
-                + "ANCHOR SWEEP POINTS THE OTHER WAY HERE AND IS NOT THE CONTROL: upstream's own "
-                + "`match(0, 1, partial=True)` does answer (0, 1), so the highest anchor a reversed "
-                + "search tries that answers at all is its own answer - but passing that `endpos` sets "
-                + "`slice_end` to 1 and MAKES `$` true there, which is the bug rather than a test of "
-                + "it, exactly as this entry says of the stepwise walk above. The `(?w)` control does "
-                + "run, and this is the third row it runs on: `(?w)$` is true at [0, 4] too, so the "
-                + "phantom end 1 is not a line end the twin would create. `$` spelled out as "
-                + "`(?:(?=\\n)|(?!\\n|.))`, `(?w)$`, and `(*SKIP)` spelled `(*PRUNE)` all answer the "
-                + "zero-width partial (0, 0) this port answers. The verb deleted answers a COMPLETE "
-                + "(1, 4) and is printed rather than counted, because deleting a verb prunes nothing. "
-                + "Measured 2026-09-20 on regex 2026.9.10, "
-                + "tools/probes/upstream-skip-partial-anchor-grid.py.\n"
                 + "S52'S NINETEENTH SITTING ADDED A FOURTH ROW, sweep row 30, and it is the first "
                 + "here that is an OVERLAPPED SCAN rather than a split or a substitution - which is "
                 + "also why the predicate one entry up does not take it. "
@@ -2647,8 +2636,10 @@ internal static class ExpectedDivergences
                 + "`pwsh -File tools/run-oracle.ps1 -Rows <file>`.\n"
                 + "AND A FIFTH ROW, drawn by the default wave AT A SEED NO SLICE HAD USED - "
                 + "`run-oracle.ps1`'s third default seed is the DATE, so every day's run is a fresh "
-                + "one, and 2026-09-16's drew `verbs` row 5721. It is the first row in this entry on "
-                + "which the `(?w)` CONTROL CAN RUN, which makes it the cleanest statement of the "
+                + "one, and 2026-09-16's drew `verbs` row 5721. It is the SECOND row in this entry on "
+                + "which the `(?w)` CONTROL CAN RUN [S60 sitting 4 correction: written as 'the first' "
+                + "when it landed, but row 38101 above already runs it; row 3633 below is the third], "
+                + "which makes it the cleanest statement of the "
                 + "defect here: `(?r)\\p{ASCII}{1,3}(*SKIP)\\uFB00$` over 's\\uFB00\\uFB00', a "
                 + "`subf`. Upstream's own `$` is true at codepoint 3 alone and its scan reports a "
                 + "match ending at 2; `(?w)$` is true at 3 ALONE AS WELL, so the twin that reads "
@@ -2658,10 +2649,32 @@ internal static class ExpectedDivergences
                 + "`(?:(?=\\n)|(?!\\n|.))` all answer the same. Upstream's drawn outcome is an "
                 + "IndexError for the reason row 38101's is - the template asks for a group the "
                 + "pattern never makes, so upstream raises precisely when it finds a match. Measured "
-                + "2026-09-16 on regex 2026.9.10.",
+                + "2026-09-16 on regex 2026.9.10.\n"
+                + "S60 SITTING 3 ADDED A SIXTH ROW, AND THE FIRST PARTIAL SEARCH, row 3633 of seed "
+                + "31337 - an extra seed sitting 2 ran beyond the gate, not one of the three defaults. "
+                + "It is the first row here that is neither a split, a scan nor a substitution, so the "
+                + "`$` tell now reaches the operation the three `partial-retry-*` entries own, and "
+                + "which entry a row belongs to is decided by the tell rather than by the call. "
+                + "`(?r)^(?P<g1>[\\p{L}||\\p{N}]){1,}(?:[a\\d](*SKIP)[\\w\\s]|\\w)$` over "
+                + "'\\n\\U0001D7EE\\U0001D518\\U0001D518' with MULTILINE and VERSION1 (flags 264) has "
+                + "upstream answering the partial (0, 1), which ENDS AT 1 where its own `$` is true at "
+                + "0 and 4 alone. THE ANCHOR SWEEP POINTS THE OTHER WAY HERE AND IS NOT THE CONTROL: "
+                + "upstream's own `match(0, 1, partial=True)` does answer (0, 1), so the highest "
+                + "anchor a reversed search tries that answers at all is its own answer - but passing "
+                + "that `endpos` sets `slice_end` to 1 and MAKES `$` true there, which is the bug "
+                + "rather than a test of it, exactly as this entry says of the stepwise walk above. "
+                + "The `(?w)` control does run here: `(?w)$` is true at [0, 4] too, so the phantom end "
+                + "1 is not a line end the twin would create. `$` spelled out as "
+                + "`(?:(?=\\n)|(?!\\n|.))`, `(?w)$`, and `(*SKIP)` spelled `(*PRUNE)` all answer the "
+                + "zero-width partial (0, 0) this port answers. The verb deleted answers a COMPLETE "
+                + "(1, 4) and is printed rather than counted, because deleting a verb prunes nothing. "
+                + "Measured 2026-09-20 on regex 2026.9.10, "
+                + "tools/probes/upstream-skip-partial-anchor-grid.py.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_"
-                + "the_line_does_not_end and .A_reversed_substitution_of_a_skip_replaces_nothing_"
-                + "where_the_line_does_not_end",
+                + "the_line_does_not_end, .A_reversed_substitution_of_a_skip_replaces_nothing_"
+                + "where_the_line_does_not_end and PartialMatchingTests.A_reversed_partial_search_of_"
+                + "a_skip_ends_where_the_line_really_ends, which is row 6's, the entry's only partial "
+                + "search",
             Example: _endOfLineReadsMovedSliceRows,
             Applies: static (row, ours) =>
                 _endOfLineReadsMovedSlice.TryGetValue(Question(row), out string? judged)
@@ -3101,12 +3114,15 @@ internal static class ExpectedDivergences
                 + "verb prunes nothing and so may reach a match the pruned spellings cannot, which is "
                 + "why it is printed and not treated as a control. Measured 2026-09-15 on regex "
                 + "2026.9.10, tools/probes/upstream-partial-anchor-reachability.py.\n"
-                + "ROWS 8 AND 9 ARE S60 SITTING 3'S, and they are the first rows this entry has taken "
-                + "from the DEFAULT three-seed gate rather than from a widened wave or a seed sweep - "
-                + "seed 20260920 row 5014 and seed 31337 row 5200. Both are rows 4 and 5's symptom "
+                + "ROWS 8 AND 9 ARE S60 SITTING 3'S, and row 8 is the first row this entry has taken "
+                + "from the DEFAULT gate rather than from a widened wave or a seed sweep - seed "
+                + "20260920 row 5014, 20260920 being the date seed `run-oracle.ps1` runs by default. "
+                + "Row 9 is seed 31337 row 5200, an EXTRA seed sitting 2 ran beyond the gate. Both are "
+                + "rows 4 and 5's symptom "
                 + "unchanged: upstream answers the zero-width partial at the far end of what it "
                 + "searched, codepoints (5, 5) and (4, 4), where the first anchor its own forward "
-                + "search must try that answers at all - pos 4 and pos 3 - gives the (4, 5) and "
+                + "search tries that answers at all - pos 4 and pos 3, which are not the first "
+                + "positions tried but the first that answer - gives the (4, 5) and "
                 + "(3, 4) this port answers, and `(*PRUNE)` and the verb-free spelling give the same "
                 + "on both. Row 9 is `partial-sliced`, so its searched region is the slice (1, 4) "
                 + "rather than the subject, and it is asked with upstream's required-string prefilter "

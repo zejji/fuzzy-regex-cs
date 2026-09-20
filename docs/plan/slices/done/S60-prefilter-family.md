@@ -134,19 +134,155 @@ upstream's own slow path does, never to invert the test.
 
 - [ ] Required-string locator and the `string_search` arms live, with the case flags and search
       offsets actually read.
+      *Partly: the forward case-sensitive arm is live and reads `ReqOffset`. The reverse and
+      case-folded arms are deferred with comments and OPTIMISATION-NOTES rows - S60b item 1.*
 - [ ] `search_start`/`do_search_start` live, the underflow site handled and pinned.
+      *Not landed - S60b item 2. The underflow site (`Matcher.cs:10436-10441`) is live and
+      annotated, because S60 made `ReqPos` live, but it is not pinned by a test yet.*
 - [ ] `SearchValues<char>` built per compiled pattern; vectorised `IndexOf` replaces the scalar
       scans; no hand-written SIMD, no `unsafe`.
-- [ ] The verb-slice test written red first and green after; the three permanent files green
+      *Not landed - S60b. The sweep uses `MemoryExtensions.IndexOf`, which is vectorised; the
+      per-pattern `SearchValues<char>` belongs with items 4 and 16.*
+- [x] The verb-slice test written red first and green after; the three permanent files green
       unchanged.
-- [ ] Oracle GREEN at three seeds; measured before and after per workload in the commit message.
-- [ ] Every sub-part not landed carries a comment and an OPTIMISATION-NOTES row; landed rows and
+- [x] Oracle GREEN at three seeds; measured before and after per workload in the commit message.
+- [x] Every sub-part not landed carries a comment and an OPTIMISATION-NOTES row; landed rows and
       their comments deleted.
-- [ ] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
+- [x] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
       `sync-divergence:` marker, `tools/check-sync-divergence.ps1` green.
 - [ ] Items 8 to 17 landed, or each deferred with a row and a comment; item 15's `a*a` test is
   not deferrable.
-- [ ] Ratchet and AOT green; blind review (hunt: a prefilter that searches below a position a verb
+      *Item 15 landed with its `a*a` test. Items 8-14, 16 and 17 are deferred with rows and
+      comments and move to S60b (spec amendment 30).*
+- [x] Ratchet and AOT green; blind review (hunt: a prefilter that searches below a position a verb
       committed past; a `SearchValues` built per call instead of per pattern; a reverse or
       case-folded arm that skips the fold; the underflow site clamped rather than handled; a
       partial match whose run-out position moved), commit.
+
+## Closing notes (2026-09-20, four sittings)
+
+**What landed.** Upstream's `locate_required_string` forward case-sensitive arm, with
+`string_search`/`simple_string_search` under it, the per-pattern needle, and the `(*SKIP)`
+constraint implemented rather than asserted: a pattern that can run a `(*SKIP)` may have its
+subject refused by the prefilter but never its first attempt position chosen for it. Item 5 and
+item 15 (with its `a*a` test) landed. 19 gap tests, and three oracle rows judged and pinned -
+`end-of-line-reads-a-skip-moved-slice` gained a sixth row, row 3633 of seed 31337, the entry's
+first PARTIAL SEARCH. The per-sitting record is `docs/plan/slices/notes/S60-sittings.md`; this
+file is the spec and stays short.
+
+**What did not land, and where it went.** Items 2, 3, 6, 8-14, 16 and 17 move to
+`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, keeping S60's item numbers
+so that every `ponytail:` comment and OPTIMISATION-NOTES row already in the tree still resolves.
+Spec amendment 30 and a ROADMAP paragraph record the phase-plan change in this commit.
+
+**Surprises the next slice should know.**
+
+1. `ReferenceBenchmarks.BacktrackingPort` no longer measures backtracking. Its `(a|a)*b` over a
+   subject with no `b` is refused by the prefilter before the matcher runs: 87,169,133 ns to
+   126.6 ns. S62 needs a workload that reaches the matcher, or it is measuring the locator.
+2. The prefilter's cancellation poll was deleted rather than pinned. `MatchState.InitMatch` zeroes
+   `Iterations` on every attempt, so `basic_match`'s opening cancel check is an open gate and a
+   spent budget is always caught before the sweep starts; the poll could only fire mid-sweep,
+   which is a race with the machine. `IndexOf` over 100,000,000 code units takes 14.1 ms, so the
+   longest string .NET can hold sweeps in about 150 ms.
+3. A benchmark on this machine must pause Stryker AND
+   `.claude/worktrees/stryker/.scratch/after-parsing.ps1`, whose watcher relaunched the queue
+   mid-run at 08:54 and contaminated the tail of a 42-minute suite.
+4. Three workloads reading 1.15x-1.32x against the committed baseline were settled by an A/B, not
+   an argument: the same three benchmarks in a `14aad0a~1` worktree and in this tree, back to back
+   (DefaultJob, which auto-sizes each run - 12 to 62 result measurements a workload, counted from
+   the artifacts - both sides under the same ~20% background load), give
+   1.026x, 1.030x and 1.040x. The slice costs them nothing measurable; the baseline is four days
+   old and was taken on a machine that was not quiet, and re-taking it is S63's job.
+
+## The negative controls, re-run against this commit
+
+All four are suite controls, not oracle waves: the fixture is the committed test files, so there is
+no generator or seed, and the count below is the whole suite. Each is one edit to
+`src/FuzzyRegex/Engine/Matcher.cs`, built and run with
+`dotnet run -c Debug -p:UseSharedCompilation=false --project tests/FuzzyRegex.Tests`, plus
+`-- --treenode-filter "<filter>"` where one is shown. Re-run 10:21-10:24 on 2026-09-20 against the
+tree in this commit, after the last code change; the baseline with no edit is `failed: 0
+succeeded: 6459`. The script that drove the edit-run-restore cycle was `.scratch/controls-final.ps1`
+(scratch, not committed); every edit below is a plain string replace that can be redone by hand.
+
+> **Control A, the verb guard.** In `LocateRequiredString`, change
+> `bool useOffset = pattern.ReqOffset >= 0 && !pattern.HasSkipVerb;` to
+> `bool useOffset = pattern.ReqOffset >= 0;`. Whole suite. Result: **2 failed of 6459** -
+> `BacktrackingVerbTests.Skip_past_a_required_string_tries_a_start_position_upstreams_prefilter_skips`
+> and `RequiredStringPrefilterTests.A_skip_verb_keeps_the_prefilter_from_choosing_where_the_first_attempt_starts`.
+
+> **Control B, the astral limit walk.** In the same method, replace the walk
+>
+> ```csharp
+>                     limit = state.SliceStart;
+>                     for (long i = 0; i < pattern.ReqOffset + reqString.Values.Count && limit < state.SliceEnd; ++i)
+>                     {
+>                         limit = state.NextPos(limit);
+>                     }
+> ```
+>
+> with the transliterated addition
+> `limit = (int)long.Min(state.SliceStart + pattern.ReqOffset + reqString.Values.Count, state.SliceEnd);`.
+> Whole suite. Result: **2 failed of 6459** -
+> `BackrefAndConditionalTests.A_backreference_spanning_an_astral_character_and_a_bmp_one_matches_the_whole_span`
+> and `RequiredStringPrefilterTests.An_astral_required_string_is_not_cut_short_by_the_offset_limit`.
+
+> **Control E, the sweep's base.** In `StringSearch`, change `return textPos + found;` to
+> `return found;`. Filter `/*/*/RequiredStringPrefilterTests/*`. Result: **1 failed of 19** -
+> `The_prefilter_searches_the_slice_and_not_the_subject`.
+
+> **Control F, the newly live `req_pos` fast path.** In `basic_match`'s `Opcode.String` case,
+> anchored on the comment above it because the assignment is not unique:
+>
+> ```csharp
+>                         // the prefilter has already compared is not compared a second time.
+>                         state.TextPos = state.ReqEnd;
+> ```
+>
+> change that assignment to `state.TextPos = state.ReqEnd + 1;`. Whole suite. Result:
+> **139 failed of 6459**. The number is the point: that arm was dead code before S60.
+
+Control C did not survive - the chunked sweep it tested was deleted, for the reason given in the
+sittings notes - and Control D is retired with the chunk boundary it broke. Neither is claimed as
+evidence here.
+
+## Review
+
+Two blind passes, both reproduced before anything was changed.
+
+**Pass 1, over sitting 3's diff (`1f55858`) and the working tree.** Six findings raised, six
+reproduced, six fixed: row 3633 is the entry's sixth row and not its fifth (four places said
+"row 5"); seed 31337 is an extra seed and not one of the gate's three defaults
+(`run-oracle.ps1:256` reads 7, 4242 and the date), which four places got wrong; the S60 paragraph
+sat ahead of paragraphs about earlier rows; the grid probe's `$` sweep inherited the REVERSE bit,
+which anchors `match` at `endpos` so every position answers (proved by a two-run control, `[2, 5]`
+against `[0, 1, 2, 3, 4, 5]`); the `(?w)` control runs on three rows, not one, which corrected two
+ledger sentences; and the grid probe read only `DIVERGE` headings, so it printed NOT RECORDED for
+exactly the rows the slice had pinned.
+
+**Pass 2, over the delta pass 1 never saw** - the new pinning test, the S60b slice file, spec
+amendment 30, the ROADMAP and OPTIMISATION-NOTES paragraphs, both probes and the benchmark notes.
+Six findings raised, six reproduced, six fixed: the benchmark claim that three workloads had been
+re-measured on a quiet machine was not supported by any artifact and one re-run read 1.32x, ABOVE
+the gate (settled by the A/B above, which is what the notes now claim); the grid probe's new
+REVERSE paragraph said all three of its rows spell `(?r)` when only one does, and the reason the
+mask is safe is different - only the spelling is compiled, never the row's pattern, and 0 of 6,380
+wave rows carry the flag, which I counted rather than asserted; OPTIMISATION-NOTES said ten items
+moved to S60b when item 15 landed here and nine moved; S60b had copied five stale `Matcher.cs` line
+references and three more besides, all re-resolved by symbol; `do_search_start` was described as
+the dispatcher in three files when it is the BOOL flag (`_regex.c:588`) and `search_start`
+(`:8385`) is the dispatcher; and "Phase 7 is seven slices where it was six" ignored amendment 28's
+two experiment slices - it is nine where it was eight.
+
+**The independent verifier** (amendment 16 limb (d)) then re-ran every number these notes and the
+ledger quote, from the committed files, and reported each CONFIRMED, DIFFERENT or COULD NOT RUN.
+Confirmed: all six `$`/`(?w)$` position lists and the three-row `(?w)` claim; both probes; the
+pinning test's five upstream answers, re-run against `regex` 2026.9.10; all four controls, each
+applied, run and restored, at 2/2/1/139; the ratchet and the three oracle seeds; the three A/B
+ratios; and every line reference in S60b but one. Four came back DIFFERENT and all four are fixed
+above: Control B's first failing test is in `BackrefAndConditionalTests`, not a
+`BackreferenceMatchingTests` that does not exist; "40 measurements each" was wrong, because
+DefaultJob auto-sizes and the six runs gave 12 to 62; the Debug suite reads 25 to 28 seconds, not 28;
+and S60b's `PatternObject.cs:253-276` pointed at the flags, where the required-string fields are at
+`:179-197`.
