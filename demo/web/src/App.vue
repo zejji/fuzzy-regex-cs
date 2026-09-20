@@ -46,6 +46,7 @@ const {
     matches,
     view,
     capped,
+    markers,
     current,
     replaced,
     partial,
@@ -378,6 +379,15 @@ const EDIT_NAMES: Readonly<Record<EditKind, string>> = {
 };
 
 const editName = (kind: EditKind): string => EDIT_NAMES[kind];
+
+/**
+ * What one mark inside a highlight is called: its kind, and how many errors of that kind it stands
+ * for when it stands for several. The number is in the title for every kind, because a pointer and
+ * a screen reader both get it there, and on screen only for a deletion, whose gap has no characters
+ * of its own to be counted.
+ */
+const runName = (kind: EditKind, count: number): string =>
+    count === 1 ? editName(kind) : `${count} ${editName(kind)}s`;
 
 /**
  * What a screen reader is told a highlight is: its number, its text, what it spent, and whether it
@@ -1251,7 +1261,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <p
                             ref="subjectPane"
                             class="subject-pane"
-                            :class="{ 'opacity-60': busy }"
+                            :class="{ 'opacity-60': busy, 'has-markers': markers }"
                             :aria-busy="busy"
                             @keydown="onSubjectKeydown"
                         ><template v-for="(part, i) in view.segments" :key="i"><mark
@@ -1281,7 +1291,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             v-if="run.kind !== null"
                                             class="edit"
                                             :class="'edit-' + run.kind"
-                                            :title="editName(run.kind)"
+                                            :data-count="run.kind === 'del' && run.count > 1 ? run.count : null"
+                                            :title="runName(run.kind, run.count)"
                                         >{{ run.text }}</span><template v-else>{{ run.text }}</template></template></template></mark><template v-else>{{ part.text }}</template></template></p>
                         <p v-if="view.total === 0" class="note">No matches.</p>
                     </section>

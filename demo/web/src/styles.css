@@ -413,6 +413,18 @@
         @apply max-w-[90ch];
     }
 
+    /* The marker row: the space under the text that the `s`, `i` and `d` letters are drawn in.
+       Only on a result that has marks to draw, because it costs a third again in height and an
+       exact match has nothing to put there.
+
+       `leading-7` gives 14 px of space around 14 px of text, 7 px of it under the line, and the
+       letter needs 13 of those 7: 1 px of the highlight's border, 2 px of gap, then the 10 px
+       letter. `leading-10` gives 13 px each side, which is the smallest step in the scale that
+       fits. Measured at 4x rather than derived - see the slice's closing notes. */
+    .subject-pane.has-markers {
+        @apply leading-10;
+    }
+
     .hit {
         @apply cursor-pointer rounded-xs border text-inherit;
         border-color: var(--color-hit-edge);
@@ -492,10 +504,16 @@
     /* The letter is drawn by the stylesheet and not by the template, for two reasons: a visitor who
        copies the subject out of the page gets the subject and not "xsfiooba", and an absolutely
        positioned mark moves none of the characters around it. The subject is the one block here
-       whose every character sits where the engine said it does. */
+       whose every character sits where the engine said it does.
+
+       `bottom: -13px` puts the letter's top 3 px under the run's box - 1 px of it the highlight's
+       border - and its baseline clear of the line below, inside the room `.has-markers` makes. It
+       was -8 px until S75, which is 2 px INTO the border and 10 px into the next line's box: the
+       owner read the letter under a wavy underline as a tick, and it was drawn with the border's
+       dark line through it. */
     .edit::after {
-        @apply absolute left-0 font-sans text-[0.625rem] leading-none font-semibold;
-        bottom: calc(var(--spacing) * -2);
+        @apply absolute left-0 font-sans text-[0.625rem] leading-none font-semibold whitespace-nowrap;
+        bottom: calc(var(--spacing) * -3.25);
     }
 
     .edit-sub {
@@ -533,6 +551,46 @@
 
     .edit-del::after {
         content: 'd';
+    }
+
+    /* A gap standing for several missing characters is drawn wider than a gap standing for one,
+       and closed on both sides so the width reads as the hole it is rather than as a stray space.
+
+       The width is not decoration. Centred labels on two 6 px gaps that sit next to each other
+       overlap by 6 px - measured on the owner's own case, where a match missing five characters is
+       followed by an empty match missing six, so "5 d" and "6 d" are drawn 8.4 px apart and are
+       14.3 px wide. 20 px of gap puts their centres far enough apart to clear.
+
+       20 px and not wider, because the gap is in the text flow: every pixel of it pushes the
+       subject's own characters apart, and the subject is what the page is for. A count of three
+       digits or more is wider than its gap and overflows it, which costs nothing in layout because
+       the label is positioned out of the flow. Those counts exist - `(?:a{1000}){d<=1000}` against
+       an empty subject is 1,000 characters missing from one place (DemoEngine.cs:624) - but a gap
+       sized for them would distort every subject that has none. */
+    .edit-del[data-count] {
+        @apply w-5;
+        border-right: 2px dashed var(--color-edit-del);
+    }
+
+    /* Several characters missing from one place, drawn as one gap that says how many.
+       `(foobar){e}` ends with a match missing five and an empty match missing six, and one mark
+       per deletion put all eleven at two x-positions with their letters on top of each other
+       (S75, the owner's case). The count comes from the attribute rather than from the element's
+       text so that copying the subject still copies the subject.
+
+       `left: 50%` and the translate, where the single letter is `left-0`: "5 d" is three
+       characters wide over a 6 px gap, so anchoring it at the left edge hangs it off to the right
+       of the mark it belongs to. Centred, it sits over its own gap.
+
+       The `whitespace-nowrap` above is what makes that work and is not decoration. An absolutely
+       positioned box with no width shrinks to fit its containing block, which here is a 6 px gap:
+       "5 d" wrapped after the digit, became 20 px tall instead of 10, and its first line was drawn
+       back through the highlight's border - the very collision this slice is fixing. Measured, not
+       reasoned (tools/probes/s75-marker-row.mjs). */
+    .edit-del[data-count]::after {
+        content: attr(data-count) ' d';
+        left: 50%;
+        transform: translateX(-50%);
     }
 
     /* `min-w-max` with `w-full`: the table fills its region when there is room and refuses to

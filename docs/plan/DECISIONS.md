@@ -800,3 +800,18 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   config would pass the very misconfiguration it catches), and a CI leg over the whole history. The
   two stale rollback tags (`s26-rolled-back`, `s29-rolled-back`) and `rewritten-main` were dropped;
   they were the last refs to the old history.
+- 2026-09-20 (S75): deletions in one place are drawn as ONE gap carrying their count, reversing
+  S73's "two deletions are two marks". A deletion has no character of its own to separate two marks
+  by, so the owner's `(foobar){e}` case drew eleven `d` letters at two x-positions. The count keeps
+  the fact S73 wanted; one mark per deletion did not survive an unbounded budget.
+- 2026-09-20 (S75): a counted gap is 20 px wide and closed on both sides, where a single deletion's
+  gap is 6 px and open. Measured, not taste: two 6 px gaps next to each other - how the owner's case
+  ends - centre their labels 8.4 px apart, and a label is 14.3 px wide, so they overlapped by 6 px.
+- 2026-09-20 (S75): neighbouring errors of one kind are one mark with one letter, and a run carries
+  how many errors it stands for. Only a deletion draws that number: its gap has nothing to show how
+  wide the hole is, where a run of six substituted characters shows six underlined characters. Every
+  kind names its number in the mark's `title`, which is where a pointer and a screen reader agree.
+- 2026-09-20 (S75): the subject's marker row is opened by a class on a result that has markers
+  (`.subject-pane.has-markers`), not on every result. It costs a third again in height and an exact
+  match has nothing to put there. The condition is read off the runs the page will paint rather than
+  off the match counts, because a match past the display cap is counted and never drawn.

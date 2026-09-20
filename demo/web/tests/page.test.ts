@@ -22,7 +22,7 @@ const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf
 import App from '../src/App.vue';
 import { CHECKBOXES, FLAG_HELP, FLAG_NAMES, RADIO_GROUPS } from '../src/lib/flags';
 import { toCSharp } from '../src/lib/snippet';
-import type { Group, Inputs, Match } from '../src/types';
+import type { Edits, Group, Inputs, Match } from '../src/types';
 
 import { FakeWorker } from './fake-worker';
 
@@ -521,6 +521,135 @@ test('a fuzzy match shows where each error was spent, inside the highlight', asy
     const exact = found(page.querySelector('mark.hit'), 'match highlight');
     expect(exact.querySelectorAll('span.edit')).toHaveLength(0);
     expect(exact.getAttribute('aria-label')).toBe('match 1, xfooba');
+});
+
+test("the owner's stacked deletions are one counted gap per run, not a letter each", async () => {
+    // `(foobar){e}` against "xirefoabralfobarxie". The five matches, their counts and their
+    // deletion positions are what DemoEngine hands the page, measured 2026-09-20 by
+    // tools/probes/s75-stacked-deletions.cs and confirmed against regex 2026.9.10 by the .py beside
+    // it. The last two matches spend 5 and 6 deletions, all at subject index 19: drawn one mark
+    // each that was eleven `d` letters stacked at one x-position, which is what the owner saw.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xirefoabralfobarxie';
+    const spent = (index: number, length: number, counts: Match['counts'], edits: Edits): Match => ({
+        ...match(index, length),
+        counts,
+        edits,
+    });
+    const none: readonly number[] = [];
+    demo.answer = {
+        matches: [
+            spent(0, 6, { substitutions: 6, insertions: 0, deletions: 0 }, {
+                substitutions: [0, 1, 2, 3, 4, 5],
+                insertions: none,
+                deletions: none,
+            }),
+            spent(6, 6, { substitutions: 6, insertions: 0, deletions: 0 }, {
+                substitutions: [6, 7, 8, 9, 10, 11],
+                insertions: none,
+                deletions: none,
+            }),
+            spent(12, 6, { substitutions: 6, insertions: 0, deletions: 0 }, {
+                substitutions: [12, 13, 14, 15, 16, 17],
+                insertions: none,
+                deletions: none,
+            }),
+            spent(18, 1, { substitutions: 1, insertions: 0, deletions: 5 }, {
+                substitutions: [18],
+                insertions: none,
+                deletions: [19, 19, 19, 19, 19],
+            }),
+            spent(19, 0, { substitutions: 0, insertions: 0, deletions: 6 }, {
+                substitutions: none,
+                insertions: none,
+                deletions: [19, 19, 19, 19, 19, 19],
+            }),
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    // Two gaps for eleven missing characters, each saying how many it stands for. The count is a
+    // `data-count` and not text in the element, so copying the subject still copies the subject.
+    const gaps = [...page.querySelectorAll('span.edit-del')];
+    expect(gaps.map((gap) => gap.getAttribute('data-count'))).toEqual(['5', '6']);
+    expect(gaps.map((gap) => gap.getAttribute('title'))).toEqual(['5 deletions', '6 deletions']);
+    expect(page.querySelector('.subject-pane')?.textContent).toBe('xirefoabralfobarxie');
+
+    // The empty match at the end of the subject has no character to paint, so it is drawn by its
+    // own edge and by the gap inside it. Without both there is nothing on screen where the table
+    // shows a fifth match.
+    const marks = [...page.querySelectorAll('mark.hit')];
+    const last = marks.at(-1);
+    expect(last?.className).toMatch(/hit-empty/);
+    expect(last?.querySelectorAll('span.edit-del')).toHaveLength(1);
+});
+
+test('a single deletion is a gap with no count on it', async () => {
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xfoobat';
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 1, insertions: 1, deletions: 1 },
+                edits: { substitutions: [0], insertions: [1], deletions: [6] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const gap = found(page.querySelector('span.edit-del'), 'deletion gap');
+    expect(gap.hasAttribute('data-count')).toBe(false);
+    expect(gap.getAttribute('title')).toBe('deletion');
+});
+
+test('six substitutions in a row are one mark with one letter, and the count is only in its title', async () => {
+    // The first of the owner's five matches. A count is drawn for a deletion because there is
+    // nothing else to see; six substituted characters are on screen already, so the number would be
+    // a second telling of what the underline says.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xirefoabralfobarxie';
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 6, insertions: 0, deletions: 0 },
+                edits: { substitutions: [0, 1, 2, 3, 4, 5], insertions: [], deletions: [] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const subs = [...page.querySelectorAll('span.edit-sub')];
+    expect(subs.map((sub) => sub.textContent)).toEqual(['xirefo']);
+    expect(subs[0]?.hasAttribute('data-count')).toBe(false);
+    expect(subs[0]?.getAttribute('title')).toBe('6 substitutions');
+});
+
+test('the taller marker row opens on a result with markers and not on one without', async () => {
+    // The row is 12px of extra line height under every line of the subject, so it is worth opening
+    // only when something is drawn in it. An exact match draws nothing.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xfoobat';
+    demo.answer = { matches: [match(1, 6)], truncated: false };
+    await nextTick();
+    expect(found(page.querySelector('.subject-pane'), 'subject pane').className).not.toMatch(/has-markers/);
+
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 1, insertions: 0, deletions: 0 },
+                edits: { substitutions: [0], insertions: [], deletions: [] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+    expect(found(page.querySelector('.subject-pane'), 'subject pane').className).toMatch(/has-markers/);
 });
 
 test('the help panel is the documentation, rendered as text and opened from the keyboard', async () => {

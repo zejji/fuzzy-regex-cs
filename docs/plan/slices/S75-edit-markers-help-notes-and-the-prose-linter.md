@@ -7,6 +7,8 @@ delivers: []
 
 # S75 - edit markers, help notes and the prose linter
 
+> Per-sitting notes, measurements and what is left: `docs/plan/slices/notes/S75-sittings.md`.
+
 > **Owner decisions (2026-09-20, from the first look at S73 and S74).** Five findings from the
 > owner's review of the demo and its code, plus a writing rule that now applies to the whole repo.
 > Each was agreed in conversation; the owner reviews this spec before a sitting runs. Run it in the
