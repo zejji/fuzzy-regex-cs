@@ -48,6 +48,20 @@ What changes is where it is drawn:
   mechanism S74 built for the `(?)` buttons, reading "substitution at index 3", "insertion at index
   7", "deletion before index 12", closing on Escape. A third layer for the exact position, never the
   only one.
+- **Deletions at the end of the subject get one marker.** A deletion has no character, so a run
+  of them past the last character stacks at the same spot. The owner's case, `(foobar){e}` on
+  `xirefoabralfobarxie`, ends with a match of `e` (one substitution, five deletions) and an empty
+  match at the end (six deletions): eleven `d` markers on top of each other. Upstream and this port
+  agree on every span and count (probe run 2026-09-20, `regex 2026.9.10`), so the engine is right
+  and the drawing is wrong. Draw the deletions of one run as a single gap with a count when there
+  are two or more ("5 d"), and give an empty match at the end of the subject a visible marker of its
+  own, because a zero-width highlight is invisible.
+- **Say when the budget is unlimited.** `{e}`, `{s}`, `{i}` and `{d}` with no bound allow any
+  number of errors, so every position matches and the page fills with markers; a visitor who meant
+  `{e<=1}` sees nonsense and blames the engine. When the pattern compiles and its fuzzy budget has
+  no bound, one line under the pattern says so and names the bounded form. Detect it from the
+  pattern text with the same parser the highlight uses, or from the engine if it exposes the
+  constraint; do not guess from the match count.
 - **A letter-by-letter alignment for the selected match**, in the groups area: the pattern text
   that matched on one row, the subject on the next, and the edit kinds in the row between them, one
   cell per character, so a substitution is visibly the pattern's `u` above the subject's `o`. Only
@@ -151,7 +165,9 @@ not run in the C# test suite.
   rows; a match with no edits produces nothing; indices from a real `DemoEngine` result round-trip.
 - `page.test.ts`: every edit run carries its letter and one run of two adjacent substitutions
   carries one; hovering, focusing and tapping a run opens its note and Escape closes it; the legend
-  appears only with a fuzzy match; each of the six headings has a help button whose note names the heading and whose
+  appears only with a fuzzy match; the owner's `(foobar){e}` case shows one counted gap and an end
+  marker, not eleven letters; `{e}` shows the unbounded-budget line and `{e<=1}` does not; each of
+  the six headings has a help button whose note names the heading and whose
   link opens the help tab at the right section; the new example loads and its match spans are the
   ones the closing notes quote.
 - `copy.test.ts`: every new note and the new example pass; README and each docs page pass; the
@@ -174,6 +190,9 @@ test suite green. The new example run in the browser and its spans compared with
       border and the next line, measured at 4x at both widths; no character moves and a copy stays
       clean; note on hover, focus and tap; legend under the subject when a fuzzy match is shown;
       alignment view for the selected match.
+- [ ] Stacked deletions drawn once with a count; an empty match at the end of the subject visible;
+      an unbounded budget named in one line under the pattern, with a test for each of the four
+      letters and for a bounded pattern that must show nothing.
 - [ ] Six heading help notes, each linking to its COMPARISON.md section through the help tab, all
       passing the copy linter.
 - [ ] The test-set example in `examples.json`, verified against the engine, spans quoted.
