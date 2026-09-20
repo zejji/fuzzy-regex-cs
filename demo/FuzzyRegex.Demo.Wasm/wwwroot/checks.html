@@ -248,8 +248,10 @@
 
     // 5. The control that matters most: a pattern that runs away is killed, the page keeps running
     //    throughout, and the next question is answered by the spare rather than by a cold boot.
-    //    "(a|a)*b" against 30 a's is the pathological pattern the test suite already uses -
-    //    exponential backtracking with no way to succeed.
+    //    "(a|a)*\b\B" against 30 a's is the pathological pattern the test suite already uses -
+    //    exponential backtracking with no way to succeed. The tail was a literal "b" until S60:
+    //    the required-string prefilter now refuses a subject with no "b" in it before matching
+    //    starts, so that pattern is not a runaway any more.
     async function stopKillsARunawayAndTheSpareTakesOver() {
       const demo = await openPage();
       demo.pattern = 'a';
@@ -270,7 +272,7 @@
       //     0, with its timers ticking 28 and 30 all the while. So the browser does drive rAF, but
       //     not for this page, and a frame count here measures that interaction and not whether
       //     the demo stayed responsive.
-      demo.pattern = '(a|a)*b';
+      demo.pattern = '(a|a)*\\b\\B';
       demo.subject = 'a'.repeat(30);
       await until('the page to start matching', () => demo.running);
 

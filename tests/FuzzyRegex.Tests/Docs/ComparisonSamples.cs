@@ -145,11 +145,13 @@ public sealed class ComparisonSamples
     [Test]
     public void A_per_call_timeout_on_every_input_dependent_method()
     {
-        // The doc's own comment notes that (a|a)*b is exponential here as in upstream, and that
-        // (a+)+b would not demonstrate a timeout because this engine's repeat guards answer it fast.
-        var pattern = new FuzzyRegex("(a|a)*b");
+        // The doc's own comment notes that (a|a)* with a tail that can never hold is exponential
+        // here as in upstream, that (a+)+b would not demonstrate a timeout because this engine's
+        // repeat guards answer it fast, and that since S60 a literal tail would not either -
+        // the required-string prefilter refuses the subject before the engine runs.
+        var pattern = new FuzzyRegex(@"(a|a)*\b\B");
 
-        Action act = () => pattern.IsMatch(new string('a', 26) + "c", timeout: TimeSpan.FromMilliseconds(50));
+        Action act = () => pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));
 
         act.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
     }

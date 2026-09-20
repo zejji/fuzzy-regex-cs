@@ -691,11 +691,14 @@ public sealed class ThreadSafetyTests
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
             // passes (the required-string node, the start optimisations, the fuzzy survey).
+            // S60 added two, both written by Compile and by nothing else: ReqStringText beside the
+            // required-string node it belongs to, and HasSkipVerb in the node-numbering loop.
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
+            "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
@@ -709,6 +712,7 @@ public sealed class ThreadSafetyTests
             "PatternObject.ReqFlags",
             "PatternObject.ReqOffset",
             "PatternObject.ReqString",
+            "PatternObject.ReqStringText",
             "PatternObject.RequiredChars",
             "PatternObject.RequiresCaseEncoding",
             "PatternObject.SingleFuzzyNode",

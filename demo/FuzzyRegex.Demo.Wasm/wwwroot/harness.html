@@ -135,8 +135,9 @@
     }
 
     // 3. terminate() kills a runaway, the page keeps painting while it runs, and a respawned worker
-    //    answers the next question correctly. "(a|a)*b" against 30 a's is the pathological pattern
-    //    the test suite already uses: exponential backtracking with no way to succeed.
+    //    answers the next question correctly. "(a|a)*\b\B" against 30 a's is the pathological
+    //    pattern the test suite already uses: exponential backtracking with no way to succeed. The
+    //    tail was a literal "b" until S60, when the required-string prefilter made that one cheap.
     async function terminateKillsARunawayAndARespawnAnswers() {
       const client = spawn();
       await client.ask('a', '', 'a');  // wait for the boot, so the runaway is the only thing running
@@ -153,7 +154,7 @@
       // `failed` and `timedOut` are this harness's own synthetic replies, not the engine's, so they
       // must not be mistaken for the runaway having answered.
       let runawayAnswered = false;
-      client.ask('(a|a)*b', '', 'a'.repeat(30)).then((reply) => {
+      client.ask('(a|a)*\\b\\B', '', 'a'.repeat(30)).then((reply) => {
         runawayAnswered = !reply.failed && !reply.timedOut;
       });
 

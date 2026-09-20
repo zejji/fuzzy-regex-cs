@@ -273,10 +273,15 @@ public sealed class OptimiserTrapsTests
     public void Pathological_backtracking_stops_at_the_timeout_rather_than_running_forever()
     {
         // The exponential shape over a run long enough that 2^n is not reachable: 2,649.52 ms at
-        // n=22 (sizing run, 2026-09-16), against the 100 ms budget below. Upstream answers None
-        // instantly (probe: search('(a|a)*b', 'a'*22) -> None) because of the prefilter it has and
-        // this port does not; without a prefilter the only bound is the timeout, which is the
-        // documented behaviour rather than a defect.
+        // n=22 (sizing run, 2026-09-16), against the 100 ms budget below.
+        //
+        // S60 changed the tail from 'b' to '\b\B', and the reason is the point of this test. The
+        // old comment here read "upstream answers None instantly because of the prefilter it has
+        // and this port does not". This port has it now, so '(a|a)*b' over a run of 'a' is refused
+        // by both engines before matching starts and costs nothing to fail. What a prefilter cannot
+        // do is rescue a pattern with no literal in it: '\b\B' is a contradiction, false at every
+        // position, so the exponential search still has to be made and the only bound is still the
+        // timeout - which remains documented behaviour rather than a defect.
         //
         // n=22 rather than something larger on purpose: if the timeout ever STOPS firing, this
         // test costs 2.6 seconds instead of the 86.5 seconds '(a+)+b' at n=2000 was measured to
@@ -284,7 +289,7 @@ public sealed class OptimiserTrapsTests
         //
         // DIVERGENCES.md, "Exception mapping": a matching timeout raises
         // RegexMatchTimeoutException where upstream raises TimeoutError.
-        var pattern = new FuzzyRegex("(a|a)*b");
+        var pattern = new FuzzyRegex(@"(a|a)*\b\B");
         string subject = new('a', 22);
 
         Action act = () => pattern.IsMatch(subject, timeout: TimeSpan.FromMilliseconds(100));
@@ -302,10 +307,18 @@ public sealed class OptimiserTrapsTests
         // so an engine that only checked between matches would pass and the Phase 7 fast path this
         // is here to guard against would slip straight through.
         //
-        // regex 2026.9.10: search('zebra', LONG) -> None, so there is genuinely nothing to find.
+        // regex 2026.9.10: search(r'\b\B', LONG) -> None, so there is genuinely nothing to find.
         // DIVERGENCES.md, "Exception mapping": a matching timeout raises RegexMatchTimeoutException
         // where upstream raises TimeoutError. Upstream has no timeout to compare with.
-        var pattern = new FuzzyRegex("zebra");
+        //
+        // S60 changed this from 'zebra'. That was a REAL catch by this test, not a stale workload:
+        // the required-string prefilter it was written to guard against landed, and a vectorised
+        // IndexOf over the megabyte answers None in microseconds, so no budget could fire. The
+        // prefilter now polls the same cancellation check the matching loop uses, once per 64 Ki
+        // chunk (Matcher.StringSearch), which is what keeps the promise for a subject large enough
+        // to matter; this test keeps its own half of the contract by using a pattern with no
+        // literal, so it still measures the position-by-position scan.
+        var pattern = new FuzzyRegex(@"\b\B");
 
         Action act = () => pattern.IsMatch(_long, timeout: TimeSpan.FromMilliseconds(1));
 

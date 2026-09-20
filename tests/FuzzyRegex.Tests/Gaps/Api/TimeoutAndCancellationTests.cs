@@ -17,9 +17,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// These are gap tests: the per-call surface is this port's, so they do not count towards parity.
 /// </para>
 /// <para>
-/// <b>The subject is chosen so the tests cannot race the machine.</b> <c>(a|a)*b</c> over a run of
-/// <c>a</c> with no <c>b</c> in it is exponential here - this port has none of upstream's
-/// <c>locate_required_string</c> prefilter, which is Phase 7 - so at 26 characters the work is
+/// <b>The subject is chosen so the tests cannot race the machine.</b> <c>(a|a)*\b\B</c> over a run
+/// of <c>a</c> is exponential: the tail is false at every position, so at 26 characters the work is
 /// about 2^26 steps and a 50 ms budget is exceeded by a margin no plausible machine closes. Every
 /// assertion below is "this threw", which a FASTER machine cannot falsify; the one test that
 /// asserts a call COMPLETED uses a one-tick pattern budget and checks the elapsed time itself, so
@@ -29,8 +28,21 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 [SkipUnderStryker]
 public sealed class TimeoutAndCancellationTests
 {
-    /// <summary>The pathological pattern: exponential backtracking with no way to succeed.</summary>
-    private const string _slowPattern = "(a|a)*b";
+    /// <summary>
+    /// The pathological pattern: exponential backtracking with no way to succeed.
+    /// </summary>
+    /// <remarks>
+    /// It used to end in a literal <c>b</c>, and S60 had to change that. A required-string
+    /// prefilter refuses a subject that does not hold the literal before the engine runs at all, so
+    /// <c>(a|a)*b</c> over a subject of <c>a</c>s now answers in microseconds and NO budget can
+    /// fire on it. That is the optimisation working, not a weaker test: what these tests assert is
+    /// that a long match notices its budget, so they need work that is still long.
+    /// <c>\b\B</c> is a contradiction - a position is either a word boundary or it is not - so it
+    /// is false everywhere, and it keeps the exponential failure while giving no literal for any
+    /// prefilter to key on. Deliberately not a literal or a character set: the rest of Phase 7
+    /// (a start-code bitmap, a rarity gate) would defeat those in turn.
+    /// </remarks>
+    private const string _slowPattern = @"(a|a)*\b\B";
 
     /// <summary>A subject the pattern cannot match, long enough to make the search exponential.</summary>
     private static readonly string _slowSubject = new('a', 26);

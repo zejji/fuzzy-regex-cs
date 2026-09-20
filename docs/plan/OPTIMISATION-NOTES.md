@@ -19,16 +19,17 @@ are not repeated here.
 
 | Where | What is deferred | Notes |
 |---|---|---|
-| `Engine/Matcher.cs:197`, `:4786`, `:7149-7583` | `locate_required_string` and the required-string search (`string_search`, `_fld`, `_ign`, `_rev` variants) | Six "unreachable until Phase 7" arms already ported and waiting. DECISIONS 2026-08-31. **Constraint**: the pinned answers in `Gaps/Engine/BacktrackingVerbTests.cs`, `PartialMatchingTests.cs`, `ReverseMatchingTests.cs` are permanent; the prefilter must honour the slice a verb moved. |
+| `Engine/Matcher.cs:5012` (`LocateRequiredString`'s `default:` arm) | The `STRING_REV`, `STRING_FLD`, `STRING_FLD_REV`, `STRING_IGN` and `STRING_IGN_REV` arms of `locate_required_string` (`:11143-11365`), and the `string_search_rev` / `_fld` / `_ign` searches they call | **S60 landed the case-sensitive forward arm only** - `Opcode.String`, through `Matcher.StringSearch`. A reverse or case-insensitive pattern therefore still gets no prefilter and searches every position. Five `String*` cases in `basic_match` keep their "unreachable until Phase 7 ports this arm" comment for the same reason; the sixth, `Opcode.String`, is live. |
+| `Engine/Matcher.cs:4946` | The start-position JUMP for a pattern holding a `(*SKIP)` | **Withheld deliberately, not deferred** - see `PatternObject.HasSkipVerb`. Refusal still applies; only the jump is withheld, because upstream's jump answers wrongly there and PCRE2 10.47 agrees with this port. Not a row to "implement later": lifting it would redden `Gaps/Engine/BacktrackingVerbTests.cs`, which is permanent. |
 | `Engine/Matcher.cs:388`, `:4718`, `:4772`, `:10048`, `:10157` | `search_start` / `do_search_start` prefilter family | Same constraint. `:10048` ("We've narrowed the slice. The required string position might now be outside it") is the underflow site the slice must handle. |
-| `Engine/Matcher.cs:5404` | `try_match`'s test-node fast arm | Unreachable until the locator exists. |
+| `Engine/Matcher.cs:5794` | `try_match`'s test-node fast arm | Still deferred after S60: the locator landing did not reach it, and the arm is the only thing that could answer `PARTIAL` there. |
 | `Engine/Matcher.cs:8894` | The fast path S19 measured and reverted | Reinstate behind a benchmark. |
 | `Engine/Matcher.cs:8715` | `string_search_rev` | Part of the locator family. |
 | `Engine/Matcher.cs:2765-2787`, `:3005` | Partial-match fast paths | Deferring is semantically neutral; see the class remarks. |
 | `Engine/Matcher.cs:2065`, `:9126` | Capture storage reused across runs and across POSIX best-match saves (`SaveBestMatch`) | "A Phase 7 question rather than a correctness one." |
 | `Engine/MatchState.cs:641`, `Engine/Node.cs:56` | `search_positions` and node search offsets | Only the prefilters read/write them; not ported. |
 | `Engine/Optimiser.cs:508` | The match loop consulting the optimiser's markings | Markings are made so the graph has upstream's shape. |
-| `Engine/PatternObject.cs:176` | Required-string case flags naming an opcode | Consumed only by the locator. |
+| `Engine/PatternObject.cs:187` | `ReqFlags` naming a case-insensitive or reverse opcode | Read by `Compile` since before S60, but the opcode it names is still only searched for by the locator arms S60 did not port - see the first row. |
 | `Unicode/Encodings.cs:166` | `same_char_ign_turkic` inside `string_search_fld` | Locator family. |
 | `Unicode/Encodings.cs:177` | The `*_has_property_ign` encoding-table slot | Its only other caller is `search_start`; prefilter family. |
 

@@ -395,15 +395,17 @@ the shape here is closer to upstream than to `Regex`.
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-// (a|a)*b is exponential in this engine as in upstream: measured 2026-09-19, regex 2026.9.10
-// spends 24.5 s on "a"*26 + "cb" (ROADMAP records 23.3 s at n=26). It answers the subject below
-// in under a millisecond, but only because locate_required_string sees no "b" in it at all - a
-// start optimisation this port has yet to gain (Phase 7), so here the timeout is what stops it.
-// (a+)+b is NOT a good demonstration here, upstream's repeat guards answer it in milliseconds.
-var pattern = new FuzzyRegex("(a|a)*b");
+// (a|a)* with a tail that can never hold is exponential in this engine as in upstream: measured
+// 2026-09-19, regex 2026.9.10 spends 24.5 s on "(a|a)*b" over "a"*26 + "cb" (ROADMAP records
+// 23.3 s at n=26). "(a|a)*b" itself is NOT the demonstration to reach for any more - since S60
+// this port has upstream's required-string prefilter, so both engines refuse a subject with no
+// "b" in it before matching starts. \b\B is false at every position and gives the prefilter no
+// literal to work with, so the search still has to be made, and the timeout is what stops it.
+// (a+)+b is NOT a good demonstration either, upstream's repeat guards answer it in milliseconds.
+var pattern = new FuzzyRegex(@"(a|a)*\b\B");
 try
 {
-    pattern.IsMatch(new string('a', 26) + "c", timeout: TimeSpan.FromMilliseconds(50));
+    pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));
 }
 catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
 {

@@ -191,10 +191,69 @@ internal sealed class PatternObject
 
     /// <summary>
     /// Upstream <c>req_string</c>: a free-standing string node for the required substring, if the
-    /// parser found one and its case flags name an opcode. Nothing consults it until Phase 7 ports
-    /// the prefilters.
+    /// parser found one and its case flags name an opcode. Read by
+    /// <c>Matcher.LocateRequiredString</c>.
     /// </summary>
     internal Node? ReqString;
+
+    /// <summary>
+    /// <see cref="ReqString"/>'s values as UTF-16 text, so the prefilter can hand them to
+    /// <see cref="MemoryExtensions.IndexOf{T}(ReadOnlySpan{T}, ReadOnlySpan{T})"/>. <b>This port's
+    /// own field</b> (S60): upstream searches with Boyer-Moore tables it builds lazily ON the node,
+    /// which needs a lock; this is computed once at compile time and never written again, which is
+    /// what S52b's immutability contract asks for.
+    ///
+    /// sync-divergence: upstream's needle lives on the node as tables <c>build_fast_tables</c>
+    /// (<c>upstream/src/_regex.c:6298</c>) fills in on first use / ours is a string built in
+    /// <see cref="Compile"/> beside the node it belongs to / the compiled pattern stays write-once.
+    /// Re-aligning: a sync slice that sees upstream change what the required string CONTAINS
+    /// changes the values fed to this field; a change to how upstream SEARCHES with it needs
+    /// nothing here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see langword="null"/> when there is no required string, when its opcode is not one the
+    /// locator searches, or when it holds an <b>unpaired surrogate</b>. That last condition is what
+    /// makes the vectorised search answer identically to the character-at-a-time one: with no
+    /// unpaired surrogate in the needle, its UTF-16 encoding occurs exactly where its codepoint
+    /// sequence does, and a match can never start inside a surrogate pair because the needle's
+    /// first code unit is never a low surrogate. A pattern that does hold one takes
+    /// <c>Matcher.SimpleStringSearch</c> instead, which compares whole codepoints.
+    /// </para>
+    /// </remarks>
+    internal string? ReqStringText;
+
+    /// <summary>
+    /// Whether the compiled graph holds a <c>(*SKIP)</c>. <b>This port's own field</b> (S60):
+    /// upstream has no equivalent because upstream does not need one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The required-string prefilter moves the FIRST attempt forward, to the position the required
+    /// string implies. Skipping a position that cannot match is answer-transparent only while
+    /// attempts are independent of each other, and <c>(*SKIP)</c> is the one thing in this engine
+    /// that makes them dependent: it sets <see cref="MatchState.SliceStart"/> to where it was
+    /// reached (<c>Matcher</c>'s <see cref="Opcode.Skip"/> arm, <c>:14544</c>), so the attempt that
+    /// runs decides where the next one starts. Begin at a later position and the chain of skips is
+    /// a different chain.
+    /// </para>
+    /// <para>
+    /// Upstream jumps anyway, and answers wrongly for it. On <c>(?:..(*SKIP)x|q)x</c> over
+    /// <c>"ab cd xx"</c> its <c>req_offset=3</c> puts the first attempt at 3; the verb steps 3 to 5,
+    /// and position 4 - the one that matches - is never tried. PCRE2 10.47 answers <c>(4, 8)</c>
+    /// with its start optimiser both on and off. ROADMAP's owner rule (2026-09-12) is that Phase 7
+    /// ports upstream's prefilters without importing their answers, so this flag turns the jump off
+    /// rather than reproducing the bug. Pinned by
+    /// <c>Gaps/Engine/BacktrackingVerbTests.Skip_past_a_required_string_tries_a_start_position_upstreams_prefilter_skips</c>,
+    /// which goes red the moment the jump is made unconditional.
+    /// </para>
+    /// <para>
+    /// Only the jump is withheld. REFUSING the whole subject when the required string is absent
+    /// stays on, because a string every match must contain is missing whatever order the attempts
+    /// run in, and no <c>(*SKIP)</c> can conjure a match without it.
+    /// </para>
+    /// </remarks>
+    internal bool HasSkipVerb;
 
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
@@ -312,6 +371,16 @@ internal sealed class PatternObject
                     _ => null,
                 };
             }
+
+            // NOT UPSTREAM'S (S60): the needle the vectorised prefilter searches with, built once
+            // here rather than lazily on the node as 'build_fast_tables' does. Only for the one
+            // opcode 'Matcher.LocateRequiredString' searches, and only when no value is an unpaired
+            // surrogate - see the field's remarks for why that condition is what makes the
+            // vectorised search and the character-at-a-time one answer the same.
+            if (self.ReqString?.Op == Opcode.String && !reqChars.Any(static c => c is >= 0xD800 and <= 0xDFFF))
+            {
+                self.ReqStringText = string.Concat(reqChars.Select(static c => char.ConvertFromUtf32(c)));
+            }
         }
 
         if (self.Encoding == CaseEncoding.Locale && self.RequiresCaseEncoding)
@@ -327,6 +396,13 @@ internal sealed class PatternObject
         for (int i = 0; i < self.NodeList.Count; i++)
         {
             self.NodeList[i].Index = i;
+
+            // NOT UPSTREAM'S (S60): note a '(*SKIP)' while we are walking the list anyway, so the
+            // prefilter knows not to move the first attempt. See HasSkipVerb.
+            if (self.NodeList[i].Op == Opcode.Skip)
+            {
+                self.HasSkipVerb = true;
+            }
         }
 
         return self;

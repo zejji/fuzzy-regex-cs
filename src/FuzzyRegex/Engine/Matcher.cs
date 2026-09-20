@@ -194,13 +194,19 @@ internal static class Seam
 /// would have to be re-derived at every sync instead of diffed.
 /// </para>
 /// <para>
-/// <b>Deferred to Phase 7</b>: the required-string locator (<c>locate_required_string</c>,
-/// <c>:11082</c>), <c>search_start</c> and the <c>string_search</c> family (<c>:5231-6918</c>), and
-/// the test-node fast path (<c>try_match</c>, <c>:7671</c>). Without them the search tries the
-/// pattern at every position, which is slower. <b>They are not only a speed matter</b>: the
-/// required-string locator is the whole reason upstream answers <c>'(a|a)*b'</c> against a subject
-/// holding no <c>'b'</c> instantly, where this port runs the exponential search. Measured
-/// 2026-08-31; DECISIONS has the numbers.
+/// <b>Landed in S60</b>: the required-string locator (<c>locate_required_string</c>, <c>:11082</c>)
+/// and the case-sensitive forward arm of the <c>string_search</c> family it calls. That is the whole
+/// reason upstream answers <c>'(a|a)*b'</c> against a subject holding no <c>'b'</c> instantly, where
+/// this port ran the exponential search until S60 - so it was never only a speed matter. It is
+/// deliberately less than upstream's: the start-position JUMP is withheld from any pattern holding a
+/// <c>(*SKIP)</c>, and the reverse, folded and ignore-case arms of the locator are still to come.
+/// See <see cref="LocateRequiredString"/>.
+/// </para>
+/// <para>
+/// <b>Still deferred to Phase 7</b>: <c>search_start</c>, the rest of the <c>string_search</c> family
+/// (<c>:5231-6918</c>), and the test-node fast path (<c>try_match</c>, <c>:7671</c>). Without them a
+/// search that the required string does not refuse outright still tries the pattern at every
+/// position.
 /// </para>
 /// <para>
 /// <b>Nor are they uniformly transparent.</b> They answer the same for the case-sensitive opcodes,
@@ -3100,11 +3106,15 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <returns><see langword="true"/> if matching should be abandoned.</returns>
     /// <remarks>
-    /// This is the ONLY site either is read, and the three callers all reach it through the same
-    /// <c>state.Iterations == 0</c> gate - upstream's <c>iterations</c>, a <see cref="ushort"/>
-    /// stepped by <c>0x100</c> so that it wraps to zero once every 256 turns. So the token costs one
-    /// predictable null test per 256 iterations of the matching or backtracking loop, on top of the
-    /// <see cref="System.Diagnostics.Stopwatch"/> read that was already there.
+    /// This is the ONLY site either is read. The three matching-loop callers all reach it through
+    /// the same <c>state.Iterations == 0</c> gate - upstream's <c>iterations</c>, a
+    /// <see cref="ushort"/> stepped by <c>0x100</c> so that it wraps to zero once every 256 turns.
+    /// So the token costs one predictable null test per 256 iterations of the matching or
+    /// backtracking loop, on top of the <see cref="System.Diagnostics.Stopwatch"/> read that was
+    /// already there. S60 added one more caller, <see cref="SimpleStringSearch"/>, on the same gate:
+    /// it is a character-at-a-time loop and it can run the length of a subject.
+    /// <see cref="StringSearch"/> deliberately has no poll - the reasoning, and the measurement
+    /// behind it, are at the sweep itself.
     /// </remarks>
     private static bool SafeCheckCancel(MatchState state) =>
         state.CheckTimedOut() || state.Cancellation.IsCancellationRequested;
@@ -4653,6 +4663,366 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Port of <c>simple_string_search</c> (<c>upstream/src/_regex.c</c> lines 5231-5378): the
+    /// character-at-a-time search for a string node's values, and the only arm that can report a
+    /// string the subject truncated.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string node to look for.</param>
+    /// <param name="textPos">Where to start looking.</param>
+    /// <param name="limit">The position to stop at.</param>
+    /// <param name="isPartial">Set when the string was found but ran off the end of the text.</param>
+    /// <param name="cancelled">Set when the caller's timeout or token ended the search.</param>
+    /// <returns>Where the string starts, or <c>-1</c>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Upstream's three <c>charsize</c> arms are one arm here, as everywhere else in this port: the
+    /// subject is always UTF-16 and <see cref="MatchState.CharAt"/> decodes a surrogate pair. That
+    /// is also why the inner walk steps with <see cref="MatchState.NextPos"/> rather than by one -
+    /// upstream's <c>text_ptr[s_pos]</c> indexes CHARACTERS, and an astral character is two code
+    /// units here.
+    /// </para>
+    /// </remarks>
+    private static int SimpleStringSearch(
+        MatchState state,
+        Node node,
+        int textPos,
+        int limit,
+        out bool isPartial,
+        out bool cancelled
+    )
+    {
+        isPartial = false;
+        cancelled = false;
+
+        int length = node.Values.Count;
+        uint checkChar = node.Values[0];
+
+        int pos = textPos;
+        while (pos < limit)
+        {
+            // NOT UPSTREAM'S (S60). Upstream's prefilter runs uninterrupted, because its caller can
+            // only be interrupted between attempts; this port promises a timeout and a
+            // CancellationToken are honoured DURING one, so the prefilter polls on the same
+            // 'Iterations' gate the matching loop uses (:5242, and :5102 at 'start_match:').
+            state.Iterations = (ushort)(state.Iterations + 0x100);
+
+            if (state.Iterations == 0 && SafeCheckCancel(state))
+            {
+                cancelled = true;
+                return -1;
+            }
+
+            if (state.CharAt(pos) == checkChar)
+            {
+                int next = state.NextPos(pos);
+                int stringPos = 1;
+
+                // Upstream's 'for (;;)' (:5256): 'while (true)' is this file's idiom for it.
+                while (true)
+                {
+                    if (stringPos >= length)
+                    {
+                        // End of search string.
+                        return pos;
+                    }
+
+                    if (next >= limit)
+                    {
+                        // Off the end of the text.
+                        if (state.PartialSide == MatchState.PartialRight)
+                        {
+                            isPartial = true;
+                            return pos;
+                        }
+
+                        return -1;
+                    }
+
+                    if (!SameChar(state.CharAt(next), node.Values[stringPos]))
+                    {
+                        break;
+                    }
+
+                    next = state.NextPos(next);
+                    ++stringPos;
+                }
+            }
+
+            pos = state.NextPos(pos);
+        }
+
+        // Off the end of the text.
+        if (state.PartialSide == MatchState.PartialRight)
+        {
+            isPartial = true;
+            return pos;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Port of <c>string_search</c> (<c>upstream/src/_regex.c</c> lines 6596-6633): find the
+    /// required string, fast where the subject allows it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string node to look for.</param>
+    /// <param name="textPos">Where to start looking.</param>
+    /// <param name="limit">The position to stop at.</param>
+    /// <param name="isPartial">Set when the string was found but ran off the end of the text.</param>
+    /// <param name="cancelled">Set when the caller's timeout or token ended the search.</param>
+    /// <returns>Where the string starts, or <c>-1</c>.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The fast half is .NET's, not upstream's, and this is the one deliberate structural
+    /// difference in S60.</b> Upstream builds Boyer-Moore bad-character and good-suffix tables on
+    /// the node at first use (<c>build_fast_tables</c>, <c>:6298</c>, under a lock because the node
+    /// is mutated) and walks them in <c>fast_string_search</c> (<c>:5846</c>).
+    /// <see cref="MemoryExtensions.IndexOf{T}(ReadOnlySpan{T}, ReadOnlySpan{T})"/> answers the same
+    /// question - the first ordinal occurrence of a substring - with a vectorised search and no
+    /// per-node mutable state at all, which is also why it keeps S52b's immutability contract that
+    /// upstream's lock exists to paper over. The slice file asks for exactly this
+    /// (<c>S60-prefilter-family.md</c> item 4: "implemented with the library primitives, not by
+    /// hand").
+    /// </para>
+    /// <para>
+    /// sync-divergence: upstream builds Boyer-Moore tables on the node under a lock and walks them
+    /// in <c>fast_string_search</c> / one character at a time in <c>simple_string_search</c> / we
+    /// call <c>MemoryExtensions.IndexOf</c> over the slice, against a needle built once in
+    /// <c>Compile</c> / it is vectorised, allocation-free, and leaves the compiled pattern
+    /// immutable, which is S52b's contract and what upstream's lock exists to paper over.
+    /// Re-aligning: a sync slice need not follow changes to <c>build_fast_tables</c> or the skip
+    /// loop at all; it must follow changes to which POSITIONS <c>string_search</c> may return, and
+    /// those live in <see cref="LocateRequiredString"/>.
+    /// </para>
+    /// <para>
+    /// <b>It is answer-identical rather than merely equivalent in spirit</b>, on one condition that
+    /// <see cref="PatternObject.ReqStringText"/> enforces: the needle holds no unpaired surrogate.
+    /// Given that, the UTF-16 encoding of the needle occurs at a code-unit index exactly where the
+    /// codepoint sequence occurs at a character index, and no match can start inside a surrogate
+    /// pair, because a position inside a pair holds a low surrogate and the needle's first unit
+    /// never is one. Where the condition fails the needle text is not built and the whole search
+    /// falls back to <see cref="SimpleStringSearch"/>.
+    /// </para>
+    /// <para>
+    /// <b>The partial retry follows upstream's shape</b> (<c>:6622-6627</c>): the fast search cannot
+    /// see a string the subject truncated, so when nothing was found and a partial match to the
+    /// right is allowed, the scalar search runs again close to the end. Upstream starts that retry
+    /// at <c>limit - (value_count - 1)</c> characters; this port steps back a whole
+    /// <c>needle.Length</c> code units and then off a low surrogate, which is a WIDER window and so
+    /// cannot lose an occurrence - the scalar search is exact, so a wider window cannot invent one
+    /// either. It is wider because upstream's arithmetic is in characters and this one is in code
+    /// units, and closing that gap exactly would cost a walk the widening avoids.
+    /// </para>
+    /// </remarks>
+    private static int StringSearch(
+        MatchState state,
+        Node node,
+        int textPos,
+        int limit,
+        out bool isPartial,
+        out bool cancelled
+    )
+    {
+        isPartial = false;
+        cancelled = false;
+
+        if (state.Pattern.ReqStringText is not string needle)
+        {
+            return SimpleStringSearch(state, node, textPos, limit, out isPartial, out cancelled);
+        }
+
+        // ONE SWEEP, NOT A POLLED ONE, and S60 tried it the other way first. The sweep was cut into
+        // 64 Ki chunks with a cancellation poll between them, on the reasoning that an 'IndexOf' a
+        // caller cannot interrupt is a hole in the promise S51 made. It is not, and the measurement
+        // says why:
+        //
+        //   * Every attempt opens with a poll already. 'MatchState.InitMatch' sets 'Iterations' to 0
+        //     (MatchState.cs:749) and 'basic_match' opens at 'start_match:' with
+        //     'state.Iterations == 0 && SafeCheckCancel(state)' (:5102), so the gate is OPEN on
+        //     every attempt and a spent budget is caught a few instructions before this method runs.
+        //     The chunk poll could therefore only ever fire mid-sweep - a race with the machine, and
+        //     no test can pin it.
+        //   * The stretch it was capping is bounded and small. 'IndexOf' over 100,000,000 code units
+        //     of a subject holding no occurrence took 14.1 ms measured here on 2026-09-20 (Release,
+        //     busy machine), so the largest subject a .NET string can hold sweeps in about 150 ms.
+        //   * The chunking cost something real: chunks have to overlap by 'needle.Length - 1' or an
+        //     occurrence straddling a boundary is missed, which is an off-by-one this method would
+        //     otherwise not own.
+        //
+        // 'SimpleStringSearch' keeps its poll, because it is a character-at-a-time loop with
+        // iterations to count and no vectorised floor under it.
+        // The chunk loop this replaced ran zero times when the bounds crossed; 'AsSpan' would throw.
+        if (limit > textPos)
+        {
+            int found = state.Text.AsSpan(textPos, limit - textPos).IndexOf(needle.AsSpan());
+            if (found >= 0)
+            {
+                return textPos + found;
+            }
+        }
+
+        if (state.PartialSide == MatchState.PartialRight)
+        {
+            int retry = limit - needle.Length;
+            if (retry > 0 && char.IsLowSurrogate(state.Text[retry]))
+            {
+                --retry;
+            }
+
+            if (retry < textPos)
+            {
+                retry = textPos;
+            }
+
+            return SimpleStringSearch(state, node, retry, limit, out isPartial, out cancelled);
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Port of <c>locate_required_string</c> (<c>upstream/src/_regex.c</c> lines 11082-11369): where
+    /// the next match could possibly start, given the substring every match must contain.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="search">Whether the caller is searching rather than matching at a fixed point.</param>
+    /// <param name="cancelled">Set when the caller's timeout or token ended the search.</param>
+    /// <returns>
+    /// The position to start matching from, or <c>-1</c> when the required string is not in the
+    /// slice at all and the whole match can therefore be refused.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Only the <c>STRING</c> arm is ported</b> (S60). Upstream's switch has six, and an opcode
+    /// it does not list falls through to "start matching from the current position" - so the five
+    /// unported arms take exactly the shape upstream already has for an unhandled opcode, and the
+    /// search is the one this port has always run. The reasons they are separate are in
+    /// <c>docs/plan/OPTIMISATION-NOTES.md</c>: <c>STRING_REV</c> needs <c>string_search_rev</c> and
+    /// the mirrored offset arithmetic, and the four case-insensitive arms are where S22 measured
+    /// upstream's prefilter answering DIFFERENTLY from upstream's own matcher, so they are a
+    /// judgement about three pinned divergences rather than a transliteration.
+    /// </para>
+    /// <para>
+    /// <b>The verb constraint, in two parts</b> (ROADMAP, owner rule 2026-09-12). The first is that
+    /// everything here is read from the live state: <c>limit</c> reads
+    /// <see cref="MatchState.SliceEnd"/>, the search starts at <see cref="MatchState.TextPos"/>, and
+    /// the cached <see cref="MatchState.ReqPos"/> is discarded as soon as the search position passes
+    /// it (<c>:11112</c>), so a position a verb committed past is never re-offered. That alone is
+    /// NOT enough, and believing it was is what the first cut of this slice got wrong: it leaves the
+    /// FIRST attempt free to start after a position whose own <c>(*SKIP)</c> would have moved the
+    /// slice somewhere else entirely. The second part is <see cref="PatternObject.HasSkipVerb"/>,
+    /// which withholds the jump from any pattern that can run one. Pinned by
+    /// <c>Gaps/Engine/BacktrackingVerbTests.cs</c> - which caught exactly that, red - and by
+    /// <c>Gaps/Engine/RequiredStringPrefilterTests.cs</c>.
+    /// </para>
+    /// <para>
+    /// <b>The offset is in characters and the positions are in code units</b>, so the step back is a
+    /// <see cref="MatchState.PrevPos"/> walk rather than a subtraction. Upstream can subtract
+    /// because its <c>text_pos</c> counts characters. <c>ReqEnd</c> needs no walk: the needle's
+    /// UTF-16 length is exactly what matched.
+    /// </para>
+    /// </remarks>
+    private static int LocateRequiredString(MatchState state, bool search, out bool cancelled)
+    {
+        PatternObject pattern = state.Pattern;
+        cancelled = false;
+
+        if (pattern.ReqString is not Node reqString)
+        {
+            // There isn't a required string, so start matching from the current position.
+            return state.TextPos;
+        }
+
+        // Search for the required string and calculate where to start matching.
+        switch (reqString.Op)
+        {
+            case Opcode.String:
+            {
+                // The offset arm is withheld from a pattern holding a '(*SKIP)', which leaves the
+                // prefilter free to refuse a subject but never to choose where the first attempt
+                // starts. PatternObject.HasSkipVerb says why.
+                bool useOffset = pattern.ReqOffset >= 0 && !pattern.HasSkipVerb;
+
+                int limit;
+                if (search || !useOffset)
+                {
+                    limit = state.SliceEnd;
+                }
+                else
+                {
+                    // Upstream adds 'req_offset + value_count' to 'slice_start' because its
+                    // positions count characters (:11117). Ours count UTF-16 code units, so the
+                    // same bound is that many NextPos steps: adding would stop an astral needle
+                    // one code unit short of itself and refuse a subject that holds it.
+                    limit = state.SliceStart;
+                    for (long i = 0; i < pattern.ReqOffset + reqString.Values.Count && limit < state.SliceEnd; ++i)
+                    {
+                        limit = state.NextPos(limit);
+                    }
+                }
+
+                bool isPartial;
+                int foundPos;
+                if (state.ReqPos < 0 || state.TextPos > state.ReqPos)
+                {
+                    // First time or already passed it.
+                    foundPos = StringSearch(state, reqString, state.TextPos, limit, out isPartial, out cancelled);
+                }
+                else
+                {
+                    foundPos = state.ReqPos;
+                    isPartial = false;
+                }
+
+                if (foundPos < 0)
+                {
+                    // The required string wasn't found.
+                    return -1;
+                }
+
+                if (!isPartial)
+                {
+                    // Record where the required string matched. Upstream adds 'value_count', which
+                    // is a character count; the needle's code-unit length is the same number of
+                    // characters and is what actually matched.
+                    state.ReqPos = foundPos;
+                    state.ReqEnd = foundPos + (pattern.ReqStringText?.Length ?? reqString.Values.Count);
+                }
+
+                if (useOffset)
+                {
+                    // Step back from the required string to where we should start matching.
+                    int startPos = foundPos;
+                    for (long i = 0; i < pattern.ReqOffset && startPos > state.TextPos; ++i)
+                    {
+                        startPos = state.PrevPos(startPos);
+                    }
+
+                    if (startPos >= state.TextPos)
+                    {
+                        return startPos;
+                    }
+                }
+
+                break;
+            }
+
+            default:
+                // ponytail: Phase 7 - the STRING_REV, STRING_FLD, STRING_FLD_REV, STRING_IGN and
+                // STRING_IGN_REV arms of 'locate_required_string' (:11143-11365). Falling through
+                // costs the prefilter on reverse and case-insensitive patterns only; the lift is
+                // 'string_search_rev' (:6867) and the three folding searches, and for the folding
+                // ones a judgement about the divergences S22 pinned. OPTIMISATION-NOTES.md.
+                break;
+        }
+
+        // Start matching from the current position.
+        return state.TextPos;
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -4722,8 +5092,9 @@ internal static class Matcher
 
         state.FewestErrors = state.MaxErrors;
 
-        // 'do_search_start' and the required-string locator are Phase 7 prefilters, so the search
-        // takes the slow path that tries the pattern at every position - upstream's 'next_match_2'.
+        // 'do_search_start' is still a Phase 7 prefilter, so a search the required string does not
+        // refuse takes the slow path that tries the pattern at every position - upstream's
+        // 'next_match_2'. The required-string locator itself landed in S60, just below.
         Node node;
         int status;
 
@@ -4790,9 +5161,21 @@ internal static class Matcher
         state.ActiveCalls.Clear();
         state.OpenCalls.Clear();
 
-        // Locate the required string, if there's one: deferred to Phase 7, so the start position
-        // stands.
-        int foundPos = state.TextPos;
+        // Locate the required string, if there's one, unless this is a recursive call of
+        // 'basic_match' (:11806-11814). S60.
+        int foundPos;
+        if (state.Pattern.ReqString is null || state.TextPos < state.ReqPos)
+        {
+            foundPos = state.TextPos;
+        }
+        else
+        {
+            foundPos = LocateRequiredString(state, search, out bool prefilterCancelled);
+            if (foundPos < 0)
+            {
+                return prefilterCancelled ? MatchStatus.Cancelled : MatchStatus.Failure;
+            }
+        }
 
         if (search)
         {
@@ -7153,8 +7536,9 @@ internal static class Matcher
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator, which is the
-                        // only thing that sets 'req_pos'.
+                        // LIVE SINCE S60, and dead code before it: the locator is the only thing
+                        // that sets 'req_pos', and this is the one arm it sets it for. The string
+                        // the prefilter has already compared is not compared a second time.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -7227,7 +7611,8 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator.
+                        // Unreachable until Phase 7 ports this arm of the required-string locator
+                        // (:11143-11365); S60 ported the case-sensitive forward one only.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -7378,7 +7763,8 @@ internal static class Matcher
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator.
+                        // Unreachable until Phase 7 ports this arm of the required-string locator
+                        // (:11143-11365); S60 ported the case-sensitive forward one only.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -7446,8 +7832,8 @@ internal static class Matcher
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator, which is the
-                        // only thing that sets 'req_pos'.
+                        // Unreachable until Phase 7 ports this arm of the required-string locator
+                        // (:11143-11365); S60 ported the case-sensitive forward one only.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -7512,7 +7898,8 @@ internal static class Matcher
                 {
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator.
+                        // Unreachable until Phase 7 ports this arm of the required-string locator
+                        // (:11143-11365); S60 ported the case-sensitive forward one only.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -7587,7 +7974,8 @@ internal static class Matcher
 
                     if ((node.Status & NodeStatus.Required) != 0 && state.TextPos == state.ReqPos && stringPos < 0)
                     {
-                        // Unreachable until Phase 7 ports the required-string locator.
+                        // Unreachable until Phase 7 ports this arm of the required-string locator
+                        // (:11143-11365); S60 ported the case-sensitive forward one only.
                         state.TextPos = state.ReqEnd;
                     }
                     else
@@ -10048,13 +10436,13 @@ internal static class Matcher
 
             // We've narrowed the slice. The required string position might now be outside it.
             //
-            // Issue 612, commit 8244055, released 2026.8.30 and ported by S44. It is INERT in this
-            // port today and ported anyway: `ReqPos` is only ever assigned -1, at state creation,
-            // because `locate_required_string` and the `search_start` family are the Phase 7
-            // deferral this file's header records. Upstream's own symptom is a `count_one()` size
-            // underflow reading off the heap. The line is here so the Phase 7 slice that adds the
-            // locator inherits the fix instead of re-introducing the bug; if it is ever deleted as
-            // dead code, it has to come back with the locator.
+            // Issue 612, commit 8244055, released 2026.8.30 and ported by S44 when it was INERT -
+            // `ReqPos` was then only ever assigned -1, at state creation. **S60 made it live**:
+            // `LocateRequiredString` now writes the position it found (`:4990`), so this reset is
+            // doing the work it was ported for, on the one arm S60 landed. Upstream's own symptom
+            // is a `count_one()` size underflow reading off the heap. It stays inert only for the
+            // reverse and folded arms, which are still the Phase 7 deferral this file's header
+            // records; deleting it as dead code was always wrong and is now visibly so.
             state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;

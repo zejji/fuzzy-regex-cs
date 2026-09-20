@@ -173,7 +173,11 @@ public sealed class PosixMatchingTests
         // build, the same shape upstream itself takes 0.69s over. MatchTimeout is therefore worth
         // more under this flag than without it, and it is still honoured: the cancellation check is
         // in the backtrack loop as well as the advance loop.
-        var regex = new FuzzyRegex(@"(?p)(a|a|aa)*b", FuzzyRegexOptions.None, System.TimeSpan.FromMilliseconds(50));
+        // S60 changed the tail from a literal 'b' to '\b\B'. The required-string prefilter refuses
+        // a subject with no 'b' in it before the engine starts, so the old pattern no longer costs
+        // anything to fail; '\b\B' is false at every position and carries no literal, so the
+        // exhaustive POSIX search still has to do the work this test is about.
+        var regex = new FuzzyRegex(@"(?p)(a|a|aa)*\b\B", FuzzyRegexOptions.None, System.TimeSpan.FromMilliseconds(50));
 
         Action act = () => regex.Match(new string('a', 40));
 

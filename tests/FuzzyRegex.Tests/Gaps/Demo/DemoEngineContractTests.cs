@@ -239,7 +239,10 @@ public sealed class DemoEngineContractTests
     {
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        Error(DemoEngine.Run("(a|a)*b", "", new string('a', 30))).Should().Contain("timed out");
+        // S60 changed the tail from 'b': the required-string prefilter refuses a subject with no
+        // 'b' in it before matching starts, so the old pattern is no longer a runaway anywhere.
+        // '\b\B' is false at every position and offers no literal to key on, so it still is.
+        Error(DemoEngine.Run(@"(a|a)*\b\B", "", new string('a', 30))).Should().Contain("timed out");
 
         // The message alone is not the contract - returning is. Asserting only on the text is how
         // the suite stayed green while Run could take forever (S70 review). The bound is loose
