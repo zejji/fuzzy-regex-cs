@@ -872,3 +872,47 @@ at the lines they affect, because every one of them looked like a defect first:
 link, and the flow rows after it are still header, main, footer.
 
 251 tests in `demo/web`.
+
+### 5e - the checks page and the reference layouts
+
+**`checks.html`, run whole**, in Chrome 153 against the served build, 2026-09-20: **CHECKS GREEN,
+9 of 9**. Not a subset and not a re-run of the ones a chunk touched - the whole page, after every
+chunk of S73 had landed. The three measurements it prints:
+
+| | ms |
+|---|---|
+| stop a runaway to the next answer on screen | 397.9 |
+| respawn a worker with no warm spare | 218.9 |
+| respawn with the spare | 114.5 |
+
+The spare still halves the respawn, which is the claim `pool.ts` makes in its own comment, and check
+7 still reports 31 timer ticks inside the demo while a runaway pattern runs - the page is not frozen.
+
+**The reference layouts are re-taken from a script**, `tools/probes/s73-reference-screenshots.mjs`,
+rather than by hand as in S71: `docs/demo/page-1280.png` at 1280x900 (above the gate, so the window
+is the whole page) and `docs/demo/page-390.png` at 390x844 full page. Both show the case the page
+loads with. Nothing is focused in either, because a ring on whichever control the load happened to
+leave the focus on is not part of the layout and it moved between the S71 pair.
+
+One thing the phone shot looked like it had and does not: the header's repository link appears flush
+with the right edge. Measured, its right edge is 359 in a 375px client - the same 16px gutter as the
+subtitle above it and the panes below. No change made.
+
+**Word count**, `npx vitest run tests/word-count.test.ts --disableConsoleIntercept`:
+
+| source | words |
+|---|---|
+| `examples.json` | 421 |
+| `App.vue` template | 372 |
+| `App.vue` script | 32 |
+| `demo.ts` | 99 |
+| `src/lib` | 20 |
+| `DemoEngine.cs` | 137 |
+| `index.html` | 55 |
+| help generator | 15 |
+| **TOTAL** | **1151** |
+
+On the six sources the before-figure covers that is 994, against 1,185 before the rewrite and 921
+at the end of chunk 1. Chunk 2 put 25 words back (946) and chunks 3 to 5 another 48, across the C#
+panel, the underlay's labels and titles, and the skip link. Still a sixth below where the page
+started, and what has been added since is labelling on new structure rather than new prose.
