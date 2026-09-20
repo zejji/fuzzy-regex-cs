@@ -14,23 +14,40 @@ delivers: []
 
 ## 1. The edit markers
 
-Today a fuzzy match paints each edited character with a colour and one of three underline styles,
-and prints a small `s`, `i` or `d` after it. The owner's finding: the letters sit at text size, so
-they overlap the outline and the next character, and the wavy underline under a letter reads as a
-tick. Nobody can tell what they mean without guessing.
+Today a fuzzy match paints each edited run with a colour, one of three underline styles, and a
+10 px letter (`s`, `i` or `d`) drawn by CSS beneath the run. S73 chose three signals on purpose:
+colour is the fast path, the line style survives colour blindness, and the letter says which kind
+without learning the line styles. The owner's finding is about the geometry, not the idea: the
+letter sits about 8 px below the baseline, inside the space the mark's border and the next line
+use, so it collides with the outline and, under a wavy line, reads as a tick.
 
-What replaces it, grounded in how diff tools and track changes show edits (colour plus an
-underline or strikethrough, the meaning on hover, a legend close by, never colour alone, which is
-WCAG 1.4.1):
+**The letters stay.** The owner read them without difficulty, and the guidance agrees: a visible
+text cue beats a symbol the reader must decode or a meaning hidden behind hover, which raises the
+interaction cost and does not exist on a touch screen (NN/g, "Icon Usability"). WCAG 1.4.1 is met by
+colour plus line style alone, so the letter is the part that makes the kind readable at a glance.
+What changes is where it is drawn:
 
-- **Colour and the three underline styles stay; the inline letters go.** Remove the `::after`
-  content and its spacing. Confirm in the browser that the outline no longer clips.
-- **Meaning on hover and focus.** Each marked run is a focusable span with a help note in the
-  mechanism S74 built for the `(?)` buttons: "substitution at index 3", "insertion at index 7",
-  "deletion before index 12". The same note opens on tap and closes on Escape.
-- **A legend of three chips under the subject**, shown only when the current result contains a
-  fuzzy match: each chip is a sample character drawn with that kind's colour and underline, followed
-  by the word. One line. The chips are not buttons.
+- **A marker row under the text.** The subject block gets enough line height for the letter to sit
+  centred beneath its run, clear of the underline above it and of the line below. Measure the
+  three distances (underline to letter, letter to border, letter to next line) at 4x, as S73 did,
+  at 1366 and 390 wide, and record them in the closing notes.
+- **No character moves.** The letter remains a `::after` pseudo-element, absolutely positioned, so
+  every subject character stays where the engine indexed it and a copy of the subject copies the
+  subject and not "xsfiooba". Do not switch to inline text or to `<ruby>`, which would move the text
+  or be copied with it.
+- **One letter per run, not per character.** Adjacent edits of one kind are already grouped into a
+  run in the template; the letter marks the run. Confirm in the browser that a run of two
+  substitutions shows one `s`.
+- **The deletion marker** (a dashed gap the width of a narrow character, because a deletion has no
+  character of its own) keeps its `d` on the same row as the others.
+- **A one-line legend under the subject**, shown only when the current result contains a fuzzy
+  match: three chips, each a sample character drawn with that kind's colour, underline and letter,
+  followed by the word ("substitution", "insertion", "deletion"). The chips are not buttons. This is
+  what makes an abbreviation acceptable: the label is in view, one line away.
+- **Meaning on hover, focus and tap.** Each marked run keeps its `title` and gains the note
+  mechanism S74 built for the `(?)` buttons, reading "substitution at index 3", "insertion at index
+  7", "deletion before index 12", closing on Escape. A third layer for the exact position, never the
+  only one.
 - **A letter-by-letter alignment for the selected match**, in the groups area: the pattern text
   that matched on one row, the subject on the next, and the edit kinds in the row between them, one
   cell per character, so a substitution is visibly the pattern's `u` above the subject's `o`. Only
@@ -132,9 +149,9 @@ not run in the C# test suite.
 
 - `alignment.test.ts`: a substitution, an insertion and a deletion each produce the expected three
   rows; a match with no edits produces nothing; indices from a real `DemoEngine` result round-trip.
-- `page.test.ts`: the inline letters are gone (no `::after` content on an edit run); hovering,
-  focusing and tapping a run opens its note and Escape closes it; the legend appears only with a
-  fuzzy match; each of the six headings has a help button whose note names the heading and whose
+- `page.test.ts`: every edit run carries its letter and one run of two adjacent substitutions
+  carries one; hovering, focusing and tapping a run opens its note and Escape closes it; the legend
+  appears only with a fuzzy match; each of the six headings has a help button whose note names the heading and whose
   link opens the help tab at the right section; the new example loads and its match spans are the
   ones the closing notes quote.
 - `copy.test.ts`: every new note and the new example pass; README and each docs page pass; the
@@ -153,8 +170,10 @@ test suite green. The new example run in the browser and its spans compared with
 
 ## Done when
 
-- [ ] No inline `s`/`i`/`d` letters; colour and underline kept; note on hover, focus and tap; legend
-      under the subject when a fuzzy match is shown; alignment view for the selected match.
+- [ ] The `s`/`i`/`d` letters sit in a marker row under the text, clear of the underline, the
+      border and the next line, measured at 4x at both widths; no character moves and a copy stays
+      clean; note on hover, focus and tap; legend under the subject when a fuzzy match is shown;
+      alignment view for the selected match.
 - [ ] Six heading help notes, each linking to its COMPARISON.md section through the help tab, all
       passing the copy linter.
 - [ ] The test-set example in `examples.json`, verified against the engine, spans quoted.
@@ -170,13 +189,22 @@ test suite green. The new example run in the browser and its spans compared with
       of a table or a fence it did not recognise; a snippet identifier not in the record), fix,
       commit.
 
-## Sources
+## Sources (read 2026-09-20 unless stated)
 
-- https://www.w3.org/WAI/WCAG21/Understanding/use-of-color.html - success criterion 1.4.1: colour
-  is never the only means of conveying information. Cited from memory when this spec was written;
-  the sitting re-reads it and records the date.
-- GitHub's split and unified diff views and Word's track changes: colour plus underline or
-  strikethrough, meaning on hover, a legend or key nearby. Observe and record during the sitting.
+- https://www.w3.org/WAI/WCAG21/Understanding/use-of-color.html (read 2026-09-20) - 1.4.1: colour
+  is never the only visual means; an underline or line style is an accepted second cue; a text cue
+  (G14) is the sufficient technique when the reader must know which category a colour means.
+- https://www.nngroup.com/articles/icon-usability/ and https://www.nngroup.com/articles/bad-icons/
+  (read 2026-09-20) - a text label visible at all times beside any symbol; do not rely on hover to
+  reveal labels, which raises interaction cost and fails on touch.
+- https://www.nngroup.com/articles/recognition-and-recall/ (read 2026-09-20) - a label on the item
+  is recognition; a legend elsewhere is recall.
+- https://support.microsoft.com/en-us/office/check-spelling-and-grammar-in-office-5cdeced7-d81d-47de-9096-efd0ee909227
+  (read 2026-09-20) - Word's convention: colour plus a distinct line style per category (wavy,
+  double, dotted), meaning on interaction.
+- https://www.mediawiki.org/wiki/Codex/Design/Diffs and https://gitlab.com/gitlab-org/gitlab/-/issues/28482
+  (read 2026-09-20) - diff views that relied on colour alone failed audit; the fix was a visible
+  text cue beside the colour.
 - `docs/plan/slices/done/S73-demo-as-a-product.md`, "Copy rules and the banned list", and its
   sources (Wikipedia:Signs of AI writing; GOV.UK A to Z style guide), read 2026-09-19.
 - `docs/plan/slices/done/S74-flags-control.md`, closing notes, for the help mechanism this slice
