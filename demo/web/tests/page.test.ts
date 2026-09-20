@@ -1223,3 +1223,34 @@ test('the keyboard opens a flag help and closes it again', async () => {
     await settle();
     expect(text.hidden).toBe(true);
 });
+
+test('Escape puts the help away when the pointer opened it and the focus is elsewhere', async () => {
+    const { page } = await mountPage();
+    const { help } = flagsPanel(page);
+    const { button, text } = help('BestMatch');
+
+    // The hover case: the pointer rests on the `(?)` while the hands are still in the pattern box,
+    // so no keystroke ever reaches the flags panel. WCAG 1.4.13 asks for a dismissal that does not
+    // need the pointer moved, which means the key is listened for on the document.
+    const patternBox = found(page.querySelector<HTMLInputElement>('#pattern'), 'the pattern box');
+    patternBox.focus();
+    button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    patternBox.dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(text.hidden).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+
+    // A pinned sentence goes the same way once the focus has left the panel, which is what a visitor
+    // who tapped the `(?)` and then clicked into the pattern box is holding.
+    button.click();
+    await settle();
+    patternBox.focus();
+    expect(text.hidden).toBe(false);
+
+    patternBox.dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(text.hidden).toBe(true);
+});

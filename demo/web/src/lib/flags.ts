@@ -59,6 +59,9 @@ export type FlagName = (typeof FLAG_NAMES)[number];
  * the source tree. `DemoSnippetTests.The_flag_help_is_the_librarys_own_words` re-reads the enum and
  * fails the build when a doc comment here and there stop agreeing - the same guarantee
  * `FLAG_NAMES` above has, by the same mechanism.
+ *
+ * `None` has a sentence and no control. The panel offers the 14 members that do something, and the
+ * entry is here because that pin compares this record's keys with `Enum.GetNames`, which has it.
  */
 export const FLAG_HELP: Record<FlagName, string> = {
     None: 'No options: case-sensitive, single-line, left-to-right matching.',

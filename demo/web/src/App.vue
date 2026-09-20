@@ -126,6 +126,28 @@ function closeHelp(): void {
     helpPinned.value = false;
 }
 
+function dismissHelpOnEscape(event: KeyboardEvent): void {
+    if (event.key === 'Escape') closeHelp();
+}
+
+/**
+ * Escape reaches the sentence wherever the focus is standing.
+ *
+ * The panel's own handler only sees the key when the focus is inside the panel, which covers the
+ * press that pinned it. The pointer case has the focus somewhere else entirely - resting on a `(?)`
+ * while the hands are still in the pattern box - and WCAG 1.4.13 asks for a dismissal that does not
+ * need the pointer moved, so the document listens for as long as there is a sentence to dismiss.
+ *
+ * Attached on opening and dropped on closing, so the page carries no key handler at rest, and
+ * dropped again on unmount because a test mounts the page many times over one document.
+ */
+watch(helpFor, (name) => {
+    if (name === null) document.removeEventListener('keydown', dismissHelpOnEscape);
+    else document.addEventListener('keydown', dismissHelpOnEscape);
+});
+
+onUnmounted(() => document.removeEventListener('keydown', dismissHelpOnEscape));
+
 // --- the shell's one breakpoint ----------------------------------------------------------------
 
 /**
@@ -806,7 +828,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
 
                           Escape is handled here, at the panel, because it is about the help and not
                           about any one button: the sentence can be open while the focus has moved
-                          on to the box beside it.
+                          on to the box beside it. The focus can also be outside the panel
+                          altogether, so `dismissHelpOnEscape` listens at the document while a
+                          sentence is open; this handler is what catches the key first inside it.
                         -->
                         <details id="flags-panel" class="flags-panel" @keydown.escape="closeHelp">
                             <summary>
@@ -817,7 +841,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                   harder reason than matching them: a `<summary>` laid out as a flex
                                   row is no longer a `list-item`, so the browser draws no marker at
                                   all and the row loses every cue that it opens (seen at 1366 px in
-                                  Chrome, `.scratch/s74-shots/flags-open-1366x768.png`). It turns
+                                  Chrome; `tools/probes/s74-flags-panel.mjs` takes the shots, and
+                                  the kept one is `docs/demo/flags-panel-1366.png`). It turns
                                   with the panel through CSS, so there is no open-state ref here.
                                 -->
                                 <span aria-hidden="true" class="chevron">&#9662;</span>
