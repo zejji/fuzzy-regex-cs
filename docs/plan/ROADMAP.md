@@ -546,6 +546,20 @@ alphabet. **That is a measured gap and it belongs to S52**: the generators compo
 text they mutate; S48 repaired all three and they now fire 10-68 divergences of 600. A control that
 will not resolve is not a control, and the repair cost minutes.
 
+**S57 splits: the backstop closes as S57, the exit gate's twenty rows become S57b (2026-09-20, spec
+amendment 32).** S57's third sitting ran the gate as the phase actually defines it - `run-oracle.ps1
+-Count 6000` at three seeds, 126,080 rows a seed, not the 300-row default wave that every recent
+slice's "oracle GREEN" line means - and it is RED: diverge 3 at seed 7, 3 at 4242 and 14 at
+20260920, twenty distinct rows. Not a regression from S60: the pre-S60 tree (`14aad0a~1`) gives 3,
+3 and 15 on the same command, so S60 is one row better, and the recorder itself has changed since
+S52's close (S52c's metamorphic invariants, S53b), so "S52 closed green at 6000" is not a regression
+window - dating the rows is a scripted bisect and belongs with the fixes. Twenty rows judged to this
+project's standard is not a tail-end task (S52 spent eighteen sittings on thirty-seven), so they
+move to `docs/plan/slices/S57b-the-6000-row-gate-rows.md`, and Phase 6's bookkeeping, measured rate
+and Phase 7 handover stay in S57 with them, because all three write that the phase is closed. **The
+phase does not close until the 6000-row gate is green at three seeds.** Estimate 17-22 becomes
+18-23.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 

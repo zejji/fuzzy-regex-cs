@@ -1593,6 +1593,7 @@
     "count": 2000,
     "seeds": [
       7,
+      99991,
       4242,
       31337
     ]
@@ -1609,6 +1610,7 @@
     "count": 2000,
     "seeds": [
       7,
+      99991,
       4242,
       31337
     ]
@@ -1625,6 +1627,7 @@
     "count": 6000,
     "seeds": [
       7,
+      99991,
       4242,
       31337
     ]
@@ -1641,6 +1644,7 @@
     "count": 6000,
     "seeds": [
       7,
+      99991,
       4242,
       31337
     ]
@@ -1657,6 +1661,7 @@
     "count": 6000,
     "seeds": [
       7,
+      99991,
       4242,
       31337
     ]
@@ -1673,9 +1678,9 @@
     "count": 6000,
     "seeds": [
       7,
+      99991,
       4242,
-      31337,
-      99991
+      31337
     ]
   },
   {
@@ -1690,9 +1695,9 @@
     "count": 6000,
     "seeds": [
       7,
+      99991,
       4242,
-      31337,
-      99991
+      31337
     ]
   },
   {
@@ -1707,6 +1712,7 @@
     "count": 6000,
     "seeds": [
       31337,
+      99991,
       555
     ]
   },
@@ -1722,7 +1728,24 @@
     "count": 6000,
     "seeds": [
       31337,
+      99991,
       555
+    ]
+  },
+  {
+    "id": "S53b-A",
+    "name": "sub-keeps-only-the-slice",
+    "file": "src/FuzzyRegex/Engine/Substitution.cs",
+    "anchor": "        // The segment following the last match.",
+    "anchorNth": 1,
+    "before": "        int endPos = state.Reverse ? 0 : input.Length;\n        if (lastPos != endPos)\n        {\n            joined.Add(state.Reverse ? input[..lastPos] : input[lastPos..]);\n        }\n",
+    "after": "        int endPos = state.Reverse ? start : end;\n        if (lastPos != endPos)\n        {\n            joined.Add(state.Reverse ? input[start..lastPos] : input[lastPos..end]);\n        }\n",
+    "generator": "substitution",
+    "count": 600,
+    "seeds": [
+      7,
+      99991,
+      55
     ]
   }
 ]

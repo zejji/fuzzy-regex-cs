@@ -921,6 +921,75 @@ public sealed class PartialMatchingTests
         (noVerb.Index, noVerb.Length).Should().Be((0, 2));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reversed_skip_does_not_lengthen_an_anchored_fuzzy_partial_either()
+    {
+        // S57, the Phase 6 exit gate's last red row: row 525 of `tools/run-oracle.ps1
+        // -Generator fuzzy,interactions -Seeds 99991,57057`, drawn again as row 225 of the 6000-row
+        // `interactions` wave at the same seed. The same moved `slice_end` as the two tests above,
+        // and worth its own test because it is the first of the family that is ANCHORED (`^`) and
+        // carries a FUZZY section: those two are exactly what a reader would suspect of a partial
+        // span that grew, so both are ablated here and neither is the cause.
+        //
+        // Measured on regex 2026.9.10, 2026-09-20,
+        // tools/probes/upstream-partial-retry-reversed-anchored.py (port half
+        // tools/probes/s57-skip-partial-span.cs):
+        //
+        //   as drawn, (*SKIP)   search(partial=True)  (0, 2) partial   <- upstream
+        //   verb -> (*PRUNE)    search(partial=True)  (0, 1) partial   <- this port
+        //   verb deleted        search(partial=True)  (0, 1) partial
+        //   match(0, endpos, partial=True)            None at 3 and 2, (0, 1) at 1, (0, 0) at 0
+        //   fuzzy section deleted, verb kept          (0, 1) partial
+        //   anchor deleted, verb kept                 (0, 2) partial
+        //
+        // BOTH of this family's arguments hold here, which is why the row needs no new one: the
+        // `(*PRUNE)` control gives this port's span, and so does upstream's own matcher at the
+        // highest `endpos` that matches at all - the first anchor a reversed search tries. Deleting
+        // the fuzzy section leaves upstream at this port's answer and deleting the anchor leaves it
+        // at its own, so neither is what moves the span; the verb is. Classified as row 13 of
+        // `partial-retry-reversed-slice` in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs.
+        //
+        // Spans are codepoints upstream and UTF-16 here. The subject's only astral character is its
+        // last, past every span below except the forward twin's, which is upstream's (0, 3) as (0, 4).
+        const string subject = "\r\n\U0001F600";
+        const string body = @"(?r)^(?:[^a-f]{3,}(?P<g1>[a-f])(?P<g2>[[:digit:]])){s<=1,i<=1,d<=1}";
+
+        Match search = new FuzzyRegex(body + @"(?:[a-f](*SKIP)\s|\p{Nd})").Match(subject, partial: true);
+        search.PartialMatch.Should().BeTrue();
+        (search.Index, search.Length).Should().Be((0, 1), "upstream answers (0, 2), a code unit the verb moved");
+
+        // The control that judges it: the same pruning with no bound moved, and upstream agrees.
+        Match pruned = new FuzzyRegex(body + @"(?:[a-f](*PRUNE)\s|\p{Nd})").Match(subject, partial: true);
+        pruned.PartialMatch.Should().BeTrue();
+        (pruned.Index, pruned.Length).Should().Be((0, 1));
+
+        // The corroboration: upstream's own matcher at the highest endpos that matches at all.
+        Match anchored = new FuzzyRegex(body + @"(?:[a-f](*SKIP)\s|\p{Nd})").MatchAtStart(
+            subject,
+            beginning: 0,
+            length: 1,
+            partial: true
+        );
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((0, 1));
+
+        // The two ablations, in the order the probe runs them: neither the fuzzy section nor the
+        // anchor is what upstream's extra code unit comes from.
+        const string noFuzzy = @"(?r)^(?:[^a-f]{3,}(?P<g1>[a-f])(?P<g2>[[:digit:]]))(?:[a-f](*SKIP)\s|\p{Nd})";
+        Match unfuzzy = new FuzzyRegex(noFuzzy).Match(subject, partial: true);
+        unfuzzy.PartialMatch.Should().BeTrue();
+        (unfuzzy.Index, unfuzzy.Length).Should().Be((0, 1), "upstream answers (0, 1) here too");
+
+        // Forwards the verb moves `slice_start`, which this subject's anchors do not expose, and the
+        // two engines agree: upstream's codepoint (0, 3) is this port's UTF-16 (0, 4).
+        Match forward = new FuzzyRegex(
+            @"^(?:[^a-f]{3,}(?P<g1>[a-f])(?P<g2>[[:digit:]])){s<=1,i<=1,d<=1}(?:[a-f](*SKIP)\s|\p{Nd})"
+        ).Match(subject, partial: true);
+        forward.PartialMatch.Should().BeTrue();
+        (forward.Index, forward.Length).Should().Be((0, 4), "upstream answers the same span, codepoints (0, 3)");
+    }
+
     [Test]
     public void A_forward_skip_does_not_move_the_slice_start_the_partial_pass_searches()
     {
@@ -1475,5 +1544,90 @@ public sealed class PartialMatchingTests
 
         verbless.PartialMatch.Should().BeTrue();
         (verbless.Index, verbless.Length).Should().Be((0, 3));
+    }
+
+    /// <summary>
+    /// A repeat whose body ran out of subject part-way through its next repetition, with the
+    /// minimum already met: the match so far is partial, not complete.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Written because S57's coverage backstop found <c>AtEnd</c> (<c>Matcher.cs:2066</c>,
+    /// upstream <c>at_end</c> at <c>_regex.c:11628</c>) wholly unreached, and this is the shape its
+    /// one caller's guard describes - "the body came back partial, the repeat has had its minimum,
+    /// and we are at the end of the slice" (<c>Matcher.cs:5796</c>). It does NOT reach it:
+    /// a coverage run over this class alone, 2026-09-20, still reports <c>:5796</c> and
+    /// <c>:2067</c> at zero hits. That agrees with the comment already standing at the call site -
+    /// only <c>try_match</c>'s test-node arm, which Phase 7 restores, can answer PARTIAL there -
+    /// so the port answers this shape by another route and the guard stays as ported.
+    /// </para>
+    /// <para>
+    /// The trailing anchor is what makes the answer partial rather than complete: without it the
+    /// shorter complete match wins and the engine never asks the question. Measured on regex
+    /// 2026.9.10, 2026-09-20: <c>regex.compile(r"(?:abc)+$").search("abcab", partial=True)</c>
+    /// gives <c>span=(0, 5), match='abcab', partial=True</c>, and the same call for
+    /// <c>(?:abc)+\Z</c> and for <c>^(?:abc)+$</c> gives the same; with no anchor,
+    /// <c>regex.compile(r"(?:abc)+").search("abcabcab", partial=True)</c> gives the complete
+    /// <c>span=(0, 6), match='abcabc'</c>.
+    /// </para>
+    /// </remarks>
+    [Test]
+    [Arguments(@"(?:abc)+$")]
+    [Arguments(@"(?:abc)+\Z")]
+    [Arguments(@"^(?:abc)+$")]
+    public void A_repeat_that_ran_out_mid_body_at_the_end_is_partial(string pattern)
+    {
+        Match partial = new FuzzyRegex(pattern).Match("abcab", partial: true);
+
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((0, 5));
+
+        // The control: with room to finish a repetition the complete match wins and nothing is
+        // partial, which is what says the assertion above is about running out and not about the
+        // pattern.
+        Match complete = new FuzzyRegex(@"(?:abc)+").Match("abcabcab", partial: true);
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 6));
+    }
+
+    /// <summary>
+    /// A fuzzy match searched right to left, which a deletion walks off the left-hand end of: the
+    /// subject ran out on the LEFT, so the answer is partial.
+    /// </summary>
+    /// <remarks>
+    /// Written because S57's coverage backstop found <c>SteppedPastTheLeft</c>
+    /// (<c>Matcher.cs:3342</c>) reached by nothing, though two call sites lead to it (<c>:3353</c>
+    /// and <c>:5192</c>). It does not reach them either - the same coverage run reports both at
+    /// zero hits - so this records the behaviour rather than the line, and S57's notes carry the
+    /// two as unreached. Measured on regex
+    /// 2026.9.10, 2026-09-20:
+    /// <c>regex.compile(r"(?r)(?:abcd){e&lt;=1}").search("cd", partial=True)</c> gives
+    /// <c>span=(0, 2), match='cd', partial=True</c> and
+    /// <c>regex.compile(r"(?r)(?:abcd){e&lt;=2}").search("d", partial=True)</c> gives
+    /// <c>span=(0, 1), match='d', partial=True</c>. The control is the same pattern with an error
+    /// budget the subject can spend without running out:
+    /// <c>regex.compile(r"(?r)(?:abc){e&lt;=1}").search("bc", partial=True)</c> gives
+    /// <c>span=(0, 2), match='bc', fuzzy_counts=(0, 0, 1)</c> - a complete match with one deletion,
+    /// not a partial.
+    /// </remarks>
+    [Test]
+    [Arguments(@"(?r)(?:abcd){e<=1}", "cd", 2)]
+    [Arguments(@"(?r)(?:abcd){e<=2}", "d", 1)]
+    public void A_reversed_fuzzy_match_that_ran_off_the_left_is_partial(
+        string pattern,
+        string subject,
+        int expectedLength
+    )
+    {
+        Match partial = new FuzzyRegex(pattern).Match(subject, partial: true);
+
+        partial.PartialMatch.Should().BeTrue();
+        (partial.Index, partial.Length).Should().Be((0, expectedLength));
+
+        Match complete = new FuzzyRegex(@"(?r)(?:abc){e<=1}").Match("bc", partial: true);
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 2));
     }
 }

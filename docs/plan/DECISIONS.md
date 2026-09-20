@@ -732,3 +732,24 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-20 (S60): a benchmark on this machine pauses Stryker AND
   `.claude/worktrees/stryker/.scratch/after-parsing.ps1`, whose watcher relaunched the queue at
   08:54 mid-run; `pause-stryker.ps1` excludes the watcher from its kill patterns by design.
+- 2026-09-20 (S57): Phase 6's "6000 rows" gate means `pwsh -File tools/run-oracle.ps1 -Count 6000`
+  - 126,080 rows a seed, about a minute a seed (ROADMAP `:163`, `:211`). It is NOT the 300-row
+  default wave that every recent slice's "oracle GREEN at seeds 7, 4242, 20260920" line reports, and
+  nobody had run it since S52. Run it before claiming the exit gate.
+- 2026-09-20 (S57): the 6000-row gate is RED - 3, 3 and 14 rows at the three seeds, twenty distinct
+  - and it is not S60's doing. Measured, not reasoned: the pre-S60 tree (`14aad0a~1`) gives 3, 3 and
+  15 on the same command, so S60 is one row better. The recreate commands (worktree plus
+  `git submodule update --init upstream`, which the recorder needs) are in `notes/S57-sittings.md`.
+- 2026-09-20 (S57): "S52 closed green at 6000" is not a regression window for those rows. S52c's
+  metamorphic invariants and S53b changed the recorder, so a seed no longer draws the same 126,080
+  rows; dating a row is a scripted engine-commit bisect, and it belongs to the slice that fixes it.
+- 2026-09-20 (S57): S57 splits - the twenty gate rows become S57b (spec amendment 32), and S57 keeps
+  the bookkeeping and the Phase 7 handover, because both of those write that the phase is closed.
+  S57's file carries a BLOCKED pointer, since the driver otherwise takes it first on the number.
+- 2026-09-20 (S57): `partial-retry-reversed-slice` row 13 pinned this port's way. An anchored fuzzy
+  `(*SKIP)` row where upstream answers (0, 2) and this port (0, 1); `(*PRUNE)`, the deleted verb and
+  upstream's own `match(0, 1, partial=True)` all give (0, 1), and deleting the fuzzy section or the
+  anchor moves nothing - so the extra code unit is the verb's moved slice bound, as for row 5.
+- 2026-09-20 (S57): `tools/probes/gate-divergence-doors.py` compiles each row inside a `try` at all
+  four sites. Upstream itself raises `IndexError` in `get_firstset` on seed 20260920 rows 81232 and
+  87091, and one uncompilable row used to cost the whole run the rows after it.

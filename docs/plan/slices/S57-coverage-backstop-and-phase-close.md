@@ -7,6 +7,14 @@ delivers: []
 
 # S57 - Coverage backstop and the Phase 6 close
 
+**BLOCKED ON S57b. Take S57b first, whatever the queue order says.** The third sitting walked the
+gate as the phase defines it (`run-oracle.ps1 -Count 6000`, three seeds) and found it red - twenty
+rows, spec amendment 32. Those rows are `docs/plan/slices/S57b-the-6000-row-gate-rows.md`, and
+everything left in this file (items 10 and 11 of the checklist: the bookkeeping and the Phase 7
+handover) WRITES that Phase 6 is closed, so none of it can be written until S57b is green. Per-sitting
+notes and the twenty rows are in `docs/plan/slices/notes/S57-sittings.md`, "Sitting 3 - 2026-09-20";
+do not re-derive today's analysis.
+
 Shaped like S36 and S43. Walks the exit gate in the ROADMAP's order - skips, oracle, mutation,
 coverage - and hands Phase 7 what it regresses against.
 

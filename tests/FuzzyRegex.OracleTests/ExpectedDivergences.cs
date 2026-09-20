@@ -816,10 +816,11 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The twelve rows of <c>partial-retry-reversed-slice</c>, each copied out of
+    /// The thirteen rows of <c>partial-retry-reversed-slice</c>, each copied out of
     /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> rather than retyped - rows 1 to 4 on
-    /// 2026-09-13, rows 5 to 12 on 2026-09-15. <b>The count said "five" until S52's eighteenth
-    /// sitting counted them</b>, having been left behind by sitting 8's six and sitting 18's one.
+    /// 2026-09-13, rows 5 to 12 on 2026-09-15, row 13 on 2026-09-20. <b>The count said "five" until
+    /// S52's eighteenth sitting counted them</b>, having been left behind by sitting 8's six and
+    /// sitting 18's one.
     /// </summary>
     /// <remarks>
     /// Rows 101560 (seed 7), 96397 and 99556 (seed 20260913) of the gate, all on the
@@ -873,6 +874,22 @@ internal static class ExpectedDivergences
     /// port's span, its group and its partial flag exactly. Measured 2026-09-15 on regex 2026.9.10,
     /// <c>tools/probes/upstream-partial-retry-reversed-longer.py</c>.
     /// </para>
+    /// <para>
+    /// <b>Row 13 is S57's, and it is the row that closed the Phase 6 exit gate</b> - row 525 of
+    /// <c>pwsh -File tools/run-oracle.ps1 -Generator fuzzy,interactions -Seeds 99991,57057</c>, the
+    /// gate's extra wave, and row 225 of the 6000-row <c>interactions</c> wave at the same seed. One
+    /// row drawn twice, not two rows. It is row 5's direction - upstream answering the LONGER
+    /// partial, (0, 2) against this port's (0, 1) - and the first here that is ANCHORED
+    /// (<c>^</c>) and carries a fuzzy section, so neither of the entry's two arguments was assumed
+    /// from row 5: BOTH were re-run and both name this port's answer. <c>(*PRUNE)</c>, which prunes
+    /// the same backtracking and moves no bound, gives (0, 1), and so does upstream's own
+    /// <c>match(0, 1, partial=True)</c> - the highest <c>endpos</c> that matches at all, since it is
+    /// None at 2 and at 3. Deleting the fuzzy section leaves upstream at (0, 1) and deleting the
+    /// anchor leaves it at (0, 2), so neither is the cause; the forward twin agrees with this port
+    /// at (0, 3). Measured 2026-09-20 on regex 2026.9.10,
+    /// <c>tools/probes/upstream-partial-retry-reversed-anchored.py</c>, port half
+    /// <c>tools/probes/s57-skip-partial-span.cs</c>.
+    /// </para>
     /// </remarks>
     private const string _partialRetryReversedRows = """
         {"generator": "partial", "pattern": "(?r)\\b(?:[^a-f](*SKIP)[\\p{L}\\p{N}]|[[:digit:]])(?P<g1>[A-Z]{0,})", "flags": 8, "namedLists": {}, "subject": "a\n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false}
@@ -887,6 +904,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "(?r)[[:alpha:]](?:[[:alpha:]]{1,1}?(*SKIP)[^a]|\\S)", "flags": 16642, "namedLists": {}, "subject": "_\n0B A.a", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?r)(?P<g1>[\\.B]{1,3})\\1\\.(?:[a]{0,1}(*SKIP)[A-Z]|\\p{Nd})", "flags": 2, "namedLists": {}, "subject": "B. ", "operation": "search", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "oracle": "prefilter-free", "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "interactions", "pattern": "(?r)\\b(?:\\p{Nd}(*SKIP)\\S|[a\\d])(?P<g1>\\p{Ll})?(?(?<!\\p{Ll})\\p{L}|[abz])", "flags": 10, "namedLists": {}, "subject": "a𐐨a\r\n𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": true}}
+        {"generator": "interactions", "pattern": "(?r)^(?:[^a-f]{3,}(?P<g1>[a-f])(?P<g2>[[:digit:]])){s<=1,i<=1,d<=1}(?:[a-f](*SKIP)\\s|\\p{Nd})", "flags": 0, "namedLists": {}, "subject": "\r\n😀", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -939,6 +957,20 @@ internal static class ExpectedDivergences
         // have found it only by luck. Measured 2026-09-15 on regex 2026.9.10,
         // tools/probes/upstream-partial-anchor-reachability.py.
         "match 0:(0,4)[(0,4)] 1:(1,2)[(1,2)] last=1/g1 partial",
+        // Row 13, S57's, the Phase 6 exit gate's last red row - row 525 of `pwsh -File
+        // tools/run-oracle.ps1 -Generator fuzzy,interactions -Seeds 99991,57057`, and row 225 of the
+        // 6000-row `interactions` wave at the same seed, which is one row drawn twice. It is the
+        // second of this entry with upstream answering the LONGER partial and the first that is
+        // ANCHORED and carries a fuzzy section, so both of the entry's arguments were re-run rather
+        // than assumed: upstream's `(*PRUNE)` spelling answers the codepoint (0, 1) this port
+        // answers - the row's own `pruneOutcome` - and so does upstream's own `match(0, 1,
+        // partial=True)`, the highest endpos that matches at all (it is None at 2 and at 3). The
+        // fuzzy section is not the cause and neither is the anchor: deleting the fuzzy section
+        // leaves upstream at (0, 1), deleting the anchor leaves it at (0, 2), and the forward twin
+        // agrees with this port at (0, 3). Measured 2026-09-20 on regex 2026.9.10,
+        // tools/probes/upstream-partial-retry-reversed-anchored.py, port half
+        // tools/probes/s57-skip-partial-span.cs.
+        "match 0:(0,1)[(0,1)] 1:unset 2:unset last=-1/- partial",
     ];
 
     /// <summary>
@@ -3013,7 +3045,13 @@ internal static class ExpectedDivergences
                 + "is the THIRD hit, and a capped sweep names it only by luck. Its answer there is "
                 + "the codepoint (0, 3) with group 1 at (1, 2) that this port answers, group and all, "
                 + "and so is the `(*PRUNE)` spelling. Measured 2026-09-15 on regex 2026.9.10, "
-                + "tools/probes/upstream-partial-anchor-reachability.py.",
+                + "tools/probes/upstream-partial-anchor-reachability.py.\n"
+                + "ROW 13 IS S57'S, the Phase 6 exit gate's last red row, and it is ANCHORED and "
+                + "fuzzy where every row above is neither. Both arguments were re-run on it rather "
+                + "than assumed: `(*PRUNE)` answers the (0, 1) this port answers, and so does "
+                + "upstream's own match(0, 1, partial=True), the highest endpos that matches at all. "
+                + "Measured 2026-09-20 on regex 2026.9.10, "
+                + "tools/probes/upstream-partial-retry-reversed-anchored.py.",
             PinnedBy: "PartialMatchingTests.A_reversed_skip_does_not_move_the_slice_end_the_partial_" + "pass_searches",
             Example: _partialRetryReversedRows,
             Applies: static (row, ours) =>

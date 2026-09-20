@@ -97,7 +97,14 @@ PROSE_ACCOUNTED = {
     "bytes4_point_to",
     # `_REV` members taken in the `try_match_*` and `search_start_*` family rows' own shorthand,
     # which those rows say a name search cannot see.
-    "search_start_STRING_REV", "try_match_STRING_REV",
+    #
+    # `search_start_STRING_REV` CAME OUT on 2026-09-20 (S57), the second time this pin has worked in
+    # the direction the module docstring says it must. It is not newly named, and the upstream line
+    # did not move - it has been `_regex.c:8373` on both sides of S44's sync. What changed is
+    # PORTMAP: S52d's `init_match` row now cites `:8335-8382` for "its three reversed string
+    # helpers", an explicit range that covers it, so it is accounted for by a range rather than only
+    # by a family row's prose shorthand. The set is 36 from this date.
+    "try_match_STRING_REV",
     # Two more that are NOT in those two families, and a blind review caught them being filed there:
     # `match_many_SET_REV` belongs to the `match_many_*` row, and `partial_string_match`
     # (`_regex.c:11655`) sits outside both cited line ranges - PORTMAP names only its `_ign` half at

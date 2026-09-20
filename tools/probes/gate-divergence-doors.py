@@ -196,7 +196,10 @@ def sweep(row: dict) -> str:
     Forward: vary `pos`, since `match` anchors at the start. Reversed: vary `endpos`, since it
     anchors at the END and `pos` cannot move the anchor at all.
     """
-    compiled = compile_row(row)
+    try:
+        compiled = compile_row(row)
+    except Exception as e:  # noqa: BLE001 - UPSTREAM ITSELF refuses to compile some drawn rows
+        return f"{type(e).__name__}: {e}"
     subject = row["subject"]
     reverse = "(?r" in row["pattern"] or bool(row.get("flags", 0) & REVERSE)
     lo, hi = slice_of(row)
@@ -216,7 +219,10 @@ def sweep(row: dict) -> str:
 
 def stepwise(row: dict) -> str:
     """Upstream's own scan taken one match at a time, each step a fresh attempt."""
-    compiled = compile_row(row)
+    try:
+        compiled = compile_row(row)
+    except Exception as e:  # noqa: BLE001 - UPSTREAM ITSELF refuses to compile some drawn rows
+        return f"{type(e).__name__}: {e}"
     subject = row["subject"]
     reverse = "(?r" in row["pattern"] or bool(row.get("flags", 0) & REVERSE)
     overlapped = row["operation"].endswith("overlapped")
@@ -327,7 +333,14 @@ def doors(row: dict, label: str, upstream_line: str, port_line: str) -> None:
     if partial:
         # The same call with the flag dropped, which is `partial-retry-carried-slice-forward`'s
         # whole control: a COMPLETE match the flagless call denies is upstream contradicting itself.
-        compiled = compile_row(row)
+        # UPSTREAM ITSELF refuses to compile some drawn rows - seed 20260920 row 81232 raises
+        # IndexError inside `get_firstset` - and an uncaught one here stops the whole batch, which
+        # is how the first S57 run asked four of the date seed's fourteen rows and none after.
+        try:
+            compiled = compile_row(row)
+        except Exception as e:  # noqa: BLE001
+            print(f"    no partial         {type(e).__name__}: {e}")
+            return
         call = getattr(compiled, row["operation"])
         slo, shi = slice_of(row)
         print("    no partial         " + ascii(describe(call(subject, slo, shi, timeout=CALL_TIMEOUT))))

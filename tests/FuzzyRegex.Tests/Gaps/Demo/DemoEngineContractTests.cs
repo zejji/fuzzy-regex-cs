@@ -351,6 +351,21 @@ public sealed class DemoEngineContractTests
     /// <c>truncated: false</c> - which is precisely the page-side freeze the caps exist to prevent,
     /// and the one freeze a Web Worker does nothing about.
     /// </summary>
+    /// <remarks>
+    /// <b>This test and
+    /// <see cref="A_partial_answer_whose_capture_list_was_clipped_says_truncated"/> fail under
+    /// coverage instrumentation, and only there.</b> Both assert a SIZE cap and both run the
+    /// shipped path, which also carries <see cref="DemoEngine.MatchTimeout"/> - a two-second wall
+    /// clock. Measured 2026-09-20 (S57), Release, <c>tools/probes/demo-cap-timing.cs</c>: the match
+    /// itself takes 27 ms here and 44 ms there, so the plain gate has a 45-to-70-fold margin and
+    /// the whole suite - 6,475 tests on the day, and it only grows - passes in 7 s. The same suite
+    /// under <c>--coverage --coverage-output-format cobertura</c> takes 35 s and fails one of two at
+    /// 2s 044ms, having spent the budget inside the instrumented engine; run the 61 tests of this
+    /// class alone under coverage and both pass. Reaching the cap costs 50,000 spans by
+    /// definition, so no smaller subject avoids the race - the answer is that the coverage run is
+    /// a one-off analysis tool and not a gate, not that these tests are flaky or that the machine
+    /// was loaded.
+    /// </remarks>
     [Test]
     public void One_match_cannot_carry_unbounded_capture_spans()
     {
@@ -673,6 +688,11 @@ public sealed class DemoEngineContractTests
     /// <remarks>
     /// The blind review of 2026-09-19 found this reported <c>truncated: false</c> with 49,997 of
     /// 60,000 captures rendered, which is an answer that is short of the truth and does not say so.
+    /// <para>
+    /// This is the test that fails under coverage instrumentation; see
+    /// <see cref="One_match_cannot_carry_unbounded_capture_spans"/> for the measurements and why
+    /// no smaller subject avoids it.
+    /// </para>
     /// </remarks>
     [Test]
     public void A_partial_answer_whose_capture_list_was_clipped_says_truncated()

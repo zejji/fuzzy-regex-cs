@@ -983,3 +983,25 @@ amended text is inline above; this list is the record of what changed and why.
     exclusive-option guidance. **What does not change:** the engine and the wire format (the
     flags string still crosses to `DemoEngine`), shared links, the examples file, and every S73
     rule on copy, layout, typing and accessibility. One slice; the phase closes again when it lands.
+32. **S57 splits: the coverage backstop closes as S57, the exit gate's twenty rows become S57b
+    (2026-09-20, decided by S57's third sitting under the skill's third-sitting rule).** Phase 6's
+    second exit criterion is "oracle waves across every generator, with zero divergences", and the
+    slice reads it as `tools/run-oracle.ps1 -Count 6000` at three seeds - 126,080 rows a seed
+    (`docs/plan/ROADMAP.md:163` and `:211`), not the 300-row default wave that recent slices' "oracle
+    GREEN at seeds 7, 4242, 20260920" lines refer to. Run properly for the first time since S52, it
+    is **red**: diverge 3 at seed 7, 3 at 4242 and 14 at 20260920, twenty distinct rows. Measured,
+    not reasoned, on the question a reader asks first: the pre-S60 tree (`14aad0a~1`, a `git
+    worktree` with `git submodule update --init upstream`) gives 3, 3 and 15, so S60's required-string
+    prefilter is one row better and none of the twenty is its doing; and the recorder itself changed
+    after S52's close (S52c's metamorphic invariants, S53b), so a seed no longer draws the 126,080
+    rows it drew then and "S52 closed green at 6000" is not a regression window. Judging twenty rows
+    to amendment 16's standard - mechanism, probe, pin or fix, blind review, verifier - is a slice
+    and not a tail: S52 spent eighteen sittings on thirty-seven. The rows move to
+    `docs/plan/slices/S57b-the-6000-row-gate-rows.md`, to be judged in **one scripted pass** off
+    `tools/probes/gate-divergence-doors.py` (owner rule 2026-09-16, with the amendment-16 ceremony
+    run once over the batch) and dated by a scripted engine-commit bisect. S57 commits as a
+    checkpoint and keeps its items 10 and 11, Phase 6's bookkeeping and the Phase 7 handover, because
+    both of them write that the phase is closed. **What does not change:** the exit gate itself - the
+    phase closes when the 6000-row wave is green at all three seeds, and the extra
+    `fuzzy,interactions` wave with it, with no row parked to get there. Phase 6 is one slice longer;
+    the estimate moves from 17-22 to 18-23.

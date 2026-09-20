@@ -287,14 +287,20 @@ public sealed class ReverseMatchingTests
         // lazy repeat's body answers PARTIAL from its own string test at the slice edge, and the
         // repeat returns that partial instead of the complete zero-width match its slow path finds.
         //
-        //   compile(r'(?r)([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2)  -> (2, 2) partial True
-        //   ... .match('AAB', 2, 2)                                       -> (2, 2) partial False
-        //   ... .search('AAB', 2, 2)                                      -> (2, 2) partial False
-        //   ... .fullmatch('AAB', 0, 0)                                   -> (0, 0) partial False
-        //   compile(r'([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2)      -> (2, 2) partial False
+        //   F|I is regex.FULLCASE|regex.IGNORECASE, and every call below is asked partial=True -
+        //   which is the whole question, so omitting it makes the first line unreproducible.
+        //
+        //   compile(r'(?r)([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2, partial=True) -> (2, 2) partial True
+        //   ... .match('AAB', 2, 2, partial=True)                                      -> (2, 2) partial False
+        //   ... .search('AAB', 2, 2, partial=True)                                     -> (2, 2) partial False
+        //   ... .fullmatch('AAB', 0, 0, partial=True)                                  -> (0, 0) partial False
+        //   compile(r'([\p{L}\p{N}])??', F|I).fullmatch('AAB', 2, 2, partial=True)     -> (2, 2) partial False
         //
         // Measured 2026-09-12, .scratch/row756.py. A complete match is not a partial one, and
-        // upstream's own other three doors agree with this port.
+        // upstream's own other three doors agree with this port. RE-RUN 2026-09-20 on regex
+        // 2026.9.10 by S57's provenance spot-check: all five lines reproduce exactly. The
+        // `partial=True` was missing from the quoted calls until then, and without it upstream
+        // answers None to the first line rather than the partial it records.
         Match zeroWidth = new FuzzyRegex(
             @"([\p{L}\p{N}])??",
             FuzzyRegexOptions.RightToLeft | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase
