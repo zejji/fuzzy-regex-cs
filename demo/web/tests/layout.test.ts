@@ -677,7 +677,15 @@ const disclosures = [
         other: 'advanced-inputs',
         focus: '[role="tab"][aria-selected="true"]',
     },
-    { region: 'the secondary inputs', id: 'advanced-inputs', other: 'examples-and-help', focus: '#flags' },
+    // The flags panel's own summary, which S74 made the first control in this region. Not a box
+    // inside it: everything inside a shut `<details>` is unreachable, and the widening rule below
+    // asserts that the focus lands on the FIRST focusable control, which is the summary itself.
+    {
+        region: 'the secondary inputs',
+        id: 'advanced-inputs',
+        other: 'examples-and-help',
+        focus: '#flags-panel > summary',
+    },
 ] as const;
 
 /** Drive the width gate the page listens to, starting at `wide`. Returns the handle to change it. */
@@ -932,7 +940,13 @@ test('a disclosure is a control and not a line of text', async () => {
 
     // Asked of every button that reveals a region, not only of the two that fold this pane: the
     // snippet panel's button opens one in the answer and has the same job of looking pressable.
-    const revealers = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]')];
+    //
+    // The flag help buttons are excluded, and the exclusion is the honest one rather than a hole:
+    // this rule is about a REGION-sized reveal that would otherwise read as a line of prose, and a
+    // round `?` beside a tickbox cannot be mistaken for prose. They are held to 2.5.8's 24x24
+    // minimum below instead, because a row of 44 px buttons would double the height of the panel
+    // they explain.
+    const revealers = [...page.querySelectorAll<HTMLElement>('button[aria-expanded]:not(.flag-help-button)')];
     expect(revealers.filter((button) => button.classList.contains('disclosure'))).toHaveLength(2);
     for (const button of revealers) {
         const chevron = found(button.querySelector('[aria-hidden="true"]'), 'a chevron on a disclosure');
@@ -945,4 +959,90 @@ test('a disclosure is a control and not a line of text', async () => {
             `${shape} is 44 px tall`,
         ).toBe(true);
     }
+});
+
+// --- the flags panel (S74) ---------------------------------------------------------------------
+
+/**
+ * The panel costs one line when it is shut, and it costs it at every width.
+ *
+ * This is the whole reason the flags stopped being a text box. On one column the secondary inputs
+ * are already behind a disclosure, so a panel that folds saves nothing there - it is the TWO-column
+ * layout, where the inputs are always open, that a fourteen-box grid would push the named lists off
+ * the bottom of. A `<details>` folds at both, which is why it is a `<details>` and not a third
+ * `v-if="!wide"` disclosure with its own line in the width watcher.
+ */
+test('the flags panel is shut until it is asked for, and shut it is one row', async () => {
+    const css = await builtCss();
+
+    // A row, not a block: the label and what is on sit on one line, and nothing wraps.
+    expect(css).toMatch(/\.flags-panel>summary\{[^}]*display:flex/);
+
+    // Which is also what costs the summary its native marker, so the chevron has to turn from here.
+    expect(css).toMatch(/\.flags-panel\[open\]>summary \.chevron\{[^}]*rotate/);
+    expect(css).toMatch(/\.flags-panel>summary\{[^}]*min-height:calc\(var\(--spacing\)\s*\*\s*10\)/);
+
+    // However many flags are on. `truncate` is overflow:hidden + text-overflow:ellipsis +
+    // white-space:nowrap, and all three are needed: with `Ascii, IgnoreCase, EnhanceMatch,
+    // IgnorePatternWhitespace` on, the row without them is three lines at 390 px.
+    expect(css).toMatch(/\.flags-chosen\{[^}]*white-space:nowrap/);
+    expect(css).toMatch(/\.flags-chosen\{[^}]*text-overflow:ellipsis/);
+    expect(css).toMatch(/\.flags-chosen\{[^}]*overflow:hidden/);
+});
+
+/**
+ * Nothing in the panel floats, and that is what keeps the help on the screen at 390 px.
+ *
+ * A tooltip positioned beside a `(?)` in the right-hand column of a 390 px phone runs off the edge,
+ * and the fixes for that are a positioning library or a hand-written flip. The help here is a
+ * paragraph in the flow underneath its own row: it cannot leave the panel, it needs no measurement,
+ * and it reflows for nothing. The cost is that the grid grows by a line while one is open, which is
+ * why only one is ever open.
+ */
+test('the flags panel floats nothing, so the help cannot fall off a narrow screen', async () => {
+    const css = await builtCss();
+    const rules = [...css.matchAll(/([^{}@]*\bflag[a-z-]*)\{([^}]*)\}/g)];
+
+    expect(rules.length, 'the flags panel has rules of its own').toBeGreaterThan(4);
+    for (const [, selector, body] of rules) {
+        expect(body ?? '', `${selector} positions something`).not.toMatch(
+            /position:\s*(?:fixed|absolute|sticky)/,
+        );
+    }
+
+    // And the markup cannot smuggle one in as a utility either, the way the scroll rule above is
+    // asked of the template as well as of the stylesheet.
+    expect(template).not.toMatch(/class="[^"]*\b(?:fixed|absolute|sticky)\b[^"]*"[^>]*flag/);
+});
+
+/**
+ * The grid asks the panel how many columns fit, and never a media query how wide the window is.
+ *
+ * The window is the wrong thing to ask, and the measurement is what settles it rather than the
+ * arithmetic: `tools/probes/s74-flags-panel.mjs` in Chrome on 2026-09-20 found the input pane
+ * 383 px wide at 1366, at 1440 and at 1920 - it is a fixed column, not a share - and 318 px at 390.
+ * A media query keyed to the window would therefore have given a 1920 px monitor two columns in a
+ * 383 px pane, which is the fault this shape cannot have.
+ *
+ * 16rem is 256 px, the floor the widest row measured at (253 px), so a second column needs 528 px
+ * of panel. One column is what every width this demo meets gets, and the slice's sketch of two from
+ * 480 px is recorded in DIVERGENCES-of-the-sketch terms in the closing notes: 480 px of PANEL is
+ * not a width this layout has.
+ */
+test('the flag grid asks the panel for its columns, not the window', async () => {
+    const css = await builtCss();
+    const grid = found(/\.flag-grid\{([^}]*)\}/.exec(css), 'a .flag-grid rule')[1] as string;
+
+    expect(grid).toMatch(/grid-template-columns:repeat\(auto-fit,\s*minmax\(16rem,\s*1fr\)\)/);
+    expect(grid).toMatch(/display:grid/);
+    expect(css).not.toMatch(/@media[^{]*\{[^{}]*\.flag-grid/);
+});
+
+/** WCAG 2.2's 24x24 minimum (2.5.8), which is what a 24 px round button is exactly. */
+test('a flag help button is a target a finger can hit', async () => {
+    const css = await builtCss();
+    const button = found(/\.flag-help-button\{([^}]*)\}/.exec(css), 'a .flag-help-button rule')[1] as string;
+
+    expect(button).toMatch(/width:calc\(var\(--spacing\)\s*\*\s*6\)/);
+    expect(button).toMatch(/height:calc\(var\(--spacing\)\s*\*\s*6\)/);
 });

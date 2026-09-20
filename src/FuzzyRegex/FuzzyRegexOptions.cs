@@ -42,7 +42,8 @@ public enum FuzzyRegexOptions
     IgnoreCase = 0x2,
 
     /// <summary>
-    /// <c>^</c> and <c>$</c> match at the start and end of any line, not just of the subject.
+    /// <c>^</c> and <c>$</c> match at the start and end of every line, as well as of the whole
+    /// subject.
     /// Upstream <c>MULTILINE</c> / <c>M</c>.
     /// </summary>
     Multiline = 0x8,

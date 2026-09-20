@@ -20,6 +20,7 @@ import { createApp, nextTick, type App as VueApp } from 'vue';
 const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf8');
 
 import App from '../src/App.vue';
+import { CHECKBOXES, FLAG_HELP, FLAG_NAMES, RADIO_GROUPS } from '../src/lib/flags';
 import { toCSharp } from '../src/lib/snippet';
 import type { Group, Inputs, Match } from '../src/types';
 
@@ -1005,4 +1006,251 @@ test('the first thing the keyboard reaches is the way to the answer', async () =
     // A weaker guard than it looks in jsdom, and kept for the other half of the claim: the handler
     // focuses the region and writes nothing to the address bar itself.
     expect(location.hash).toBe('#p=kitten&s=sitting');
+});
+
+// --- the flags control (S74) -------------------------------------------------------------------
+
+/**
+ * The flags panel's parts: the `<details>`, the row it shows shut, and the boxes inside it.
+ *
+ * `flags.test.ts` owns what a selection MEANS - the two exclusive pairs, the two defaults, the
+ * string that comes out. What is left for here is that the boxes are wired to it, which is the half
+ * a pure function cannot check.
+ */
+function flagsPanel(page: HTMLElement) {
+    const panel = found(page.querySelector<HTMLDetailsElement>('details#flags-panel'), 'the flags panel');
+    return {
+        panel,
+        summary: found(panel.querySelector<HTMLElement>('summary'), 'the flags summary row'),
+        chosen: found(panel.querySelector<HTMLElement>('.flags-chosen'), 'the row that says what is on'),
+        box: (name: string) => found(panel.querySelector<HTMLInputElement>(`#flag-${name}`), `the ${name} box`),
+        help: (name: string) => ({
+            button: found(
+                panel.querySelector<HTMLButtonElement>(`#flag-help-button-${name}`),
+                `the ${name} help button`,
+            ),
+            text: found(panel.querySelector<HTMLElement>(`#flag-help-${name}`), `the ${name} help`),
+        }),
+    };
+}
+
+test('the flags panel starts shut, saying what it is hiding, and offers every flag', async () => {
+    const { page } = await mountPage();
+    const { panel, chosen, box } = flagsPanel(page);
+
+    expect(panel.open).toBe(false);
+    expect(chosen.textContent?.trim()).toBe('none');
+
+    // A chevron, like the two disclosures above it, and for a harder reason than matching them: a
+    // `<summary>` laid out as a flex row stops being a `list-item`, so the browser draws no marker
+    // and the row has nothing left to say it opens. Seen in Chrome at 1366 px before it was added.
+    const chevron = found(
+        page.querySelector<HTMLElement>('#flags-panel > summary [aria-hidden="true"]'),
+        'a chevron on the flags row',
+    );
+    expect(chevron.textContent?.trim()).toMatch(/\S/);
+
+    for (const name of CHECKBOXES) expect(box(name).type).toBe('checkbox');
+    for (const group of RADIO_GROUPS) {
+        for (const option of group.options) {
+            expect(box(option).type).toBe('radio');
+            expect(box(option).name).toBe(group.name);
+        }
+    }
+
+    // Every member but `None`, which is what an empty panel already means. A member added to the
+    // library reaches this count through `FLAG_NAMES`, which DemoSnippetTests pins to the enum, so
+    // a flag nobody gave a control to fails here rather than being quietly unreachable.
+    expect(panel.querySelectorAll('input')).toHaveLength(FLAG_NAMES.length - 1);
+});
+
+/** A worker that keeps every question it was asked, so a test can watch the page ask again. */
+class RecordingWorker extends FakeWorker {
+    static made: RecordingWorker[] = [];
+    constructor() {
+        super();
+        RecordingWorker.made.push(this);
+    }
+}
+
+test('ticking a flag asks the engine again, and the shut row says so', async () => {
+    RecordingWorker.made = [];
+    vi.stubGlobal('Worker', RecordingWorker);
+    const { page, demo } = await mountPage();
+    const { chosen, box } = flagsPanel(page);
+
+    box('BestMatch').click();
+    await settle();
+
+    expect(demo.flags).toBe('BestMatch');
+    expect(chosen.textContent?.trim()).toBe('BestMatch');
+    await until(
+        () =>
+            RecordingWorker.made.some((worker) =>
+                worker.posted.some((question) => question.flags === 'BestMatch'),
+            ),
+        'asked the engine again with BestMatch',
+    );
+
+    // And the C# the panel hands out is the C# for the case as it now stands.
+    const { toggle, code } = snippetParts(page);
+    toggle.click();
+    await settle();
+    expect(code.textContent).toContain('FuzzyRegexOptions.BestMatch');
+
+    box('BestMatch').click();
+    await settle();
+    expect(demo.flags).toBe('');
+    expect(chosen.textContent?.trim()).toBe('none');
+});
+
+test('a shared link that names flags opens with them ticked', async () => {
+    // The string is still the state, so every link written before this panel existed still loads -
+    // including one that names a default, which the panel shows chosen and writes back as nothing.
+    location.hash = '#p=a&f=IgnoreCase,BestMatch,Version1&s=abc';
+    const { page } = await mountPage();
+    const { box, chosen } = flagsPanel(page);
+
+    expect(box('IgnoreCase').checked).toBe(true);
+    expect(box('BestMatch').checked).toBe(true);
+    expect(box('Version1').checked).toBe(true);
+    expect(box('Posix').checked).toBe(false);
+    expect(chosen.textContent?.trim()).toBe('IgnoreCase, BestMatch');
+});
+
+test('a link naming both sides of a pair shows both, and one press repairs it', async () => {
+    // `Unicode,Ascii` is a string the engine refuses ("ASCII, LOCALE and UNICODE flags are mutually
+    // incompatible" - `tools/probes/demo-flag-pair-exclusivity.ps1`, 2026-09-20). The page does not
+    // rewrite what it was handed, so the panel must not claim one side of it: a row reading `Ascii`
+    // beside an error about the pair is the page contradicting itself, and the press the visitor
+    // then makes on `Ascii` fires no `change` at all, because that radio already says it is chosen.
+    location.hash = '#p=a&f=Unicode,Ascii&s=abc';
+    const { page, demo } = await mountPage();
+    const { box, chosen } = flagsPanel(page);
+
+    expect(demo.flags).toBe('Unicode,Ascii');
+    expect(box('Unicode').checked).toBe(false);
+    expect(box('Ascii').checked).toBe(false);
+    expect(chosen.textContent?.trim()).toBe('Unicode, Ascii');
+
+    box('Ascii').click();
+    await settle();
+    expect(demo.flags).toBe('Ascii');
+    expect(box('Ascii').checked).toBe(true);
+    expect(box('Unicode').checked).toBe(false);
+});
+
+test('the character set is one choice of two, and picking one unpicks the other', async () => {
+    const { page, demo } = await mountPage();
+    const { box, chosen } = flagsPanel(page);
+
+    // Nothing named, and the library's own default shown as chosen: measured, not assumed, by
+    // `tools/probes/demo-flag-pair-exclusivity.ps1` (2026-09-20) - a pattern compiled with nothing
+    // and one compiled with `Unicode` both come back `Options = Unicode, Version1, FullCase`.
+    expect(demo.flags).toBe('');
+    expect(box('Unicode').checked).toBe(true);
+    expect(box('Ascii').checked).toBe(false);
+
+    box('Ascii').click();
+    await settle();
+    expect(demo.flags).toBe('Ascii');
+    expect(box('Unicode').checked).toBe(false);
+
+    // Back to the default, which is written as nothing at all rather than as `Unicode`.
+    box('Unicode').click();
+    await settle();
+    expect(demo.flags).toBe('');
+    expect(box('Ascii').checked).toBe(false);
+    expect(chosen.textContent?.trim()).toBe('none');
+});
+
+test('each flag explains itself in the library own words, and Escape puts it away', async () => {
+    const { page } = await mountPage();
+    const { help } = flagsPanel(page);
+    const { button, text } = help('BestMatch');
+
+    expect(text.hidden).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(text.textContent?.trim()).toBe(FLAG_HELP.BestMatch);
+
+    // A pointer resting on it: shown while it is there, gone when it leaves.
+    button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(true);
+
+    // A press pins it, because a tap leaves no pointer behind to hold it open, and content that
+    // cannot be dismissed without moving a pointer is what WCAG 1.4.13 is about.
+    button.click();
+    await settle();
+    expect(text.hidden).toBe(false);
+    button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    button.dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(text.hidden).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+
+    // One sentence shows at a time: the help sits in the flow under its own row, so two open at
+    // once move the grid twice and nobody is reading both.
+    button.click();
+    await settle();
+    help('Posix').button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden, 'a pointer passing another flag does not take a pinned sentence away').toBe(false);
+
+    // A second press is the other way to dismiss it.
+    button.click();
+    await settle();
+    expect(text.hidden).toBe(true);
+});
+
+test('the keyboard opens a flag help and closes it again', async () => {
+    const { page } = await mountPage();
+    const { help } = flagsPanel(page);
+    const { button, text } = help('Posix');
+
+    button.focus();
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    button.blur();
+    await settle();
+    expect(text.hidden).toBe(true);
+});
+
+test('Escape puts the help away when the pointer opened it and the focus is elsewhere', async () => {
+    const { page } = await mountPage();
+    const { help } = flagsPanel(page);
+    const { button, text } = help('BestMatch');
+
+    // The hover case: the pointer rests on the `(?)` while the hands are still in the pattern box,
+    // so no keystroke ever reaches the flags panel. WCAG 1.4.13 asks for a dismissal that does not
+    // need the pointer moved, which means the key is listened for on the document.
+    const patternBox = found(page.querySelector<HTMLInputElement>('#pattern'), 'the pattern box');
+    patternBox.focus();
+    button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    patternBox.dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(text.hidden).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+
+    // A pinned sentence goes the same way once the focus has left the panel, which is what a visitor
+    // who tapped the `(?)` and then clicked into the pattern box is holding.
+    button.click();
+    await settle();
+    patternBox.focus();
+    expect(text.hidden).toBe(false);
+
+    patternBox.dispatchEvent(keydown('Escape'));
+    await settle();
+    expect(text.hidden).toBe(true);
 });

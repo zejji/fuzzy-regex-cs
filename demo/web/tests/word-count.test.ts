@@ -28,6 +28,11 @@
  * six original sources are **994** and the printed total over all eight is **1,148** (measured
  * 2026-09-20). Structure costs words; it is meant to cost fewer than the prose it replaced, and
  * 1,185 -> 994 is a sixth of the page still gone.
+ *
+ * S74 adds a ninth source, `flags.ts`, and the printed total with it is **1,430** (measured
+ * 2026-09-20). 297 of those words are the fifteen flag help sentences, the two legends and the shut
+ * row's word; a visitor reads one sentence at a time and only on asking, and the six original
+ * sources are untouched at 994.
  */
 import { expect, it } from 'vitest';
 

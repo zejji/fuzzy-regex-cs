@@ -716,7 +716,7 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   its own already answered, so that selector is true from the first paint and the probe measures the
   wrong layout.
 - 2026-09-20 (S73): upstream's deletion shift is `match_fuzzy_changes`, `_regex.c:20555-20558`. Four
-  comments elsewhere cite `:20535-20537`, which is the top of that function; they are in STATE.md.
+  comments elsewhere cited `:20535-20537`, the top of that function; corrected in S74's fix pass.
 - 2026-09-20 (S60): a probe that sweeps `$` over a row's positions masks REVERSE off the row's
   flags. Under REVERSE the `regex` module anchors `match` at `endpos`, so every position answers:
   `'ab\ncd'` gives `[2, 5]` under MULTILINE and `[0, 1, 2, 3, 4, 5]` under `MULTILINE|REVERSE`.
@@ -753,3 +753,23 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-20 (S57): `tools/probes/gate-divergence-doors.py` compiles each row inside a `try` at all
   four sites. Upstream itself raises `IndexError` in `get_firstset` on seed 20260920 rows 81232 and
   87091, and one uncompilable row used to cost the whole run the rows after it.
+- 2026-09-20 (S74): the flags string stays the state. `DemoEngine.Run` is handed the `f=` fragment
+  unchanged and the checkbox panel is a pure view over it, so shared links and `examples.json` rows
+  written before the panel load into it with no mapping at any edge.
+- 2026-09-20 (S74): measured, all 91 unordered pairs of the 14 members - the library refuses exactly
+  two (`Unicode + Ascii`, `Version1 + Version0`), so there are two radio groups and a checkbox grid
+  cannot reach a refused combination; and naming a default is identical to omitting it, so a radio
+  set to its default writes nothing into the string.
+- 2026-09-20 (S74): a flags string the engine refuses is shown as it is, not repaired. Both sides of
+  a pair stay selected and neither radio is chosen, because a panel that quietly normalised it would
+  show a legal state beside the engine's refusal - and the visitor's repairing press would fire no
+  `change`.
+- 2026-09-20 (S74): the panel mirrors `char.IsWhiteSpace` as a code-point set, not `String.trim`.
+  The two differ in both directions (U+0085, U+FEFF), and the contract is that both halves read the
+  same string the same way; `DemoSnippetTests` pins the set from both files.
+- 2026-09-20 (S74): the copy linter imports the flags panel's strings instead of scanning the file.
+  `literals()` needs two words to tell a sentence from an identifier, which silently dropped the
+  `Version` legend and the shut row's `none`.
+- 2026-09-20 (S74): `MULTILINE`'s doc comment says what the flag does, with no claim about the
+  default - without it, `$` still matches before a trailing newline (`/$/` on `"a\nb\n"` is `[3,4]`,
+  in this port and in `regex 2026.9.10`).

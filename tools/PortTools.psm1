@@ -260,7 +260,13 @@ function Update-Baseline {
     }
 
     if ($PSCmdlet.ShouldProcess($BaselinePath, 'Write parity baseline')) {
-        $json = ConvertTo-Json -InputObject $baseline -Depth 4
+        # -EscapeHandling pinned, because the default is not the same everywhere: ConvertTo-Json
+        # under pwsh 7 leaves a character above U+007F raw, Windows PowerShell's escapes it, and a
+        # test id carrying U+00B7 is enough for the two to write the same set of ids as two
+        # different files. Seen on 2026-09-20: one baseline regeneration moved 350 lines with no
+        # id added or removed. EscapeNonAscii and not the raw form, so the file is ASCII whatever
+        # writes or reads it, and its diff is only ever the ids a slice enabled.
+        $json = ConvertTo-Json -InputObject $baseline -Depth 4 -EscapeHandling EscapeNonAscii
         Set-Content -LiteralPath $BaselinePath -Value $json -Encoding utf8
     }
 }

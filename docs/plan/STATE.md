@@ -1,5 +1,12 @@
 # State
 
+**S74 is closed** (2026-09-20). The demo's flags text box is a collapsible checkbox panel: a summary
+row, ten checkboxes, two radio groups for the only two pairs the library refuses, and a per-flag help
+sentence that is the enum's own `<summary>`. The flags string stays the state, so old shared links
+and every `examples.json` row load unchanged. Spec, deviations, evidence and the three blind passes:
+`docs/plan/slices/done/S74-flags-control.md`. Ratchet GREEN, 6,461 tests, **baseline updated to
+6,353**; 297 web tests in 14 files; typecheck and `npm run build` green.
+
 **S57 is CHECKPOINTED after three sittings (2026-09-20). Nothing is in progress.**
 
 **Take S57b next, not S57** - the driver's lowest-numbered file is S57 and it is blocked, which its

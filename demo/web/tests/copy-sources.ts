@@ -16,6 +16,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { FLAG_HELP, RADIO_GROUPS, summaryText } from '../src/lib/flags';
+
 const read = (relative: string): string =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
@@ -169,6 +171,18 @@ export const SOURCES: Record<string, Copy[]> = {
     'src/lib': [
         ...literals(read('../src/lib/shapes.ts'), 'shapes.ts'),
         ...literals(read('../src/lib/caps.ts'), 'caps.ts'),
+    ],
+    // The flags panel: the sentence each flag's help button shows, the two fieldset legends, and the
+    // word the shut row says when nothing is ticked. Imported rather than scanned, because `literals`
+    // needs two words to tell a sentence from an identifier and three of these are one word - the
+    // `Version` legend among them, which the scan silently dropped (blind pass, 2026-09-20). The help
+    // is lifted from the enum's doc comments, so a rule firing on one is a rule about the LIBRARY's
+    // words and the fix is in `FuzzyRegexOptions.cs`;
+    // `DemoSnippetTests.The_flag_help_is_the_librarys_own_words` holds the two together.
+    'flags.ts': [
+        ...Object.entries(FLAG_HELP).map(([name, text]) => ({ where: `flags.ts ${name}`, text })),
+        ...RADIO_GROUPS.map((group) => ({ where: `flags.ts ${group.name} legend`, text: group.legend })),
+        { where: 'flags.ts summary row', text: summaryText(new Set()) },
     ],
     // The engine's own refusals - the caps, the timeout, the named-list errors - arrive as
     // `answer.error` and land in that same paragraph. Linting the C# keeps the whole channel

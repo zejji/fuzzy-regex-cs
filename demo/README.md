@@ -148,7 +148,8 @@ The layout follows Nielsen Norman Group's form-design guidance (one column, labe
 field, hints that persist instead of placeholders), its response-time limits (the 250 ms debounce,
 and a busy state that appears rather than a frozen page), and WCAG 2.2 for target size, focus
 appearance and contrast. The two screenshots in `docs/demo/` are the reference layouts at 390 and
-1280 px.
+1280 px, and `flags-panel-1366.png` and `flags-panel-390.png` beside them are the flags panel open
+at a laptop width and on a phone.
 
 ## Deploy to GitHub Pages
 
