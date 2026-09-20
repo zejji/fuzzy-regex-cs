@@ -1216,6 +1216,10 @@ def _record_row(regex, row: dict, violations: list | None = None) -> dict:
     except Exception as e:  # noqa: BLE001
         return failed(e, while_matching=True)
 
+    cut = _cut_subject_outcome(compiled, subject, operation, pos, endpos, partial)
+    if cut is not None:
+        recorded["cutSubjectOutcome"] = cut
+
     if match is None:
         recorded["codepointSpan"] = None
         recorded["outcome"] = {"kind": "nomatch"}
@@ -1373,6 +1377,59 @@ def _describe_match(compiled, match, offsets: list[int], violations: list | None
         }
 
     return described
+
+
+def _cut_subject_outcome(compiled, subject: str, operation: str, pos, endpos, partial: bool) -> dict | None:
+    """Upstream's answer to the same call over ``subject[pos:endpos]`` AS A SUBJECT IN ITS OWN RIGHT.
+
+    A SECOND FACT ABOUT UPSTREAM, never compared against anything, exactly as ``searchOnlyPartial``
+    and ``bestmatchFreeOutcome`` are. The spans are shifted back into the full subject before they
+    are written, so the consumer compares them with this port's sliced answer directly.
+
+    WHAT IT IS FOR. The owner ruled on 2026-09-15 (ledger entry 24, slice S52d) that a reversed match
+    asked with ``partial=True`` has run out of text when it reaches ``pos``. The argument for that
+    ruling is that a slice start behaves like a string start, and that has a consequence which can be
+    checked rather than described: the slice ``[pos, endpos)`` must answer what the cut subject
+    answers, shifted. This field is that answer, so the consumer's entry can pin "this port gives the
+    ruling's own consequence" instead of describing a shape.
+
+    Upstream cannot give it over the slice, which is the divergence. ``init_match`` sets
+    ``text_start`` to 0 (``upstream/src/_regex.c:18442``) and every node handler reads it, so
+    upstream's sliced answer comes from a later door: its search retreats until ``search_start``
+    (``:8400-8405``) reports a partial positioned at ``slice_start``, and ``:18185-18190`` then
+    overwrites the match position with ``slice_start``. Upstream's span is therefore
+    ``(slice_start, match_pos)`` of whichever attempt was current when the retreat ran out, and this
+    port's is the one the ruling names.
+
+    THE TWO ANSWERS ARE NOT ALWAYS THE SAME, AND THAT IS THE POINT. ``\\b``, ``\\B`` and lookbehind
+    still read the character before ``pos`` - Python ``re``'s rule, which the ruling left alone - so a
+    pattern that looks across the slice start answers differently once the text before it is gone.
+    Measured by ``tools/probes/s57b-cut-subject-door.py`` over the three-seed 6000-row gate of
+    2026-09-20: of the 831 reversed partial rows with a non-zero slice that those reports NAME - the
+    divergences and the rows the entry below already accounts for, not the rows that simply agreed -
+    777 give this port's answer and 54 do not, and every one of the 54 is a row where upstream
+    answers no match over the slice. The consumer keeps its separate limb for those.
+
+    ASKED ONLY OF A REVERSED PARTIAL OVER A NON-ZERO SLICE. ``text_end`` IS the slice end on every
+    upstream path, so the forward side never held two rules and the door would tell nothing apart.
+    """
+    if not (partial and pos and endpos is not None and operation in ("match", "search", "fullmatch")):
+        return None
+    if not compiled.flags & _REVERSE_FLAG:
+        return None
+
+    try:
+        cut = getattr(compiled, operation)(
+            subject[pos:endpos], 0, endpos - pos, partial=True, timeout=ROW_TIMEOUT_SECONDS
+        )
+    except Exception:  # noqa: BLE001 - an unanswerable second question is recorded as unasked
+        return None
+
+    if cut is None:
+        return {"kind": "nomatch"}
+    # `offsets[pos:]` indexes the CUT subject's codepoints and yields the FULL subject's UTF-16
+    # positions, which is the shift, done in one step rather than as an add afterwards.
+    return {"kind": "match", **_describe_match(compiled, cut, _utf16_offsets(subject)[pos:])}
 
 
 def _leak_free_fuzzy(compiled, subject: str, offsets: list[int], matches: list[dict], partial: bool) -> list | None:

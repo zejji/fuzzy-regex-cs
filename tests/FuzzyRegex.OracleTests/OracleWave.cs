@@ -209,6 +209,7 @@ internal static class OracleWave
             row.TryGetProperty("posixFreeOutcome", out JsonElement posixFree) ? ReadOutcome(posixFree) : null,
             row.TryGetProperty("atomicFreeOutcome", out JsonElement atomicFree) ? ReadOutcome(atomicFree) : null,
             row.TryGetProperty("pruneOutcome", out JsonElement pruneOutcome) ? ReadOutcome(pruneOutcome) : null,
+            row.TryGetProperty("cutSubjectOutcome", out JsonElement cutSubject) ? ReadOutcome(cutSubject) : null,
             row.TryGetProperty("timeout", out JsonElement budget) ? budget.GetDouble() : null
         )
         {
@@ -688,6 +689,17 @@ internal sealed record OracleHeader(
 /// and on any wave recorded before this slice. Never compared; only
 /// <see cref="ExpectedDivergences"/> reads it.
 /// </param>
+/// <param name="CutSubject">
+/// An eighth (S57b). Upstream's answer to the same call over <c>Subject[Pos..EndPos]</c> as a subject
+/// in its own right, with the spans shifted back into the full subject so it compares directly with
+/// this port's sliced answer. Asked only of a reversed <c>partial</c> call over a non-zero slice,
+/// because that is the one shape the owner's ruling of 2026-09-15 (ledger entry 24, slice S52d)
+/// speaks about: a reversed match has run out of text when it reaches <c>pos</c>, on the argument
+/// that a slice start behaves like a string start. This field turns that argument into a check -
+/// answering the slice the way the cut subject is answered IS the ruling. <see langword="null"/> on
+/// every other row and on any wave recorded before this slice. Never compared; only
+/// <see cref="ExpectedDivergences"/> reads it.
+/// </param>
 /// <param name="Timeout">
 /// The deadline in seconds this row's question was put to upstream under, and part of the QUESTION
 /// rather than of the answer (S52). <see langword="null"/> on every row of every generator but
@@ -738,6 +750,7 @@ internal sealed record OracleRow(
     IOracleOutcome? PosixFree = null,
     IOracleOutcome? AtomicFree = null,
     IOracleOutcome? PruneOutcome = null,
+    IOracleOutcome? CutSubject = null,
     double? Timeout = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0,
     IReadOnlyList<string>? SelfContradiction = null

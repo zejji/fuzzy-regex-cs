@@ -3177,3 +3177,46 @@ is S33's old pin, rewritten: it asserted upstream's `None` on five cells as "a p
 not a general rule about slice_start", and the ruling is that it IS one rule about the slice start,
 so it now records those five as a deliberate divergence with upstream's measured answers beside
 them.
+
+## 25. `ENHANCEMATCH` keeps a three-error fit where the same engine's tighter budget finds a two-error one
+
+**Status:** not filed, per the owner's rule. Found by S57b in the 6000-row exit gate, seed 20260920
+row 122739. Related to entries 19 and 20, which are about a looser budget losing a match outright;
+this one is about a looser budget keeping a WORSE fit under the flag whose job is to improve it.
+
+**The promise.** `ENHANCEMATCH` re-runs a fuzzy match inside its own span with the budget tightened
+to `fewest_errors - 1`, keeping the best run and stopping when a run fails
+(`upstream/src/_regex.c:17896` to `:17997`). The fit it returns should therefore never spend more
+errors than the same engine can spend on the same span.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-20 by
+`tools/probes/s57b-enhancematch-loses-a-candidate.py`:
+
+```python
+>>> regex.compile(r'(?e)(?:a\d+Z){e<=3}').fullmatch('a6ZZ_').fuzzy_counts
+(3, 0, 0)
+>>> regex.compile(r'(?:a\d+Z){e<=2}').fullmatch('a6ZZ_').fuzzy_counts
+(1, 1, 0)                    # the same span, two errors, and `{e<=2}` permits strictly less
+```
+
+`{e<=2}` admits a subset of what `{e<=3}` admits, so the two-error fit was available to the run the
+loop makes with its budget tightened to 2. `(?b)` behaves the same way, and `(?b)(?:a\d+Z){e<=2}`
+answers no match at all where the flagless `{e<=2}` matches - which is the separate contradiction
+entry 12's family covers.
+
+**The loop is not simply absent.** On the neighbouring subject `'a6Z_'` the same pattern answers
+three errors plain and one with `(?e)`, so the improvement loop runs and improves there.
+
+**Not established:** which of the two limits the re-run applies differs from writing the tighter
+budget into the section. `state->max_errors` (`:17978`) and `values[RE_FUZZY_VAL_MAX_ERR]` are read
+side by side in `this_error_permitted` (`:9675`) and look equivalent. Nothing in the report rests on
+the answer; the monotonicity argument is enough on its own.
+
+**This port.** Its improvement loop reaches the two-error fit, so the row diverges. Without `(?e)`
+the two engines agree exactly, including `{e<=4}`'s `(3, 0, 1)`, which is what says the divergence is
+the loop rather than the fuzzy matcher under it. Port half:
+`tools/probes/s57b-enhancematch-loses-a-candidate.cs`.
+
+**Tests.** `Gaps/Engine/FuzzyEnhanceMatchTests.Enhancematch_reaches_a_two_error_fit_where_upstream_keeps_a_three_error_one`,
+with `.The_improvement_loop_is_not_what_stops_without_the_flag` as its control. The oracle pin is
+`enhancematch-loses-a-candidate`.

@@ -194,3 +194,54 @@ every fix is one of its own findings applied to a file it had already read.
 3. Minimise rows 10 and 11 and draft (never file) the ledger entry.
 4. Re-run the gate at `-Count 6000` on all three seeds plus
    `-Generator fuzzy,interactions -Seeds 99991,57057`, green, then close the slice.
+
+## Sitting 2 (2026-09-20): fourteen of the twenty judged
+
+Seed 4242 is GREEN, seed 7 is at 2 diverging, seed 20260920 at 4 (replay of the recorded waves, not
+a re-record - that is still owed).
+
+**Rows 3, 4, 5, 6, 15 - the S52d regressions. Port right.** Sitting 1's empty-span hypothesis was
+already dead. Upstream's reversed partial span is `(slice_start, match_pos)` of whichever attempt
+was current when it gave up: `_regex.c:18185-18190` overwrites the match's text position with
+`slice_start` on a partial, and `search_start` (`:8400-8405`) does the same before returning
+`RE_ERROR_PARTIAL`, so upstream's answer over a non-zero slice comes from a later door, after the
+search has retreated, where this port's comes from the node handler on the first attempt. The
+decisive control is the ruling's own falsifiable consequence - the slice `[pos, endpos)` must answer
+what the same pattern answers over `subject[pos:endpos]` shifted by `pos` - and on all six rows this
+port's answer equals upstream's own cut-subject answer. Recorded per row as a new second fact,
+`cutSubjectOutcome`, so the predicate compares against upstream rather than against a transcription.
+Pin: `reversed-partial-answers-the-cut-subject`. Tests:
+`Gaps/Engine/ReversedPartialCutSubjectTests.cs`, six of them.
+
+**Row 107758 is not a Turkic row.** The new entry sits above `turkic-default-folding` and claims it.
+Proved by the isolating control that entry's own Reason demands - swap every U+0131 in pattern and
+subject for `h` and for `å` and the answer does not move: `tools/probes/s57b-107758-not-turkic.py`.
+
+**Rows 16, 17** -> `turkic-default-folding-without-spans`; **18, 20** -> `bestmatch-loses-a-candidate`
+(both carry `selfContradiction: ["bestmatch-no-worse"]` and a `bestmatchFreeOutcome` equal to this
+port's answer); **9, 12, 13** -> `search-start-partial`'s row-keyed arm (each has
+`searchOnlyPartial` true, an anchor grid that does not contain upstream's span, and a `pruneOutcome`
+equal to this port's answer); **14** -> `partial-retry-reversed-slice`.
+
+**Row 14 corrects the anchor-reachability instrument.** Sitting 2 first read it as a port defect,
+because upstream's own `match(0, endpos, partial=True)` answers at endpos 0 and nowhere else. It is
+not: the pattern ends in `(?(?=[^a])[^\d]|\p{ASCII})`, matched FIRST under `(?r)`, with a lookahead
+that reads to the RIGHT of the span. Truncating at `endpos` makes that lookahead see end-of-text, the
+conditional takes its other branch, and the anchored call asks a different question. Force the branch
+the untruncated subject takes and the sweep answers at endpos 0, 1 and 3, the highest being this
+port's span. **A reachability NO is evidence only where the pattern reads nothing past the anchor.**
+`tools/probes/s57b-anchor-sweep-reads-past-the-anchor.py`.
+
+**Row 19 is a new family.** Upstream's `(?e)` keeps a three-error fit where the same engine's tighter
+budget finds a two-error one, minimised to `(?e)(?:a\d+Z){e<=3}` over `'a6ZZ_'`: `{e<=2}` gives
+`(1, 1, 0)` and `{e<=3}` gives `(3, 0, 0)`, and `{e<=2}` permits a subset of `{e<=3}`. The loop is
+not absent - on `'a6Z_'` it improves three errors to one. Without the flag the two engines agree
+exactly. Pin `enhancematch-loses-a-candidate`, ledger entry 25, probes
+`tools/probes/s57b-enhancematch-loses-a-candidate.py` and `.cs`.
+
+**Still open, for sitting 3.** Seed 20260920 rows 72433 and 74399, seed 7 rows 75921 and 76160, and
+rows 10 and 11 (seed 20260920 rows 81232 and 87091), where upstream raises `IndexError: tuple index
+out of range` while COMPILING and so cannot be an oracle pin at all. Then the re-record, the full
+gate, and the closing ceremony. **The cut-subject door figures in
+`reversed-partial-answers-the-cut-subject`'s Reason (831 named / 777 SAME / 54 DIFFERENT) were
+measured BEFORE the re-record and must be re-measured before the slice closes.**

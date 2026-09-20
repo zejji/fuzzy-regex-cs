@@ -173,6 +173,46 @@ public sealed class FuzzyEnhanceMatchTests
     }
 
     [Test]
+    public void Enhancematch_reaches_a_two_error_fit_where_upstream_keeps_a_three_error_one()
+    {
+        // The improvement loop tightens its budget to one below the best count so far and re-runs
+        // inside the same span, so the fit it settles on should never spend more errors than the
+        // same engine can spend there. Over 'a6ZZ_' upstream settles on three substitutions, and
+        // the same pattern written '{e<=2}' - a SUBSET of what '{e<=3}' permits - gives it the
+        // two-error fit below. Measured 2026-09-20 on regex 2026.9.10,
+        // tools/probes/s57b-enhancematch-loses-a-candidate.py:
+        //
+        //   plain e<=2: counts=(1, 1, 0)   e<=3: counts=(3, 0, 0)   <- upstream and this port agree
+        //   (?e)  e<=2: counts=(1, 1, 0)   e<=3: counts=(3, 0, 0)   <- upstream
+        //   (?e)  e<=3: counts=(1, 1, 0)                            <- this port
+        //
+        // Upstream's '{e<=2}' changes are ([2], [4], []): the '6' of '\d+' stands in for a 'Z' and
+        // the trailing '_' is an insertion.
+        //
+        // The expected value is upstream's own '{e<=2}' answer, position for position. The entry is
+        // `enhancematch-loses-a-candidate` in the oracle's ExpectedDivergences and ledger entry 25.
+        Match m = new FuzzyRegex(@"(?e)(?:a\d+Z){e<=3}").FullMatch("a6ZZ_");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 5));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(2);
+        m.FuzzyChanges.Insertions.Should().Equal(4);
+    }
+
+    [Test]
+    public void The_improvement_loop_is_not_what_stops_without_the_flag()
+    {
+        // The control for the test above, and what rules out "this port's loop simply runs where
+        // upstream's does not": on the SAME pattern with the flag deleted this port answers exactly
+        // what upstream answers, three substitutions. The divergence is confined to the loop.
+        new FuzzyRegex(@"(?:a\d+Z){e<=3}")
+            .FullMatch("a6ZZ_")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(3, 0, 0));
+    }
+
+    [Test]
     public void Cost_ranking_and_count_ranking_agree_once_the_costs_are_equal()
     {
         // The control for the test above: the same pattern and subject with a unit cost equation
