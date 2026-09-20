@@ -916,6 +916,43 @@ test('the snippet is text and never markup, and copying says out loud what happe
 });
 
 /**
+ * The answer can be removed while a visitor is standing inside it.
+ *
+ * Everything below the status line is one `v-if` on the answer, so a pattern that stops parsing
+ * does not hide the focused control, it removes it - and a browser given no instructions puts the
+ * focus on `<body>`, at the top of the document. The C# panel is where that actually happens: it is
+ * opened from the keyboard, the focus is placed inside it, and the visitor is still there when the
+ * pattern they pasted turns out not to parse.
+ *
+ * The destination is the pattern field, because nothing in the answer survives to take the focus -
+ * the panel's toggle is inside the same `v-if` - and the pattern field is where the fix is typed.
+ */
+test('losing the answer while the C# panel is open keeps the focus on the page', async () => {
+    const { page, demo } = await mountPage();
+    const { toggle, panel } = snippetParts(page);
+
+    toggle.click();
+    await settle();
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    // The pattern stops parsing. No offset, so the message goes to the block below the inputs and
+    // the whole answer - highlights, tables, the panel - leaves the page.
+    demo.failure = 'missing ) at position 1';
+    demo.failureOffset = null;
+    await settle();
+
+    expect(page.querySelector('button.snippet-toggle'), 'the panel is still on the page').toBeNull();
+    expect(document.activeElement, 'the focus was dropped to the top of the document').not.toBe(document.body);
+    expect(document.activeElement).toBe(page.querySelector('#pattern'));
+
+    // Shut, not merely unmounted: the next answer must not bring a screenful of code back open
+    // around a focus that has since moved somewhere else.
+    demo.failure = '';
+    await settle();
+    expect(snippetParts(page).panel.hidden).toBe(true);
+});
+
+/**
  * The keyboard's way past the input pane.
  *
  * Measured at 1920x1080, 1440x900, 1366x768 and 1024x768 (`tools/probes/s73-widths.mjs`,

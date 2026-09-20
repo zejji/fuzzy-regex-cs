@@ -261,6 +261,86 @@ test('nothing but a link is underlined', async () => {
     }
 });
 
+/**
+ * How hard `selector` matches an element carrying exactly `classes`, or null if it does not match.
+ *
+ * The number is CSS specificity for the shapes this file writes the highlight states in: a compound
+ * of classes, with `:not(.class)` allowed, where every token counts one. Any other shape - a tag, a
+ * combinator, a pseudo-element, `*` - is reported as no match, which is what keeps the universal
+ * rule that declares Tailwind's variables out of an answer about one `<mark>`.
+ */
+function specificity(selector: string, classes: readonly string[]): number | null {
+    const CLASS_TOKEN = /:not\(\.([a-z0-9-]+)\)|\.([a-z0-9-]+)/gi;
+    const tokens = [...selector.matchAll(CLASS_TOKEN)];
+    if (tokens.length === 0) return null;
+    if (selector.replace(CLASS_TOKEN, '').trim() !== '') return null;
+
+    for (const [, excluded, required] of tokens) {
+        if (excluded !== undefined && classes.includes(excluded)) return null;
+        if (required !== undefined && !classes.includes(required)) return null;
+    }
+    return tokens.length;
+}
+
+/**
+ * What the cascade leaves on such an element for one property, or null if nothing declares it.
+ *
+ * Source order decides between equal specificities, which is the whole question here, so a later
+ * rule of the same strength replaces the winner. At-rule preludes are dropped first for the reason
+ * the underline test gives: left in, `@layer components{` reads as a selector and swallows the
+ * first rule inside the layer.
+ */
+function cascade(css: string, classes: readonly string[], property: string): string | null {
+    const rules = css.replace(/@[a-z-]+[^{;]*\{/gi, ' ');
+    const declaration = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, 'g');
+    let winner: { strength: number; value: string } | null = null;
+
+    for (const [, list, body] of rules.matchAll(/([^{}@]+)\{([^}]*)\}/g)) {
+        // The last declaration in the rule, because `outline-dashed` writes `outline-style` twice.
+        const value = [...(body ?? '').matchAll(declaration)].at(-1)?.[1]?.trim();
+        if (value === undefined) continue;
+
+        for (const selector of selectorList(list ?? '')) {
+            const strength = specificity(selector, classes);
+            if (strength !== null && (winner === null || strength >= winner.strength)) {
+                winner = { strength, value };
+            }
+        }
+    }
+
+    return winner?.value ?? null;
+}
+
+/**
+ * Selected outranks hovered on the mark that is both.
+ *
+ * `.hit-current` and `.hit-linked` paint the same property at equal specificity, so which one wins
+ * on a mark carrying both was decided by source order alone - and the hover rule is written second.
+ * Hovering the selected match therefore repainted it as a hover, which is the ordinary case and not
+ * a corner: the pointer is usually what selected it in the first place.
+ *
+ * Over the COMPILED stylesheet, because only the compiled output shows the second half of that
+ * fault: `outline-dashed` sets a `--tw-outline-style` variable as well as `outline-style`, and that
+ * variable is what `.hit-current`'s own `outline-style: var(--tw-outline-style)` reads - so the
+ * dashed line reached the selected mark even where the colour did not. The source is two `@apply`
+ * lines with no conflict visible in them at all.
+ */
+test('the selected match keeps its own outline under the pointer', async () => {
+    const css = await builtCss();
+    const both = ['hit', 'hit-current', 'hit-linked'];
+
+    expect(cascade(css, both, 'outline-color'), 'the hover colour wins on the selected mark').toBe(
+        'var(--color-slate-900)',
+    );
+    expect(cascade(css, both, 'outline-style'), 'the selected mark is drawn dashed').not.toBe('dashed');
+    expect(cascade(css, both, '--tw-outline-style'), 'the hover rule flips the style variable').not.toBe('dashed');
+
+    // And a hovered match that is not selected still gets the dashed cue: the fix is a narrower
+    // selector, not a deleted rule.
+    expect(cascade(css, ['hit', 'hit-linked'], 'outline-color')).toBe('var(--color-slate-500)');
+    expect(cascade(css, ['hit', 'hit-linked'], 'outline-style')).toBe('dashed');
+});
+
 /** Every rule whose selector list names exactly this selector, in source order. */
 function rulesFor(css: string, selector: string): string[] {
     return [...css.matchAll(/([^{}@]+)\{([^}]*)\}/g)]

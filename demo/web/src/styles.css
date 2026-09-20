@@ -360,8 +360,16 @@
 
        Two rules and not one, because a <tr> is not a <mark>: an outline on a table row is drawn
        differently by every engine (and not at all under some border-collapse rules), so the row
-       takes a background instead - which is also what it had as a plain hover before the link. */
-    .hit-linked {
+       takes a background instead - which is also what it had as a plain hover before the link.
+
+       `:not(.hit-current)` because the two rules paint the same property and this one is written
+       second: at equal specificity the later rule wins, so hovering the SELECTED match repainted it
+       as a hover - slate-500 instead of slate-900, and dashed instead of solid, since
+       `outline-dashed` also sets the `--tw-outline-style` variable that .hit-current's own
+       `outline-style` reads. Selected outranks hovered, and the selected mark is under the pointer
+       most of the time because the pointer is what selected it. `layout.test.ts` asserts the
+       winner over the compiled stylesheet. */
+    .hit-linked:not(.hit-current) {
         @apply outline-2 outline-dashed outline-offset-1 outline-slate-500;
     }
 

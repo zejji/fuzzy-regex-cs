@@ -90,6 +90,14 @@ function useWide(query: string) {
 const wide = useWide(SHELL_QUERY);
 
 /**
+ * The one control that is on the page whatever else is, which makes it the focus's last resort.
+ *
+ * Nothing else qualifies: every other field is behind the `advanced` disclosure on one column, and
+ * the whole answer is behind a `v-if`.
+ */
+const patternField = useTemplateRef<HTMLInputElement>('patternField');
+
+/**
  * The two things a narrow window keeps closed, and a wide one never does.
  *
  * On one column every open thing above the answer is a screenful between a visitor and the answer,
@@ -523,6 +531,43 @@ async function copySnippet(): Promise<void> {
             : 'the browser refused the clipboard, so the code is selected';
 }
 
+/** Whether the answer - highlights, tables, the C# panel - is on screen at all. */
+const answerShown = computed(() => answer.value !== null && !failure.value);
+
+/**
+ * The answer going away must not take the focus with it.
+ *
+ * Everything below the status line lives inside one `v-if`, so a pattern that stops parsing while
+ * the visitor is standing in it does not hide the focused control, it removes it - and the browser
+ * drops the focus to `<body>`, which is the top of the document (WCAG 2.4.3 Focus Order). The
+ * reachable case is the C# panel: it is opened from the keyboard, the focus is put inside it on
+ * opening, and the next keystroke in the pattern field is not what a visitor with the panel open is
+ * doing, so they are in it when a colleague's pasted pattern or their own edit breaks.
+ *
+ * Nothing inside the answer survives to receive the focus - the panel's own toggle is inside the
+ * same `v-if` - so the destination is the pattern field. It is always present, and it is where the
+ * change that removed the answer was made, so it is also where the fix is typed.
+ *
+ * The element is read BEFORE the render (this is a pre-flush watcher) because afterwards there is
+ * nothing to read, and it is checked for `isConnected` AFTER it, so the focus only moves when the
+ * focused element really did go. That way this says nothing about which parts of the answer are
+ * conditional, and stays right when they change.
+ */
+watch(answerShown, (shown) => {
+    if (shown) return;
+
+    // Shut, rather than left open to reappear with the next answer around a focus that has moved on.
+    snippetOpen.value = false;
+    copyNote.value = '';
+
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement) || focused === document.body) return;
+    void nextTick(() => {
+        if (focused.isConnected) return;
+        patternField.value?.focus();
+    });
+});
+
 onMounted(demo.initialise);
 // The page's lifetime is the document's, so this never runs in production. It runs in the tests,
 // where a mount that left its `hashchange` listener and its two workers behind would answer the
@@ -587,6 +632,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <label class="field-label" for="pattern">Pattern</label>
                         <input
                             id="pattern"
+                            ref="patternField"
                             v-model="pattern"
                             class="field"
                             spellcheck="false"
