@@ -984,7 +984,7 @@ amended text is inline above; this list is the record of what changed and why.
     flags string still crosses to `DemoEngine`), shared links, the examples file, and every S73
     rule on copy, layout, typing and accessibility. One slice; the phase closes again when it lands.
 
-32. **Phase 9 gains S75 (owner decisions, 2026-09-20).** The owner's first look at S73 and S74
+33. **Phase 9 gains S75 (owner decisions, 2026-09-20).** The owner's first look at S73 and S74
     found five things: the inline `s`/`i`/`d` edit letters overlap and mislead; the input headings,
     "Named lists" above all, lack an explanation; no worked example shows the fuzzy test set; the
     C# snippet's type and member names are unpinned string literals; and the copy linter reaches

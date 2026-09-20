@@ -749,7 +749,7 @@ exclusive pairs and per-flag help generated from the enum comments. Spec:
 `docs/plan/slices/S74-flags-control.md`. Design agreed with the owner in conversation; no review
 round before the sitting.
 
-**S75 follows S74 (owner decisions 2026-09-20; spec amendment 32):** the edit markers keep their
+**S75 follows S74 (owner decisions 2026-09-20; spec amendment 33):** the edit markers keep their
 letters, drawn in a clear marker row, and gain hover notes, a legend and an alignment view; every input heading gets a help
 note linking to the docs; the fuzzy test set gets a worked example; the snippet's identifiers are
 pinned by `nameof`; and the copy linter runs over `README.md` and `docs/*.md`. Spec:
