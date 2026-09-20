@@ -1,6 +1,9 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+# Identity first, before anything slower: see .husky/check-identity.sh.
+sh "$(dirname "$0")/check-identity.sh" commit || exit 1
+
 # Formatting, then the IDE-only inspections; deliberately NOT the test suite. The suite runs on
 # pre-push and in CI; a pre-commit hook that ran it would double the test time of every unattended
 # slice (the driver has already run check-ratchet.ps1 seconds earlier) and would refuse the

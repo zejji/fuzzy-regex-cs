@@ -22,6 +22,19 @@ env:
   CI: true
 
 jobs:
+  # Every commit in the history carries the public GitHub identity and no other address. The
+  # same check runs in the pre-commit and pre-push hooks; this leg is for a checkout that never
+  # installed them. Reasoning and the 2026-09-19 incident: .husky/check-identity.sh.
+  identity:
+    name: Author identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit is authored and committed by the public identity
+        run: sh .husky/check-identity.sh history HEAD
+
   build-and-ratchet:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -791,3 +791,12 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-20 (S56): Stryker takes a mutant only when its whole span fits the `File.cs{a..b}`
   window, not when its first character does. Counting by start offset over-counts the engine queue
   by 165 `Removed by mutate filter` and 32 CompileError; `tested` and `survivors` are unaffected.
+- 2026-09-20 (owner): one commit authored on 2026-09-19 with the owner's employer address reached
+  origin/main before anyone looked. Root cause: a checkout outside this repository's `.git` took the
+  global config, which the repo-local `user.email` never covers. Fixed by rewriting the sixty commits
+  above it (author and committer both), owner force-pushes. Prevented three ways, each independent
+  of the others: a global `includeIf` for every path under this repository, `.husky/check-identity.sh`
+  in the pre-commit and pre-push hooks with the allowed address fixed in the script (reading it from
+  config would pass the very misconfiguration it catches), and a CI leg over the whole history. The
+  two stale rollback tags (`s26-rolled-back`, `s29-rolled-back`) and `rewritten-main` were dropped;
+  they were the last refs to the old history.

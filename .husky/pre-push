@@ -1,6 +1,9 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+# Nothing leaves this machine under another address: every commit each ref would publish is checked.
+sh "$(dirname "$0")/check-identity.sh" push || exit 1
+
 # The last moment before work leaves the machine, and far rarer than a commit, so waiting for
 # the suite here is proportionate. CI remains the real gate: a local hook is absent in a fresh
 # clone until `dotnet husky install` runs, and is one --no-verify away from being skipped.
