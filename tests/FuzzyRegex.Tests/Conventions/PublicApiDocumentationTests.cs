@@ -44,6 +44,7 @@ public sealed class PublicApiDocumentationTests
             .HaveCountGreaterThan(10, "the exported-type scan must actually find this library's public surface");
 
         List<string> violations = [];
+        int membersChecked = 0;
         foreach (Type type in types)
         {
             string typeName = type.FullName!.Replace('+', '.');
@@ -66,9 +67,29 @@ public sealed class PublicApiDocumentationTests
                     .GroupBy(m => Prefix(m) + typeName + "." + MemberKeyName(m))
             )
             {
+                membersChecked += group.Count();
                 CheckGroup(entries, group.Key, group.Count(), violations, describe: group.Key);
             }
         }
+
+        // S57. The third floor, and the one that makes the project's IL2065 suppression honest
+        // rather than asserted. Under Native AOT this scan reads a PUBLISHED assembly, so the
+        // hazard IL2065 warns about is real in general: a trimmed member is a member this test
+        // silently stops checking, and the type and doc-entry floors above both survive that -
+        // GetExportedTypes still returns the types and FuzzyRegex.xml is a build artefact the
+        // trimmer never touches. Only a member count can see it. FuzzyRegex is a
+        // TrimmerRootAssembly (see FuzzyRegex.Tests.csproj), so nothing is trimmed and this run
+        // proves it every time the AOT gate runs. Measured 2026-09-20: 110 members, against the 147
+        // tracked entries in PublicAPI.Unshipped.txt - fewer because that file lists types and
+        // accessors this scan folds away. 100 is the floor rather than 110 so an ordinary API
+        // change does not trip it; a trim removes far more than nine per cent, and a deliberate
+        // removal is already gated by the public-API analyzer.
+        membersChecked
+            .Should()
+            .BeGreaterThan(
+                100,
+                "a trimmed public surface would shrink this count, and every other floor in this test survives trimming"
+            );
 
         violations.Should().BeEmpty();
     }

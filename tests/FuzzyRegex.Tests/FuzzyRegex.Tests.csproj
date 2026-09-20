@@ -22,8 +22,8 @@
     <!--
       S53. This project is published with PublishAot=true and the produced executable is run as the
       dynamic half of the AOT gate (tools/run-aot-tests.ps1, the `native-aot` job in ci.yml). The
-      five suppressions below are scoped to this test project; src/FuzzyRegex carries none at all
-      and, measured 2026-09-16, produces zero trim or AOT warnings of its own.
+      six suppressions below are scoped to this test project; src/FuzzyRegex carries none at all
+      and, measured 2026-09-16 and again 2026-09-20, produces zero trim or AOT warnings of its own.
 
       IL2026, IL2070, IL2075 - this project reflects over the library on purpose. The thread-safety
       audits in Gaps/Api and the ported-test conventions scan read types, fields and properties by
@@ -33,6 +33,27 @@
       ThreadSafetyTests.The_library_assembly_this_file_scans_has_not_been_trimmed_away and the
       count floor in PortedTestConventionsTests.Every_ported_test_in_this_assembly_conforms.
 
+      IL2065 - S57, and the same reason one step further out. Conventions/PublicApiDocumentationTests
+      walks Assembly.GetExportedTypes() and calls type.GetMembers(BindingFlags) on each, so the
+      RECEIVER is a Type the trimmer cannot resolve statically; that is the whole point of the test,
+      which exists to reflect over the real shipped surface rather than read the project's own
+      PublicAPI.*.txt back to itself. This was the AOT gate's only error and it failed the publish
+      (MSB3077); reproduced identically by S58, by S59 from a deleted obj/ and bin/, and again here
+      on 2026-09-20 before the fix.
+
+      Of the three ways out, annotating is not available: the value flows from GetExportedTypes(),
+      which carries no DynamicallyAccessedMembers of its own, so a [DynamicallyAccessedMembers]
+      helper parameter only moves the same warning to its call site. Excluding the one test from the
+      native publish would delete AOT coverage of the convention that the shipped package is
+      documented - the package is the thing AOT consumers get. So: suppressed, in this project's
+      existing NoWarn list rather than as an UnconditionalSuppressMessage, because the neighbouring
+      reflection warnings are already handled here and one mechanism is easier to audit than two.
+
+      What makes it safe is measured, not asserted: FuzzyRegex is a TrimmerRootAssembly below, so
+      its members are not trimmed, and the test now carries a member-count floor that fails if they
+      ever are - the type and doc-entry floors it already had both survive trimming, and a count of
+      members reflected does not. The native run is therefore the standing proof of this line.
+
       IL2104, IL3053 - AwesomeAssertions 9.6.0 is a FluentAssertions fork with reflection inside
       and is not marked AOT-compatible, so it reports these two aggregate warnings for the whole
       assembly. They cannot be fixed from here. What they mean in practice was measured rather than
@@ -40,7 +61,7 @@
       call sites with Equivalence and banned it in AotAssertionConventionTests. The other ~4,600
       assertions run natively.
     -->
-    <NoWarn>$(NoWarn);IL2026;IL2070;IL2075;IL2104;IL3053</NoWarn>
+    <NoWarn>$(NoWarn);IL2026;IL2065;IL2070;IL2075;IL2104;IL3053</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
