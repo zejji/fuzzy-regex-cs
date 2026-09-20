@@ -1,32 +1,30 @@
 # State
 
-**S60 is closed (2026-09-20, four sittings). S57 stays in flight. Nothing is in progress.**
+**S56 is closed (2026-09-20, one sitting, branch `stryker-queue`). S57 stays in flight.**
 
-**S60 - the prefilter family, closed on its required-string half** (the forward
-`locate_required_string` arm, the per-pattern needle, the `(*SKIP)` constraint implemented rather
-than asserted, scope items 5 and 15, 19 gap tests, three judged oracle rows). Spec, controls and
-both review passes: `docs/plan/slices/done/S60-prefilter-family.md`; measurements:
-`notes/S60-sittings.md`. Items 2, 3, 6, 8-14, 16 and 17 moved to
-`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, item numbers kept (spec
-amendment 30 plus a ROADMAP paragraph). **Phase 7 is nine slices.**
+**S56 - the engine's mutation survivors.** There are none: 4,673 in-window mutants across the 59
+`engine-rand-*` chunks, **0 Survived**, 46 Timeout, 14 RuntimeError, all 60 judged with probes
+(`tools/probes/s56-mutant-behaviour.py`) and all detections. Numbers and caveats:
+`docs/plan/mutation/2026-09-20-engine.md`; sitting detail: `notes/S56-sittings.md`.
+`Gaps/Engine/HangBoundTests.cs` now guards the assembly-wide 120 s `[Timeout]`.
 
-**Gates at the commit.** Ratchet GREEN, 6,459 tests, baseline updated to 6,351. Oracle GREEN at the
-three default seeds (7, 4242, 20260920). Both AOT gates GREEN - the `IL2065` STATE reported RED does
-not appear. The 20260919 red row was date-seeded and is no longer drawn (triage:
-`docs/plan/2026-09-19-oracle-divergence-fuzzy-edit-attribution.md`).
+**Two caveats S57 and Phase 7 must carry.** 533 in-window mutants never compiled, 185 of them in
+`Matcher.cs::BasicMatch` and `DoEnhancedFuzzyMatch` (Stryker Safe Mode, on a `CS0165` it will not
+attribute); and 1,048 lines of today's `Matcher.cs`, `PatternObject.cs`, `NodeCompiler.cs` and
+`FuzzyRegex.cs` have never been mutated, because the engine moved under the three-day queue.
+`tools/stryker-queue.json` ends with `engine-topup-01..09` (54 windows) covering those lines -
+**queued, not run**, per the orchestrator's brief; regenerate with `tools/stryker-topup-windows.py`
+if those files change. `NoCoverage` is absent everywhere because coverage analysis was off, not
+because the lines are reached.
 
-**Next slice: S57**, the lowest number in `docs/plan/slices/` (Phase 6 close-out, checkpointed).
+**Gates at the commit.** Ratchet GREEN, 6,460 tests, baseline 6,352. Oracle not re-run (no engine
+code changed). **Next slice: S57**, the lowest number in `docs/plan/slices/` (Phase 6 close-out, checkpointed).
 Order and checklist in `notes/S57-sittings.md`: items 5 and 7-11 untouched, 911 uncovered lines
 unclassified, **no blind review and no verifier over the S57 diff**. Its item 1 closed in S60.
 
-**Benchmarks here** need `.claude/worktrees/stryker/.scratch/pause-stryker.ps1` AND `after-parsing.ps1`
-there stopped - that watcher relaunched the queue mid-run at 08:54 today. Queue running since 10:47;
-resume after a pause with `.scratch/run-queue.ps1` there.
-
-**Waiting on the owner, both from S73:** the `docs/demo/` reference layouts, and publishing (push
-`phase9-demo`, Pages > Source = GitHub Actions). **Maintenance:** four comments cite
-`_regex.c:20535-20537` for the deletion shift, which is at `:20555-20558` (`Match.cs:389`,
-`Engine/MatchState.cs:32`, `Gaps/Engine/FuzzyMatchingTests.cs:75`, `tools/record-oracle.py:1366`);
-`tools/check-ratchet.ps1:94` writes the upstream-commit line wrongly with no submodule; MAIN has a
-stray `.github/workflows/pages.yml`. **Left running:** four `python -m http.server` (8090, 8092,
-8137, 8199) and Vite (PID 34120).
+**Carried from S73/S60:** the owner owes the `docs/demo/` reference layouts and the Pages publish
+(push `phase9-demo`, Source = GitHub Actions); four comments cite `_regex.c:20535-20537` for the
+deletion shift, which is at `:20555-20558`; `tools/check-ratchet.ps1:94` writes the upstream-commit
+line wrongly with no submodule; MAIN has a stray `.github/workflows/pages.yml`; a benchmark here
+must stop `.scratch/pause-stryker.ps1` AND `after-parsing.ps1`. Left running: four
+`python -m http.server` (8090, 8092, 8137, 8199) and Vite (PID 34120).
