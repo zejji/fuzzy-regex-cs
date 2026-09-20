@@ -17,6 +17,8 @@ The full finding, the per-row door output and the evidence that none of it is S6
 `docs/plan/slices/notes/S57-sittings.md`, "Sitting 3 - 2026-09-20". Read that section, not this
 file, for the rows themselves.
 
+This slice's own working notes are in `docs/plan/slices/notes/S57b-sittings.md`.
+
 ## Scope
 
 - **Every one of the twenty rows is judged**: this port right (an `ExpectedDivergences` entry with

@@ -800,3 +800,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   config would pass the very misconfiguration it catches), and a CI leg over the whole history. The
   two stale rollback tags (`s26-rolled-back`, `s29-rolled-back`) and `rewritten-main` were dropped;
   they were the last refs to the old history.
+
+- **2026-09-20 (S57b): date an oracle row by replaying the row, not by re-running a wave.**
+  A bisect step that re-runs a 6000-row wave takes about four minutes and, worse, dates the row
+  against a wave that no longer contains it: the recorder changed after S52 closed (S52c, S53b), so
+  a seed does not draw what it drew then. Handing the rows in as a `-Rows` file takes about twenty
+  seconds a step and every step asks about the same rows. `tools/probes/s57b-date-the-rows.ps1`.
