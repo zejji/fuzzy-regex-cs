@@ -1005,3 +1005,14 @@ amended text is inline above; this list is the record of what changed and why.
     phase closes when the 6000-row wave is green at all three seeds, and the extra
     `fuzzy,interactions` wave with it, with no row parked to get there. Phase 6 is one slice longer;
     the estimate moves from 17-22 to 18-23.
+
+
+33. **Phase 9 gains S75 (owner decisions, 2026-09-20).** The owner's first look at S73 and S74
+    found five things: the inline `s`/`i`/`d` edit letters overlap and mislead; the input headings,
+    "Named lists" above all, lack an explanation; no worked example shows the fuzzy test set; the
+    C# snippet's type and member names are unpinned string literals; and the copy linter reaches
+    only the demo's strings while the owner's writing rule now covers every document. S75 fixes all
+    five in one slice, reusing S74's help mechanism for the markers and the headings, and extends
+    the linter to `README.md` and `docs/*.md` with the same rule set. **What does not change:** the
+    engine, the wire format, the examples already shipped, and every S73 and S74 rule. The phase
+    closes again when it lands.

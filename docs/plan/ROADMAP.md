@@ -763,6 +763,13 @@ exclusive pairs and per-flag help generated from the enum comments. Spec:
 `docs/plan/slices/S74-flags-control.md`. Design agreed with the owner in conversation; no review
 round before the sitting.
 
+**S75 follows S74 (owner decisions 2026-09-20; spec amendment 33):** the edit markers keep their
+letters, drawn in a clear marker row, and gain hover notes, a legend and an alignment view; every input heading gets a help
+note linking to the docs; the fuzzy test set gets a worked example; the snippet's identifiers are
+pinned by `nameof`; and the copy linter runs over `README.md` and `docs/*.md`. Spec:
+`docs/plan/slices/S75-edit-markers-help-notes-and-the-prose-linter.md`. The owner reviews it before
+the sitting.
+
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
 Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus
