@@ -35,6 +35,14 @@ export interface EditRun {
      * how wide the hole is. A run of six substitutions does (S75).
      */
     readonly count: number;
+    /**
+     * Where the run starts in the subject, in UTF-16 code units, as the engine counts.
+     *
+     * The page names the position when a pointer rests on a mark, and a `del` run is the one that
+     * needs saying: the gap is drawn between two characters and stands for characters that are not
+     * there at all, so "deletion before index 6" is the only way to read it off the page.
+     */
+    readonly index: number;
 }
 
 /** One run of the subject as the page paints it. `match` is null for the text between matches. */
@@ -160,7 +168,9 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
     const runs: EditRun[] = [];
     let plainFrom = start;
     const flush = (upto: number): void => {
-        if (upto > plainFrom) runs.push({ text: subject.slice(plainFrom, upto), kind: null, count: 1 });
+        if (upto > plainFrom) {
+            runs.push({ text: subject.slice(plainFrom, upto), kind: null, count: 1, index: plainFrom });
+        }
         plainFrom = upto;
     };
 
@@ -172,7 +182,7 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
     let openCount = 0;
     const close = (upto: number): void => {
         if (openKind === null) return;
-        runs.push({ text: subject.slice(openFrom, upto), kind: openKind, count: openCount });
+        runs.push({ text: subject.slice(openFrom, upto), kind: openKind, count: openCount, index: openFrom });
         plainFrom = upto;
         openKind = null;
         openCount = 0;
@@ -189,7 +199,7 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
             // span it: the two halves are two marks with a hole between them.
             close(at);
             flush(at);
-            runs.push({ text: '', kind: 'del', count: missing });
+            runs.push({ text: '', kind: 'del', count: missing, index: at });
         }
 
         if (at === end) break;

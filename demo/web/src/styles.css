@@ -221,6 +221,30 @@
         @apply mb-1 block text-xs font-semibold tracking-wide text-shell-muted uppercase;
     }
 
+    /* A heading and the `(?)` that opens its note, on one row.
+
+       Inline boxes rather than a flex row, because one of the six IS a `<legend>`: `display` on a
+       legend was restricted for years and only became reliable recently, while `vertical-align`
+       has always worked there. The label keeps its own bottom margin, so the box below each
+       heading sits exactly where it did before the button arrived. */
+    .field-heading {
+        @apply block;
+    }
+
+    .field-heading .field-label {
+        @apply inline-block align-middle;
+    }
+
+    .field-heading .flag-help-button {
+        @apply ml-2 inline-flex align-middle;
+    }
+
+    /* The Flags note has no heading beside it - it opens inside the panel, below the summary that
+       already says "Flags" - so its button starts the row. */
+    .field-heading > .flag-help-button:first-child {
+        @apply ml-0;
+    }
+
     .field {
         @apply w-full rounded-md border border-shell-edge bg-shell-raised px-3 py-2;
         @apply font-mono text-sm text-shell-text placeholder:text-shell-muted;
@@ -371,6 +395,14 @@
 
     .flag-help {
         @apply mt-1 mb-1 text-xs leading-relaxed text-shell-muted;
+    }
+
+    /* The press at the end of a heading note. Underlined and in the accent, because it behaves like
+       a link and anything that behaves like a link must look like one; a button rather than an
+       anchor, because it goes nowhere - it opens the tab already in the page. */
+    .note-link {
+        @apply underline underline-offset-2 text-accent-bright;
+        @apply hover:text-shell-text focus-visible:text-shell-text;
     }
 
     /* --- the tab set, at the foot of the input pane ------------------------------------------
@@ -591,6 +623,43 @@
         content: attr(data-count) ' d';
         left: 50%;
         transform: translateX(-50%);
+    }
+
+    /* The key to the marks. Three chips on one row, wrapping at the widths where three do not fit.
+
+       `mt-4` and the chip's own line height leave room for the letter under each sample, which is
+       positioned out of the flow and would otherwise be drawn over whatever follows - the same
+       room `.subject-pane.has-markers` makes for the letters inside the subject. */
+    .edit-legend {
+        @apply mt-4 flex flex-wrap gap-x-5 gap-y-3 text-xs leading-6 text-shell-muted;
+    }
+
+    .edit-chip {
+        @apply inline-flex items-baseline gap-1.5;
+    }
+
+    /* The selected match spread out, a cell per character. It wraps, because a 200-character match
+       on one line is a sideways scroller nobody asked for, and the cells are the same width so a
+       wrapped row still reads as a row. */
+    .alignment {
+        @apply mt-2 flex flex-wrap gap-x-1 gap-y-4 font-mono text-sm;
+    }
+
+    .alignment-cell {
+        @apply flex min-w-6 flex-col items-center;
+    }
+
+    /* Room under the character for the letter `.edit::after` positions there, the same room
+       `.subject-pane.has-markers` makes inside the subject. A deletion has no character, so the
+       cell would collapse to nothing: `min-h-5` keeps the gap the width of the mark beside it. */
+    .alignment-character {
+        @apply block min-h-5 leading-5;
+    }
+
+    /* Below the kind's letter, which `.edit::after` positions 13 px under the character and out of
+       the flow: at `mt-2` the number was drawn through the letter (measured at 1366x768, S75). */
+    .alignment-index {
+        @apply mt-5 font-sans text-[0.625rem] leading-none text-slate-500;
     }
 
     /* `min-w-max` with `w-full`: the table fills its region when there is room and refuses to

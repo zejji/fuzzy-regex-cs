@@ -168,6 +168,24 @@ test('a fuzzy match is broken into the characters each error was spent on', () =
     expect(runs(result)).toBe('sub:x|ins:f|-:ooba|del:');
 });
 
+test('each run carries the subject index it starts at', () => {
+    // The page says where an error was spent - "substitution at index 0" - and a run that does not
+    // know its own position cannot be described. The same "xfoobat" answer as above.
+    const result = segments('xfoobat', [
+        { index: 0, length: 6, edits: { substitutions: [0], insertions: [1], deletions: [6] } },
+    ]);
+
+    const [match] = result.segments.filter((s) => s.match !== null);
+    expect(match?.runs?.map((run) => `${run.kind ?? '-'}@${run.index}`)).toEqual([
+        'sub@0',
+        'ins@1',
+        '-@2',
+        // The gap sits at the position of the character that is missing, which for a deletion at
+        // the end of the match is the index one past its last character.
+        'del@6',
+    ]);
+});
+
 test('deletions in the same place are one gap carrying their count', () => {
     // (?:abcdef){d<=2} against "abef", read off the subject: "abef" is "abcdef" with "c" and "d"
     // missing, both from the one place, after "ab" and before "ef", which is subject position 2.

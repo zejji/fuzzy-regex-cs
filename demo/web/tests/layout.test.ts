@@ -252,7 +252,19 @@ test('nothing but a link is underlined', async () => {
         .flatMap(([, selector]) => selectorList(selector ?? ''));
 
     expect(underlined.length, 'no rule underlines anything, so the link style is gone').toBeGreaterThan(0);
-    for (const selector of underlined) {
+
+    // The one control that is underlined and is not an `<a>`: the press at the end of a heading
+    // note, which opens the help tab (S75, item 2). It goes nowhere, so it is a `<button>` and not
+    // an anchor with a dead `href` - but it reads as a link, and a link-shaped control that is not
+    // underlined is told apart from its sentence by colour alone, which is WCAG 1.4.1. That it is
+    // a button and that pressing it does something is held by page.test.ts, not here.
+    const linkLike = ['.note-link'];
+
+    // An allowance nothing uses is an allowance that outlives its reason, so each one has to be
+    // among the rules this run actually found.
+    for (const allowed of linkLike) expect(underlined).toContain(allowed);
+
+    for (const selector of underlined.filter((one) => !linkLike.includes(one))) {
         // A selector naming the <a> element, which a utility class never does: `class="underline"`
         // compiles to `.underline` and says nothing about what wears it, so an underline a link
         // needs is written in this file against `a`, not in the template.
@@ -1041,7 +1053,13 @@ test('the flag grid asks the panel for its columns, not the window', async () =>
 /** WCAG 2.2's 24x24 minimum (2.5.8), which is what a 24 px round button is exactly. */
 test('a flag help button is a target a finger can hit', async () => {
     const css = await builtCss();
-    const button = found(/\.flag-help-button\{([^}]*)\}/.exec(css), 'a .flag-help-button rule')[1] as string;
+    // Anchored at the start of the selector, so the rule read is the one that sizes the button and
+    // not `.field-heading .flag-help-button`, which only moves it (S75, item 2). Unanchored, the
+    // first rule in the file whose selector merely ENDS in this class was the one measured.
+    const button = found(
+        /(?:^|[}])\.flag-help-button\{([^}]*)\}/.exec(css),
+        'a .flag-help-button rule',
+    )[1] as string;
 
     expect(button).toMatch(/width:calc\(var\(--spacing\)\s*\*\s*6\)/);
     expect(button).toMatch(/height:calc\(var\(--spacing\)\s*\*\s*6\)/);

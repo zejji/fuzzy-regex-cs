@@ -36,6 +36,10 @@ describe('the linter sees the strings it was written for', () => {
         // 15 help sentences, two legends and the shut row's word; one-word strings included, which
         // is why this source is imported rather than scanned.
         ['flags.ts', 18, 'Case-insensitive matching'],
+        // Three strings per heading note, six notes.
+        ['help-notes.ts', 18, 'A named list is a set of words'],
+        // One sentence per unbounded letter: e, s, i, d.
+        ['budget.ts', 4, 'allows any number of errors'],
         ['DemoEngine.cs', 12, 'The page stays responsive'],
         ['index.html', 3, 'FuzzyRegex'],
         ['help generator', 1, 'GENERATED'],

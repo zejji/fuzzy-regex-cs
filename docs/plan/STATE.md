@@ -1,28 +1,23 @@
 # State
 
-**S75 is CHECKPOINTED after sitting 1 (2026-09-20, branch `phase9-demo`, demo worktree).** The two
-commits before it, `e3f47e2` and `7c2b294`, were the owner's edits to the spec; sitting 1 is the
-first code.
+**S75 is CHECKPOINTED after sitting 2 (2026-09-20, branch `phase9-demo`, demo worktree).** The
+sitting stopped on the allowance, not on a blocker.
 
-**What landed:** item 1 in part. Neighbouring errors of one kind are one mark with one letter, where
-they were a mark per character. Deletions that stack in one place are one gap carrying a count
-(`data-count`, drawn as CSS `content`, so copying the subject still copies the subject), and the
-marker row sits under a taller line that only opens on a result with markers. Measured in a real
-browser at 1366x768 and 390x844: the letter's top was 2.8 px above the bottom of the highlight's
-border and is now 2.2 px clear of it, with 10.2 px to the line below. Measuring found two faults no
-test caught - a counted label that wrapped and drew back through the border, and two labels
-overlapping by 6 px. Both fixed and pinned. Evidence, re-run commands and the engine table:
-`docs/plan/slices/notes/S75-sittings.md`.
+**What landed in sitting 2:** items 1 and 2 complete. A `(?)` note on all six input headings
+(`HeadingHelp.vue`, `lib/help-notes.ts`), the line under the pattern when a fuzzy budget has no
+bound (`lib/budget.ts`), the legend under the subject, the note naming where one marked run was
+spent, and the alignment view - the selected match a cell per character, each labelled with its
+position and kind (`lib/alignment.ts`). Sitting 1 delivered the marker row itself.
 
-**Sitting 2 picks up:** the rest of item 1 - the legend under the subject, the note on
-hover/focus/tap naming the exact position, the unbounded-budget line under the pattern, and the
-letter-by-letter alignment view - then items 2 to 5 untouched. `markers` in `demo.ts` is already the
-condition the legend needs. Generalise the note mechanism out of `flags.ts` first: item 2's six
-heading notes want the same thing, and the spec asks for one help mechanism rather than three. No
-reference screenshots are committed yet, because they are meant to show the legend and the
-alignment view.
+**Sitting 3 picks up at item 3**, whose engine numbers are already measured and quoted in
+`notes/S75-sittings.md`: write the example, then items 4 and 5, then the blind review and the
+verifier over BOTH sittings, then the reference screenshots. Two things for the owner, both
+recorded in the notes: the spec's named-lists wording describes a box that parses one list per
+line, and the alignment view has no pattern row because `fuzzy_changes` carries no pattern-side
+information.
 
-**Ratchet GREEN**, 6,480 tests passing, baseline 6,372; 309 web tests, typecheck clean.
+**Green at the checkpoint:** 363 web tests, `vue-tsc` clean, the copy linter included. No C# changed
+in this sitting, so the ratchet stands where sitting 1 left it: GREEN, 6,480 tests, baseline 6,372.
 
 **Take S57b next on the main line, not S57** - S57 is blocked by its own first paragraph. Phase 6's
 exit gate is RED: `run-oracle.ps1 -Count 6000` diverges 3 (seed 7), 3 (4242), 14 (20260920), twenty

@@ -143,3 +143,56 @@ asks for one help mechanism rather than three.
 
 No screenshots are committed yet: the reference shots are meant to show the legend and the alignment
 view, and neither exists.
+
+## Sitting 2 - 2026-09-20
+
+Checkpoint, not the end of the slice: the five-hour allowance ran to 92% with items 3 to 5 still
+open. Everything below is green - 363 web tests, `vue-tsc` clean, the copy linter included.
+
+### Done
+
+- **Item 2 in full.** `HeadingHelp.vue` carries the `(?)` row for all six input headings, and
+  `lib/help-notes.ts` holds the six notes, their link text and their button names, all linted.
+- **Item 1 finished.** The unbounded-budget line, the legend, the note on a marked run, and the
+  alignment view.
+
+### The unbounded budget, measured rather than parsed from memory
+
+`lib/budget.ts` reads the pattern text, because the engine exposes no compiled constraint and the
+answer is wanted while the pattern is being typed. Which budgets actually run away came from
+`tools/probes/s75-fuzzy-budget.py` (22 cases, regex 2026.9.10) and `s75-fuzzy-budget.cs` (the same
+22 against this port, row for row identical), with `s75-fuzzy-defaults.py` settling the one that
+reading the grammar gets wrong: `{s<=1,e}` is BOUNDED. Naming any kind puts every kind nobody named
+at zero, so the unbounded `e` beside `s<=1` allows one error in total and the page says nothing.
+
+### No pattern row in the alignment, and why
+
+The spec asks for the pattern's characters above the subject's. The engine cannot supply them.
+`fuzzy_changes` is three lists of subject positions and carries no pattern-side information, and a
+pattern is not a sequence of characters to begin with - `(?:colou?r|couleur){e<=2}` against "calor"
+answers `fuzzy_changes=([1], [], [4])` and never says which branch matched
+(`tools/probes/s75-alignment-inputs.py`, regex 2026.9.10, 2026-09-20). So the view is the subject's
+side: a cell per character, each labelled with its position and what happened to it, plus a cell per
+place where characters are missing. The owner should say whether a pattern row is wanted enough to
+pay for engine work.
+
+### Three faults the browser found that the tests did not
+
+1. The legend's sample character was `a`, so the key read "a substitution" - the sample became the
+   article. It is `ab` now.
+2. `.alignment-index` at `mt-2` drew the position through the kind's letter, which `.edit::after`
+   positions 13 px below the character and out of the flow. `mt-5` clears it (1366x768).
+3. A cell holding a space was a blank square labelled "at index 5", which names nothing. Spaces,
+   tabs and newlines now draw a stand-in glyph and are named in words.
+
+### Left for sitting 3
+
+- **Item 3.** The example is measured and ready to write:
+  `(?:colour){e<=2:[a-z]}` over `"colour, color, col our and col0ur"` gives (0,6) "colour" with no
+  errors and (8,13) "color" with one substitution and one deletion; "col our" and "col0ur" are
+  searched on their own in the probe and give no match at all
+  (`tools/probes/s75-example-test-set.py`, regex 2026.9.10, 2026-09-20). Still to do: run it against
+  this port, add the entry with key `fuzzy`, and lint the note.
+- **Items 4 and 5** untouched.
+- **The whole slice's blind review and verifier** are outstanding, over both sittings' changes.
+- Reference screenshots at 1366x768 and 390x844 once item 3 lands.

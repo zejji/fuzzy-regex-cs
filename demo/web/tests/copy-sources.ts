@@ -16,7 +16,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { budgetNote } from '../src/lib/budget';
 import { FLAG_HELP, RADIO_GROUPS, summaryText } from '../src/lib/flags';
+import { HEADING_NOTES } from '../src/lib/help-notes';
 
 const read = (relative: string): string =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
@@ -184,6 +186,22 @@ export const SOURCES: Record<string, Copy[]> = {
         ...RADIO_GROUPS.map((group) => ({ where: `flags.ts ${group.name} legend`, text: group.legend })),
         { where: 'flags.ts summary row', text: summaryText(new Set()) },
     ],
+    // The six heading notes: the sentence, the words on the press that opens the help tab, and the
+    // button's own name, which only a screen reader ever hears. Imported rather than scanned for the
+    // reason flags.ts is - and for a second one: the sentences hold backslashes (`\L<name>`, `\1`),
+    // which the literal scan would read through its own escape rule.
+    'help-notes.ts': HEADING_NOTES.flatMap((note) => [
+        { where: `help-notes.ts ${note.id}`, text: note.note },
+        { where: `help-notes.ts ${note.id} link`, text: note.linkText },
+        { where: `help-notes.ts ${note.id} label`, text: note.label },
+    ]),
+    // The line under the pattern when a fuzzy budget has no bound. Assembled per letter rather than
+    // scanned, because the sentence is built from two halves and a spec the pattern supplies, and
+    // what a visitor reads is the whole of it.
+    'budget.ts': (['e', 's', 'i', 'd'] as const).map((letter) => ({
+        where: `budget.ts {${letter}}`,
+        text: budgetNote({ spec: `{${letter}}`, letter }),
+    })),
     // The engine's own refusals - the caps, the timeout, the named-list errors - arrive as
     // `answer.error` and land in that same paragraph. Linting the C# keeps the whole channel
     // covered: a message a visitor reads is copy wherever it is written.

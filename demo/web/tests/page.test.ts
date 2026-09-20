@@ -21,6 +21,7 @@ const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf
 
 import App from '../src/App.vue';
 import { CHECKBOXES, FLAG_HELP, FLAG_NAMES, RADIO_GROUPS } from '../src/lib/flags';
+import { HEADING_NOTES, noteButtonId, noteId } from '../src/lib/help-notes';
 import { toCSharp } from '../src/lib/snippet';
 import type { Edits, Group, Inputs, Match } from '../src/types';
 
@@ -571,7 +572,9 @@ test("the owner's stacked deletions are one counted gap per run, not a letter ea
 
     // Two gaps for eleven missing characters, each saying how many it stands for. The count is a
     // `data-count` and not text in the element, so copying the subject still copies the subject.
-    const gaps = [...page.querySelectorAll('span.edit-del')];
+    // Scoped to the pane: the legend under it carries a sample of each mark, drawn by the same
+    // rules, so a page-wide query would count the key along with the thing it is a key to.
+    const gaps = [...page.querySelectorAll('.subject-pane span.edit-del')];
     expect(gaps.map((gap) => gap.getAttribute('data-count'))).toEqual(['5', '6']);
     expect(gaps.map((gap) => gap.getAttribute('title'))).toEqual(['5 deletions', '6 deletions']);
     expect(page.querySelector('.subject-pane')?.textContent).toBe('xirefoabralfobarxie');
@@ -623,7 +626,7 @@ test('six substitutions in a row are one mark with one letter, and the count is 
     };
     await nextTick();
 
-    const subs = [...page.querySelectorAll('span.edit-sub')];
+    const subs = [...page.querySelectorAll('.subject-pane span.edit-sub')];
     expect(subs.map((sub) => sub.textContent)).toEqual(['xirefo']);
     expect(subs[0]?.hasAttribute('data-count')).toBe(false);
     expect(subs[0]?.getAttribute('title')).toBe('6 substitutions');
@@ -650,6 +653,217 @@ test('the taller marker row opens on a result with markers and not on one withou
     };
     await nextTick();
     expect(found(page.querySelector('.subject-pane'), 'subject pane').className).toMatch(/has-markers/);
+});
+
+test('the selected fuzzy match is laid out one character at a time', async () => {
+    // The marks in the subject are as wide as the characters under them, and a deletion is a few
+    // pixels of dashed border. This is where one error can be read on its own, and it is the only
+    // path a keyboard has to that: a highlight is a control, so the marks inside it cannot be
+    // focusable (axe-core, nested-interactive).
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'calor';
+    // (?:colour){e<=2} against "calor": span (0,5), fuzzy_changes ([1], [], [4]).
+    // tools/probes/s75-alignment-inputs.py, regex 2026.9.10, 2026-09-20.
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 5),
+                counts: { substitutions: 1, insertions: 0, deletions: 1 },
+                edits: { substitutions: [1], insertions: [], deletions: [4] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const cells = [...page.querySelectorAll('.alignment-cell')];
+    expect(cells.map((cell) => cell.querySelector('.alignment-character')?.textContent)).toEqual([
+        'c',
+        'a',
+        'l',
+        'o',
+        '',
+        'r',
+    ]);
+    // The position is drawn on the cells that have something to say, and nowhere else: under every
+    // character it is a row of numbers competing with the subject it is about.
+    expect(cells.map((cell) => cell.querySelector('.alignment-index')?.textContent)).toEqual([
+        undefined,
+        '1',
+        undefined,
+        undefined,
+        '4',
+        undefined,
+    ]);
+    expect(cells.map((cell) => cell.getAttribute('aria-label'))).toEqual([
+        'c at index 0',
+        'a at index 1, substitution',
+        'l at index 2',
+        'o at index 3',
+        'deletion before index 4',
+        'r at index 4',
+    ]);
+    // The cells are drawn by the same rules as the marks in the subject, so the key under the
+    // subject explains both.
+    expect(cells[1]?.querySelector('.edit-sub')).not.toBeNull();
+    expect(cells[4]?.querySelector('.edit-del')).not.toBeNull();
+
+    // An exact match has nothing to align, and a row of plain characters under the groups would be
+    // a second copy of the subject.
+    demo.answer = { matches: [match(0, 5)], truncated: false };
+    await nextTick();
+    expect(page.querySelector('.alignment-cell')).toBeNull();
+});
+
+test('a space in the alignment is drawn and named, rather than being an empty cell', async () => {
+    // `(?:colour){e}` against "calor and the colour" matches "calor " - six characters, the last a
+    // space substituted for the pattern's "r". Drawn as the character itself it is a blank cell
+    // with a letter under it, and read out it is "at index 5", which names nothing.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'calor and';
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 2, insertions: 0, deletions: 0 },
+                edits: { substitutions: [1, 5], insertions: [], deletions: [] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const cells = [...page.querySelectorAll('.alignment-cell')];
+    const last = cells.at(-1);
+    expect(last?.getAttribute('aria-label')).toBe('space at index 5, substitution');
+    expect(last?.querySelector('.alignment-character')?.textContent).not.toBe(' ');
+    expect(last?.querySelector('.alignment-character')?.textContent).toMatch(/\S/);
+});
+
+test('the marks under the subject have a legend, and only when there are marks', async () => {
+    // Three signals per kind - hue, line style, letter - and none of them means anything to a
+    // first-time visitor without a key. The legend is the key, in the words the labels use.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xfoobat';
+    demo.answer = { matches: [match(1, 6)], truncated: false };
+    await nextTick();
+    expect(page.querySelector('.edit-legend')).toBeNull();
+
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 1, insertions: 1, deletions: 1 },
+                edits: { substitutions: [0], insertions: [1], deletions: [6] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const legend = found(page.querySelector('.edit-legend'), 'the legend');
+    const chips = [...legend.querySelectorAll('.edit-chip')];
+    expect(chips.map((chip) => chip.querySelector('.edit-name')?.textContent)).toEqual([
+        'substitution',
+        'insertion',
+        'deletion',
+    ]);
+    // Each chip carries a sample drawn by the same rules as the marks themselves, so the key and
+    // the thing it is a key to cannot drift apart.
+    expect(chips.map((chip) => found(chip.querySelector('span.edit'), 'a sample mark').className)).toEqual([
+        'edit edit-sub',
+        'edit edit-ins',
+        'edit edit-del',
+    ]);
+    // A key, not a control. Nothing here is pressable, so nothing here can look pressable.
+    expect(legend.querySelectorAll('button, [role="button"], [tabindex]')).toHaveLength(0);
+});
+
+test('a marked run says where the error was spent, on a pointer and on a tap', async () => {
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'xfoobat';
+    demo.answer = {
+        matches: [
+            {
+                ...match(0, 6),
+                counts: { substitutions: 1, insertions: 1, deletions: 1 },
+                edits: { substitutions: [0], insertions: [1], deletions: [6] },
+            },
+        ],
+        truncated: false,
+    };
+    await nextTick();
+
+    const note = found(page.querySelector<HTMLElement>('#edit-run-note'), 'the run note');
+    expect(note.hidden).toBe(true);
+
+    const marks = [...page.querySelectorAll('.subject-pane span.edit')];
+    const hover = async (which: number, event: string): Promise<void> => {
+        marks[which]?.dispatchEvent(new MouseEvent(event, { bubbles: true }));
+        await nextTick();
+    };
+
+    // A substitution and an insertion are at a character; a deletion is between two, and the
+    // subject has no character there to point at, so it is said as "before".
+    await hover(0, 'mouseenter');
+    expect(note.hidden).toBe(false);
+    expect(note.textContent?.trim()).toBe('substitution at index 0');
+    await hover(1, 'mouseenter');
+    expect(note.textContent?.trim()).toBe('insertion at index 1');
+    await hover(2, 'mouseenter');
+    expect(note.textContent?.trim()).toBe('deletion before index 6');
+
+    // The pointer leaving takes the note with it, the way the flag help behaves.
+    await hover(2, 'mouseleave');
+    expect(note.hidden).toBe(true);
+
+    // A tap leaves no pointer behind to hold the note open, so a press pins it (WCAG 1.4.13
+    // persistent), and Escape from anywhere dismisses it (dismissable).
+    await hover(0, 'click');
+    expect(note.hidden).toBe(false);
+    await hover(0, 'mouseleave');
+    expect(note.hidden).toBe(false);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await nextTick();
+    expect(note.hidden).toBe(true);
+});
+
+test('a fuzzy budget with no bound is named under the pattern', async () => {
+    // `{e}` allows any number of errors, so the subject fills with markers and the page looks
+    // broken to anyone who meant `{e<=1}`. Which budgets run away was measured, not reasoned
+    // about: tools/probes/s75-fuzzy-budget.py and the .cs beside it, and the table is in
+    // tests/budget.test.ts.
+    const { page, demo } = await mountPage();
+    demo.answeredSubject = 'colour';
+    demo.answer = { matches: [match(0, 6)], truncated: false };
+
+    for (const [letter, kind] of [
+        ['e', 'errors'],
+        ['s', 'substitutions'],
+        ['i', 'insertions'],
+        ['d', 'deletions'],
+    ]) {
+        demo.answeredPattern = `(?:colour){${letter}}`;
+        await nextTick();
+        const note = found(page.querySelector('#budget-note'), `the budget note for {${letter}}`);
+        expect(note.textContent).toContain(`{${letter}} allows any number of ${kind}`);
+        // And the bounded form, so the reader has the edit to make rather than a diagnosis.
+        expect(note.textContent).toContain(`{${letter}<=2}`);
+    }
+
+    // A bounded budget is the ordinary case and says nothing. A page that comments on every fuzzy
+    // pattern is a page whose comments are scrolled past.
+    demo.answeredPattern = '(?:colour){e<=1}';
+    await nextTick();
+    expect(page.querySelector('#budget-note')).toBeNull();
+
+    // Nor on a pattern the engine refused: the braces in a pattern that did not parse mean
+    // whatever the engine got to before it stopped, and the parse error is the thing to read.
+    demo.answeredPattern = '(?:colour){e}(';
+    demo.failure = 'missing ) at position 13';
+    demo.failureOffset = 13;
+    await nextTick();
+    expect(page.querySelector('#budget-note')).toBeNull();
 });
 
 test('the help panel is the documentation, rendered as text and opened from the keyboard', async () => {
@@ -1351,6 +1565,87 @@ test('the keyboard opens a flag help and closes it again', async () => {
     button.blur();
     await settle();
     expect(text.hidden).toBe(true);
+});
+
+// --- the heading notes (S75, item 2) -----------------------------------------------------------
+
+/**
+ * One heading's `(?)` button, its note, and the press inside the note that opens the help tab.
+ *
+ * The flags panel is opened first, because its note lives inside the panel body rather than in the
+ * summary row: a focusable control inside a `<summary>` is a focusable descendant of an interactive
+ * control, which is what axe's `nested-interactive` rule refuses.
+ */
+function headingHelp(page: HTMLElement, id: string) {
+    const button = found(
+        page.querySelector<HTMLButtonElement>(`#${noteButtonId(id)}`),
+        `the ${id} heading help button`,
+    );
+    const text = found(page.querySelector<HTMLElement>(`#${noteId(id)}`), `the ${id} heading note`);
+    return {
+        button,
+        text,
+        link: found(text.querySelector<HTMLButtonElement>('button.note-link'), `the ${id} note's link`),
+    };
+}
+
+test('every input heading says what it is for, and the note links to the documentation', async () => {
+    const { page, demo } = await mountPage();
+    found(page.querySelector<HTMLDetailsElement>('details#flags-panel'), 'the flags panel').open = true;
+    // The replacement box belongs to replace mode and is only in the page there, so its heading is
+    // only in the page there too.
+    demo.mode = 'replace';
+    await settle();
+
+    expect(HEADING_NOTES).toHaveLength(6);
+
+    for (const note of HEADING_NOTES) {
+        const { button, text } = headingHelp(page, note.id);
+
+        // Shut until asked for, and named for a screen reader: the button's own text is "?".
+        expect(text.hidden, note.id).toBe(true);
+        expect(button.getAttribute('aria-label')).toBe(note.label);
+        expect(button.getAttribute('aria-controls')).toBe(noteId(note.id));
+
+        button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        await settle();
+        expect(text.hidden, note.id).toBe(false);
+        expect(text.textContent).toContain(note.note);
+        expect(text.textContent).toContain(note.linkText);
+
+        button.dispatchEvent(keydown('Escape'));
+        await settle();
+        expect(text.hidden, note.id).toBe(true);
+    }
+
+    // The link opens the help tab at this heading's section, and the note has done its job so it
+    // closes behind it.
+    const subject = headingHelp(page, 'subject');
+    subject.button.click();
+    await settle();
+    subject.link.click();
+    await settle();
+    expect(demo.helpKey).toBe('indices');
+    expect(found(page.querySelector('#tab-help'), 'the help tab').getAttribute('aria-selected')).toBe('true');
+    expect(subject.text.hidden).toBe(true);
+    expect(document.activeElement).toBe(page.querySelector('#tab-help'));
+});
+
+test('one note is open at a time, whichever mechanism opened the other', async () => {
+    const { page } = await mountPage();
+    const pattern = headingHelp(page, 'pattern');
+    const { help } = flagsPanel(page);
+
+    pattern.button.click();
+    await settle();
+    expect(pattern.text.hidden).toBe(false);
+
+    // A flag's `(?)` and a heading's `(?)` are the same mechanism since S75, so one shuts the other:
+    // two sentences open at once move the pane twice and nobody is reading both.
+    help('Posix').button.click();
+    await settle();
+    expect(pattern.text.hidden).toBe(true);
+    expect(help('Posix').text.hidden).toBe(false);
 });
 
 test('Escape puts the help away when the pointer opened it and the focus is elsewhere', async () => {

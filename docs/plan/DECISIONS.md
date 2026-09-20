@@ -815,3 +815,16 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   (`.subject-pane.has-markers`), not on every result. It costs a third again in height and an exact
   match has nothing to put there. The condition is read off the runs the page will paint rather than
   off the match counts, because a match past the display cap is counted and never drawn.
+- 2026-09-20 (S75): the alignment view has a subject row and no pattern row. `fuzzy_changes` is
+  three lists of subject positions and says nothing about the pattern, and a pattern is not a
+  sequence of characters anyway - `(?:colou?r|couleur){e<=2}` over "calor" never says which branch
+  matched (`tools/probes/s75-alignment-inputs.py`). A pattern row needs engine work, so whether it
+  is worth paying for is the owner's call.
+- 2026-09-20 (S75): `{s<=1,e}` is bounded, so the page says nothing about it. Naming any kind sets
+  every unnamed kind to zero, which caps the unbounded `e` at one error in total. Measured over 22
+  cases against regex 2026.9.10 and against this port, row for row identical
+  (`tools/probes/s75-fuzzy-budget.py`, `s75-fuzzy-budget.cs`, `s75-fuzzy-defaults.py`).
+- 2026-09-20 (S75): the note on a marked run opens on hover and on tap, and the keyboard and
+  screen-reader path is the mark's own `aria-label` plus the alignment view, not a control inside
+  the mark. axe-core's `nested-interactive` forbids focusable descendants of the
+  `<mark role="button">` highlights, so there is nowhere inside a mark to put one.
