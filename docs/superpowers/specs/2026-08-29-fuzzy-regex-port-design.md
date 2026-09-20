@@ -952,3 +952,13 @@ amended text is inline above; this list is the record of what changed and why.
     S73 does not touch, so the answer-identity rule is not in play. S72's decision to leave
     regex101's code generator out is reversed in one narrow respect: one language, this library's
     own API. One slice, sittings unestimated; the phase closes again when it lands.
+
+30. **Phase 9 gains S74, the flags control (owner decision, 2026-09-20).** The demo's free-text
+    flags field was inherited from S71's regex101 layout and never decided. S74 replaces it with a
+    collapsible panel: one summary row when closed, a checkbox grid with radio groups for the
+    exclusive pairs when open, opening in the page flow rather than floating, and a one-sentence
+    help note per flag generated from the enum's own doc comments. Grounded in NN/g's rule that a
+    multi-selection is a listbox with checkboxes and never a dropdown, and GOV.UK's checkbox and
+    exclusive-option guidance. **What does not change:** the engine and the wire format (the
+    flags string still crosses to `DemoEngine`), shared links, the examples file, and every S73
+    rule on copy, layout, typing and accessibility. One slice; the phase closes again when it lands.
