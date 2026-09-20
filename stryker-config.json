@@ -2,10 +2,10 @@
   "stryker-config": {
     "test-runner": "mtp",
     "target-framework": "net10.0",
-    "test-projects": ["tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj"],
-    "reporters": ["Progress", "Html", "Json"],
+    "reporters": ["Dots", "Html", "Json"],
     "mutation-level": "Standard",
-    "concurrency": 4,
+    "concurrency": 2,
+    "coverage-analysis": "off",
     "additional-timeout": 30000,
     "thresholds": { "high": 80, "low": 60, "break": 0 },
     "since": { "enabled": false }

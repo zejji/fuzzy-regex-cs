@@ -61,7 +61,7 @@
     TimeoutAndCancellationTests, OptimiserTrapsTests) now carry [SkipUnderStryker] and sit out
     when FUZZYREGEX_UNDER_STRYKER=1, which this script sets; stryker-config.json runs 4
     concurrent runners (was the default of 14 on 28 threads) with additional-timeout 30000 ms,
-    and this process runs at BelowNormal priority. Cost: roughly three times the wall clock.
+    (BelowNormal priority was tried and reverted the same day: it starves the coverage relay). Cost: roughly three times the wall clock.
     Gain: a "Timeout" now means a real hang, not a starved runner, and the machine stays usable.
 
 .PARAMETER Chunk
@@ -89,6 +89,7 @@
 #>
 [CmdletBinding(DefaultParameterSetName = 'Single')]
 param(
+    [int]$TestThreads = 4,
     [Parameter(ParameterSetName = 'Single', Mandatory)][string]$Chunk,
     [Parameter(ParameterSetName = 'Single', Mandatory)][string]$Mutate,
     [Parameter(ParameterSetName = 'Queue', Mandatory)][switch]$Queue,
@@ -106,11 +107,12 @@ function Test-BuildInFlight {
     # The leading comma stops PowerShell enumerating the array on return: `return @(...)` with
     # zero matches collapses to $null at the call site, not an empty array (verified 2026-09-16).
     $procs = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" -ErrorAction SilentlyContinue
-    , @($procs | Where-Object { $_.CommandLine -match '\bdotnet(\.exe)?"?\s+(test|build)\b' })
+    # Scoped to THIS checkout: a build in another worktree shares nothing with this one.
+    , @($procs | Where-Object { $_.CommandLine -match '\bdotnet(\.exe)?"?\s+(test|build)\b' -and $_.CommandLine -like "*$repoRoot*" })
 }
 
 function Invoke-StrykerChunk {
-    param([string]$ChunkName, [string]$MutateGlob)
+    param([string]$ChunkName, [string[]]$MutateGlobs)
 
     $chunkDir = Join-Path $outputRoot $ChunkName
     $reportPath = Join-Path $chunkDir 'reports/mutation-report.json'
@@ -127,18 +129,47 @@ function Invoke-StrykerChunk {
 
     New-Item -ItemType Directory -Force -Path $chunkDir | Out-Null
     $logPath = Join-Path $chunkDir 'run.log'
+    # A compiler server or MSBuild node left over from an interrupted run holds bin\ files; the
+    # initial `dotnet build` then fails and Stryker falls back to the BuildTools MSBuild, which
+    # cannot resolve the SDK (MSB4276). Measured 2026-09-17 13:50. Cheap insurance per chunk.
+    # Bounded since 2026-09-19: on SDK 10.0.400 the VB/C# half of the shutdown can wait for ever on
+    # an unresponsive VBCSCompiler (07:25 today, 25 min and counting; 04:18 the same), which stalled
+    # the whole queue between chunks. Insurance must not cost more than what it insures, so give it
+    # a minute, then end our own helper process and carry on; the build simply starts its own server.
+    $shutdown = Start-Process -FilePath 'dotnet' -ArgumentList 'build-server', 'shutdown' -NoNewWindow -PassThru
+    if (-not $shutdown.WaitForExit(60000)) {
+        Write-Host "  build-server shutdown did not return in 60 s; ending that helper and continuing" -ForegroundColor Yellow
+        try { $shutdown.Kill($true) } catch { }
+    }
 
-    Write-Host "Stryker chunk '$ChunkName': mutate = $MutateGlob" -ForegroundColor Cyan
+    Write-Host "Stryker chunk '$ChunkName': mutate = $($MutateGlobs -join ' ')" -ForegroundColor Cyan
+    # One -m per glob: a chunk may be many character spans across several files (the engine queue
+    # is a random-order partition, so a chunk finished early is still a representative sample).
+    $mArgs = @($MutateGlobs | ForEach-Object { '-m'; $_ })
 
     # Kind to the machine (owner, 2026-09-17): the whole tree of test runners inherits this
     # priority class, so the desktop wins any contention; and the suite's load-sensitive classes
     # ([SkipUnderStryker]) sit out, since fourteen parallel suites of stress tests was what turned
     # 557 of 2189 parsing mutants into "Timeout" (counted as killed) on the first run.
-    (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+    # NOT BelowNormal: measured 2026-09-17 11:05, at BelowNormal the MTP coverage relay acks timed
+    # out for nearly every test (1096+ Dubious in 47 min, 5 CPU-seconds used), so capture took an
+    # order of magnitude longer and every mutant then ran against the whole suite. Four runners and
+    # the [SkipUnderStryker] classes are what keep the machine usable.
     $env:FUZZYREGEX_UNDER_STRYKER = '1'
-    Push-Location $repoRoot
+    # Per test host: how many tests run at once (tests/FuzzyRegex.Tests/TestThreadsLimit.cs).
+    # Four runners x four threads = 16 of 28 logical processors; raise with -TestThreads overnight.
+    $env:FUZZYREGEX_TEST_THREADS = [string]$TestThreads
+    # Single-project mode from the test project's own directory: from the repo root Stryker
+    # detects FuzzyRegex.slnx and runs EVERY test project, including the oracle project, whose
+    # test host raced Stryker's own write of tests/FuzzyRegex.OracleTests/bin/.../FuzzyRegex.dll
+    # ("The process cannot access the file", 13:54 on 2026-09-17) and whose 26 tests need the
+    # recorded wave. Here only FuzzyRegex.Tests runs, which is what stryker-config.json always
+    # meant. -m globs stay relative to src/FuzzyRegex, the mutated project.
+    Push-Location (Join-Path $repoRoot 'tests/FuzzyRegex.Tests')
     try {
-        & dotnet stryker -m $MutateGlob -O $chunkDir --skip-version-check -V info 2>&1 |
+        # Release: the suite runs three times faster than Debug at four threads (11 s vs 31 s,
+        # measured 2026-09-17), and every mutant pays that cost.
+        & dotnet stryker --project FuzzyRegex.csproj --config-file (Join-Path $repoRoot 'stryker-config.json') @mArgs -O $chunkDir --configuration Release --skip-version-check -V info 2>&1 |
             Tee-Object -FilePath $logPath
         $exitCode = $LASTEXITCODE
     }
@@ -156,15 +187,18 @@ function Invoke-StrykerChunk {
 
 if ($Queue) {
     $queuePath = Join-Path $repoRoot 'tools/stryker-queue.json'
-    $chunks = @(Get-Content -LiteralPath $queuePath -Raw | ConvertFrom-Json)
-    $failed = @()
-    foreach ($c in $chunks) {
-        $globs = @($c.mutate)
-        if ($globs.Count -ne 1) {
-            throw "Chunk '$($c.chunk)' has $($globs.Count) mutate globs; exactly one is supported (see DESCRIPTION)."
-        }
-        $ok = Invoke-StrykerChunk -ChunkName $c.chunk -MutateGlob $globs[0]
-        if (-not $ok) { $failed += $c.chunk }
+    # The queue's leading _note entry has no 'chunk'; drop it here (StrictMode faults on $c.chunk).
+    # The queue is re-read before every chunk so it can be re-cut while a run is in progress
+    # (2026-09-18: the owner must be able to pause at any time, so chunks were shrunk mid-run).
+    # A chunk whose report exists is skipped inside Invoke-StrykerChunk, so this loop terminates.
+    $failed = @(); $done = @{}
+    while ($true) {
+        $chunks = @(Get-Content -LiteralPath $queuePath -Raw | ConvertFrom-Json | Where-Object { $_.PSObject.Properties['chunk'] })
+        $next = $chunks | Where-Object { -not $done.ContainsKey($_.chunk) } | Select-Object -First 1
+        if (-not $next) { break }
+        $done[$next.chunk] = $true
+        $ok = Invoke-StrykerChunk -ChunkName $next.chunk -MutateGlobs @($next.mutate)
+        if (-not $ok) { $failed += $next.chunk }
     }
     if ($failed.Count -gt 0) {
         Write-Host "Queue finished with failures: $($failed -join ', ')" -ForegroundColor Red
@@ -174,5 +208,5 @@ if ($Queue) {
     exit 0
 }
 
-$ok = Invoke-StrykerChunk -ChunkName $Chunk -MutateGlob $Mutate
+$ok = Invoke-StrykerChunk -ChunkName $Chunk -MutateGlobs @($Mutate)
 exit ($ok ? 0 : 1)
