@@ -33,6 +33,9 @@ describe('the linter sees the strings it was written for', () => {
         // The two the chunk-1 fix added, and the two this table went without until the blind pass
         // of 2026-09-20 noticed that the sources most likely to drift were the unguarded ones.
         ['src/lib', 2, 'could not be read'],
+        // 15 help sentences, two legends and the shut row's word; one-word strings included, which
+        // is why this source is imported rather than scanned.
+        ['flags.ts', 18, 'Case-insensitive matching'],
         ['DemoEngine.cs', 12, 'The page stays responsive'],
         ['index.html', 3, 'FuzzyRegex'],
         ['help generator', 1, 'GENERATED'],
@@ -40,6 +43,14 @@ describe('the linter sees the strings it was written for', () => {
         const copy = SOURCES[source as string] ?? [];
         expect(copy.length).toBeGreaterThanOrEqual(floor as number);
         expect(copy.some(({ text }) => text.includes(anchor as string))).toBe(true);
+    });
+
+    it("lints the flags panel's one-word strings, which a literal scan drops", () => {
+        // `literals` needs two words to tell a sentence from an identifier, so scanning flags.ts
+        // linted "Character set" and not "Version" - a legend a visitor reads either way.
+        const texts = (SOURCES['flags.ts'] ?? []).map(({ text }) => text);
+        expect(texts).toContain('Version');
+        expect(texts).toContain('none');
     });
 
     it('takes the comments out before linting a script', () => {

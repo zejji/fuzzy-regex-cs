@@ -17,36 +17,7 @@
 import type { Inputs } from '../types';
 
 import { MATCH_TIMEOUT_SECONDS } from './caps';
-
-/**
- * Every member of `FuzzyRegexOptions`, spelt as the enum spells it.
- *
- * The demo takes flags as text and the engine reads them case-insensitively
- * (`DemoEngine.TryParseFlags`), so "bestmatch" is a case the engine answers and
- * `FuzzyRegexOptions.bestmatch` is a snippet that does not compile. The visitor's spelling is
- * matched against this list and the enum's own is printed.
- *
- * `tests/FuzzyRegex.Tests/Gaps/Demo/DemoSnippetTests.cs` reads this array and compares it with
- * `Enum.GetNames<FuzzyRegexOptions>()`, so a member added to the library and not to this list
- * reddens the build rather than reaching a visitor as a name they cannot compile.
- */
-export const FLAG_NAMES: readonly string[] = [
-    'None',
-    'IgnoreCase',
-    'Multiline',
-    'Singleline',
-    'Unicode',
-    'IgnorePatternWhitespace',
-    'Ascii',
-    'Version1',
-    'RightToLeft',
-    'Word',
-    'BestMatch',
-    'Version0',
-    'FullCase',
-    'EnhanceMatch',
-    'Posix',
-];
+import { FLAG_NAMES } from './flags';
 
 /**
  * What `String.Trim()` strips, which is not what JavaScript's `trim()` strips.

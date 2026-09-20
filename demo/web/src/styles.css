@@ -294,6 +294,85 @@
         @apply rotate-180;
     }
 
+    /* --- the flags panel ---------------------------------------------------------------------
+
+       A native <details>, like the help panels further down, and it folds at every width: the
+       fourteen boxes are worth one row of the input pane until somebody wants them. Nothing in
+       here is positioned, which is the whole of how the help survives a 390 px screen - a
+       paragraph in the flow cannot fall off the edge of the panel it is inside. */
+    .flags-panel {
+        @apply rounded-md border border-shell-edge bg-shell-raised;
+    }
+
+    /* 40 px tall against WCAG 2.2's 24x24 (2.5.8), and the whole row is the target.
+
+       A flex summary is not a `list-item`, so the browser draws no disclosure marker on it. The
+       chevron in the markup is what replaces it, and it turns from here rather than from a ref: the
+       open state is the element's own and the page has no business holding a second copy of it. */
+    .flags-panel > summary {
+        @apply flex min-h-10 cursor-pointer items-center gap-2 px-3 py-2;
+        @apply hover:bg-shell;
+    }
+
+    .flags-panel[open] > summary .chevron {
+        @apply rotate-180;
+    }
+
+    /* The same words as `.field-label`, on a row rather than over a box, so without its margin. */
+    .flags-label {
+        @apply text-xs font-semibold tracking-wide text-shell-muted uppercase;
+    }
+
+    /* What is on, said on the shut row, and said on ONE line however long the list gets: a summary
+       that wraps to three lines is the screenful this panel exists to save. */
+    .flags-chosen {
+        @apply min-w-0 flex-1 truncate font-mono text-sm text-shell-text;
+    }
+
+    .flags-body {
+        @apply flex flex-col gap-4 border-t border-shell-edge px-3 py-3;
+    }
+
+    /* As many columns as fit, which at every width this demo meets is ONE - and the floor is the
+       measurement that says so rather than a guess.
+
+       `tools/probes/s74-flags-panel.mjs`, Chrome through Playwright on 2026-09-20: the input pane
+       is 383 px wide at 1366, at 1440 AND at 1920, because it is a fixed column and not a share of
+       the window, and 318 px at 390. The widest row - `IgnorePatternWhitespace` with its box and
+       its `(?)`, laid out on one line - is 253 px. So a second column needs 2 x 256 + the 1rem gap
+       = 528 px of panel and cannot arrive at any of them; the slice sketched two columns from
+       480 px, and 480 px of panel is not a width this layout has.
+
+       The rule stays `auto-fit` rather than becoming a plain column because that is the honest
+       statement of the intent and it costs a line: 16rem is the floor the measurement gives, so a
+       pane that ever grows past 528 px gets its second column with nothing to change here, and a
+       column is never narrower than the longest flag name. */
+    .flag-grid {
+        @apply grid gap-x-4 gap-y-2;
+        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    }
+
+    .flag-row {
+        @apply flex min-h-8 items-center gap-2;
+    }
+
+    .flag-name {
+        @apply min-w-0 flex-1 cursor-pointer font-mono text-sm text-shell-text;
+    }
+
+    /* 24x24, which is WCAG 2.2's minimum (2.5.8) exactly. A row of 44 px buttons would make the
+       panel twice as tall as the boxes they explain, and this one sits inside a 32 px row that is
+       itself the target for the label beside it. */
+    .flag-help-button {
+        @apply flex size-6 shrink-0 items-center justify-center rounded-full;
+        @apply border border-shell-edge text-xs font-semibold text-shell-muted;
+        @apply hover:border-accent-bright hover:text-shell-text;
+    }
+
+    .flag-help {
+        @apply mt-1 mb-1 text-xs leading-relaxed text-shell-muted;
+    }
+
     /* --- the tab set, at the foot of the input pane ------------------------------------------
 
        NN/g's rules: one row, one tab always selected, the panel below the list, labels of one or

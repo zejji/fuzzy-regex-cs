@@ -4,6 +4,19 @@ import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplate
 
 import { spawnEngineWorker, useDemo } from './demo';
 import { copyText } from './lib/clipboard';
+import {
+    CHECKBOXES,
+    FLAG_HELP,
+    RADIO_GROUPS,
+    chosen,
+    formatFlags,
+    selectionFrom,
+    summaryText,
+    withCheckbox,
+    withRadio,
+    type FlagName,
+    type RadioGroup,
+} from './lib/flags';
 import type { EditKind } from './lib/highlight';
 import { createPool } from './lib/pool';
 import { toCSharp, tokenize } from './lib/snippet';
@@ -54,6 +67,64 @@ const MODES = [
     { value: 'partial', id: 'mode-partial', label: 'Partial match' },
     { value: 'replace', id: 'mode-replace', label: 'Replace' },
 ];
+
+// --- the flags control -------------------------------------------------------------------------
+
+/**
+ * What the panel shows, which is a view over the flags STRING - the string stays the state.
+ *
+ * `lib/flags.ts` holds the reasoning and the measurements: the two pairs the library refuses, the
+ * two defaults that are identical to naming nothing, and why a shared link written before this
+ * panel existed still loads into it. Nothing here decides anything; it wires boxes to those
+ * functions and back to the one string the engine is given.
+ */
+const selectedFlags = computed(() => selectionFrom(flags.value));
+
+/** The shut row's text, so the panel says what it is hiding without being opened. */
+const flagSummary = computed(() => summaryText(selectedFlags.value));
+
+function setFlag(name: FlagName, ticked: boolean): void {
+    flags.value = formatFlags(withCheckbox(selectedFlags.value, name, ticked));
+}
+
+function setGroup(group: RadioGroup, option: FlagName): void {
+    flags.value = formatFlags(withRadio(selectedFlags.value, group, option));
+}
+
+/**
+ * Which flag is explaining itself, and whether the visitor asked for it or is only passing over it.
+ *
+ * One at a time, because the sentence is a paragraph in the flow under its own row rather than a
+ * layer floating over one: two open at once move the grid twice, and nobody is reading both. In the
+ * flow is also what makes the help survive a 390 px screen with no positioning code at all - it
+ * cannot leave the panel, so it cannot fall off the edge of it.
+ *
+ * Pinning is what makes a tap work. A pointer that rests on a `(?)` opens the sentence and takes it
+ * away again on the way out; a press holds it, because a tap leaves no pointer behind to hold it,
+ * and a second press or Escape dismisses it. Hoverable, dismissable and persistent is WCAG 1.4.13,
+ * and this is the cheapest shape that is all three.
+ */
+const helpFor = ref<FlagName | null>(null);
+const helpPinned = ref(false);
+
+function toggleHelp(name: FlagName): void {
+    const pinnedHere = helpPinned.value && helpFor.value === name;
+    helpFor.value = pinnedHere ? null : name;
+    helpPinned.value = !pinnedHere;
+}
+
+function peekHelp(name: FlagName): void {
+    if (!helpPinned.value) helpFor.value = name;
+}
+
+function unpeekHelp(name: FlagName): void {
+    if (!helpPinned.value && helpFor.value === name) helpFor.value = null;
+}
+
+function closeHelp(): void {
+    helpFor.value = null;
+    helpPinned.value = false;
+}
 
 // --- the shell's one breakpoint ----------------------------------------------------------------
 
@@ -148,12 +219,17 @@ function toggleDisclosure(which: 'advanced' | 'samples'): void {
  * a tab set, where every tab but the selected one carries -1, and focusing one of those would leave
  * the set with two entries the arrows disagree about. The selected tab carries 0 and is the one
  * meant to be reachable, which is also the one a visitor would expect to arrive at.
+ *
+ * `summary` is here because it is focusable without a tabindex and the flags panel's is the first
+ * control in the secondary inputs. A list that missed it would hand the focus to the first tickbox
+ * INSIDE that panel, which is a control nobody can see while the panel is shut.
  */
 const FOCUSABLE = [
     'a[href]',
     'button:not([disabled]):not([tabindex="-1"])',
     'input:not([disabled]):not([tabindex="-1"])',
     'select:not([disabled])',
+    'summary',
     'textarea:not([disabled])',
     '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
@@ -722,23 +798,127 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         class="flex flex-col gap-4"
                         :hidden="!wide && !advanced"
                     >
-                        <div>
-                            <label class="field-label" for="flags">Flags</label>
-                            <input
-                                id="flags"
-                                v-model="flags"
-                                class="field"
-                                spellcheck="false"
-                                autocapitalize="off"
-                                autocomplete="off"
-                                aria-describedby="flags-hint"
-                            />
-                            <p id="flags-hint" class="field-hint">
-                                FuzzyRegexOptions names, separated by commas or spaces:
-                                <code class="font-mono">IgnoreCase, BestMatch</code>. A typo is an
-                                error. Version1 is the default.
-                            </p>
-                        </div>
+                        <!--
+                          A native `<details>`, like the help panels at the foot of this pane. It
+                          folds at every width, so it needs none of the gate machinery the two
+                          one-column disclosures carry, and the browser gives the keyboard, the
+                          open-or-shut announcement and the page flow for nothing.
+
+                          Escape is handled here, at the panel, because it is about the help and not
+                          about any one button: the sentence can be open while the focus has moved
+                          on to the box beside it.
+                        -->
+                        <details id="flags-panel" class="flags-panel" @keydown.escape="closeHelp">
+                            <summary>
+                                <span class="flags-label">Flags</span>
+                                <span class="flags-chosen">{{ flagSummary }}</span>
+                                <!--
+                                  The same chevron the one-column disclosures carry, and for a
+                                  harder reason than matching them: a `<summary>` laid out as a flex
+                                  row is no longer a `list-item`, so the browser draws no marker at
+                                  all and the row loses every cue that it opens (seen at 1366 px in
+                                  Chrome, `.scratch/s74-shots/flags-open-1366x768.png`). It turns
+                                  with the panel through CSS, so there is no open-state ref here.
+                                -->
+                                <span aria-hidden="true" class="chevron">&#9662;</span>
+                            </summary>
+
+                            <div class="flags-body">
+                                <div class="flag-grid">
+                                    <div v-for="name in CHECKBOXES" :key="name">
+                                        <div class="flag-row">
+                                            <input
+                                                :id="`flag-${name}`"
+                                                class="size-4 accent-accent-bright"
+                                                type="checkbox"
+                                                :checked="selectedFlags.has(name)"
+                                                @change="
+                                                    setFlag(name, ($event.target as HTMLInputElement).checked)
+                                                "
+                                            />
+                                            <label :for="`flag-${name}`" class="flag-name">{{ name }}</label>
+                                            <button
+                                                :id="`flag-help-button-${name}`"
+                                                class="flag-help-button"
+                                                type="button"
+                                                :aria-expanded="helpFor === name"
+                                                :aria-controls="`flag-help-${name}`"
+                                                :aria-label="`What ${name} does`"
+                                                @click="toggleHelp(name)"
+                                                @mouseenter="peekHelp(name)"
+                                                @mouseleave="unpeekHelp(name)"
+                                                @focus="peekHelp(name)"
+                                                @blur="unpeekHelp(name)"
+                                            >
+                                                ?
+                                            </button>
+                                        </div>
+                                        <!--
+                                          Hidden rather than dropped, for the reason the secondary
+                                          inputs above are: `aria-controls` must name something that
+                                          is in the page, and `hidden` takes it out of the
+                                          accessibility tree as well as off the screen.
+                                        -->
+                                        <p
+                                            :id="`flag-help-${name}`"
+                                            class="flag-help"
+                                            :hidden="helpFor !== name"
+                                        >
+                                            {{ FLAG_HELP[name] }}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <!--
+                                  The two choices the library refuses to take both of, so they are
+                                  radios: `Unicode` with `Ascii`, and `Version1` with `Version0`.
+                                  Measured rather than read off the enum - every one of the other 89
+                                  pairs compiles - by `tools/probes/demo-flag-pair-exclusivity.ps1`.
+                                -->
+                                <fieldset v-for="group in RADIO_GROUPS" :key="group.name">
+                                    <legend class="flags-label">{{ group.legend }}</legend>
+                                    <div class="flag-grid">
+                                        <div v-for="option in group.options" :key="option">
+                                            <div class="flag-row">
+                                                <input
+                                                    :id="`flag-${option}`"
+                                                    class="size-4 accent-accent-bright"
+                                                    type="radio"
+                                                    :name="group.name"
+                                                    :checked="chosen(selectedFlags, group) === option"
+                                                    @change="setGroup(group, option)"
+                                                />
+                                                <label :for="`flag-${option}`" class="flag-name">
+                                                    {{ option }}
+                                                </label>
+                                                <button
+                                                    :id="`flag-help-button-${option}`"
+                                                    class="flag-help-button"
+                                                    type="button"
+                                                    :aria-expanded="helpFor === option"
+                                                    :aria-controls="`flag-help-${option}`"
+                                                    :aria-label="`What ${option} does`"
+                                                    @click="toggleHelp(option)"
+                                                    @mouseenter="peekHelp(option)"
+                                                    @mouseleave="unpeekHelp(option)"
+                                                    @focus="peekHelp(option)"
+                                                    @blur="unpeekHelp(option)"
+                                                >
+                                                    ?
+                                                </button>
+                                            </div>
+                                            <p
+                                                :id="`flag-help-${option}`"
+                                                class="flag-help"
+                                                :hidden="helpFor !== option"
+                                            >
+                                                {{ FLAG_HELP[option] }}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </fieldset>
+                            </div>
+                        </details>
 
                         <!--
                           A fieldset and a legend, which is how a set of radios is named: without
