@@ -914,3 +914,50 @@ test('the snippet is text and never markup, and copying says out loud what happe
     await until(() => /selected/i.test(status.textContent ?? ''), 'said the snippet was selected');
     expect(window.getSelection()?.toString()).toBe(code.textContent);
 });
+
+/**
+ * The keyboard's way past the input pane.
+ *
+ * Measured at 1920x1080, 1440x900, 1366x768 and 1024x768 (`tools/probes/s73-widths.mjs`,
+ * 2026-09-20): twenty-six tabs from the top of the page to the first control in the answer,
+ * eighteen of them example buttons, because above the gate the examples region is always open. The
+ * phone is six, since the same region is behind a closed disclosure there. One link at the front of
+ * the document makes it one at every width.
+ */
+test('the first thing the keyboard reaches is the way to the answer', async () => {
+    const { page } = await mountPage();
+
+    const focusable = page.querySelectorAll<HTMLElement>(
+        'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])',
+    );
+    const first = found(focusable[0], 'a focusable control');
+    expect(first.tagName).toBe('A');
+    expect(first.className).toContain('skip-link');
+    expect(first.getAttribute('href')).toBe('#results');
+    // Named for where it goes, not "skip to content": the answer is what this page is for.
+    expect(first.textContent?.trim()).toMatch(/answer/i);
+
+    // The target has to be able to take the focus, or the link moves the viewport and leaves the
+    // focus at the top of the document - the tab that follows starts from the header again.
+    const answer = found(page.querySelector<HTMLElement>('#results'), 'a region with id="results"');
+    expect(answer.className).toContain('results-pane');
+    expect(answer.getAttribute('tabindex')).toBe('-1');
+
+    // Off the screen until it is focused, and never off the screen while it is: the rule is in the
+    // stylesheet, which jsdom does not apply, so it is read as source the way the rest of this file
+    // reads it.
+    expect(styles).toMatch(/\.skip-link\s*\{[^}]*absolute/);
+    expect(styles).toMatch(/\.skip-link:focus\s*\{/);
+
+    // Following it moves the focus and NOT the address bar. The case lives in the fragment, so a
+    // link that navigated to `#results` would replace a shareable URL with an anchor - measured in
+    // Chrome before this handler existed (`tools/probes/s73-widths.mjs`, 2026-09-20: the page ended
+    // the run at `?v=...#results`). The page survives it either way, because `applyFragment` leaves
+    // somebody else's anchor alone, but the URL the visitor would copy no longer holds their case.
+    location.hash = '#p=kitten&s=sitting';
+    await settle();
+    first.click();
+    await settle();
+    expect(document.activeElement).toBe(answer);
+    expect(location.hash).toBe('#p=kitten&s=sitting');
+});

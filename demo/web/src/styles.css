@@ -160,6 +160,24 @@
         @apply flex min-h-dvh flex-col;
     }
 
+    /* The way past the input pane, for the only visitor who needs one. It is the first thing in the
+       document and it is off the screen until it is focused - moved with a transform rather than
+       with `display: none` or a negative `left`, so it keeps its place in the tab order and the
+       accessibility tree, and so no assistive technology has to guess what a control 9,999 px to
+       the left of the page is.
+
+       `:focus` and not `:focus-visible`: a link nothing but a keyboard can reach has no use for the
+       distinction, and a browser that withholds `:focus-visible` would withhold the link. */
+    .skip-link {
+        @apply absolute top-2 left-2 z-50 rounded-md px-3 py-2 text-sm font-semibold;
+        @apply bg-shell-raised text-accent-bright;
+        transform: translateY(calc(-100% - var(--spacing) * 4));
+    }
+
+    .skip-link:focus {
+        transform: translateY(0);
+    }
+
     .shell-header {
         @apply flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 sm:px-6;
         @apply bg-shell text-shell-text;

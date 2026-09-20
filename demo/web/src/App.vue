@@ -390,6 +390,19 @@ function reveal(origin: Half, index: number): void {
     });
 }
 
+/**
+ * The skip link's own navigation, because the browser's would cost the visitor their case.
+ *
+ * The case is the fragment, so letting `href="#results"` navigate replaces a URL that holds
+ * everything typed with one that holds an anchor. The page survives it - `applyFragment` leaves
+ * somebody else's anchor alone - but the address bar no longer says what is on screen, which is the
+ * one thing the fragment is for. Focusing the region does what the link promised and touches
+ * nothing else; every browser scrolls a focused element into view on its own.
+ */
+function skipToAnswer(): void {
+    document.getElementById('results')?.focus();
+}
+
 /** Selects a match from one half of the answer and brings the other half to it. */
 function selectFrom(origin: Half, index: number): void {
     select(index);
@@ -532,6 +545,16 @@ window.__demoInternals = { createPool, spawnEngineWorker };
 
 <template>
     <div class="shell">
+        <!--
+          The keyboard's way past the input pane, and the first thing in the document.
+
+          Measured before it existed (`tools/probes/s73-widths.mjs`, 2026-09-20): twenty-six tabs
+          from the top of the page to the first control in the answer at every width above the gate,
+          eighteen of them the example buttons, which are always on screen there. The answer is what
+          the page is for, so it is one tab away.
+        -->
+        <a class="skip-link" href="#results" @click.prevent="skipToAnswer">Skip to the answer</a>
+
         <header class="shell-header">
             <h1 class="text-[1.75rem] leading-none font-semibold tracking-tight">FuzzyRegex</h1>
             <p class="text-xs leading-relaxed text-shell-muted">
@@ -904,7 +927,9 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                 </section>
             </div>
 
-            <section class="results-pane" aria-label="The answer">
+            <!-- `tabindex="-1"` so the skip link above lands the FOCUS here and not just the
+                 viewport; without it the next tab starts from the header again. -->
+            <section id="results" class="results-pane" aria-label="The answer" tabindex="-1">
                 <!--
                   Announced politely: the answer arrives without anyone pressing anything, so a
                   screen reader is never told the count changed unless this region says so. Polite

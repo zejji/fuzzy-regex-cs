@@ -812,3 +812,63 @@ chroma of each was the thing that had to come down to stay inside sRGB. Chrome p
 probe above.
 
 250 tests in `demo/web`, 61 in `DemoEngineContractTests`.
+
+### 5d - one scripted width pass
+
+`tools/probes/s73-widths.mjs`, Chrome 153 through Playwright, against the served build on port 8213.
+One run, five viewports, a fresh load each: 1920x1080, 1440x900, 1366x768, 1024x768 and 390x844.
+Per width it records sideways scroll, page scroll, where the answer's heading ends, the disclosure
+buttons, the pane boxes, anything clipped, the skip link, and a forty-stop tab walk. It ends with
+every `--color-` token painted through a canvas.
+
+| | 1920x1080 | 1440x900 | 1366x768 | 1024x768 | 390x844 |
+|---|---|---|---|---|---|
+| sideways scroll | none | none | none | none | none |
+| page scroll | none | none | none | none | 1358 of 844 |
+| answer heading ends | 262 | 262 | 262 | 262 | 721 |
+| above the fold | yes | yes | yes | yes | yes |
+| disclosures | 1 | 1 | 1 | 1 | 3 |
+| clipped panes | 0 | 0 | 0 | 0 | 0 |
+| focus stops off screen | 0 | 0 | 0 | 0 | 0 |
+| focus stops with no ring | 0 | 0 | 0 | 0 | 0 |
+
+Above the gate the shell is exactly the window - `scrollHeight` equals `clientHeight` at all four
+widths - and the two disclosures collapse into the pane. Below it the page scrolls, the three
+regions become disclosures, and the answer is still the first thing on screen. The data table is
+wider than the phone (479px in a 375px column) and that is the deliberate scroll region with the
+"Scroll the table sideways" hint under it, not a clip: the document itself does not scroll sideways.
+
+**The one defect the pass found: twenty-six tabs to the answer.** At every width above the gate the
+first control inside the answer was the twenty-sixth stop of the walk, eighteen of them the example
+buttons, which sit in the left pane and are always on screen there. The answer is what the page is
+for. A skip link now sits before the header, off screen until it takes the focus, and the walk is:
+stop 1 the skip link, Enter, and the next Tab is `hit hit-current` - the selected match.
+
+It is the demo's own navigation, not the browser's. The case lives in the URL fragment, so letting
+`href="#results"` navigate would replace a URL holding everything typed with one holding an anchor.
+Measured before the handler existed: the probe run ended at `?v=...#results`. With
+`@click.prevent="skipToAnswer"` the same run ends at
+`?v=...#p=%28%3F%3Akitten%29%7Be%3C%3D2%7D&f=&s=sitting+kitten+mitten+bitten+kitty&m=&r=&l=`. The
+`href` stays for semantics and as the no-JS fallback. `page.test.ts` pins both halves: the focus
+moves to `#results` and the hash is untouched.
+
+**The colour table re-checked.** All eighteen `--color-` tokens the browser painted in this run equal
+the `BROWSER` record in `contrast.test.ts` byte for byte, including the three 5c darkened.
+
+**Three probe artefacts, each measured rather than reasoned about.** They are written into the probe
+at the lines they affect, because every one of them looked like a defect first:
+
+- Playwright compensates a 125% Windows display by zooming the page to 0.8, so the stylesheet's 2px
+  focus outline computes to 1.6px and the first run called every stop ringless. The probe now
+  derives the scale from a synthetic `outline: 2px` element and compares against `2 * scale`.
+- The first run measured the phone with its examples region open and the answer 2,799px down,
+  because the walk at 1024 had left the focus on an example button and chunk 2's narrowing fix opens
+  the region the focus is in rather than losing it. Fixed with a fresh load per width.
+- Chrome resumes sequential focus from the last focused element, so `blur()` does not restart a walk
+  at the top and the first two stops were missing. `document.body` with `tabindex="-1"`, focused,
+  moves the origin back to the document.
+
+`layout.test.ts`'s shell-children pin was rewritten rather than relaxed: the first child is the skip
+link, and the flow rows after it are still header, main, footer.
+
+251 tests in `demo/web`.

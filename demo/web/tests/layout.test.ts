@@ -414,7 +414,14 @@ test('the shell is a header, two panes and a footer, and the panes are the scrol
 
     // The rows of the grid, in order. A footer inside the scrolling input pane would be a footer
     // most visitors never reach, so it is a row of the shell.
-    expect([...shell.children].map((child) => child.tagName.toLowerCase())).toEqual(['header', 'main', 'footer']);
+    //
+    // The skip link is a child but not a row: it is `position: absolute`, so it is out of the flex
+    // flow and occupies none of the height the three rows divide. It has to be the FIRST child,
+    // because being the first tab stop is the whole of what it does; `page.test.ts` pins the rest
+    // of it, and the rule that takes it off the screen until it is focused.
+    expect(shell.firstElementChild?.classList.contains('skip-link')).toBe(true);
+    const rows = [...shell.children].filter((child) => !child.classList.contains('skip-link'));
+    expect(rows.map((child) => child.tagName.toLowerCase())).toEqual(['header', 'main', 'footer']);
 
     expect(found(page.querySelector('.input-pane'), 'input pane').closest('main')).not.toBeNull();
     expect(found(page.querySelector('.results-pane'), 'results pane').closest('main')).not.toBeNull();
