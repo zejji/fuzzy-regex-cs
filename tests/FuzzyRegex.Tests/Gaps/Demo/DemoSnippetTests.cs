@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Tests.Conventions;
 using FuzzyRegexDemo.Wasm;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
@@ -25,20 +26,22 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// </remarks>
 public sealed class DemoSnippetTests
 {
-    /// <summary>A file under <c>demo/web/src</c>, found from this source file's own path.</summary>
+    /// <summary>A file under <c>demo/web/src</c>, found from the repository root.</summary>
     private static string WebSource(string relative) => RepoFile(Path.Combine("demo/web/src", relative));
 
-    /// <summary>A file anywhere in the repository, found from this source file's own path.</summary>
+    /// <summary>
+    /// A file anywhere in the repository, found from the test assembly's location through
+    /// <see cref="TestTree.RepositoryRoot"/>. Not <c>[CallerFilePath]</c>: CI builds with
+    /// <c>ContinuousIntegrationBuild</c>, which rewrites source paths to <c>/_/...</c>, and the
+    /// Native AOT job failed on 2026-09-20 looking for <c>/_/demo/web/src/lib/flags.ts</c>.
+    /// </summary>
     private static string RepoFile(string relative)
     {
-        string repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(ThisFile())!, "../../../.."));
-        string file = Path.Combine(repoRoot, relative);
+        string file = Path.Combine(TestTree.RepositoryRoot().FullName, relative);
 
         File.Exists(file).Should().BeTrue("{0} lives at {1}", relative, file);
         return File.ReadAllText(file);
     }
-
-    private static string ThisFile([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
 
     [Test]
     public void The_snippets_timeout_is_the_engines_timeout()

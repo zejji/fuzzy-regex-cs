@@ -1,7 +1,7 @@
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Tests.Conventions;
 using FuzzyRegexDemo.Wasm;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
@@ -32,14 +32,16 @@ public sealed class DemoCapsTests
     /// <c>caps.ts</c>, found from the test assembly rather than from the working directory.
     /// </summary>
     /// <remarks>
-    /// Source-relative: <see cref="CallerFilePathAttribute"/> is how a test finds a file that is
-    /// deliberately not embedded. Embedding it would make this test read a copy of the file the
-    /// browser loads, and the whole claim is about the file the browser loads.
+    /// Read from the repository, not embedded: embedding it would make this test read a copy of
+    /// the file the browser loads, and the whole claim is about the file the browser loads. The
+    /// root comes from <see cref="TestTree.RepositoryRoot"/> and not from
+    /// <c>[CallerFilePath]</c>: CI builds with <c>ContinuousIntegrationBuild</c>, which rewrites
+    /// every source path to <c>/_/...</c>, and the Native AOT job failed on 2026-09-20 looking for
+    /// <c>/_/demo/web/src/lib/caps.ts</c>.
     /// </remarks>
-    private static string CapsSource([CallerFilePath] string thisFile = "")
+    private static string CapsSource()
     {
-        string repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, "../../../.."));
-        string caps = Path.Combine(repoRoot, "demo/web/src/lib/caps.ts");
+        string caps = Path.Combine(TestTree.RepositoryRoot().FullName, "demo/web/src/lib/caps.ts");
 
         File.Exists(caps).Should().BeTrue("the page's caps live in {0}", caps);
         return File.ReadAllText(caps);

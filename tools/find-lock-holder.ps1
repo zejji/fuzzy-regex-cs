@@ -46,6 +46,12 @@ $ErrorActionPreference = 'Stop'
 
 $resolved = (Resolve-Path -LiteralPath $Path).Path
 
+# The Restart Manager is a Windows API. Elsewhere the interop below compiles but every call fails
+# with an error that names nothing useful (CI on ubuntu and macos, 2026-09-20), so stop here.
+if (-not $IsWindows) {
+    throw "find-lock-holder.ps1 asks the Windows Restart Manager and cannot run on $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription). Use lsof or fuser here."
+}
+
 # The interop lives in a uniquely-named type so that running this twice in one PowerShell session
 # does not fail on "type already exists".
 $typeName = "RmLockProbe_$([guid]::NewGuid().ToString('N'))"

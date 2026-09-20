@@ -221,7 +221,9 @@ Describe 'build-demo-help.ps1' {
 
         $examples = Get-Content -LiteralPath $examplesPath -Raw | ConvertFrom-Json
         # The syntax-tour rows carry no key and have no panel; the rest name the feature they show.
-        $demonstrated = @($examples | ForEach-Object { $_.key } | Where-Object { $_ } | Select-Object -Unique)
+        # Through the property bag, not `$_.key`: a row without the property made CI's strict host
+        # throw PropertyNotFoundException on all three OS legs (run 35519223744, 2026-09-20).
+        $demonstrated = @($examples | ForEach-Object { $_.PSObject.Properties['key'].Value } | Where-Object { $_ } | Select-Object -Unique)
 
         $documented | Should -Be $demonstrated
     }

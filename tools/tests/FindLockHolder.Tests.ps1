@@ -10,7 +10,7 @@ BeforeAll {
 }
 
 Describe 'find-lock-holder.ps1' {
-    It 'reports no holder for a file nothing has open' {
+    It 'reports no holder for a file nothing has open' -Skip:(-not $IsWindows) {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) "lock-probe-$([guid]::NewGuid().ToString('n')).tmp"
         'unlocked' | Set-Content -LiteralPath $path
         try {
@@ -20,7 +20,7 @@ Describe 'find-lock-holder.ps1' {
         finally { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'names the process id and application holding an open file' {
+    It 'names the process id and application holding an open file' -Skip:(-not $IsWindows) {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) "lock-probe-$([guid]::NewGuid().ToString('n')).tmp"
         'locked' | Set-Content -LiteralPath $path
 
