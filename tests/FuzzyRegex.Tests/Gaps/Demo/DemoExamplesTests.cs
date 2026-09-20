@@ -29,18 +29,18 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 ///     matches=1 spans=[[4, 5]]             [0] 'color'   counts(sub,ins,del)=(0, 0, 1)
 /// A budget per kind of error    (?:foobar){i&lt;=1,d&lt;=1,s&lt;=1}          "xfoobat"
 ///     matches=1 spans=[[0, 6]]             [0] 'xfooba'  counts=(1, 1, 1)
-/// Weighted cost, not a count    (foobar){i&lt;=1,d&lt;=2,s&lt;=3,2d+1s&lt;4}    "3oifaowefbaoraofuiebofasebfaobfaorfeoaro"
+/// Weighted cost                 (foobar){i&lt;=1,d&lt;=2,s&lt;=3,2d+1s&lt;4}    "3oifaowefbaoraofuiebofasebfaobfaorfeoaro"
 ///     matches=3 spans=[[6, 7], [25, 7], [33, 6]]   [0] 'wefbaor' counts=(3, 1, 0)
 /// The first match the budget allows  (foobar){e}                     "xirefoabralfobarxie"
 ///     matches=5 spans=[[0, 6], [6, 6], [12, 6], [18, 1], [19, 0]]   [0] 'xirefo' counts=(6, 0, 0)
-/// BestMatch: the closest fit instead  (foobar){e}  BestMatch         "xirefoabralfobarxie"
+/// BestMatch: the closest fit    (foobar){e}  BestMatch               "xirefoabralfobarxie"
 ///     matches=3 spans=[[11, 5], [16, 3], [19, 0]]  [0] 'fobar'  counts=(0, 0, 1)
 /// EnhanceMatch: tighten what was found  (foobar){e}  EnhanceMatch    "xirefoabralfobarxie"
 ///     matches=6 spans=[[0, 3], [4, 5], [11, 4], [15, 1], [16, 3], [19, 0]]  [0] 'xir' counts=(2, 0, 3)
 /// Fuzzy matching against a word list  \b(?:\L&lt;fruit&gt;){e&lt;=1}\b        "aple bananna cherry"
 ///     namedLists={"fruit": ["apple", "banana", "cherry"]}
 ///     matches=3 spans=[[0, 4], [5, 7], [13, 6]]    [0] 'aple'   counts=(0, 0, 1)
-/// Leftmost-first, as Perl and .NET do it  a|ab|abc                   "abcd"
+/// Leftmost-first                a|ab|abc                             "abcd"
 ///     matches=1 spans=[[0, 1]]             [0] 'a'       counts=(0, 0, 0)
 /// POSIX: leftmost-longest       a|ab|abc  Posix                      "abcd"
 ///     matches=1 spans=[[0, 3]]             [0] 'abc'     counts=(0, 0, 0)
@@ -52,7 +52,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 /// Replace with a template       (?&lt;year&gt;\d{4})-(?&lt;month&gt;\d{2})       "2026-09 and 1999-12"
 ///     mode=replace replacement='\g&lt;month&gt;/\g&lt;year&gt;'
 ///     replaced='09/2026 and 12/1999'       matches=2 spans=[[0, 7], [12, 7]]
-/// Replace what was only nearly right  (?:colour){e&lt;=1}  -&gt; 'colour'  "the color of the collar"
+/// Replace a misspelling         (?:colour){e&lt;=1}  -&gt; 'colour'        "the color of the collar"
 ///     replaced='the colour of the collar'  matches=1 spans=[[4, 5]]   [0] counts=(0, 0, 1)
 /// </code>
 /// <para>
@@ -104,17 +104,17 @@ public sealed class DemoExamplesTests
     {
         ["Up to one error"] = new([(4, 5)], (0, 0, 1)),
         ["A budget per kind of error"] = new([(0, 6)], (1, 1, 1)),
-        ["Weighted cost, not a count"] = new([(6, 7), (25, 7), (33, 6)], (3, 1, 0)),
+        ["Weighted cost"] = new([(6, 7), (25, 7), (33, 6)], (3, 1, 0)),
         ["The first match the budget allows"] = new([(0, 6), (6, 6), (12, 6), (18, 1), (19, 0)], (6, 0, 0)),
-        ["BestMatch: the closest fit instead"] = new([(11, 5), (16, 3), (19, 0)], (0, 0, 1)),
+        ["BestMatch: the closest fit"] = new([(11, 5), (16, 3), (19, 0)], (0, 0, 1)),
         ["EnhanceMatch: tighten what was found"] = new([(0, 3), (4, 5), (11, 4), (15, 1), (16, 3), (19, 0)], (2, 0, 3)),
         ["Fuzzy matching against a word list"] = new([(0, 4), (5, 7), (13, 6)], (0, 0, 1)),
-        ["Leftmost-first, as Perl and .NET do it"] = new([(0, 1)], (0, 0, 0)),
+        ["Leftmost-first"] = new([(0, 1)], (0, 0, 0)),
         ["POSIX: leftmost-longest"] = new([(0, 3)], (0, 0, 0)),
         ["Partial: so far, so good"] = new([(0, 7)], (0, 0, 0)) { Partial = true },
         ["Search from the right"] = new([(8, 5), (4, 3), (0, 3)], (0, 0, 0)),
         ["Replace with a template"] = new([(0, 7), (12, 7)], (0, 0, 0)) { Replaced = "09/2026 and 12/1999" },
-        ["Replace what was only nearly right"] = new([(4, 5)], (0, 0, 1)) { Replaced = "the colour of the collar" },
+        ["Replace a misspelling"] = new([(4, 5)], (0, 0, 1)) { Replaced = "the colour of the collar" },
         ["Named groups and every capture"] = new([(0, 18)], (0, 0, 0)),
         ["Set operations"] = new([(0, 3), (6, 3)], (0, 0, 0)),
         ["Unicode properties"] = new([(11, 3)], (0, 0, 0)),

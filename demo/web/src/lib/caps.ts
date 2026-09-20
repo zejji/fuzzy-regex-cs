@@ -19,6 +19,16 @@
 export const MAX_SUBJECT_LENGTH = 100000;
 
 /**
+ * The longest pattern the page will accept a position inside. Mirrors DemoEngine.MaxPatternLength.
+ *
+ * The page does not refuse a long pattern itself - the engine does, and says so - but it does bound
+ * `errorOffset`, which is the one number in a reply the page turns into work rather than into text:
+ * `' '.repeat(offset)` builds the caret line. This is the largest offset any pattern the engine
+ * would have parsed can carry (`shapes.ts`).
+ */
+export const MAX_PATTERN_LENGTH = 1000;
+
+/**
  * The most matches the page will draw. Deliberately far below the engine's own cap of 1,000
  * (DemoEngine.MaxMatches): that one bounds the answer on the wire, this one bounds how much of it
  * becomes DOM. The true total is always shown beside it.
@@ -36,3 +46,13 @@ export const MAX_DISPLAYED_MATCHES = 200;
  * and says so.
  */
 export const MAX_FRAGMENT_LENGTH = 8000;
+
+/**
+ * The clock every match on this page runs against. Mirrors DemoEngine.MatchTimeout.
+ *
+ * Not a bound the page enforces - the engine holds this one - but the page prints it, in the C#
+ * snippet, as the timeout the visitor's own copy of the case will use. A snippet quoting a number
+ * the demo has since changed would be a demo lying about how it got its own answer, so the number
+ * is read from here and checked against the engine by DemoCapsTests.
+ */
+export const MATCH_TIMEOUT_SECONDS = 2;

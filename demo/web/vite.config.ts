@@ -22,6 +22,19 @@ const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.u
 export const webRoot = here('../FuzzyRegex.Demo.Wasm/wwwroot');
 
 /**
+ * This project's directory, which is the Vite root and the directory this config lives in.
+ *
+ * Vite defaults its root to `process.cwd()`, so a dev server created without one serves whatever
+ * directory the caller happened to start in. Measured 2026-09-20: started from the repository root,
+ * the same server resolved its root there, found no `index.html` and answered every request with an
+ * empty 404 - which is what `tests/dev-server.test.ts` was reading as five failures. Exported so
+ * that test can pin it and stop depending on its caller. The config file needs no pin of its own:
+ * Vite looks for it under the root it settled on, so pinning the root pins both (measured the same
+ * day from the repository root - `configFile` came back as this file and `vite:vue` was loaded).
+ */
+export const projectRoot = here('.');
+
+/**
  * Where `npm run dev` finds the files this project does not build: the runtime under `_framework/`,
  * `worker.js`, `examples.json` and `checks.html`. The publish is preferred over the source web root
  * because `_framework/` only exists after a publish, and a dev session running an older runtime than

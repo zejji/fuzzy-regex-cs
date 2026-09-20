@@ -370,3 +370,72 @@ reviews' browser checks ran against the code being committed.
 **The in-place `demo/web` suite could not be run after the lock appeared**, so `dev-server.test.ts`
 is the one test file nothing exercised this sitting; it wants the real repository layout and the
 scratch copy leaves it out. Nothing in this sitting touches the dev middleware it covers.
+
+## Post-landing review fixes (2026-09-19)
+
+A blind review of the landed slice raised nine findings - one major, eight minor. All nine are
+fixed here, each with a test that fails without the fix.
+
+**1 (major). `checks.html` held a second copy of the upstream spans.** `docs/plan/DECISIONS.md`
+said the verdict page "keeps no copy of the upstream spans ... cannot become a second,
+hand-maintained source"; the file that landed carried all seventeen span sets, copied out of
+`DemoExamplesTests.cs`, with nothing comparing the two. The decision was the intention and the code
+was the fact. The spans are out: check 1 now asserts that every sidebar entry reaches the engine
+and is answered with matches, and that the one slow sample is refused - the questions only a
+browser can answer. Whether the spans are RIGHT stays in `DemoExamplesTests.cs`, which the ratchet
+runs. The decision and the closing note in `docs/plan/slices/done/S72-demo-v2-features-and-help.md`
+both carry the correction.
+
+**2. The focus ring missed `<summary>`.** `:where(a, button, input, textarea, [tabindex])` matches
+no disclosure control, so every help panel - all of them `<details>` - fell back to the browser's
+hairline, which is the thing WCAG 2.4.13 is about. `summary` added; asserted in `page.test.ts` by
+reading `styles.css` as text, the arrangement `DemoCapsTests.cs` already uses for `caps.ts`. Note
+for the next sitting: Vitest disables CSS processing, so `import '../src/styles.css?raw'` resolves
+to the empty string (measured). `readFileSync` with `import.meta.dirname` is what works under the
+jsdom environment - `new URL('...', import.meta.url)` there is an http URL and `readFile` refuses
+it.
+
+**3. Two new sideways-scrolling regions had no keyboard route.** S71 fixed that for the two tables;
+the caret `<pre>` under the pattern and the help panels' fenced code blocks arrived in S72 without
+it. Both are now `tabindex="0" role="region"` with a name. The caret box could not simply keep
+`aria-hidden="true"` and gain a tab stop - a focusable element hidden from assistive technology is
+a stop a screen reader lands on and is told nothing about - so only the caret ROW is hidden now,
+inside the same `<pre>` so the hat still lines up, and the sentence below it (`#caret-hint`, tied
+by `aria-describedby`) says both the position and that the line scrolls.
+
+**4. `errorOffset` was checked as a number, not as an index.** The page does not print that member,
+it executes it: `' '.repeat(failureOffset)`. A negative one throws RangeError out of the render -
+a blank page - and a huge one allocates. `shapes.ts` now requires an integer in `[0,
+MAX_PATTERN_LENGTH]`, with `MAX_PATTERN_LENGTH` added to `caps.ts` mirroring
+`DemoEngine.MaxPatternLength`.
+
+**5 and 6. The help generator could write a panel that opens onto nothing, or leak markdown.** A
+mapped heading whose prose has moved under a sub-heading yields `blocks: []`, and the generator
+wrote it green. `build-demo-help.ps1` now fails on an empty section, and `isSection` requires
+`blocks.length > 0` at load time as well. It also fails on the constructs `Split-Runs` cannot
+render - a deeper heading, a list item, a `[text](url)` link - naming the construct and the line,
+rather than letting them reach the panel as literal markdown. Fenced code is exempt, because a C#
+sample legitimately holds hashes, dashes and brackets. None of these is in `docs/COMPARISON.md`'s
+mapped sections today; the Pester tests prove the guard fires on a fixture and that the real file
+is still green.
+
+**7. `$LASTEXITCODE` after a called `.ps1`.** The review called this a live bug; it was not, quite -
+measured 2026-09-19, `& script.ps1` that ends in `exit 1` DOES set `$LASTEXITCODE` to 1 in the
+caller, and in `build-demo-web.ps1` the preceding native command (`node --version`) is checked, so
+neither direction could go wrong today. What is true is that the check only worked by accident of
+ordering: a script that runs off its end writes nothing, so the caller reads the last native
+command's code. `build-demo-help.ps1` now ends with an explicit `exit 0`, and the Pester test
+reproduces the caller's pattern in-process (a failed native command, then the call) - it fails with
+`Expected 0, but got 3` without that line.
+
+**8. The nine feature keys existed in two hand-written lists.** The map in `build-demo-help.ps1`
+and the `features` array in `DemoExamplesTests.cs`, with nothing comparing them. A Pester test now
+runs the generator against the real `docs/COMPARISON.md` and compares the keys it wrote with the
+distinct keys in `examples.json`; the C# test already compares its list with the same file, so the
+loop is closed through the file the page actually reads.
+
+**9. The three-argument `DemoEngine.Run` overload is deleted.** It was kept "because a browser
+holding the cached S71 page must keep getting the S71 answer", which it could never deliver: the
+`[JSExport]` the browser calls went from three parameters to six in the same change, so a cached
+page fails on arity before any overload is reached. It had no production caller. The tests that
+wanted the short form now declare it as their own helper; `DECISIONS.md` carries the amendment.

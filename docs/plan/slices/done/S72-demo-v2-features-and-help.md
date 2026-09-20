@@ -121,5 +121,11 @@ Two sittings; the per-sitting record, every measurement and the review outcomes 
 What the next demo slice should know: the highlight's paint order is the SUBJECT's, the match
 numbering is the ANSWER's, and a RightToLeft search makes them differ - anything that finds a mark
 or a row by DOM position rather than by `data-match` is wrong under that one flag, which is how the
-bug the review found got in. `checks.html` is a real oracle again but only for titles and shapes;
-the upstream numbers live in `DemoExamplesTests.cs` and should stay in one place.
+bug the review found got in. `checks.html` asks only what a browser can answer - that every sidebar
+entry reaches the engine and is answered, and that the slow one is refused; the upstream numbers
+live in `DemoExamplesTests.cs` and stay in one place.
+
+Corrected 2026-09-19, after the post-landing review: that last sentence was written as an intention
+and was not true of the file that landed, which carried all seventeen span sets copied out of
+`DemoExamplesTests.cs` with nothing comparing the two. They are out of `checks.html` now, and
+`docs/plan/DECISIONS.md` carries the amendment. See `docs/plan/slices/notes/S72-sittings.md`.

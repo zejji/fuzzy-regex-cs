@@ -22,38 +22,20 @@
   <iframe id="page" title="the demo page under test" style="width: 100%; height: 30rem; border: 1px solid grey"></iframe>
 
   <script type="module">
-    // Expected answers come from a real upstream run, never from this port's own output (port-slice
-    // rule, owner 2026-09-15). These are the v2 samples, and the values are the ones
-    // tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs pins - each of them recorded there with
-    // the `regex 2026.9.10` call it came from, run under VERSION1 (the port's default, where
-    // upstream's is VERSION0 - docs/DIVERGENCES.md). Keeping the numbers in one place and naming it
-    // here is deliberate: two hand-maintained copies of an upstream answer is two chances to drift,
-    // and the C# file is the one the ratchet runs.
+    // THE UPSTREAM ANSWERS ARE NOT HERE, AND MUST NOT BE COPIED HERE.
     //
-    // What this page adds over that test is that the PAGE asks the right question and renders the
-    // answer - not that the engine is right, which is already pinned.
-    const UPSTREAM_SPANS = {
-      'Up to one error': [[4, 5]],
-      'A budget per kind of error': [[0, 6]],
-      'Weighted cost, not a count': [[6, 7], [25, 7], [33, 6]],
-      'The first match the budget allows': [[0, 6], [6, 6], [12, 6], [18, 1], [19, 0]],
-      'BestMatch: the closest fit instead': [[11, 5], [16, 3], [19, 0]],
-      'EnhanceMatch: tighten what was found': [[0, 3], [4, 5], [11, 4], [15, 1], [16, 3], [19, 0]],
-      'Fuzzy matching against a word list': [[0, 4], [5, 7], [13, 6]],
-      'Leftmost-first, as Perl and .NET do it': [[0, 1]],
-      'POSIX: leftmost-longest': [[0, 3]],
-      'Partial: so far, so good': [[0, 7]],
-      // RightToLeft, so the answer is numbered from the end of the subject and its spans DESCEND.
-      // The page paints them in subject order; that it still paints all three is what check 1 sees
-      // here, and demo/web/tests/highlight.test.ts pins the ordering itself.
-      'Search from the right': [[8, 5], [4, 3], [0, 3]],
-      'Replace with a template': [[0, 7], [12, 7]],
-      'Replace what was only nearly right': [[4, 5]],
-      'Named groups and every capture': [[0, 18]],
-      'Set operations': [[0, 3], [6, 3]],
-      'Unicode properties': [[11, 3]],
-      'Case-insensitive, with a flag': [[0, 5], [6, 5], [12, 5]],
-    };
+    // Every span the tour's examples produce is pinned in one place,
+    // tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs, each recorded there with the
+    // `regex 2026.9.10` call it came from (port-slice rule, owner 2026-09-15: expected answers come
+    // from a real upstream run and never from this port's own output). That file is the one the
+    // ratchet runs; a second hand-maintained copy of the same numbers on this page would be a
+    // second thing to update and the two would drift apart silently.
+    //
+    // So what this page asks is what only a browser can answer, and nothing else: that the SIDEBAR
+    // reaches the engine - every example the page offers is answered, with matches, rather than
+    // refused or dropped - and that the one sample built to run out of time is refused. Whether
+    // those matches are the right ones is the C# test's question, not this page's.
+    const EXPECTED_EXAMPLES = 18;
 
     // The one sample with no upstream answer: it is there to run out of time, so what it must
     // produce is a refusal rather than spans. DemoExamplesTests pins the same thing engine-side.
@@ -125,9 +107,12 @@
     };
 
     // 1. Every worked example, asked BY THE PAGE and answered by the engine in the worker. A broken
-    //    promise on the front page of the project is what this catches: the C# test pins the
-    //    engine's answer, and this pins that the sidebar's entry reaches it unaltered.
-    async function everyExampleAnswersWhatUpstreamSays() {
+    //    promise on the front page of the project is what this catches: a sidebar entry that
+    //    reaches the engine mangled - a mode dropped, a named list lost, a flag misspelled - comes
+    //    back as an error or as no matches at all, and this is the only leg that drives the page's
+    //    own load() over the real runtime. What the answer should BE is DemoExamplesTests.cs's
+    //    question; see the note at the top of this file.
+    async function everyExampleIsAnsweredByTheEngine() {
       const demo = await openPage();
       await until('the examples to load', () => demo.examples.length > 0);
 
@@ -144,16 +129,20 @@
           continue;
         }
 
-        const found = JSON.stringify(spans(demo));
-        const expected = JSON.stringify(UPSTREAM_SPANS[example.title]);
-        if (found !== expected) wrong.push(`${example.title}: page ${found}, upstream ${expected}`);
+        if (demo.failure !== '') {
+          wrong.push(`${example.title}: the page reported ${JSON.stringify(demo.failure)}`);
+        } else if (demo.matches.length === 0) {
+          // Every example in the tour is written to find something. An empty answer means the
+          // inputs that reached the engine were not the ones the sidebar holds.
+          wrong.push(`${example.title}: no matches, so the example demonstrates nothing`);
+        }
       }
 
       check(
-        'every worked example answers what upstream answers',
-        demo.examples.length === Object.keys(UPSTREAM_SPANS).length + 1 && wrong.length === 0,
+        'every worked example is answered by the engine, and the slow one is refused',
+        demo.examples.length === EXPECTED_EXAMPLES && wrong.length === 0,
         wrong.length === 0
-          ? `all ${demo.examples.length} examples agree with regex 2026.9.10`
+          ? `all ${demo.examples.length} examples answered (spans are pinned in DemoExamplesTests.cs)`
           : wrong.join('; ')
       );
     }
@@ -202,8 +191,12 @@
       demo.subject = 'a'.repeat(demo.maxSubjectLength + 1);
       await settled(demo);
       check(
+        // Match on the CAP, not on a phrase. This read `includes("limit of")` until S73 chunk 1
+        // rewrote the message to "the demo's limit is 100,000" and turned the check red without
+        // anything being wrong with the page (browser run, 2026-09-19). The number is what the
+        // visitor needs and it cannot be reworded away.
         'a subject over the cap is refused, not truncated',
-        demo.answer === null && demo.failure.includes("limit of"),
+        demo.answer === null && demo.failure.includes(demo.maxSubjectLength.toLocaleString()),
         demo.failure.slice(0, 160)
       );
 
@@ -378,7 +371,7 @@
     }
 
     try {
-      await everyExampleAnswersWhatUpstreamSays();
+      await everyExampleIsAnsweredByTheEngine();
       await aSharedLinkOpensTheSameCase();
       await thePagesCapsHold();
       await aGroupThatDidNotParticipateSaysSo();

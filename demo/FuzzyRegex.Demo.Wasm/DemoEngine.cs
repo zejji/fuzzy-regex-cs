@@ -137,25 +137,6 @@ internal static class DemoEngine
     private static readonly string[] _lineSeparators = ["\r\n", "\n", "\r"];
 
     /// <summary>
-    /// Matches <paramref name="pattern"/> against <paramref name="subject"/> and returns the answer
-    /// as JSON.
-    /// </summary>
-    /// <param name="pattern">The regular expression.</param>
-    /// <param name="flags">
-    /// Zero or more <see cref="FuzzyRegexOptions"/> member names, separated by commas, spaces or
-    /// <c>|</c>. Case-insensitive. Numbers are refused: the demo takes names so that a typo is an
-    /// error rather than a silently different set of flags.
-    /// </param>
-    /// <param name="subject">The text to search.</param>
-    /// <returns>
-    /// <c>{"matches": [...], "truncated": false}</c>, or <c>{"error": "..."}</c>. Every index and
-    /// length is a UTF-16 code unit offset, because the page slices a JavaScript string with it and
-    /// JavaScript strings are UTF-16 too.
-    /// </returns>
-    internal static string Run(string pattern, string flags, string subject) =>
-        Run(pattern, flags, subject, mode: "", replacement: "", namedLists: "");
-
-    /// <summary>
     /// Matches <paramref name="pattern"/> against <paramref name="subject"/> in one of the demo's
     /// three modes and returns the answer as JSON.
     /// </summary>
@@ -421,7 +402,7 @@ internal static class DemoEngine
 
             DemoMatch described = Describe(match, MaxSpans - spans, out bool clipped);
             matches.Add(described);
-            spans += described.Groups.Sum(static g => 1 + g.Captures.Count);
+            spans += described.Groups.Sum(static g => 1 + g.Captures.Count) + Spent(described.Edits);
 
             // A clipped match is the last one: its own capture lists are already short of the
             // truth, and going round again would only add more spans to an answer that has just
@@ -550,9 +531,30 @@ internal static class DemoEngine
     /// </param>
     private static DemoMatch Describe(Match match, int budget, out bool clipped)
     {
+        clipped = false;
+        List<DemoGroup> groups = DescribeGroups(match, ref budget, ref clipped);
+        FuzzyCounts counts = match.FuzzyCounts;
+
+        return new DemoMatch(
+            match.Index,
+            match.Length,
+            new DemoCounts(counts.Substitutions, counts.Insertions, counts.Deletions),
+            groups,
+            Edits(match, counts, ref budget, ref clipped),
+            // Null rather than false, so the member is omitted from every ordinary answer: partial
+            // matching is one mode of three, and a "partialMatch": false on all thousand matches of
+            // a walk would be a thousand copies of "this question was not asked".
+            match.PartialMatch
+                ? true
+                : null
+        );
+    }
+
+    /// <summary>Every group and every capture of one match, within the same budget of spans.</summary>
+    private static List<DemoGroup> DescribeGroups(Match match, ref int budget, ref bool clipped)
+    {
         List<DemoGroup> groups = [];
         int number = 0;
-        clipped = false;
 
         foreach (Group group in match.Groups)
         {
@@ -596,19 +598,83 @@ internal static class DemoEngine
             );
         }
 
-        FuzzyCounts counts = match.FuzzyCounts;
-        return new DemoMatch(
-            match.Index,
-            match.Length,
-            new DemoCounts(counts.Substitutions, counts.Insertions, counts.Deletions),
-            groups,
-            // Null rather than false, so the member is omitted from every ordinary answer: partial
-            // matching is one mode of three, and a "partialMatch": false on all thousand matches of
-            // a walk would be a thousand copies of "this question was not asked".
-            match.PartialMatch
-                ? true
-                : null
-        );
+        return groups;
+    }
+
+    /// <summary>
+    /// Where the match spent each error, in positions the page can slice the subject with, or
+    /// <see langword="null"/> when it spent none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null rather than three empty arrays, for the reason <c>partialMatch</c> is omitted: a walk
+    /// of a thousand exact matches would otherwise carry a thousand copies of what the zero counts
+    /// beside them already say.
+    /// </para>
+    /// <para>
+    /// <b>A deletion is un-shifted back to the subject here.</b> <see cref="Match.FuzzyChanges"/>
+    /// reports upstream's own number, which is where the missing character would sit in a string
+    /// that had every deletion put back, so the i-th deletion is i past the place in the subject
+    /// it happened at (<c>src/FuzzyRegex/Match.cs</c>, the <c>change.Pos + offset</c> at line 448,
+    /// and the paragraph above it). Upstream's number stays the library's answer; the demo is what
+    /// needs a position in the subject on screen, because that is the string the page slices.
+    /// </para>
+    /// <para>
+    /// Edits spend the same span budget captures do. One match can hold as many deletions as the
+    /// pattern has characters - <c>(?:a{1000}){d&lt;=1000}</c> against an empty subject is 1,000 of
+    /// them - and <see cref="MaxMatches"/> such matches would be a megabyte of positions.
+    /// </para>
+    /// </remarks>
+    private static DemoEdits? Edits(Match match, FuzzyCounts counts, ref int budget, ref bool clipped)
+    {
+        if (counts.Total == 0)
+        {
+            return null;
+        }
+
+        FuzzyChanges changes = match.FuzzyChanges;
+        List<int> substitutions = Take(changes.Substitutions, ref budget, ref clipped);
+        List<int> insertions = Take(changes.Insertions, ref budget, ref clipped);
+        List<int> deletions = [];
+
+        for (int i = 0; i < changes.Deletions.Count; i++)
+        {
+            if (budget <= 0)
+            {
+                clipped = true;
+                break;
+            }
+
+            budget--;
+            deletions.Add(changes.Deletions[i] - i);
+        }
+
+        return new DemoEdits(substitutions, insertions, deletions);
+    }
+
+    /// <summary>How much of the span budget one match's edits took, for the walk's running tally.</summary>
+    private static int Spent(DemoEdits? edits) =>
+        edits is null ? 0 : edits.Substitutions.Count + edits.Insertions.Count + edits.Deletions.Count;
+
+    /// <summary>As many of these positions as the budget allows, setting <paramref name="clipped"/>
+    /// when it does not stretch to all of them.</summary>
+    private static List<int> Take(IReadOnlyList<int> positions, ref int budget, ref bool clipped)
+    {
+        List<int> taken = [];
+
+        foreach (int position in positions)
+        {
+            if (budget <= 0)
+            {
+                clipped = true;
+                break;
+            }
+
+            budget--;
+            taken.Add(position);
+        }
+
+        return taken;
     }
 
     /// <summary>
@@ -654,7 +720,7 @@ internal static class DemoEngine
                     token.Length > MaxQuotedTokenLength
                         ? string.Concat(token.AsSpan(0, MaxQuotedTokenLength), "...")
                         : token;
-                error = $"'{quoted}' is not a FuzzyRegexOptions member name.";
+                error = $"Unknown flag '{quoted}'. Flags are FuzzyRegexOptions member names.";
                 return false;
             }
 
@@ -684,9 +750,9 @@ internal static class DemoEngine
         };
 
     /// <summary>
-    /// Reads the mode name, or says which one it could not read. Empty means the ordinary walk, so
-    /// that the three-argument <see cref="Run(string, string, string)"/> and any older caller keep
-    /// their meaning exactly.
+    /// Reads the mode name, or says which one it could not read. Empty means the ordinary walk - the
+    /// question the page asks unless it is asking for a partial match or a replacement - so a caller
+    /// that has nothing to say about the mode says nothing.
     /// </summary>
     private static bool TryParseMode(string mode, out DemoMode parsed, out string? error)
     {
@@ -709,7 +775,7 @@ internal static class DemoEngine
                     mode.Length > MaxQuotedTokenLength
                         ? string.Concat(mode.AsSpan(0, MaxQuotedTokenLength), "...")
                         : mode;
-                error = $"'{quoted}' is not a mode. The modes are 'match', 'partial' and 'replace'.";
+                error = $"Unknown mode '{quoted}'. The modes are 'match', 'partial' and 'replace'.";
                 return false;
         }
     }
@@ -742,7 +808,7 @@ internal static class DemoEngine
             int colon = line.IndexOf(':', StringComparison.Ordinal);
             if (colon <= 0)
             {
-                error = $"'{Quoted(line)}' is not a named list. Write one list per line, as: name: word, word, word";
+                error = $"Line '{Quoted(line)}' needs a colon. Write one list per line, as: name: word, word, word";
                 return false;
             }
 
@@ -804,6 +870,17 @@ internal sealed record DemoSpan(int Index, int Length);
 internal sealed record DemoCounts(int Substitutions, int Insertions, int Deletions);
 
 /// <summary>
+/// Where a fuzzy match spent each kind of error, as positions in the subject. A substitution and an
+/// insertion name the character they were spent on; a deletion names the place a character is
+/// missing from, so two deletions in a row are two positions the same.
+/// </summary>
+internal sealed record DemoEdits(
+    IReadOnlyList<int> Substitutions,
+    IReadOnlyList<int> Insertions,
+    IReadOnlyList<int> Deletions
+);
+
+/// <summary>
 /// One capturing group's result. <c>Captures</c> is the full capture list, which is an mrab-regex
 /// feature the built-in engine does not have, and is what makes a repeated group worth showing.
 /// </summary>
@@ -817,15 +894,17 @@ internal sealed record DemoGroup(
 );
 
 /// <summary>
-/// One match: its span, its cost, every group, and - in partial mode only - whether the subject ran
-/// out before the pattern did. <c>Partial</c> is null except when it is true, so it appears in the
-/// JSON only where the question was asked.
+/// One match: its span, its cost, every group, where a fuzzy match spent its errors, and - in
+/// partial mode only - whether the subject ran out before the pattern did. <c>Edits</c> is null on
+/// an exact match and <c>Partial</c> is null except when it is true, so each appears in the JSON
+/// only where there is something to say.
 /// </summary>
 internal sealed record DemoMatch(
     int Index,
     int Length,
     DemoCounts Counts,
     IReadOnlyList<DemoGroup> Groups,
+    DemoEdits? Edits,
     bool? PartialMatch
 );
 

@@ -72,6 +72,10 @@ Body.
 
 ## Something else
 '@
+
+    # Line endings normalised once, so a test that edits the fixture can match a two-line sequence
+    # with `n and not care whether this file was checked out with CRLF.
+    $script:Normalised = $Markdown.Replace("`r`n", "`n")
 }
 
 Describe 'build-demo-help.ps1' {
@@ -130,5 +134,95 @@ Describe 'build-demo-help.ps1' {
         $LASTEXITCODE | Should -Be 1
         $report | Should -Match 'FAILED'
         $report | Should -Match "key 'bestmatch' wants a section headed"
+    }
+
+    It 'sets $LASTEXITCODE itself, so a caller does not read the last native command instead' {
+        # tools/build-demo-web.ps1 calls this script in-process and then tests $LASTEXITCODE. That
+        # variable is only written by a native command or by `exit`, so a script that simply runs
+        # off its end leaves whatever the caller's previous native command set - and the gate then
+        # reports whatever that happened to be. Called here the way the build calls it, not in a
+        # child process, because a child process always has an exit code and the defect cannot
+        # appear there.
+        Set-Content -LiteralPath $Source -Value $Markdown -Encoding utf8
+
+        & pwsh -NoProfile -Command 'exit 3'   # a failed native command, as a caller could have run
+        $LASTEXITCODE | Should -Be 3
+
+        & $ScriptPath -Comparison $Source -Destination $Output | Out-Null
+
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'refuses a mapped section that has no body, rather than writing an empty panel' {
+        # The heading is still there, so the fail-on-rename check is satisfied; what moved is the
+        # prose, under a sub-heading or into another section. On screen that is a disclosure which
+        # opens onto nothing, and nothing tells the difference between it and a feature nobody
+        # documented - so the build stops instead (S72 review, 2026-09-19).
+        $heading = '### A per-call `timeout` on every input-dependent method'
+        Set-Content -LiteralPath $Source -Value $Normalised.Replace("$heading`n`nBody.", $heading) -Encoding utf8
+
+        $report = & pwsh -NoProfile -File $ScriptPath -Comparison $Source -Destination $Output 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match 'FAILED'
+        $report | Should -Match "key 'timeout'"
+        $report | Should -Match 'no body'
+    }
+
+    It 'refuses markdown it cannot render, naming the construct and the line' -ForEach @(
+        @{ What = 'a sub-heading'; Line = '#### A deeper heading'; Expected = 'heading' }
+        @{ What = 'a bullet'; Line = '- a list item'; Expected = 'list item' }
+        @{ What = 'a numbered item'; Line = '1. a numbered item'; Expected = 'list item' }
+        @{ What = 'a link'; Line = 'See [the docs](https://example.invalid) for more.'; Expected = 'link' }
+    ) {
+        # Split-Runs understands backticks and `**` and nothing else, so any of these reaches the
+        # panel as literal markdown - "#### A deeper heading" printed with its hashes. None is in
+        # docs/COMPARISON.md's mapped sections today; the point is that adding one is a red build
+        # and not a page that has quietly started showing markup to visitors.
+        $plain = 'One sentence with no code in it at all.'
+        Set-Content -LiteralPath $Source -Value $Normalised.Replace($plain, "$plain`n`n$Line") -Encoding utf8
+
+        $report = & pwsh -NoProfile -File $ScriptPath -Comparison $Source -Destination $Output 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match 'FAILED'
+        $report | Should -Match $Expected
+    }
+
+    It 'leaves a fenced code block alone, hashes, dashes, brackets and all' {
+        # The guard above must not fire inside a fence: COMPARISON.md's C# samples hold comments
+        # that start with a hash and expressions full of brackets, and refusing those would make
+        # the check useless on the only file it is ever run against.
+        $sample = 'var m = FuzzyRegex.Match("x");'
+        Set-Content -LiteralPath $Source -Value $Normalised.Replace($sample, "# a comment`n- not a list`nvar m = FuzzyRegex.Match(""[a](b)"");") -Encoding utf8
+
+        $report = & pwsh -NoProfile -File $ScriptPath -Comparison $Source -Destination $Output 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0
+        $report | Should -Match 'GREEN'
+    }
+
+    It 'documents every feature the sidebar names, and no others' {
+        # The two lists are written out twice - the map in build-demo-help.ps1 and the `features`
+        # array in tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs - and both are checked
+        # against examples.json, which is the file the page actually reads. Drop a key from either
+        # side and one of the two gates goes red.
+        #
+        # Run against the REAL docs/COMPARISON.md, so this also proves the shipped mapping resolves.
+        $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $comparison = Join-Path $repo 'docs/COMPARISON.md'
+        $examplesPath = Join-Path $repo 'demo/FuzzyRegex.Demo.Wasm/wwwroot/examples.json'
+
+        $report = & pwsh -NoProfile -File $ScriptPath -Comparison $comparison -Destination $Output 2>&1 | Out-String
+        $report | Should -Match 'GREEN'
+
+        $help = Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json
+        $documented = @($help.entries.PSObject.Properties.Name)
+
+        $examples = Get-Content -LiteralPath $examplesPath -Raw | ConvertFrom-Json
+        # The syntax-tour rows carry no key and have no panel; the rest name the feature they show.
+        $demonstrated = @($examples | ForEach-Object { $_.key } | Where-Object { $_ } | Select-Object -Unique)
+
+        $documented | Should -Be $demonstrated
     }
 }

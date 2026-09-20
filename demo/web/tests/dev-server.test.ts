@@ -15,14 +15,14 @@
 // a test that needs a previous build to go red is a test CI can never fail.
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createServer, type ViteDevServer } from 'vite';
 
 // Both from the config, so the test cannot drift from the thing it guards: `webRoot` is the build
 // output directory and the middleware's last fallback root at once, which is the whole problem.
-import { isOwnBuildOutput, webRoot } from '../vite.config';
+import { isOwnBuildOutput, projectRoot, webRoot } from '../vite.config';
 
 // Shaped like what `vite build` writes, because the assertions below tell the two pages apart by
 // the hashed bundle a built page references and a source page does not.
@@ -34,6 +34,7 @@ const created: string[] = [];
 
 let server: ViteDevServer;
 let base: string;
+let spent: string;
 
 beforeAll(async () => {
     for (const path of shadows) {
@@ -45,8 +46,19 @@ beforeAll(async () => {
         written.push(path);
     }
 
+    // The whole file runs from the repository root, because being started from somewhere else IS the
+    // regression and `npm test` runs with the cwd already at `demo/web`: a suite that stays there
+    // cannot tell the `root` below from its absence, and every assertion in the file would hold with
+    // the pin taken out. Started here without it, Vite took its root from `process.cwd()`, resolved
+    // it to the repository root, found no `index.html`, and answered every request below with an
+    // empty 404 - the five failures of 2026-09-20. Only the root needs pinning: Vite looks for
+    // `vite.config.ts` under the root it settled on, not under the cwd (measured 2026-09-20 from
+    // here - `configFile` resolved to `demo/web/vite.config.ts` and `vite:vue` was loaded).
+    spent = process.cwd();
+    process.chdir(resolve(projectRoot, '../..'));
+
     // Port 0: the suite must not fight a dev server the developer already has open.
-    server = await createServer({ server: { port: 0 }, logLevel: 'error' });
+    server = await createServer({ root: projectRoot, server: { port: 0 }, logLevel: 'error' });
     await server.listen();
     const local = server.resolvedUrls?.local[0];
     expect(local, 'the dev server reported no local URL').toBeDefined();
@@ -71,6 +83,9 @@ afterAll(async () => {
     // whether the bundle landed.
     for (const path of written) rmSync(path, { force: true });
     for (const directory of created) rmSync(directory, { force: true, recursive: true });
+    // Last, because Vite reads the cwd while it shuts down, and this process is a worker vitest may
+    // hand to another test file next.
+    process.chdir(spent);
 });
 
 test.each([

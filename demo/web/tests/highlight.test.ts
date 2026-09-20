@@ -6,6 +6,13 @@ import type { Span } from '../src/types';
 const texts = (result: ReturnType<typeof segments>) =>
     result.segments.map((s) => (s.match === null ? s.text : `[${s.text}]`)).join('');
 
+/** The edits inside the matches, as `kind:text` per run, so a test can name the whole breakdown. */
+const runs = (result: ReturnType<typeof segments>) =>
+    result.segments
+        .filter((s) => s.match !== null)
+        .map((s) => (s.runs ?? []).map((run) => `${run.kind ?? '-'}:${run.text}`).join('|'))
+        .join(' ');
+
 test('the subject comes back whole, with the matches marked', () => {
     // Upstream's answer for \d+ against "a1 b22 c333" (tools/probes/demo-json-contract-expectations.py,
     // run 2026-09-18 against regex 2026.9.10): (1,1), (4,2), (8,3).
@@ -140,6 +147,94 @@ test('a zero-length match sharing a start with a longer one is still painted', (
     ]);
     expect(result.segments.filter((s) => s.match !== null).map((s) => s.match)).toEqual([2, 1, 0]);
     expect(texts(result)).toBe('[]b[][aa]');
+});
+
+test('a fuzzy match is broken into the characters each error was spent on', () => {
+    // Upstream's answer for (?:foobar){i<=1,d<=1,s<=1} against "xfoobat"
+    // (tools/probes/demo-json-contract-expectations.py, run 2026-09-20 against regex 2026.9.10):
+    // span (0,6), fuzzy_changes ([0], [1], [6]), and the deletion at subject position 6.
+    const result = segments('xfoobat', [
+        { index: 0, length: 6, edits: { substitutions: [0], insertions: [1], deletions: [6] } },
+    ]);
+
+    expect(texts(result)).toBe('[xfooba]t');
+    expect(runs(result)).toBe('sub:x|ins:f|-:ooba|del:');
+});
+
+test('two deletions in the same place are two marks, not one', () => {
+    // (?:abcdef){d<=2} against "abef", read off the subject: "abef" is "abcdef" with "c" and "d"
+    // missing, both from the one place, after "ab" and before "ef", which is subject position 2.
+    // Upstream's own answer for the same match is `fuzzy_changes = ([], [], [2, 3])`, shifted as if
+    // the deletions were put back; `DemoEngine.Edits` un-shifts it, and the derivation above is how
+    // that 2,2 is checked without going through either implementation.
+    const result = segments('abef', [
+        { index: 0, length: 4, edits: { substitutions: [], insertions: [], deletions: [2, 2] } },
+    ]);
+
+    expect(runs(result)).toBe('-:ab|del:|del:|-:ef');
+});
+
+test('an exact match has no breakdown at all', () => {
+    // The engine omits `edits` from an exact match, and a match that spent no error inside a fuzzy
+    // walk carries three empty lists. Neither draws anything, and neither may cost a run.
+    const [plain, spent] = segments('abcd', [
+        { index: 0, length: 2 },
+        { index: 2, length: 2, edits: { substitutions: [], insertions: [], deletions: [] } },
+    ]).segments.filter((s) => s.match !== null);
+
+    expect(plain?.runs).toBeUndefined();
+    expect(spent?.runs).toBeUndefined();
+});
+
+test('an edit outside the match it belongs to is not drawn', () => {
+    // No engine answer puts one there - the positions come from the match's own walk - but the
+    // answer arrives as JSON from a worker, and a slice beyond the run would paint text that
+    // belongs to the subject around the match as though it were inside it.
+    const result = segments('abcdef', [
+        { index: 2, length: 2, edits: { substitutions: [0, 5], insertions: [], deletions: [9] } },
+    ]);
+
+    expect(texts(result)).toBe('ab[cd]ef');
+    expect(result.segments.filter((s) => s.match !== null)[0]?.runs).toBeUndefined();
+});
+
+test('an error spent on half a surrogate pair marks the whole character', () => {
+    // The engine counts UTF-16 code units, so a position can land on one half of a pair. Slicing
+    // there would put a lone surrogate in a text node, which browsers paint as U+FFFD - a subject
+    // the demo has corrupted. Hand-built, like the overlap case below: it is a guard against a
+    // shape the page can be handed, not a claim about what the engine answers.
+    const result = segments('a\u{10400}b', [
+        { index: 0, length: 4, edits: { substitutions: [2], insertions: [], deletions: [] } },
+    ]);
+
+    expect(runs(result)).toBe('-:a|sub:\u{10400}|-:b');
+});
+
+test('a match that ends inside a surrogate pair paints its own text and no more', () => {
+    // Half a character at each end of the span is the other way a code-unit position lands badly,
+    // and the whole-character rule above made it worse rather than better: widening the run to the
+    // end of the pair took it past the end of the match, and the low half was then painted a second
+    // time by the segment after it. Whatever the indices, the runs are the match's own text - that
+    // is what the page renders instead of `text` when they are present.
+    const result = segments('a\u{10400}b', [
+        { index: 0, length: 2, edits: { substitutions: [1], insertions: [], deletions: [] } },
+    ]);
+
+    const match = result.segments.filter((s) => s.match !== null)[0];
+    expect((match?.runs ?? []).map((run) => run.text).join('')).toBe(match?.text);
+});
+
+test('a match that starts inside a surrogate pair still draws the error at its first character', () => {
+    // The mirror of it. The whole-character rule moves a position on the low half back to the high
+    // half, and there the high half is outside the match: the run was keyed to a position the walk
+    // never visits, so the error vanished while the chip beside the match still counted it.
+    const result = segments('a\u{10400}b', [
+        { index: 2, length: 2, edits: { substitutions: [2], insertions: [], deletions: [] } },
+    ]);
+
+    const match = result.segments.filter((s) => s.match !== null)[0];
+    expect((match?.runs ?? []).map((run) => run.kind)).toContain('sub');
+    expect((match?.runs ?? []).map((run) => run.text).join('')).toBe(match?.text);
 });
 
 test('an overlapping match is skipped rather than rendered as an empty slice', () => {

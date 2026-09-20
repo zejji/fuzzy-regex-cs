@@ -84,7 +84,12 @@ const HELP = JSON.stringify({
     source: 'docs/COMPARISON.md',
     note: 'generated',
     entries: {
-        fuzzy: [{ heading: [{ code: false, text: 'Fuzzy matching' }], blocks: [] }],
+        fuzzy: [
+            {
+                heading: [{ code: false, text: 'Fuzzy matching' }],
+                blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Up to n errors.' }] }],
+            },
+        ],
     },
 });
 
@@ -139,7 +144,7 @@ test("stopping a runaway leaves the explanation on screen, not the pool's bare r
     // Killing the worker makes the pool settle the in-flight question with `{aborted: true,
     // error: 'stopped'}`, and that continuation lands AFTER stop() has written its message. Without
     // the guard in stop() it overwrites it, and the button's whole explanation never reaches anyone.
-    expect(demo.failure.value).toMatch(/^Stopped\. The worker running that match was killed/);
+    expect(demo.failure.value).toMatch(/^Stopped\. That worker was killed and a warm spare took over/);
     expect(demo.running.value).toBe(false);
     expect(demo.busy.value).toBe(false);
 });
@@ -184,7 +189,9 @@ test('the subject-cap refusal survives the killing of the question it replaces',
     demo.subject.value = 'x'.repeat(demo.maxSubjectLength + 1);
     await sleep(DEBOUNCE_MS + 120);
 
-    expect(demo.failure.value).toMatch(/^The subject is 100,001 characters, over the demo's limit of 100,000\./);
+    expect(demo.failure.value).toMatch(
+        /^The subject is 100,001 characters and the demo's limit is 100,000, so nothing was sent/,
+    );
     expect(demo.answer.value).toBeNull();
 
     // And the refusal ENDS the question. The refused keystroke supersedes one that was with a

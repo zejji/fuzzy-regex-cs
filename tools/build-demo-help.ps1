@@ -109,6 +109,40 @@ function Get-Section {
 
 <#
 .SYNOPSIS
+    The markdown constructs a mapped section may not contain, because the page cannot render them.
+
+.DESCRIPTION
+    Split-Runs below understands exactly two things: `inline code` and `**bold**`. Anything else
+    reaches the panel as literal markdown - a sub-heading printed with its hashes, a bullet with its
+    dash, a link as `[text](url)` with no link in it. None of these is in the mapped sections of
+    docs/COMPARISON.md today, and the job of this check is to keep it that way: adding one is then a
+    red build on the pull request that adds it, rather than markup quietly appearing on the page.
+
+    Fenced code is skipped, because a C# sample legitimately holds hashes, dashes and brackets.
+#>
+function Get-UnsupportedConstructs {
+    param([string[]]$Body)
+
+    $found = @()
+    $fenced = $false
+    for ($i = 0; $i -lt $Body.Length; $i++) {
+        $line = $Body[$i]
+        if ($line.TrimEnd().StartsWith('```')) { $fenced = -not $fenced; continue }
+        if ($fenced) { continue }
+
+        # A heading of the same level or higher ended the section already, so any heading left in
+        # the body is a deeper one.
+        if ($line -match '^\s*#{1,6} ') { $found += "a sub-heading the page cannot render, on line $($i + 1): $($line.Trim())" }
+        elseif ($line -match '^\s*([-*+]|\d+\.)\s+') { $found += "a list item the page cannot render, on line $($i + 1): $($line.Trim())" }
+
+        if ($line -match '\[[^\]]*\]\([^)]*\)') { $found += "a link the page cannot render, on line $($i + 1): $($line.Trim())" }
+    }
+
+    return , @($found)
+}
+
+<#
+.SYNOPSIS
     Splits one paragraph into runs of plain text and `inline code`, so the page can render code
     spans without a markdown renderer and without any HTML.
 #>
@@ -187,32 +221,45 @@ function ConvertTo-Blocks {
 }
 
 $entries = [ordered]@{}
-$missing = @()
+$problems = @()
 
 foreach ($key in $map.Keys) {
     $sections = @()
     foreach ($heading in $map[$key]) {
         $body = Get-Section -Lines $lines -Heading $heading
         if ($null -eq $body) {
-            $missing += "  key '$key' wants a section headed: $heading"
+            $problems += "  key '$key' wants a section headed: $heading"
             continue
+        }
+
+        foreach ($construct in (Get-UnsupportedConstructs -Body $body)) {
+            $problems += "  key '$key', section '$heading' contains $construct"
+        }
+
+        $blocks = ConvertTo-Blocks -Body $body
+
+        # A heading that is still there but whose prose has moved - under a sub-heading, or into a
+        # neighbouring section - would otherwise be written green and rendered as a disclosure that
+        # opens onto nothing, which nobody can tell from a feature that was never documented.
+        if ($blocks.Count -eq 0) {
+            $problems += "  key '$key', section '$heading' has no body: the heading is there and the prose under it is not"
         }
 
         # The heading itself is shown above the panel's prose, without its "### " marker.
         $sections += , [ordered]@{
             heading = Split-Runs ($heading -replace '^#{1,6} ', '')
-            blocks  = ConvertTo-Blocks -Body $body
+            blocks  = $blocks
         }
     }
 
     $entries[$key] = $sections
 }
 
-if ($missing.Count -gt 0) {
+if ($problems.Count -gt 0) {
     $source = Resolve-Path -LiteralPath $Comparison
-    Write-Host "build-demo-help: FAILED - $($missing.Count) heading(s) missing from $source" -ForegroundColor Red
-    $missing | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-    Write-Host 'Either the heading was renamed (update the map in tools/build-demo-help.ps1) or the section was deleted.' -ForegroundColor Red
+    Write-Host "build-demo-help: FAILED - $($problems.Count) problem(s) with $source" -ForegroundColor Red
+    $problems | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    Write-Host 'A heading may have been renamed or deleted (update the map in tools/build-demo-help.ps1), its prose may have moved, or the section may have grown markdown the demo cannot render.' -ForegroundColor Red
     exit 1
 }
 
@@ -227,3 +274,9 @@ $json = $payload | ConvertTo-Json -Depth 12
 
 $count = ($entries.Keys | ForEach-Object { $entries[$_].Count } | Measure-Object -Sum).Sum
 Write-Host "build-demo-help: GREEN - $($entries.Count) keys, $count sections -> $Destination"
+
+# An explicit exit on the success path too, because tools/build-demo-web.ps1 calls this script
+# in-process and then reads $LASTEXITCODE. That variable is written by a native command or by
+# `exit` and by nothing else, so a script that runs off its end leaves the caller reading whatever
+# its own last native command set - a gate whose answer comes from somewhere else entirely.
+exit 0

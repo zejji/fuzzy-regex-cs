@@ -77,6 +77,12 @@ CASES = [
         lambda: regex.compile(r"(?:foobar){i<=1,d<=1,s<=1}").search("xfoobat"),
     ),
     (
+        "fuzzy-two-deletions-at-one-place",
+        r'compile(r"(?:abcdef){d<=2}").search("abef")',
+        "abef",
+        lambda: regex.compile(r"(?:abcdef){d<=2}").search("abef"),
+    ),
+    (
         "astral-subject",
         r'compile(r"\p{Deseret}+").search("ab\U00010400\U00010401cd")',
         "ab\U00010400\U00010401cd",
@@ -117,6 +123,14 @@ def main() -> int:
             continue
         print(f"    match       {show(subject, m.start(), m.end())}")
         print(f"    fuzzy_counts (sub, ins, del) = {m.fuzzy_counts}")
+        print(f"    fuzzy_changes (sub, ins, del) = {m.fuzzy_changes}")
+        # No subject positions printed here. Upstream reports a deletion where the missing character
+        # would sit in a string that had every deletion put back, so the i-th is shifted by i
+        # (match_fuzzy_changes, _regex.c:20555-20558), and the demo un-shifts them to draw its
+        # caret in the subject on screen. Un-shifting them here too would make this probe
+        # re-implement `DemoEngine.Edits`
+        # and then check the port against its own algorithm, which is not evidence of anything: the
+        # subject position belongs in the test that asserts it, derived from the subject by hand.
         for number in range(0, (m.re.groups or 0) + 1):
             name_of = {v: k for k, v in m.re.groupindex.items()}.get(number)
             label = f"{number}" if name_of is None else f"{number} ({name_of})"
