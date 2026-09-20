@@ -386,7 +386,7 @@ public sealed class Match : Group
     /// </para>
     /// <para>
     /// A deletion's position is <b>not</b> a position in the subject. Upstream shifts each deletion
-    /// by the number of deletions recorded before it (<c>:20535-20537</c>), so what is reported is
+    /// by the number of deletions recorded before it (<c>:20555-20558</c>), so what is reported is
     /// where the missing character would sit in a string that had them all put back - which can be
     /// past the end of the match, and past the end of the subject.
     /// </para>

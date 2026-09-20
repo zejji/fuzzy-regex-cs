@@ -5,7 +5,7 @@
 # Version0/Version1 - and says to confirm them and to find any other pair the engine rejects, so
 # that every rejected pair becomes a radio group rather than an error path the control can reach.
 #
-# Every unordered pair of the 13 non-None members, compiled against the pattern the demo starts
+# Every unordered pair of the 14 non-None members, compiled against the pattern the demo starts
 # with. Reading the two `throw` sites in PatternCompiler.cs is not the same as running them: the
 # encoding check tests `AllEncodings`, which includes upstream's LOCALE, and the version check runs
 # against a default, so the reachable set is a question about the code as built.

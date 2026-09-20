@@ -1363,7 +1363,7 @@ def _describe_match(compiled, match, offsets: list[int], violations: list | None
             "substitutions": [_utf16_index(offsets, p) for p in sub_positions],
             "insertions": [_utf16_index(offsets, p) for p in ins_positions],
             # A deletion's position is NOT a position in the subject: match_fuzzy_changes
-            # (upstream/src/_regex.c:20535) adds one per deletion recorded before it, so what comes
+            # (upstream/src/_regex.c:20555-20558) adds one per deletion recorded before it, so what comes
             # out is where the missing character would sit in a string with them all put back. Only
             # the part before that shift is a real subject position, so the shift is undone, the
             # position translated, and the shift re-applied - a deletion is one CHARACTER wide

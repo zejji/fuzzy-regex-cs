@@ -716,7 +716,7 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   its own already answered, so that selector is true from the first paint and the probe measures the
   wrong layout.
 - 2026-09-20 (S73): upstream's deletion shift is `match_fuzzy_changes`, `_regex.c:20555-20558`. Four
-  comments elsewhere cite `:20535-20537`, which is the top of that function; they are in STATE.md.
+  comments elsewhere cited `:20535-20537`, the top of that function; corrected in S74's fix pass.
 - 2026-09-20 (S74): the flags string stays the state. `DemoEngine.Run` is handed the `f=` fragment
   unchanged and the checkbox panel is a pure view over it, so shared links and `examples.json` rows
   written before the panel load into it with no mapping at any edge.

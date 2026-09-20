@@ -72,7 +72,7 @@ public sealed class FuzzyMatchingTests
 
         // twodel match('(?:[ab][cd][ef][gh]){e<=2}', 'ag'): counts=(0, 0, 2) changes=([], [], [1, 2])
         // Both deletions happen at position 1; the second is reported at 2 because
-        // match_fuzzy_changes (:20535) shifts each deletion by the number recorded before it, so the
+        // match_fuzzy_changes (:20555-20558) shifts each deletion by the number recorded before it, so the
         // positions read as places in a string with the missing characters put back.
         Match two = new FuzzyRegex("(?:[ab][cd][ef][gh]){e<=2}").MatchAtStart("ag");
 

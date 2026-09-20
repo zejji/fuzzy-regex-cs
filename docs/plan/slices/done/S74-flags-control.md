@@ -182,6 +182,37 @@ the ones the engine refuses.*
   its header. Both browser probes want a served publish:
   `node tools/probes/serve-demo-publish.mjs` on port 8213, then
   `browser_run_code_unsafe` with the probe's filename.
+- **The fold, with the panel SHUT, measured rather than asserted** (2026-09-20, the fix pass;
+  S73's case in the fragment, a Release publish served on 8213, Chrome through Playwright). The
+  numbers are the distance from the top of the viewport to the bottom of each thing, in CSS pixels,
+  and they are identical at 1366x768 and at 1440x900 because the input pane is a fixed width and
+  the results pane scrolls inside itself:
+
+  | | 1366x768 | 1440x900 |
+  | --- | --- | --- |
+  | pattern field | 121 | 121 |
+  | subject field | 269 | 269 |
+  | flags row, shut | 356 | 356 |
+  | `5 matches` | 120 | 120 |
+  | last of the five match rows | 507 | 507 |
+  | page scrolls | no (768 of 768) | no (900 of 900) |
+
+  So every part of S73's claim holds with the panel in the page: the whole answer for the default
+  case is inside the first viewport at both laptop sizes, and nothing has to be scrolled to.
+  The one correction to S73's wording is that there is no "primary action" to measure - the page
+  answers as the boxes are typed in, and the only button in that row is `Stop`, which exists while
+  a run is in flight. Taken with the fold block of `tools/probes/s73-widths.mjs` run inline at the
+  two laptop sizes rather than the whole five-width walk. Re-run: publish with
+  `pwsh -File tools/run-wasm-smoke.ps1 -OutDir .scratch/s74-publish`, serve that `wwwroot`, then
+  `tools/probes/s73-widths.mjs`, whose default state is the shut panel.
+
+  One thing to know before reading a rect out of that page: a `<details>` that is SHUT still hands
+  back plausible geometry for what is inside it. Measured in the same session -
+  `getComputedStyle(panel, '::details-content').contentVisibility` is `hidden`, not `display: none`
+  - and a skipped subtree keeps its boxes, so `.flags-body` reported 625 px of height and
+  `.flag-help-button` a 24x24 box at y=372 while the shut panel ended at 356. Nothing of it is
+  painted (the screenshot shows the `Mode` fieldset at that point, and `elementFromPoint` agrees).
+  A probe asking whether the panel is shut must read `details.open`, never a rect.
 - `.NET` and upstream anchor positions behind the reworded `Multiline` sentence (2026-09-20):
   `/$/ on "a\nb\n"` gives `[3,4]` with no flags and `[1,3,4]` with `Multiline`; `/^/` gives `[0]`
   and `[0,2,4]`. Identical from `regex 2026.9.10` under `finditer`. Re-run: a file-based

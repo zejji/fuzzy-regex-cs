@@ -29,7 +29,7 @@ internal readonly record struct GroupSpan(int Start, int End);
 /// <see cref="Pos"/> is a UTF-16 code unit index, like every other position in the engine; upstream's
 /// is a codepoint index. For a substitution or an insertion it is a real position in the subject; for
 /// a deletion it is where the missing character would have gone, which <c>match_fuzzy_changes</c>
-/// (<c>:20535</c>) then shifts by one per earlier deletion, so the reported value can be past the end
+/// (<c>:20555-20558</c>) then shifts by one per earlier deletion, so the reported value can be past the end
 /// of the match.
 /// </remarks>
 /// <param name="Type">Which error: <see cref="FuzzyValue.Sub"/>, <c>Ins</c> or <c>Del</c>.</param>
