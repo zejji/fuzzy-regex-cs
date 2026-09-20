@@ -74,6 +74,14 @@ jobs:
         shell: pwsh
         run: ./tools/check-doc-examples.ps1
 
+      - name: The demo's help must still be generatable from the documentation
+        # The demo's help panels are lifted out of docs/COMPARISON.md at build time (S72). A pull
+        # request that renames or deletes a heading the panels quote has to go red HERE, on the
+        # change that renames it, rather than on the next Pages deployment - so this runs in the
+        # library's own CI even though nothing else about the demo does.
+        shell: pwsh
+        run: ./tools/build-demo-help.ps1 -Destination $env:RUNNER_TEMP/help.json
+
       - name: The generated status board must be up to date
         shell: pwsh
         run: |
@@ -135,6 +143,34 @@ jobs:
         # nothing rooted in the trimmer, and the binary size and startup time a user would see.
         shell: pwsh
         run: ./tools/run-aot-smoke.ps1 -Rid ${{ matrix.rid }}
+
+  pack:
+    # The packaging half of the release rehearsal (S66, docs/plan/RELEASE.md): pack in Release and
+    # validate the result on every push, so a packaging regression (a metadata field dropped, a
+    # SourceLink mapping broken) fails here instead of at the real release. No publish step - this
+    # never leaves the runner.
+    name: Pack and validate the NuGet package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Pack and validate
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./tools/pack-and-validate.ps1
 
   inspections:
     name: ReSharper inspections (IDE0320 and other IDE-only errors must fail here)

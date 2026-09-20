@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FuzzyRegex demo harness (S70)</title>
+</head>
+
+<body>
+  <h1>FuzzyRegex worker harness</h1>
+  <p>
+    No framework and no styling on purpose: this page exists to prove the engine half works in a
+    browser, so that when S71's Vue page misbehaves, a failed boot is distinguishable from a failed
+    render. Every verdict below is also on <code>window.__harness</code> for a driver to read.
+  </p>
+  <ol id="checks"></ol>
+  <p id="verdict">running...</p>
+
+  <script type="module">
+    // Expected answers come from a real upstream run, never from this port's own output
+    // (port-slice rule, owner 2026-09-15). tools/probes/demo-json-contract-expectations.py, run
+    // 2026-09-18 against regex 2026.9.10:
+    //   compile(r"(?:foobar){i<=1,d<=1,s<=1}").search("xfoobat")
+    //       match utf16 index=0 length=6, fuzzy_counts (sub, ins, del) = (1, 1, 1)
+    //   compile(r"\d+").finditer("a1 b22 c333")
+    //       matches utf16 (1,1), (4,2), (8,3)
+    const results = [];
+
+    const check = (name, ok, detail) => {
+      results.push({ name, ok, detail });
+      const li = document.createElement('li');
+      li.textContent = `${ok ? 'PASS' : 'FAIL'}  ${name}  -  ${detail}`;
+      document.getElementById('checks').appendChild(li);
+    };
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    function spawn() {
+      const worker = new Worker('worker.js', { type: 'module' });
+      const waiting = new Map();
+      const replies = [];
+      let nextId = 1;
+
+      // A worker that never answers must produce a verdict, not a page stuck on "running...".
+      // Before this, renaming _framework/dotnet.js left every promise below permanently pending:
+      // window.__harness was never assigned and the page read as still loading rather than as
+      // broken, which is the one failure this harness exists to make obvious.
+      const failEveryone = (why) => {
+        for (const [requestId, resolve] of waiting) {
+          resolve({ requestId, json: JSON.stringify({ error: why }), failed: true });
+        }
+        waiting.clear();
+      };
+
+      worker.addEventListener('error', (event) => failEveryone(`worker error: ${event.message ?? event}`));
+
+      worker.addEventListener('message', (event) => {
+        if (event.data.ready === false) {
+          failEveryone(`the worker reported a failed boot: ${event.data.error}`);
+          return;
+        }
+        if (event.data.ready) return;
+        replies.push(event.data);
+        const resolve = waiting.get(event.data.requestId);
+        if (resolve === undefined) return;  // an answer to a question we have moved on from
+        waiting.delete(event.data.requestId);
+        resolve(event.data);
+      });
+
+      return {
+        worker,
+        replies,
+        ask(pattern, flags, subject, timeoutMs = 20000) {
+          const requestId = nextId++;
+          return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+              if (waiting.delete(requestId)) {
+                resolve({
+                  requestId,
+                  json: JSON.stringify({ error: `no answer in ${timeoutMs} ms` }),
+                  timedOut: true,
+                });
+              }
+            }, timeoutMs);
+            waiting.set(requestId, (reply) => { clearTimeout(timer); resolve(reply); });
+            worker.postMessage({ requestId, pattern, flags, subject });
+          });
+        },
+      };
+    }
+
+    const spans = (json) => JSON.parse(json).matches.map((m) => [m.index, m.length]);
+
+    // 1. A round trip returns the ENGINE's answer and not an echo. The assertion is on the
+    //    per-error-type counts of an approximate match, which the page has no way to compute for
+    //    itself - a harness that asserted on a value it supplied would pass against a worker that
+    //    did nothing but reflect its input.
+    async function roundTripCarriesAnEngineAnswer() {
+      const startedAt = performance.now();
+      const client = spawn();
+      const reply = await client.ask('(?:foobar){i<=1,d<=1,s<=1}', '', 'xfoobat');
+      // From `new Worker(...)` to the first answer: the runtime boot plus one match. It is a
+      // measurement, not an assertion - there is no published figure to compare it against - so it
+      // is reported rather than asserted, and it is the demo's own baseline.
+      window.__bootToFirstAnswerMs = performance.now() - startedAt;
+      const answer = JSON.parse(reply.json);
+      const match = answer.matches[0];
+      const counts = `${match.counts.substitutions},${match.counts.insertions},${match.counts.deletions}`;
+      check(
+        'round trip returns the engine\'s own answer',
+        match.index === 0 && match.length === 6 && counts === '1,1,1',
+        `index=${match.index} length=${match.length} counts=(${counts}), upstream says index=0 length=6 counts=(1,1,1)`
+      );
+      client.worker.terminate();
+    }
+
+    // 2. Two questions in flight at once come back on their own requestIds. Without the echo, a
+    //    slow answer arriving after the user has typed something else is rendered as the answer to
+    //    the new question.
+    async function repliesCarryTheirOwnRequestId() {
+      const client = spawn();
+      const [first, second] = await Promise.all([
+        client.ask('a', '', 'aaa'),
+        client.ask('b', '', 'bb'),
+      ]);
+      const firstCount = JSON.parse(first.json).matches.length;
+      const secondCount = JSON.parse(second.json).matches.length;
+      check(
+        'each reply carries the requestId it was asked with',
+        first.requestId !== second.requestId && firstCount === 3 && secondCount === 2,
+        `#${first.requestId} -> ${firstCount} matches, #${second.requestId} -> ${secondCount} matches`
+      );
+      client.worker.terminate();
+    }
+
+    // 3. terminate() kills a runaway, the page keeps painting while it runs, and a respawned worker
+    //    answers the next question correctly. "(a|a)*\b\B" against 30 a's is the pathological
+    //    pattern the test suite already uses: exponential backtracking with no way to succeed. The
+    //    tail was a literal "b" until S60, when the required-string prefilter made that one cheap.
+    async function terminateKillsARunawayAndARespawnAnswers() {
+      const client = spawn();
+      await client.ask('a', '', 'a');  // wait for the boot, so the runaway is the only thing running
+
+      let frames = 0;
+      let painting = true;
+      const tick = () => {
+        if (!painting) return;
+        frames += 1;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
+      // `failed` and `timedOut` are this harness's own synthetic replies, not the engine's, so they
+      // must not be mistaken for the runaway having answered.
+      let runawayAnswered = false;
+      client.ask('(a|a)*\\b\\B', '', 'a'.repeat(30)).then((reply) => {
+        runawayAnswered = !reply.failed && !reply.timedOut;
+      });
+
+      await sleep(500);
+      painting = false;
+      client.worker.terminate();
+
+      check(
+        'the page keeps painting while a runaway pattern runs',
+        frames > 3,
+        `${frames} animation frames in the 500 ms the runaway was running`
+      );
+
+      // Waiting past the engine's own 2 s MatchTimeout is what makes the next check mean
+      // anything. Read immediately after terminate() it was vacuous: no answer could have
+      // arrived by 500 ms even from a worker nobody had killed, so it passed with the
+      // terminate() line deleted. Left running, this pattern answers with a timeout error at
+      // about 2 s, so a silence at 3.5 s distinguishes a killed worker from a slow one.
+      await sleep(3000);
+
+      check(
+        'terminate() kills the runaway before it can answer',
+        !runawayAnswered,
+        runawayAnswered
+          ? 'the runaway answered anyway, so terminate() did not stop it'
+          : 'no answer after 3.5 s, past the 2 s budget an unkilled worker would have answered on'
+      );
+
+      const respawned = spawn();
+      const reply = await respawned.ask('\\d+', '', 'a1 b22 c333');
+      const found = JSON.stringify(spans(reply.json));
+      check(
+        'a respawned worker answers the next question correctly',
+        found === '[[1,1],[4,2],[8,3]]',
+        `${found}, upstream says [[1,1],[4,2],[8,3]]`
+      );
+      respawned.worker.terminate();
+    }
+
+    // 4. The one claim only a browser can settle: a failure crosses the interop boundary as JSON.
+    //    The C# tests pin what DemoEngine.Run returns; what they cannot see is whether a managed
+    //    exception would instead reach JavaScript as a rejected promise carrying no useful text,
+    //    which is the whole reason Run catches everything. Upstream, per
+    //    tools/probes/demo-json-contract-expectations.py run 2026-09-18 against regex 2026.9.10:
+    //    compile('(') is "missing ) at position 1".
+    async function aFailureArrivesAsJsonAndNotAsARejection() {
+      const client = spawn();
+      const reply = await client.ask('(', '', 'abc');
+      const answer = JSON.parse(reply.json);
+      check(
+        'a parse error crosses the boundary as JSON, not as a rejection',
+        !reply.failed && !reply.timedOut && typeof answer.error === 'string'
+        && answer.error.includes('missing )'),
+        JSON.stringify(answer)
+      );
+      client.worker.terminate();
+    }
+
+    try {
+      await roundTripCarriesAnEngineAnswer();
+      await repliesCarryTheirOwnRequestId();
+      await aFailureArrivesAsJsonAndNotAsARejection();
+      await terminateKillsARunawayAndARespawnAnswers();
+    } catch (error) {
+      check('the harness ran to completion', false, String(error));
+    }
+
+    const ok = results.length > 0 && results.every((r) => r.ok);
+    window.__harness = { ok, checks: results, bootToFirstAnswerMs: window.__bootToFirstAnswerMs };
+    document.getElementById('verdict').textContent = ok ? 'HARNESS GREEN' : 'HARNESS RED';
+  </script>
+</body>
+
+</html>

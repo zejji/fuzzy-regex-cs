@@ -54,6 +54,17 @@ if (Test-Path -LiteralPath $controlMarker) {
     exit 1
 }
 
+# Pre-flight, like the control marker above: it needs no build, it costs a file scan, and a slice
+# that forgets a ledger row should be told before it waits thirty seconds for the suite. Phase 7 is
+# allowed to give up upstream's shape where a measurement justifies it, provided the note pairing
+# the source to docs/plan/SYNC-DIVERGENCE.md exists - and a note that is not enforced is a note the
+# next slice under deadline leaves out (S58, 2026-09-19).
+& (Join-Path $PSScriptRoot 'check-sync-divergence.ps1')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Ratchet: RED - the sync-divergence ledger and the source markers disagree.' -ForegroundColor Red
+    exit 1
+}
+
 if (-not $SkipTestRun) {
     if (Test-Path -LiteralPath $trxPath) { Remove-Item -LiteralPath $trxPath -Force }
 

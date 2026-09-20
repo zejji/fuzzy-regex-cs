@@ -32,8 +32,25 @@ internal static class Corpus
     /// </summary>
     public static readonly string LongPartial = Pad("a needle in a hay");
 
+    /// <summary>
+    /// A megabyte of filler with no <c>needle</c> and no near-occurrence of one, so a fuzzy search
+    /// for <c>(?:needle){e&lt;=1}</c> scans the whole subject and answers no match.
+    /// </summary>
+    /// <remarks>
+    /// <b>The absence is measured, not assumed.</b> Upstream <c>regex 2026.9.10</c> on 2026-09-19,
+    /// over this exact subject: <c>(?:needle){e&lt;=1}</c> and <c>(?:needle){e&lt;=2}</c> both answer
+    /// <c>None</c>, where the same patterns over <see cref="Long"/> match its tail at 1048577 and
+    /// 1048576. The probe is <c>tools/probes/s58-nomatch-corpus.py</c>. A budget-2 check as well as
+    /// a budget-1 one, because a near-occurrence one edit outside the budget would still make this
+    /// subject the wrong shape the moment a later slice widened the workload.
+    /// </remarks>
+    public static readonly string LongNoMatch = Pad("a pin in a haystack.");
+
     /// <summary>A short subject, for the workloads that measure per-call cost rather than scanning.</summary>
     public static readonly string Short = _sentence + "and finds a needle.";
+
+    /// <summary>A kilobyte of the same filler, for the span-overload size sweep.</summary>
+    public static readonly string Kilobyte = Pad("a needle in a haystack.", 1024);
 
     /// <summary>
     /// The short subject with a misspelled <c>haystack</c> at the end, for the workloads that vary

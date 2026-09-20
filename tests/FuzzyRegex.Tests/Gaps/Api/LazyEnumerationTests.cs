@@ -29,7 +29,7 @@ public sealed class LazyEnumerationTests
     /// backtracking with no way to succeed. Borrowed rather than invented, because it is the one
     /// shape in this repo already proven to make the timeout fire.
     /// </summary>
-    private const string _slowPattern = "(a|a)*b";
+    private const string _slowPattern = @"(a|a)*(?:b|\b\B)";
 
     /// <summary>
     /// Two easy matches at the front, then 26 characters the pattern can only fail on

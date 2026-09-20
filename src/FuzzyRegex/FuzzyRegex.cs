@@ -68,6 +68,18 @@ public sealed class FuzzyRegex
     public static readonly TimeSpan InfiniteMatchTimeout = Timeout.InfiniteTimeSpan;
 
     /// <summary>
+    /// The <see cref="MaxCompiledNodes"/> a pattern gets when the caller asks for none: a million
+    /// nodes, which is about 250 MB and under a second of compiling.
+    /// </summary>
+    /// <remarks>
+    /// Chosen in S56b against the measured cost of a node (about 250 bytes,
+    /// <c>Engine/Node.cs</c>) and the largest repeat count the ported suite and the compile-parity
+    /// corpus contain (<c>{65535}</c>, which creates about 131,000 nodes). Upstream has no such
+    /// limit; see the "Compile budget" row of <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    public const int DefaultMaxCompiledNodes = 1_000_000;
+
+    /// <summary>
     /// The flags upstream resolves a pattern to but <see cref="FuzzyRegexOptions"/> has no name
     /// for, and which <see cref="Options"/> therefore hides: <c>LOCALE</c>, <c>DEBUG</c> and
     /// <c>TEMPLATE</c>. <c>ASCII</c>, <c>UNICODE</c> and <c>WORD</c> were in this set until S53b
@@ -143,6 +155,14 @@ public sealed class FuzzyRegex
     /// for a pattern that version 0 itself accepts, such as <c>[[a-z]--[aeiou]]</c>; upstream
     /// raises the bare message with no such detail.
     /// </para>
+    /// <para>
+    /// <b>A pattern needing more than <paramref name="maxCompiledNodes"/> nodes is refused</b>
+    /// with <see cref="FuzzyRegexParseException"/> before it can match anything. A counted repeat
+    /// is expanded into one copy of its body per repetition, so nested counted repeats allocate
+    /// the product of their counts: <c>((a{1000}){1000}){1000}</c> needs a thousand million nodes
+    /// and exhausts memory upstream, which has no limit. Raise the budget for a pattern that
+    /// genuinely needs a bigger graph. See the "Compile budget" row of <c>docs/DIVERGENCES.md</c>.
+    /// </para>
     /// </remarks>
     /// <param name="pattern">The pattern to compile.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -154,18 +174,25 @@ public sealed class FuzzyRegex
     /// The set of literal strings each <c>\L&lt;name&gt;</c> in the pattern stands for, keyed by
     /// name, or <see langword="null"/> when the pattern references none.
     /// </param>
+    /// <param name="maxCompiledNodes">
+    /// The most nodes the compiled pattern may occupy, or <see cref="DefaultMaxCompiledNodes"/>.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="matchTimeout"/> is neither <see cref="InfiniteMatchTimeout"/> nor positive.
+    /// <paramref name="matchTimeout"/> is neither <see cref="InfiniteMatchTimeout"/> nor positive,
+    /// or <paramref name="maxCompiledNodes"/> is not positive.
     /// </exception>
-    /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
+    /// <exception cref="FuzzyRegexParseException">
+    /// The pattern is not valid, or needs more than <paramref name="maxCompiledNodes"/> nodes.
+    /// </exception>
     public FuzzyRegex(
         string pattern,
         FuzzyRegexOptions options,
         TimeSpan matchTimeout,
-        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null,
+        int maxCompiledNodes = DefaultMaxCompiledNodes
     )
-        : this(pattern, options, matchTimeout, namedLists, Parsing.PatternCompiler.DefaultVersion) { }
+        : this(pattern, options, matchTimeout, namedLists, Parsing.PatternCompiler.DefaultVersion, maxCompiledNodes) { }
 
     /// <summary>
     /// Compiles a pattern against a chosen default version, for a caller that needs a version
@@ -175,10 +202,20 @@ public sealed class FuzzyRegex
     /// pass it - which is what the ported suite's <c>Upstream</c> helper does (S50b).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Not a flag, deliberately. <c>Version0</c> in the flags and an inline <c>(?V1)</c> in the
     /// pattern leave both version bits set, which upstream rejects as "VERSION0 and VERSION1 flags
     /// are mutually incompatible"; a default is what a pattern falls back to when it names none, so
     /// a pattern that names one still wins.
+    /// </para>
+    /// <para>
+    /// A METHOD rather than an internal constructor, since S56b. It was a constructor differing
+    /// from the public one only by a trailing <see langword="int"/>, and the moment the public
+    /// constructor gained a trailing <see langword="int"/> of its own (<c>maxCompiledNodes</c>) the
+    /// one call site silently rebound to it: the ported suite started compiling under version 1
+    /// with a budget of 8,192 nodes, which two ported tests caught and nothing in the signature
+    /// would have. A name cannot be captured by an overload.
+    /// </para>
     /// </remarks>
     /// <param name="pattern">The pattern to compile.</param>
     /// <param name="options">Options that change how the pattern is compiled and matched.</param>
@@ -188,21 +225,43 @@ public sealed class FuzzyRegex
     /// The version the pattern gets when neither the flags nor an inline <c>(?V0)</c> /
     /// <c>(?V1)</c> pick one, as a <see cref="Parsing.RegexFlags"/> bit.
     /// </param>
-    internal FuzzyRegex(
+    /// <returns>The compiled pattern.</returns>
+    internal static FuzzyRegex WithDefaultVersion(
         string pattern,
         FuzzyRegexOptions options,
         TimeSpan matchTimeout,
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
         int defaultVersion
+    ) => new(pattern, options, matchTimeout, namedLists, defaultVersion, DefaultMaxCompiledNodes);
+
+    /// <summary>The one constructor that compiles: every other overload delegates to it.</summary>
+    /// <param name="pattern">The pattern to compile.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="matchTimeout">How long a single matching operation may run.</param>
+    /// <param name="namedLists">Values for the pattern's <c>\L&lt;name&gt;</c> references.</param>
+    /// <param name="defaultVersion">
+    /// The version the pattern gets when neither the flags nor an inline <c>(?V0)</c> /
+    /// <c>(?V1)</c> pick one, as a <see cref="Parsing.RegexFlags"/> bit.
+    /// </param>
+    /// <param name="maxCompiledNodes">The compile budget, in nodes.</param>
+    private FuzzyRegex(
+        string pattern,
+        FuzzyRegexOptions options,
+        TimeSpan matchTimeout,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists,
+        int defaultVersion,
+        int maxCompiledNodes
     )
     {
         // Argument validation is real and comes first: it is a trust boundary.
         ArgumentNullException.ThrowIfNull(pattern);
 
         ValidateTimeout(matchTimeout, nameof(matchTimeout));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCompiledNodes);
 
         Pattern = pattern;
         MatchTimeout = matchTimeout;
+        MaxCompiledNodes = maxCompiledNodes;
         _compiled = Parsing.PatternCompiler.Compile(
             pattern,
             (int)options,
@@ -213,8 +272,10 @@ public sealed class FuzzyRegex
         // Upstream's _compile hands the code list straight to _regex.compile, whose C compiler is
         // the last thing that can reject a pattern - it refuses code the parser was happy to emit
         // (upstream/src/_regex.c:25863). Building here rather than at first match keeps that
-        // rejection where the caller expects it, and where upstream puts it.
-        PatternObject = Engine.PatternObject.Compile(_compiled);
+        // rejection where the caller expects it, and where upstream puts it. The pattern text goes
+        // with it because the compile budget's refusal is a parse failure and carries the pattern,
+        // and CompiledPattern - the compile-parity seam - deliberately does not hold it.
+        PatternObject = Engine.PatternObject.Compile(_compiled, pattern, maxCompiledNodes);
 
         TimeoutTicks = ToTicks(matchTimeout);
 
@@ -272,6 +333,27 @@ public sealed class FuzzyRegex
     /// How long a single matching operation may run, or <see cref="InfiniteMatchTimeout"/>.
     /// </summary>
     public TimeSpan MatchTimeout { get; }
+
+    /// <summary>
+    /// The compile budget this instance was built under: the most nodes compiling the pattern was
+    /// allowed to create. A pattern needing more is refused at construction rather than compiled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The companion to <see cref="MatchTimeout"/>, and the other half of what a caller compiling
+    /// somebody else's pattern needs: the timeout bounds matching, this bounds compiling. Upstream
+    /// has neither. There is no "unlimited" value on purpose: <see cref="int.MaxValue"/> nodes is
+    /// about 500 GB at 250 bytes each, so it is already further than any process can go.
+    /// </para>
+    /// <para>
+    /// <b>Nodes created, not nodes kept.</b> The optimiser prunes unreachable nodes once the graph
+    /// is built, and for a counted repeat that is about half of them - <c>(a{100}){100}</c> creates
+    /// 20,913 nodes and keeps 10,509 - so a graph the budget refuses may be smaller than the budget
+    /// once finished. Created is the number worth bounding, because the memory is spent before the
+    /// pruning runs.
+    /// </para>
+    /// </remarks>
+    public int MaxCompiledNodes { get; }
 
     /// <summary>
     /// The names of the pattern's groups, by ascending group number. Unnamed groups are
@@ -1399,6 +1481,83 @@ public sealed class FuzzyRegex
             cancellationToken
         );
 
+    /// <summary>
+    /// The most patterns the static conveniences on this class keep compiled at once. Fifteen by
+    /// default, which is what <c>Regex.CacheSize</c> is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every static convenience here - <see cref="IsMatch(string, string, FuzzyRegexOptions, TimeSpan?, CancellationToken)"/>,
+    /// <see cref="Match(string, string, FuzzyRegexOptions, IReadOnlyDictionary{string, IReadOnlyCollection{string}}, TimeSpan?, CancellationToken)"/>
+    /// and the rest - compiles its pattern and then keeps it, so calling one in a loop parses the
+    /// pattern once rather than once a call. The cache is keyed on the pattern text, the options
+    /// exactly as they were passed, the version and the match timeout; the most recently used entry
+    /// is kept and the least recently used is evicted at the bound.
+    /// </para>
+    /// <para>
+    /// <b>A call that carries a <c>namedLists</c> dictionary is not cached.</b> That dictionary is
+    /// the caller's, mutable and of no bounded size, so it cannot be part of a key, and a cache that
+    /// ignored it would answer the second call from the first call's lists. Those calls compile per
+    /// call, as every call did before this cache existed.
+    /// </para>
+    /// <para>
+    /// <b>The constructors never consult it</b>, exactly as <c>new Regex(...)</c> does not. A
+    /// program that compiles its patterns once and keeps them - which is still the fastest thing to
+    /// do - is unaffected by this property.
+    /// </para>
+    /// <para>
+    /// Setting it to <c>0</c> empties the cache and stops it storing anything, which is this port's
+    /// answer to upstream's <c>regex.purge</c> and a little stronger - <c>purge</c> clears, this
+    /// clears and disables. A smaller value evicts down to the new bound at once. Upstream's
+    /// <c>regex.cache_all</c>, which decides whether an explicit <c>regex.compile</c> is cached too
+    /// (<c>_main.py:359-382</c>, default on), is here fixed at its off setting: the constructors
+    /// never store. See <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <value>The bound, which must not be negative.</value>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public static int CacheSize
+    {
+        get => Cache.Size;
+        set => Cache.Size = value;
+    }
+
+    /// <summary>
+    /// The patterns the static conveniences have compiled lately, so a loop calling one of them
+    /// does not re-parse the same pattern on every pass. The library's only shared mutable state;
+    /// see <see cref="PatternCache"/> for how it is guarded. Internal rather than private because
+    /// a cache is invisible in the answers it gives, so the tests that measure it need the object.
+    /// </summary>
+    internal static PatternCache Cache { get; } = new();
+
+    /// <summary>
+    /// The compiled pattern a static convenience should use: the cached one when the cache holds
+    /// it, a freshly compiled one otherwise.
+    /// </summary>
+    /// <param name="pattern">The pattern to apply.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <returns>The compiled pattern.</returns>
+    private static FuzzyRegex Cached(string pattern, FuzzyRegexOptions options) =>
+        Cache.GetOrAdd(pattern, options, InfiniteMatchTimeout, Parsing.PatternCompiler.DefaultVersion);
+
+    /// <summary>
+    /// The compiled pattern a static convenience that takes named lists should use. A caller's
+    /// dictionary is never a cache key (see <see cref="CacheSize"/>), so passing one bypasses the
+    /// cache entirely rather than reading it under a key that does not describe the call.
+    /// </summary>
+    /// <param name="pattern">The pattern to apply.</param>
+    /// <param name="options">Options that change how the pattern is compiled and matched.</param>
+    /// <param name="namedLists">Values for the pattern's <c>\L&lt;name&gt;</c> references.</param>
+    /// <returns>The compiled pattern.</returns>
+    private static FuzzyRegex Cached(
+        string pattern,
+        FuzzyRegexOptions options,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists
+    ) =>
+        namedLists is null
+            ? Cached(pattern, options)
+            : new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists);
+
     /// <summary>Whether the pattern matches anywhere in the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
@@ -1412,7 +1571,7 @@ public sealed class FuzzyRegex
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => new FuzzyRegex(pattern, options).IsMatch(input, timeout: timeout, cancellationToken: cancellationToken);
+    ) => Cached(pattern, options).IsMatch(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds the first match anywhere in the subject. Upstream <c>regex.search</c>.</summary>
     /// <param name="input">The subject to search.</param>
@@ -1432,12 +1591,7 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).Match(
-            input,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+    ) => Cached(pattern, options, namedLists).Match(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>
     /// Finds the match starting at the start of the subject. Upstream <c>regex.match</c>.
@@ -1460,11 +1614,8 @@ public sealed class FuzzyRegex
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).MatchAtStart(
-            input,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+        Cached(pattern, options, namedLists)
+            .MatchAtStart(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds the match covering the whole subject. Upstream <c>regex.fullmatch</c>.</summary>
     /// <param name="input">The subject to match.</param>
@@ -1484,12 +1635,7 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).FullMatch(
-            input,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+    ) => Cached(pattern, options, namedLists).FullMatch(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Finds every match in the subject. Upstream <c>regex.finditer</c>.</summary>
     /// <param name="input">The subject to search.</param>
@@ -1509,12 +1655,7 @@ public sealed class FuzzyRegex
         IReadOnlyDictionary<string, IReadOnlyCollection<string>>? namedLists = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).Matches(
-            input,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+    ) => Cached(pattern, options, namedLists).Matches(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>
     /// Finds every match in the subject, one at a time. Upstream <c>regex.finditer</c>; the lazy
@@ -1538,11 +1679,8 @@ public sealed class FuzzyRegex
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        new FuzzyRegex(pattern, options, InfiniteMatchTimeout, namedLists).EnumerateMatches(
-            input,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+        Cached(pattern, options, namedLists)
+            .EnumerateMatches(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>
     /// Splits the subject around the matches, producing the pieces one at a time. Upstream
@@ -1563,8 +1701,7 @@ public sealed class FuzzyRegex
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        new FuzzyRegex(pattern, options).EnumerateSplits(input, timeout: timeout, cancellationToken: cancellationToken);
+    ) => Cached(pattern, options).EnumerateSplits(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>Counts the matches in the subject.</summary>
     /// <param name="input">The subject to search.</param>
@@ -1579,7 +1716,7 @@ public sealed class FuzzyRegex
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => new FuzzyRegex(pattern, options).Count(input, timeout: timeout, cancellationToken: cancellationToken);
+    ) => Cached(pattern, options).Count(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>
     /// Replaces matches with an expanded replacement template. Upstream <c>regex.sub</c>.
@@ -1609,14 +1746,15 @@ public sealed class FuzzyRegex
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        new FuzzyRegex(pattern, options).Replace(
-            input,
-            replacement,
-            beginning: beginning,
-            length: length,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+        Cached(pattern, options)
+            .Replace(
+                input,
+                replacement,
+                beginning: beginning,
+                length: length,
+                timeout: timeout,
+                cancellationToken: cancellationToken
+            );
 
     /// <summary>
     /// Replaces matches with text computed per match. Upstream <c>regex.sub</c> with a callable.
@@ -1643,14 +1781,15 @@ public sealed class FuzzyRegex
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        new FuzzyRegex(pattern, options).Replace(
-            input,
-            evaluator,
-            beginning: beginning,
-            length: length,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+        Cached(pattern, options)
+            .Replace(
+                input,
+                evaluator,
+                beginning: beginning,
+                length: length,
+                timeout: timeout,
+                cancellationToken: cancellationToken
+            );
 
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, where <c>{0}</c> is the
@@ -1680,14 +1819,15 @@ public sealed class FuzzyRegex
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) =>
-        new FuzzyRegex(pattern, options).ReplaceFormat(
-            input,
-            format,
-            beginning: beginning,
-            length: length,
-            timeout: timeout,
-            cancellationToken: cancellationToken
-        );
+        Cached(pattern, options)
+            .ReplaceFormat(
+                input,
+                format,
+                beginning: beginning,
+                length: length,
+                timeout: timeout,
+                cancellationToken: cancellationToken
+            );
 
     /// <summary>Splits the subject around the matches. Upstream <c>regex.split</c>.</summary>
     /// <param name="input">The subject to split.</param>
@@ -1705,7 +1845,7 @@ public sealed class FuzzyRegex
         FuzzyRegexOptions options = FuzzyRegexOptions.None,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => new FuzzyRegex(pattern, options).Split(input, timeout: timeout, cancellationToken: cancellationToken);
+    ) => Cached(pattern, options).Split(input, timeout: timeout, cancellationToken: cancellationToken);
 
     /// <summary>
     /// Escapes the characters that have a special meaning in a pattern, so the result matches the

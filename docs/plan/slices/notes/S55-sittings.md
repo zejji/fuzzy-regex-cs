@@ -167,6 +167,46 @@ blocking calls in-turn (never ended-turn-and-wait, per this skill's S07/S44 rule
 5. Ratchet green, blind review of the new tests, verifier pass on any quoted mutant/survivor
    numbers, commit, move slice to `done/`.
 
+## Sitting 4 (2026-09-18, closing)
+
+Orchestrator briefed final numbers from the `stryker-queue` worktree (branch `stryker-queue`,
+`.claude/worktrees/stryker`) rather than re-running anything (memory rule: no probe that
+compiles a pathological pattern unbounded; none was needed here). Verified the four reports
+directly (`.scratch/summarize_mutants.py`, deleted) against
+`.claude/worktrees/stryker/TestResults/stryker/<chunk>/reports/mutation-report.json`: counts
+matched the brief exactly. Full triage: `docs/plan/mutation/2026-09-17-api-parser.md`.
+
+- **api**: 237/237 killed, 0 survivors.
+- **substitution**: 261/261 killed, 0 survivors.
+- **parsing** (recovered + remaining): 2156 Killed, 29 Timeout, 4 RuntimeError, 0 Survived across
+  2189 mutants. The 4 RuntimeError mutants are all `StackOverflowException` crashes in
+  `ParseFunctions.cs` - 3 remove the bound on `ParseSetItem`'s version-1 nested-set recursion
+  (line 2193), 1 breaks `FloatToRational`'s continued-fraction convergence invariant (line
+  2281). Correctly-detected, not survivors, no test change needed.
+
+All three chunks S55 scopes are fully decided with zero survivors, so no new tests were written
+this sitting - there was nothing to kill. Discarded per orchestrator as INVALID: the
+per-test-coverage-analysis runs (`api-pertest-4runners`, `api-failed-*`) and anything timestamped
+before 2026-09-17 13:00, which had mislabelled survivors as Timeout.
+
+The stryker worktree's uncommitted edits (`stryker-config.json`, `tools/run-stryker.ps1`,
+`tools/stryker-queue.json`, `tests/FuzzyRegex.Tests/TestThreadsLimit.cs`,
+`tools/stryker-report-from-dump.py`) are the settings that produced these numbers (Release
+build, coverage-analysis off, 2 runners, `FUZZYREGEX_TEST_THREADS=4`) and are NOT copied into
+`main` per the orchestrator's instruction - they land with the `stryker-queue` branch at merge
+time. `tools/stryker-report-from-dump.py` is the one file already identical and committed on
+`main` (5bb7af2), confirmed byte-for-byte.
+
+No source or test changes on `main` this sitting - the slice's remaining work was triage and
+closeout. Ran `tools/check-ratchet.ps1` anyway per the skill's "every step, every time" rule:
+GREEN, 6343/6343 passing (6235 distinct ids), baseline 6235 unchanged (`delivers: []`). That run
+regenerated `docs/STATUS.md`, whose only diff is the upstream submodule's commit hash
+(`8d5a257...` -> `7dd71c1...`, `upstream/regex` moved independently of this slice) - harmless,
+committed alongside. 59 of the 60 `tools/stryker-queue.json` entries (`engine-rand-01` through
+`engine-rand-59`, about 7,300 mutants across 12 engine files) continue running detached in the
+`stryker` worktree for S56/S57; the 60th entry, `parsing-remaining`, is the one this sitting
+already triaged. Not this slice's concern beyond that.
+
 ## Engine chunk queue (`tools/stryker-queue.json`)
 
 Written from `Matcher.cs`'s method boundaries (`grep -n "^    private static\|^    internal

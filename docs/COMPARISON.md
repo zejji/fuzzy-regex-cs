@@ -229,6 +229,80 @@ foreach (Match m in matches)
 
 `"cot"` matches `"cat"` from the list with one substitution; `"dog"` matches exactly.
 
+## Matching modes the built-in engine does not have
+
+Three switches that change how a search is run rather than what the pattern means. All three are
+upstream's, and none of them has an equivalent in `System.Text.RegularExpressions`.
+
+### `FuzzyRegexOptions.Posix` / `(?p)`: leftmost-longest instead of leftmost-first
+
+An alternation normally takes the first branch that matches at the leftmost position - what Perl,
+.NET and Python all do. With POSIX matching the engine keeps looking at that same position and takes
+the longest match instead, which is the rule `grep` and `awk` follow.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match first = FuzzyRegex.Match("abcd", "a|ab|abc");
+Console.WriteLine(first.Value);   // a
+
+Match longest = FuzzyRegex.Match("abcd", "a|ab|abc", FuzzyRegexOptions.Posix);
+Console.WriteLine(longest.Value);   // abc
+```
+
+It costs time, because the position is not settled until every branch has been tried, and it is the
+right answer when a rule set has to agree with a POSIX tool rather than with Perl.
+
+### Partial matching: `partial: true` means "so far, so good"
+
+A partial match is one that ran out of subject before it ran out of pattern. It is how a search box
+tells a half-typed entry from a wrong one: keep accepting while the match is partial, reject when it
+is neither partial nor complete. `Match.PartialMatch` says which of the two a successful match is,
+and it is only ever true when a complete match was not available at that position.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var date = new FuzzyRegex(@"\d{4}-\d{2}-\d{2}");
+
+Match sofar = date.Match("2026-09", partial: true);
+Console.WriteLine((sofar.Success, sofar.PartialMatch, sofar.Value));   // (True, True, 2026-09)
+
+Match whole = date.Match("2026-09-19", partial: true);
+Console.WriteLine((whole.Success, whole.PartialMatch));   // (True, False)
+
+Match wrong = date.Match("not a date", partial: true);
+Console.WriteLine((wrong.Success, wrong.PartialMatch, wrong.Index));   // (True, True, 10)
+```
+
+The third answer is the one to read twice: an empty partial match at the end of the subject is
+upstream's way of saying "nothing here contradicts the pattern yet", because the empty tail of the
+subject is a prefix of something the pattern could still accept. `partial` is available on
+`Match`, `MatchAtStart` and `FullMatch` only. The scanning entry points do not take it, because
+upstream's `finditer` and `findall` do not either; neither does `IsMatch`, which asks a yes/no
+question that a partial match cannot answer without the match itself to inspect.
+
+### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right
+
+The search starts at the end of the subject and works backwards, so the first match found is the
+last one in the text. The pattern itself is not reversed: it still reads left to right.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match forwards = FuzzyRegex.Match("one two three", @"\w+");
+Console.WriteLine(forwards.Value);   // one
+
+Match backwards = FuzzyRegex.Match("one two three", @"\w+", FuzzyRegexOptions.RightToLeft);
+Console.WriteLine(backwards.Value);   // three
+```
+
+This is not `RegexOptions.RightToLeft`'s meaning by accident - the built-in engine's flag does the
+same thing - but the name is the only part the two share: `FuzzyRegexOptions` carries upstream's bit
+values, not `RegexOptions`'s. The one place a reversed search answers differently from upstream is a
+reversed *partial* match at a slice start; see "**Reversed partial matches run out of text at the
+slice start**" below.
+
 ## Behaviour that differs and why
 
 One section per SHIPPED row in `docs/DIVERGENCES.md`, quoting each row's heading exactly. See that
@@ -321,12 +395,17 @@ the shape here is closer to upstream than to `Regex`.
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
-// (a|a)*b is exponential in this engine as in upstream (ROADMAP: 23.3 s at n=26 upstream);
-// (a+)+b is NOT a good demonstration here, upstream's repeat guards answer it in milliseconds.
-var pattern = new FuzzyRegex("(a|a)*b");
+// (a|a)* with a tail that can never hold is exponential in this engine as in upstream: measured
+// 2026-09-19, regex 2026.9.10 spends 24.5 s on "(a|a)*b" over "a"*26 + "cb" (ROADMAP records
+// 23.3 s at n=26). "(a|a)*b" itself is NOT the demonstration to reach for any more - since S60
+// this port has upstream's required-string prefilter, so both engines refuse a subject with no
+// "b" in it before matching starts. \b\B is false at every position and gives the prefilter no
+// literal to work with, so the search still has to be made, and the timeout is what stops it.
+// (a+)+b is NOT a good demonstration either, upstream's repeat guards answer it in milliseconds.
+var pattern = new FuzzyRegex(@"(a|a)*\b\B");
 try
 {
-    pattern.IsMatch(new string('a', 26) + "c", timeout: TimeSpan.FromMilliseconds(50));
+    pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));
 }
 catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
 {
@@ -701,6 +780,14 @@ the later occurrence a group number the earlier occurrence's name has already cl
 write is the one that survives under that name. Upstream instead keeps the group numbered from
 scratch per branch, so an earlier branch's text becomes unreachable through the name.
 
+This is the maintainer's own fix for one specific ordering - the NAMED group coming first in each
+branch. Where the UNNAMED group comes first instead, the name's number is already fixed by an
+earlier branch and this port still answers as upstream does, losing the earlier branch's text the
+same way: `(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))` over `'!BUG'` is `groups=('BUG', None)` on both
+engines, with the first branch's `'!'` unreachable through the name on either. Fixing that ordering
+too needs machinery neither engine has chosen to build; see `docs/DIVERGENCES.md`'s row for the
+detail.
+
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
@@ -724,6 +811,44 @@ var pattern = new FuzzyRegex("(?r)ya", FuzzyRegexOptions.None);
 Match m = pattern.Match("xya", beginning: 2, length: 1, partial: true);
 Console.WriteLine((m.Success, m.PartialMatch, m.Index));   // (True, True, 2) - upstream answers None
 ```
+
+### Compile budget
+
+A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted
+repeats multiply: `((a{150}){150}){150}` is 3,375,000 copies. Upstream builds that graph until the
+process runs out of memory. This port refuses it at construction instead, once compiling has created
+more nodes than `maxCompiledNodes` allows - a million by default, about 250 MB. The timeout does not
+cover this, because the cost is paid in the constructor before there is any subject to match.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+try
+{
+    _ = new FuzzyRegex("((a{150}){150}){150}");
+}
+catch (FuzzyRegexParseException e)
+{
+    // The rest of the message names the limit that was set and how to raise it.
+    Console.WriteLine(e.Message.Split(',')[0]);   // compiling this pattern needs more than 1000000 nodes
+}
+
+// Or lower the budget, which is the point of it: compiling a pattern that arrived from outside
+// the process under a ceiling you chose rather than the default quarter of a gigabyte.
+string untrustedPattern = @"(\w+)\s*=\s*(\w+)";   // whatever arrived from outside
+var strict = new FuzzyRegex(
+    untrustedPattern,
+    FuzzyRegexOptions.None,
+    FuzzyRegex.InfiniteMatchTimeout,
+    maxCompiledNodes: 50_000        // about 12 MB
+);
+```
+
+Two details worth knowing. The budget counts the nodes compiling *creates*, not the nodes the
+finished pattern keeps: the optimiser prunes about half of a counted repeat's graph afterwards, and
+the memory has already been spent by then, so a graph that is refused may be smaller than the budget
+once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
+500 GB.
 
 ### Inherited upstream bugs are fixed here
 

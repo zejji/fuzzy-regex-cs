@@ -204,6 +204,18 @@ internal static class NodeCompiler
     /// <returns>The new node.</returns>
     private static Node CreateNode(PatternObject pattern, Opcode op, uint flags, long step, int valueCount)
     {
+        // The compile budget (S56b), checked here because this is the only place a node joins the
+        // graph. BuildRepeat unrolls the minimum count of every counted repeat (upstream
+        // build_REPEAT, upstream/src/_regex.c lines 25166-25197), so nested counted repeats
+        // allocate the PRODUCT of their counts - '((a{1000}){1000}){1000}' passed 15 GB before it
+        // could match anything. Checking per node rather than after the loop is what bounds the
+        // cost of a pattern that is going to be refused. Upstream has no such limit; see the
+        // "Compile budget" row of docs/DIVERGENCES.md.
+        if (pattern.NodeList.Count >= pattern.MaxNodes)
+        {
+            throw new FuzzyRegexParseException(OverBudget(pattern.MaxNodes), pattern.PatternText, -1);
+        }
+
         pattern.RequiresCaseEncoding |= UsesCasing(op);
 
         var node = new Node(valueCount)
@@ -219,6 +231,20 @@ internal static class NodeCompiler
 
         return node;
     }
+
+    /// <summary>
+    /// What a caller who hit the compile budget is told: the limit, why a pattern can need that
+    /// many nodes, and the parameter that raises it. <b>This port's own message</b> - upstream has
+    /// no budget, so there is nothing to mirror.
+    /// </summary>
+    /// <param name="maxNodes">The budget the pattern was compiled under.</param>
+    /// <returns>The message for the <see cref="FuzzyRegexParseException"/>.</returns>
+    private static string OverBudget(int maxNodes) =>
+        $"compiling this pattern needs more than {maxNodes.ToString(System.Globalization.CultureInfo.InvariantCulture)} "
+        + "nodes, the limit maxCompiledNodes was set to. A counted repeat is expanded into one copy "
+        + "of its body per repetition, so nested counted repeats multiply: their counts are "
+        + "multiplied together. Raise maxCompiledNodes on the FuzzyRegex constructor to compile this "
+        + "pattern, or reduce the repeat counts.";
 
     /// <summary>Whether an opcode consults its encoding's casing functions.</summary>
     private static bool UsesCasing(Opcode op) =>
@@ -1400,6 +1426,16 @@ internal static class NodeCompiler
         else
         {
             // Extract the minimum number of repeats out of a repeat if it contains a repeat.
+            //
+            // ponytail: this loop is why compiling costs memory proportional to the PRODUCT of
+            // nested counted repeat counts - one copy of the body per repetition, about 250 bytes a
+            // node. Ceiling: `(a{1000}){1000}` keeps 1,005,009 nodes and 238 MB, and the cubed form
+            // exhausts any machine (docs/plan/2026-09-18-repeat-unrolling-investigation.md). S56b
+            // bounds it with a node budget rather than removing it. The lift is a counting loop -
+            // one copy of the body plus a counter - and it is NOT a transparent rewrite: every
+            // guard and every per-iteration effect today sees distinct nodes, so the equivalence has
+            // to be PROVEN (captures per repetition, the fuzzy sections and the group-call guard are
+            // the places to start) rather than assumed. Parked as post-1.0, its own slice.
             var subargs = default(CompileArgs);
 
             if (minCount > 0)

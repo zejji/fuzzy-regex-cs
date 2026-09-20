@@ -71,6 +71,14 @@ verifies ratchet green + commit made -> next slice. It stops at: budget exhauste
 Budget is configured in `docs/plan/budget.json`; the driver reads it before every slice, so
 edits take effect immediately without stopping it.
 
+Sessions route through the Headroom proxy (`headroom proxy`, 0.37.0 here), which
+compresses their context and so charges fewer tokens to the account's allowance. The driver sets
+`ANTHROPIC_BASE_URL` (and `ENABLE_TOOL_SEARCH`, which Claude Code otherwise turns off when the
+base URL is custom) on the session itself, and refuses to start if the proxy is not answering
+`/health`. On a machine without Headroom installed, run `tools/run-slices.ps1 -NoHeadroom`: the
+slices run identically, at full token cost. The address comes from `ANTHROPIC_BASE_URL` if the
+driver's own shell has one, otherwise `http://127.0.0.1:8787`.
+
 Two different jobs in that file, and it matters which you reach for:
 
 - **Slice caps per day and week are the rationing.** They are exact - the driver counts its own

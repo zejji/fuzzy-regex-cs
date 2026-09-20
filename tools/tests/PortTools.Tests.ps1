@@ -800,3 +800,110 @@ Describe 'Undo-FailedSlice' {
         finally { Remove-Item -Recurse -Force $repo -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'Test-HeadroomProxy' {
+    It 'reports the proxy healthy when /health answers ready' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'healthy'; ready = $true; version = '0.37.0' } }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeTrue
+        $probe.Detail | Should -Match '0\.37\.0'
+    }
+
+    It 'probes /health on the given base URL, not the messages endpoint' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'healthy'; ready = $true } }
+
+        Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:9999/' | Out-Null
+
+        Should -Invoke -ModuleName PortTools Invoke-RestMethod -Times 1 -Exactly `
+            -ParameterFilter { $Uri -eq 'http://127.0.0.1:9999/health' }
+    }
+
+    It 'reports unhealthy when the proxy answers but is not ready, so a slice is not launched into a half-started proxy' {
+        Mock -ModuleName PortTools Invoke-RestMethod { [pscustomobject]@{ status = 'starting'; ready = $false } }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeFalse
+        $probe.Detail | Should -Match 'starting'
+    }
+
+    It 'reports unhealthy, with the error, when nothing is listening' {
+        Mock -ModuleName PortTools Invoke-RestMethod { throw 'No connection could be made because the target machine actively refused it.' }
+
+        $probe = Test-HeadroomProxy -BaseUrl 'http://127.0.0.1:8787'
+
+        $probe.Healthy | Should -BeFalse
+        $probe.Detail | Should -Match 'refused'
+    }
+}
+
+Describe 'Test-AllowanceFloor' {
+    BeforeAll {
+        $script:Now = [datetimeoffset]::Parse('2026-09-18T22:00:00+01:00')
+        $script:Reset = [datetimeoffset]::Parse('2026-09-19T01:10:00+01:00')
+        function script:Snapshot([int]$five, [int]$age = 3) {
+            [pscustomobject]@{ Source = 'last-usage.json'; AgeMinutes = $age; FiveHourPercent = $five; FiveHourResetsAt = $script:Reset; SevenDayPercent = 61; SevenDayResetsAt = $script:Reset.AddDays(2) }
+        }
+    }
+    It 'lets a sitting start below the floor' {
+        (Test-AllowanceFloor -Allowance (Snapshot 87) -Now $script:Now).Allowed | Should -BeTrue
+    }
+    It 'spends the weekly window to 98% before blocking (owner 2026-09-19)' {
+        $a = Snapshot 40; $a.SevenDayPercent = 97
+        (Test-AllowanceFloor -Allowance $a -Now $script:Now).Allowed | Should -BeTrue
+        $a.SevenDayPercent = 98
+        $v = Test-AllowanceFloor -Allowance $a -Now $script:Now
+        $v.Allowed | Should -BeFalse
+        $v.Reason | Should -Match 'seven-day'
+    }
+    It 'blocks at the floor and waits for the five-hour reset' {
+        $v = Test-AllowanceFloor -Allowance (Snapshot 88) -Now $script:Now
+        $v.Allowed | Should -BeFalse
+        $v.WaitUntil | Should -Be $script:Reset
+        $v.Reason | Should -Match 'five-hour'
+    }
+    It 'treats a stale snapshot as unknown and lets the sitting start, saying so' {
+        $v = Test-AllowanceFloor -Allowance (Snapshot 99 -age 60) -Now $script:Now
+        $v.Allowed | Should -BeTrue
+        $v.Stale | Should -BeTrue
+    }
+    It 'treats a missing snapshot as unknown' {
+        (Test-AllowanceFloor -Allowance $null).Stale | Should -BeTrue
+    }
+    It 'waits ten minutes when the reset time is already in the past, rather than spinning' {
+        $snap = Snapshot 95; $snap.FiveHourResetsAt = $script:Now.AddMinutes(-1)
+        (Test-AllowanceFloor -Allowance $snap -Now $script:Now).WaitUntil | Should -Be $script:Now.AddMinutes(10)
+    }
+}
+
+Describe 'Read-Allowance' {
+    BeforeAll {
+        Set-StrictMode -Version Latest
+        $script:Dir = Join-Path ([IO.Path]::GetTempPath()) ("allowance-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $script:Dir | Out-Null
+    }
+    AfterAll { Remove-Item -LiteralPath $script:Dir -Recurse -Force -ErrorAction SilentlyContinue }
+    It 'reads the shape both writers produce' {
+        $p = Join-Path $script:Dir 'good.json'
+        '{"rate_limits":{"five_hour":{"used_percentage":45,"resets_at":1789794600},"seven_day":{"used_percentage":68,"resets_at":1789995600}}}' | Set-Content -LiteralPath $p
+        $a = Read-Allowance -Paths @($p)
+        $a.FiveHourPercent | Should -Be 45
+        $a.FiveHourResetsAt.ToUnixTimeSeconds() | Should -Be 1789794600
+        $a.FiveHourResetsAt.Offset | Should -Be ([DateTimeOffset]::Now.Offset)  # printed as local time, not UTC
+    }
+    It 'returns unknown, not an error, for a snapshot without rate_limits (the 2026-09-19 04:12 crash)' {
+        $p = Join-Path $script:Dir 'shapeless.json'
+        '{"model":{"id":"x"}}' | Set-Content -LiteralPath $p
+        Read-Allowance -Paths @($p) | Should -BeNullOrEmpty
+    }
+    It 'returns unknown for a half-written file' {
+        $p = Join-Path $script:Dir 'partial.json'
+        '{"rate_limits":{"five_hour":{"used_perc' | Set-Content -LiteralPath $p -NoNewline
+        Read-Allowance -Paths @($p) | Should -BeNullOrEmpty
+    }
+    It 'returns unknown when no file exists' {
+        Read-Allowance -Paths @((Join-Path $script:Dir 'missing.json')) | Should -BeNullOrEmpty
+    }
+}

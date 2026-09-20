@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <!--
+      Not "FuzzyRegex.Demo.Wasm", although that is the folder name: a namespace whose first segment
+      is "FuzzyRegex" shadows the FuzzyRegex type this demo exists to call. samples/FuzzyRegex.AotSmoke
+      hit the same thing and renamed for the same reason.
+    -->
+    <RootNamespace>FuzzyRegexDemo.Wasm</RootNamespace>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      No <RuntimeIdentifier>browser-wasm</RuntimeIdentifier> and no <OutputType>Exe</OutputType>.
+      The slice file listed both from the older shipped sample; the template as it actually
+      generates today (10.0.112, read 2026-09-18) sets neither, the SDK infers them, and adding the
+      RID does not fix the one thing it looked like it would - see Properties/AssemblyInfo.cs.
+    -->
+
+    <!--
+      Required, not advisory: "The JS interop API requires enabling AllowUnsafeBlocks"
+      (learn.microsoft.com/aspnet/core/client-side/dotnet-interop/wasm-browser-app, fetched
+      2026-09-16). It fails at build time rather than at run time, so it cannot reach a user.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+      The engine is booted by wwwroot/worker.js, inside a Web Worker, and never on the page's own
+      thread - that is the demo's entire safety design (ROADMAP, 2026-08-31). So the worker IS this
+      project's main JS file, and there is no page-side main.js at all.
+    -->
+    <WasmMainJSPath>wwwroot/worker.js</WasmMainJSPath>
+
+    <!--
+      Published trimmed, as a real consumer would. src/FuzzyRegex sets IsAotCompatible and emits
+      zero trim warnings (S53), so this is a second, differently-shaped proof of the same claim
+      under a different runtime. WebAssembly AOT (RunAOTCompilation) is deliberately NOT on: it is
+      a size-against-speed knob with no measurement behind it yet.
+    -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+
+    <!--
+      InvariantGlobalization is already true in Directory.Build.props and is inherited. Repeating
+      it here would be the kind of duplicate that quietly disagrees with the root one day.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/FuzzyRegex/FuzzyRegex.csproj" />
+  </ItemGroup>
+
+  <!--
+    The `dotnet new wasmbrowser` template (10.0.112, generated and read 2026-09-18) adds a
+    StaticWebAssetFingerprintPattern that renames every *.js to main#[hash].js. It is dropped here:
+    the worker is loaded by name from harness.html as `new Worker('worker.js', {type: 'module'})`,
+    and a fingerprinted name would have to be threaded through by hand for a cache-busting win that
+    belongs to S71's Pages deployment, not to proving the interop works.
+  -->
+</Project>

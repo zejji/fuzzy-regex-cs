@@ -17,11 +17,7 @@ public sealed class TestThreadsLimit : IParallelLimit
 {
     /// <inheritdoc/>
     public int Limit =>
-        int.TryParse(
-            Environment.GetEnvironmentVariable("FUZZYREGEX_TEST_THREADS"),
-            out int threads
-        )
-        && threads > 0
+        int.TryParse(Environment.GetEnvironmentVariable("FUZZYREGEX_TEST_THREADS"), out int threads) && threads > 0
             ? threads
             : Environment.ProcessorCount;
 }

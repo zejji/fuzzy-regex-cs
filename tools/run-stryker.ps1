@@ -107,8 +107,7 @@ function Test-BuildInFlight {
     # The leading comma stops PowerShell enumerating the array on return: `return @(...)` with
     # zero matches collapses to $null at the call site, not an empty array (verified 2026-09-16).
     $procs = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" -ErrorAction SilentlyContinue
-    # Scoped to THIS checkout: a build in another worktree shares nothing with this one.
-    , @($procs | Where-Object { $_.CommandLine -match '\bdotnet(\.exe)?"?\s+(test|build)\b' -and $_.CommandLine -like "*$repoRoot*" })
+    , @($procs | Where-Object { $_.CommandLine -match '\bdotnet(\.exe)?"?\s+(test|build)\b' })
 }
 
 function Invoke-StrykerChunk {
@@ -132,10 +131,9 @@ function Invoke-StrykerChunk {
     # A compiler server or MSBuild node left over from an interrupted run holds bin\ files; the
     # initial `dotnet build` then fails and Stryker falls back to the BuildTools MSBuild, which
     # cannot resolve the SDK (MSB4276). Measured 2026-09-17 13:50. Cheap insurance per chunk.
-    # Bounded since 2026-09-19: on SDK 10.0.400 the VB/C# half of the shutdown can wait for ever on
-    # an unresponsive VBCSCompiler (07:25 today, 25 min and counting; 04:18 the same), which stalled
-    # the whole queue between chunks. Insurance must not cost more than what it insures, so give it
-    # a minute, then end our own helper process and carry on; the build simply starts its own server.
+    # Bounded: on 2026-09-19 (04:18 and 07:25) this call hung for good against a wedged compiler
+    # server and the whole queue stalled with it. Give the graceful shutdown a minute, then end our
+    # own helper process and carry on; the build simply starts its own server.
     $shutdown = Start-Process -FilePath 'dotnet' -ArgumentList 'build-server', 'shutdown' -NoNewWindow -PassThru
     if (-not $shutdown.WaitForExit(60000)) {
         Write-Host "  build-server shutdown did not return in 60 s; ending that helper and continuing" -ForegroundColor Yellow

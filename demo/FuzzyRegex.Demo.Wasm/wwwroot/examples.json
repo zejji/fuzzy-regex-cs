@@ -1,0 +1,148 @@
+[
+  {
+    "key": "fuzzy",
+    "title": "Up to one error",
+    "note": "One error allowed, so \"color\" matches. Raise the budget to 2 and \"collar\" matches too.",
+    "pattern": "(?:colour){e<=1}",
+    "flags": "",
+    "subject": "the color of the collar"
+  },
+  {
+    "key": "fuzzy",
+    "title": "A budget per kind of error",
+    "note": "Each kind of error has its own budget. Every match reports what it spent.",
+    "pattern": "(?:foobar){i<=1,d<=1,s<=1}",
+    "flags": "",
+    "subject": "xfoobat"
+  },
+  {
+    "key": "fuzzy",
+    "title": "Weighted cost",
+    "note": "A cost equation prices each kind of error. Kinds it never names are free, and the total has to stay under the limit.",
+    "pattern": "(foobar){i<=1,d<=2,s<=3,2d+1s<4}",
+    "flags": "",
+    "subject": "3oifaowefbaoraofuiebofasebfaobfaorfeoaro"
+  },
+  {
+    "key": "bestmatch",
+    "title": "The first match the budget allows",
+    "note": "An unbounded budget takes the leftmost thing that fits, six substitutions deep. The next two samples do better on this subject.",
+    "pattern": "(foobar){e}",
+    "flags": "",
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "bestmatch",
+    "title": "BestMatch: the closest fit",
+    "note": "BestMatch searches the whole subject for the cheapest match. Same pattern, same subject, one deletion against six substitutions.",
+    "pattern": "(foobar){e}",
+    "flags": "BestMatch",
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "enhancematch",
+    "title": "EnhanceMatch: tighten what was found",
+    "note": "EnhanceMatch keeps the first match's position and improves the fit there. The span shrinks from six characters to three.",
+    "pattern": "(foobar){e}",
+    "flags": "EnhanceMatch",
+    "subject": "xirefoabralfobarxie"
+  },
+  {
+    "key": "namedlists",
+    "title": "Fuzzy matching against a word list",
+    "note": "A named list supplies literal alternatives beside the pattern. With a budget on top, one pattern covers every word in the list.",
+    "pattern": "\\b(?:\\L<fruit>){e<=1}\\b",
+    "flags": "",
+    "subject": "aple bananna cherry",
+    "namedLists": "fruit: apple, banana, cherry"
+  },
+  {
+    "key": "posix",
+    "title": "Leftmost-first",
+    "note": "By default an alternation takes the first branch that matches at the leftmost position, however short. Perl and .NET do the same.",
+    "pattern": "a|ab|abc",
+    "flags": "",
+    "subject": "abcd"
+  },
+  {
+    "key": "posix",
+    "title": "POSIX: leftmost-longest",
+    "note": "Under POSIX rules the same pattern takes the longest match at that position, as grep and awk do.",
+    "pattern": "a|ab|abc",
+    "flags": "Posix",
+    "subject": "abcd"
+  },
+  {
+    "key": "partial",
+    "title": "Partial: so far, so good",
+    "note": "The subject ran out before the pattern did, which is how a search box tells a half-typed entry from a wrong one. Finish the date and the match stops being partial.",
+    "pattern": "\\d{4}-\\d{2}-\\d{2}",
+    "flags": "",
+    "subject": "2026-09",
+    "mode": "partial"
+  },
+  {
+    "key": "reverse",
+    "title": "Search from the right",
+    "note": "The search starts at the end of the subject, so the first match found is the last one in the text. Only the direction changes.",
+    "pattern": "\\w+",
+    "flags": "RightToLeft",
+    "subject": "one two three"
+  },
+  {
+    "key": "replace",
+    "title": "Replace with a template",
+    "note": "Templates use upstream's syntax: \\1 and \\g<name>. A dollar sign is ordinary text here.",
+    "pattern": "(?<year>\\d{4})-(?<month>\\d{2})",
+    "flags": "",
+    "subject": "2026-09 and 1999-12",
+    "mode": "replace",
+    "replacement": "\\g<month>/\\g<year>"
+  },
+  {
+    "key": "replace",
+    "title": "Replace a misspelling",
+    "note": "Fuzzy matching and replacement compose: match within a budget, write the right spelling back.",
+    "pattern": "(?:colour){e<=1}",
+    "flags": "",
+    "subject": "the color of the collar",
+    "mode": "replace",
+    "replacement": "colour"
+  },
+  {
+    "key": "timeout",
+    "title": "A pattern that runs out of time",
+    "note": "This pattern has to try every way of splitting 36 a's before it can answer. The engine gives up after two seconds, and the page stays responsive while it works, because the engine runs in a Web Worker.",
+    "pattern": "^(a|aa)+$",
+    "flags": "",
+    "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+  },
+  {
+    "title": "Named groups and every capture",
+    "note": "A repeated group keeps every capture it made. The group table lists them all.",
+    "pattern": "(?:(?<word>\\w+),?\\s*)+",
+    "flags": "",
+    "subject": "alpha, beta, gamma"
+  },
+  {
+    "title": "Set operations",
+    "note": "One character set subtracted from another: word characters minus digits.",
+    "pattern": "[\\w--[\\d]]+",
+    "flags": "",
+    "subject": "abc123def456"
+  },
+  {
+    "title": "Unicode properties",
+    "note": "A script property matches by what a character is, wherever it sits in an alphabet.",
+    "pattern": "\\p{Greek}+",
+    "flags": "",
+    "subject": "alpha then αβγ then beta"
+  },
+  {
+    "title": "Case-insensitive, with a flag",
+    "note": "Flags are typed by name, so a typo is an error. Take IgnoreCase away and see.",
+    "pattern": "\\bfuzzy\\b",
+    "flags": "IgnoreCase",
+    "subject": "Fuzzy FUZZY fuzzy"
+  }
+]

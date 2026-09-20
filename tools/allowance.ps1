@@ -19,8 +19,10 @@ param(
     [int]$ExtraFloor = 90,
     [int]$MaxAgeMinutes = 120
 )
-$file = Join-Path $env:USERPROFILE '.claude\last-status.json'
-if (-not (Test-Path -LiteralPath $file)) { Write-Host 'allowance: no statusline snapshot yet (open an interactive session once)'; exit 0 }
+# The fresher of the statusline snapshot and tools/usage-poll.ps1's live poll (same shape).
+$file = @((Join-Path $env:USERPROFILE '.claude\last-usage.json'), (Join-Path $env:USERPROFILE '.claude\last-status.json')) |
+    Where-Object { Test-Path -LiteralPath $_ } | Get-Item | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+if (-not $file) { Write-Host 'allowance: no statusline snapshot yet (open an interactive session once)'; exit 0 }
 $age = [int]((Get-Date) - (Get-Item -LiteralPath $file).LastWriteTime).TotalMinutes
 $d = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
 $rl = $d.rate_limits

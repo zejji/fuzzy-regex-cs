@@ -516,8 +516,8 @@ amended text is inline above; this list is the record of what changed and why.
    likeliest: the benchmark baselines, and the edge cases an optimizer is tempted to special-case -
    zero-width and empty matches, anchors, `MatchTimeout`, large inputs, pathological backtracking.
 
-   *Phase 9 browser demo.* A Vue 3 page, vendored as an ESM build so there is no build step and no
-   CDN dependency, driving a .NET WebAssembly runtime hosted in a Web Worker that exposes one
+   *Phase 9 browser demo.* A Vue 3 + TypeScript page built with Vite (amendment 27; until
+   2026-09-18 a vendored ESM build with no build step), never loading from a CDN, driving a .NET WebAssembly runtime hosted in a Web Worker that exposes one
    `[JSExport]` string-in, JSON-out match method; deployed to GitHub Pages. The worker is the whole
    safety design, and that reasoning is why this belongs in the spec rather than in a README task. A
    public demo invites strangers to type pathological patterns; regex matching is unbounded in the
@@ -874,3 +874,112 @@ amended text is inline above; this list is the record of what changed and why.
     its provenance (a real upstream run and version, or the DIVERGENCES row it follows), the
     verifier samples them, and S57 audits the gap tests written before the rule. Estimate 14-19
     becomes 15-20. Decided by the project owner.
+
+26. **The browser demo (Phase 9) moves ahead of 1.0, and Phases 8 and 9 run in parallel with
+    Phases 6 and 7 (2026-09-18, owner decision).** The owner wants the demo site to experiment with
+    the library before the public launch, so the README carries a working "try it in your browser"
+    link *at* 1.0: the option the roadmap offered on 2026-08-31. Preconditions checked the same
+    day: the public API is frozen (`PublicApiAnalyzers`; the API-layer mutation run killed 237 of
+    237 mutants), the `wasm-tools` and `wasm-experimental` workloads are installed, and Phase 7
+    makes no public-surface change. Phase 8 is sliced as S64-S69; its documentation and packaging
+    slices need nothing from Phases 6 or 7, except the `<remarks>` pass (S68, after Phase 7, so it
+    does not collide with `src/` edits) and the release itself (S69, after both gates and the
+    owner's approval of any upstream filing). Each stream runs in its own worktree
+    (`.claude/worktrees/docs`, `.claude/worktrees/demo`) with the driver's `-Phase` filter and
+    merges `main` at the start of every slice. S72's help panels depend on `COMPARISON.md`'s
+    section headings, which S65 stabilises. Estimates unchanged. Housekeeping: the two entries
+    above both numbered 25 stand as written; the second (metamorphic invariants) is cited as 25b.
+
+27. **The demo front end gets the standard Vue toolchain: Vite, TypeScript in strict mode, and a CSS
+    framework with a build step (2026-09-18, owner decision).** The 2026-08-31 shape said "vendored
+    as an ESM build so there is no build step", to keep the demo free of someone else's toolchain.
+    The owner overruled it while S71 was in flight: build pipelines are standard for Vue 3,
+    particularly with TypeScript, which the project should be doing; strong typing everywhere possible
+    reduces mistakes; and a framework such as Tailwind is welcome because limiting choices gives
+    consistency. What stays: no CDN, ever, since a CDN makes the demo's availability someone else's
+    uptime; every dependency is pinned in `package-lock.json` and installed with `npm ci`; the
+    Pages workflow builds with a pinned Node. What the build must do: type-check with `vue-tsc`
+    and run the unit tests before `vite build`, so a type error fails the deploy; share one typed
+    contract for the worker's request and response messages between page and worker; no `any`.
+    S71 absorbs the change (its slice file carries the design bar and toolchain rule); the
+    vendored `vue.esm-browser.prod.js` and the hand-written ESM modules from the S71 checkpoint are
+    superseded, their logic ported into typed modules with their tests kept.
+
+28. **Phase 7 gains two experiment slices, S62b (auto-atomicity) and S62c (a memoisation spike)
+    (2026-09-19, owner decision).** The research sweep of 2026-09-18 ended with two bets recorded
+    for the owner and in no slice: the compile-time rewrite that makes loops nothing can backtrack
+    into atomic, which .NET and PCRE2 both ship, and selective memoisation of failed positions
+    (Davis et al. 2021, extended to lookaround and atomic grouping by Fujinami and Hasuo 2024),
+    the one published technique that makes a backtracker linear without changing its answers. Both
+    attack the class this port measured as catastrophic - `(a|a)*b` at 10.6 s for n=24 - from
+    opposite ends, and the owner's ruling is that no stone should be left unturned: they are
+    planned, not left on a list. **S62b** is a bounded experiment after S62, so the inner loop is
+    measured first and the rewrite's win is attributed honestly; PCRE2's guard list is ported
+    verbatim and this port's own three guards - fuzzy sections, the backtracking verbs,
+    conditionals - are added, with the analysis stopping rather than guessing wherever it cannot
+    prove the premise. **S62c** is a spike of one sitting that merges no production code unless its
+    exit criteria pass, and whose deliverable is a measured answer plus a recommendation: promote
+    to a full slice, or record why not. What does not change is the rule everything else in this
+    plan rests on: the answer-identity rule stands, so the oracle at three seeds with
+    `ExpectedDivergences` strict decides both, and an optimisation that changes an answer has
+    ported a bug (ROADMAP, owner rule 2026-09-12); the permanent pins in `BacktrackingVerbTests`,
+    `PartialMatchingTests` and `ReverseMatchingTests` are not negotiable for either. **Both may end
+    in "reverted, recorded"** - a negative number written into `OPTIMISATION-NOTES.md` with its
+    shapes and its reason is the successful outcome of an experiment, not a failed slice, and is
+    what stops it being re-attempted blind. Phase 7's six committed slices (S58-S63) stand as
+    drafted and gain these two experiments between S62 and S63; estimates unchanged.
+
+29. **Phase 9 reopens for S73, which judges the demo as a product rather than as a feature tour
+    (2026-09-19, owner decision).** S72 closed the phase on the strength of its features. The
+    owner's first look at the live page judged it on what a visitor meets, and named seven faults:
+    the match results sit below the fold on a laptop and are "not intuitive at all"; the copy is
+    "horrible AI-speak"; the visual design is flat; the layout is a web page rather than an
+    application; there is no way to take the case away as C#; the GitHub link is only in the
+    footer; and the match numbers look like links and appear to do nothing when clicked. S73 is one
+    slice against those seven, drafted as `docs/plan/slices/S73-demo-as-a-product.md` and reviewed
+    by the owner before any sitting runs. Three of the seven are specified rather than left to
+    taste, because taste is what produced the current page: the layout is a fixed shell with its
+    own scroll regions, at breakpoints taken from Material's window size classes and with panel and
+    tab behaviour from NN/g, each decision cited; the copy is enforced by a banned-phrase test built
+    from Wikipedia's signs-of-AI-writing list and GOV.UK's words to avoid, so a regression is a red
+    test rather than an opinion; and the C# snippet prints the API `DemoEngine` itself calls, is
+    compiled for real during the sitting, and is coloured by a hand-written tokenizer, since a
+    highlighter library would be larger than the feature it serves. **What does not change:** no
+    CDN and every dependency pinned (amendment 27); `npm run build` type-checks and runs the tests
+    before it bundles; the worker, the caps and the warm spare from S70 and S71; the help panels
+    generated from `docs/COMPARISON.md`, which stays the single source; the accessibility rules
+    S71 and S72 set, which are met again rather than traded for the new look; and the engine, which
+    S73 does not touch, so the answer-identity rule is not in play. S72's decision to leave
+    regex101's code generator out is reversed in one narrow respect: one language, this library's
+    own API. One slice, sittings unestimated; the phase closes again when it lands.
+
+30. **S60 splits: the required-string half closes as S60, and everything else becomes S60b
+    (2026-09-20, decided by the S60 sitting under scope item 7's "a partial landing is acceptable, a
+    silent one is not").** S60 was authored as one slice over seventeen scope items, and three
+    sittings measured what that is: sittings 2 and 3 landed item 1's forward arm, item 5, item 15,
+    19 gap tests and three judged oracle rows, and left items 2, 3, 6, 8-14, 16 and 17 untouched.
+    They are not a tail to be squeezed in. Item 2 is upstream's `search_start`
+    (`upstream/src/_regex.c:8385`), the dispatcher its `do_search_start` flag (`:588`) turns on,
+    over about thirty `search_start_*` functions (`:7859-8385`, one per boundary opcode
+    plus a `_rev` twin), and items 8-14, 16 and 17 are nine research-derived optimisations, each
+    wanting its own before/after measurement against S58's noise floor and each allowed to end in
+    "measured, not worth it". Carrying them inside S60 could only produce further checkpoints, which
+    is the outcome the third-sitting rule exists to stop. They move to
+    `docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, **keeping S60's item
+    numbers** so that the `ponytail:`/`Phase 7` comments and `OPTIMISATION-NOTES.md` rows already in
+    the tree still resolve. **What does not change:** the verb constraint (ROADMAP, owner rule
+    2026-09-12) binds S60b exactly as it bound S60, with the three permanent test files green on
+    every sitting; the oracle at three seeds is the gate, not a formality; and nothing deferred
+    loses its comment or its OPTIMISATION-NOTES row until the commit that implements it. Phase 7 is
+    nine slices where it was eight - six as drafted, plus S62b and S62c from amendment 28, plus
+    S60b; the 5-10 session band is unchanged, because the work is the same work counted in a
+    different number of slices.
+31. **Phase 9 gains S74, the flags control (owner decision, 2026-09-20).** The demo's free-text
+    flags field was inherited from S71's regex101 layout and never decided. S74 replaces it with a
+    collapsible panel: one summary row when closed, a checkbox grid with radio groups for the
+    exclusive pairs when open, opening in the page flow rather than floating, and a one-sentence
+    help note per flag generated from the enum's own doc comments. Grounded in NN/g's rule that a
+    multi-selection is a listbox with checkboxes and never a dropdown, and GOV.UK's checkbox and
+    exclusive-option guidance. **What does not change:** the engine and the wire format (the
+    flags string still crosses to `DemoEngine`), shared links, the examples file, and every S73
+    rule on copy, layout, typing and accessibility. One slice; the phase closes again when it lands.

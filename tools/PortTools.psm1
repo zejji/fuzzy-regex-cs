@@ -469,6 +469,49 @@ function Get-RateLimitResetsAt {
     return $latest
 }
 
+function Test-HeadroomProxy {
+    <#
+    .SYNOPSIS
+        Reports whether the Headroom compression proxy is up and ready to carry a slice session.
+
+    .DESCRIPTION
+        Slice sessions send their API traffic through Headroom (ANTHROPIC_BASE_URL, set on the
+        session in run-slices.ps1), which compresses the context and cuts the tokens the run
+        charges to the account's allowance. A proxy that is down fails every call of a slice
+        that has already spent its orientation, so the driver probes it before it launches.
+
+        /health is the proxy's own endpoint. Measured 2026-09-18 against Headroom 0.37.0 running
+        on 127.0.0.1:8787: it answers 200 with
+        {"service":"headroom-proxy","status":"healthy","ready":true,"version":"0.37.0",...}.
+        The other candidates are unusable as a probe - / answers 421 and /v1/models 401.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $uri = "$($BaseUrl.TrimEnd('/'))/health"
+
+    try {
+        $response = Invoke-RestMethod -Uri $uri -TimeoutSec $TimeoutSeconds
+    }
+    catch {
+        return [pscustomobject]@{ Uri = $uri; Healthy = $false; Detail = $_.Exception.Message }
+    }
+
+    # 'ready' is the proxy's own readiness flag: it serves /health while it is still starting up,
+    # and a session launched into that window would fail its first call.
+    $ready = [bool]($response.PSObject.Properties['ready']?.Value)
+    $status = $response.PSObject.Properties['status']?.Value
+    $version = $response.PSObject.Properties['version']?.Value
+
+    return [pscustomobject]@{
+        Uri     = $uri
+        Healthy = $ready -and $status -eq 'healthy'
+        Detail  = "status=$status ready=$ready version=$version"
+    }
+}
+
 function Test-BudgetGate {
     <#
     .SYNOPSIS
@@ -739,7 +782,87 @@ function Undo-FailedSlice {
     }
 }
 
+function Read-Allowance {
+    <#
+    .SYNOPSIS
+        The freshest known account allowance: five-hour and seven-day percentages used and their reset
+        times, from whichever of the two snapshot files is newer.
+
+    .DESCRIPTION
+        Two writers, one shape (rate_limits.five_hour/seven_day with used_percentage and resets_at in
+        Unix seconds): the user statusline script writes ~/.claude/last-status.json on every
+        interactive prompt, and tools/usage-poll.ps1 writes ~/.claude/last-usage.json from the live
+        usage endpoint every few minutes (measured 2026-09-18, see that script). Returns $null when
+        neither file exists. AgeMinutes tells the caller how much to trust the number.
+    #>
+    [CmdletBinding()]
+    param([string[]]$Paths = @(
+        (Join-Path $env:USERPROFILE '.claude\last-usage.json'),
+        (Join-Path $env:USERPROFILE '.claude\last-status.json')))
+    $existing = @($Paths | Where-Object { Test-Path -LiteralPath $_ })
+    if ($existing.Count -eq 0) { return $null }
+    $file = Get-ChildItem -LiteralPath $existing | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    # The driver runs under Set-StrictMode, where a missing property throws rather than yielding
+    # $null, and the statusline snapshot is rewritten non-atomically on every prompt, so a read can
+    # meet a half-written or shape-less file (it did, 2026-09-19 04:12: "The property 'rate_limits'
+    # cannot be found"). Any unreadable snapshot is "unknown", which the gate treats as go-ahead.
+    $prop = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.$n } else { $null } }
+    try { $data = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { return $null }
+    $rl = & $prop $data 'rate_limits'
+    if ($null -eq $rl) { return $null }
+    $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
+    $pct = { param($w) $v = & $prop $w 'used_percentage'; if ($null -ne $v) { [int]$v } else { $null } }
+    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t).ToLocalTime() } else { $null } }  # local time, so the driver's 'waiting until' line reads right (it printed UTC on 2026-09-19)
+    [pscustomobject]@{
+        Source           = $file.Name
+        AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
+        FiveHourPercent  = & $pct $five
+        FiveHourResetsAt = & $reset $five
+        SevenDayPercent  = & $pct $seven
+        SevenDayResetsAt = & $reset $seven
+    }
+}
+
+function Test-AllowanceFloor {
+    <#
+    .SYNOPSIS
+        Says whether a sitting may start (or continue) given the allowance, and if not, until when
+        to wait. Pure: no I/O, so it is unit-tested.
+
+    .DESCRIPTION
+        Owner rule 2026-09-18: use most of each five-hour window but never exhaust it, because a
+        window at 100% stops every session dead until it resets. The floor leaves a reserve for the
+        orchestrator's own merges and relaunches. An unknown allowance ($null) or a stale one (older
+        than -MaxAgeMinutes) is treated as permission to proceed, with Stale = $true so the caller
+        can say so; the driver would otherwise deadlock on a poller that died.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Allowance,
+        [int]$FiveHourFloor = 88,
+        [int]$SevenDayFloor = 98,  # owner 2026-09-19: spend the week to the end; the hook orders a checkpoint at the same mark, so a sitting that starts below it gets its run
+        [int]$MaxAgeMinutes = 45,
+        [datetimeoffset]$Now = [datetimeoffset]::Now
+    )
+    if ($null -eq $Allowance) { return [pscustomobject]@{ Allowed = $true; Stale = $true; WaitUntil = $null; Reason = 'no allowance snapshot' } }
+    if ($Allowance.AgeMinutes -gt $MaxAgeMinutes) { return [pscustomobject]@{ Allowed = $true; Stale = $true; WaitUntil = $null; Reason = "snapshot is $($Allowance.AgeMinutes) min old" } }
+    $wait = $null; $reason = $null
+    if ($null -ne $Allowance.FiveHourPercent -and $Allowance.FiveHourPercent -ge $FiveHourFloor) {
+        $wait = $Allowance.FiveHourResetsAt; $reason = "five-hour window at $($Allowance.FiveHourPercent)% (floor $FiveHourFloor)"
+    }
+    if ($null -ne $Allowance.SevenDayPercent -and $Allowance.SevenDayPercent -ge $SevenDayFloor) {
+        if (-not $wait -or $Allowance.SevenDayResetsAt -gt $wait) { $wait = $Allowance.SevenDayResetsAt }
+        $reason = "seven-day window at $($Allowance.SevenDayPercent)% (floor $SevenDayFloor)"
+    }
+    if ($reason) {
+        if (-not $wait -or $wait -le $Now) { $wait = $Now.AddMinutes(10) }
+        return [pscustomobject]@{ Allowed = $false; Stale = $false; WaitUntil = $wait; Reason = $reason }
+    }
+    [pscustomobject]@{ Allowed = $true; Stale = $false; WaitUntil = $null; Reason = "five-hour at $($Allowance.FiveHourPercent)%" }
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
-    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice
+    Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
+    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor

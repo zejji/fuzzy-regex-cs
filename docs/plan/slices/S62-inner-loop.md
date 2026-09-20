@@ -55,6 +55,13 @@ no measured win is just a bug you have not found yet"* (`benchmark` skill).
    does land carries a `sync-divergence:` comment and a `SYNC-DIVERGENCE.md` row naming the file,
    the reason, the measured gain and how to re-align.
 
+**Added 2026-09-18 (research sweep, `docs/plan/2026-09-18-optimisation-research.md` §3):** before
+any vector or inlining number is trusted, state the instruction set the AOT binary is published with
+(`IlcInstructionSet`, `IlcMaxVectorTBitWidth`; the Native AOT guide says the compiler "targets the
+minimum instruction set supported by the target OS and architecture" by default), because
+`Vector256.IsHardwareAccelerated` is a publish-time constant under ILC and a JIT-measured win may
+not exist in the shipped binary. Item 5 (dispatch replacement) stays "propose, do not implement".
+
 ## Verification
 
 - Before and after **per item, not per slice** - two changes in one measurement are two unattributed

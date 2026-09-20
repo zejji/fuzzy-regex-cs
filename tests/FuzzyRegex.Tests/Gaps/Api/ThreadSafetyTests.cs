@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names forty-one, and under the JIT this set is exactly those forty-one. A floor of
+        // The allowlist names forty-three, and under the JIT this set is exactly those forty-three. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names forty-one writable fields, so a near-empty answer means the "
+                "the allowlist names forty-three writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -545,6 +545,21 @@ public sealed class ThreadSafetyTests
                 continue;
             }
 
+            // S59: the pattern cache is left out for the same reason, and left out EXPLICITLY. Its
+            // contents move whenever anything anywhere compiles through a static convenience - this
+            // suite runs in parallel, so that is every few milliseconds - and it is the one static
+            // the library writes by design. Without this line it would still be snapshotted, as the
+            // `Convert.ToString` fall-through below, which renders any object as its type name: a
+            // line that can never move, which is a blind spot wearing the costume of coverage. What
+            // the cache does under threads is measured by PatternCacheStressTests instead.
+            //
+            // This does not narrow the test's claim. The workload it runs between the readings is
+            // instance matching, and instance matching does not reach the cache at all.
+            if (field.FieldType == typeof(PatternCache))
+            {
+                continue;
+            }
+
             snapshot[name] = value switch
             {
                 null => "null",
@@ -620,6 +635,19 @@ public sealed class ThreadSafetyTests
             return true;
         }
 
+        // S59's pattern cache, and the third category this rule names: a type whose own contract is
+        // thread-safe. It is not on the list because a slice needed it to be - it is the one static
+        // in the library that is written after its static constructor, deliberately, and the whole
+        // reason it is a class of its own is that every write is behind one Lock in one file
+        // (src/FuzzyRegex/PatternCache.cs). The entries it hands out are FuzzyRegex instances, which
+        // the rest of this file measures as immutable. That the locking holds is measured, not
+        // asserted, exactly as the Dictionary entry above is: PatternCacheStressTests runs four
+        // threads per core through one bounded cache and checks every answer and the bound.
+        if (type == typeof(PatternCache))
+        {
+            return true;
+        }
+
         // A table nothing writes. The element type is not recursed into: every array in the library
         // holds primitives, strings or value tuples of them, which the static-table snapshot
         // hashes in full.
@@ -647,7 +675,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all forty-one, and it is the reason they are not readonly: the engine's
+            // ONE writer for all forty-three, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -658,27 +686,33 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all forty-one
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all forty-three
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
             // passes (the required-string node, the start optimisations, the fuzzy survey).
+            // S60 added two, both written by Compile and by nothing else: ReqStringText beside the
+            // required-string node it belongs to, and HasSkipVerb in the node-numbering loop.
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
+            "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
             "PatternObject.IsFuzzy",
+            "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             "PatternObject.NamedListIndexes",
             "PatternObject.NamedLists",
             "PatternObject.PatternCallRef",
+            "PatternObject.PatternText",
             "PatternObject.PublicGroupCount",
             "PatternObject.RepeatCount",
             "PatternObject.ReqFlags",
             "PatternObject.ReqOffset",
             "PatternObject.ReqString",
+            "PatternObject.ReqStringText",
             "PatternObject.RequiredChars",
             "PatternObject.RequiresCaseEncoding",
             "PatternObject.SingleFuzzyNode",

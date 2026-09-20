@@ -1,667 +1,667 @@
 [
-  {
-    "_note": "Random-order PARTITIONS of the parser files (parsing-rand-*) and engine files (engine-rand-*) into ~2000-char line-aligned windows (seed 20260917), ~6 windows per chunk so a chunk takes under an hour and a pause loses at most that. Every window appears once: the whole queue is the full suite, any prefix is a representative sample. The exhaustive 'parsing' chunk is kept first: if its report exists it is skipped and the parsing-rand-* chunks are redundant (also skipped when their reports exist); if it never finished, they replace it. 2026-09-18: the exhaustive 'parsing' chunk ran 19:37-07:42 and was recovered from a memory dump into TestResults/stryker/parsing-recovered (1646 decided, 0 survivors); 'parsing-remaining' covers only its 543 undecided mutants, so parsing-recovered + parsing-remaining together are the full parser result. parsing-rand-* dropped as redundant."
-  },
-  {
-    "chunk": "parsing-remaining",
-    "mutate": [
-      "Parsing/ParseFunctions.cs{85261..91362}",
-      "Parsing/ParseFunctions.cs{92866..119656}",
-      "Parsing/PatternCompiler.cs{3972..4333}",
-      "Parsing/PatternCompiler.cs{5973..6264}",
-      "Parsing/PatternCompiler.cs{7864..8044}",
-      "Parsing/PatternCompiler.cs{15739..22017}",
-      "Parsing/RegexFlags.cs{4967..11345}",
-      "Parsing/Source.cs{2164..10213}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-01",
-    "mutate": [
-      "Engine/Matcher.cs{253955..256008}",
-      "Engine/Matcher.cs{233652..235691}",
-      "Engine/Matcher.cs{170774..172821}",
-      "Engine/Matcher.cs{239746..241765}",
-      "Engine/PatternObject.cs{10169..12172}",
-      "Engine/Matcher.cs{89480..91480}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-02",
-    "mutate": [
-      "Engine/Matcher.cs{247896..249931}",
-      "Engine/Matcher.cs{191077..193085}",
-      "Engine/NodeCompiler.cs{56924..58933}",
-      "Engine/MatchState.cs{18379..20438}",
-      "Engine/Optimiser.cs{12169..14254}",
-      "Engine/GuardList.cs{2094..4118}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-03",
-    "mutate": [
-      "Engine/Matcher.cs{437082..439132}",
-      "Engine/Matcher.cs{87458..89479}",
-      "Engine/Matcher.cs{12261..14293}",
-      "Engine/Matcher.cs{225578..227599}",
-      "Engine/Matcher.cs{349351..351371}",
-      "Engine/MatchState.cs{12232..14320}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-04",
-    "mutate": [
-      "Engine/Matcher.cs{176895..178903}",
-      "Engine/Matcher.cs{172822..174843}",
-      "Engine/Matcher.cs{195097..197150}",
-      "Engine/Matcher.cs{189075..191076}",
-      "Engine/Matcher.cs{347272..349350}",
-      "Engine/Matcher.cs{304659..306715}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-05",
-    "mutate": [
-      "Engine/Matcher.cs{371675..373686}",
-      "Engine/Matcher.cs{314831..316845}",
-      "Unicode/UnicodeCasing.cs{4083..5515}",
-      "Engine/Matcher.cs{178904..180920}",
-      "Engine/Matcher.cs{79374..81384}",
-      "Engine/GuardList.cs{6122..8172}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-06",
-    "mutate": [
-      "Engine/Matcher.cs{166709..168741}",
-      "Engine/Matcher.cs{402280..404334}",
-      "Engine/Matcher.cs{256009..258035}",
-      "Engine/MatchState.cs{16376..18378}",
-      "Engine/Matcher.cs{351372..353386}",
-      "Engine/Matcher.cs{174844..176894}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-07",
-    "mutate": [
-      "Engine/Matcher.cs{61110..63154}",
-      "Engine/Matcher.cs{435061..437081}",
-      "Engine/Node.cs{10099..12125}",
-      "Engine/Matcher.cs{373687..375745}",
-      "Engine/ByteStack.cs{2075..4153}",
-      "Engine/Matcher.cs{292460..294472}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-08",
-    "mutate": [
-      "Engine/Matcher.cs{197151..199156}",
-      "Engine/Matcher.cs{447281..449297}",
-      "Engine/Matcher.cs{83390..85443}",
-      "Engine/PatternObject.cs{12173..14175}",
-      "Engine/Node.cs{8095..10098}",
-      "Engine/Matcher.cs{109707..111721}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-09",
-    "mutate": [
-      "Engine/Matcher.cs{418642..420715}",
-      "Engine/Matcher.cs{424820..426874}",
-      "Engine/Matcher.cs{258036..260039}",
-      "Engine/Matcher.cs{318852..320888}",
-      "Engine/MatchState.cs{26670..28719}",
-      "Engine/Matcher.cs{126033..128095}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-10",
-    "mutate": [
-      "Engine/MatchState.cs{34880..36910}",
-      "Engine/MatchState.cs{32869..34879}",
-      "Engine/Matcher.cs{22452..24512}",
-      "Engine/NodeCompiler.cs{18335..20348}",
-      "Engine/Matcher.cs{433045..435060}",
-      "Engine/Matcher.cs{123988..126032}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-11",
-    "mutate": [
-      "Engine/Matcher.cs{392027..394047}",
-      "Engine/Matcher.cs{365586..367596}",
-      "Engine/Matcher.cs{67176..69185}",
-      "Engine/NodeCompiler.cs{4094..6115}",
-      "Engine/Matcher.cs{193086..195096}",
-      "Engine/Optimiser.cs{8090..10108}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-12",
-    "mutate": [
-      "Engine/NodeCompiler.cs{42732..44747}",
-      "Engine/Matcher.cs{205237..207331}",
-      "Engine/Matcher.cs{308721..310749}",
-      "Engine/Matcher.cs{219497..221500}",
-      "Engine/Iteration.cs{26547..27023}",
-      "Engine/Iteration.cs{22502..24542}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-13",
-    "mutate": [
-      "Engine/MatchState.cs{36911..38968}",
-      "Engine/Matcher.cs{187040..189074}",
-      "Engine/Matcher.cs{32609..34671}",
-      "Engine/NodeCompiler.cs{30520..32559}",
-      "Engine/Matcher.cs{445264..447280}",
-      "Engine/NodeCompiler.cs{60938..62951}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-14",
-    "mutate": [
-      "Engine/Matcher.cs{335161..337163}",
-      "Engine/NodeCompiler.cs{50870..52882}",
-      "Engine/Iteration.cs{14380..16424}",
-      "Engine/Matcher.cs{95584..97592}",
-      "Engine/NodeCompiler.cs{62952..64969}",
-      "Engine/Matcher.cs{306716..308720}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-15",
-    "mutate": [
-      "Engine/MatchLimits.cs{2025..3153}",
-      "Engine/Matcher.cs{119871..121958}",
-      "Engine/Matcher.cs{241766..243826}",
-      "Engine/Matcher.cs{77370..79373}",
-      "Engine/Matcher.cs{93574..95583}",
-      "Engine/Iteration.cs{12298..14379}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-16",
-    "mutate": [
-      "Engine/PatternObject.cs{8145..10168}",
-      "Engine/Node.cs{16208..17771}",
-      "Engine/Matcher.cs{325018..327050}",
-      "Engine/Matcher.cs{260040..262083}",
-      "Engine/Node.cs{14206..16207}",
-      "Engine/NodeCompiler.cs{22366..24421}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-17",
-    "mutate": [
-      "Engine/Iteration.cs{4101..6168}",
-      "Engine/Matcher.cs{339213..341227}",
-      "Engine/NodeCompiler.cs{20349..22365}",
-      "Engine/ByteStack.cs{8202..10250}",
-      "Engine/MatchState.cs{4097..6151}",
-      "Engine/Matcher.cs{453367..455385}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-18",
-    "mutate": [
-      "Engine/Matcher.cs{229621..231621}",
-      "Engine/Matcher.cs{237721..239745}",
-      "Engine/Matcher.cs{367597..369620}",
-      "Engine/Matcher.cs{154508..156512}",
-      "Engine/Optimiser.cs{16276..18329}",
-      "Engine/Matcher.cs{266129..268164}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-19",
-    "mutate": [
-      "Engine/NodeCompiler.cs{66971..68665}",
-      "Engine/Matcher.cs{355421..357449}",
-      "Engine/MatchState.cs{6152..8212}",
-      "Engine/Matcher.cs{65174..67175}",
-      "Engine/Matcher.cs{160620..162636}",
-      "Unicode/UnicodeCasing.cs{2075..4082}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-20",
-    "mutate": [
-      "Engine/Matcher.cs{57053..59104}",
-      "Engine/Matcher.cs{16311..18337}",
-      "Engine/Matcher.cs{199157..201161}",
-      "Engine/Matcher.cs{268165..270169}",
-      "Engine/Matcher.cs{345256..347271}",
-      "Engine/Matcher.cs{99610..101616}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-21",
-    "mutate": [
-      "Engine/Matcher.cs{284406..286420}",
-      "Engine/Node.cs{2021..4061}",
-      "Engine/Matcher.cs{459485..460201}",
-      "Engine/Matcher.cs{59105..61109}",
-      "Engine/Matcher.cs{441136..443185}",
-      "Engine/NodeCompiler.cs{16290..18334}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-22",
-    "mutate": [
-      "Engine/Matcher.cs{426875..428916}",
-      "Engine/Matcher.cs{329069..331084}",
-      "Engine/Optimiser.cs{10109..12168}",
-      "Engine/Matcher.cs{377842..379882}",
-      "Engine/Matcher.cs{408449..410476}",
-      "Engine/Matcher.cs{322984..325017}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-23",
-    "mutate": [
-      "Engine/Matcher.cs{107681..109706}",
-      "Engine/GuardList.cs{10184..12194}",
-      "Engine/CharacterIndex.cs{10173..11038}",
-      "Engine/NodeCompiler.cs{6116..8186}",
-      "Engine/Matcher.cs{26533..28553}",
-      "Engine/Matcher.cs{243827..245876}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-24",
-    "mutate": [
-      "Engine/Matcher.cs{451365..453366}",
-      "Engine/Matcher.cs{203167..205236}",
-      "Engine/Matcher.cs{44806..46828}",
-      "Engine/Matcher.cs{381885..383896}",
-      "Engine/Optimiser.cs{2066..4072}",
-      "Engine/Matcher.cs{274232..276247}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-25",
-    "mutate": [
-      "Engine/MatchState.cs{20439..22537}",
-      "Engine/Matcher.cs{439133..441135}",
-      "Engine/Matcher.cs{152505..154507}",
-      "Engine/Matcher.cs{343237..345255}",
-      "Engine/Matcher.cs{272225..274231}",
-      "Engine/Matcher.cs{296520..298554}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-26",
-    "mutate": [
-      "Engine/Matcher.cs{182969..184987}",
-      "Engine/Matcher.cs{115769..117833}",
-      "Engine/Optimiser.cs{4073..6079}",
-      "Engine/Matcher.cs{97593..99609}",
-      "Engine/MatchState.cs{2028..4096}",
-      "Engine/Optimiser.cs{14255..16275}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-27",
-    "mutate": [
-      "Engine/Matcher.cs{50891..52981}",
-      "Engine/Matcher.cs{412569..414574}",
-      "Engine/Matcher.cs{142300..144336}",
-      "Engine/Matcher.cs{420716..422721}",
-      "Engine/Matcher.cs{8171..10252}",
-      "Engine/NodeCompiler.cs{38648..40686}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-28",
-    "mutate": [
-      "Engine/Matcher.cs{18338..20422}",
-      "Engine/PatternObject.cs{2042..4059}",
-      "Engine/Matcher.cs{280295..282343}",
-      "Engine/Matcher.cs{48851..50890}",
-      "Engine/NodeCompiler.cs{32560..34583}",
-      "Engine/MatchState.cs{14321..16375}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-29",
-    "mutate": [
-      "Engine/Matcher.cs{180921..182968}",
-      "Engine/Matcher.cs{213433..215463}",
-      "Engine/Matcher.cs{85444..87457}",
-      "Engine/GuardList.cs{12195..12487}",
-      "Engine/Matcher.cs{71198..73291}",
-      "Engine/Matcher.cs{2018..4086}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-30",
-    "mutate": [
-      "Engine/Matcher.cs{428917..430963}",
-      "Engine/Matcher.cs{290444..292459}",
-      "Engine/Iteration.cs{20488..22501}",
-      "Engine/Iteration.cs{2072..4100}",
-      "Engine/Optimiser.cs{22375..23226}",
-      "Engine/NodeCompiler.cs{48835..50869}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-31",
-    "mutate": [
-      "Engine/Matcher.cs{10253..12260}",
-      "Engine/NodeCompiler.cs{12267..14267}",
-      "Engine/Matcher.cs{132177..134251}",
-      "Engine/CharacterIndex.cs{4038..6073}",
-      "Engine/Matcher.cs{276248..278271}",
-      "Engine/Matcher.cs{235692..237720}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-32",
-    "mutate": [
-      "Engine/Matcher.cs{400168..402279}",
-      "Engine/GuardList.cs{8173..10183}",
-      "Engine/Matcher.cs{294473..296519}",
-      "Engine/Matcher.cs{231622..233651}",
-      "Engine/Matcher.cs{55013..57052}",
-      "Engine/MatchState.cs{43143..45144}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-33",
-    "mutate": [
-      "Engine/MatchState.cs{30792..32868}",
-      "Engine/CharacterIndex.cs{8134..10172}",
-      "Engine/Matcher.cs{449298..451364}",
-      "Engine/Matcher.cs{75296..77369}",
-      "Unicode/UnicodeCasing.cs{0..2074}",
-      "Engine/Matcher.cs{117834..119870}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-34",
-    "mutate": [
-      "Engine/NodeCompiler.cs{24422..26481}",
-      "Engine/Matcher.cs{217476..219496}",
-      "Engine/NodeCompiler.cs{44748..46786}",
-      "Engine/Matcher.cs{36689..38724}",
-      "Engine/Matcher.cs{34672..36688}",
-      "Engine/Matcher.cs{455386..457452}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-35",
-    "mutate": [
-      "Engine/ByteStack.cs{12345..12928}",
-      "Engine/Matcher.cs{310750..312786}",
-      "Engine/MatchState.cs{41045..43142}",
-      "Engine/Matcher.cs{121959..123987}",
-      "Engine/Matcher.cs{300577..302620}",
-      "Engine/Matcher.cs{359459..361517}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-36",
-    "mutate": [
-      "Engine/Matcher.cs{361518..363576}",
-      "Engine/Matcher.cs{251953..253954}",
-      "Engine/Matcher.cs{416590..418641}",
-      "Engine/Matcher.cs{201162..203166}",
-      "Engine/Matcher.cs{73292..75295}",
-      "Engine/NodeCompiler.cs{14268..16289}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-37",
-    "mutate": [
-      "Engine/ByteStack.cs{10251..12344}",
-      "Engine/CharacterIndex.cs{6074..8133}",
-      "Engine/Matcher.cs{278272..280294}",
-      "Engine/Matcher.cs{162637..164699}",
-      "Engine/Iteration.cs{18456..20487}",
-      "Engine/Matcher.cs{383897..385977}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-38",
-    "mutate": [
-      "Engine/Matcher.cs{333124..335160}",
-      "Engine/Matcher.cs{138259..140269}",
-      "Engine/Matcher.cs{353387..355420}",
-      "Engine/Matcher.cs{91481..93573}",
-      "Engine/PatternObject.cs{14176..15763}",
-      "Engine/Matcher.cs{422722..424819}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-39",
-    "mutate": [
-      "Engine/Matcher.cs{394048..396074}",
-      "Engine/Matcher.cs{331085..333123}",
-      "Engine/Matcher.cs{379883..381884}",
-      "Engine/Matcher.cs{443186..445263}",
-      "Engine/Matcher.cs{262084..264122}",
-      "Engine/MatchState.cs{45145..47166}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-40",
-    "mutate": [
-      "Engine/Iteration.cs{16425..18455}",
-      "Engine/Iteration.cs{10271..12297}",
-      "Engine/Matcher.cs{369621..371674}",
-      "Engine/Matcher.cs{28554..30568}",
-      "Engine/NodeCompiler.cs{46787..48834}",
-      "Engine/Node.cs{4062..6067}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-41",
-    "mutate": [
-      "Engine/NodeCompiler.cs{34584..36628}",
-      "Engine/Matcher.cs{40751..42759}",
-      "Engine/MatchState.cs{49184..49547}",
-      "Engine/Matcher.cs{130145..132176}",
-      "Engine/MatchState.cs{10214..12231}",
-      "Engine/Matcher.cs{144337..146371}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-42",
-    "mutate": [
-      "Engine/Matcher.cs{337164..339212}",
-      "Engine/Matcher.cs{414575..416589}",
-      "Engine/NodeCompiler.cs{54911..56923}",
-      "Engine/Iteration.cs{24543..26546}",
-      "Engine/Matcher.cs{363577..365585}",
-      "Engine/Matcher.cs{158586..160619}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-43",
-    "mutate": [
-      "Engine/Matcher.cs{6139..8170}",
-      "Engine/Matcher.cs{14294..16310}",
-      "Engine/GuardList.cs{4119..6121}",
-      "Engine/Matcher.cs{375746..377841}",
-      "Engine/PatternObject.cs{4060..6143}",
-      "Engine/Matcher.cs{298555..300576}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-44",
-    "mutate": [
-      "Engine/Optimiser.cs{20348..22374}",
-      "Engine/Matcher.cs{150487..152504}",
-      "Engine/MatchState.cs{22538..24620}",
-      "Engine/ByteStack.cs{4154..6165}",
-      "Engine/Matcher.cs{140270..142299}",
-      "Engine/Matcher.cs{286421..288423}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-45",
-    "mutate": [
-      "Engine/Matcher.cs{404335..406367}",
-      "Engine/Matcher.cs{146372..148437}",
-      "Engine/MatchState.cs{0..2027}",
-      "Engine/Matcher.cs{406368..408448}",
-      "Engine/Iteration.cs{8180..10270}",
-      "Engine/Matcher.cs{52982..55012}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-46",
-    "mutate": [
-      "Engine/Iteration.cs{6169..8179}",
-      "Engine/NodeCompiler.cs{26482..28490}",
-      "Engine/MatchState.cs{8213..10213}",
-      "Engine/Matcher.cs{389984..392026}",
-      "Engine/Matcher.cs{103619..105651}",
-      "Engine/CharacterIndex.cs{0..2018}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-47",
-    "mutate": [
-      "Engine/Matcher.cs{184988..187039}",
-      "Engine/Matcher.cs{69186..71197}",
-      "Engine/NodeCompiler.cs{8187..10211}",
-      "Engine/Node.cs{6068..8094}",
-      "Engine/Matcher.cs{46829..48850}",
-      "Engine/Matcher.cs{396075..398080}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-48",
-    "mutate": [
-      "Engine/Matcher.cs{164700..166708}",
-      "Engine/Matcher.cs{81385..83389}",
-      "Engine/Matcher.cs{113748..115768}",
-      "Engine/MatchState.cs{47167..49183}",
-      "Engine/Matcher.cs{312787..314830}",
-      "Engine/PatternObject.cs{6144..8144}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-49",
-    "mutate": [
-      "Engine/Iteration.cs{0..2071}",
-      "Engine/Matcher.cs{136254..138258}",
-      "Engine/MatchState.cs{28720..30791}",
-      "Engine/Matcher.cs{457453..459484}",
-      "Engine/Matcher.cs{211387..213432}",
-      "Engine/Optimiser.cs{0..2065}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-50",
-    "mutate": [
-      "Engine/Matcher.cs{101617..103618}",
-      "Engine/Matcher.cs{282344..284405}",
-      "Engine/PatternObject.cs{0..2041}",
-      "Engine/Matcher.cs{30569..32608}",
-      "Engine/Matcher.cs{288424..290443}",
-      "Engine/Matcher.cs{63155..65173}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-51",
-    "mutate": [
-      "Engine/Matcher.cs{105652..107680}",
-      "Engine/Matcher.cs{38725..40750}",
-      "Engine/NodeCompiler.cs{0..2053}",
-      "Engine/Optimiser.cs{6080..8089}",
-      "Engine/Matcher.cs{111722..113747}",
-      "Engine/Matcher.cs{316846..318851}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-52",
-    "mutate": [
-      "Engine/NodeCompiler.cs{40687..42731}",
-      "Engine/Matcher.cs{327051..329068}",
-      "Engine/Matcher.cs{223560..225577}",
-      "Engine/Matcher.cs{249932..251952}",
-      "Engine/NodeCompiler.cs{10212..12266}",
-      "Engine/Matcher.cs{398081..400167}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-53",
-    "mutate": [
-      "Engine/CharacterIndex.cs{2019..4037}",
-      "Engine/Matcher.cs{207332..209375}",
-      "Engine/MatchState.cs{24621..26669}",
-      "Engine/Matcher.cs{430964..433044}",
-      "Engine/Matcher.cs{209376..211386}",
-      "Engine/Matcher.cs{227600..229620}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-54",
-    "mutate": [
-      "Engine/Matcher.cs{264123..266128}",
-      "Engine/Matcher.cs{357450..359458}",
-      "Engine/ByteStack.cs{0..2074}",
-      "Engine/Matcher.cs{168742..170773}",
-      "Engine/NodeCompiler.cs{36629..38647}",
-      "Engine/GuardList.cs{0..2093}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-55",
-    "mutate": [
-      "Engine/Node.cs{0..2020}",
-      "Engine/Matcher.cs{0..2017}",
-      "Engine/NodeCompiler.cs{2054..4093}",
-      "Engine/Matcher.cs{24513..26532}",
-      "Engine/Matcher.cs{302621..304658}",
-      "Engine/Matcher.cs{128096..130144}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-56",
-    "mutate": [
-      "Engine/Optimiser.cs{18330..20347}",
-      "Engine/Matcher.cs{156513..158585}",
-      "Engine/Matcher.cs{42760..44805}",
-      "Engine/Matcher.cs{387980..389983}",
-      "Engine/Matcher.cs{20423..22451}",
-      "Engine/Matcher.cs{410477..412568}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-58",
-    "mutate": [
-      "Engine/Matcher.cs{341228..343236}",
-      "Engine/NodeCompiler.cs{58934..60937}",
-      "Engine/Matcher.cs{385978..387979}",
-      "Engine/Matcher.cs{148438..150486}",
-      "Engine/Matcher.cs{4087..6138}",
-      "Engine/Matcher.cs{245877..247895}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-59",
-    "mutate": [
-      "Engine/NodeCompiler.cs{64970..66970}",
-      "Engine/Matcher.cs{270170..272224}",
-      "Engine/Matcher.cs{320889..322983}",
-      "Engine/MatchLimits.cs{0..2024}",
-      "Engine/Matcher.cs{134252..136253}",
-      "Engine/ByteStack.cs{6166..8201}"
-    ]
-  },
-  {
-    "chunk": "engine-rand-57",
-    "mutate": [
-      "Engine/MatchState.cs{38969..41044}",
-      "Engine/Matcher.cs{221501..223559}",
-      "Engine/Node.cs{12126..14205}",
-      "Engine/Matcher.cs{215464..217475}",
-      "Engine/NodeCompiler.cs{28491..30519}",
-      "Engine/NodeCompiler.cs{52883..54910}"
-    ]
-  }
+ {
+  "_note": "Random-order PARTITIONS of the parser files (parsing-rand-*) and engine files (engine-rand-*) into ~2000-char line-aligned windows (seed 20260917), ~6 windows per chunk so a chunk takes under an hour and a pause loses at most that. Every window appears once: the whole queue is the full suite, any prefix is a representative sample. The exhaustive 'parsing' chunk is kept first: if its report exists it is skipped and the parsing-rand-* chunks are redundant (also skipped when their reports exist); if it never finished, they replace it. 2026-09-18: the exhaustive 'parsing' chunk ran 19:37-07:42 and was recovered from a memory dump into TestResults/stryker/parsing-recovered (1646 decided, 0 survivors); 'parsing-remaining' covers only its 543 undecided mutants, so parsing-recovered + parsing-remaining together are the full parser result. parsing-rand-* dropped as redundant."
+ },
+ {
+  "chunk": "parsing-remaining",
+  "mutate": [
+   "Parsing/ParseFunctions.cs{85261..91362}",
+   "Parsing/ParseFunctions.cs{92866..119656}",
+   "Parsing/PatternCompiler.cs{3972..4333}",
+   "Parsing/PatternCompiler.cs{5973..6264}",
+   "Parsing/PatternCompiler.cs{7864..8044}",
+   "Parsing/PatternCompiler.cs{15739..22017}",
+   "Parsing/RegexFlags.cs{4967..11345}",
+   "Parsing/Source.cs{2164..10213}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-01",
+  "mutate": [
+   "Engine/Matcher.cs{253955..256008}",
+   "Engine/Matcher.cs{233652..235691}",
+   "Engine/Matcher.cs{170774..172821}",
+   "Engine/Matcher.cs{239746..241765}",
+   "Engine/PatternObject.cs{10169..12172}",
+   "Engine/Matcher.cs{89480..91480}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-02",
+  "mutate": [
+   "Engine/Matcher.cs{247896..249931}",
+   "Engine/Matcher.cs{191077..193085}",
+   "Engine/NodeCompiler.cs{56924..58933}",
+   "Engine/MatchState.cs{18379..20438}",
+   "Engine/Optimiser.cs{12169..14254}",
+   "Engine/GuardList.cs{2094..4118}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-03",
+  "mutate": [
+   "Engine/Matcher.cs{437082..439132}",
+   "Engine/Matcher.cs{87458..89479}",
+   "Engine/Matcher.cs{12261..14293}",
+   "Engine/Matcher.cs{225578..227599}",
+   "Engine/Matcher.cs{349351..351371}",
+   "Engine/MatchState.cs{12232..14320}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-04",
+  "mutate": [
+   "Engine/Matcher.cs{176895..178903}",
+   "Engine/Matcher.cs{172822..174843}",
+   "Engine/Matcher.cs{195097..197150}",
+   "Engine/Matcher.cs{189075..191076}",
+   "Engine/Matcher.cs{347272..349350}",
+   "Engine/Matcher.cs{304659..306715}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-05",
+  "mutate": [
+   "Engine/Matcher.cs{371675..373686}",
+   "Engine/Matcher.cs{314831..316845}",
+   "Unicode/UnicodeCasing.cs{4083..5515}",
+   "Engine/Matcher.cs{178904..180920}",
+   "Engine/Matcher.cs{79374..81384}",
+   "Engine/GuardList.cs{6122..8172}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-06",
+  "mutate": [
+   "Engine/Matcher.cs{166709..168741}",
+   "Engine/Matcher.cs{402280..404334}",
+   "Engine/Matcher.cs{256009..258035}",
+   "Engine/MatchState.cs{16376..18378}",
+   "Engine/Matcher.cs{351372..353386}",
+   "Engine/Matcher.cs{174844..176894}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-07",
+  "mutate": [
+   "Engine/Matcher.cs{61110..63154}",
+   "Engine/Matcher.cs{435061..437081}",
+   "Engine/Node.cs{10099..12125}",
+   "Engine/Matcher.cs{373687..375745}",
+   "Engine/ByteStack.cs{2075..4153}",
+   "Engine/Matcher.cs{292460..294472}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-08",
+  "mutate": [
+   "Engine/Matcher.cs{197151..199156}",
+   "Engine/Matcher.cs{447281..449297}",
+   "Engine/Matcher.cs{83390..85443}",
+   "Engine/PatternObject.cs{12173..14175}",
+   "Engine/Node.cs{8095..10098}",
+   "Engine/Matcher.cs{109707..111721}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-09",
+  "mutate": [
+   "Engine/Matcher.cs{418642..420715}",
+   "Engine/Matcher.cs{424820..426874}",
+   "Engine/Matcher.cs{258036..260039}",
+   "Engine/Matcher.cs{318852..320888}",
+   "Engine/MatchState.cs{26670..28719}",
+   "Engine/Matcher.cs{126033..128095}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-10",
+  "mutate": [
+   "Engine/MatchState.cs{34880..36910}",
+   "Engine/MatchState.cs{32869..34879}",
+   "Engine/Matcher.cs{22452..24512}",
+   "Engine/NodeCompiler.cs{18335..20348}",
+   "Engine/Matcher.cs{433045..435060}",
+   "Engine/Matcher.cs{123988..126032}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-11",
+  "mutate": [
+   "Engine/Matcher.cs{392027..394047}",
+   "Engine/Matcher.cs{365586..367596}",
+   "Engine/Matcher.cs{67176..69185}",
+   "Engine/NodeCompiler.cs{4094..6115}",
+   "Engine/Matcher.cs{193086..195096}",
+   "Engine/Optimiser.cs{8090..10108}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-12",
+  "mutate": [
+   "Engine/NodeCompiler.cs{42732..44747}",
+   "Engine/Matcher.cs{205237..207331}",
+   "Engine/Matcher.cs{308721..310749}",
+   "Engine/Matcher.cs{219497..221500}",
+   "Engine/Iteration.cs{26547..27023}",
+   "Engine/Iteration.cs{22502..24542}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-13",
+  "mutate": [
+   "Engine/MatchState.cs{36911..38968}",
+   "Engine/Matcher.cs{187040..189074}",
+   "Engine/Matcher.cs{32609..34671}",
+   "Engine/NodeCompiler.cs{30520..32559}",
+   "Engine/Matcher.cs{445264..447280}",
+   "Engine/NodeCompiler.cs{60938..62951}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-14",
+  "mutate": [
+   "Engine/Matcher.cs{335161..337163}",
+   "Engine/NodeCompiler.cs{50870..52882}",
+   "Engine/Iteration.cs{14380..16424}",
+   "Engine/Matcher.cs{95584..97592}",
+   "Engine/NodeCompiler.cs{62952..64969}",
+   "Engine/Matcher.cs{306716..308720}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-15",
+  "mutate": [
+   "Engine/MatchLimits.cs{2025..3153}",
+   "Engine/Matcher.cs{119871..121958}",
+   "Engine/Matcher.cs{241766..243826}",
+   "Engine/Matcher.cs{77370..79373}",
+   "Engine/Matcher.cs{93574..95583}",
+   "Engine/Iteration.cs{12298..14379}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-16",
+  "mutate": [
+   "Engine/PatternObject.cs{8145..10168}",
+   "Engine/Node.cs{16208..17771}",
+   "Engine/Matcher.cs{325018..327050}",
+   "Engine/Matcher.cs{260040..262083}",
+   "Engine/Node.cs{14206..16207}",
+   "Engine/NodeCompiler.cs{22366..24421}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-17",
+  "mutate": [
+   "Engine/Iteration.cs{4101..6168}",
+   "Engine/Matcher.cs{339213..341227}",
+   "Engine/NodeCompiler.cs{20349..22365}",
+   "Engine/ByteStack.cs{8202..10250}",
+   "Engine/MatchState.cs{4097..6151}",
+   "Engine/Matcher.cs{453367..455385}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-18",
+  "mutate": [
+   "Engine/Matcher.cs{229621..231621}",
+   "Engine/Matcher.cs{237721..239745}",
+   "Engine/Matcher.cs{367597..369620}",
+   "Engine/Matcher.cs{154508..156512}",
+   "Engine/Optimiser.cs{16276..18329}",
+   "Engine/Matcher.cs{266129..268164}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-19",
+  "mutate": [
+   "Engine/NodeCompiler.cs{66971..68665}",
+   "Engine/Matcher.cs{355421..357449}",
+   "Engine/MatchState.cs{6152..8212}",
+   "Engine/Matcher.cs{65174..67175}",
+   "Engine/Matcher.cs{160620..162636}",
+   "Unicode/UnicodeCasing.cs{2075..4082}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-20",
+  "mutate": [
+   "Engine/Matcher.cs{57053..59104}",
+   "Engine/Matcher.cs{16311..18337}",
+   "Engine/Matcher.cs{199157..201161}",
+   "Engine/Matcher.cs{268165..270169}",
+   "Engine/Matcher.cs{345256..347271}",
+   "Engine/Matcher.cs{99610..101616}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-21",
+  "mutate": [
+   "Engine/Matcher.cs{284406..286420}",
+   "Engine/Node.cs{2021..4061}",
+   "Engine/Matcher.cs{459485..460201}",
+   "Engine/Matcher.cs{59105..61109}",
+   "Engine/Matcher.cs{441136..443185}",
+   "Engine/NodeCompiler.cs{16290..18334}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-22",
+  "mutate": [
+   "Engine/Matcher.cs{426875..428916}",
+   "Engine/Matcher.cs{329069..331084}",
+   "Engine/Optimiser.cs{10109..12168}",
+   "Engine/Matcher.cs{377842..379882}",
+   "Engine/Matcher.cs{408449..410476}",
+   "Engine/Matcher.cs{322984..325017}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-23",
+  "mutate": [
+   "Engine/Matcher.cs{107681..109706}",
+   "Engine/GuardList.cs{10184..12194}",
+   "Engine/CharacterIndex.cs{10173..11038}",
+   "Engine/NodeCompiler.cs{6116..8186}",
+   "Engine/Matcher.cs{26533..28553}",
+   "Engine/Matcher.cs{243827..245876}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-24",
+  "mutate": [
+   "Engine/Matcher.cs{451365..453366}",
+   "Engine/Matcher.cs{203167..205236}",
+   "Engine/Matcher.cs{44806..46828}",
+   "Engine/Matcher.cs{381885..383896}",
+   "Engine/Optimiser.cs{2066..4072}",
+   "Engine/Matcher.cs{274232..276247}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-25",
+  "mutate": [
+   "Engine/MatchState.cs{20439..22537}",
+   "Engine/Matcher.cs{439133..441135}",
+   "Engine/Matcher.cs{152505..154507}",
+   "Engine/Matcher.cs{343237..345255}",
+   "Engine/Matcher.cs{272225..274231}",
+   "Engine/Matcher.cs{296520..298554}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-26",
+  "mutate": [
+   "Engine/Matcher.cs{182969..184987}",
+   "Engine/Matcher.cs{115769..117833}",
+   "Engine/Optimiser.cs{4073..6079}",
+   "Engine/Matcher.cs{97593..99609}",
+   "Engine/MatchState.cs{2028..4096}",
+   "Engine/Optimiser.cs{14255..16275}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-27",
+  "mutate": [
+   "Engine/Matcher.cs{50891..52981}",
+   "Engine/Matcher.cs{412569..414574}",
+   "Engine/Matcher.cs{142300..144336}",
+   "Engine/Matcher.cs{420716..422721}",
+   "Engine/Matcher.cs{8171..10252}",
+   "Engine/NodeCompiler.cs{38648..40686}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-28",
+  "mutate": [
+   "Engine/Matcher.cs{18338..20422}",
+   "Engine/PatternObject.cs{2042..4059}",
+   "Engine/Matcher.cs{280295..282343}",
+   "Engine/Matcher.cs{48851..50890}",
+   "Engine/NodeCompiler.cs{32560..34583}",
+   "Engine/MatchState.cs{14321..16375}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-29",
+  "mutate": [
+   "Engine/Matcher.cs{180921..182968}",
+   "Engine/Matcher.cs{213433..215463}",
+   "Engine/Matcher.cs{85444..87457}",
+   "Engine/GuardList.cs{12195..12487}",
+   "Engine/Matcher.cs{71198..73291}",
+   "Engine/Matcher.cs{2018..4086}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-30",
+  "mutate": [
+   "Engine/Matcher.cs{428917..430963}",
+   "Engine/Matcher.cs{290444..292459}",
+   "Engine/Iteration.cs{20488..22501}",
+   "Engine/Iteration.cs{2072..4100}",
+   "Engine/Optimiser.cs{22375..23226}",
+   "Engine/NodeCompiler.cs{48835..50869}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-31",
+  "mutate": [
+   "Engine/Matcher.cs{10253..12260}",
+   "Engine/NodeCompiler.cs{12267..14267}",
+   "Engine/Matcher.cs{132177..134251}",
+   "Engine/CharacterIndex.cs{4038..6073}",
+   "Engine/Matcher.cs{276248..278271}",
+   "Engine/Matcher.cs{235692..237720}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-32",
+  "mutate": [
+   "Engine/Matcher.cs{400168..402279}",
+   "Engine/GuardList.cs{8173..10183}",
+   "Engine/Matcher.cs{294473..296519}",
+   "Engine/Matcher.cs{231622..233651}",
+   "Engine/Matcher.cs{55013..57052}",
+   "Engine/MatchState.cs{43143..45144}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-33",
+  "mutate": [
+   "Engine/MatchState.cs{30792..32868}",
+   "Engine/CharacterIndex.cs{8134..10172}",
+   "Engine/Matcher.cs{449298..451364}",
+   "Engine/Matcher.cs{75296..77369}",
+   "Unicode/UnicodeCasing.cs{0..2074}",
+   "Engine/Matcher.cs{117834..119870}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-34",
+  "mutate": [
+   "Engine/NodeCompiler.cs{24422..26481}",
+   "Engine/Matcher.cs{217476..219496}",
+   "Engine/NodeCompiler.cs{44748..46786}",
+   "Engine/Matcher.cs{36689..38724}",
+   "Engine/Matcher.cs{34672..36688}",
+   "Engine/Matcher.cs{455386..457452}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-35",
+  "mutate": [
+   "Engine/ByteStack.cs{12345..12928}",
+   "Engine/Matcher.cs{310750..312786}",
+   "Engine/MatchState.cs{41045..43142}",
+   "Engine/Matcher.cs{121959..123987}",
+   "Engine/Matcher.cs{300577..302620}",
+   "Engine/Matcher.cs{359459..361517}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-36",
+  "mutate": [
+   "Engine/Matcher.cs{361518..363576}",
+   "Engine/Matcher.cs{251953..253954}",
+   "Engine/Matcher.cs{416590..418641}",
+   "Engine/Matcher.cs{201162..203166}",
+   "Engine/Matcher.cs{73292..75295}",
+   "Engine/NodeCompiler.cs{14268..16289}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-37",
+  "mutate": [
+   "Engine/ByteStack.cs{10251..12344}",
+   "Engine/CharacterIndex.cs{6074..8133}",
+   "Engine/Matcher.cs{278272..280294}",
+   "Engine/Matcher.cs{162637..164699}",
+   "Engine/Iteration.cs{18456..20487}",
+   "Engine/Matcher.cs{383897..385977}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-38",
+  "mutate": [
+   "Engine/Matcher.cs{333124..335160}",
+   "Engine/Matcher.cs{138259..140269}",
+   "Engine/Matcher.cs{353387..355420}",
+   "Engine/Matcher.cs{91481..93573}",
+   "Engine/PatternObject.cs{14176..15763}",
+   "Engine/Matcher.cs{422722..424819}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-39",
+  "mutate": [
+   "Engine/Matcher.cs{394048..396074}",
+   "Engine/Matcher.cs{331085..333123}",
+   "Engine/Matcher.cs{379883..381884}",
+   "Engine/Matcher.cs{443186..445263}",
+   "Engine/Matcher.cs{262084..264122}",
+   "Engine/MatchState.cs{45145..47166}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-40",
+  "mutate": [
+   "Engine/Iteration.cs{16425..18455}",
+   "Engine/Iteration.cs{10271..12297}",
+   "Engine/Matcher.cs{369621..371674}",
+   "Engine/Matcher.cs{28554..30568}",
+   "Engine/NodeCompiler.cs{46787..48834}",
+   "Engine/Node.cs{4062..6067}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-41",
+  "mutate": [
+   "Engine/NodeCompiler.cs{34584..36628}",
+   "Engine/Matcher.cs{40751..42759}",
+   "Engine/MatchState.cs{49184..49547}",
+   "Engine/Matcher.cs{130145..132176}",
+   "Engine/MatchState.cs{10214..12231}",
+   "Engine/Matcher.cs{144337..146371}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-42",
+  "mutate": [
+   "Engine/Matcher.cs{337164..339212}",
+   "Engine/Matcher.cs{414575..416589}",
+   "Engine/NodeCompiler.cs{54911..56923}",
+   "Engine/Iteration.cs{24543..26546}",
+   "Engine/Matcher.cs{363577..365585}",
+   "Engine/Matcher.cs{158586..160619}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-43",
+  "mutate": [
+   "Engine/Matcher.cs{6139..8170}",
+   "Engine/Matcher.cs{14294..16310}",
+   "Engine/GuardList.cs{4119..6121}",
+   "Engine/Matcher.cs{375746..377841}",
+   "Engine/PatternObject.cs{4060..6143}",
+   "Engine/Matcher.cs{298555..300576}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-44",
+  "mutate": [
+   "Engine/Optimiser.cs{20348..22374}",
+   "Engine/Matcher.cs{150487..152504}",
+   "Engine/MatchState.cs{22538..24620}",
+   "Engine/ByteStack.cs{4154..6165}",
+   "Engine/Matcher.cs{140270..142299}",
+   "Engine/Matcher.cs{286421..288423}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-45",
+  "mutate": [
+   "Engine/Matcher.cs{404335..406367}",
+   "Engine/Matcher.cs{146372..148437}",
+   "Engine/MatchState.cs{0..2027}",
+   "Engine/Matcher.cs{406368..408448}",
+   "Engine/Iteration.cs{8180..10270}",
+   "Engine/Matcher.cs{52982..55012}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-46",
+  "mutate": [
+   "Engine/Iteration.cs{6169..8179}",
+   "Engine/NodeCompiler.cs{26482..28490}",
+   "Engine/MatchState.cs{8213..10213}",
+   "Engine/Matcher.cs{389984..392026}",
+   "Engine/Matcher.cs{103619..105651}",
+   "Engine/CharacterIndex.cs{0..2018}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-47",
+  "mutate": [
+   "Engine/Matcher.cs{184988..187039}",
+   "Engine/Matcher.cs{69186..71197}",
+   "Engine/NodeCompiler.cs{8187..10211}",
+   "Engine/Node.cs{6068..8094}",
+   "Engine/Matcher.cs{46829..48850}",
+   "Engine/Matcher.cs{396075..398080}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-48",
+  "mutate": [
+   "Engine/Matcher.cs{164700..166708}",
+   "Engine/Matcher.cs{81385..83389}",
+   "Engine/Matcher.cs{113748..115768}",
+   "Engine/MatchState.cs{47167..49183}",
+   "Engine/Matcher.cs{312787..314830}",
+   "Engine/PatternObject.cs{6144..8144}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-49",
+  "mutate": [
+   "Engine/Iteration.cs{0..2071}",
+   "Engine/Matcher.cs{136254..138258}",
+   "Engine/MatchState.cs{28720..30791}",
+   "Engine/Matcher.cs{457453..459484}",
+   "Engine/Matcher.cs{211387..213432}",
+   "Engine/Optimiser.cs{0..2065}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-50",
+  "mutate": [
+   "Engine/Matcher.cs{101617..103618}",
+   "Engine/Matcher.cs{282344..284405}",
+   "Engine/PatternObject.cs{0..2041}",
+   "Engine/Matcher.cs{30569..32608}",
+   "Engine/Matcher.cs{288424..290443}",
+   "Engine/Matcher.cs{63155..65173}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-51",
+  "mutate": [
+   "Engine/Matcher.cs{105652..107680}",
+   "Engine/Matcher.cs{38725..40750}",
+   "Engine/NodeCompiler.cs{0..2053}",
+   "Engine/Optimiser.cs{6080..8089}",
+   "Engine/Matcher.cs{111722..113747}",
+   "Engine/Matcher.cs{316846..318851}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-52",
+  "mutate": [
+   "Engine/NodeCompiler.cs{40687..42731}",
+   "Engine/Matcher.cs{327051..329068}",
+   "Engine/Matcher.cs{223560..225577}",
+   "Engine/Matcher.cs{249932..251952}",
+   "Engine/NodeCompiler.cs{10212..12266}",
+   "Engine/Matcher.cs{398081..400167}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-53",
+  "mutate": [
+   "Engine/CharacterIndex.cs{2019..4037}",
+   "Engine/Matcher.cs{207332..209375}",
+   "Engine/MatchState.cs{24621..26669}",
+   "Engine/Matcher.cs{430964..433044}",
+   "Engine/Matcher.cs{209376..211386}",
+   "Engine/Matcher.cs{227600..229620}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-54",
+  "mutate": [
+   "Engine/Matcher.cs{264123..266128}",
+   "Engine/Matcher.cs{357450..359458}",
+   "Engine/ByteStack.cs{0..2074}",
+   "Engine/Matcher.cs{168742..170773}",
+   "Engine/NodeCompiler.cs{36629..38647}",
+   "Engine/GuardList.cs{0..2093}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-55",
+  "mutate": [
+   "Engine/Node.cs{0..2020}",
+   "Engine/Matcher.cs{0..2017}",
+   "Engine/NodeCompiler.cs{2054..4093}",
+   "Engine/Matcher.cs{24513..26532}",
+   "Engine/Matcher.cs{302621..304658}",
+   "Engine/Matcher.cs{128096..130144}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-56",
+  "mutate": [
+   "Engine/Optimiser.cs{18330..20347}",
+   "Engine/Matcher.cs{156513..158585}",
+   "Engine/Matcher.cs{42760..44805}",
+   "Engine/Matcher.cs{387980..389983}",
+   "Engine/Matcher.cs{20423..22451}",
+   "Engine/Matcher.cs{410477..412568}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-57",
+  "mutate": [
+   "Engine/MatchState.cs{38969..41044}",
+   "Engine/Matcher.cs{221501..223559}",
+   "Engine/Node.cs{12126..14205}",
+   "Engine/Matcher.cs{215464..217475}",
+   "Engine/NodeCompiler.cs{28491..30519}",
+   "Engine/NodeCompiler.cs{52883..54910}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-58",
+  "mutate": [
+   "Engine/Matcher.cs{341228..343236}",
+   "Engine/NodeCompiler.cs{58934..60937}",
+   "Engine/Matcher.cs{385978..387979}",
+   "Engine/Matcher.cs{148438..150486}",
+   "Engine/Matcher.cs{4087..6138}",
+   "Engine/Matcher.cs{245877..247895}"
+  ]
+ },
+ {
+  "chunk": "engine-rand-59",
+  "mutate": [
+   "Engine/NodeCompiler.cs{64970..66970}",
+   "Engine/Matcher.cs{270170..272224}",
+   "Engine/Matcher.cs{320889..322983}",
+   "Engine/MatchLimits.cs{0..2024}",
+   "Engine/Matcher.cs{134252..136253}",
+   "Engine/ByteStack.cs{6166..8201}"
+  ]
+ }
 ]

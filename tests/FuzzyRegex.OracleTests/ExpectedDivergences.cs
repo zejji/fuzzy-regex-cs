@@ -981,6 +981,8 @@ internal static class ExpectedDivergences
         {"generator": "partial-sliced", "pattern": "(\\D)\\1(?:[\\p{L}\\p{N}]*?(*SKIP)\\s|[a])", "flags": 258, "namedLists": {}, "subject": "𐐀\r\n😀𐐀ßß😀 𐐀", "operation": "search", "partial": true, "pos": 2, "endpos": 10, "codepointSlice": [1, 7], "oracle": "prefilter-free", "codepointSpan": [7, 7], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 10, "length": 0, "captures": [[10, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 8, "length": 2, "captures": [[8, 2]]}, {"number": 1, "success": true, "index": 8, "length": 1, "captures": [[8, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "([\\p{ASCII}&&\\p{L}]+)*\\B(?:\\w(*SKIP)\\W|[a])", "flags": 16642, "namedLists": {}, "subject": "𐐨𐐨aa𐐀𐐀", "operation": "search", "partial": true, "codepointSpan": [6, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 10, "length": 0, "captures": [[10, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 8, "length": 2, "captures": [[8, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?P<g1>\\w{0,1}){1,3}?([^[\\p{L}--[a-z]]]?)(?:\\p{Lu}(*SKIP)[[a-f]~~[d-k]]|\\p{Ll})\\b", "flags": 16650, "namedLists": {}, "subject": " 𝟮𝟮𐐀𐐀 ", "operation": "search", "partial": true, "codepointSpan": [5, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}, {"number": 1, "success": true, "index": 9, "length": 0, "captures": [[9, 0]]}, {"number": 2, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}], "lastIndex": 2, "lastGroup": "g1", "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 7, "length": 3, "captures": [[7, 3]]}, {"number": 1, "success": true, "index": 7, "length": 2, "captures": [[7, 2]]}, {"number": 2, "success": true, "index": 9, "length": 1, "captures": [[9, 1]]}], "lastIndex": 2, "lastGroup": "g1", "partial": true}}
+        {"generator": "partial", "pattern": "(?:[^\\p{L}](*SKIP)[[:digit:]]|[^a-f])([a]?)\\g<1>\\b", "flags": 16394, "namedLists": {}, "subject": "AAaa ", "operation": "search", "partial": true, "codepointSpan": [5, 5], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 5, "length": 0, "captures": [[5, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "partial-sliced", "pattern": "(?:[^\\p{L}](*SKIP)\\D|[^a-f])[[:alpha:]]", "flags": 8, "namedLists": {}, "subject": "0bA.", "operation": "search", "partial": true, "pos": 1, "endpos": 4, "codepointSlice": [1, 4], "oracle": "prefilter-free", "codepointSpan": [4, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 4, "length": 0, "captures": [[4, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 1, "captures": [[3, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1031,6 +1033,19 @@ internal static class ExpectedDivergences
         // 2026-09-15 on regex 2026.9.10, tools/probes/upstream-partial-anchor-reachability.py.
         "match 0:(8,2)[(8,2)] 1:unset last=-1/- partial",
         "match 0:(7,3)[(7,3)] 1:(7,2)[(7,2)] 2:(9,1)[(9,1)] last=2/g1 partial",
+        // Rows 8 and 9 are S60 sitting 3's, and row 8 is the first this entry has taken from the
+        // DEFAULT gate rather than a widened wave - seed 20260920 row 5014, and 20260920 is the date
+        // seed `run-oracle.ps1` runs by default (`:256`). Row 9 is seed 31337 row 5200, an EXTRA
+        // seed sitting 2 ran beyond the gate, not a default one. Both are rows 4 and 5's symptom
+        // exactly: upstream answers the zero-width partial at the far end of what it searched,
+        // codepoints (5, 5) and (4, 4), where the first anchor its own forward search tries THAT
+        // ANSWERS AT ALL - pos 4 and pos 3, the sweep's own first hits, not the first positions
+        // tried - gives the (4, 5) and (3, 4) this port answers, and so do `(*PRUNE)` and the
+        // verb-free spelling on both. Row 9 is
+        // `partial-sliced`, so its searched region is the slice (1, 4) and not the subject. Measured
+        // 2026-09-20 on regex 2026.9.10, tools/probes/upstream-skip-partial-anchor-grid.py.
+        "match 0:(4,1)[(4,1)] 1:unset last=-1/- partial",
+        "match 0:(3,1)[(3,1)] last=-1/- partial",
     ];
 
     /// <summary>
@@ -1071,6 +1086,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?r)^(?P<g1>\\D)(?:[^\\d](*SKIP)\\p{ASCII}|\\W)$", "flags": 8, "namedLists": {}, "subject": "𐐨𐐨a\r\n", "operation": "subf", "template": "-}}{g1}", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "-}𐐨\r\n", "count": 1}, "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 3]}], "pruneOutcome": {"kind": "sub", "text": "𐐨𐐨a\r\n", "count": 0}}
         {"generator": "verbs", "pattern": "(?r)\\w{1,3}(*SKIP)[\\w\\s]$", "flags": 10, "namedLists": {}, "subject": "😀 AAa\ra𝔘a", "operation": "finditer-overlapped", "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}, {"groups": [{"number": 0, "success": true, "index": 7, "length": 3, "captures": [[7, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 8]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 4, "captures": [[3, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 6]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 3, "captures": [[3, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 5]}, {"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}, "pruneOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 7, "length": 4, "captures": [[7, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [6, 9]}]}}
         {"generator": "verbs", "pattern": "(?r)\\p{ASCII}{1,3}(*SKIP)ﬀ$", "flags": 8, "namedLists": {}, "subject": "sﬀﬀ", "operation": "subf", "template": "{0[2]}{0[2]}{0[-2]}", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "error", "exception": "IndexError", "message": "list index out of range", "whileMatching": true}, "pruneOutcome": {"kind": "sub", "text": "sﬀﬀ", "count": 0}}
+        {"generator": "interactions", "pattern": "(?r)^(?P<g1>[\\p{L}||\\p{N}]){1,}(?:[a\\d](*SKIP)[\\w\\s]|\\w)$", "flags": 264, "namedLists": {}, "subject": "\n\ud835\udfee\ud835\udd18\ud835\udd18", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1092,6 +1108,15 @@ internal static class ExpectedDivergences
         "sub 0 '\\ud801\\udc28\\ud801\\udc28a\\u000d\\u000a'",
         "matches 1 | match 0:(7,4)[(7,4)] last=-1/-",
         "sub 0 's\\ufb00\\ufb00'",
+        // Row 6 is S60 sitting 3's, row 3633 of seed 31337 - an EXTRA seed sitting 2 ran beyond the
+        // gate, not one of `run-oracle.ps1`'s three defaults (`:256`) - and it is the FIRST PARTIAL
+        // SEARCH this entry has held: every row above it is a split, a scan or a
+        // substitution. Upstream's partial ENDS AT codepoint 1, where its own `$` is true at 0 and 4
+        // alone, and the `(?w)` control runs here because 1 is not a `(?w)$` position either: `$`
+        // spelled out, `(?w)$` and `(*PRUNE)` all answer the zero-width partial at (0, 0) that this
+        // port answers. Measured 2026-09-20 on regex 2026.9.10,
+        // tools/probes/upstream-skip-partial-anchor-grid.py.
+        "match 0:(0,0)[(0,0)] 1:unset last=-1/- partial",
     ];
 
     /// <summary>
@@ -2531,8 +2556,12 @@ internal static class ExpectedDivergences
                 + "    `$` written out                          no match, this port's answer\n"
                 + "    (*SKIP) -> (*PRUNE), or deleted          no match, this port's answer\n"
                 + "    `$` written as (?w)$, the TWIN           no match, this port's answer\n"
-                + "THE `(?w)` CONTROL IS THE SHARPEST ONE AND IT RUNS ON ONE ROW ONLY, and the reason "
-                + "is narrower than it first looks. `(?w)` compiles `$` to `END_OF_LINE_U` "
+                + "THE `(?w)` CONTROL IS THE SHARPEST ONE AND OF THE FIRST TWO ROWS IT RUNS ON ONE "
+                + "ONLY [S60 sitting 4: it runs on rows 38101, 5721 and 3633 - three of the six rows "
+                + "this entry now holds; measured with "
+                + "`python tools/probes/upstream-dollar-positions-for-moved-slice-rows.py`, which "
+                + "prints every row's `$` and `(?w)$` positions], and the reason is narrower than it "
+                + "first looks. `(?w)` compiles `$` to `END_OF_LINE_U` "
                 + "(regex/_regex_core.py:506-510), the twin that reads `text_end` - but it is NOT a "
                 + "clean swap of one bound for another, because it also changes WHICH POSITIONS ARE "
                 + "LINE ENDS, on both rows and in both directions:\n"
@@ -2607,8 +2636,10 @@ internal static class ExpectedDivergences
                 + "`pwsh -File tools/run-oracle.ps1 -Rows <file>`.\n"
                 + "AND A FIFTH ROW, drawn by the default wave AT A SEED NO SLICE HAD USED - "
                 + "`run-oracle.ps1`'s third default seed is the DATE, so every day's run is a fresh "
-                + "one, and 2026-09-16's drew `verbs` row 5721. It is the first row in this entry on "
-                + "which the `(?w)` CONTROL CAN RUN, which makes it the cleanest statement of the "
+                + "one, and 2026-09-16's drew `verbs` row 5721. It is the SECOND row in this entry on "
+                + "which the `(?w)` CONTROL CAN RUN [S60 sitting 4 correction: written as 'the first' "
+                + "when it landed, but row 38101 above already runs it; row 3633 below is the third], "
+                + "which makes it the cleanest statement of the "
                 + "defect here: `(?r)\\p{ASCII}{1,3}(*SKIP)\\uFB00$` over 's\\uFB00\\uFB00', a "
                 + "`subf`. Upstream's own `$` is true at codepoint 3 alone and its scan reports a "
                 + "match ending at 2; `(?w)$` is true at 3 ALONE AS WELL, so the twin that reads "
@@ -2618,10 +2649,32 @@ internal static class ExpectedDivergences
                 + "`(?:(?=\\n)|(?!\\n|.))` all answer the same. Upstream's drawn outcome is an "
                 + "IndexError for the reason row 38101's is - the template asks for a group the "
                 + "pattern never makes, so upstream raises precisely when it finds a match. Measured "
-                + "2026-09-16 on regex 2026.9.10.",
+                + "2026-09-16 on regex 2026.9.10.\n"
+                + "S60 SITTING 3 ADDED A SIXTH ROW, AND THE FIRST PARTIAL SEARCH, row 3633 of seed "
+                + "31337 - an extra seed sitting 2 ran beyond the gate, not one of the three defaults. "
+                + "It is the first row here that is neither a split, a scan nor a substitution, so the "
+                + "`$` tell now reaches the operation the three `partial-retry-*` entries own, and "
+                + "which entry a row belongs to is decided by the tell rather than by the call. "
+                + "`(?r)^(?P<g1>[\\p{L}||\\p{N}]){1,}(?:[a\\d](*SKIP)[\\w\\s]|\\w)$` over "
+                + "'\\n\\U0001D7EE\\U0001D518\\U0001D518' with MULTILINE and VERSION1 (flags 264) has "
+                + "upstream answering the partial (0, 1), which ENDS AT 1 where its own `$` is true at "
+                + "0 and 4 alone. THE ANCHOR SWEEP POINTS THE OTHER WAY HERE AND IS NOT THE CONTROL: "
+                + "upstream's own `match(0, 1, partial=True)` does answer (0, 1), so the highest "
+                + "anchor a reversed search tries that answers at all is its own answer - but passing "
+                + "that `endpos` sets `slice_end` to 1 and MAKES `$` true there, which is the bug "
+                + "rather than a test of it, exactly as this entry says of the stepwise walk above. "
+                + "The `(?w)` control does run here: `(?w)$` is true at [0, 4] too, so the phantom end "
+                + "1 is not a line end the twin would create. `$` spelled out as "
+                + "`(?:(?=\\n)|(?!\\n|.))`, `(?w)$`, and `(*SKIP)` spelled `(*PRUNE)` all answer the "
+                + "zero-width partial (0, 0) this port answers. The verb deleted answers a COMPLETE "
+                + "(1, 4) and is printed rather than counted, because deleting a verb prunes nothing. "
+                + "Measured 2026-09-20 on regex 2026.9.10, "
+                + "tools/probes/upstream-skip-partial-anchor-grid.py.",
             PinnedBy: "BacktrackingVerbTests.A_reversed_split_of_a_skip_does_not_end_a_separator_where_"
-                + "the_line_does_not_end and .A_reversed_substitution_of_a_skip_replaces_nothing_"
-                + "where_the_line_does_not_end",
+                + "the_line_does_not_end, .A_reversed_substitution_of_a_skip_replaces_nothing_"
+                + "where_the_line_does_not_end and PartialMatchingTests.A_reversed_partial_search_of_"
+                + "a_skip_ends_where_the_line_really_ends, which is row 6's, the entry's only partial "
+                + "search",
             Example: _endOfLineReadsMovedSliceRows,
             Applies: static (row, ours) =>
                 _endOfLineReadsMovedSlice.TryGetValue(Question(row), out string? judged)
@@ -3060,7 +3113,23 @@ internal static class ExpectedDivergences
                 + "elsewhere on both, so they rest on `(*PRUNE)` and the anchor sweep; deleting a "
                 + "verb prunes nothing and so may reach a match the pruned spellings cannot, which is "
                 + "why it is printed and not treated as a control. Measured 2026-09-15 on regex "
-                + "2026.9.10, tools/probes/upstream-partial-anchor-reachability.py.",
+                + "2026.9.10, tools/probes/upstream-partial-anchor-reachability.py.\n"
+                + "ROWS 8 AND 9 ARE S60 SITTING 3'S, and row 8 is the first row this entry has taken "
+                + "from the DEFAULT gate rather than from a widened wave or a seed sweep - seed "
+                + "20260920 row 5014, 20260920 being the date seed `run-oracle.ps1` runs by default. "
+                + "Row 9 is seed 31337 row 5200, an EXTRA seed sitting 2 ran beyond the gate. Both are "
+                + "rows 4 and 5's symptom "
+                + "unchanged: upstream answers the zero-width partial at the far end of what it "
+                + "searched, codepoints (5, 5) and (4, 4), where the first anchor its own forward "
+                + "search tries that answers at all - pos 4 and pos 3, which are not the first "
+                + "positions tried but the first that answer - gives the (4, 5) and "
+                + "(3, 4) this port answers, and `(*PRUNE)` and the verb-free spelling give the same "
+                + "on both. Row 9 is `partial-sliced`, so its searched region is the slice (1, 4) "
+                + "rather than the subject, and it is asked with upstream's required-string prefilter "
+                + "neutralised because that is how the recorder drew it. NEITHER ROW IS S60'S OWN: "
+                + "both were proved pre-existing against 3f1bf91, before the required-string "
+                + "prefilter landed, by re-running the seed with `src/` stashed. Measured 2026-09-20 "
+                + "on regex 2026.9.10, tools/probes/upstream-skip-partial-anchor-grid.py.",
             PinnedBy: "PartialMatchingTests.A_forward_skip_does_not_move_the_slice_start_the_partial_"
                 + "pass_searches, .A_partial_match_of_a_skip_is_not_the_verb_free_answer, "
                 + ".A_partial_search_of_a_skip_is_not_the_verb_free_answer and "

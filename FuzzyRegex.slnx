@@ -12,4 +12,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/FuzzyRegex.AotSmoke/FuzzyRegex.AotSmoke.csproj" />
   </Folder>
+  <Folder Name="/demo/">
+    <Project Path="demo/FuzzyRegex.Demo.Wasm/FuzzyRegex.Demo.Wasm.csproj" />
+  </Folder>
 </Solution>

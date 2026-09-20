@@ -341,13 +341,23 @@ foreach ($seed in $runs) {
 
     if ($consumerExit -ne 0) {
         $failed += $seed
-        # The next seed overwrites both files, so a red run's evidence is kept under its own seed
-        # or it is gone by the time the summary prints.
-        if ($seed -ge 0) {
-            Copy-Item -LiteralPath $wavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
-            if (Test-Path -LiteralPath $reportPath) {
-                Copy-Item -LiteralPath $reportPath -Destination (Join-Path $repoRoot "TestResults/oracle/report-$seed.txt") -Force
-            }
+    }
+
+    # The next seed overwrites both files, so this run's evidence is kept under its own seed or it
+    # is gone by the time the summary prints.
+    #
+    # S57: this copy is UNCONDITIONAL, and it used to happen only on a red seed. That made
+    # report-<seed>.txt mean "the last time this seed was red" rather than "what this seed did",
+    # and every consumer reads it as the latter. Measured 2026-09-20: the default wave was GREEN at
+    # 4242, report-4242.txt was still the red one from 2026-09-18 16:43, and
+    # tools/probes/gate-divergence-doors.py duly asked every family's control about three rows that
+    # no longer diverge - presented indistinguishably from the rows that do. Overwriting on green
+    # keeps the evidence (a green report is a record too, and a truthful one) while making a
+    # DIVERGE line in report-<seed>.txt mean this run.
+    if ($seed -ge 0) {
+        Copy-Item -LiteralPath $wavePath -Destination (Join-Path $repoRoot "TestResults/oracle/wave-$seed.jsonl") -Force
+        if (Test-Path -LiteralPath $reportPath) {
+            Copy-Item -LiteralPath $reportPath -Destination (Join-Path $repoRoot "TestResults/oracle/report-$seed.txt") -Force
         }
     }
 }

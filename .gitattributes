@@ -8,5 +8,26 @@
 *.snk binary
 *.trx text eol=lf
 
+# JavaScript is byte-for-byte content here, not text to normalise. Below the `* text=auto` line on
+# purpose: the LAST matching pattern wins, so this has to come after it to take effect.
+#
+# Microsoft's reason, verbatim (learn.microsoft.com/aspnet/core/blazor/host-and-deploy/webassembly/
+# github-pages, fetched 2026-09-16): "Git treats JavaScript (JS) files, such as
+# blazor.webassembly.js, as text and converts line endings from CRLF to LF in the deployment
+# pipeline. These changes to JS files produce different file hashes than Blazor sends to the client.
+# The mismatches result in integrity check failures on the client."
+#
+# What it protects HERE is narrower than that quotation, and saying so is the point: their scenario
+# commits the published assets to a branch, whereas .github/workflows/pages.yml publishes in CI and
+# uploads the output directly, so no framework JavaScript ever passes through Git. This rule covers
+# the one piece of JavaScript this repository both commits and ships to a browser:
+# demo/FuzzyRegex.Demo.Wasm/wwwroot/worker.js. Since S71 bundled the front end, the page's modules
+# are TypeScript under demo/web/src and the bundle Vite builds from them is generated, gitignored
+# and hashed at build time, so it never passes through Git at all. The rule deliberately does not
+# extend to demo/web/scripts/clean.mjs, the only other committed module: it runs on the build
+# machine, is never fetched with an integrity attribute, and keeping it text keeps its diffs
+# readable.
+*.js binary
+
 # The upstream submodule is vendored read-only; its diffs are not ours to review.
 upstream/** linguist-vendored

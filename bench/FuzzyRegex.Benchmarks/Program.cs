@@ -15,6 +15,14 @@ internal static class Program
             return;
         }
 
+        // `attribution` is not a benchmark filter either: it is the one-shot allocation split that
+        // stands in for the allocation profiler nothing installed can read. See Attribution.cs.
+        if (args is ["attribution"])
+        {
+            Attribution.Run();
+            return;
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
     }
 }

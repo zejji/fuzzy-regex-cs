@@ -1,0 +1,142 @@
+name: Demo (GitHub Pages)
+
+# Publishes demo/FuzzyRegex.Demo.Wasm to GitHub Pages (S71, Phase 9).
+#
+# Separate from ci.yml on purpose: a broken demo must never block a library merge. Nothing in this
+# file gates anything - ci.yml is the merge gate, and this only ever deploys what main already has.
+#
+# One-off repository setting this needs, which no workflow can do for you: Settings, Pages,
+# Source = "GitHub Actions". Without it, deploy-pages fails with "Get Pages site failed". The steps
+# are written out in demo/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The demo itself, and the library it compiles in. Watching src/ as well as demo/ is a
+      # deliberate widening of the slice's "pushes that touch demo/**": the demo is a WebAssembly
+      # publish of this library, so a library change with no demo change leaves a live page that no
+      # longer shows what the library does, and nothing would ever notice. The cost is one publish
+      # per library merge, which is this workflow's whole job.
+      - 'demo/**'
+      - 'src/**'
+      - 'tools/run-wasm-smoke.ps1'
+      - 'tools/build-demo-web.ps1'
+      # The help panels are generated from this file by this script (S72), so an edit to either is
+      # a change to what the deployed page says.
+      - 'tools/build-demo-help.ps1'
+      - 'docs/COMPARISON.md'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# The default for every job: read the repository and nothing else. The two write permissions the
+# deployment needs are granted on the deploy job alone, not here - the build job runs `npm ci` and
+# a WebAssembly publish, which is where third-party code executes, and a token that could deploy to
+# Pages from inside that job is a token that did not need to exist.
+permissions:
+  contents: read
+
+# One deployment at a time, and the newest wins. cancel-in-progress is false rather than true here,
+# unlike ci.yml: cancelling a deployment half way leaves Pages serving a half-uploaded artefact.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Publish and check the artefact set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The demo builds src/FuzzyRegex from source and Directory.Build.props is shared with the
+          # rest of the repository, so the checkout is the whole repository as CI sees it.
+          submodules: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          # From demo/web/.nvmrc, which pins the FULL version (24.16.0) and not a floating major:
+          # `24` is whatever 24.x the runner has that week, so a runtime change would arrive here
+          # without a commit, and the runner and a developer's machine could differ while both
+          # claimed to be on 24. package.json's `engines` stays a floor - Vite 8 needs 22.12 or
+          # newer - and tools/build-demo-web.ps1 refuses below that, so the failure names Node
+          # rather than surfacing as a missing API deep inside the toolchain.
+          node-version-file: demo/web/.nvmrc
+          cache: npm
+          cache-dependency-path: demo/web/package-lock.json
+
+      - name: Install the WebAssembly workload
+        # Required to publish a browser-wasm app; the SDK does not carry it by default.
+        run: dotnet workload install wasm-tools
+
+      - name: Build the page - type-check, unit tests, bundle
+        # `npm ci`, then vue-tsc, then Vitest, then vite build, and any of the four fails the job.
+        # The tests are Node and not a browser: the fragment, the display cap, the worker pool's
+        # promotion and the page's own state machine are all testable without one. What needs a
+        # browser is wwwroot/checks.html, which is driven by hand and recorded in the slice notes -
+        # a headless browser in CI is a later slice's if it earns it.
+        shell: pwsh
+        run: ./tools/build-demo-web.ps1
+
+      - name: Publish the demo and assert its artefact set
+        # Before anything is uploaded: a missing _framework file, a stale asset nobody named or an
+        # integrity hash that does not match its file all produce a page that boots on a developer's
+        # machine and fails on Pages. Catching it here costs a minute; catching it after deployment
+        # costs whoever opened the link.
+        shell: pwsh
+        run: ./tools/run-wasm-smoke.ps1 -SkipWebBuild -OutDir ${{ runner.temp }}/demo-publish
+
+      - name: The runtime's own folder must survive Jekyll
+        # .nojekyll is committed in wwwroot and published with it, so this checks rather than
+        # creates. "The default GitHub Action, which deploys pages, skips deployment of folders
+        # starting with underscore, the _framework folder for example" - learn.microsoft.com,
+        # aspnet/core/blazor/host-and-deploy/webassembly/github-pages, fetched 2026-09-16. Without
+        # the file the app serves a 404 for its own runtime, and the deployment still says it
+        # succeeded.
+        shell: pwsh
+        run: |
+          $root = '${{ runner.temp }}/demo-publish/wwwroot'
+          if (-not (Test-Path "$root/.nojekyll")) {
+            throw "No .nojekyll in $root. Pages would run Jekyll and drop _framework/."
+          }
+          Write-Host '.nojekyll is in the publish root.'
+
+      # No base-href rewrite step, and that is a divergence from the documented recipe worth being
+      # explicit about. Microsoft's uses SteveSandersonMS/ghaction-rewrite-base-href because a Blazor
+      # app's index.html is generated and its framework resolves assets against <base href>. This
+      # page is ours: every URL in it is relative to the document (Vite's `base: './'`), and demo.ts
+      # resolves the worker against `document.baseURI`, so the same artefact boots at the repository
+      # subpath on Pages, at
+      # the root of a local server and at a preview path on a fork. Nothing third-party to pin, and
+      # no second place for the path to drift out of step with.
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/demo-publish/wwwroot
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    # Exactly what actions/deploy-pages asks for, on the one job that runs it: `pages: write` "to
+    # deploy to Pages" and `id-token: write` "to verify the deployment originates from an
+    # appropriate source" (github.com/actions/deploy-pages, read 2026-09-19, which grants them at
+    # job level for this reason). A job-level block replaces the default above rather than adding
+    # to it, and this job checks nothing out, so `contents` is not among them.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

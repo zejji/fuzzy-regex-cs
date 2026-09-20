@@ -13,19 +13,37 @@
     -->
     <NoWarn>RS0026</NoWarn>
     <IsPackable>true</IsPackable>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageId>FuzzyRegex</PackageId>
     <Description>A .NET port of mrab-regex: a full-featured regex engine with fuzzy (approximate) matching and per-error-type budgets.</Description>
+    <Authors>Gerard Howell</Authors>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/zejji/fuzzy-regex-cs</PackageProjectUrl>
     <PackageTags>regex;fuzzy;approximate-matching;levenshtein;unicode</PackageTags>
     <RepositoryUrl>https://github.com/zejji/fuzzy-regex-cs</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- Maps PDB paths to raw.githubusercontent.com so a consumer's debugger can step into source. Needs a public commit to resolve; see docs/plan/RELEASE.md. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!--
+      Shape validation (matching TFM assets, consistent dependencies) on every pack. No
+      PackageValidationBaselineVersion yet - there is no earlier published version to diff
+      against. Set it to "1.0.0" once the first post-1.0 release is being prepared, per S66's
+      docs/plan/RELEASE.md.
+    -->
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../../LICENSE" Pack="true" PackagePath="/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)../../NOTICE" Pack="true" PackagePath="/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
   </ItemGroup>
 
   <!--

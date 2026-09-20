@@ -30,10 +30,15 @@
 .PARAMETER DryRun
     Show what the driver would do - which slice, and the budget verdict - and start nothing.
 
+.PARAMETER NoHeadroom
+    Run the sessions straight against the API instead of through the Headroom proxy. Needed on a
+    machine that has no Headroom installed; costs the run the compression saving.
+
 .EXAMPLE
     tools/run-slices.ps1
     tools/run-slices.ps1 -MaxSlices 3
     tools/run-slices.ps1 -DryRun
+    tools/run-slices.ps1 -NoHeadroom   # a machine without Headroom, at full token cost
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +47,8 @@ param(
     # skip the earlier phase's files that main is still working through. 0 = any phase.
     [int]$Phase = 0,
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoHeadroom
 )
 
 Set-StrictMode -Version Latest
@@ -57,10 +63,23 @@ $sliceLogPath = Join-Path $repoRoot 'docs/plan/slice-log.jsonl'
 $budgetPath = Join-Path $repoRoot 'docs/plan/budget.json'
 $sessionLogRoot = Join-Path $env:USERPROFILE '.claude/projects'
 
+# Where the slice session sends its API traffic. Until 2026-09-18 this was inherited by accident:
+# the proxy address lives in the main checkout's untracked .claude/settings.local.json, so a
+# session only reached Headroom when the driver happened to be launched from a shell that already
+# had the variable, and a driver started in a worktree (which has no settings.local.json) ran at
+# full token cost with nothing to say so. Set it on the session explicitly instead, and probe the
+# proxy before launching - see the preflight below.
+$headroomBaseUrl = $env:ANTHROPIC_BASE_URL ? $env:ANTHROPIC_BASE_URL : 'http://127.0.0.1:8787'
+
 # The unattended session may edit the repo, build, test and commit - and nothing else. A tool
 # outside this list stalls the slice rather than doing something unreviewed on the machine.
 $allowedTools = @(
     'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite', 'Skill', 'Task', 'Agent',
+    # Every tool of the Playwright MCP server (the installed plugin): Phase 9 sessions verify the
+    # demo in a real browser. Owner grant 2026-09-18, after three S70 sittings were parked on the
+    # denial of browser_navigate. Rule form per code.claude.com/docs/en/permissions (read
+    # 2026-09-18): `mcp__<server>` matches every tool that server provides.
+    'mcp__plugin_playwright_playwright',
     # TWO tools, two sets of rules. This machine sets CLAUDE_CODE_USE_POWERSHELL_TOOL=1 in
     # ~/.claude/settings.json, which the child session inherits, so it reaches for the PowerShell
     # tool as readily as Bash - and PowerShell tool calls are matched against 'PowerShell(...)'
@@ -69,6 +88,8 @@ $allowedTools = @(
     # -Last 1` was denied; adding the PowerShell mirrors ran it.
     'Bash(dotnet *)', 'Bash(git *)', 'Bash(pwsh *)', 'Bash(python *)',
     'PowerShell(dotnet *)', 'PowerShell(git *)', 'PowerShell(pwsh *)', 'PowerShell(python *)',
+    'Bash(npm *)', 'Bash(npx *)', 'Bash(node *)',
+    'PowerShell(npm *)', 'PowerShell(npx *)', 'PowerShell(node *)',
 
     # Claude Code decomposes a compound command and requires EVERY part to match, so
     # `dotnet build ... | Select-Object -Last 60` is denied on the filter, not on dotnet. These
@@ -86,9 +107,16 @@ $allowedTools = @(
     # tasklist / Get-Process are read-only and let a session see an orphaned test host (S44).
     'WebFetch', 'WebSearch', 'Bash(curl *)', 'Bash(perl *)', 'Bash(wsl *)',
     'Bash(tasklist *)', 'PowerShell(Get-Process *)',
+
+    # A Headroom-compressed tool result can drop the decisive line; this expands it by hash.
+    'mcp__headroom__headroom_retrieve',
+
     # Compound commands are matched part by part, so `cd repo && dotnet run ...` was denied on the
     # cd (S45, 2026-09-14). These read or set nothing outside the shell. Owner-approved 2026-09-14.
-    'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)'
+    'Bash(cd *)', 'Bash(export *)', 'Bash(wc *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(echo *)',
+    # S55 sittings lost turns to these (2026-09-16/17): shell loops, unset, find, and reading a
+    # process's command line, all read-only.
+    'Bash(for *)', 'Bash(unset *)', 'Bash(find *)', 'PowerShell(Get-CimInstance *)'
 )
 
 function Get-PendingSlice {
@@ -145,6 +173,15 @@ function Invoke-SliceSession {
         # moved out of .scratch/ on 2026-09-15 because slice sessions clear that directory and
         # took the deadline file with it mid-sitting.
         $startInfo.Environment['FUZZY_SLICE_SESSION'] = '1'
+
+        # Route the session through Headroom, which compresses its context and so charges fewer
+        # tokens to the allowance. ENABLE_TOOL_SEARCH goes with it: Claude Code turns on-demand
+        # tool loading off by itself when ANTHROPIC_BASE_URL points at a custom endpoint (Headroom
+        # issue #746), and this turns it back on, which is what the main checkout's settings do.
+        if (-not $NoHeadroom) {
+            $startInfo.Environment['ANTHROPIC_BASE_URL'] = $headroomBaseUrl
+            $startInfo.Environment['ENABLE_TOOL_SEARCH'] = 'true'
+        }
         $deadline = [datetimeoffset]::Now.AddMinutes($TimeoutMinutes)
         New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.claude/driver') | Out-Null
         Set-Content -LiteralPath (Join-Path $repoRoot '.claude/driver/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
@@ -343,6 +380,22 @@ function Add-ParkNote {
 # Read inside the loop, not here: budget.json says editing it takes effect immediately, and that
 # is only true if the driver re-reads it every time round. $null seeds the first read, which is
 # the one Read-Budget refuses to paper over.
+# Preflight, not a per-slice check: a proxy that dies mid-run fails the session's calls loudly,
+# whereas a proxy that was never up would silently cost the whole run its compression saving.
+# -NoHeadroom is the way past it on a machine with no Headroom installed.
+if ($NoHeadroom) {
+    Write-Host 'Headroom is off (-NoHeadroom): sessions talk to the API directly, at full token cost.' -ForegroundColor Yellow
+}
+else {
+    $proxy = Test-HeadroomProxy -BaseUrl $headroomBaseUrl
+    if (-not $proxy.Healthy) {
+        throw "The Headroom proxy at $headroomBaseUrl is not ready ($($proxy.Detail)). Start it with " +
+        "'headroom proxy' (or 'headroom wrap claude'), or run the driver with -NoHeadroom to " +
+        'accept the full token cost.'
+    }
+    Write-Host "Sessions route through Headroom at $headroomBaseUrl ($($proxy.Detail))." -ForegroundColor DarkGray
+}
+
 $budget = $null
 $startingPhase = $null
 $completed = 0
@@ -361,6 +414,22 @@ while ($completed -lt $MaxSlices) {
     if ($phase -ne $startingPhase) {
         Write-Host "Stopping: $($slice.Name) belongs to phase $phase and this run started on phase $startingPhase. Phase boundaries are a human checkpoint." -ForegroundColor Cyan
         break
+    }
+
+    # Owner rule 2026-09-18: use most of each five-hour window, never exhaust it. A sitting started
+    # at 90% runs to the cap and then every session on the account stalls until the reset; waiting
+    # here instead costs only the wait. Read-Allowance takes the fresher of the statusline snapshot
+    # and tools/usage-poll.ps1's live poll; a stale or missing snapshot lets the sitting start.
+    while ($true) {
+        $gate = Test-AllowanceFloor -Allowance (Read-Allowance)
+        if ($gate.Allowed) {
+            if ($gate.Stale) { Write-Host "  allowance unknown ($($gate.Reason)); starting anyway" -ForegroundColor Yellow }
+            break
+        }
+        $until = $gate.WaitUntil.AddMinutes(2)
+        Write-Host "  ALLOWANCE GATE: $($gate.Reason); waiting until $($until.ToString('ddd HH:mm')) before the next sitting" -ForegroundColor Yellow
+        $seconds = [int][Math]::Min([Math]::Max(($until - [datetimeoffset]::Now).TotalSeconds, 60), 6 * 3600)
+        Start-Sleep -Seconds $seconds
     }
 
     $budget = Read-Budget -Path $budgetPath -LastGood $budget
@@ -454,6 +523,15 @@ while ($completed -lt $MaxSlices) {
         # No sleep. The budget gate at the top of the next iteration refuses to start while the
         # reset is in the future, so the driver stops there of its own accord and says why.
         continue
+    }
+
+    # A sitting that committed the slice into done/ and only then left the tree dirty has landed
+    # the slice: the kept commit is green and the pending file is gone. Without counting it here the
+    # loop's next pick is a DIFFERENT slice, which under -MaxSlices 1 is exactly what the caller
+    # forbade (S65 rolled into S66 and S55 into S56 on 2026-09-18, the second on the wrong model).
+    if (-not (Test-Path -LiteralPath $slice.FullName) -and $rescue.KeptHead) {
+        $completed++
+        Write-Host "  counted as landed for -MaxSlices: the slice file is in done/ on the kept commit" -ForegroundColor Yellow
     }
 
     if ($consecutiveFailures -ge 2) {

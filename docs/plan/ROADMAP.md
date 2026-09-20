@@ -355,11 +355,38 @@ prefilter honour the slice the verb moved (the way upstream's own slow path does
 test. The oracle rows for those shapes stay recorded against a prefilter-free upstream, or in the
 strict manifest, until upstream itself is fixed.
 
+**Techniques from other engines (2026-09-18).** The owner asked whether the Rust `fuzzy-regex-rs`
+library has anything to borrow. Two prefilter refinements were folded into S60 (a rarity gate on the
+skip character; a large-list fast path for `\L<name>`); its automaton design and fuzzy algebra are
+out of bounds because this port returns mrab-regex's answers exactly. Full table in
+`docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md`. The two bets the wider research sweep of
+2026-09-18 left for the owner are now planned as experiments rather than left on a list (spec
+amendment 28, owner decision 2026-09-19): **S62b** rewrites loops nothing can backtrack into as
+atomic behind PCRE2's guard list, and **S62c** is a one-sitting spike on selective memoisation of
+failed positions, both bounded by the oracle at three seeds and both allowed to end in "reverted,
+recorded".
+
+**S60 splits into S60 and S60b (2026-09-20, spec amendment 30).** S60 was authored over seventeen
+scope items and three sittings measured what that is: it closes on the required-string half - the
+forward `locate_required_string` arm, `string_search`/`simple_string_search`, the per-pattern
+needle, the `(*SKIP)` constraint implemented rather than asserted, 19 gap tests and three judged
+oracle rows - and its items 2, 3, 6, 8-14, 16 and 17 move to
+`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md` with **S60's item numbers
+kept**, so the `ponytail:` comments and `OPTIMISATION-NOTES.md` rows already in the tree still
+resolve. Item 2 alone is upstream's `search_start` (`_regex.c:8385`), the dispatcher its
+`do_search_start` flag (`:588`) turns on, over about thirty `search_start_*` functions; items 8-14,
+16 and 17 are nine researched optimisations, each wanting its own measurement and each allowed to
+end in "measured, not worth it, recorded". Phase 7 is nine slices where it was eight (six as
+drafted, plus S62b and S62c from amendment 28); the 5-10 session band is unchanged, because it is
+the same work counted differently.
+
 **Phase 7 is six slices, S58-S63 (drafted 2026-09-16 from the owner's notes of 2026-09-14, the
 research in `docs/plan/phase7-research/` and the ground rules in DECISIONS).** **S58** is
 measurement only and changes no engine code: this machine's noise floor from two runs of an
 unchanged build, pyperf installed and probed, the EventPipe and dotTrace/Rider MCP routes proven
-end to end, `.claude/skills/optimise/SKILL.md` written from the research checklist,
+end to end, the optimise checklist written from the research (in
+`docs/plan/phase7-research/optimise-skill-pending.md`, because S58's session was refused permission
+to write under `.claude/`; it becomes `.claude/skills/optimise/SKILL.md` when the owner moves it),
 `tools/compare-benchmarks.ps1` extended with an allocation ratio and the floor, the span-copy and
 lazy-walk costs measured and written up for the owner, and `docs/plan/SYNC-DIVERGENCE.md` created
 with a script that pairs a `sync-divergence:` marker to a ledger row. **S59** adds the bounded MRU
@@ -462,6 +489,12 @@ protect, so the compile-time default flips, the oracle states upstream's default
 row, the ported suite pins `Version0` through one helper, and the one loud edge (`[` inside a set)
 gets an error that names `Version0`. Before S51 so every later slice tests and measures the shipped
 default. Estimate 13-18 becomes 14-19.
+
+**S56b adds a compile budget (owner, 2026-09-18).** A probe of `((a{1000}){1000}){1000}` crashed the
+owner's machine at compile time; the cause is inherited repeat unrolling (investigation above). S56b
+puts a configurable node budget at the compiler's single node-creation point, throwing a parse
+exception before any matching; default about a million nodes, exact parity below it. Runs on main
+after S55. Estimate 15-20 becomes 16-21.
 
 **S52c adds metamorphic invariants (owner, 2026-09-15, spec amendment 25).** The oracle sees
 disagreement, not correctness: a bug the port inherited line for line agrees with upstream and
@@ -613,8 +646,9 @@ engine's diligence: a runaway is killed with `worker.terminate()`, and a warm sp
 spawned in advance so the respawn is not felt. `MatchTimeout` stays in the demo as the fast
 common-case exit and as defence in depth, never as the only safety net.
 
-**The shape.** The main thread is a Vue 3 UI, vendored as an ESM build so there is no build step and
-no CDN dependency. The worker hosts its own .NET WebAssembly runtime (a `wasmbrowser` project) and
+**The shape.** The main thread is a Vue 3 + TypeScript UI built with Vite, in strict mode, with a
+CSS framework allowed (design spec amendment 27, owner decision 2026-09-18; until then a vendored
+ESM build with no build step). No CDN dependency, ever: everything pinned and installed with `npm ci`. The worker hosts its own .NET WebAssembly runtime (a `wasmbrowser` project) and
 exposes exactly one `[JSExport]` method: pattern, flags and subject in as strings, a JSON result
 out. SolidJS was considered and rejected - the UI is three inputs, a result pane and an examples
 list, so fine-grained reactivity would optimise the part that was never the bottleneck, and the
@@ -685,7 +719,54 @@ are not merely unneeded here, they would break the interop; and GitHub Pages "do
 support using Brotli-compressed resources", so the bytes a visitor waits for are the uncompressed
 ones and the size baseline has to be recorded twice, on disk and on the wire.
 
+**Phase 9 moves ahead of 1.0 (owner decision, 2026-09-18; spec amendment 26).** The owner wants to
+experiment with the library through the demo before launching it publicly, so v1 (S71) ships before
+the release and the README carries the link at 1.0. Phases 8 and 9 start now, in parallel with the
+Phase 6 mutation queue and Phase 7, each in its own worktree with `-Phase`. Running the demo
+locally and deploying it to GitHub Pages are documented step by step in `demo/README.md`, written
+by S71.
+
+**Phase 9 reopens for one slice, S73 (owner decision, 2026-09-19; spec amendment 29).** S72 closed
+the phase on features. The owner's first look at the live page judged it as a product and found
+seven faults: the match results sit below the fold on a laptop ("not intuitive at all"); the copy
+is "horrible AI-speak"; the design is flat; the layout is a web page rather than an application;
+there is no way to take the current case away as C#; the GitHub link is only in the footer; and the
+match numbers look like links while appearing to do nothing. **S73** answers all seven in one
+slice: a fixed shell with its own scroll regions so the answer is above the fold at 1366x768 and
+1440x900, every user-facing string rewritten against a banned-phrase list that a test enforces, one
+visual identity with the fuzzy edit types given meaning in colour, a "C# for this case" panel that
+prints the API `DemoEngine` itself calls and copies to the clipboard, the GitHub link in the header,
+and two-way linking between a highlight and its match row. Layout and copy decisions are cited to
+NN/g, Material's window size classes, GOV.UK's style guide and Wikipedia's signs-of-AI-writing list,
+named in the slice. Nothing in the engine, the worker, the caps or the single-source help changes,
+and the accessibility rules from S71 and S72 are met again rather than traded away. The draft is
+`docs/plan/slices/S73-demo-as-a-product.md`; the owner reviews it before any sitting runs, and the
+phase closes again when it lands.
+
+**S74 follows S73 in the reopened phase (owner decision 2026-09-20; spec amendment 31):** the
+flags text field becomes a collapsible checkbox panel with a summary row, radio groups for the
+exclusive pairs and per-flag help generated from the enum comments. Spec:
+`docs/plan/slices/S74-flags-control.md`. Design agreed with the owner in conversation; no review
+round before the sitting.
+
+**Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
+owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
+Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus
+`IncludeSymbols`/snupkg; **S65** `COMPARISON.md` checked row by row against `DIVERGENCES.md`'s
+SHIPPED rows and the two convention tests (every public member documented, every SHIPPED row
+named); **S66** pack, validate and a dry-run release checklist, nothing published; **S67** the
+registries (Context7, DeepWiki) as owner-performed steps with prepared files; **S68** the
+`<remarks>` divergence notes on every affected public member, **after Phase 7** because it edits
+`src/`; **S69** (Opus) the upstream-report filing under the ledger's owner-approval rule and the 1.0
+release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
+
 ## Candidates parked for later
+- **Counted repeats without unrolling (post-1.0).** The compiler unrolls the minimum count of every
+  counted repeat (inherited from upstream, 2018.11.22, to keep the position-keyed repeat guard sound),
+  so memory is linear in the product of nested counts; S56b bounds it with a node budget. The
+  structural fix emits counted repeats and redesigns the guard: flat memory, but a hot-path
+  divergence from upstream whose backtracking effects the oracle cannot see. Take it up when Phase 7
+  has benchmarks to measure it against. Investigation: `2026-09-18-repeat-unrolling-investigation.md`.
 
 - **Mutation testing (Stryker.NET), phase 6, scoped and on demand.** It answers "do our tests
   actually pin this behaviour?", which is worth asking of a port. But it is the wrong tool for

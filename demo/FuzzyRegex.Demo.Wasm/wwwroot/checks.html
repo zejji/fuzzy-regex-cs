@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FuzzyRegex demo checks (S72)</title>
+</head>
+
+<body>
+  <h1>FuzzyRegex demo checks</h1>
+  <p>
+    What only a real browser can settle about the page. The pure parts - the fragment, the display
+    cap, the worker pool's promotion - are checked by Vitest in
+    <code>demo/web/tests/</code>; <code>harness.html</code> checks the engine in a worker (S70); this
+    page checks the PAGE, by loading the real <code>index.html</code> in a frame and reading what it
+    believes. Every verdict is also on <code>window.__checks</code> for a driver to read.
+  </p>
+  <ol id="checks"></ol>
+  <p id="verdict">running...</p>
+  <p id="measurements"></p>
+  <iframe id="page" title="the demo page under test" style="width: 100%; height: 30rem; border: 1px solid grey"></iframe>
+
+  <script type="module">
+    // THE UPSTREAM ANSWERS ARE NOT HERE, AND MUST NOT BE COPIED HERE.
+    //
+    // Every span the tour's examples produce is pinned in one place,
+    // tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs, each recorded there with the
+    // `regex 2026.9.10` call it came from (port-slice rule, owner 2026-09-15: expected answers come
+    // from a real upstream run and never from this port's own output). That file is the one the
+    // ratchet runs; a second hand-maintained copy of the same numbers on this page would be a
+    // second thing to update and the two would drift apart silently.
+    //
+    // So what this page asks is what only a browser can answer, and nothing else: that the SIDEBAR
+    // reaches the engine - every example the page offers is answered, with matches, rather than
+    // refused or dropped - and that the one sample built to run out of time is refused. Whether
+    // those matches are the right ones is the C# test's question, not this page's.
+    const EXPECTED_EXAMPLES = 18;
+
+    // The one sample with no upstream answer: it is there to run out of time, so what it must
+    // produce is a refusal rather than spans. DemoExamplesTests pins the same thing engine-side.
+    const TIMES_OUT = 'A pattern that runs out of time';
+
+    const results = [];
+    const measurements = {};
+
+    const check = (name, ok, detail) => {
+      results.push({ name, ok, detail });
+      const li = document.createElement('li');
+      li.textContent = `${ok ? 'PASS' : 'FAIL'}  ${name}  -  ${detail}`;
+      document.getElementById('checks').appendChild(li);
+    };
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    /** Waits for a condition, and gives up rather than hanging: a stuck page must produce a verdict. */
+    async function until(what, condition, timeoutMs = 30000) {
+      const deadline = performance.now() + timeoutMs;
+      while (performance.now() < deadline) {
+        if (condition()) return true;
+        await sleep(25);
+      }
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    }
+
+    /** Loads the real page at a fragment and hands back its live component state. */
+    async function openPage(fragment = '') {
+      const frame = document.getElementById('page');
+
+      // about:blank first, and this is load-bearing rather than tidiness. Assigning a src that
+      // differs from the current one only in its FRAGMENT is a same-document navigation: the
+      // browser scrolls, fires hashchange and does NOT reload, so the `load` event never comes and
+      // the await below hangs for ever. Found the first time this page was run in a real browser
+      // (2026-09-18): check 1 passed, check 2 sat at "running..." indefinitely. Clearing the frame
+      // makes every openPage a genuine document load whatever the previous URL was.
+      const blanked = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      frame.src = 'about:blank';
+      await blanked;
+
+      const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      // A cache-busting query is deliberately NOT used: the page must work at the URL a visitor
+      // gets. The fragment is enough to make each load distinct.
+      frame.src = './index.html' + fragment;
+      await loaded;
+
+      const demo = frame.contentWindow.__demo;
+      if (demo === undefined) throw new Error('the page did not mount: window.__demo is undefined');
+      await until('the engine to boot', () => demo.engine !== 'starting');
+      return demo;
+    }
+
+    const spans = (demo) => demo.matches.map((m) => [m.index, m.length]);
+
+    /**
+     * The page settles asynchronously: a Vue flush, then a debounce, then a worker round trip.
+     *
+     * Two things here are load-bearing, and both were got wrong first time round. The `sleep(0)` is
+     * because setting an input only schedules the watcher, and `until` tests its condition before it
+     * waits at all - so without it this returns having seen the state BEFORE the keystroke. And the
+     * condition is `busy`, not `running`: `running` is false for the whole 250 ms debounce window,
+     * during which the page still holds the previous case's answer. Either mistake makes every check
+     * after the first assert about the wrong inputs, which is worse than no check at all.
+     */
+    const settled = async (demo) => {
+      await sleep(0);
+      return until('the page to answer', () => !demo.busy && (demo.answer !== null || demo.failure !== ''), 30000);
+    };
+
+    // 1. Every worked example, asked BY THE PAGE and answered by the engine in the worker. A broken
+    //    promise on the front page of the project is what this catches: a sidebar entry that
+    //    reaches the engine mangled - a mode dropped, a named list lost, a flag misspelled - comes
+    //    back as an error or as no matches at all, and this is the only leg that drives the page's
+    //    own load() over the real runtime. What the answer should BE is DemoExamplesTests.cs's
+    //    question; see the note at the top of this file.
+    async function everyExampleIsAnsweredByTheEngine() {
+      const demo = await openPage();
+      await until('the examples to load', () => demo.examples.length > 0);
+
+      const wrong = [];
+      for (const example of demo.examples) {
+        demo.load(example);
+        await sleep(0);
+        await settled(demo);
+
+        if (example.title === TIMES_OUT) {
+          if (!demo.failure.includes('timed out')) {
+            wrong.push(`${example.title}: expected the engine to give up, page said ${JSON.stringify(demo.failure)}`);
+          }
+          continue;
+        }
+
+        if (demo.failure !== '') {
+          wrong.push(`${example.title}: the page reported ${JSON.stringify(demo.failure)}`);
+        } else if (demo.matches.length === 0) {
+          // Every example in the tour is written to find something. An empty answer means the
+          // inputs that reached the engine were not the ones the sidebar holds.
+          wrong.push(`${example.title}: no matches, so the example demonstrates nothing`);
+        }
+      }
+
+      check(
+        'every worked example is answered by the engine, and the slow one is refused',
+        demo.examples.length === EXPECTED_EXAMPLES && wrong.length === 0,
+        wrong.length === 0
+          ? `all ${demo.examples.length} examples answered (spans are pinned in DemoExamplesTests.cs)`
+          : wrong.join('; ')
+      );
+    }
+
+    // 2. The fragment round trip, which is the feature's whole point: a case pasted into a bug report
+    //    opens as the same three inputs.
+    async function aSharedLinkOpensTheSameCase() {
+      const demo = await openPage('#p=%28%3F%3Afoobar%29%7Bi%3C%3D1%2Cd%3C%3D1%2Cs%3C%3D1%7D&f=&s=xfoobat');
+      await settled(demo);
+
+      check(
+        'a pasted link opens the case it encoded',
+        demo.pattern === '(?:foobar){i<=1,d<=1,s<=1}' && demo.subject === 'xfoobat'
+        && JSON.stringify(spans(demo)) === '[[0,6]]',
+        `pattern=${JSON.stringify(demo.pattern)} subject=${JSON.stringify(demo.subject)} spans=${JSON.stringify(spans(demo))}`
+      );
+
+      // And the address bar keeps up with typing, so the link is always a link to what is on screen.
+      demo.subject = 'xfoobat and xfoobar';
+      await settled(demo);
+      const hash = document.getElementById('page').contentWindow.location.hash;
+      // Read the fragment the way it is written - URLSearchParams - rather than with
+      // decodeURIComponent. encode() builds it with URLSearchParams, which writes a space as `+`,
+      // and decodeURIComponent leaves `+` alone; comparing the two said the address bar had not
+      // followed the inputs when it had (first real browser run, 2026-09-18). Parsing it back is
+      // also the stronger assertion: it is what the page itself does on load.
+      const carried = new URLSearchParams(hash.replace(/^#/, '')).get('s');
+      check(
+        'the address bar follows the inputs',
+        carried === 'xfoobat and xfoobar',
+        `s=${JSON.stringify(carried)} from ${hash.slice(0, 100)}`
+      );
+    }
+
+    // 3. The page's own caps. The engine has its own and they are tested in C#; these are the ones
+    //    that protect the MAIN THREAD, which no worker can do.
+    async function thePagesCapsHold() {
+      const demo = await openPage();
+      // The page asks its own first question as it mounts. Waiting for that one to land before
+      // starting is what keeps the assertions below about the inputs THIS check sets.
+      await settled(demo);
+
+      // Over the subject cap: refused with a message, and nothing sent. Truncating instead would
+      // give wrong answers that look right.
+      demo.pattern = 'a';
+      demo.subject = 'a'.repeat(demo.maxSubjectLength + 1);
+      await settled(demo);
+      check(
+        // Match on the CAP, not on a phrase. This read `includes("limit of")` until S73 chunk 1
+        // rewrote the message to "the demo's limit is 100,000" and turned the check red without
+        // anything being wrong with the page (browser run, 2026-09-19). The number is what the
+        // visitor needs and it cannot be reworded away.
+        'a subject over the cap is refused, not truncated',
+        demo.answer === null && demo.failure.includes(demo.maxSubjectLength.toLocaleString()),
+        demo.failure.slice(0, 160)
+      );
+
+      // Over the DISPLAY cap: the true total is reported beside what is drawn. Showing the cap at
+      // work needs more matches than the cap, so this subject is longer than the hundred characters
+      // the memory rule sets for engine work (owner, 2026-09-18). The rule is there to stop a
+      // pathological COMPILE or an exponential walk from taking the machine down; this is a
+      // single-character class walked left to right over 450 characters, which is linear and costs
+      // microseconds. Nothing else on this page goes near the limit.
+      demo.pattern = '\\w';
+      demo.subject = 'ab '.repeat(150);
+      await settled(demo);
+      const marks = document.getElementById('page').contentDocument.querySelectorAll('mark').length;
+      check(
+        'the display cap draws its limit and reports the true total',
+        demo.view.shown === demo.maxDisplayedMatches && demo.view.total > demo.view.shown && marks === demo.view.shown,
+        `${demo.view.shown} drawn of ${demo.view.total} found, ${marks} <mark> elements in the page`
+      );
+    }
+
+    // 4. A group that did not participate is shown as such and not as an empty string - the two are
+    //    different answers, and the demo exists to show real ones.
+    async function aGroupThatDidNotParticipateSaysSo() {
+      // Upstream, tools/probes/demo-json-contract-expectations.py run 2026-09-18 against
+      // regex 2026.9.10: compile(r"(a)|(b)").search("b") matches at 0 length 1, group 1 no match,
+      // group 2 index 0 length 1.
+      const demo = await openPage();
+      await settled(demo);  // the mount question first, as in check 3
+      demo.pattern = '(a)|(b)';
+      demo.flags = '';
+      demo.subject = 'b';
+      await settled(demo);
+
+      const groups = demo.matches[0].groups;
+      const text = document.getElementById('page').contentDocument.body.textContent;
+      check(
+        'a group that did not take part is shown as such',
+        groups[1].success === false && groups[2].success === true && text.includes('did not participate'),
+        `group 1 success=${groups[1].success}, group 2 index=${groups[2].index}, the page says "did not participate": ${text.includes('did not participate')}`
+      );
+    }
+
+    // 5. The control that matters most: a pattern that runs away is killed, the page keeps running
+    //    throughout, and the next question is answered by the spare rather than by a cold boot.
+    //    "(a|a)*\b\B" against 30 a's is the pathological pattern the test suite already uses -
+    //    exponential backtracking with no way to succeed. The tail was a literal "b" until S60:
+    //    the required-string prefilter now refuses a subject with no "b" in it before matching
+    //    starts, so that pattern is not a runaway any more.
+    async function stopKillsARunawayAndTheSpareTakesOver() {
+      const demo = await openPage();
+      demo.pattern = 'a';
+      demo.subject = 'a';
+      await settled(demo);
+
+      // What "the page survives a runaway" actually means is that the runaway is on the WORKER's
+      // thread while the page's own thread keeps working. Two counters, because the obvious one
+      // does not work on THIS page:
+      //
+      //   ticks  - a 16 ms interval on the checks page's thread and a second one inside the page
+      //     under test. A blocked main thread cannot service either, so a healthy count is direct
+      //     evidence that the runaway did not take the page with it. This is what is asserted.
+      //   frames - requestAnimationFrame. Reported, never asserted on, and the reason is measured
+      //     rather than assumed (2026-09-18, Chrome 153 under the Playwright MCP server, same
+      //     server, two 500 ms windows on IDLE pages): a page with nothing on it scored 31 and 31
+      //     frames, while THIS page - which boots two .NET WebAssembly workers - scored 1 and then
+      //     0, with its timers ticking 28 and 30 all the while. So the browser does drive rAF, but
+      //     not for this page, and a frame count here measures that interaction and not whether
+      //     the demo stayed responsive.
+      demo.pattern = '(a|a)*\\b\\B';
+      demo.subject = 'a'.repeat(30);
+      await until('the page to start matching', () => demo.running);
+
+      // The counters start HERE, after the wait above, so the window they measure is the 500 ms
+      // sleep and nothing else. Started before it, they would also span the 250 ms debounce and the
+      // poll, and the count would be reported as "in the 500 ms the runaway was running" when it
+      // covered about 750 ms of which a third had no runaway in it.
+      const pageWindow = document.getElementById('page').contentWindow;
+      let frames = 0;
+      let ticks = 0;
+      let pageTicks = 0;
+      let alive = true;
+      let ticking = null;
+      let pageTicking = null;
+      let pills = [];
+
+      try {
+        const frame = () => { if (alive) { frames++; requestAnimationFrame(frame); } };
+        requestAnimationFrame(frame);
+        ticking = setInterval(() => { ticks++; }, 16);
+        pageTicking = pageWindow.setInterval(() => { pageTicks++; }, 16);
+
+        await sleep(500);
+
+        // Read while the runaway is still going, not afterwards: the claim is that the page renders
+        // its state DURING the match, and once it has been stopped anything could be on screen.
+        // The STATUS PILLS specifically, not the page's whole text: the intro paragraph contains
+        // the words "...compiled to WebAssembly and matching in your browser", so a body-text search
+        // for "matching" passes on a page that is doing nothing at all.
+        pills = [...pageWindow.document.querySelectorAll('.status .pill')].map((p) => p.textContent.trim());
+      } finally {
+        // In a finally because `sleep` is not the only thing above that can fail: anything thrown
+        // between starting these and clearing them would leave both intervals running for the life
+        // of the checks page and of the frame it is driving.
+        alive = false;
+        clearInterval(ticking);
+        pageWindow.clearInterval(pageTicking);
+      }
+
+      check(
+        'the page keeps running while a runaway pattern runs',
+        ticks > 10 && pageTicks > 10 && pills.some((text) => text.startsWith('matching')),
+        `${ticks} timer ticks on the checks page and ${pageTicks} inside the demo during the 500 ms `
+        + `window, status pills ${JSON.stringify(pills)} `
+        + `(${frames} animation frames - reported only; this page does not get rAF in this browser)`
+      );
+
+      const startedAt = performance.now();
+      demo.stop();
+      // The spare is already booted, so the next answer costs a round trip and not a runtime boot.
+      demo.pattern = '\\d+';
+      demo.subject = 'a1 b22 c333';
+      await settled(demo);
+      // Named for what it actually contains: this is the PAGE's recovery, Stop to answer on screen,
+      // and it includes the 250 ms debounce the new inputs have to wait out. The spare's own cost is
+      // check 6's pair of numbers, measured on raw pools where there is no debounce to include.
+      measurements.stopToNextAnswerOnScreenMs = performance.now() - startedAt;
+
+      check(
+        'stopping a runaway leaves a working page',
+        JSON.stringify(spans(demo)) === '[[1,1],[4,2],[8,3]]',
+        `${JSON.stringify(spans(demo))}, upstream says [[1,1],[4,2],[8,3]]`
+      );
+    }
+
+    // 6. What the spare is worth, measured rather than asserted: there is no published figure for a
+    //    .NET WebAssembly respawn and none had been measured here (ROADMAP). Taken with the spare
+    //    DISABLED, so the number means "what a respawn costs", and again with it enabled, so the
+    //    difference means "what the spare saves".
+    async function measureRespawn() {
+      // Taken from INSIDE the page, through the handle it publishes, rather than by importing its
+      // modules into this one. Since the Vite build there is no stable module URL to import: the
+      // bundle is one hashed file per build. `__demoInternals` is the page's answer to that, and
+      // taking the measurement in the page's own window is the truer reading anyway - that is the
+      // window the demo's workers are really spawned from.
+      await openPage();
+      const { createPool, spawnEngineWorker } = document.getElementById('page').contentWindow.__demoInternals;
+
+      const cold = createPool({ spawn: spawnEngineWorker, spare: false });
+      await cold.ready;
+      await cold.ask({ pattern: 'a', flags: '', subject: 'a' });
+      let startedAt = performance.now();
+      cold.stop();
+      await cold.ask({ pattern: 'a', flags: '', subject: 'a' });
+      measurements.respawnWithoutSpareMs = performance.now() - startedAt;
+      cold.dispose();
+
+      const warm = createPool({ spawn: spawnEngineWorker });
+      await warm.ready;
+      await warm.ask({ pattern: 'a', flags: '', subject: 'a' });
+      await sleep(3000);  // let the spare finish booting, which is the state the page is normally in
+      startedAt = performance.now();
+      warm.stop();
+      await warm.ask({ pattern: 'a', flags: '', subject: 'a' });
+      measurements.respawnWithSpareMs = performance.now() - startedAt;
+      warm.dispose();
+
+      check(
+        'a respawn is faster with the warm spare than without it',
+        measurements.respawnWithSpareMs < measurements.respawnWithoutSpareMs,
+        `${measurements.respawnWithSpareMs.toFixed(1)} ms with the spare, ${measurements.respawnWithoutSpareMs.toFixed(1)} ms without`
+      );
+    }
+
+    try {
+      await everyExampleIsAnsweredByTheEngine();
+      await aSharedLinkOpensTheSameCase();
+      await thePagesCapsHold();
+      await aGroupThatDidNotParticipateSaysSo();
+      await stopKillsARunawayAndTheSpareTakesOver();
+      await measureRespawn();
+    } catch (error) {
+      check('the checks ran to completion', false, String(error));
+    }
+
+    const ok = results.length > 0 && results.every((r) => r.ok);
+    window.__checks = { ok, checks: results, measurements };
+    document.getElementById('verdict').textContent = ok ? 'CHECKS GREEN' : 'CHECKS RED';
+    document.getElementById('measurements').textContent = JSON.stringify(measurements);
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FuzzyRegex - try it in your browser</title>
+  <meta name="description"
+    content="FuzzyRegex, a C# port of Python's regex module, running in your browser on WebAssembly. Fuzzy matching with a budget per kind of error.">
+
+  <!--
+    No <base href>, deliberately, and this is a divergence from both the ROADMAP's note and
+    Microsoft's Blazor-on-Pages recipe, which rewrite it to the repository subpath. A Blazor app
+    needs that because its index.html is generated and its framework resolves assets from the base.
+    This page is ours and every URL in it is relative: the bundle to the document (Vite's
+    `base: './'`), _framework to worker.js, and the worker itself to `document.baseURI` in demo.ts.
+    So it boots at the repository subpath on GitHub Pages, at the root of a local server, and at a
+    preview path on a fork, with nothing to keep in step. A hard-coded base href would work at
+    exactly one of those, which is the "works on the developer's machine, 404s on Pages" failure the
+    slice file's Hunt names. Sitting 2 settled it by measurement: checks.html is green at both.
+  -->
+</head>
+
+<body>
+  <noscript>
+    <p style="margin: 1.5rem; font-family: system-ui, sans-serif">
+      This page runs a regular expression engine in your browser, so it needs JavaScript and
+      WebAssembly. The library itself needs neither - see the repository.
+    </p>
+  </noscript>
+
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
