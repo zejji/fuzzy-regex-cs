@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Compiles every ```csharp block in README.md and docs/COMPARISON.md against src/FuzzyRegex and
+    Compiles every ```csharp block in README.md, docs/COMPARISON.md and docs/GUIDE.md against src/FuzzyRegex and
     runs it, checking that what it prints is exactly the `// ` comment lines that follow the code.
 
 .DESCRIPTION
@@ -15,7 +15,7 @@
     pwsh -File tools/check-doc-examples.ps1
     pwsh -File tools/check-doc-examples.ps1 -Files README.md
 #>
-param([string[]]$Files = @('README.md', 'docs/COMPARISON.md'))
+param([string[]]$Files = @('README.md', 'docs/COMPARISON.md', 'docs/GUIDE.md'))
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $dir = Join-Path $repo '.scratch/doc-examples'

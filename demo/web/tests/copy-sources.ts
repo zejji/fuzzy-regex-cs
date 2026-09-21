@@ -393,7 +393,7 @@ export function docComments(source: string, where: string): Copy[] {
 }
 
 /**
- * The documents a reader of the library reads: the front page and the six reference pages.
+ * The documents a reader of the library reads: the front page and the seven reference pages.
  *
  * Not `docs/plan/`. That is the port's own working notes - slice specs, decisions, the roadmap -
  * written for whoever is running the port, and holding it to copy written for readers of the
@@ -405,6 +405,7 @@ export function docComments(source: string, where: string): Copy[] {
 export const DOC_SOURCES: Record<string, Copy[]> = Object.fromEntries(
     [
         'README.md',
+        'docs/GUIDE.md',
         'docs/COMPARISON.md',
         'docs/DIVERGENCES.md',
         'docs/ORACLE-INVARIANTS.md',

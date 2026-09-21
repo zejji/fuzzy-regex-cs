@@ -1,32 +1,31 @@
 # State
 
-**S57c is DONE (2026-09-21).** Ledger entries 19 and 20 (upstream issues 563/564) fixed:
-`Optimiser.FindAnchorGuards` / `PatternObject.AnchorGuards` / `Matcher.AnchorIsPinned`, compile-time
-route, with the one-step-on narrowing S50 had proved necessary. Both inherited pins in
-`InheritedIssueTests.cs` inverted. Ratchet GREEN (6509/6509, baseline 6401), default wave and
-`-Count 6000` wave GREEN at three seeds, blind review clean, independent verifier confirmed all
-nine judged-row claims. Record: `docs/plan/slices/done/S57c-*.md`,
-`docs/plan/slices/notes/S57c-sittings.md`. S50's own test-row figure (51, 52, 54, 56) did not
-survive re-measurement - actually 51 and 56, corrected in `Matcher.cs` and `ExpectedDivergences.cs`.
+**S80 is IN PROGRESS, checkpoint committed (allowance hook, 2026-09-21).** `docs/GUIDE.md`
+written (295 lines, no `FLAGS.md` split needed), linked from README's "Where the docs are",
+`tools/check-doc-examples.ps1` and `tests/FuzzyRegex.Tests/Docs/GuideSamples.cs` pin its 7
+samples - both green. `demo/web/tests/copy-sources.ts`'s `DOC_SOURCES` now includes
+`docs/GUIDE.md`; three copy-rule violations (`says-what-it-is-not`) found and fixed in the
+guide's prose; `demo/web` test suite green (81/81).
 
-**Next slice is S57d** (`docs/plan/slices/S57d-hitend-and-the-partial-that-was-denied.md`), entry 21.
+**Remaining for S80, in order:**
+1. Add a `['docs/GUIDE.md', 45, "An error budget lives inside the pattern, next to the part of
+   it that may be wrong"]` guard row to `demo/web/tests/copy.test.ts`'s `it.each` block (measured
+   paragraph count 2026-09-21: 57; floor set below that, not at it).
+2. Write the new completeness convention test (sibling to `PublicApiDocumentationTests.cs`):
+   every member name in `src/FuzzyRegex/PublicAPI.Unshipped.txt` (NOT `.Shipped.txt`, which is
+   pre-1.0 and has zero members - using it would be vacuous) and every key of
+   `RegexFlags.InlineFlags` must be named in `README.md` + `docs/GUIDE.md`. Prove it fails on a
+   deleted reference, then revert.
+3. Run `tools/check-ratchet.ps1`, blind review per `docs/VERIFICATION.md`, closing notes (record
+   the Shipped→Unshipped substitution and the 295-line/no-split measurement), move the slice file
+   to `docs/plan/slices/done/`, commit.
 
-**S57c's new `fuzzy-anchored` generator found an unjudged divergence** at seed 1234567 -
-`(?b)(?r)\m(?:.fo){e<=2}` over `'x fx'`, same span and errors, different insertion position. Not
-S57c's rule (under `(?r)` the leading `\m` is not at the head of the reversed graph, so its anchor
-guards are empty). That is **S57e**, spec amendment 36, no slice file yet. `fuzzy-anchored` stays
-off `run-oracle.ps1`'s default generator list until S57e judges it.
+**Next slice after S80 is S57d** (`docs/plan/slices/S57d-hitend-and-the-partial-that-was-denied.md`),
+entry 21. Do not take it from this worktree while another session works it on `main`.
 
-**Phase 6's four gate items are green, Phase 6 is NOT closed.** Remaining: **S57d** is entry 21,
-**S61 item 7** is entry 18; entry 17 is the owner's decision, not a slice.
+**S57c's `fuzzy-anchored` generator found an unjudged divergence** at seed 1234567 -
+`(?b)(?r)\m(?:.fo){e<=2}` over `'x fx'` - that is S57e, spec amendment 36, no slice file yet.
+`fuzzy-anchored` stays off `run-oracle.ps1`'s default generator list until S57e judges it.
 
-**Maintenance:** stale citations in `gate-divergence-doors.py:137` (now `record-oracle.py:1338`)
-and four `_regex.c:20535-20537` comments (now `:20555-20558`); `check-ratchet.ps1:94` writes the
-upstream-commit line wrongly with no submodule; MAIN has a stray `.github/workflows/pages.yml`;
-`run-controls.py` needs a `suite` mode; `_leak_free_fuzzy` starves a reversed row whose lookahead
-reads past the match end (S57b sitting 4).
-
-**Owner (S73):** `docs/demo/` reference layouts; publish (push `phase9-demo`, Pages > Source =
-GitHub Actions). **Environment:** stale vite dev server (PID 27600, port 5179) holds
-`lightningcss.win32-x64-msvc.node`; repair `demo/web` EPERM with `npm --prefix demo/web install
---no-audit --no-fund`.
+**Phase 6 gate items are green, Phase 6 is NOT closed.** Remaining: S57d (entry 21), S61 item 7
+(entry 18); entry 17 is the owner's decision, not a slice.
