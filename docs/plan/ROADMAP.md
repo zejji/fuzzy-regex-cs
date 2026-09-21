@@ -776,8 +776,10 @@ of `docs/COMPARISON.md` that two of them needed: how set operations, `\p{...}` p
 `IgnoreCase` differ from `System.Text.RegularExpressions`. Landed 2026-09-21;
 `docs/plan/slices/done/S76-help-for-the-last-four-samples.md` has the closing notes. **S77** is the
 owner's two follow-ups: the help panels' C# examples are printed in one colour, and a heading note's
-link opens its help entry with nothing on screen to say it has. Spec:
-`docs/plan/slices/S77-help-code-colour-and-the-jump-that-lands.md`.
+link opens its help entry with nothing on screen to say it has. Landed 2026-09-21, reusing the
+tokenizer the snippet box already had (0.25 kB gzipped, all in) and landing the reader on the
+section with focus, a scroll and one fade:
+`docs/plan/slices/done/S77-help-code-colour-and-the-jump-that-lands.md`.
 
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,

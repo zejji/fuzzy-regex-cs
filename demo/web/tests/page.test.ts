@@ -952,6 +952,51 @@ test('the help panel is the documentation, rendered as text and opened from the 
     expect(page.querySelector('details.help-panel')).toBeNull();
 });
 
+/**
+ * The help panels' samples are coloured by the same tokenizer as the "C# for this case" box.
+ *
+ * One C# sample printed in one colour is harder to read than it needs to be (owner, 2026-09-21),
+ * and the page already had the answer: `snippet.ts` splits C# into five classes for the snippet
+ * box, and `help.json` has carried `language: 'csharp'` on every fenced block since S72 without
+ * anything reading it. Spans of text, never `v-html`, so a sample holding markup is still text.
+ */
+test('a C# sample in a help panel is coloured, and still reads back as the code it was', async () => {
+    const source = 'using Fuzzy.Text.RegularExpressions;\n\n// a note\nvar m = new FuzzyRegex(@"a<b>", 2);';
+    const { page, demo } = await mountPage();
+    demo.help = {
+        source: 'docs/COMPARISON.md',
+        note: 'generated',
+        entries: {
+            fuzzy: [
+                {
+                    heading: [{ code: false, text: 'Colour' }],
+                    blocks: [{ kind: 'code', language: 'csharp', text: source }],
+                },
+            ],
+        },
+    };
+    demo.helpKey = 'fuzzy';
+    await nextTick();
+    found(page.querySelector<HTMLElement>('#tab-help'), 'the help tab').click();
+    await nextTick();
+
+    const fenced = found(page.querySelector<HTMLElement>('pre.help-code'), 'a fenced code block');
+
+    // Every character back, in order: colour that drops or reorders text would be a sample that
+    // does not compile when it is copied.
+    expect(fenced.textContent).toBe(source);
+    expect(fenced.innerHTML).toContain('@"a&lt;b&gt;"');
+
+    const classes = [...fenced.querySelectorAll('span')].map((span) => span.className);
+    expect(classes).toContain('tok tok-keyword');
+    expect(classes).toContain('tok tok-comment');
+    expect(classes).toContain('tok tok-string');
+    expect(classes).toContain('tok tok-number');
+
+    const keywords = [...fenced.querySelectorAll('.tok-keyword')].map((span) => span.textContent);
+    expect(keywords).toEqual(['using', 'var', 'new']);
+});
+
 test('hovering a match links the highlight to its row, and the row back to the highlight', async () => {
     const { page, demo } = await mountPage();
     demo.answeredSubject = 'abc abc';
@@ -1657,7 +1702,136 @@ test('every input heading says what it is for, and the note links to the documen
     expect(demo.helpKey).toBe('indices');
     expect(found(page.querySelector('#tab-help'), 'the help tab').getAttribute('aria-selected')).toBe('true');
     expect(subject.text.hidden).toBe(true);
+    // No panel for this key in the stubbed help, so the tab itself is where the focus can land.
     expect(document.activeElement).toBe(page.querySelector('#tab-help'));
+});
+
+/**
+ * Pressing a note's link lands the reader ON the section, rather than a tab above it.
+ *
+ * Until S77 the press set the key, selected the tab and focused the tab. On a wide screen the panel
+ * is below the fold in the left column, so what the reader saw was nothing at all (owner,
+ * 2026-09-21). The answer is the pattern the skip link already uses here: move focus to the thing
+ * that was asked for, bring it into view, and say so once. Red was considered and rejected - it is
+ * the colour of an error, and a repeated flash runs into WCAG 2.2.2 and 2.3.1.
+ */
+test('a note that opens a section puts the reader on that section, and says where they landed', async () => {
+    const { page, demo } = await mountPage();
+    demo.help = {
+        source: 'docs/COMPARISON.md',
+        note: 'generated',
+        entries: {
+            indices: [
+                {
+                    heading: [{ code: false, text: 'Indices are UTF-16 code units' }],
+                    blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Counted in code units.' }] }],
+                },
+            ],
+        },
+    };
+    await nextTick();
+
+    const scrolled: ScrollIntoViewOptions[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions) {
+        scrolled.push(options as ScrollIntoViewOptions);
+    };
+
+    const subject = headingHelp(page, 'subject');
+    subject.button.click();
+    await settle();
+    subject.link.click();
+    await settle();
+
+    const panel = found(page.querySelector<HTMLDetailsElement>('details.help-panel'), 'the help panel');
+    const summary = found(panel.querySelector('summary'), 'the panel summary');
+
+    // The section itself takes the focus, so a screen reader announces what was asked for and the
+    // focus ring shows where the reader is - a cue that does not depend on colour.
+    expect(document.activeElement).toBe(summary);
+    expect(panel.open).toBe(true);
+    expect(scrolled.at(-1)?.behavior).toBe('smooth');
+
+    // And one pass of a highlight, which the class carries and the stylesheet times.
+    expect(panel.classList.contains('help-panel-arrived')).toBe(true);
+
+});
+
+/**
+ * The same press on a narrow window, where the section is inside a shut disclosure.
+ *
+ * "Examples and help" is a div carrying `hidden` while that disclosure is shut, so the section the
+ * note names was not in the page to focus and the press left the reader on the `(?)` they had just
+ * used - measured on the published build at 390 px, 2026-09-21. The layout has to be stubbed
+ * narrow: jsdom has no `matchMedia`, so the page defaults to wide and the box is never hidden,
+ * which is what made a first version of this check pass with the fix taken out.
+ */
+test('the same press opens the disclosure the section is hidden inside', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+    const { page, demo } = await mountPage();
+    demo.help = {
+        source: 'docs/COMPARISON.md',
+        note: 'generated',
+        entries: {
+            indices: [
+                {
+                    heading: [{ code: false, text: 'Indices are UTF-16 code units' }],
+                    blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Counted in code units.' }] }],
+                },
+            ],
+        },
+    };
+    await nextTick();
+
+    const box = found(page.querySelector<HTMLElement>('#examples-and-help'), 'the samples box');
+    expect(box.hidden).toBe(true);
+
+    const subject = headingHelp(page, 'subject');
+    subject.button.click();
+    await settle();
+    subject.link.click();
+    await settle();
+
+    expect(box.hidden).toBe(false);
+    expect(document.activeElement).toBe(page.querySelector('details.help-panel summary'));
+});
+
+test('a reader who asked for less motion gets the jump without the animation', async () => {
+    const { page, demo } = await mountPage();
+    demo.help = {
+        source: 'docs/COMPARISON.md',
+        note: 'generated',
+        entries: {
+            indices: [
+                {
+                    heading: [{ code: false, text: 'Indices are UTF-16 code units' }],
+                    blocks: [{ kind: 'paragraph', runs: [{ code: false, text: 'Counted in code units.' }] }],
+                },
+            ],
+        },
+    };
+    await nextTick();
+
+    const scrolled: ScrollIntoViewOptions[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions) {
+        scrolled.push(options as ScrollIntoViewOptions);
+    };
+    // Stubbed rather than spied on: jsdom has no matchMedia at all, which is why the page asks for
+    // it optionally.
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduced-motion') }));
+
+    const subject = headingHelp(page, 'subject');
+    subject.button.click();
+    await settle();
+    subject.link.click();
+    await settle();
+
+    const panel = found(page.querySelector<HTMLElement>('details.help-panel'), 'the help panel');
+
+    // The reader still arrives - focus and the scroll are not decoration - but neither the scroll
+    // nor the highlight animates.
+    expect(document.activeElement).toBe(panel.querySelector('summary'));
+    expect(scrolled.at(-1)?.behavior).toBe('auto');
+    expect(panel.classList.contains('help-panel-arrived')).toBe(false);
 });
 
 test('one note is open at a time, whichever mechanism opened the other', async () => {

@@ -9,6 +9,9 @@
 // quoted in the closing notes, because a snippet nobody has compiled is a guess. These tests then
 // hold that shape in place.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { expect, test } from 'vitest';
 
 import { MATCH_TIMEOUT_SECONDS } from '../src/lib/caps';
@@ -312,4 +315,44 @@ test('a trailing backslash ends a verbatim string where the compiler ends it', (
 test('a raw string literal is one token, fence and all', () => {
     expect(kinds('"""\n// not a comment\n"""')).toEqual(['string:"""\n// not a comment\n"""']);
     expect(kinds('""""\nsay """this"""\n""""')).toEqual(['string:""""\nsay """this"""\n""""']);
+});
+
+// The help panels render the same tokenizer over samples lifted from docs/COMPARISON.md, which is
+// prose anybody may edit - so the list of words it knows has to keep up with what those samples
+// use. Read from the generated help.json rather than listed here: a listed copy is a second opinion
+// about the same fact, and this is the check that fails when a new sample brings a new keyword
+// (S77).
+test('every C# keyword in the shipped help samples is coloured as one', () => {
+    const path = join(import.meta.dirname, '../../FuzzyRegex.Demo.Wasm/wwwroot/help.json');
+    let source: string;
+    try {
+        source = readFileSync(path, 'utf8');
+    } catch {
+        // Generated into an untracked path by tools/build-demo-help.ps1, which the demo build runs
+        // before these tests. Said plainly, as demo.test.ts says it, rather than a raw ENOENT.
+        throw new Error('help.json is generated: run tools/build-demo-help.ps1 before the web tests');
+    }
+
+    const help = JSON.parse(source) as {
+        entries: Record<string, { blocks: { kind: string; language?: string; text: string }[] }[]>;
+    };
+
+    const samples = Object.values(help.entries)
+        .flat()
+        .flatMap((section) => section.blocks)
+        .filter((block) => block.kind === 'code');
+    expect(samples.length).toBeGreaterThan(0);
+
+    // The words a C# sample in that document could plausibly use. A keyword left out of the
+    // tokenizer's own list arrives here as uncoloured text, which is what this catches.
+    const csharp =
+        /\b(?:using|new|foreach|for|while|if|else|switch|case|default|try|catch|finally|throw|return|var|const|static|readonly|public|private|internal|sealed|class|record|struct|interface|enum|namespace|void|int|long|double|decimal|bool|char|string|object|true|false|null|out|ref|in|is|as|this|base|typeof|nameof|await|async)\b/;
+
+    const uncoloured = samples.flatMap((block) =>
+        tokenize(block.text)
+            .filter((token) => token.kind === 'other' && csharp.test(token.text))
+            .map((token) => `${csharp.exec(token.text)?.[0]} in: ${block.text.split('\n')[0]}`),
+    );
+
+    expect(uncoloured).toEqual([]);
 });

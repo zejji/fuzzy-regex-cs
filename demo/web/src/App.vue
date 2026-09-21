@@ -228,14 +228,79 @@ onUnmounted(() => {
  * somebody asking for that section by name, so an empty panel saying the help did not load is a
  * truer answer than a press that appears to do nothing.
  *
- * The focus follows to the tab itself, which is the one stop in the tab set, so a keyboard visitor
- * arrives at what they asked for rather than two tab presses away from it.
+ * The focus follows the reader to the SECTION they asked for, and the page brings it into view and
+ * highlights it once (S77). Until then the focus stopped at the tab, and on a wide screen the panel
+ * is below the fold in the left column - so a press that had done exactly what was asked looked
+ * like a press that had done nothing. Focus first because it is the part that is not decoration: a
+ * screen reader announces the section, and the focus ring says where the reader is without relying
+ * on colour. The highlight is one pass in the accent, never a red flash: red is the colour of an
+ * error, and a flash that repeats runs into WCAG 2.2.2 and 2.3.1.
+ *
+ * With no panel for that key - help that failed to load, or a key nothing documents - the focus
+ * stops at the tab as before, which is the truthful place to leave it.
  */
 function openHelpTab(note: HeadingNote): void {
     helpKey.value = note.helpKey;
     tab.value = 'help';
+    // On a narrow window the tabs live inside the "Examples and help" disclosure, and its box
+    // carries `hidden` while that is shut - so the section the note names was not in the page to
+    // focus, and the press left the reader on the `(?)` they had just used. Measured on the
+    // published build at 390 px, 2026-09-21; jsdom cannot see it, because `focus()` there works on
+    // a hidden element.
+    panelOpen.value = true;
     closeHelp();
-    void nextTick(() => document.getElementById('tab-help')?.focus());
+    void nextTick(() => arriveAtHelp());
+}
+
+/** How long the arrival highlight runs. The stylesheet times the animation; this clears the class. */
+const ARRIVAL_MS = 1200;
+let arrivalTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** The section the reader asked for, carrying the one-pass highlight while it runs. */
+const arrivedPanel = ref<HTMLElement | null>(null);
+
+function arriveAtHelp(): void {
+    const panel = document.querySelector<HTMLDetailsElement>('#panel-help details.help-panel');
+    const summary = panel?.querySelector('summary');
+    if (panel === null || panel === undefined || summary === null || summary === undefined) {
+        document.getElementById('tab-help')?.focus();
+        return;
+    }
+
+    // Open, because a reader sent to a section wants the section and not a disclosure to press.
+    // What hides it on a narrow window is `panelOpen`, which `openHelpTab` sets before this runs:
+    // "Examples and help" is a div with `:hidden`, not a <details>, so there is nothing above this
+    // panel to open.
+    panel.open = true;
+
+    // preventScroll, so the scroll below is the one that runs: two scrolls to the same place is a
+    // jump and then a glide, which reads as a stutter.
+    summary.focus({ preventScroll: true });
+
+    const reduced = window.matchMedia?.(REDUCED_MOTION).matches === true;
+    panel.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+
+    if (reduced) return;
+
+    // Removed, flushed, added again. Vue reuses one <details> element for whatever section is on
+    // screen, and a class removed and re-added in one synchronous block leaves the browser with
+    // nothing to notice: the animation never stops, so a second press showed the tail of the first
+    // press's fade. Measured on the published build, 2026-09-21: pressing a second note 520 ms in
+    // left `getAnimations()` reading 516 ms and then 733 ms on the same animation.
+    //
+    // Reading `offsetWidth` is what makes the difference. It forces the pending style and layout to
+    // be computed, so the browser sees the element without the class and then with it, which is a
+    // new animation - the same probe then reads 33 ms. `void` because the value is not wanted.
+    clearTimeout(arrivalTimer);
+    arrivedPanel.value?.classList.remove('help-panel-arrived');
+    panel.classList.remove('help-panel-arrived');
+    void panel.offsetWidth;
+    panel.classList.add('help-panel-arrived');
+    arrivedPanel.value = panel;
+    arrivalTimer = setTimeout(() => {
+        panel.classList.remove('help-panel-arrived');
+        arrivedPanel.value = null;
+    }, ARRIVAL_MS);
 }
 
 /** The four things a heading's `(?)` and its note can be asked for, answered by the state above. */
@@ -809,6 +874,16 @@ const snippet = computed(() =>
 
 /** The same text as coloured runs. Spans with text in them, so nothing here can become markup. */
 const snippetTokens = computed(() => tokenize(snippet.value));
+
+/**
+ * A help panel's fenced sample, as coloured runs.
+ *
+ * The same tokenizer the snippet box uses, over samples `help.json` has labelled `csharp` since S72
+ * (S77). A block in any other language keeps its single colour rather than being coloured as C#,
+ * which is why the language is read rather than assumed.
+ */
+const codeTokens = (block: { language?: string; text: string }) =>
+    block.language === 'csharp' ? tokenize(block.text) : [{ kind: 'other' as const, text: block.text }];
 
 /** What the last copy did, said in the region that announces the answer. Cleared on every open. */
 const copyNote = ref('');
@@ -1457,7 +1532,11 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                 tabindex="0"
                                                 role="region"
                                                 aria-label="Code sample, scrollable sideways"
-                                            >{{ block.text }}</pre>
+                                            ><span
+                                                v-for="(token, t) in codeTokens(block)"
+                                                :key="t"
+                                                :class="'tok tok-' + token.kind"
+                                            >{{ token.text }}</span></pre>
                                         </template>
                                     </div>
                                 </details>
