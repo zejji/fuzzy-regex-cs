@@ -889,3 +889,13 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `{d,d<=1,i}` is unbounded in `i` - it inserts all six characters of "czozlzozuzzr". When the
   second reading fails too, as in `{e<=1,e}` and `{s<=1,s}`, the braces are text:
   `(?:colour){e<=1,e}` matches the literal "colour{e<=1,e}" (regex 2026.9.10).
+
+- 2026-09-21 (S76): the built-in engine and this port read `[\w-[\d]]` differently and neither
+  complains. Version 1 unions `\w`, a literal dash and the nested set, so "abc123-" matches whole;
+  `System.Text.RegularExpressions` subtracts the digits and matches "abc". It also closes a class at
+  the first unescaped `]`, so upstream's `[[a-z]--[aeiou]]` is a class, two dashes, a vowel and a
+  literal `]` there - it matches "a--e]" and nothing in "abcde". Measured on .NET 10.0.11 and
+  regex 2026.9.10.
+- 2026-09-21 (S76): the sigma pairing is a single-character fold, not a full-folding effect. Capital
+  sigma matches the final form here under `(?V0)` and under `(?-f)`, where the built-in engine
+  matches neither; only the multi-character folds (ß to "SS", ﬁ to "FI") belong to version 1.

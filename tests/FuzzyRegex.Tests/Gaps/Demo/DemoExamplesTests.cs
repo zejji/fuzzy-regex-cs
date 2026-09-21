@@ -410,8 +410,13 @@ public sealed class DemoExamplesTests
                 "reverse",
                 "replace",
                 "timeout",
+                "namedgroups",
+                "setops",
+                "unicodeprops",
+                "ignorecase",
             ];
-            examples.Select(static e => e.Key).Where(static key => key.Length > 0).Distinct().Should().Equal(features);
+            examples.Select(static e => e.Key).Distinct().Should().Equal(features);
+            examples.Should().OnlyContain(static example => example.Key.Length > 0);
 
             foreach (DemoExampleRow example in examples)
             {
