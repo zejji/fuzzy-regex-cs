@@ -1742,6 +1742,7 @@ GENERATORS = (
     "partial-sliced",
     "posix",
     "fuzzy",
+    "fuzzy-anchored",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -5525,6 +5526,37 @@ FUZZY_BACKREF_FOLD_PROBABILITY = 0.5
 # a failing assertion - and it moves the position rather than the node.
 FUZZY_ZERO_WIDTH = ("^", "$", r"\b", r"\B", r"\A", r"\Z")
 
+# A zero-width assertion in FRONT of the whole pattern, which is a different shape from the one
+# above and reaches a rule nothing else here can see. It is what the 'fuzzy-anchored' generator
+# adds, and it has a generator of its own rather than a share of 'fuzzy' for a measured reason:
+# drawing it inside `_generate_fuzzy` reshuffles that generator's whole row stream, and the first
+# 2,000-row trial of it did exactly that and reported a divergence in an unrelated family - a
+# `(?b)(?fi)` backreference row with no assertion anywhere in it (seed 7, row 331, 2026-09-21).
+# A generator has its own `random.Random(f"{seed}:{name}")`, so a new one adds rows without moving
+# anybody else's.
+#
+# WHY THE SHAPE NEEDS REACHING. S57c fixed upstream issues 563 and 564 by permitting a fuzzy
+# insertion at the search anchor where a LEADING assertion holds at the anchor and fails one
+# character on (`docs/DIVERGENCES.md`). Its negative control - removing the one-step-on half of
+# that test - reddens four rows of the ported suite and, before this generator, not one row of a
+# 12,000-row wave: the generators drew the assertion and the fuzzy section independently and
+# never together in front.
+#
+# IT IS OFF THE DEFAULT LIST IN `tools/run-oracle.ps1` until S57e judges the row it found: seed
+# 1234567, row 1982 of 2000, `(?b)(?r)\m(?:.fo){e<=2}` over 'x fx', where the two engines record
+# the same span and the same error counts but a different insertion position. That row is not
+# about S57c's rule - under `(?r)` the leading `\m` is not at the head of the reversed graph, so
+# `PatternObject.AnchorGuards` is empty and the narrowing never runs - and the default third seed
+# is today's date, so a generator red at some seeds is red on some days.
+#
+# The assertions are the ones that can FAIL one step along from an anchor: `\b` and `\m` at the
+# start of a subject whose first two characters are both word characters, `\M` and `$` at the end
+# under `(?r)`, where the anchor is the subject's end, and `\B` for the reverse of all of them.
+# `^` and `\A` are deliberately absent: upstream turns a start-anchored search into an anchored
+# match and escapes the rule entirely, so those rows would be about the unported search prefilters
+# instead of about this.
+FUZZY_ANCHOR_GUARDS = (r"\b", r"\m", r"\M", "$", r"\B")
+
 # The constraints. Every shape upstream's `build_FUZZY` reads: a bare budget, a per-kind budget, a
 # mixture, a cost equation, and a minimum. `(?e)` and `(?b)` are NOT here - they are whole-pattern
 # flags rather than constraints, and are prepended at the end of `_generate_fuzzy` (S41 and S42).
@@ -5822,7 +5854,7 @@ def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -
     return subject
 
 
-def _generate_fuzzy(rng: random.Random, count: int):
+def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
     """One fuzzy section, S38's one-character and zero-width items plus S39's multi-character ones.
 
     The subject is built to match the section exactly and then mutated by zero to three edits, so a
@@ -5847,6 +5879,11 @@ def _generate_fuzzy(rng: random.Random, count: int):
     S42 adds `(?b)` on the same terms, drawn independently again, so a wave holds all four
     combinations of the two flags and every body shape draws each of them. See
     FUZZY_BESTMATCH_PROBABILITY on why both together is worth its own eighth of the wave.
+
+    S57c reuses the whole of it for a second generator, 'fuzzy-anchored', by passing `guarded`:
+    every row then opens with a zero-width assertion in front of everything else, which is the one
+    shape the S57c anchor-pin rule decides. See FUZZY_ANCHOR_GUARDS for why it is a generator of
+    its own rather than a probability inside this one.
     """
     for i in range(count):
         # A TRAP FOR WHOEVER ADDS A FOURTH BAND, left as a comment because S42 walked into it and
@@ -5954,6 +5991,15 @@ def _generate_fuzzy(rng: random.Random, count: int):
             group = "(" + backref_text + ")"
             pattern = pattern + group if reverse else group + pattern
 
+        # A LEADING assertion, in front of everything the row has built so far, so that the S57c
+        # anchor-pin rule is reachable at all. See FUZZY_ANCHOR_GUARDS. It goes on after the
+        # backreference group rather than before it, because the rule reads the assertions the
+        # pattern passes before anything else happens and a group in front of one hides it. The
+        # `if` short-circuits for 'fuzzy' itself, so that generator draws nothing new and its rows
+        # are unchanged at every seed.
+        if guarded:
+            pattern = rng.choice(FUZZY_ANCHOR_GUARDS) + pattern
+
         flags = 0
         if reverse:
             # Reverse, which flips the step and so the position record_fuzzy writes: a change is
@@ -5993,7 +6039,7 @@ def _generate_fuzzy(rng: random.Random, count: int):
             pattern = "(?b)" + pattern
 
         row = {
-            "generator": "fuzzy",
+            "generator": "fuzzy-anchored" if guarded else "fuzzy",
             "pattern": pattern,
             "flags": flags,
             "namedLists": {},
@@ -6300,6 +6346,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "fuzzy":
         yield from _generate_fuzzy(rng, count)
+        return
+
+    if name == "fuzzy-anchored":
+        yield from _generate_fuzzy(rng, count, guarded=True)
         return
 
     if name == "posix":

@@ -437,6 +437,10 @@ public sealed class OracleWaveTests
         //   * no match at all, which is the shape of an unrelated engine defect landing on one of
         //     these rows, and the only one of the two that is not already excluded by the row
         //     having to diverge before `For` is ever called.
+        //
+        // What neither case reaches is a change to the SHAPE of the pin rule, because the ablation
+        // restores upstream's answer under a broken rule too. The entry's own text says so, with
+        // the measurement; the rule's shape is held by `InheritedIssueTests` instead.
         ExpectedDivergence entry = ExpectedDivergences
             .All.Should()
             .ContainSingle(static e =>

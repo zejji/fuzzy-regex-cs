@@ -151,9 +151,10 @@ public sealed class InheritedIssueTests
         // match minus an insertion only while the pattern still fits one character later. So the
         // prohibition is lifted where a zero-width position assertion at the head of the pattern
         // holds at the anchor and FAILS one character on, and nowhere else. Both halves are load
-        // bearing: S50 measured that lifting it whenever any assertion had held reddened
-        // upstream's own test_fuzzy rows 51, 52, 54 and 56, where the assertion holds one
-        // character on too.
+        // bearing: drop the one-character-on test and four of the ported suite's tests go red,
+        // upstream's own test_fuzzy rows 51 and 56 among them, where the assertion holds one
+        // character on too (measured 2026-09-21; S50 found the narrowing the same way, against a
+        // different implementation of the pin).
         //
         // WHERE THE ANSWER LIVES, which is what S50 got wrong twice. It is a property of the
         // PATTERN - `PatternObject.AnchorGuards`, filled by `Optimiser.FindAnchorGuards` - not a
@@ -184,7 +185,7 @@ public sealed class InheritedIssueTests
 
         // A MATCH UPSTREAM LOSES ALTOGETHER rather than shortens, which is the clearest form of the
         // bug: there is no match one character later to fall back on, so "start searching one
-        // character later" costs the whole answer. Upstream gives [] to all four.
+        // character later" costs the whole answer. Upstream gives [] to all five.
         Values(@"\b(?:abc){i<=1}", "xabc").Should().Equal("xabc");
         Values(@"\m(?:YZ){i}\M", "XYZ ZY").Should().Equal("XYZ");
         Values(@"\G(?:abc){i<=1}", "xabc").Should().Equal("xabc");

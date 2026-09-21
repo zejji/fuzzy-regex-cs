@@ -1071,3 +1071,20 @@ amended text is inline above; this list is the record of what changed and why.
     ROADMAP argues for. **What does not change:** the four gate items and their numbers, every
     permanent pin, and the rule that an optimisation changing an answer has ported a bug. Phase 6 is
     two slices longer; the estimate moves from 18-23 to 20-25.
+
+36. **Phase 6 gains S57e, one unjudged oracle row (2026-09-21, found by S57c's blind review).** S57c
+    added the `fuzzy-anchored` generator - `fuzzy` with a zero-width assertion in front of the whole
+    pattern - because its negative control could not be made to fire on any other generator. At a
+    seed S57c had not used, 1234567, the generator found a row neither engine's answer had been
+    judged for: `(?b)(?r)\m(?:.fo){e<=2}` over `'x fx'`, where both engines report the same span and
+    the same error counts and disagree only on the recorded insertion position, upstream index 2 and
+    this port index 1. Upstream gives two different positions for that row itself, according to
+    whether `(?b)` re-ran the match, so the best-match re-anchoring is the first place to look - the
+    same machinery as issue 564.
+
+    The row is **not** S57c's rule: under `(?r)` the leading `\m` is not at the head of the reversed
+    graph, so `PatternObject.AnchorGuards` is empty and the narrowing never runs. Judging it needs
+    amendment 16's full ceremony, which is a slice, so it gets one rather than widening S57c.
+    Meanwhile the generator comes **off** `run-oracle.ps1`'s default list, because the default third
+    seed is today's date and a generator red at some seeds is red on some days; S57e puts it back.
+    Phase 6 is one slice longer; the estimate moves from 20-25 to 21-26.

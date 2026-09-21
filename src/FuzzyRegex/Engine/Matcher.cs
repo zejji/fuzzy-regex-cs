@@ -2010,9 +2010,10 @@ internal static class Matcher
     /// <para>
     /// Starting one character later is the same match minus an insertion only while the pattern
     /// still fits one character later. An assertion that holds here and fails there says it does
-    /// not, and that is the whole condition. Both halves are needed: lifting the rule whenever any
-    /// assertion held reddened upstream's own <c>test_fuzzy</c> rows 51, 52, 54 and 56, where the
-    /// assertion holds one character on too.
+    /// not, and that is the whole condition. Both halves are needed: with the one-character-on
+    /// test dropped, four of the ported suite's tests go red, upstream's own <c>test_fuzzy</c>
+    /// rows 51 and 56 among them (measured 2026-09-21; S50 first found the narrowing the same way,
+    /// against a different implementation of the pin).
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>

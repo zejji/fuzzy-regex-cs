@@ -581,6 +581,14 @@ slice:** its remaining two orderings need the maintainer's option 3, and upstrea
 option on an issue open since 2021, so fixing it means inventing semantics - it is an owner decision,
 stated with the evidence in STATE.md. Estimate 18-23 becomes 20-25.
 
+**Phase 6 gains S57e (2026-09-21, spec amendment 36).** S57c's new `fuzzy-anchored` generator found
+a row at seed 1234567 that nobody has judged - `(?b)(?r)\m(?:.fo){e<=2}` over `'x fx'`, same span
+and same error counts in both engines, different recorded insertion position. It is not S57c's rule
+(under `(?r)` the leading `\m` is not at the head of the reversed graph, so the anchor guards are
+empty), and judging it needs the full divergence ceremony, so it is its own slice. Until S57e runs,
+`fuzzy-anchored` is off `run-oracle.ps1`'s default list: the default third seed is today's date, so
+a generator red at some seeds is red on some days. Estimate 20-25 becomes 21-26.
+
 **Phase 7 started before that list emptied, and this records it rather than resolves it.** The
 2026-09-12 decision gates Phase 7 on the bug sweep; S60 landed on 2026-09-20 with five entries still
 open. The later owner decision of 2026-09-16 runs Phases 7, 8 and 9 in parallel, which is what has

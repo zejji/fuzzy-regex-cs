@@ -947,3 +947,26 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   constant across `Parsing/`s 9,151 lines - 4,375 of them the 47 node classes in `Nodes.cs` - and
   eight consumer files outside it, where lifting `BuildRepeat`'s unrolling attacks the node COUNT
   that makes the last figure 20x the third. Same principle, and the numbers say do the count first.
+- **2026-09-21 (S57c): the anchor pin is a property of the compiled pattern, not of the match
+  state.** `Optimiser.FindAnchorGuards` walks the leading chain at compile time and stops at the
+  first node that can send matching down more than one path, so every assertion it collects is
+  passed on every path. S50's two attempts held the same answer in a `MatchState` field the
+  backtracking engine neither saves nor restores, and both were wrong in both directions. The
+  alternative - pushing and popping the pin with the backtracking frames - would have been correct
+  too, and was rejected on cost: it spends per-frame bytes on the inner loop S61 is about to
+  measure, where the compile-time walk spends nothing at match time beyond the two assertion tests
+  the rule itself needs.
+- **2026-09-21 (S57c): a control that needs a new row shape gets a new generator, never a widening
+  of an existing one.** Each generator draws from `random.Random(f"{seed}:{name}")`, so adding a
+  draw inside one reshuffles its whole stream: widening `fuzzy` in place surfaced an unrelated
+  pre-existing divergence at seed 7, row 331, and nothing about that row was the slice's. The new
+  `fuzzy-anchored` generator reuses `_generate_fuzzy` behind a `guarded` flag whose branch takes no
+  draw, so `fuzzy`'s own rows are byte-identical at every seed - measured across seeds 7, 4242,
+  20260921 and 1234567.
+- **2026-09-21 (S57c): an oracle entry keyed on an ablation cannot see a change to the SHAPE of the
+  rule it ablates, and the entry has to say so.** Emptying `PatternObject.AnchorGuards` restores
+  upstream's answer under a broken narrowing exactly as it does under the shipped one, so a wave
+  over rows the broken rule answers wrongly is GREEN with more rows classified rather than fewer.
+  No predicate that answers by running this engine can do better, because the reference run is
+  broken too. Where an ablation is the only workable key, the tests that carry upstream's own
+  answers are what hold the rule's shape, and the limitation belongs in the entry's `Reason` text.

@@ -380,4 +380,16 @@ public sealed class ComparisonSamples
 
         (m.Success, m.PartialMatch, m.Index).Should().Be((true, true, 2));
     }
+
+    /// <summary>
+    /// "A fuzzy section may open with an inserted character at the search anchor, where a position
+    /// assertion pins the match there".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_section_may_open_with_an_inserted_character_at_the_search_anchor()
+    {
+        Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
+
+        (m.Success ? m.Value : "no match").Should().Be("xabc");
+    }
 }

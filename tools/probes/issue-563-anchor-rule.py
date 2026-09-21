@@ -86,6 +86,16 @@ SECTIONS = [
         (r'(?b)\m(?:Y){1i+1d+1s<=1}\M', ' XY Z'),
         (r'(?b)\m(?:Y){1i+1d+1s<=2}\M', ' XY Z'),
     ]),
+    # S57c, 2026-09-21. The one-character-on test is what separates these two groups, and the
+    # separation is upstream's own: the first row is a match upstream loses, the next three are
+    # rows where the ban changes nothing because a later start finds the same match. Recorded
+    # because sitting 1's notes had quoted a row from the second group as if it were in the first.
+    ('8. what the one-character-on test decides', [
+        (r'\b(?:abc){i<=1}', 'xabc'),
+        (r'\b(?:abc){i<=2}', 'x abc'),
+        (r'\b(?:abc){i<=2}', 'ab abc'),
+        (r'\B(?:abc){i<=2}', 'xy abc'),
+    ]),
 ]
 
 # Printed on their own, because the match TEXT of these rows hides the thing they are about: the

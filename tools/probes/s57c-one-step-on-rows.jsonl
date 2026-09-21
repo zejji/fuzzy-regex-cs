@@ -1,0 +1,7 @@
+{"pattern":"\\b(?:abc){i<=2}","flags":0,"subject":"x abc","operation":"finditer"}
+{"pattern":"\\b(?:abc){i<=2}","flags":0,"subject":"ab abc","operation":"finditer"}
+{"pattern":"\\B(?:abc){i<=2}","flags":0,"subject":"xy abc","operation":"finditer"}
+{"pattern":"\\b(?:abc){i<=2}","flags":0,"subject":"x abc","operation":"search"}
+{"pattern":"(?b)\\b(?:abc){i<=2}","flags":0,"subject":"x abc","operation":"finditer"}
+{"pattern":"\\B(?:abc){i<=2}","flags":0,"subject":"xy abc","operation":"search"}
+{"pattern":"\\m(?:Y){i}\\M","flags":0,"subject":"XY YX","operation":"finditer"}
