@@ -70,12 +70,20 @@ are read-only. Sonnet drafts, Opus reviews under `docs/VERIFICATION.md`.
   everything else.
 - **The gate that keeps it complete**: a new convention test, sibling to
   `PublicApiDocumentationTests`, asserting that every public member name in
-  `src/FuzzyRegex/PublicAPI.Shipped.txt` and every key of `RegexFlags.InlineFlags` (visible to the
+  `src/FuzzyRegex/PublicAPI.Unshipped.txt` and every key of `RegexFlags.InlineFlags` (visible to the
   test assembly through `InternalsVisibleTo`) is named somewhere in the user documentation set. The
   set is a list in the test, starting `README.md` and `docs/GUIDE.md`, so splitting the guide later
   adds a filename rather than rewriting the gate. It matches names rather than signatures, so
   overloads do not multiply the work, and its failure message names the missing symbol. Any
   exclusion is a constant in the test with a written reason beside it.
+
+  **Read Unshipped, not Shipped** - this spec said Shipped until 2026-09-21 and that was wrong.
+  Nothing has been released, so `PublicAPI.Shipped.txt` is a single line and `PublicAPI.Unshipped.txt`
+  carries all 147 members: a gate over Shipped enumerates nothing and passes while documenting
+  nothing, which is the exact failure it exists to catch. Assert a floor on the count of members the
+  scan finds, the way `ComparisonCoversDivergencesTests` does, so a parse that finds nothing fails
+  instead of passing. When the 1.0 release moves those lines into Shipped, the gate must read both
+  files.
 
 - **One file or several, decided on measured length** (owner, 2026-09-21: "you can split the docs
   between multiple files - up to you"). Write `docs/GUIDE.md` first, with a table of contents at
