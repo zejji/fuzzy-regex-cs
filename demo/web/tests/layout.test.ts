@@ -8,7 +8,7 @@
  * What these tests hold is the structure those numbers depend on: if the scroll owners move, the
  * measurement stops meaning anything.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -1163,5 +1163,37 @@ test('a help sample is coloured for the surface it sits on', async () => {
         const plainColour = found(plain, `a .tok-${kind} rule`)[1] as string;
         expect(overrideColour).toMatch(/color:/);
         expect(overrideColour, `the ${kind} run reuses the snippet's colour on the dark shell`).not.toBe(plainColour);
+    }
+});
+
+/**
+ * The page's icons are declared, and every one of them is relative.
+ *
+ * The demo has no `<base href>` on purpose, so that one artefact boots at the repository subpath on
+ * Pages, at the root of a local server and at a fork's preview path. An absolute `/favicon.svg`
+ * resolves to the ACCOUNT root on Pages - which is where the 404 this replaced was going - and
+ * nothing on a developer's machine would ever show it (S78).
+ */
+test('every icon the page declares is relative to the page', () => {
+    const html = readFileSync(join(import.meta.dirname, '../index.html'), 'utf8');
+    const links = [...html.matchAll(/<link\s+rel="(icon|apple-touch-icon)"[^>]*href="([^"]+)"/g)].map(
+        (match) => [match[1] ?? '', match[2] ?? ''] as const,
+    );
+
+    expect(links.map(([, href]) => href).sort()).toEqual([
+        './apple-touch-icon.png',
+        './favicon.ico',
+        './favicon.svg',
+    ]);
+    for (const [rel, href] of links) {
+        expect(href.startsWith('./'), `${rel} is not relative: ${href}`).toBe(true);
+    }
+});
+
+/** The three files the declarations name are in the web root the publish gathers. */
+test('the icons the page declares are files that exist', () => {
+    for (const name of ['favicon.svg', 'favicon.ico', 'apple-touch-icon.png']) {
+        const path = join(import.meta.dirname, '../../FuzzyRegex.Demo.Wasm/wwwroot', name);
+        expect(existsSync(path), `${name} is declared and not shipped`).toBe(true);
     }
 });

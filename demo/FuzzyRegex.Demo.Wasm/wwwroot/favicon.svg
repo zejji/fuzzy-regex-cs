@@ -1,0 +1,9 @@
+<!-- The FuzzyRegex mark: F and R from Cascadia Code Bold (SIL OFL 1.1, see NOTICE), coloured
+     with the page's own accent and match tokens. Drawn by tools in .scratch; the source of
+     truth is this file. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>FuzzyRegex</title>
+  <rect width="32" height="32" rx="7" fill="#0f141c"/>
+  <path transform="translate(2.128 24.153) scale(0.01148 -0.01148)" fill="#74a6ef" d="M163 0V1420H427V0ZM163 529V774H940V529ZM163 1177V1420H1137V1177Z"/>
+  <path transform="translate(14.691 24.153) scale(0.01148 -0.01148)" fill="#f1c45e" d="M373 520V763H628Q720 763 771.0 817.5Q822 872 822 970Q822 1069 771.0 1123.0Q720 1177 628 1177H377L353 1420H628Q857 1420 982.0 1308.0Q1107 1196 1107 990Q1107 767 982.0 643.5Q857 520 628 520ZM123 0V1420H387V0ZM844 0 576 668H854L1159 0Z"/>
+</svg>

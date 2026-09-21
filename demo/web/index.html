@@ -9,6 +9,20 @@
     content="FuzzyRegex, a C# port of Python's regex module, running in your browser on WebAssembly. Fuzzy matching with a budget per kind of error.">
 
   <!--
+    Relative hrefs, like every other URL in this file: the page has no <base href> so that it boots
+    at the repository subpath on Pages, at the root of a local server and at a fork's preview path.
+    An absolute "/favicon.svg" would resolve to the ACCOUNT root on Pages, which is where the 404
+    this replaces was coming from.
+
+    Three files because browsers ask three different questions: the SVG is the one modern browsers
+    use and the only one that scales, the .ico answers the request a browser makes by name whether
+    or not it is declared, and iOS reads neither and wants a 180 px PNG.
+  -->
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./favicon.ico" sizes="32x32">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+
+  <!--
     No <base href>, deliberately, and this is a divergence from both the ROADMAP's note and
     Microsoft's Blazor-on-Pages recipe, which rewrite it to the repository subpath. A Blazor app
     needs that because its index.html is generated and its framework resolves assets from the base.

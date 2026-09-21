@@ -57,3 +57,48 @@ already near the limit, so the shape carries the identity, not the detail.
 - [ ] Rendered at 16, 32 and 180 px and looked at, not assumed: the 16 px version is the one that
       decides whether the design works.
 - [ ] The published build loads with no console error, which is the check that started this.
+
+## Closing notes (2026-09-21)
+
+**What shipped.** `favicon.svg`, `favicon.ico` (16 and 32) and `apple-touch-icon.png` (180) in the
+.NET web root, declared in `demo/web/index.html` with relative hrefs. The published page now asks
+for `favicon.svg` and gets 200, the root `/favicon.ico` answers 200, and a full load produces no
+console error - the check that started this slice.
+
+**The design took three rounds, and the first two were wrong in ways worth recording.**
+
+- Round one delegated the design to a subagent with the `frontend-design` skill named in its brief.
+  Its report showed no evidence the skill or any research shaped the work, and the owner's verdict on
+  the result was "boring font, nasty colours, nasty spacing". A skill named in a brief is not a skill
+  applied.
+- Round two drew the letters as axis-aligned rectangles on a 32-unit grid, reasoning that curves
+  blur when a 32 px artboard is downsampled to 16. That optimisation bought pixel-snapping and paid
+  for it with a square-bowled R that reads as a wireframe. It also produced a variant with a cut
+  corner, which the owner read as damage rather than design.
+- Round three used real outlines: `F` and `R` from Cascadia Code Bold, pulled through `fontTools`
+  (`.scratch/favicon-candidates/glyphs.py` extracts, `build.py` composes), spaced by their ink
+  bounds rather than the font's monospace advance, which is what had been leaving a hole between the
+  two capitals. A coding face is also the right register for a regex library.
+
+**Licensing.** Cascadia Code is SIL OFL 1.1, so the derived artwork may ship; `NOTICE` records the
+copyright, the licence and the fact that only two outlines are used and no font file is
+redistributed. A system face such as Segoe UI would not have been usable this way.
+
+**Two faults caught by looking rather than by trusting the toolchain.**
+
+- The first PNG and .ico were mostly transparent. Opening an SVG file directly in a browser renders
+  it at its intrinsic 32 px in the corner of a 180 px viewport, so the screenshot packaged empty
+  space. Reading the centre pixel of each .ico frame is what found it; a wrapper page that sizes the
+  icon to the viewport is what fixed it.
+- `vue-tsc` rejected the new test's regex destructuring (`'href' is possibly undefined`) although
+  Vitest passed, because the web build type-checks before it tests. Run `tools/build-demo-web.ps1`,
+  not `npx vitest run`, before believing the front end is green.
+
+**Tests.** `layout.test.ts` pins that the three icons are declared, that every href is relative -
+the failure that only appears on Pages, where an absolute path resolves to the account root - and
+that the three files exist in the web root the publish gathers. The publish integrity check covers
+them from the moment they ship: 58 endpoints before, 64 after.
+
+**Sources kept.** The candidates and renders are under `.scratch/favicon-candidates/`, which is
+gitignored, and `w7.svg` is the file that became `favicon.svg`. The generator scripts are there too,
+so the mark can be rebuilt at another weight or spacing without redrawing it.
