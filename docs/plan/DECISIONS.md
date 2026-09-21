@@ -933,3 +933,17 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-21 (S77): jsdom focuses a hidden element, so a fault where the target is inside a shut
   disclosure passes every unit test and fails in a browser. The demo's narrow layout hides the tabs
   with `hidden` on a div rather than a `<details>`; the browser probe is what caught it.
+
+- 2026-09-21 (owner, refining the 2026-09-16 Phase 7 ground rules): **the bar for a structural
+  divergence from upstream's shape is an entry criterion for Phase 7, not a permanent one.** While
+  the obvious optimisations remain, take a divergence only where it removes a measured ceiling - an
+  order of magnitude, or an out-of-memory - rather than where it shaves a constant off a cached cold
+  path. Once those are done, rank everything strictly by cost against benefit and decide the
+  unclear ones case by case; a divergence that is both faster and leaner is then legitimate on its
+  own numbers. The AST is the worked example, and stays a candidate rather than a refusal: a fresh
+  compile allocates 7.7 kB for `\w+`, 72 kB for an email-shaped pattern and 1.57 MB for
+  `(?:ab{10}c){200}` (measured 2026-09-21, Release, `GC.GetAllocatedBytesForCurrentThread`), paid
+  once per pattern because the cache holds fifteen. An arena or struct AST attacks the per-node
+  constant across `Parsing/`s 9,151 lines - 4,375 of them the 47 node classes in `Nodes.cs` - and
+  eight consumer files outside it, where lifting `BuildRepeat`'s unrolling attacks the node COUNT
+  that makes the last figure 20x the third. Same principle, and the numbers say do the count first.

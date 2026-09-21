@@ -820,6 +820,16 @@ registries (Context7, DeepWiki) as owner-performed steps with prepared files; **
 release, **after the Phase 6 exit gate and the Phase 7 performance gate**.
 
 ## Candidates parked for later
+- **An analyzer shipped with the package (post-1.0).** `Directory.Build.props` already runs
+  Meziantou, Sonar and ErrorProne over this repository, and MA0009 and S6444 both demand a match
+  timeout on every `new Regex(...)` - but they only know `System.Text.RegularExpressions`, so a
+  consumer calling `FuzzyRegex.Match(input, pattern)` with no `timeout` is warned by nothing. One
+  rule, shipped in the nupkg under `analyzers/dotnet/cs/`, would close that: warn on a call with no
+  timeout where the instance carries no `matchTimeout`. Cost: an analyzer project with its own
+  tests, a pinned Roslyn version, and a suppression story; it has to model the compiled-instance
+  case or it cries wolf on correct code. It changes no behaviour, so it is not a 1.0 blocker (owner
+  suggestion, 2026-09-21).
+
 - **Counted repeats without unrolling (post-1.0).** The compiler unrolls the minimum count of every
   counted repeat (inherited from upstream, 2018.11.22, to keep the position-keyed repeat guard sound),
   so memory is linear in the product of nested counts; S56b bounds it with a node budget. The
