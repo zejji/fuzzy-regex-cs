@@ -70,6 +70,24 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Demo;
 ///     matches=3 spans=[[0, 5], [6, 5], [12, 5]]  [0] 'Fuzzy' counts=(0, 0, 0)
 /// </code>
 /// <para>
+/// and, for the test-set example S75 added, run on 2026-09-20 against the same <c>regex 2026.9.10</c>:
+/// </para>
+/// <code>
+/// Edits limited to letters      (?:colour){e&lt;=2:[a-z]}               "colour, color, col our and col0ur"
+///     matches=2 spans=[[0, 6], [8, 5]]     [0] 'colour' counts=(0, 0, 0)
+/// </code>
+/// <para>
+/// The example's claim is about the two candidates it does <b>not</b> match, and a subject that
+/// holds all four cannot show that on its own: an absent match looks the same as one the search
+/// stepped over. <c>tools/probes/s75-example-test-set.py</c> therefore searches each candidate
+/// alone, and <c>tools/probes/s75-example-test-set.cs</c> asks this port the same five questions.
+/// Both printed the same five rows on 2026-09-20 (<c>diff</c> agreed to the byte):
+/// "colour" matches at (0, 6) with no errors, "color" at (0, 5) for one substitution and one
+/// deletion, and "col our" and "col0ur" have no match at all, because the only edits that would
+/// reach them fall on a space and on a digit, which <c>[a-z]</c> forbids.
+/// <see cref="The_test_set_example_misses_the_two_candidates_it_names"/> is that claim as a test.
+/// </para>
+/// <para>
 /// <b>The probe runs upstream under <c>VERSION1</c></b>, because this port defaults to
 /// <see cref="FuzzyRegexOptions.Version1"/> where upstream defaults to <c>VERSION0</c> (a
 /// deliberate divergence, <c>docs/DIVERGENCES.md</c>). Asking upstream its default-flag question
@@ -105,6 +123,7 @@ public sealed class DemoExamplesTests
         ["Up to one error"] = new([(4, 5)], (0, 0, 1)),
         ["A budget per kind of error"] = new([(0, 6)], (1, 1, 1)),
         ["Weighted cost"] = new([(6, 7), (25, 7), (33, 6)], (3, 1, 0)),
+        ["Edits limited to letters"] = new([(0, 6), (8, 5)], (0, 0, 0)),
         ["The first match the budget allows"] = new([(0, 6), (6, 6), (12, 6), (18, 1), (19, 0)], (6, 0, 0)),
         ["BestMatch: the closest fit"] = new([(11, 5), (16, 3), (19, 0)], (0, 0, 1)),
         ["EnhanceMatch: tighten what was found"] = new([(0, 3), (4, 5), (11, 4), (15, 1), (16, 3), (19, 0)], (2, 0, 3)),
@@ -265,6 +284,48 @@ public sealed class DemoExamplesTests
     }
 
     /// <summary>
+    /// The test-set example's note names two candidates it misses, "col our" and "col0ur". The
+    /// example's own subject cannot show that: a candidate with no match looks exactly like one the
+    /// search never reached, so the spans above would be just as green if the test set were ignored
+    /// altogether. Each candidate is searched on its own here, which is the question the note asks.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's answers, <c>tools/probes/s75-example-test-set.py</c> against <c>regex 2026.9.10</c>
+    /// on 2026-09-20: "colour" at (0, 6) with counts (0, 0, 0), "color" at (0, 5) with (1, 0, 1),
+    /// and nothing for "col our" or for "col0ur".
+    /// </remarks>
+    [Test]
+    [Arguments("colour", 0, 6)]
+    [Arguments("color", 0, 5)]
+    [Arguments("col our", -1, 0)]
+    [Arguments("col0ur", -1, 0)]
+    public void The_test_set_example_misses_the_two_candidates_it_names(string candidate, int index, int length)
+    {
+        DemoExampleRow row = Single("Edits limited to letters");
+        using JsonDocument answer = JsonDocument.Parse(
+            DemoEngine.Run(row.Pattern, row.Flags, candidate, row.Mode, row.Replacement, row.NamedLists)
+        );
+
+        (int, int)[] spans =
+        [
+            .. answer
+                .RootElement.GetProperty("matches")
+                .EnumerateArray()
+                .Select(static match =>
+                    (match.GetProperty("index").GetInt32(), match.GetProperty("length").GetInt32())
+                ),
+        ];
+
+        spans
+            .Should()
+            .Equal(
+                index < 0 ? [] : [(index, length)],
+                "'{0}' is what the note claims the budget can and cannot reach",
+                candidate
+            );
+    }
+
+    /// <summary>
     /// The timeout example is the only row the probe cannot answer, and that is a property of the
     /// example rather than an omission. Pinning it here means a future row that quietly arrives
     /// without an upstream answer fails <see cref="Answers_what_upstream_answers"/> instead of
@@ -331,7 +392,7 @@ public sealed class DemoExamplesTests
 
         using (new AssertionScope())
         {
-            examples.Should().HaveCount(18);
+            examples.Should().HaveCount(19);
             examples.Select(static e => e.Title).Should().OnlyHaveUniqueItems();
 
             // Every feature the slice promises a sample for, in the order the sidebar shows them and
@@ -340,6 +401,7 @@ public sealed class DemoExamplesTests
             string[] features =
             [
                 "fuzzy",
+                "fuzzy-test-set",
                 "bestmatch",
                 "enhancematch",
                 "namedlists",

@@ -19,11 +19,16 @@ import { violations } from './copy-rules';
  * Read rather than listed, because a listed copy is a second opinion about the same fact. The map
  * is an `[ordered]@{ ... }` literal of `key = @('### heading')` lines, so the keys are the names on
  * the left of the `=` inside it.
+ *
+ * A key holding a hyphen has to be quoted in PowerShell, so the quotes are optional here and the
+ * name may contain one. Without that, `'fuzzy-test-set'` was invisible to this test (S75, item 3):
+ * the extraction skipped it, and a note linking to it would have been reported as a link to a panel
+ * the generator does not write.
  */
 function generatedHelpKeys(): readonly string[] {
     const source = readFileSync(join(import.meta.dirname, '../../../tools/build-demo-help.ps1'), 'utf8');
     const map = /\$map = \[ordered\]@\{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
-    return [...map.matchAll(/^\s{4}(\w+)\s*=/gm)].map((match) => match[1] ?? '');
+    return [...map.matchAll(/^\s{4}'?([\w-]+)'?\s*=/gm)].map((match) => match[1] ?? '');
 }
 
 describe('the heading notes', () => {
@@ -52,6 +57,9 @@ describe('the heading notes', () => {
     it('link only to panels the help generator writes', () => {
         const generated = generatedHelpKeys();
         expect(generated).toContain('fuzzy');
+        // The guard on the extraction itself: a quoted, hyphenated key is the shape it used to miss,
+        // and an extraction that silently finds fewer keys makes this test pass for the wrong reason.
+        expect(generated).toContain('fuzzy-test-set');
         for (const note of HEADING_NOTES) expect(generated, note.id).toContain(note.helpKey);
     });
 

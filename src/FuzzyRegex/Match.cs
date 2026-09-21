@@ -9,9 +9,8 @@ namespace Fuzzy.Text.RegularExpressions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Indices are UTF-16 code units</b>, not codepoints: <see cref="Index"/> and
-/// <see cref="Length"/> match the built-in <c>Regex</c>, where upstream reports codepoints
-/// (design spec section 4).
+/// <b>Indices are UTF-16 code units</b>, where upstream counts codepoints: <see cref="Index"/>
+/// and <see cref="Length"/> match the built-in <c>Regex</c> (design spec section 4).
 /// </para>
 /// <para>
 /// The engine works in <c>(start, end)</c> throughout, keeping upstream's names. This class and the
@@ -84,7 +83,7 @@ public class Group : Capture
     public string Name { get; }
 
     /// <summary>
-    /// Every capture the group made, oldest first, not just the last one. Upstream
+    /// Every capture the group made, oldest first. Upstream
     /// <c>Match.captures(group)</c>; the built-in <c>Regex</c> only keeps this for groups inside
     /// a repeated construct, whereas mrab-regex keeps it always.
     /// </summary>
@@ -385,10 +384,10 @@ public sealed class Match : Group
     /// counts in code units throughout.
     /// </para>
     /// <para>
-    /// A deletion's position is <b>not</b> a position in the subject. Upstream shifts each deletion
-    /// by the number of deletions recorded before it (<c>:20555-20558</c>), so what is reported is
-    /// where the missing character would sit in a string that had them all put back - which can be
-    /// past the end of the match, and past the end of the subject.
+    /// <b>A deletion's position is measured in a restored subject.</b> Upstream shifts each
+    /// deletion by the number of deletions recorded before it (<c>:20555-20558</c>), so what is
+    /// reported is where the missing character would sit in a string that had them all put back -
+    /// which can be past the end of the match, and past the end of the subject.
     /// </para>
     /// <para>
     /// Cached, because upstream builds three fresh lists on every attribute read and a .NET property
@@ -520,7 +519,7 @@ public sealed class Match : Group
     /// <remarks>
     /// <para>
     /// <b>Replacement templates speak upstream's language</b> (<c>\1</c>, <c>\g&lt;name&gt;</c>,
-    /// <c>\n</c>, <c>\x41</c>, <c>\N{...}</c>), not <c>Regex</c>'s <c>$1</c>: the escape
+    /// <c>\n</c>, <c>\x41</c>, <c>\N{...}</c>), where <c>Regex</c> uses <c>$1</c>: the escape
     /// character is <c>\</c>, so those all mean what they mean upstream, and <c>$</c> is
     /// ordinary text.
     /// </para>

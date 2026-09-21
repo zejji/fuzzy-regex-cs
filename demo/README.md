@@ -149,7 +149,9 @@ field, hints that persist instead of placeholders), its response-time limits (th
 and a busy state that appears rather than a frozen page), and WCAG 2.2 for target size, focus
 appearance and contrast. The two screenshots in `docs/demo/` are the reference layouts at 390 and
 1280 px, and `flags-panel-1366.png` and `flags-panel-390.png` beside them are the flags panel open
-at a laptop width and on a phone.
+at a laptop width and on a phone. `alignment-1366.png` and `alignment-390.png` are the same two
+widths on a fuzzy case, so the marker row, the legend, the alignment view and an open heading note
+are all in one picture; `tools/probes/s75-reference-screenshots.mjs` takes them.
 
 ## Deploy to GitHub Pages
 

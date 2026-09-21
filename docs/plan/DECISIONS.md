@@ -828,3 +828,29 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   screen-reader path is the mark's own `aria-label` plus the alignment view, not a control inside
   the mark. axe-core's `nested-interactive` forbids focusable descendants of the
   `<mark role="button">` highlights, so there is nowhere inside a mark to put one.
+- 2026-09-21 (S75): the worked example for a fuzzy test set is its own example button, keyed
+  `fuzzy-test-set`, rather than a paragraph of help. The page already teaches by loading a pattern
+  and a subject, and its spans are checked against both engines
+  (`tools/probes/s75-example-test-set.py`, `s75-example-test-set.cs`).
+- 2026-09-21 (S75): the C# snippet's identifiers are pinned by compiling the snippet the page
+  writes (`tools/probes/demo-snippet-compiles.mjs`), not by comparing it with a stored string. A
+  stored string pins the words; only the compiler pins the API.
+- 2026-09-21 (S75): the copy linter reads the seven documents and the public XML doc comments as
+  well as the page, with an empty allow list. It found 43 phrasings in the documents and 18 in the
+  doc comments, and both are 0.
+- 2026-09-21 (S75): a heading note's "read more" press is a tab stop only while the note is pinned.
+  A peeked note closes when the `(?)` loses the focus, so a press that was always a tab stop was
+  chosen as the next stop and then removed before the focus arrived - one Tab that did nothing
+  (Chrome, 2026-09-21).
+- 2026-09-21 (S75): a note the pointer opened waits `PEEK_GRACE_MS` (400 ms) before closing, and
+  the pointer resting on the note refuses the close outright. WCAG 2.2 SC 1.4.13 "Hoverable" asks
+  that the pointer be able to reach revealed content; these notes sit a few pixels below their
+  button, and before the grace the note was gone after a 332 ms journey across a 4 px gap
+  (`tools/probes/s75-hover-travel.mjs`).
+- 2026-09-21 (S75): the unbounded-budget line bounds every kind that has no bound, not the first.
+  `(?:colour){i<=2,d}` matches 19 times in nine characters, the same as `{i,d}` (regex 2026.9.10).
+- 2026-09-21 (S75): a cost equation bounds only the kinds it prices at one or more. `{d,1i+1s<3}`
+  is unbounded in `d` and the page names it; a kind the equation prices at zero - `{0d+1i<3}` - is
+  unbounded too and the page stays silent, because the only advice available is a re-pricing of the
+  equation and a second constraint on a priced kind is the "re-use of fuzzy constraint" upstream
+  refuses.

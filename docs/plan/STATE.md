@@ -1,23 +1,30 @@
 # State
 
-**S75 is CHECKPOINTED after sitting 2 (2026-09-20, branch `phase9-demo`, demo worktree).** The
-sitting stopped on the allowance, not on a blocker.
+**S75 is CHECKPOINTED after sitting 3 (2026-09-21, branch `phase9-demo`, demo worktree).** All five
+items are built and green; the sitting stopped on the allowance with the closing ceremony left.
+What each sitting measured is in `notes/S75-sittings.md`.
 
-**What landed in sitting 2:** items 1 and 2 complete. A `(?)` note on all six input headings
-(`HeadingHelp.vue`, `lib/help-notes.ts`), the line under the pattern when a fuzzy budget has no
-bound (`lib/budget.ts`), the legend under the subject, the note naming where one marked run was
-spent, and the alignment view - the selected match a cell per character, each labelled with its
-position and kind (`lib/alignment.ts`). Sitting 1 delivered the marker row itself.
+**Sitting 4 has only the close to do:** the independent verifier over the numbers the notes quote,
+one blind pass over the last fix (`budget.ts`, a kind that carries both a price and a constraint),
+then tick the "Done when" boxes, `git mv` the slice file into `done/` with its closing notes, and
+rewrite this file.
 
-**Sitting 3 picks up at item 3**, whose engine numbers are already measured and quoted in
-`notes/S75-sittings.md`: write the example, then items 4 and 5, then the blind review and the
-verifier over BOTH sittings, then the reference screenshots. Two things for the owner, both
-recorded in the notes: the spec's named-lists wording describes a box that parses one list per
-line, and the alignment view has no pattern row because `fuzzy_changes` carries no pattern-side
-information.
+**What landed in sitting 3:** the worked example for a fuzzy test set, as the nineteenth example
+button; the C# snippet's identifiers pinned by compiling the snippet the page writes
+(`tools/probes/demo-snippet-compiles.mjs`); the copy linter extended over the seven documents and
+the public XML doc comments, which found 43 and 18 phrasings and now finds none; the two reference
+screenshots in `docs/demo/`; and the review fixes - the "read more" press is a tab stop only while
+its note is pinned, a hover-revealed note can now be reached by the pointer (WCAG 2.2 SC 1.4.13),
+and the unbounded-budget line names every kind that has no bound rather than the first.
 
-**Green at the checkpoint:** 363 web tests, `vue-tsc` clean, the copy linter included. No C# changed
-in this sitting, so the ratchet stands where sitting 1 left it: GREEN, 6,480 tests, baseline 6,372.
+**Green at the checkpoint:** 417 web tests, `vue-tsc` clean, 123 Pester tests, ratchet GREEN at
+6,487 tests against baseline 6,379, WASM smoke GREEN over 58 published endpoints.
+
+**Two things for the owner, both from earlier sittings:** the alignment view has no pattern row,
+because `fuzzy_changes` carries no pattern-side information and a pattern is not a sequence of
+characters; and a stale vite dev server (PID 27600, port 5179) holds
+`lightningcss.win32-x64-msvc.node`, so `npm ci` fails with EPERM in `demo/web` until it is stopped.
+`npm install --no-audit --no-fund` works and leaves the lockfile alone.
 
 **Take S57b next on the main line, not S57** - S57 is blocked by its own first paragraph. Phase 6's
 exit gate is RED: `run-oracle.ps1 -Count 6000` diverges 3 (seed 7), 3 (4242), 14 (20260920), twenty

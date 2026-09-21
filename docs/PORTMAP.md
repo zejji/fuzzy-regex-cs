@@ -51,12 +51,13 @@ Three properties of it are load-bearing, and each is pinned by a test in `Oracle
   file holds UTF-16 `(Index, Length)`. This is one of exactly two places the span convention is
   enforced - the other is `Match`/`Group`'s accessors - so a slip at the accessor shows up as a
   divergence rather than as a silent agreement (DECISIONS 2026-08-31).
-- **An answer that is a sequence is compared as a sequence, not match by match.** S25 added
+- **An answer that is a sequence is compared whole, rather than match by match.** S25 added
   `finditer`, `finditer-overlapped` and `split` rows, whose recorded outcome is the whole list. A
   scan that finds the right matches in the wrong order, stops one match early, or repeats a
   zero-width match at one position agrees on every individual match and diverges only here.
-- **A wave is generated, not committed.** A divergence is minimised by hand and pinned as an
-  ordinary test in `tests/FuzzyRegex.Tests/Gaps/`; the recorder's file header has the workflow.
+- **A wave is generated on demand and never committed.** A divergence is minimised by hand and
+  pinned as an ordinary test in `tests/FuzzyRegex.Tests/Gaps/`; the recorder's file header has the
+  workflow.
   Named lists are sorted before either engine sees them, for the reason the last row of "Where we
   diverge" gives.
 
@@ -409,7 +410,7 @@ writes the family in the `x_left`/`_right` shorthand that a name search cannot s
 274 as a lower bound on what is named, and this table as the accounting.**
 
 Two things about the count, because the first attempt got it wrong. It is found by **brace
-counting**, not by matching declarations: upstream puts the opening brace at the end of the
+counting** rather than by matching declarations: upstream puts the opening brace at the end of the
 declarator, wraps long parameter lists and hides the return type in a macro, so a regex over the
 opening line missed 109 functions and reported 458. The cross-check that catches that is
 `grep -c '^}$' upstream/src/_regex.c`, which is 567 - in this file a function body is the only
@@ -451,10 +452,9 @@ The S26 script itself lived in that session's scratch and is gone, which is the 
 evidence problem the slice skill records for negative controls. It was rebuilt from this section's
 own description of what it did - brace counting, the bare-`}` cross-check, and a name search over
 this file with this section excluded - and the rebuild reproduces the 567 exactly. Two limits of the
-count, stated so a later sync does not
-read more into it than it says. It counts **definitions, not declarations**, so a prototype whose
-body is elsewhere is not double counted; and it counts *functions*, so the structs, macros and tables
-are covered only by the rows above that name them.
+count, stated so a later sync does not read more into it than it says. It counts **definitions and
+skips declarations**, so a prototype whose body is elsewhere is not double counted; and it counts
+*functions*, so the structs, macros and tables are covered only by the rows above that name them.
 
 ## Upstream sync log
 
@@ -627,7 +627,7 @@ Six methods sit in S05's range. Five are ported - `test_hg_bugs`, `test_fuzzy_ex
 
 With this slice every one of upstream's 102 test methods is accounted for: 91 ported, 11 recorded
 here as not ported. Verified by listing the methods out of the Python source and matching them
-against the `[Property("Upstream", ...)]` attributes actually present in `tests/`, not by assuming.
+against the `[Property("Upstream", ...)]` attributes actually present in `tests/`.
 
 ### Assertions omitted from methods that are otherwise ported (S05)
 
@@ -646,8 +646,8 @@ not.
 
 `test_hg_bugs` #58 **is** ported, but not as the flag test it looks like. Upstream writes
 `regex.sub(r"(\w+)", r"[\1]", subject, regex.WORD)`, and the fourth positional parameter of
-`regex.sub` is `count`, not `flags` - so `regex.WORD` is used as a replacement count and the WORD
-flag is never applied. Measured against the local oracle on 2026-08-30: the call with no fourth
+`regex.sub` is `count` rather than `flags` - so `regex.WORD` is used as a replacement count and
+the WORD flag is never applied. Measured against the local oracle on 2026-08-30: the call with no fourth
 argument, and the call with `flags=regex.WORD`, both give the identical result. It is ported as a
 plain `Replace` with no options.
 

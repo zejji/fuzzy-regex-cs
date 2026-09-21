@@ -27,6 +27,32 @@ export interface HeadingNote {
     readonly helpKey: string;
 }
 
+/**
+ * How long a note the pointer opened stays after the pointer leaves the `(?)`, in milliseconds.
+ *
+ * WCAG 1.4.13 asks that the pointer be able to move onto content that hover revealed, so that
+ * somebody under magnification, or with a pointer large enough to cover the sentence, can read it
+ * ("Hoverable", https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html, read
+ * 2026-09-21). None of these notes sits against its button - each is a line under the heading row,
+ * or under the subject - so the pointer is over neither for the few frames it takes to cross the
+ * gap, and a note that closed on `mouseleave` was gone before the pointer arrived.
+ *
+ * The note therefore waits this long, and arriving on the note cancels the wait. Long enough for a
+ * slow hand to cross a line of text, short enough that a pointer passing over a `(?)` on its way
+ * somewhere else does not leave a sentence sitting open behind it.
+ */
+export const PEEK_GRACE_MS = 400;
+
+/**
+ * What a visitor did to a heading's `(?)` or to the note behind it, for the page to answer.
+ *
+ * The note's own hovers are their own asks rather than the button's: the page has to tell "the
+ * pointer left the button" from "the pointer left the sentence", and only the second is a close.
+ * Named here because the component that raises them and the page that answers them both need the
+ * list, and a `<script setup>` block cannot export a type.
+ */
+export type HeadingAsk = 'toggle' | 'peek' | 'unpeek' | 'peek-note' | 'unpeek-note' | 'follow';
+
 /** The id the `(?)` button's `aria-controls` and the note itself agree on. */
 export const noteId = (id: string): string => `heading-help-${id}`;
 

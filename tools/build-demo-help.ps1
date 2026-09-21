@@ -64,7 +64,10 @@ $map = [ordered]@{
         '### `{s,i,d,e}`: separate budgets per kind of error',
         '### Cost forms: `{Ni+Md<n}` weights errors instead of just counting them'
     )
-    bestmatch    = @('### `FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first')
+    # Its own key rather than a fourth heading under `fuzzy`, because the sample that uses it is
+    # about the test set alone (S75, item 3) and the help tab should open on that one section.
+    'fuzzy-test-set' = @('### `{e<=n:[set]}`: constrain which characters an edit may touch')
+    bestmatch    = @('### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first')
     enhancematch = @('### `FuzzyRegexOptions.EnhanceMatch` / `(?e)`: tighten a match after it is found')
     namedlists   = @('### `\L<name>`: fuzzy matching against a named list of words')
     posix        = @('### `FuzzyRegexOptions.Posix` / `(?p)`: leftmost-longest instead of leftmost-first')
@@ -72,7 +75,7 @@ $map = [ordered]@{
     reverse      = @('### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right')
     replace      = @('### Replacement templates speak upstream''s language')
     timeout      = @('### A per-call `timeout` on every input-dependent method')
-    indices      = @('### **Indices are UTF-16 code units**, not codepoints')
+    indices      = @('### **Indices are UTF-16 code units**, where upstream counts codepoints')
     version      = @('### Version 1 is the default')
 }
 

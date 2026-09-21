@@ -54,11 +54,11 @@ These are not upstream tests, so they do not count towards parity.
 |---|---:|---:|---:|---:|
 | Conventions | 43 | 43 | 0 | 0 |
 | Docs | 36 | 36 | 0 | 0 |
-| Gaps | 4434 | 4434 | 0 | 0 |
+| Gaps | 4441 | 4441 | 0 | 0 |
 
 ## Tests waiting on a capability
 
-What the next slice should deliver, biggest win first.
+What the next slice should build, biggest win first.
 
 None: every test is enabled.
 

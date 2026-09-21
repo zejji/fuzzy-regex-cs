@@ -71,7 +71,7 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
-    /// "`FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first".
+    /// "`FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first".
     /// </summary>
     [Test]
     public void Rank_by_the_best_fuzzy_match_not_the_first()
@@ -176,7 +176,7 @@ public sealed class ComparisonSamples
         (m.LastGroupName ?? "null").Should().Be("null");
     }
 
-    /// <summary>"**Indices are UTF-16 code units**, not codepoints".</summary>
+    /// <summary>"**Indices are UTF-16 code units**, where upstream counts codepoints".</summary>
     [Test]
     public void Indices_are_utf16_code_units_not_codepoints()
     {

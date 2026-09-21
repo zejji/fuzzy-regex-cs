@@ -20,6 +20,46 @@ import { MATCH_TIMEOUT_SECONDS } from './caps';
 import { FLAG_NAMES } from './flags';
 
 /**
+ * Every name from this library that the snippet prints, in one place.
+ *
+ * TypeScript has no `nameof`, so a type or member the generator names is a string literal here, and
+ * a rename in the library would otherwise ship a snippet that does not compile - silently, because
+ * nothing on the page reads the panel's text. The templates below interpolate these rather than
+ * spelling the names out, which is what makes this record the only copy.
+ *
+ * `DemoSnippetTests.The_snippet_names_the_library_the_library_names_itself` holds each entry against
+ * `nameof(...)` on the real API, and the `partial` argument against the method's own
+ * `ParameterInfo`, so a rename fails the build rather than the browser. The keys are roles and not
+ * spellings: `matchType` and `matchMethod` are the same word today and a rename could move one
+ * without the other.
+ *
+ * What is NOT here: `Console`, `TimeSpan`, `Dictionary`, `IReadOnlyCollection` and `string`. Those
+ * are the framework's and nothing in this repository can rename them.
+ */
+export const CSHARP_API = {
+    // The NuGet package, pinned against `<PackageId>` in src/FuzzyRegex/FuzzyRegex.csproj. The same
+    // word as the type today and a separate fact: renaming the type does not rename the package.
+    packageId: 'FuzzyRegex',
+    namespace: 'Fuzzy.Text.RegularExpressions',
+    regexType: 'FuzzyRegex',
+    optionsType: 'FuzzyRegexOptions',
+    matchType: 'Match',
+    countsType: 'FuzzyCounts',
+    enumerateMatches: 'EnumerateMatches',
+    matchMethod: 'Match',
+    replace: 'Replace',
+    partialParameter: 'partial',
+    success: 'Success',
+    index: 'Index',
+    length: 'Length',
+    partialMatch: 'PartialMatch',
+    fuzzyCounts: 'FuzzyCounts',
+    substitutions: 'Substitutions',
+    insertions: 'Insertions',
+    deletions: 'Deletions',
+} as const;
+
+/**
  * What `String.Trim()` strips, which is not what JavaScript's `trim()` strips.
  *
  * Measured on 2026-09-19 by walking the whole BMP: `char.IsWhiteSpace` is true for U+0085 and false
@@ -141,7 +181,9 @@ function options(flags: string): string {
         // or quietly dropping one, would be a snippet that matches something else.
         .map((token) => FLAG_NAMES.find((name) => name.toLowerCase() === token.toLowerCase()) ?? token);
 
-    return (named.length === 0 ? ['None'] : named).map((name) => `FuzzyRegexOptions.${name}`).join(' | ');
+    return (named.length === 0 ? ['None'] : named)
+        .map((name) => `${CSHARP_API.optionsType}.${name}`)
+        .join(' | ');
 }
 
 /**
@@ -185,6 +227,24 @@ function namedLists(block: string): string | null {
  */
 function body(inputs: Inputs): string {
     const subject = literal(inputs.subject, 4);
+    // Destructured so that each template below reads as the C# it prints. The names on the left are
+    // the roles; the values are what the library calls them today.
+    const {
+        matchType: Match,
+        countsType: FuzzyCounts,
+        enumerateMatches: EnumerateMatches,
+        matchMethod: MatchMethod,
+        replace: Replace,
+        partialParameter,
+        success: Success,
+        index: Index,
+        length: Length,
+        partialMatch: PartialMatch,
+        fuzzyCounts: FuzzyCountsOf,
+        substitutions: Substitutions,
+        insertions: Insertions,
+        deletions: Deletions,
+    } = CSHARP_API;
 
     // Read as `DemoEngine.TryParseMode` reads it - `mode.Trim().ToLowerInvariant()` - because the
     // fragment carries the mode as typed and `#m=Partial` is a case the engine answers. Compared
@@ -192,10 +252,10 @@ function body(inputs: Inputs): string {
     const mode = trimmed(inputs.mode).toLowerCase();
 
     if (mode === 'partial') {
-        return `Match match = regex.Match(${subject}, partial: true);
-if (match.Success)
+        return `${Match} match = regex.${MatchMethod}(${subject}, ${partialParameter}: true);
+if (match.${Success})
 {
-    Console.WriteLine($"{match.Index}+{match.Length} partial={match.PartialMatch}");
+    Console.WriteLine($"{match.${Index}}+{match.${Length}} partial={match.${PartialMatch}}");
 }
 `;
     }
@@ -205,15 +265,15 @@ if (match.Success)
     // subject rather than inherit a limit that belongs to this page. The walk below omits the same
     // cap for the same reason. The timeout is not dropped, only moved: it is on the regex above.
     if (mode === 'replace') {
-        return `string replaced = regex.Replace(${subject}, ${literal(inputs.replacement, 4)});
+        return `string replaced = regex.${Replace}(${subject}, ${literal(inputs.replacement, 4)});
 Console.WriteLine(replaced);
 `;
     }
 
-    return `foreach (Match match in regex.EnumerateMatches(${subject}))
+    return `foreach (${Match} match in regex.${EnumerateMatches}(${subject}))
 {
-    FuzzyCounts counts = match.FuzzyCounts;
-    Console.WriteLine($"{match.Index}+{match.Length} s={counts.Substitutions} i={counts.Insertions} d={counts.Deletions}");
+    ${FuzzyCounts} counts = match.${FuzzyCountsOf};
+    Console.WriteLine($"{match.${Index}}+{match.${Length}} s={counts.${Substitutions}} i={counts.${Insertions}} d={counts.${Deletions}}");
 }
 `;
 }
@@ -235,10 +295,10 @@ export function toCSharp(inputs: Inputs): string {
     const timeout = `    TimeSpan.FromSeconds(${MATCH_TIMEOUT_SECONDS})${lists === null ? ');' : ','} // the demo's own timeout`;
 
     return [
-        '// dotnet add package FuzzyRegex',
-        'using Fuzzy.Text.RegularExpressions;',
+        `// dotnet add package ${CSHARP_API.packageId}`,
+        `using ${CSHARP_API.namespace};`,
         '',
-        'FuzzyRegex regex = new(',
+        `${CSHARP_API.regexType} regex = new(`,
         `    ${literal(inputs.pattern, 4)},`,
         `    ${options(inputs.flags)},`,
         timeout,

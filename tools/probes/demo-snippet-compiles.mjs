@@ -17,6 +17,15 @@
 // The project is made in the system temporary directory and not in the repository, deliberately:
 // `Directory.Build.props` here turns analyzers into errors and would compile the snippet under
 // rules a visitor's own project does not have. What is under test is what happens on their machine.
+//
+// S75 (item 4) made it answer rather than only print. It ends on GREEN or on FAILED with a line per
+// fault, and exits 1 on a fault, so the command is a verdict instead of eight screens of C# for a
+// human to read down. It stayed a probe rather than becoming an opt-in test: `DemoSnippetTests`
+// reads `snippet.ts` as TEXT on purpose - that suite also runs published as Native AOT and has no
+// JavaScript runtime to call `toCSharp` with - and a C# copy of the generator would be a second
+// implementation, not a check. The identifier pin
+// (`DemoSnippetTests.The_snippet_names_the_library_the_library_names_itself`) is the half of this
+// that CI can run on every commit; a compiler is the half that needs a compiler.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -112,8 +121,13 @@ if (!existsSync(project)) {
 
 function run(command, args, cwd = repoRoot) {
     const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
-    return `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
+    return {
+        text: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim(),
+        ok: result.status === 0,
+    };
 }
+
+const faults = [];
 
 for (const item of cases) {
     let source = toCSharp(item.inputs);
@@ -129,5 +143,23 @@ for (const item of cases) {
     console.log(`\n=== ${item.name}\n`);
     console.log(source);
     console.log('--- output');
-    console.log(run('dotnet', ['run', '--project', project, '--nologo', '-v', 'quiet'], project));
+
+    const { text, ok } = run('dotnet', ['run', '--project', project, '--nologo', '-v', 'quiet'], project);
+    console.log(text);
+
+    // Two ways to fail, and both have happened: the snippet does not compile at all, and it compiles
+    // but hands the compiler a different string from the one the page holds.
+    if (!ok) faults.push(`${item.name}: dotnet run failed`);
+    for (const line of text.split('\n')) {
+        if (line.trim().endsWith('DIFFERENT')) faults.push(`${item.name}: ${line.trim()}`);
+    }
+}
+
+console.log('');
+if (faults.length === 0) {
+    console.log(`demo-snippet-compiles: GREEN - ${cases.length} snippets compiled, ran and round-tripped`);
+} else {
+    console.log(`demo-snippet-compiles: FAILED - ${faults.length} fault(s)`);
+    for (const fault of faults) console.log(`  ${fault}`);
+    process.exitCode = 1;
 }

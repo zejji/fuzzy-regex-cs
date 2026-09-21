@@ -19,12 +19,12 @@
 /** The four letters a fuzzy budget is written with: total errors, substitutions, insertions, deletions. */
 export type BudgetLetter = 'e' | 's' | 'i' | 'd';
 
-/** A fuzzy budget in a pattern that allows any number of errors of one kind. */
+/** A fuzzy budget in a pattern that allows any number of errors of at least one kind. */
 export interface UnboundedBudget {
     /** The budget exactly as the pattern writes it, braces included. */
     readonly spec: string;
-    /** The letter that has no bound. */
-    readonly letter: BudgetLetter;
+    /** Every letter that has no bound, in the order the budget writes them. */
+    readonly letters: readonly BudgetLetter[];
 }
 
 /** What each letter counts, in the words the line uses. */
@@ -42,12 +42,25 @@ const KINDS: Record<BudgetLetter, string> = {
  * rule to derive. The copy linter reads these sentences through `tests/copy-sources.ts`.
  */
 export function budgetNote(budget: UnboundedBudget): string {
-    // The bound goes into the budget the pattern already has, so a test on which characters an
-    // edit may touch - `{e:[a-z]}` - keeps its test: dropping it would be different advice.
-    const bounded = budget.spec.replace(budget.letter, `${budget.letter}<=2`);
+    // Every unbounded kind, because bounding one of two leaves the other running: `{i<=2,d}`
+    // matches as widely as `{i,d}` does (19 matches in nine characters, regex 2026.9.10,
+    // 2026-09-21). The bound goes into the budget the pattern already has, so a test on which
+    // characters an edit may touch - `{e:[a-z]}` - keeps its test: dropping it would be different
+    // advice. Each letter is replaced at its first occurrence, which is that letter's own item: a
+    // letter a cost equation prices is bounded and so is never one of these, and the items of a
+    // budget all come before the `:` that introduces the test. Without the first of those,
+    // `{1i+1d<3,i}` would be advised as `{1i<=2+1d<3,i}`, which upstream refuses to compile
+    // ("expected } at position 16", regex 2026.9.10, 2026-09-21).
+    let bounded = budget.spec;
+    for (const letter of budget.letters) bounded = bounded.replace(letter, `${letter}<=2`);
+
+    const kinds = budget.letters.map((letter) => KINDS[letter]);
+    const allows = kinds.length === 1 ? kinds[0] : `${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]}`;
+    const each = kinds.length === 1 ? '' : ' of each';
+
     return (
-        `${budget.spec} allows any number of ${KINDS[budget.letter]}, so a match can be any distance ` +
-        `from the pattern. Write ${bounded} to allow at most two.`
+        `${budget.spec} allows any number of ${allows}, so a match can be any distance ` +
+        `from the pattern. Write ${bounded} to allow at most two${each}.`
     );
 }
 
@@ -97,8 +110,8 @@ export function unboundedBudget(pattern: string): UnboundedBudget | null {
         const parsed = parseFuzzy(pattern, at);
         if (parsed === null) continue;
 
-        const letter = unboundedLetter(parsed.items, parsed.hasCostEquation);
-        if (letter !== null) return { spec: pattern.slice(at, parsed.end), letter };
+        const letters = unboundedLetters(parsed.items, parsed.free);
+        if (letters.length > 0) return { spec: pattern.slice(at, parsed.end), letters };
 
         at = parsed.end - 1;
     }
@@ -107,27 +120,36 @@ export function unboundedBudget(pattern: string): UnboundedBudget | null {
 }
 
 /**
- * Which letter of a budget allows any number of errors, or null when none does.
+ * Which letters of a budget allow any number of errors, empty when none does.
  *
  * `Fuzzy.__init__`, upstream line 2796 onwards, in the order it applies its defaults.
  */
-function unboundedLetter(items: readonly Item[], hasCostEquation: boolean): BudgetLetter | null {
-    // A cost equation carries its own maximum, and every kind it names costs at least one by the
-    // time the page sees it, so the count each kind can reach is bounded by what the equation
-    // affords. `{0i+1d<3}` - a kind priced at nothing - is the exception, and is not worth the
-    // machinery: the page then stays quiet, which is the safe way to be wrong.
-    if (hasCostEquation) return null;
+function unboundedLetters(items: readonly Item[], free: boolean): BudgetLetter[] {
+    // A kind a cost equation prices at nothing is unbounded - `{0d+1i<3}` deletes freely, measured
+    // 2026-09-21 - and the page says nothing about it anyway, because the advice would have to
+    // re-price somebody's equation rather than add a bound to it. Every other kind the equation
+    // names costs at least one, so what it can reach is bounded by what the equation affords, and
+    // those kinds arrive here as bounded items.
+    if (free) return [];
 
     const named = items.filter((item) => item.letter !== 'e');
     const total = items.find((item) => item.letter === 'e');
-    if (total !== undefined && total.bounded) return null;
+    if (total !== undefined && total.bounded) return [];
 
     // No kind named: each of the three defaults to unlimited, and `e` has no bound either.
-    if (named.length === 0) return total === undefined ? null : 'e';
+    if (named.length === 0) return total === undefined ? [] : ['e'];
 
-    // A kind named without a bound. Every kind nobody named is zero, so this is the only way what
-    // is left can run away.
-    return named.find((item) => !item.bounded)?.letter ?? null;
+    // The kinds named without a bound. Every kind nobody named is zero, so these are the only ways
+    // what is left can run away, and all of them have to be bounded for the pattern to be.
+    //
+    // A kind can be named twice: once as a constraint and once with a price, which upstream allows
+    // even though two constraints on one kind are a parse error. The price wins, because it binds
+    // whatever the constraint says - `(?:colour){i,1i+1d<3}` and `{1i+1d<3,i}` both fail to insert
+    // the six characters that `{i}` alone inserts (measured, regex 2026.9.10, 2026-09-21).
+    const bounded = new Set(named.filter((item) => item.bounded).map((item) => item.letter));
+    return named
+        .filter((item) => !item.bounded && !bounded.has(item.letter))
+        .map((item) => item.letter);
 }
 
 /**
@@ -137,10 +159,11 @@ function unboundedLetter(items: readonly Item[], hasCostEquation: boolean): Budg
  * restores its position and reads the braces as text in exactly those cases, so a pattern this
  * returns null for is a pattern with no budget at that brace.
  */
-function parseFuzzy(pattern: string, from: number): { items: Item[]; hasCostEquation: boolean; end: number } | null {
+function parseFuzzy(pattern: string, from: number): { items: Item[]; free: boolean; end: number } | null {
     let at = from + 1;
     const items: Item[] = [];
-    let hasCostEquation = false;
+    let equations = 0;
+    let free = false;
     const seen = new Set<string>();
 
     for (;;) {
@@ -153,8 +176,12 @@ function parseFuzzy(pattern: string, from: number): { items: Item[]; hasCostEqua
             seen.add(item.constraint.letter);
             items.push(item.constraint);
         } else {
-            if (hasCostEquation) return null;
-            hasCostEquation = true;
+            if (equations > 0) return null;
+            equations += 1;
+            // A kind the equation prices is bounded by the equation, so it joins the items as
+            // one; a kind priced at nothing is the case the page keeps quiet about.
+            items.push(...item.priced);
+            free = item.priced.some((kind) => !kind.bounded);
         }
 
         at = item.end;
@@ -171,19 +198,19 @@ function parseFuzzy(pattern: string, from: number): { items: Item[]; hasCostEqua
     }
 
     if (pattern[at] !== '}') return null;
-    return { items, hasCostEquation, end: at + 1 };
+    return { items, free, end: at + 1 };
 }
 
-/** One item: a constraint on a kind, or a cost equation. */
+/** One item: a constraint on a kind, or a cost equation and the kinds it prices. */
 function parseItem(
     pattern: string,
     from: number,
-): { constraint: Item | null; end: number } | null {
+): { constraint: Item | null; priced: Item[]; end: number } | null {
     const constraint = parseConstraint(pattern, from);
-    if (constraint !== null) return { constraint: constraint.item, end: constraint.end };
+    if (constraint !== null) return { constraint: constraint.item, priced: [], end: constraint.end };
 
     const equation = parseCostEquation(pattern, from);
-    return equation === null ? null : { constraint: null, end: equation.end };
+    return equation === null ? null : { constraint: null, priced: equation.priced, end: equation.end };
 }
 
 /** `letter [("<=" | "<") count]`, or `count ("<=" | "<") letter ("<=" | "<") count`. */
@@ -217,12 +244,25 @@ function parseConstraint(pattern: string, from: number): { item: Item; end: numb
     return { item: { letter: letter as BudgetLetter, bounded: true }, end: max };
 }
 
-/** `count? kind ("+" count? kind)* ("<=" | "<") count`, where a kind is one of `d`, `i`, `s`. */
-function parseCostEquation(pattern: string, from: number): { end: number } | null {
+/**
+ * `count? kind ("+" count? kind)* ("<=" | "<") count`, where a kind is one of `d`, `i`, `s`.
+ *
+ * The kinds come back with the cost read: a kind that costs something is bounded by what the
+ * equation affords, and a kind priced at zero - `{0d+1i<3}` - buys as many errors as it likes. An
+ * absent count is one, as upstream's `parse_fuzzy_item` reads it.
+ */
+function parseCostEquation(pattern: string, from: number): { priced: Item[]; end: number } | null {
     let at = from;
+    const priced: Item[] = [];
     for (;;) {
+        const cost = at;
         while (DIGITS.includes(pattern[at] ?? '')) at += 1;
-        if (!'dis'.includes(pattern[at] ?? '')) return null;
+        const letter = pattern[at] ?? '';
+        if (!'dis'.includes(letter)) return null;
+        priced.push({
+            letter: letter as BudgetLetter,
+            bounded: at === cost || Number(pattern.slice(cost, at)) >= 1,
+        });
         at += 1;
         if (pattern[at] !== '+') break;
         at += 1;
@@ -231,7 +271,7 @@ function parseCostEquation(pattern: string, from: number): { end: number } | nul
     const compare = parseCompare(pattern, at);
     if (compare === null) return null;
     const max = parseCount(pattern, compare);
-    return max === null ? null : { end: max };
+    return max === null ? null : { priced, end: max };
 }
 
 /** Where a `<=` or `<` ends, or null when there is neither. */

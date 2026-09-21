@@ -7,21 +7,21 @@ design spec section 8 and amendments 9-10.
 
 1. **A finding is a hypothesis.** Reproduce it yourself - run the command, read the output - before
    changing a line. Roughly four in five candidate findings do not survive this.
-2. **No reproduction, no finding.** Reject prose rationale, style opinions and speculative rewrites
+2. **Require a reproduction.** Reject prose rationale, style opinions and speculative rewrites
    unread.
 3. **Never ask a reviewer for explanations or proposed corrections.** Those prompts measurably raise
    misjudgement. Ask only for `file:line`, a one-line defect, and the exact command and its output.
-4. **One pass per unreviewed change, not per slice.** If the fixes add public API, change tooling, or
+4. **One pass per unreviewed change, rather than per slice.** If the fixes add public API, change tooling, or
    touch anything the reviewer never saw, that delta gets its own first pass. Coverage and iteration
    are different axes.
 5. **No critique loops.** Reviewer opines, code changes, reviewer opines again is banned.
-6. **Repair against execution feedback is not a critique loop.** A red ratchet, a failing test or an
-   oracle divergence is ground truth, not an opinion. Two rounds, then stop and think rather than
-   take another swing.
-7. **Passing the ported suite is evidence of parity, not proof.** From phase 3, run the differential
+6. **Repair against execution feedback is exempt from rule 5.** A red ratchet, a failing test or an
+   oracle divergence is ground truth rather than an opinion. Two rounds, then stop and think instead
+   of taking another swing.
+7. **Passing the ported suite is evidence of parity without proving it.** From phase 3, run the differential
    oracle locally before committing any slice that touches the engine, and minimise every divergence
    into a permanent test.
-7a. **A wave counts at THREE SEEDS and not before.** `tools/run-oracle.ps1` runs three by default -
+7a. **A wave counts only at THREE SEEDS.** `tools/run-oracle.ps1` runs three by default -
    7, 4242 and the run's date - and is green only when every one of them is. One seed is how four
    divergence families stayed hidden from S14 to S33: every slice ran one, each happened to be
    clean, and "the wave is green" was concluded from it every time. A single-seed run is for
@@ -42,10 +42,10 @@ design spec section 8 and amendments 9-10.
    the same way and satisfy every invariant, which is what the second engines in
    `docs/plan/OPERATIONS.md` are the third leg for - and what makes the FUZZY rows the thin ice,
    since TRE answered 10 of 126,240 wave rows and none of this slice's violations.
-8. **Prove the test fails without the fix.** A test that cannot go red is not a test. Mutate it once
+8. **Prove the test fails without the fix.** A test that cannot go red proves nothing. Mutate it once
    and watch it fail.
-9. **Verify on real output**, not just on green tests: the actual rows, the rendered file, the built
-   artifact. State what you checked and what you saw.
+9. **Verify on real output.** Green tests alone are not enough: read the actual rows, the rendered
+   file, the built artifact. State what you checked and what you saw.
 
 ## Reviewer brief
 

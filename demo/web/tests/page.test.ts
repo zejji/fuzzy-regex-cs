@@ -21,7 +21,7 @@ const styles = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf
 
 import App from '../src/App.vue';
 import { CHECKBOXES, FLAG_HELP, FLAG_NAMES, RADIO_GROUPS } from '../src/lib/flags';
-import { HEADING_NOTES, noteButtonId, noteId } from '../src/lib/help-notes';
+import { HEADING_NOTES, noteButtonId, noteId, PEEK_GRACE_MS } from '../src/lib/help-notes';
 import { toCSharp } from '../src/lib/snippet';
 import type { Edits, Group, Inputs, Match } from '../src/types';
 
@@ -127,6 +127,8 @@ afterEach(() => {
     Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // Whichever test took the clock over hands it back, since `restoreAllMocks` does not.
+    vi.useRealTimers();
 });
 
 /** Mounts the page, waits for its first answer, and hands back the page and the state behind it. */
@@ -144,6 +146,24 @@ async function mountPage() {
 }
 
 const keydown = (key: string) => new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+
+/**
+ * Takes the clock over, so a test about the note's grace measures the grace and not the machine.
+ *
+ * {@link PEEK_GRACE_MS} is 400 ms and a real sleep of half that is a race: a loaded machine can
+ * spend 200 ms between the two lines of a test, and the failure reads as a note that closed too
+ * early rather than as a slow build. Called after `mountPage`, whose wait for the first answer
+ * needs the real clock. `afterEach` gives the clock back.
+ */
+const holdTheClock = (): void => {
+    vi.useFakeTimers();
+};
+
+/** Moves the fake clock on and lets the page re-render. */
+const advance = async (ms: number): Promise<void> => {
+    vi.advanceTimersByTime(ms);
+    await settle();
+};
 
 /** Lets a render, and the focus move queued behind it, both happen. */
 const settle = async (): Promise<void> => {
@@ -813,8 +833,12 @@ test('a marked run says where the error was spent, on a pointer and on a tap', a
     await hover(2, 'mouseenter');
     expect(note.textContent?.trim()).toBe('deletion before index 6');
 
-    // The pointer leaving takes the note with it, the way the flag help behaves.
+    // The pointer leaving takes the note with it, the way the flag help behaves - after the grace
+    // that lets a pointer travel to the note instead (WCAG 1.4.13, PEEK_GRACE_MS).
     await hover(2, 'mouseleave');
+    expect(note.hidden).toBe(false);
+    await sleep(PEEK_GRACE_MS * 2);
+    await settle();
     expect(note.hidden).toBe(true);
 
     // A tap leaves no pointer behind to hold the note open, so a press pins it (WCAG 1.4.13
@@ -1300,10 +1324,13 @@ test('losing the answer while the C# panel is open keeps the focus on the page',
  * The keyboard's way past the input pane.
  *
  * Measured at 1920x1080, 1440x900, 1366x768 and 1024x768 (`tools/probes/s73-widths.mjs`,
- * 2026-09-20): twenty-six tabs from the top of the page to the first control in the answer,
- * eighteen of them example buttons, because above the gate the examples region is always open. The
- * phone is six, since the same region is behind a closed disclosure there. One link at the front of
+ * re-run 2026-09-21): thirty-two tabs from the top of the page to the first control in the answer,
+ * nineteen of them example buttons, because above the gate the examples region is always open. The
+ * phone is nine, since the same region is behind a closed disclosure there. One link at the front of
  * the document makes it one at every width.
+ *
+ * It was twenty-six and six when S73 measured it. The six heading notes and the tab row arrived
+ * between, and so did a nineteenth example.
  */
 test('the first thing the keyboard reaches is the way to the answer', async () => {
     const { page } = await mountPage();
@@ -1516,12 +1543,13 @@ test('each flag explains itself in the library own words, and Escape puts it awa
     expect(button.getAttribute('aria-expanded')).toBe('false');
     expect(text.textContent?.trim()).toBe(FLAG_HELP.BestMatch);
 
-    // A pointer resting on it: shown while it is there, gone when it leaves.
+    // A pointer resting on it: shown while it is there, gone a grace after it leaves.
     button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     await settle();
     expect(text.hidden).toBe(false);
     expect(button.getAttribute('aria-expanded')).toBe('true');
     button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await sleep(PEEK_GRACE_MS * 2);
     await settle();
     expect(text.hidden).toBe(true);
 
@@ -1563,6 +1591,7 @@ test('the keyboard opens a flag help and closes it again', async () => {
     expect(text.hidden).toBe(false);
 
     button.blur();
+    await sleep(PEEK_GRACE_MS * 2);
     await settle();
     expect(text.hidden).toBe(true);
 });
@@ -1676,5 +1705,117 @@ test('Escape puts the help away when the pointer opened it and the focus is else
 
     patternBox.dispatchEvent(keydown('Escape'));
     await settle();
+    expect(text.hidden).toBe(true);
+});
+
+/**
+ * The dead tab stop a peeked note left behind.
+ *
+ * Focusing a `(?)` opens its note and leaving the button shuts it again. While the note's link was
+ * a tab stop, the browser picked the link as the next stop and the blur then took it out of the
+ * page, so the focus landed on the document instead: one press of Tab that appears to do nothing.
+ * Measured in Chrome against the published build (2026-09-21): from
+ * `#heading-help-button-pattern`, the first Tab reached BODY and the second reached `#pattern`,
+ * while tabbing out of a note the visitor had clicked open reached `note-link`. Four such stops
+ * above the gate, one per note on screen.
+ */
+test('a note opened by the focus keeps its link out of the tab order', async () => {
+    const { page } = await mountPage();
+    const { button, text, link } = headingHelp(page, 'pattern');
+
+    button.focus();
+    await settle();
+    expect(text.hidden).toBe(false);
+    expect(link.tabIndex).toBe(-1);
+
+    // Clicked open, the note stays put when the focus leaves the button, so the link is somewhere
+    // the keyboard can get to and has to be in the tab order.
+    button.click();
+    await settle();
+    expect(link.tabIndex).toBe(0);
+});
+
+/**
+ * WCAG 1.4.13 "Hoverable": the pointer has to be able to reach content that hover revealed
+ * (https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html, read 2026-09-21).
+ *
+ * The note is not against the `(?)`. It sits under the heading row, where it pushes the input down
+ * rather than covering it, so a pointer travelling to it is over neither for a few frames. A note
+ * that closed on the button's `mouseleave` was gone before the pointer arrived, which is that
+ * criterion's documented failure F95. It now waits {@link PEEK_GRACE_MS}, and the note's own
+ * `mouseenter` cancels the wait.
+ */
+test('the pointer can travel from a heading (?) to its note', async () => {
+    const { page } = await mountPage();
+    const { button, text } = headingHelp(page, 'pattern');
+    holdTheClock();
+
+    button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    // Off the button, and part of the way across the gap. The assertion is here rather than only
+    // after the arrival: a note that closes on `mouseleave` and re-opens when the pointer lands on
+    // it passes an end-state check while failing the criterion, because what the visitor sees is a
+    // sentence that flickers out from under them.
+    button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await advance(PEEK_GRACE_MS / 2);
+    expect(text.hidden, 'the note went away before the pointer could reach it').toBe(false);
+
+    // Arrived. It stays for as long as the pointer is on it, which is longer than the grace.
+    text.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await advance(PEEK_GRACE_MS * 2);
+    expect(text.hidden).toBe(false);
+
+    // And away: the pointer leaves the note itself, so nothing is holding it open.
+    text.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await advance(PEEK_GRACE_MS * 2);
+    expect(text.hidden).toBe(true);
+});
+
+test('the pointer can travel from a flag (?) to its sentence', async () => {
+    const { page } = await mountPage();
+    const { help } = flagsPanel(page);
+    const { button, text } = help('BestMatch');
+    holdTheClock();
+
+    button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    button.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await advance(PEEK_GRACE_MS / 2);
+    expect(text.hidden, 'the sentence went away before the pointer could reach it').toBe(false);
+
+    text.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await advance(PEEK_GRACE_MS * 2);
+    expect(text.hidden).toBe(false);
+});
+
+/**
+ * The other half of "Hoverable": what holds the note open is the pointer on it, not the `(?)`.
+ *
+ * A note can be open with the focus on its button and the pointer on the note itself - Tab to the
+ * `(?)`, then read the sentence with the pointer over it, which is what somebody under
+ * magnification does. The focus then leaving the button is not the pointer leaving the note, and
+ * the sentence must stay while it is being pointed at.
+ */
+test('a note under the pointer survives the (?) losing the focus', async () => {
+    const { page } = await mountPage();
+    const { button, text } = headingHelp(page, 'pattern');
+    holdTheClock();
+
+    button.focus();
+    await settle();
+    expect(text.hidden).toBe(false);
+
+    text.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    button.blur();
+    await advance(PEEK_GRACE_MS * 2);
+    expect(text.hidden, 'the note closed under the pointer when the button lost the focus').toBe(false);
+
+    // The pointer leaving it is the close it was waiting for.
+    text.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    await advance(PEEK_GRACE_MS * 2);
     expect(text.hidden).toBe(true);
 });

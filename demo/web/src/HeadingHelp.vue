@@ -8,7 +8,7 @@
 //
 // No prose lives here. Every word a visitor reads comes from `HEADING_NOTES`, which the copy linter
 // reads - a string typed into this template would be prose nothing lints.
-import { noteButtonId, noteId, type HeadingNote } from './lib/help-notes';
+import { noteButtonId, noteId, type HeadingAsk, type HeadingNote } from './lib/help-notes';
 
 withDefaults(
     defineProps<{
@@ -16,16 +16,22 @@ withDefaults(
         /** Whether this note is the open one. */
         open: boolean;
         /**
+         * Whether the visitor asked for it, rather than the note being open under the pointer or
+         * the focus. A peeked note goes away the moment the focus leaves the `(?)`, which is why
+         * its link is not a tab stop.
+         */
+        pinned?: boolean;
+        /**
          * The element the heading row is. `legend` for the Mode fieldset, whose legend must be the
          * fieldset's first child and so cannot be wrapped in anything.
          */
         as?: 'div' | 'legend';
     }>(),
-    { as: 'div' },
+    { as: 'div', pinned: false },
 );
 
 /** What the visitor did, for App.vue to answer: the four states WCAG 1.4.13 asks a note to have. */
-const emit = defineEmits<{ ask: ['toggle' | 'peek' | 'unpeek' | 'follow'] }>();
+const emit = defineEmits<{ ask: [HeadingAsk] }>();
 </script>
 
 <template>
@@ -52,9 +58,32 @@ const emit = defineEmits<{ ask: ['toggle' | 'peek' | 'unpeek' | 'follow'] }>();
       that is in the page, and `hidden` takes it out of the accessibility tree as well as off the
       screen.
     -->
-    <p :id="noteId(note.id)" class="flag-help" :hidden="!open">
+    <!--
+      The note holds itself open while the pointer is on it, which with the grace in App.vue is
+      WCAG 1.4.13 "Hoverable": the pointer can cross the gap from the `(?)` and read the sentence.
+      Its own asks, not the button's, so that the button losing the focus or the pointer does not
+      shut a sentence somebody is reading.
+    -->
+    <p
+        :id="noteId(note.id)"
+        class="flag-help"
+        :hidden="!open"
+        @mouseenter="emit('ask', 'peek-note')"
+        @mouseleave="emit('ask', 'unpeek-note')"
+    >
         {{ note.note }}
-        <button class="note-link" type="button" @click="emit('ask', 'follow')">
+        <!--
+          Out of the tab order while the note is only peeked. The `(?)` opens the note when it
+          takes the focus and shuts it when it loses it, so a link that was a tab stop was chosen
+          as the next stop and then removed from the page before the focus arrived - one Tab that
+          landed on the document and appeared to do nothing. Measured in Chrome, 2026-09-21.
+        -->
+        <button
+            class="note-link"
+            type="button"
+            :tabindex="pinned ? 0 : -1"
+            @click="emit('ask', 'follow')"
+        >
             {{ note.linkText }}
         </button>
     </p>

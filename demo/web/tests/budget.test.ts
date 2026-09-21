@@ -21,16 +21,29 @@ import { budgetNote, unboundedBudget } from '../src/lib/budget';
 
 describe('a budget with no bound is named', () => {
     it.each([
-        ['(?:colour){e}', '{e}', 'e'],
-        ['(?:colour){s}', '{s}', 's'],
-        ['(?:colour){i}', '{i}', 'i'],
-        ['(?:colour){d}', '{d}', 'd'],
+        ['(?:colour){e}', '{e}', ['e']],
+        ['(?:colour){s}', '{s}', ['s']],
+        ['(?:colour){i}', '{i}', ['i']],
+        ['(?:colour){d}', '{d}', ['d']],
         // A test on the errors bounds which characters an edit may touch, not how many there are.
-        ['(?:colour){e:[a-z]}', '{e:[a-z]}', 'e'],
+        ['(?:colour){e:[a-z]}', '{e:[a-z]}', ['e']],
         // The second spec is the unbounded one, and the page names the one it found.
-        ['(?:a){e<=1}(?:b){d}', '{d}', 'd'],
-    ])('%s is unbounded', (pattern, spec, letter) => {
-        expect(unboundedBudget(pattern)).toEqual({ spec, letter });
+        ['(?:a){e<=1}(?:b){d}', '{d}', ['d']],
+        // Two kinds named and neither bounded, which is every letter that can still run away.
+        // Bounding one of them is not enough: `(?:colour){i<=2,d}` matches 19 times in nine
+        // characters, the same as `{i,d}` (regex 2026.9.10, measured 2026-09-21).
+        ['(?:colour){i,d}', '{i,d}', ['i', 'd']],
+        ['(?:colour){s,i,d}', '{s,i,d}', ['s', 'i', 'd']],
+        // One of the two bounded, so only the other is named.
+        ['(?:colour){s<=1,d}', '{s<=1,d}', ['d']],
+        // A cost equation prices the kinds it names and leaves the rest at zero, so a kind named
+        // beside it without a bound is the one that runs away: `{d,1i+1s<3}` deletes the whole
+        // pattern (`fuzzy_counts=(0, 0, 6)` against the empty string), and `{d<=2,1i+1s<3}` finds
+        // nothing in nine characters (regex 2026.9.10, measured 2026-09-21).
+        ['(?:colour){d,1i+1s<3}', '{d,1i+1s<3}', ['d']],
+        ['(?:colour){s,1i+1d<3}', '{s,1i+1d<3}', ['s']],
+    ])('%s is unbounded', (pattern, spec, letters) => {
+        expect(unboundedBudget(pattern)).toEqual({ spec, letters });
     });
 });
 
@@ -44,10 +57,25 @@ describe('a budget that is bounded is left alone', () => {
         // Unbounded in `e`, but naming `s` puts insertions and deletions at zero, so the total is
         // the one substitution `s<=1` allows. Measured, not reasoned about: see the header.
         '(?:colour){s<=1,e}',
-        // A cost equation carries its own maximum, so the count each kind is allowed is bounded by
-        // what the equation can afford.
+        // A cost equation prices every kind it names at one or more, so what each can reach is
+        // bounded by what the equation affords, and every kind it does not name is zero.
         '(?:colour){1i+1d<3}',
         '(?:colour){2i+2d+1s<=4}',
+        '(?:colour){d<=1,1i+1s<3}',
+        // A kind priced at nothing IS unbounded - `{0d+1i<3}` deletes freely - and the page still
+        // says nothing, because the advice it would give is the advice it cannot write: `d<=2`
+        // beside a price for `d` is a re-use of the constraint, and re-pricing somebody's equation
+        // is a rewrite rather than a bound. Silence is the safe way to be wrong here.
+        '(?:colour){0d+1i<3}',
+        '(?:colour){0i+1d<3}',
+        // A kind can carry a price AND a constraint, which upstream allows even though two
+        // constraints on one kind are a parse error, and the price binds it either way round:
+        // `{i}` alone inserts six characters into "czozlzozuzzr" and neither of these matches it
+        // at all (regex 2026.9.10, measured 2026-09-21).
+        '(?:colour){i,1i+1d<3}',
+        '(?:colour){1i+1d<3,i}',
+        '(?:colour){d,1d+1i<3}',
+        '(?:colour){s,1i+1s<3}',
     ])('%s says nothing', (pattern) => {
         expect(unboundedBudget(pattern)).toBeNull();
     });
@@ -60,15 +88,31 @@ describe('the line under the pattern', () => {
         ['{i}', 'i', '{i} allows any number of insertions', 'Write {i<=2} to allow at most two.'],
         ['{d}', 'd', '{d} allows any number of deletions', 'Write {d<=2} to allow at most two.'],
     ])('%s names what it allows and how to bound it', (spec, letter, opening, advice) => {
-        const note = budgetNote({ spec, letter: letter as 'e' | 's' | 'i' | 'd' });
+        const note = budgetNote({ spec, letters: [letter as 'e' | 's' | 'i' | 'd'] });
         expect(note).toContain(opening);
         expect(note).toContain(advice);
+    });
+
+    it('bounds every kind that has no bound, because bounding one leaves the rest running', () => {
+        // `{i<=2,d}` matches as widely as `{i,d}` does, so advice that stopped at the first letter
+        // would be advice that does not work: 19 matches in nine characters either way.
+        const note = budgetNote({ spec: '{i,d}', letters: ['i', 'd'] });
+        expect(note).toContain('{i,d} allows any number of insertions or deletions');
+        expect(note).toContain('Write {i<=2,d<=2} to allow at most two of each.');
+    });
+
+    it('names three kinds as a list', () => {
+        expect(budgetNote({ spec: '{s,i,d}', letters: ['s', 'i', 'd'] })).toContain(
+            'any number of substitutions, insertions or deletions',
+        );
     });
 
     it('keeps the test on which characters an edit may touch', () => {
         // `{e<=2}` would be different advice from `{e<=2:[a-z]}`: it drops the restriction the
         // pattern already has, which is not what the reader asked for.
-        expect(budgetNote({ spec: '{e:[a-z]}', letter: 'e' })).toContain('Write {e<=2:[a-z]} to allow at most two.');
+        expect(budgetNote({ spec: '{e:[a-z]}', letters: ['e'] })).toContain(
+            'Write {e<=2:[a-z]} to allow at most two.',
+        );
     });
 });
 

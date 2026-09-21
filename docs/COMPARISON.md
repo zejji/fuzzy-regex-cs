@@ -178,7 +178,7 @@ Match rejected = FuzzyRegex.FullMatch("a-", @"(?:a){e<=1:[a-z]}");
 Console.WriteLine(rejected.Success);   // False - the inserted '-' is not in [a-z]
 ```
 
-### `FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first
+### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first
 
 Without this flag, fuzzy matching stops at the first match that satisfies the budget, scanning
 left to right. With it, the engine keeps looking and reports the best-fitting one instead - here,
@@ -297,9 +297,9 @@ Match backwards = FuzzyRegex.Match("one two three", @"\w+", FuzzyRegexOptions.Ri
 Console.WriteLine(backwards.Value);   // three
 ```
 
-This is not `RegexOptions.RightToLeft`'s meaning by accident - the built-in engine's flag does the
-same thing - but the name is the only part the two share: `FuzzyRegexOptions` carries upstream's bit
-values, not `RegexOptions`'s. The one place a reversed search answers differently from upstream is a
+The built-in engine's flag does the same thing, so the meaning carries over from it. The name is the
+only part the two share: `FuzzyRegexOptions` carries upstream's bit values rather than
+`RegexOptions`'s. The one place a reversed search answers differently from upstream is a
 reversed *partial* match at a slice start; see "**Reversed partial matches run out of text at the
 slice start**" below.
 
@@ -359,9 +359,9 @@ so every call is already concurrent; there is no parameter and no observable beh
 ### A `Match` may be read from any thread, where `System.Text.RegularExpressions.Match` may not
 
 A `Match` this library returns holds a copy of everything it reports, so it can be read from several
-threads at once with no synchronisation. This is a stronger guarantee than the built-in `Regex`
-documents, not an example of different output, so there is nothing to print - the difference is in
-what is safe to do, not in what a call returns.
+threads at once with no synchronisation. The built-in `Regex` documents no such guarantee, so there
+is nothing to print here: the difference is in what is safe to do with the answer, and a call
+returns the same thing either way.
 
 ### A `CancellationToken` on every input-dependent method
 
@@ -441,7 +441,7 @@ Console.WriteLine(m.LastGroupNumber);   // 2 - group 1 never took part
 Console.WriteLine(m.LastGroupName ?? "null");     // null - group 2 has no name
 ```
 
-### **Indices are UTF-16 code units**, not codepoints
+### **Indices are UTF-16 code units**, where upstream counts codepoints
 
 `Index`, `Length` and `FuzzyRegexParseException.Offset` all count UTF-16 code units, matching
 `System.Text.RegularExpressions`. Upstream counts Unicode codepoints, so a subject containing a
@@ -459,8 +459,8 @@ Console.WriteLine(m.Index);   // 2 - upstream reports 1
 ### Upstream's `pos`/`endpos` are reshaped to `beginning`/`length`
 
 Every method that takes a starting position and a limit takes `beginning` and `length`, where
-`length` is a length in UTF-16 code units and `-1` means "the rest of the subject" - not an end
-index, and not upstream's Python-slice reading of a negative `endpos`.
+`length` is a length in UTF-16 code units and `-1` means "the rest of the subject": neither an end
+index nor upstream's Python-slice reading of a negative `endpos`.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -558,8 +558,8 @@ Console.WriteLine(string.Join("|", pattern.Split("a1b").Select(static s => s ?? 
 
 ### Replacement templates speak upstream's language
 
-Replacement templates use `\1`, `\g<name>`, `\n`, `\x41` and `\N{...}` - upstream's escape
-character is `\`, not `Regex`'s `$1`. `$` is ordinary text in these templates.
+Replacement templates use `\1`, `\g<name>`, `\n`, `\x41` and `\N{...}`: the escape character is
+upstream's `\` where `Regex` uses `$`. `$` is ordinary text in these templates.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -710,8 +710,7 @@ against `CharUnicodeInfo` directly, which is internal engine behaviour rather th
 A named character *sequence* (multiple codepoints under one `\N{...}` name, as opposed to a single
 named character) is not recognised; this port reports "undefined character name" where upstream
 raises `TypeError` when it tries to call `ord()` on the multi-codepoint result. Both engines reject
-the pattern, so the only observable difference is the error type and message, not whether it
-compiles.
+the pattern, so the only observable difference is in the error type and message.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -844,8 +843,8 @@ var strict = new FuzzyRegex(
 );
 ```
 
-Two details worth knowing. The budget counts the nodes compiling *creates*, not the nodes the
-finished pattern keeps: the optimiser prunes about half of a counted repeat's graph afterwards, and
+Two details worth knowing. The budget counts the nodes compiling *creates* rather than the nodes
+the finished pattern keeps: the optimiser prunes about half of a counted repeat's graph afterwards, and
 the memory has already been spent by then, so a graph that is refused may be smaller than the budget
 once finished. And there is no "unlimited" value, deliberately - `int.MaxValue` nodes is around
 500 GB.

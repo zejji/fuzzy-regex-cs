@@ -196,3 +196,106 @@ pay for engine work.
 - **Items 4 and 5** untouched.
 - **The whole slice's blind review and verifier** are outstanding, over both sittings' changes.
 - Reference screenshots at 1366x768 and 390x844 once item 3 lands.
+
+## Sitting 3 - 2026-09-21
+
+Items 3, 4 and 5, the reference screenshots, and the slice's reviews. Green at the end: 413 web
+tests, `vue-tsc` clean, 123 Pester tests, ratchet GREEN at 6487, WASM smoke GREEN over 58 published
+endpoints.
+
+### Done
+
+- **Item 3.** The worked example - `(?:colour){e<=2:[a-z]}` over "colour, color, col our and
+  col0ur" - is the nineteenth example button, keyed `fuzzy-test-set`, and its help note is linted.
+  Run against this port as well as against Python: `tools/probes/s75-example-test-set.py` and
+  `tools/probes/s75-example-test-set.cs`, same spans row for row.
+- **Item 4.** The C# snippet's identifiers are pinned by a probe that compiles the snippet the page
+  writes rather than comparing it to a stored string: `tools/probes/demo-snippet-compiles.mjs`.
+- **Item 5.** The copy linter reads the seven documents and the public XML doc comments as well as
+  the page. It found 43 phrasings in the documents and 18 in the doc comments; both are 0 now, and
+  the allow list is still empty.
+
+### How to re-run this sitting's measurements
+
+All three need a published build served on port 8213:
+
+```powershell
+pwsh -File tools/run-wasm-smoke.ps1 -SkipWebBuild     # writes the publish
+node tools/probes/serve-demo-publish.mjs --root demo/FuzzyRegex.Demo.Wasm/bin/Release/net10.0/publish/wwwroot
+```
+
+Then `browser_run_code_unsafe` with `filename` set to each probe:
+
+| Probe | What it answers | This sitting's numbers |
+|---|---|---|
+| `tools/probes/s73-widths.mjs` | tab stops to the answer, clipping, focus rings | 32 tabs at 1920, 1440, 1366 and 1024; 9 on the phone; `aboveTheFold:true`, `clipped:0`, `ringless:[]`, `offscreen:[]` |
+| `tools/probes/s75-reference-screenshots.mjs` | the two screenshots in `docs/demo/` | `alignment-1366.png`, `alignment-390.png` |
+| `tools/probes/s75-hover-travel.mjs` | can the pointer reach a hover-revealed note | `gap:4`, `travelMs:330`, `onArrival:true`, `whileReading:true`, `afterLeaving:false` |
+
+The tab count rose from 26 to 32 on the desktop and from 6 to 9 on the phone. Six of the new stops
+are the heading `(?)` buttons and the nineteenth example button; re-measure after any control is
+added, because the count is quoted in `App.vue`'s comments.
+
+### The dead tab stop the browser found
+
+A note opened by the focus put its "read more" press in the tab order, and the `(?)` shuts a peeked
+note the moment it loses the focus - so Tab chose the press as the next stop, the note closed, and
+the press was removed from the page before the focus arrived. One Tab that appeared to do nothing
+(Chrome, 2026-09-21). The press is now a tab stop only while the note is pinned, which is the state
+that survives the focus leaving.
+
+### Reaching a note with the pointer (WCAG 2.2 SC 1.4.13)
+
+None of these notes sits against its `(?)`: each is a line under the heading row, so a pointer
+travelling to it is over neither for a few frames, and a note that closed on the button's
+`mouseleave` was gone before the pointer arrived - failure F95 of that criterion
+(https://www.w3.org/WAI/WCAG22/Understanding/content-on-hover-or-focus.html, read 2026-09-21).
+Measured before the fix, on a publish of the same page: `onArrival:false` after a 332 ms journey
+across a 4 px gap.
+
+Two rules fix it, both in `App.vue`. `PEEK_GRACE_MS` (400 ms) delays the close the button's
+`mouseleave` asks for, and the note's own `mouseenter` cancels it. `pointerOnNote` then refuses a
+close while the pointer is resting on the sentence, which is the case the grace alone misses: Tab
+to the `(?)`, read the sentence with the pointer over it, Tab on, and the button's `blur` shut a
+note under the pointer 400 ms later.
+
+### The budget line, and two ways it was wrong
+
+`budgetNote` bounded only the first unbounded kind. `(?:colour){i<=2,d}` matches 19 times in nine
+characters, exactly as `{i,d}` does (regex 2026.9.10, 2026-09-21), so the advice did not work; it
+now bounds every unbounded kind and says "at most two of each".
+
+A cost equation was treated as bounding everything, and then, for one round, as bounding nothing it
+did not price. It does not bound a kind it never prices:
+`(?:colour){d,1i+1s<3}` deletes the whole pattern (`fuzzy_counts=(0, 0, 6)`), so `d` is named. A
+kind the equation prices at zero - `{0d+1i<3}` - is unbounded too, and there the page stays silent
+on purpose: the only advice it could give is a re-pricing of somebody's equation.
+
+A kind can also carry both a price and a constraint. Upstream allows that, although two
+constraints on one kind are the parse error "re-use of fuzzy constraint", and the price binds the
+kind either way round: `{i}` inserts six characters into "czozlzozuzzr" and neither
+`{i,1i+1d<3}` nor `{1i+1d<3,i}` matches it at all (regex 2026.9.10, 2026-09-21,
+`.scratch/s75-priced-and-named.py`, the cases are pinned in `budget.test.ts`). Getting this wrong
+in the first attempt at the fix also broke the advice: the line bounds a letter at its first
+occurrence in the budget text, so `{1i+1d<3,i}` came out as `{1i<=2+1d<3,i}`, which upstream
+refuses to compile.
+
+### Review
+
+Three blind passes, each over the changes the one before it had not seen.
+
+1. **Pass 1**, over sittings 1 to 3: four findings raised, three reproduced and fixed - the budget
+   line bounding only the first kind, the unreachable hover-revealed note, and two copy-linter
+   guards that asserted nothing because the allow list was empty. The fourth (an alignment index
+   landing between the halves of a surrogate pair) was rejected: the reviewer's own note said the
+   engine never emits one, and only a hand-written worker reply could.
+2. **Pass 2**, over the fixes: four findings, all four reproduced and fixed - a note closing under
+   the pointer when its `(?)` lost the focus, two travel tests that raced a real 400 ms timer or
+   passed with the grace reverted, and the cost-equation case above.
+3. **Pass 3**, over those fixes: two findings, both reproduced and fixed, both in `budget.ts` - a
+   kind holding a price and a constraint at once, and the advice that case printed. Everything
+   else the pass tested survived, including all four hover and tab-order tests, which it checked
+   by removing each guard in turn.
+
+Still outstanding, and the reason this is a checkpoint: the independent verifier, and one blind
+pass over the last `budget.ts` fix.

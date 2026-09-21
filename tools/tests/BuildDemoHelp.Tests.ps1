@@ -38,7 +38,11 @@ Body.
 
 Body.
 
-### `FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first
+### `{e<=n:[set]}`: constrain which characters an edit may touch
+
+Body.
+
+### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first
 
 Body.
 
@@ -70,7 +74,7 @@ Body.
 
 Body.
 
-### **Indices are UTF-16 code units**, not codepoints
+### **Indices are UTF-16 code units**, where upstream counts codepoints
 
 Body.
 

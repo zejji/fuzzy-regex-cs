@@ -20,7 +20,13 @@ import {
     type RadioGroup,
 } from './lib/flags';
 import HeadingHelp from './HeadingHelp.vue';
-import { headingNote, noteId, type HeadingNote } from './lib/help-notes';
+import {
+    headingNote,
+    noteId,
+    PEEK_GRACE_MS,
+    type HeadingAsk,
+    type HeadingNote,
+} from './lib/help-notes';
 import type { EditKind, EditRun } from './lib/highlight';
 import { createPool } from './lib/pool';
 import { toCSharp, tokenize } from './lib/snippet';
@@ -120,21 +126,69 @@ const helpPinned = ref(false);
 /** The id of one flag's sentence, which is also its key in {@link helpFor}. */
 const flagNoteId = (name: FlagName): string => `flag-help-${name}`;
 
+/**
+ * The close a pointer leaving a `(?)` has asked for, while the sentence waits out its grace.
+ *
+ * {@link PEEK_GRACE_MS} says why there is a wait at all: without it the pointer cannot reach the
+ * sentence, which is what WCAG 1.4.13 "Hoverable" asks for. One timer, because one sentence is
+ * open at a time.
+ */
+let closingPeek: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The sentence the pointer is resting on, which is not the same thing as the one it opened.
+ *
+ * WCAG 1.4.13 asks that revealed content stay while the pointer is over it, and the `(?)` can stop
+ * being pointed at or focused while the sentence itself still is: a visitor who tabs to the button
+ * and then reads the sentence with the pointer over it loses the button's focus the moment they
+ * Tab on. The close is what the pointer leaving the sentence asks for, so the pointer being on it
+ * refuses one.
+ */
+let pointerOnNote: string | null = null;
+
+function holdPeek(): void {
+    if (closingPeek !== null) clearTimeout(closingPeek);
+    closingPeek = null;
+}
+
 function toggleHelp(id: string): void {
+    holdPeek();
     const pinnedHere = helpPinned.value && helpFor.value === id;
     helpFor.value = pinnedHere ? null : id;
     helpPinned.value = !pinnedHere;
 }
 
 function peekHelp(id: string): void {
+    holdPeek();
     if (!helpPinned.value) helpFor.value = id;
 }
 
 function unpeekHelp(id: string): void {
-    if (!helpPinned.value && helpFor.value === id) helpFor.value = null;
+    if (helpPinned.value || helpFor.value !== id || pointerOnNote === id) return;
+
+    // Checked again when the timer fires: the pointer may have moved on to another `(?)` in the
+    // meantime, and closing then would take away a sentence somebody has just asked for.
+    holdPeek();
+    closingPeek = setTimeout(() => {
+        closingPeek = null;
+        if (!helpPinned.value && helpFor.value === id) helpFor.value = null;
+    }, PEEK_GRACE_MS);
+}
+
+/** The pointer arriving on the sentence itself, which is the journey the grace was buying time for. */
+function peekNote(id: string): void {
+    pointerOnNote = id;
+    peekHelp(id);
+}
+
+/** The pointer leaving the sentence, which is the only thing a peeked sentence waits for. */
+function unpeekNote(id: string): void {
+    if (pointerOnNote === id) pointerOnNote = null;
+    unpeekHelp(id);
 }
 
 function closeHelp(): void {
+    holdPeek();
     helpFor.value = null;
     helpPinned.value = false;
 }
@@ -159,7 +213,10 @@ watch(helpFor, (name) => {
     else document.addEventListener('keydown', dismissHelpOnEscape);
 });
 
-onUnmounted(() => document.removeEventListener('keydown', dismissHelpOnEscape));
+onUnmounted(() => {
+    document.removeEventListener('keydown', dismissHelpOnEscape);
+    holdPeek();
+});
 
 /**
  * The press at the end of a heading note: the documentation's own words on that heading, in the
@@ -182,10 +239,12 @@ function openHelpTab(note: HeadingNote): void {
 }
 
 /** The four things a heading's `(?)` and its note can be asked for, answered by the state above. */
-function askHelp(note: HeadingNote, ask: 'toggle' | 'peek' | 'unpeek' | 'follow'): void {
+function askHelp(note: HeadingNote, ask: HeadingAsk): void {
     if (ask === 'toggle') toggleHelp(noteId(note.id));
     else if (ask === 'peek') peekHelp(noteId(note.id));
     else if (ask === 'unpeek') unpeekHelp(noteId(note.id));
+    else if (ask === 'peek-note') peekNote(noteId(note.id));
+    else if (ask === 'unpeek-note') unpeekNote(noteId(note.id));
     else openHelpTab(note);
 }
 
@@ -851,10 +910,10 @@ window.__demoInternals = { createPool, spawnEngineWorker };
         <!--
           The keyboard's way past the input pane, and the first thing in the document.
 
-          Measured before it existed (`tools/probes/s73-widths.mjs`, 2026-09-20): twenty-six tabs
-          from the top of the page to the first control in the answer at every width above the gate,
-          eighteen of them the example buttons, which are always on screen there. The answer is what
-          the page is for, so it is one tab away.
+          Measured before it existed (`tools/probes/s73-widths.mjs`, re-run 2026-09-21):
+          thirty-two tabs from the top of the page to the first control in the answer at every
+          width above the gate, nineteen of them the example buttons, which are always on screen
+          there. The answer is what the page is for, so it is one tab away.
         -->
         <a class="skip-link" href="#results" @click.prevent="skipToAnswer">Skip to the answer</a>
 
@@ -895,6 +954,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <HeadingHelp
                             :note="patternNote"
                             :open="helpFor === noteId(patternNote.id)"
+                            :pinned="helpPinned"
                             @ask="askHelp(patternNote, $event)"
                         >
                             <label class="field-label" for="pattern">Pattern</label>
@@ -958,6 +1018,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <HeadingHelp
                             :note="subjectNote"
                             :open="helpFor === noteId(subjectNote.id)"
+                            :pinned="helpPinned"
                             @ask="askHelp(subjectNote, $event)"
                         >
                             <label class="field-label" for="subject">Subject</label>
@@ -1047,6 +1108,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 <HeadingHelp
                                     :note="flagsNote"
                                     :open="helpFor === noteId(flagsNote.id)"
+                                    :pinned="helpPinned"
                                     @ask="askHelp(flagsNote, $event)"
                                 />
 
@@ -1089,6 +1151,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             :id="flagNoteId(name)"
                                             class="flag-help"
                                             :hidden="helpFor !== flagNoteId(name)"
+                                            @mouseenter="peekNote(flagNoteId(name))"
+                                            @mouseleave="unpeekNote(flagNoteId(name))"
                                         >
                                             {{ FLAG_HELP[name] }}
                                         </p>
@@ -1137,6 +1201,8 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                 :id="flagNoteId(option)"
                                                 class="flag-help"
                                                 :hidden="helpFor !== flagNoteId(option)"
+                                                @mouseenter="peekNote(flagNoteId(option))"
+                                                @mouseleave="unpeekNote(flagNoteId(option))"
                                             >
                                                 {{ FLAG_HELP[option] }}
                                             </p>
@@ -1159,6 +1225,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <HeadingHelp
                                 :note="modeNote"
                                 :open="helpFor === noteId(modeNote.id)"
+                                :pinned="helpPinned"
                                 as="legend"
                                 @ask="askHelp(modeNote, $event)"
                             >
@@ -1196,6 +1263,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <HeadingHelp
                                 :note="replacementNote"
                                 :open="helpFor === noteId(replacementNote.id)"
+                                :pinned="helpPinned"
                                 @ask="askHelp(replacementNote, $event)"
                             >
                                 <label class="field-label" for="replacement">
@@ -1222,6 +1290,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <HeadingHelp
                                 :note="namedListsNote"
                                 :open="helpFor === noteId(namedListsNote.id)"
+                                :pinned="helpPinned"
                                 @ask="askHelp(namedListsNote, $event)"
                             >
                                 <label class="field-label" for="named-lists">Named lists</label>
@@ -1521,7 +1590,13 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                           `hidden` rather than `v-if` so the paragraph keeps its place in the
                           layout and the line below it does not jump as a pointer crosses the marks.
                         -->
-                        <p id="edit-run-note" class="field-hint" :hidden="helpFor !== RUN_NOTE">
+                        <p
+                            id="edit-run-note"
+                            class="field-hint"
+                            :hidden="helpFor !== RUN_NOTE"
+                            @mouseenter="peekNote(RUN_NOTE)"
+                            @mouseleave="unpeekNote(RUN_NOTE)"
+                        >
                             {{ runNoteText }}
                         </p>
                         <!--
