@@ -889,3 +889,15 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `{d,d<=1,i}` is unbounded in `i` - it inserts all six characters of "czozlzozuzzr". When the
   second reading fails too, as in `{e<=1,e}` and `{s<=1,s}`, the braces are text:
   `(?:colour){e<=1,e}` matches the literal "colour{e<=1,e}" (regex 2026.9.10).
+- 2026-09-21 (S57b): a diverging row goes to the family whose flag ablation restores this port's
+  answer, and the ablation is run in BOTH spellings - the inline `(?x)` text and the flag-word bit
+  - because a row can carry POSIX either way. `tools/probes/s57b-extra-wave-flag-ablations.py`
+  does all three flags singly and in pairs over a whole batch in one run.
+- 2026-09-21 (S57b): deleting a backtracking verb is NOT a control for a `(*SKIP)` row. It prunes
+  nothing, so it answers a different question; the control is respelling the verb as `(*PRUNE)`.
+  Two S57b rows were nearly explained by the wrong door before the blind review caught it.
+- 2026-09-21 (S57b): one gap test per MECHANISM, not per pinned row. Nine of sitting 6's ten rows
+  reuse a mechanism an existing `PinnedBy` test already asserts; only the tenth, POSIX lengthening
+  a group inside an unchanged overall match, got a new test.
+- 2026-09-21 (S57b): `-Count 6000` is rows PER GENERATOR, so a two-generator wave is 12,000 rows a
+  seed. Say which when quoting a wave's size.

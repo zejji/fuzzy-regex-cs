@@ -597,3 +597,110 @@ gate and this is its first run in this slice. The reports are
 `TestResults/oracle/report-99991.txt` and `report-57057.txt`; the waves beside them. The slice's
 "Done when" box for it stays unticked and the rows are the next sitting's batch - judge them with
 `python tools/probes/gate-divergence-doors.py <seed>` in one pass, as sitting 3 did for the gate.
+
+## Sitting 6 (2026-09-21): the extra wave's ten rows judged, and the slice closed
+
+All ten belong to families this slice has already pinned, so no new entry was needed. They went in
+as rows of four existing ones: `bestmatch-loses-a-candidate` rows 22 and 23 (57057/4067,
+99991/683), `bestmatch-loses-a-partial` row 11 (57057/9163), `search-start-partial` rows 24 and 25
+(57057/6441 and 57057/8825), and `posix-fuzzy-contradicts-its-own-flagless-answer` rows 11 to 15
+(57057/8690, 57057/9182, 99991/9204, 99991/9720, 99991/9951).
+
+**Judged in one scripted pass, off the output.** Four commands over the whole batch, never row by
+row:
+
+```
+python tools/probes/gate-divergence-doors.py --rows tools/probes/s57b-extra-wave-rows.jsonl
+python tools/probes/s57b-extra-wave-flag-ablations.py tools/probes/s57b-extra-wave-rows.jsonl
+python tools/probes/upstream-partial-anchor-reachability.py \
+    tools/probes/s57b-extra-wave-partial-search-rows.jsonl
+```
+
+`tools/probes/s57b-extra-wave-rows.jsonl` is committed, so nothing has to be cut out of the waves
+again: it is the ten diverging lines of `TestResults/oracle/wave-57057.jsonl` and `wave-99991.jsonl`
+as they stand, each tagged with the `s57bSeed` and `s57bRow` it came from (the header line makes row
+N line N+1). `s57b-extra-wave-partial-search-rows.jsonl` is the two search rows of the same set.
+
+The ablation probe is new and is the sitting's main instrument. It deletes `(?b)`, `(?e)` and
+`(?p)` singly and in pairs, in BOTH spellings - the inline `(?x)` text and the flag-word bit - and
+prints upstream's answer for each, so the row is placed by which deletion restores this port's
+answer rather than by reading its shape. On every one of the ten, this port's answer is upstream's
+own answer with the offending flag deleted. None is a port defect.
+
+What each row turned on:
+
+- **57057/4067 and 99991/683**, both `fuzzy` `fullmatch`es upstream refuses outright, both carrying
+  the recorder's `bestmatch-no-worse`. Delete `(?b)` and upstream answers: codepoints (0, 3) with
+  insertions at 1 and 2, and (0, 6) with an insertion and a deletion at 1. Neither carries `(?e)`,
+  so no second flag is in play.
+- **57057/9163**, a `(?b)` partial `fullmatch` with a `(*SKIP)`. All three doors answer and agree:
+  `(?b)` deleted, `(*SKIP)` spelt `(*PRUNE)`, and the verb deleted all give codepoints (0, 2)
+  partial with nothing spent. Two of the three are on the row itself as `bestmatchFreeOutcome` and
+  `pruneOutcome`. It is ledger entry 13's four conditions together.
+- **57057/6441 and 57057/8825** are the first rows of the `search-start-partial` arm whose
+  `(*PRUNE)` door answers UPSTREAM's span rather than this port's, so the converging controls are
+  not available and the reachability grid does the whole argument. Over the searched region (0, 3)
+  upstream's own anchored matcher produces (0,0), (0,1), (1,1), (1,2), (2,2), (2,3) and (3,3) on
+  each row. Its search answer (1, 3) is in neither grid: it reported a span its own matcher cannot
+  make. This port answers (2, 3), which is in the grid and is the first anchor a forward search
+  tries that answers at all.
+- **The five POSIX rows** carry the family across five operations at once - a partial `match`, a
+  `finditer`, a `sub`, a `split` and a `finditer-overlapped`. Two turn on POSIX alone (9182 charges
+  a deletion over a single `ß` the POSIX-free engine gets for nothing; 9951 has POSIX report six
+  overlapped matches where the POSIX-free engine reports four). Two need POSIX with a second flag
+  (8690 with `(?e)`, 9204 with `(?b)`, and dropping either restores this port's answer). 9720 moves
+  a GROUP inside an identical overall match, g1 two codepoints under POSIX against one without,
+  which upstream's own README rules out: "It looks for the longest overall match. It doesn't look
+  for the longest match for each group" (`upstream/README.rst:177`).
+
+**One new test for ten rows, deliberately.** Nine of the ten mechanisms are already asserted by the
+tests each family's `PinnedBy` names, and writing nine near-duplicates would buy nothing. Only
+9720's shape had no test, so `FuzzyPosixTests.Posix_does_not_lengthen_a_group_inside_the_same_
+overall_match` was added for it. The reviewer was told this was a judgement and invited to
+reproduce a counterexample; none was found.
+
+**Two traps worth remembering.** The row's pattern carries U+10400 itself, so a C# verbatim string
+(`@"...\U00010400..."`) pins the six-character escape text and not the character - the new test
+uses a normal string with doubled backslashes. And SonarAnalyzer S125 reads a prose comment whose
+punctuation looks like code as commented-out code; the fix was to reword, not to suppress.
+
+**Verified on real data, 2026-09-21, in this order.** The ten rows replayed with
+`pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57b-extra-wave-rows.jsonl`: GREEN, each row
+classified under the entry it was assigned. The extra wave re-run in full,
+`-Count 6000 -Generator fuzzy,interactions -Seeds 99991,57057`: GREEN at both seeds. The default
+gate re-run one seed at a time at `-Count 6000`: seed 7 GREEN, 4242 GREEN, 20260921 GREEN.
+`pwsh -File tools/check-ratchet.ps1`: GREEN, 6503 tests passing, 6395 distinct ids, baseline
+raised from 6394.
+
+**Row JSON is JSON-equal to the wave line, not byte-equal.** The generator writes non-ASCII
+literally where the wave file writes `\uXXXX`, which is the convention the other 152 non-ASCII
+lines of `ExpectedDivergences.cs` already follow. `OracleWave.ParseRows` parses both the same, and
+the green replay above is the proof. A verifier asked to check "byte for byte" will report this;
+it is not a defect.
+
+### Review
+
+One reviewer, the brief in `S57b-review-brief.md` scoped to this sitting, and the amendment-16
+verifier over the batch of ten, both blocking and both on Opus. The reviewer raised four findings
+and the verifier two more; all six were reproduced here before anything changed, and all six were
+real:
+
+- the `search-start-partial` `Reason` said the verb-deleted door also gives upstream's (1, 3). It
+  gives (0, 1) and (0, 3), neither partial, and the probe labels it "NOT a control". Both the
+  `Reason` and the inline comment now say so.
+- "the first row of this family to answer at all three doors" was false - row 8 of
+  `bestmatch-loses-a-partial` answers and agrees at all three. Superlative removed.
+- the POSIX paragraph said "four operations at once" and then listed five. It is five.
+- `s57b-extra-wave-flag-ablations.py:59` cited the POSIX `fuzzy_changes` guard at
+  `record-oracle.py:1019`, which is a docstring in `exhausted()`. The guard is at `:1338`.
+- "an extra 6000-row wave" is wrong: `-Count 6000` is per generator, so each seed's wave is 12,000
+  rows. The paragraph now says both numbers.
+- the same paragraph's range "on rows 14 to 23 that door converged" was narrower than the truth;
+  every earlier row carrying the door converges, from row 8.
+
+No finding was rejected. A second blind pass over that delta returned "No defects found." The
+verifier's remaining non-CONFIRMED lines were the byte-equality note above and the missing Sitting
+6 section, which is this one.
+
+**Left for between-slice maintenance:** `tools/probes/gate-divergence-doors.py:137` carries the same
+stale `record-oracle.py:1019` citation, in committed code outside this slice's scope.

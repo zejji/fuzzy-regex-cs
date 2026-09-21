@@ -175,18 +175,31 @@ def reachable_spans(row: dict) -> set[tuple[int, int]]:
     return spans
 
 
-def main() -> int:
-    print("regex", regex.__version__)
-    rows = [json.loads(line) for line in
-            ROWS_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
+def main(argv: list[str] | None = None) -> int:
+    """The six sweep rows by default, or every row of a `--rows`-shaped file named on the line.
 
-    for number in WANTED:
+    S57b sitting 6 added the argument rather than a second copy of this probe: the extra
+    `fuzzy,interactions` wave left two partial-search rows whose `(*PRUNE)` door answers UPSTREAM's
+    span rather than this port's, which is the one shape the six sweep rows did not show, and the
+    two questions below are what separate `search-start-partial` from
+    `partial-retry-carried-slice-forward` on it. Called bare, it prints exactly what it always did.
+    """
+    argv = list(argv if argv is not None else sys.argv[1:])
+    print("regex", regex.__version__)
+    path = Path(argv[0]) if argv else ROWS_FILE
+    rows = [json.loads(line) for line in
+            path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    wanted = WANTED if path == ROWS_FILE else range(1, len(rows) + 1)
+
+    for number in wanted:
         row = rows[number - 1]
         pattern, subject = row["pattern"], row["subject"]
         lo, hi = slice_of(row)
         drawn = compile_row(row).search(subject, lo, hi, partial=True, timeout=CALL_TIMEOUT)
 
-        print(f"\n=== sweep row {number}  {row.get('generator')}  {row['operation']} partial"
+        label = (f"seed {row['s57bSeed']} row {row['s57bRow']}" if "s57bRow" in row
+                 else f"sweep row {number}")
+        print(f"\n=== {label}  {row.get('generator')}  {row['operation']} partial"
               f"  flags={row.get('flags', 0):#x}  [{row.get('comment', '')}]")
         print("    pattern              " + ascii(pattern))
         print("    subject              " + ascii(subject))

@@ -62,6 +62,45 @@ This slice's own working notes are in `docs/plan/slices/notes/S57b-sittings.md`.
       Sitting 3 folded them into the existing ledger entry 6 rather than drafting a duplicate.
 - [x] `pwsh -File tools/run-oracle.ps1 -Count 6000` GREEN at all three seeds. Re-run 2026-09-21
       after the last two pins: seeds 7, 4242 and 20260921, 0 of 126,080 rows each.
-- [ ] `pwsh -File tools/run-oracle.ps1 -Generator fuzzy,interactions -Seeds 99991,57057` GREEN.
-      First run, 2026-09-21: RED, four rows at 99991 and six at 57057, all unjudged.
-- [ ] Ratchet GREEN, blind review, independent verifier, committed.
+- [x] `pwsh -File tools/run-oracle.ps1 -Generator fuzzy,interactions -Seeds 99991,57057` GREEN.
+      First run, 2026-09-21: RED, four rows at 99991 and six at 57057, all unjudged. Sitting 6
+      judged and pinned all ten; re-run the same day at `-Count 6000`, GREEN at both seeds.
+- [x] Ratchet GREEN, blind review, independent verifier, committed.
+
+## Closing notes
+
+**What landed.** Forty-one rows judged in six sittings, not the twenty the scope named: the twenty
+S57 found, the eleven the re-recorded date seed drew on 2026-09-21, and the ten of the extra
+`fuzzy,interactions` wave. Every one is this port right or upstream's own defect; none was a port
+defect. `ExpectedDivergences` went from 34 entries to 40, the rest of the rows joining entries that
+already existed, with a gap test per new mechanism and paragraphs in ledger entries 6, 13, 16 and
+26. Eighteen probes and five row files under `tools/probes/`, all named `s57b-*`. The gate is GREEN
+at all three default seeds and at the extra wave's two.
+
+**What was surprising.** A row whose controls are missing is not a row with a different fault.
+Sitting 3 read the shape of the evidence for rows 72790 and 74947, proposed a new family, and was
+wrong on both; sittings 4 and 5 ran the ablations and the rows landed in families that already
+existed. Sitting 6 scripted every ablation of all ten rows in one pass and judged them in a sitting.
+That is S52's lesson for the third time: script the controls, read the output, never reason from
+the table.
+
+**What the next slice should know.** The third default seed is the RUN DATE, so a new day draws a
+fresh sample and the gate can be red tomorrow on rows nobody has seen. That is the gate working,
+not a regression. Judge them with
+`python tools/probes/gate-divergence-doors.py --rows <file>`, which puts every judged family's own
+control to every row in one run, and add the flag ablations
+(`s57b-extra-wave-flag-ablations.py`) when more than one door opens.
+
+**Negative controls.** Sitting 4 ran the only one of this slice, against row 72790's "this port is
+wrong" hypothesis. It is recorded with its snippet, generator, row count and seeds in
+`notes/S57b-sittings.md` under "Sitting 4".
+
+**Review.** Six sittings, each with its own blocking blind pass, plus the amendment-16 verifier
+twice: once over sittings 3 to 5 and once over sitting 6's batch of ten. Sittings 3 to 5: seven
+findings raised, seven reproduced, seven fixed, and the one claim that did not survive
+reproduction (the `_regex_core.py` citations said to be two lines high) was rejected. Sitting 6:
+four findings from the reviewer and two more from the verifier, all six reproduced here and all six
+fixed - a door named as a control that is not one, a false superlative, "four operations" for five,
+a stale probe line citation, a wave called 6000 rows when `-Count 6000` gives 12,000 per seed, and a
+convergence range narrower than the truth. A second blind pass over that delta returned "No defects
+found". Full detail per sitting in `notes/S57b-sittings.md`.

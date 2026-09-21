@@ -342,4 +342,55 @@ public sealed class FuzzyPosixTests
         // Nothing fuzzy happened on the path that wins, which is what makes the loss indefensible.
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
+
+    /// <summary>
+    /// POSIX picks the longest OVERALL match and stops there. It does not stretch a group inside a
+    /// match whose start and end are already settled, and upstream stretches one here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Row 9720 of the seed-99991 <c>fuzzy,interactions</c> wave, judged by S57b sitting 6 as the
+    /// fifth shape <c>posix-fuzzy-contradicts-its-own-flagless-answer</c> covers, and the first that
+    /// moves a GROUP rather than an error count, a span or a match count. The row carries POSIX in
+    /// the flag word rather than as <c>(?p)</c>, so an ablation that edits only the pattern text
+    /// reports nothing at all on it.
+    /// </para>
+    /// <para>
+    /// Upstream's own documentation is the standard being applied: "It looks for the longest overall
+    /// match. It doesn't look for the longest match for each group"
+    /// (<c>upstream/README.rst:175-177</c>). Both spellings below agree on the overall match - the
+    /// leading and trailing split parts are empty in each, so it spans the whole subject - and they
+    /// disagree only on <c>g1</c>.
+    /// </para>
+    /// <para>
+    /// <b>Measured 2026-09-21 on regex 2026.9.10</b> by
+    /// <c>python tools/probes/s57b-extra-wave-flag-ablations.py
+    /// tools/probes/s57b-extra-wave-rows.jsonl</c>:
+    /// </para>
+    /// <code>
+    /// as drawn        4 | '' '\U00010400\n' '\U00010400' ''   &lt;- upstream, g1 two codepoints
+    /// without (?p)    4 | '' '\n' '\U00010400' ''             &lt;- ours, g1 one codepoint
+    /// </code>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void Posix_does_not_lengthen_a_group_inside_the_same_overall_match()
+    {
+        // Not verbatim: the row's pattern carries U+10400 itself, not the six-character escape.
+        const string pattern = "(?b)(?r)(?:\U00010400(?P<g1>[^\\d]+)){d<=1:[^a-z]}(?P<g2>[\\w\\s])$";
+        const string subject = "\U00010400\n\U00010400";
+
+        // POSIX as the flag, as the row drew it, and Version0 because the row names no version and
+        // the recorder resolves that under upstream's own default.
+        FuzzyRegex posix = new(pattern, FuzzyRegexOptions.Posix | FuzzyRegexOptions.Version0);
+
+        posix.Split(subject).Should().Equal("", "\n", "\U00010400", "");
+
+        // The control that names the flag: deleting POSIX changes nothing on this port, where it
+        // moves upstream's g1 from one codepoint to two.
+        new FuzzyRegex(pattern, FuzzyRegexOptions.Version0)
+            .Split(subject)
+            .Should()
+            .Equal("", "\n", "\U00010400", "");
+    }
 }
