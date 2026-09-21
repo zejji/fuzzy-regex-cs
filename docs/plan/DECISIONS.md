@@ -862,7 +862,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-21 (S75): a `.cs` probe aligns its columns with `PadRight`/`PadLeft`, never with an
   interpolation alignment specifier. The pre-commit hook's `dotnet csharpier format` writes those
   with a space after the comma and `IDE0055` rejects the space, so such a line cannot pass both
-  gates and the probe stops building. `tools/probes/s57-skip-partial-span.cs` still has it.
+  gates and the probe stops building. `tools/probes/s57-skip-partial-span.cs` is fixed the same way
+  and prints the same six rows.
 - 2026-09-21 (S75): a kind constrained twice is not an error. Upstream's `parse_fuzzy_item` answers
   the repeat by re-reading the item as a cost equation, so `{s,s<=1}` allows one substitution and
   `{d,d<=1,i}` is unbounded in `i` - it inserts all six characters of "czozlzozuzzr". When the

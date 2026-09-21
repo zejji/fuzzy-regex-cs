@@ -38,9 +38,12 @@ void Show(string label, string pattern)
 {
     FuzzyRegex re = new(pattern, FuzzyRegexOptions.Version0);
     Match m = re.Match(subject, partial: true);
+
+    // PadRight rather than an interpolation alignment specifier: CSharpier writes those with a
+    // space after the comma and IDE0055 rejects the space, so a line using one satisfies neither of
+    // this repo's formatting gates (the same note is on tools/probes/aot-smoke-slow-patterns.cs).
     Console.WriteLine(
-        m.Success
-            ? $"{label, -10} span=({m.Index},{m.Index + m.Length}) partial={m.PartialMatch}"
-            : $"{label, -10} no match"
+        label.PadRight(10)
+            + (m.Success ? $" span=({m.Index},{m.Index + m.Length}) partial={m.PartialMatch}" : " no match")
     );
 }

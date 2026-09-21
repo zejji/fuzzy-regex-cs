@@ -409,8 +409,8 @@ the pre-commit hook runs `dotnet csharpier format` over the staged files and CSh
 space back, while `dotnet run` on the same file fails `IDE0055` for having it. A line with an
 interpolation alignment specifier cannot satisfy both gates, so the three probes use `PadRight` and
 `PadLeft` instead, as `tools/probes/aot-smoke-slow-patterns.cs` already did and says. Output is
-unchanged, character for character. `tools/probes/s57-skip-partial-span.cs` still has the clash and
-will not build until it is written the same way.
+unchanged, character for character. `tools/probes/s57-skip-partial-span.cs` had the same clash and
+is fixed the same way, in its own commit; it prints the six rows S57 recorded.
 
 ### Green at the close
 
