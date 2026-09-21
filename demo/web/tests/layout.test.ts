@@ -1066,6 +1066,35 @@ test('a flag help button is a target a finger can hit', async () => {
 });
 
 /**
+ * The gap under a heading belongs to the row, not to the label inside it.
+ *
+ * Two faults came from one declaration. `vertical-align: middle` centres an inline box's MARGIN
+ * box, so the 4 px margin the label used to carry pushed its letters 2 px above the middle of the
+ * 24 px button beside it, and the `(?)` read as sitting low. The same margin lived inside a line
+ * box that the button overflowed, so it bought no space either and the button's bottom edge landed
+ * on the field below. `tools/probes/s76-heading-help-row.mjs` measured both in Chrome on
+ * 2026-09-21: 2.01 px of offset and a 0 px gap before the change, 0.01 px and 4 px after it.
+ *
+ * No line height is asked of the row: the shell already gives it 24 px, which the same probe
+ * confirmed, and a declaration that changes no pixel is a declaration to leave out.
+ */
+test('the gap under a heading belongs to the row, so the help button sits level and clear', async () => {
+    const css = await builtCss();
+    const heading = found(/\.field-heading\{([^}]*)\}/.exec(css), 'a .field-heading rule')[1] as string;
+
+    // One step of the spacing scale, which Tailwind writes without the `* 1`.
+    expect(heading).toMatch(/margin-bottom:var\(--spacing\)/);
+
+    // And the label carries none of its own, which is what levels the button against its letters.
+    const label = found(
+        /\.field-heading \.field-label\{([^}]*)\}/.exec(css),
+        'a .field-heading .field-label rule',
+    )[1] as string;
+    expect(label).toMatch(/margin-bottom:0/);
+    expect(label).toMatch(/vertical-align:middle/);
+});
+
+/**
  * The marker row exists, and only on a result that has markers to put in it.
  *
  * The three distances it buys cannot be asserted here - jsdom has no layout, and the numbers come

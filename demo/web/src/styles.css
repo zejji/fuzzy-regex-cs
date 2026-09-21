@@ -225,14 +225,21 @@
 
        Inline boxes rather than a flex row, because one of the six IS a `<legend>`: `display` on a
        legend was restricted for years and only became reliable recently, while `vertical-align`
-       has always worked there. The label keeps its own bottom margin, so the box below each
-       heading sits exactly where it did before the button arrived. */
+       has always worked there.
+
+       The gap under the heading belongs to the row, not to the label, and that one move fixes two
+       faults the owner spotted on 2026-09-21. `vertical-align: middle` centres an inline box's
+       MARGIN box, so a 4px margin under the label pushed its letters 2px above the middle of the
+       button and the `(?)` read as sitting low; and the margin was inside a line box that the 24px
+       button overflowed, so it bought no space at all and the button's bottom edge landed on the
+       field below it. Measured in the browser through `tools/probes/s76-heading-help-row.mjs`:
+       2.01px of offset and a 0px gap before, 0.01px and 4px after. */
     .field-heading {
-        @apply block;
+        @apply mb-1 block;
     }
 
     .field-heading .field-label {
-        @apply inline-block align-middle;
+        @apply mb-0 inline-block align-middle;
     }
 
     .field-heading .flag-help-button {
