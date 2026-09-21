@@ -462,6 +462,84 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_partial_of_the_wrong_span_is_not_accounted_for_as_a_boundary_partial()
+    {
+        // The control for `boundary-at-the-end-of-the-text`, named in that entry's own Reason.
+        //
+        // The entry is keyed on this port's ANSWER rather than on the pattern's shape, so what holds
+        // it narrow is that the answer is the escalation's signature. `Matcher.DoMatch` builds
+        // exactly one thing when a boundary runs the attempt out of text: a partial spanning the
+        // attempt's start to the end of the available text, with `ClearGroups` run, so no capture
+        // group is set and `lastindex` is -1. Every other answer on the same row is a different
+        // defect, and the four below are the four ways to be one:
+        //
+        //   * the right shape over the wrong span, which is a partial the escalation did not build
+        //   * a zero-width partial at the truncation point, which is the fault the escalation's
+        //     consumed-something narrowing exists to prevent and which Control A of this slice
+        //     caught the predicate classifying
+        //   * the right span with a capture group still set, the shape a bug in the clearing
+        //     itself would give
+        //   * the right span as a COMPLETE match, which is the port claiming to have matched text
+        //     upstream says it cannot
+        //   * no match at all, the shape of an unrelated engine defect landing on this row
+        //
+        // Both example rows, because the span limb turns round under `(?r)`: a reversed match runs
+        // out of text at its start, so the escalated partial reaches position 0 and its far end is
+        // wherever the attempt had got to. The wrong span therefore has to be spelt in the row's own
+        // direction, and it is the reversed row that caught the limb missing.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "boundary-at-the-end-of-the-text", StringComparison.Ordinal))
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            bool reversed = row.Pattern.Contains("(?r)", StringComparison.Ordinal);
+            (MatchOutcome right, MatchOutcome wrongSpan) = reversed
+                ? (Escalated(0, 1), Escalated(1, row.Subject.Length))
+                : (Escalated(0, row.Subject.Length), Escalated(0, row.Subject.Length - 1));
+
+            // The answer the escalation really builds, so each refusal below differs from an
+            // accounted answer in exactly the one thing it is about.
+            ExpectedDivergences.For(row, right).Should().NotBeNull("{0}", row.Pattern);
+
+            ExpectedDivergences.For(row, wrongSpan).Should().BeNull("the span does not reach the end of the text");
+            ExpectedDivergences
+                .For(row, Escalated(reversed ? 0 : row.Subject.Length, reversed ? 0 : row.Subject.Length))
+                .Should()
+                .BeNull("a zero-width partial at the truncation point is the fault, not the family");
+            ExpectedDivergences
+                .For(row, right with { Groups = [right.Groups[0], Taken(1, 0, 1)] })
+                .Should()
+                .BeNull("the groups were not cleared");
+            ExpectedDivergences
+                .For(row, right with { Partial = false })
+                .Should()
+                .BeNull("this one is a complete match");
+            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("a total failure is a defect");
+
+            // And the other half, through the LIVE engine, so this fails the day the port stops
+            // diverging on the row as well as the day the predicate stops reaching it.
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull("{0} -> [{1}]", row.Pattern, ours.Describe())
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("boundary-at-the-end-of-the-text");
+        }
+
+        static MatchOutcome Escalated(int index, int end) =>
+            new([Taken(0, index, end - index)], LastIndex: -1, LastGroup: null, Partial: true);
+
+        static OracleGroup Taken(int number, int index, int length) =>
+            new(number, Success: true, index, length, [new OracleSpan(index, length)]);
+    }
+
+    [Test]
     public void An_accounted_divergence_is_reported_but_does_not_fail_the_run()
     {
         // Half one: the wave loop reclassifies, tallies and renders it as EXPECTED rather than

@@ -927,6 +927,37 @@ Match m = pattern.Match("xya", beginning: 2, length: 1, partial: true);
 Console.WriteLine((m.Success, m.PartialMatch, m.Index));   // (True, True, 2) - upstream answers None
 ```
 
+### A word or grapheme boundary decided at the end of the available text makes a partial match
+
+With `partial: true`, a `\b`, `\B`, `\m`, `\M` or `\X` judged at the end of the text is judged on
+text that may not all be there yet. This port says so and reports a partial match. Upstream reports
+no match at all, because it reports a partial only when a node runs out of characters to read, and a
+boundary reads none.
+
+The case for saying so is the streaming caller the option exists for. Take "is this chunk something
+other than a keyword", `(?!(True|False)\b)(.*)`, and feed it the chunk `"True"`. Upstream answers
+None, which tells the caller no further text can rescue this. A next chunk of `"s"` does: the word is
+then `Trues`, the lookahead's `\b` fails, and the pattern matches. PCRE2 takes this port's side and
+names `\z`, `\Z`, `\b`, `\B` and `$` as the constructs that "always give a partial match"
+([pcre2partial(3)](https://www.pcre.org/current/doc/html/pcre2partial.html), read 2026-09-21).
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(?!(True|False)\b)(.*)").MatchAtStart("True", partial: true);
+Console.WriteLine((m.Success, m.PartialMatch, m.Index, m.Length));  // (True, True, 0, 4)
+                                                                    // upstream answers None
+Match n = new FuzzyRegex(@"aa\B").FullMatch("aa", partial: true);
+Console.WriteLine((n.Success, n.PartialMatch, n.Index, n.Length));  // (True, True, 0, 2)
+                                                                    // upstream answers None
+```
+
+A complete match still wins, and so does a partial found the ordinary way, so this only ever replaces
+an answer of "no match". `True\b` over `"True"` is a complete match in both engines, boundary or no
+boundary. The partial spans the attempt that reached the end of the text and reports no capture
+groups, since no path through the pattern finished. Under `(?r)` the end of the available text is its
+start, and the rule reads the same way there.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted

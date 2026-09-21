@@ -371,17 +371,32 @@ public sealed class PartialMatchingTests
         // start test - agrees on all three doors. Same mechanism as S29's four `verbs` rows: see
         // the Generator note in tools/run-oracle.ps1, and DECISIONS 2026-09-12.
         //
-        // PERMANENT, decided 2026-09-12: the port is right, upstream is internally inconsistent, and
-        // this test does NOT invert when `search_start` lands - a Phase 7 slice that turns it red has
-        // ported the bug. See docs/plan/2026-09-12-divergence-research.md. The reasoning is the
-        // maintainer's own, from upstream issue 589: `\b` is evaluated against the real string, and
-        // the empty string contains no word character, so there is no boundary at position 0 to be
-        // partial about. PCRE2 10.47 answers a partial here, but on a different rule of its own -
-        // `pcre2partial`'s "the next pattern item must be one that inspects a character" test, which
-        // upstream deliberately does not share (README's `\d{4}` example, upstream issue 469) - so it
-        // is not a second opinion on the same question. What is decisive is that upstream's own
-        // `match` and `fullmatch` answer None to this row, and only the door that consults
-        // `search_start` answers otherwise.
+        // PERMANENT, decided 2026-09-12, RE-JUDGED and upheld by S57d on 2026-09-21 on different
+        // reasoning: the port is right, upstream is internally inconsistent, and this test does NOT
+        // invert when `search_start` lands - a Phase 7 slice that turns it red has ported the bug.
+        // See docs/plan/2026-09-12-divergence-research.md.
+        //
+        // Two of the three reasons first given here have since been measured and do not hold. The
+        // maintainer's own argument from upstream issue 589, that `\b` is evaluated against the real
+        // string and the empty string holds no word character to be partial about, is the argument
+        // ledger entry 21 rejects and S57d now departs from: this port answers a partial for a
+        // boundary decided at the end of the available text. And PCRE2's partial here was put down
+        // to a rule of PCRE2's own, `pcre2partial`'s "the next pattern item must be one that
+        // inspects a character" test. It is not: a bare `\b` has no next pattern item and PCRE2
+        // still answers a partial, `\b\b` likewise, and PCRE2_NO_START_OPTIMIZE changes neither
+        // (tools/probes/pcre2-hitend-partial-span.py section E, PCRE2 10.47, 2026-09-21). PCRE2 is
+        // answering on the boundary, which is the same question, so it is a second opinion after
+        // all - and it is against us on this row.
+        //
+        // What upholds the pin is the first reason, now with upstream's rule behind it. Upstream
+        // reports a partial when a node runs out of TEXT and at no other time
+        // (tools/probes/upstream-partial-needs-text-exhaustion.py, regex 2026.9.10, 2026-09-21).
+        // Nothing in `(?r)\b$` over '' asks for a character, so upstream's own rule says None here,
+        // its `match` and `fullmatch` doors say None, and only the door that consults `search_start`
+        // says otherwise. S57d's rule reaches the same answer from the other side: the attempt that
+        // reached the boundary had consumed nothing, and a zero-width partial at the truncation
+        // point is the one case where this port stops short of PCRE2. So both engines' stated rules
+        // agree on None and one door of one engine dissents.
         //
         // The `partial` and `partial-sliced` generators ARE on the default oracle list from S33, with
         // these rows classified as `search-start-partial` in
@@ -1629,5 +1644,307 @@ public sealed class PartialMatchingTests
 
         complete.PartialMatch.Should().BeFalse();
         (complete.Index, complete.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
+    /// A word or grapheme boundary decided at the end of the available text makes a partial match
+    /// here, where upstream reports nothing at all.
+    /// </summary>
+    /// <remarks>
+    /// The deliberate divergence S57d adds, and the rule behind it is upstream's rather than this
+    /// port's: upstream reports a partial when a node runs out of TEXT, never when a boundary runs
+    /// out of CONTEXT. <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> is the
+    /// measurement, on regex 2026.9.10, 2026-09-21, and its decisive pair is
+    /// <c>a+\B</c> against <c>aa\B</c> over 'aa': both reach the same <c>\B</c> at position 2 and
+    /// both fail there, and only the one whose repeat can ask for a third character answers a
+    /// partial. So upstream is not making a judgement about the boundary here; the boundary plays
+    /// no part in its answer.
+    /// <para>
+    /// Ledger entry 21 is the case for changing that, and PCRE2 is the second engine that already
+    /// has: <c>pcre2partial(3)</c> names <c>\z</c>, <c>\Z</c>, <c>\b</c>, <c>\B</c> and <c>$</c> as
+    /// the constructs that "always give a partial match", because the end of the buffer need not be
+    /// the end of the data. A caller feeding a stream one chunk at a time gets a wrong answer
+    /// otherwise: upstream answers None to <c>(?!(True|False)\b)(.*)</c> over the chunk 'True', and a
+    /// next chunk of 's' makes the word 'Trues', which the pattern matches (measured, regex
+    /// 2026.9.10, 2026-09-21). Note that a complete match still wins, so this changes nothing for
+    /// <c>True\b</c> over 'True': that is a complete match in both engines.
+    /// </para>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    // A boundary that fails at the end of the text, with the attempt having consumed the whole span.
+    [Arguments(@"aa\B", "aa", 2)]
+    [Arguments(@"a{2}\B", "aa", 2)]
+    [Arguments(@"True\B", "True", 4)]
+    [Arguments(@"a?\B", "a", 1)]
+    // A boundary that SUCCEEDS at the end of the text, where what fails is the construct around it.
+    // Both rows need this: entry 21's own row is a lookahead whose inner `\b` succeeded, and `\X`
+    // ends at a grapheme boundary that more text could move.
+    [Arguments(@"(?!(True|False)\b)(.*)", "True", 4)]
+    [Arguments(@"\X(?<!a)", "a", 1)]
+    public void A_boundary_decided_at_the_end_of_the_text_reports_a_partial_upstream_denies(
+        string pattern,
+        string subject,
+        int expectedLength
+    )
+    {
+        // Upstream answers None to every row here on both of these doors. The probe prints, for
+        // example, 'aa\B' 'aa' match=None fullmatch=None and 'True\B' 'True' match=None
+        // fullmatch=None.
+        var compiled = new FuzzyRegex(pattern);
+
+        foreach (
+            Match m in new[]
+            {
+                compiled.MatchAtStart(subject, partial: true),
+                compiled.FullMatch(subject, partial: true),
+            }
+        )
+        {
+            m.PartialMatch.Should().BeTrue();
+
+            // The span runs from the start of the attempt that reached the end of the text to the
+            // end of the text, which is PCRE2's answer for the same rows:
+            // tools/probes/pcre2-hitend-partial-span.py, PCRE2 10.47, 2026-09-21.
+            (m.Index, m.Length)
+                .Should()
+                .Be((0, expectedLength));
+        }
+    }
+
+    /// <summary>
+    /// The search door usually agrees with upstream anyway, because a search that can retry at the
+    /// end of the subject finds upstream's own partial there first.
+    /// </summary>
+    /// <remarks>
+    /// This is why the divergence above is nearly invisible to the differential oracle, whose
+    /// generators mostly search. Over 'aa' the attempt at 0 reaches <c>\B</c> at the end and fails,
+    /// but the search then retries at 1, where the second <c>a</c> runs out of text and both engines
+    /// report the ordinary partial (1, 2). A start anchor removes the retry, and then the two
+    /// engines differ: upstream measured None for <c>^a\B</c> over 'a' by
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-21.
+    /// </remarks>
+    [Test]
+    public void A_partial_found_the_ordinary_way_is_kept_in_place_of_the_boundary_one()
+    {
+        // regex.compile(r'aa\B').search('aa', partial=True) -> (1, 2), partial True
+        Match ordinary = new FuzzyRegex(@"aa\B").Match("aa", partial: true);
+
+        ordinary.PartialMatch.Should().BeTrue();
+        (ordinary.Index, ordinary.Length).Should().Be((1, 1));
+
+        // DIVERGES FROM UPSTREAM, deliberately: with `^` there is no later start to retry from, so
+        // nothing runs out of text and only the boundary is left to answer.
+        Match anchored = new FuzzyRegex(@"^a\B").Match("a", partial: true);
+
+        anchored.PartialMatch.Should().BeTrue();
+        (anchored.Index, anchored.Length).Should().Be((0, 1));
+    }
+
+    /// <summary>
+    /// A partial derived from a boundary reports no groups, even for a group that had closed before
+    /// the boundary was reached.
+    /// </summary>
+    /// <remarks>
+    /// PCRE2 defines none: on a partial match "only the first pair in the ovector is set", and the
+    /// rest is undefined (<c>pcre2partial(3)</c>, read 2026-09-21 at
+    /// <see href="https://www.pcre.org/current/doc/html/pcre2partial.html"/>). Measured, that is
+    /// uninitialised memory - <c>tools/probes/pcre2-hitend-partial-span.py</c> section C prints
+    /// <c>(8819262122025316210,4981658938864334708)</c> for the two groups of <c>(a)(b)\B</c>. So
+    /// there is nothing to copy, and reporting a group whose span the model does not define would
+    /// be inventing an answer. Upstream reports None for this row altogether.
+    /// <para>
+    /// A partial found the ordinary way is unaffected and still carries its groups, which
+    /// <see cref="A_partial_match_keeps_the_groups_that_had_already_closed"/> pins.
+    /// </para>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    // The `(*SKIP)` row is the one that makes the clearing load-bearing, and it took a negative
+    // control to find: without `(*SKIP)` the backtracking unwinds every group on the way out, so a
+    // port that never cleared them would pass anyway. The verb prunes that unwind and group 1
+    // survives the failure at (0, 1) with `lastindex` 1. Measured with `state.ClearGroups()`
+    // removed, 2026-09-21. Upstream answers None to both rows.
+    [Arguments(@"(a)(b)\B")]
+    [Arguments(@"(a)(*SKIP)(b)\B")]
+    public void A_boundary_partial_reports_no_groups(string pattern)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("ab", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.Groups[1].Success.Should().BeFalse();
+        m.Groups[2].Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A complete match still wins. The boundary answer is a fallback, consulted only once the whole
+    /// scan has failed.
+    /// </summary>
+    /// <remarks>
+    /// PCRE2 calls this the soft option, and it is the default there and the only behaviour here:
+    /// "the partial match is remembered, but matching continues as normal", and the partial is
+    /// returned only "if no complete match can be found" (<c>pcre2partial(3)</c>, read 2026-09-21).
+    /// Its hard option, which returns the partial even when a complete match exists, has no
+    /// equivalent in this port or upstream. Both rows agree with upstream, measured by
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> on regex 2026.9.10, 2026-09-21.
+    /// </remarks>
+    [Test]
+    public void A_complete_match_beats_a_boundary_partial()
+    {
+        // regex.compile(r'True\b').match('True', partial=True) -> (0, 4), partial False
+        Match complete = new FuzzyRegex(@"True\b").MatchAtStart("True", partial: true);
+
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 4));
+
+        // The same within one scan: `a+` reaches `\B` at the end of 'aa' and fails there, then
+        // backtracks to a shorter repeat that matches completely.
+        // regex.compile(r'a+\B').match('aa', partial=True) -> (0, 1), partial False
+        Match backtracked = new FuzzyRegex(@"a+\B").MatchAtStart("aa", partial: true);
+
+        backtracked.PartialMatch.Should().BeFalse();
+        (backtracked.Index, backtracked.Length).Should().Be((0, 1));
+    }
+
+    /// <summary>
+    /// A boundary that fails without the attempt having consumed anything reports no partial, and
+    /// this is where the port stops short of PCRE2.
+    /// </summary>
+    /// <remarks>
+    /// PCRE2 escalates these: <c>\b</c> over '' is <c>PARTIAL (0,0)</c> there, with or without
+    /// <c>PCRE2_NO_START_OPTIMIZE</c> (<c>tools/probes/pcre2-hitend-partial-span.py</c> sections D
+    /// and E, PCRE2 10.47, 2026-09-21). This port follows upstream instead, for two reasons. A
+    /// zero-width partial at the truncation point tells a caller nothing it did not already know -
+    /// there is always more text that might match - and the port already pins upstream's own
+    /// zero-width answer as wrong in <c>docs/DIVERGENCES.md</c> under <c>search-start-partial</c>,
+    /// so producing one here would contradict that. Measured against upstream, which agrees on
+    /// every row below:
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-21.
+    /// </remarks>
+    [Test]
+    // Nothing to consume, so the boundary is the whole pattern and the attempt is empty.
+    [Arguments(@"\b", "")]
+    [Arguments(@"\b\b", "")]
+    // `\B` fails at 1, the end of 'a', with the attempt there having started at 1 as well.
+    [Arguments(@"\B", "a")]
+    public void A_boundary_that_consumed_nothing_reports_no_partial(string pattern, string subject)
+    {
+        var compiled = new FuzzyRegex(pattern);
+
+        compiled.Match(subject, partial: true).Success.Should().BeFalse();
+        compiled.MatchAtStart(subject, partial: true).Success.Should().BeFalse();
+        compiled.FullMatch(subject, partial: true).Success.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The three rows the differential oracle found for this divergence, one at each seed, kept as
+    /// the wave generated them.
+    /// </summary>
+    /// <remarks>
+    /// The default wave of 2026-09-21 at seeds 7, 4242 and 20260921 diverged on one row each, and
+    /// all three are this rule reaching a pattern nobody would write by hand: a conditional whose
+    /// condition fails so the whole group matches empty, a fuzzy section whose budget goes unused, a
+    /// reversed lookbehind. Each reduces to a boundary that runs out of context after the attempt
+    /// has consumed text. They are pinned here whole rather than minimised, so that the
+    /// <c>boundary-at-the-end-of-the-text</c> entry in
+    /// <c>tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs</c> has tests carrying its own examples
+    /// and a later engine change cannot quietly move them. Upstream answers no match to all three,
+    /// which is what the wave recorded from regex 2026.9.10.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    // Seed 7, `partial` row 4867, search. `\m` is a word start, and there is none at the end of the
+    // subject, which is two astral uppercase letters.
+    [Arguments(@"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$", "\U00010400\U0001D518", "search", 4)]
+    // Seed 4242, `fuzzy` row 6027, fullmatch. The deletion budget is never spent.
+    [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2)]
+    // Seed 20260921, `partial` row 4830, fullmatch. The lookbehind condition is false after 'b', so
+    // the conditional contributes nothing and the pattern is `b\B`.
+    [Arguments(@"b\B(?(?<![\w\s])\p{Ll})", "b", "fullmatch", 1)]
+    public void A_boundary_partial_is_what_the_oracle_waves_found(
+        string pattern,
+        string subject,
+        string door,
+        int expectedLength
+    )
+    {
+        var compiled = new FuzzyRegex(pattern);
+        Match m = string.Equals(door, "search", StringComparison.Ordinal)
+            ? compiled.Match(subject, partial: true)
+            : compiled.FullMatch(subject, partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, expectedLength));
+    }
+
+    /// <summary>
+    /// Under <c>(?r)</c> the end of the available text is its start, and the same divergence appears
+    /// there.
+    /// </summary>
+    /// <remarks>
+    /// A reversed match travels right to left, so it runs out of text at position 0, and the far end
+    /// of a reversed partial is the slice start rather than the slice end
+    /// (<c>Matcher.cs</c>, "We've matched up to the limit of the slice"). Upstream's rule turns round
+    /// with it: rows 11 and 12 of
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> are the reversed twin of the
+    /// decisive pair, measured on regex 2026.9.10, 2026-09-21.
+    /// <code>
+    ///   '(?r)\Ba'  'a'   search=PARTIAL (0, 0)  match=None            fullmatch=None
+    ///   '(?r)\Ba+' 'a'   search=PARTIAL (0, 1)  match=PARTIAL (0, 1)  fullmatch=PARTIAL (0, 1)
+    /// </code>
+    /// Both consume the 'a' backwards and then ask <c>\B</c> at 0. Only <c>a+</c> can ask for a
+    /// character before the text and be told it has run out, so only <c>a+</c> gets a partial from
+    /// upstream. This port answers a partial to both.
+    /// </remarks>
+    [Test]
+    public void A_reversed_boundary_at_the_start_of_the_text_reports_a_partial_upstream_denies()
+    {
+        // DIVERGES FROM UPSTREAM, deliberately. Upstream answers None on both anchored doors.
+        var denied = new FuzzyRegex(@"(?r)\Ba");
+
+        foreach (Match m in new[] { denied.MatchAtStart("a", partial: true), denied.FullMatch("a", partial: true) })
+        {
+            m.PartialMatch.Should().BeTrue();
+            (m.Index, m.Length).Should().Be((0, 1));
+        }
+
+        // The twin, where upstream agrees, so the test above is about the boundary rather than about
+        // reversed partials in general.
+        var granted = new FuzzyRegex(@"(?r)\Ba+");
+
+        foreach (Match m in new[] { granted.MatchAtStart("a", partial: true), granted.FullMatch("a", partial: true) })
+        {
+            m.PartialMatch.Should().BeTrue();
+            (m.Index, m.Length).Should().Be((0, 1));
+        }
+    }
+
+    /// <summary>
+    /// The reversed row the 6,000-row gate found, kept as the wave generated it.
+    /// </summary>
+    /// <remarks>
+    /// Seed 20260921, <c>partial</c> row 98169 of the three-seed 6,000-row gate of 2026-09-21, the
+    /// one reversed row of the four the slice's waves turned up. Read backwards the pattern matches
+    /// the '\n' into group 1, has <c>\K</c> drop it from the reported span, matches the '\r' through
+    /// the conditional's else branch, and then asks <c>\b</c> at position 0, where '\r' is not a word
+    /// character and the boundary fails. Upstream answers no match on this door, which is what the
+    /// wave recorded from regex 2026.9.10 and what row 13 of
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> re-measures.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_reversed_boundary_partial_is_what_the_gate_wave_found()
+    {
+        Match m = new FuzzyRegex(
+            @"(?r)\b(?(?!\p{L}).|[^a])\K(\s)",
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version1
+        ).FullMatch("\r\n", partial: true);
+
+        m.PartialMatch.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 1));
+
+        // No capture group survives the escalation, `\K` or no `\K`.
+        m.Groups[1].Success.Should().BeFalse();
     }
 }

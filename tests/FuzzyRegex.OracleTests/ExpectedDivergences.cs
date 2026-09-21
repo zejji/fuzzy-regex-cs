@@ -5388,6 +5388,91 @@ internal static class ExpectedDivergences
             Example: _anchorPinRows,
             Applies: static (row, ours) => OnlyTheAnchorPinExplainsIt(row, ours)
         ),
+        new(
+            Id: "boundary-at-the-end-of-the-text",
+            Reason: "Deliberate divergence, slice S57d, 2026-09-21 (upstream issue 589, ledger "
+                + "entry 21; docs/DIVERGENCES.md). Where a word or grapheme boundary is decided at "
+                + "the end of the available text and the match then fails, this port answers a "
+                + "partial and upstream answers no match.\n"
+                + "UPSTREAM'S RULE IS TEXT EXHAUSTION AND NOTHING ELSE, measured rather than read: "
+                + "`python tools/probes/upstream-partial-needs-text-exhaustion.py` on regex "
+                + "2026.9.10. Its decisive pair is `a+\\B` against `aa\\B` over 'aa'. Both reach the "
+                + "same `\\B` at position 2 and both fail there, and only the one whose repeat can "
+                + "ask for a third character answers a partial - so upstream is not judging the "
+                + "boundary at all, it is reporting a node that ran out of text.\n"
+                + "WHY THIS PORT DOES OTHERWISE. The end of the buffer need not be the end of the "
+                + "data, which is the whole point of asking for a partial: a caller feeding a stream "
+                + "one chunk at a time is told `True\\b` over the chunk 'True' is a complete match, "
+                + "and the next chunk may begin with 's'. PCRE2 is the second engine and it "
+                + "escalates these, naming `\\z`, `\\Z`, `\\b`, `\\B` and `$` as the constructs that "
+                + "\"always give a partial match\" (pcre2partial(3), read 2026-09-21; "
+                + "tools/probes/pcre2-partial-truncation-assertions.py). This port follows PCRE2's "
+                + "soft model - a complete match still wins, and so does a partial found the "
+                + "ordinary way - with one narrowing: an attempt that consumed nothing does not "
+                + "escalate, which keeps `search-start-partial`'s zero-width row pinned as it was.\n"
+                + "MOSTLY INVISIBLE TO A SEARCH, which is why three seeds of the default wave found "
+                + "three rows. An unanchored search that reaches a boundary at the end can usually "
+                + "retry at the end of the subject, where the first consuming node runs out and both "
+                + "engines report that ordinary partial instead. It takes a start anchor, or an "
+                + "anchored door, to leave the boundary as the only thing left to answer.\n"
+                + "THE PREDICATE IS THIS PORT'S ANSWER SHAPE, and it is the escalation's own "
+                + "signature rather than a family resemblance. The escalated partial is built at one "
+                + "place in `Matcher.DoMatch`: the span is the attempt's start to the end of the "
+                + "available text, and `ClearGroups` runs, so no capture group is set and "
+                + "`lastindex` is -1. An ordinary partial of a pattern with groups keeps them, and a "
+                + "wrong span fails the end-of-text limb. A ZERO-WIDTH PARTIAL FAILS TOO, because the "
+                + "escalation fires only where the attempt consumed something. That limb is not "
+                + "decoration: Control A of this slice removes the consumed-something narrowing, and "
+                + "without the limb this predicate classified all 14 rows of the fault the narrowing "
+                + "exists to prevent. UNDER `(?r)` THAT END IS THE START, "
+                + "because the far end of a partial is `Reverse ? SliceStart : SliceEnd` "
+                + "(Matcher.cs:10867) and a reversed match runs out of text at `pos`. Upstream's "
+                + "rule turns round with it: `(?r)\\Ba` and `(?r)\\Ba+` over 'a' are the decisive "
+                + "pair again, rows 11 and 12 of the probe. The fifth limb is that the pattern "
+                + "contains one of the five escapes that can reach a boundary predicate - `\\b`, "
+                + "`\\B`, `\\m`, `\\M`, `\\X` (Parsing/ParseFunctions.cs:1617, :1693-1697) - counted "
+                + "without regard to character classes, so `[\\b]`, a backspace, satisfies it too. "
+                + "What this predicate CANNOT tell apart is a different defect that produces the "
+                + "same four-part shape in a boundary-bearing pattern with no capture groups. The "
+                + "guard against that is "
+                + "`A_partial_of_the_wrong_span_is_not_accounted_for_as_a_boundary_partial`, which "
+                + "puts a fabricated answer of the same family through `For` and requires it to come "
+                + "back unaccounted.\n"
+                + "THE ROWS, one per seed, from the default wave of 2026-09-21: seed 7 row 4867 "
+                + "(`partial`, search, `^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$`), seed 4242 row 6027 "
+                + "(`fuzzy`, fullmatch, `(?fi)(?:[ab]+\\B){d<=1}`), seed 20260921 row 4830 "
+                + "(`partial`, fullmatch, `b\\B(?(?<![\\w\\s])\\p{Ll})`), and from the 6000-row gate "
+                + "of the same day, seed 20260921 row 98169 (`partial`, fullmatch, "
+                + "`(?r)\\b(?(?!\\p{L}).|[^a])\\K(\\s)`), the only reversed one and the row the "
+                + "reversed limb was written for. Each is a permanent test.",
+            PinnedBy: "PartialMatchingTests.A_boundary_decided_at_the_end_of_the_text_reports_a_"
+                + "partial_upstream_denies, .A_boundary_partial_is_what_the_oracle_waves_found, "
+                + ".A_boundary_partial_reports_no_groups, .A_boundary_that_consumed_nothing_reports_"
+                + "no_partial and InheritedIssueTests.A_partial_fullmatch_reports_a_prefix_whose_"
+                + "completion_matches",
+            Example: """
+            {"generator": "partial", "pattern": "^(\\p{Lu}+?)(?(?<=\\p{Nd})[A-Z])\\m$", "flags": 16394, "namedLists": {}, "subject": "𐐀𝔘", "operation": "search", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "partial", "pattern": "(?r)\\b(?(?!\\p{L}).|[^a])\\K(\\s)", "flags": 258, "namedLists": {}, "subject": "\r\n", "operation": "fullmatch", "partial": true, "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            """,
+            Applies: static (row, ours) =>
+                row.Partial
+                && row.Expected is NoMatchOutcome
+                && ours
+                    is MatchOutcome
+                    {
+                        Partial: true,
+                        LastIndex: -1,
+                        LastGroup: null,
+                        Groups: [{ Success: true, Index: int start, Length: int length }, ..],
+                    } theirs
+                // Never zero-width. The escalation fires only where the attempt consumed something,
+                // so a partial of length 0 at the truncation point is the fault that narrowing
+                // exists to prevent - and Control A measured this predicate classifying it.
+                && length > 0
+                && (IsReversed(row) ? start == (row.Pos ?? 0) : start + length == (row.EndPos ?? row.Subject.Length))
+                && theirs.Groups.Skip(1).All(static group => !group.Success)
+                && HasABoundaryEscape(row.Pattern)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -6092,6 +6177,34 @@ internal static class ExpectedDivergences
                 or (char)0x0085 // NEL
                 or (char)0x2028 // LINE SEPARATOR
                 or (char)0x2029; // PARAGRAPH SEPARATOR
+
+    /// <summary>
+    /// Whether the pattern holds an escape that can reach one of the boundary predicates
+    /// <c>boundary-at-the-end-of-the-text</c> is about.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <returns><see langword="true"/> if it holds one.</returns>
+    /// <remarks>
+    /// The five are <c>\b</c> and <c>\B</c> (word boundary, or the default-boundary pair under
+    /// <c>WORD</c>), <c>\m</c> and <c>\M</c> (word start and word end) and <c>\X</c>, whose grapheme
+    /// cluster ends at a grapheme boundary: <c>Parsing/ParseFunctions.cs:1617</c> and
+    /// <c>:1693-1697</c>. The scan steps over an escaped backslash so that <c>\\b</c>, a literal
+    /// backslash then a 'b', does not count. It does not track character classes, so <c>[\b]</c> - a
+    /// backspace - counts although it reaches no predicate. That widens the entry by patterns that
+    /// still have to satisfy its other four limbs, and the alternative is a parser.
+    /// </remarks>
+    private static bool HasABoundaryEscape(string pattern)
+    {
+        for (int i = pattern.IndexOf('\\'); i >= 0 && i + 1 < pattern.Length; i = pattern.IndexOf('\\', i + 2))
+        {
+            if (pattern[i + 1] is 'b' or 'B' or 'm' or 'M' or 'X')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Whether the pattern's last character is a <c>$</c> that is not itself escaped.</summary>
     /// <param name="pattern">The pattern.</param>

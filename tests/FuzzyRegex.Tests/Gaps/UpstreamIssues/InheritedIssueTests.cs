@@ -325,13 +325,15 @@ public sealed class InheritedIssueTests
         loose.Should().Equal("XY", "Z");
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_partial_fullmatch_still_denies_a_prefix_whose_completion_matches()
+    public void A_partial_fullmatch_reports_a_prefix_whose_completion_matches()
     {
-        // Upstream issue 589. 'True' is a prefix of 'Truest', and 'Truest' is a complete match of
-        // the pattern, so upstream's own documented definition of a partial match - "whether a
-        // complete match could be possible if the string had not been truncated"
-        // (upstream/docs/Features.html:576) - makes this a partial. Both engines answer None.
+        // Upstream issue 589, ledger entry 21, FIXED HERE by S57d. 'True' is a prefix of 'Truest',
+        // and 'Truest' is a complete match of the pattern, so upstream's own documented definition
+        // of a partial match - "whether a complete match could be possible if the string had not
+        // been truncated" (upstream/docs/Features.html:576) - makes this a partial. Upstream
+        // answers None; this port now answers the partial, and docs/DIVERGENCES.md carries the row.
         //
         // The maintainer's defence is that `\b` matches at the end of 'True', so the negative
         // lookahead fails. That resolves an assertion against text the caller has said is
@@ -348,40 +350,49 @@ public sealed class InheritedIssueTests
         // positive in the same machinery and is NOT a bug - PCRE2 does the same thing and deciding
         // it in general is undecidable. See Gaps/Engine/PartialMatchingTests.cs.
         //
-        // PARKED BY S50, AND THIS TEST NOW PINS THE INHERITED ANSWER. S50 fixed it, its blind review
-        // broke the fix, and the fix was reverted rather than patched. What S50 tried was to make
-        // the seven word and grapheme boundary predicates answer PARTIAL at the right-hand
-        // truncation point instead of resolving against the missing character. It turns this row
-        // green, but returning PARTIAL from a predicate ENDS the match, and the engine had not
-        // finished backtracking:
+        // S50 FIXED THIS AND ITS OWN BLIND REVIEW BROKE THE FIX, so the shape of the fix matters as
+        // much as the answer. S50 made the seven word and grapheme boundary predicates answer
+        // PARTIAL at the truncation point. That turns this row green, but returning PARTIAL from a
+        // predicate ENDS the match, and the engine had not finished backtracking:
         //
         //   search(r'(\.+?)\1\b', '..',   partial=True) -> group 1 was (0, 1), upstream (0, 2)
         //   search(r'(\.+?)\1\b', '....', partial=True) -> group 1 was (0, 2), upstream (0, 3)
         //
         // The lazy repeat's FIRST try reached the boundary, escalated, and returned before the
-        // repeat could grow - so a partial this port previously got exactly right came back with a
-        // truncated capture group. Both rows are upstream's answer at HEAD and both reproduce.
-        //
-        // The sound fix is PCRE2's model and not this one: a "hit the end of the subject while
-        // deciding" flag (`hitend`) that lets matching CONTINUE and only turns a final failure into
-        // a partial, so a definite complete match still wins and backtracking still runs to the
-        // end. That is an engine change with its own design, not a predicate tweak, and it is a
-        // named blocker in STATE.md rather than something to improvise at the end of a slice.
+        // repeat could grow, so a partial this port had exactly right came back with a truncated
+        // capture group. S57d takes PCRE2's model instead: the predicate sets MatchState.HitEnd and
+        // answers as it always did, matching and backtracking run to the end, and only a FINAL
+        // failure becomes a partial. The rows below hold both halves of that.
         var pattern = new FuzzyRegex(@"(?!(True|False)\b)(.*)");
 
         // The completion this partial is a prefix of, so the premise is measured, not asserted.
-        // This is the half that makes the answer below wrong, and it is still true.
         pattern.FullMatch("Truest").Success.Should().BeTrue();
 
-        // The inherited answer, pinned so that a fix cannot land silently: when this goes green the
-        // assertions below it are what the fix must satisfy.
-        pattern.FullMatch("True", partial: true).Success.Should().BeFalse();
+        // THE FIX. PCRE2 10.47 answers PARTIAL (0,4) here under both partial options, and the span
+        // is the whole of the available text.
+        Match prefix = pattern.FullMatch("True", partial: true);
+
+        prefix.Success.Should().BeTrue();
+        prefix.PartialMatch.Should().BeTrue();
+        (prefix.Index, prefix.Length).Should().Be((0, 4));
+
+        // A complete match still wins over the escalation, which is what makes this PCRE2's SOFT
+        // semantics rather than its HARD ones: asking for a partial does not cost 'Truest' its
+        // complete match. pcre2partial(3) puts the same row at HARD=PARTIAL (0,6) and SOFT=match
+        // (0,6), and upstream's `partial` has only the soft sense.
+        Match complete = pattern.FullMatch("Truest", partial: true);
+
+        complete.Success.Should().BeTrue();
+        complete.PartialMatch.Should().BeFalse();
+        (complete.Index, complete.Length).Should().Be((0, 6));
 
         // Without asking for a partial there is still no match, which both engines already get right.
         pattern.FullMatch("True").Success.Should().BeFalse();
 
-        // AND THE ROWS THE REVERTED FIX BROKE, pinned so the next attempt has to keep them. Upstream
-        // answers the same on both, and this port agreed before S50 and agrees again.
+        // AND THE ROWS THE REVERTED FIX BROKE. Upstream answers the same on both, and this port
+        // agreed before S50, agreed again after the revert, and still agrees now. A partial found
+        // the ORDINARY way keeps its own span and its own capture groups; the hitend flag is set
+        // here too, and is never read, because the match did not fail.
         var lazyBackreference = new FuzzyRegex(@"(\.+?)\1\b");
 
         foreach ((string subject, int groupLength) in new[] { ("..", 2), ("....", 3) })

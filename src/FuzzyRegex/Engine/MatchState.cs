@@ -307,6 +307,45 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>partial_side</c>.</summary>
     internal int PartialSide;
 
+    /// <summary>
+    /// PCRE2's <c>hitend</c>: a word or grapheme boundary was decided at the truncation point of a
+    /// partial match, so the answer it gave rests on text the caller has said is missing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This has no upstream counterpart. Upstream resolves such a boundary against the truncated
+    /// text and is done with it, which is upstream issue 589 and ledger entry 21: 'True' is denied
+    /// as a partial of <c>(?!(True|False)\b)(.*)</c> even though 'Truest' is a complete match, so a
+    /// prefix whose completion exists is reported as impossible. S57d takes PCRE2's model instead,
+    /// which pcre2partial(3) states in one line - under the soft option "the partial match is
+    /// remembered, but matching continues as normal", and "if no complete match can be found,
+    /// PCRE2_ERROR_PARTIAL is returned instead of PCRE2_ERROR_NOMATCH".
+    /// </para>
+    /// <para>
+    /// <b>Setting this flag is all a predicate does; it never ends the match.</b> That is the whole
+    /// difference from S50's reverted attempt, which returned a partial status from the predicate
+    /// itself and so truncated a capture group that backtracking had not finished growing -
+    /// <c>search(r'(\.+?)\1\b', '..', partial=True)</c> came back with group 1 at (0, 1) where
+    /// upstream gives (0, 2). Only <see cref="Matcher.DoMatch"/> reads the flag, and only once the
+    /// whole match has failed.
+    /// </para>
+    /// </remarks>
+    internal bool HitEnd;
+
+    /// <summary>
+    /// Where the attempt that first set <see cref="HitEnd"/> began, which is the start of the span a
+    /// hitend-derived partial reports.
+    /// </summary>
+    /// <remarks>
+    /// Written once per match and not overwritten, so that the leftmost end-reaching attempt is the
+    /// one reported. Measured on PCRE2 10.47, 2026-09-21,
+    /// <c>tools/probes/pcre2-hitend-partial-span.py</c> section B: <c>a*c\B</c> over <c>'ac'</c>
+    /// reaches the end from start 0 and again from start 1, and the answer is PARTIAL (0,2).
+    /// Section A is the same question from the other side - <c>cd\B</c> over <c>'xabcd'</c> is
+    /// PARTIAL (3,5), so the start is the attempt's and not the subject's.
+    /// </remarks>
+    internal int HitEndMatchPos;
+
     /// <summary>Upstream <c>max_errors</c>.</summary>
     internal long MaxErrors;
 
