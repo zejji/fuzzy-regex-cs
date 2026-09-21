@@ -98,3 +98,21 @@ expected 475/508/494, diverge 0/0/0).
 Still to do: the `docs/DIVERGENCES.md` row, `docs/PORTMAP.md`, ledger entries 19 and 20 marked
 fixed, the ratchet and its baseline, the blind review, the independent verifier over the judged
 rows, and the closing notes.
+
+## Sitting 2 (2026-09-21, 14:22-16:07) - interrupted, and its work is kept
+
+The owner needed the machine quiet at 16:13, so the driver and this sitting were stopped mid-run
+(an oracle wave and a `dotnet test` were running at the time). No commit was made, and the driver
+never reached its own rollback, so **sitting 3 must not start from scratch**: the work is on the
+branch `rescue/s57c-sitting2` (also stash `b37c93a`), 18 files and 389 insertions.
+
+Read it before writing anything: `git diff main..rescue/s57c-sitting2`. It carries most of the
+documentation list this file's sitting-2 plan names - the `fuzzy-insertion-at-a-pinned-anchor` row
+in `docs/DIVERGENCES.md`, new symbols in `docs/PORTMAP.md`, ledger entries 19 and 20, the roadmap
+and design-spec edits - plus changes to `Engine/Matcher.cs`, `ExpectedDivergences.cs`,
+`OracleWaveTests.cs`, `ThreadSafetyTests.cs`, `InheritedIssueTests.cs`, `tools/controls.json`,
+`tools/probes/issue-563-anchor-rule.py`, `tools/record-oracle.py` and `tools/run-oracle.ps1`.
+
+It is unreviewed and was written mid-sitting, so treat it as a draft to check rather than as
+landed work: cherry-pick what survives reading, re-run the wave, and take the blind review and the
+verifier over the result as the plan already says.
