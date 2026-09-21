@@ -907,3 +907,68 @@ Describe 'Read-Allowance' {
         Read-Allowance -Paths @((Join-Path $script:Dir 'missing.json')) | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Select-PendingSlice' {
+    BeforeAll {
+        # A throwaway slices directory, shaped like the real one: two pending slices in the same
+        # phase, one in another phase, and the two subdirectories the queue uses to say "not this
+        # one". S68 sitting beside S80 is the 2026-09-21 case that made -Slice necessary.
+        $script:Dir = Join-Path ([System.IO.Path]::GetTempPath()) "slices-probe-$([guid]::NewGuid().ToString('n'))"
+        New-Item -ItemType Directory -Path (Join-Path $script:Dir 'done') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $script:Dir 'blocked') -Force | Out-Null
+
+        function New-Slice([string]$Where, [string]$Name, [string]$Id, [int]$Phase) {
+            $path = Join-Path $script:Dir (Join-Path $Where $Name)
+            Set-Content -LiteralPath $path -Value "---`nslice: $Id`nphase: $Phase`n---`n`n# $Id" -NoNewline
+        }
+
+        New-Slice '.' 'S68-remarks.md' 'S68' 8
+        New-Slice '.' 'S80-guide.md' 'S80' 8
+        New-Slice '.' 'S57d-hitend.md' 'S57d' 6
+        New-Slice 'done' 'S64-readme.md' 'S64' 8
+        New-Slice 'blocked' 'S69-release.md' 'S69' 8
+    }
+
+    AfterAll { Remove-Item -LiteralPath $script:Dir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'takes the lowest-numbered pending slice in the phase' {
+        (Select-PendingSlice -SlicesDir $script:Dir -Phase 8).Name | Should -Be 'S68-remarks.md'
+    }
+
+    It 'takes the named slice even when another sorts before it' {
+        (Select-PendingSlice -SlicesDir $script:Dir -Phase 8 -SliceId 'S80').Name | Should -Be 'S80-guide.md'
+    }
+
+    It 'matches the id in the front matter rather than the file name' {
+        (Select-PendingSlice -SlicesDir $script:Dir -SliceId 'S57d').Name | Should -Be 'S57d-hitend.md'
+    }
+
+    It 'returns nothing when the named slice is not pending, rather than the next one' {
+        Select-PendingSlice -SlicesDir $script:Dir -Phase 8 -SliceId 'S81' | Should -BeNullOrEmpty
+    }
+
+    It 'refuses a named slice that belongs to another phase' {
+        Select-PendingSlice -SlicesDir $script:Dir -Phase 8 -SliceId 'S57d' | Should -BeNullOrEmpty
+    }
+
+    It 'reads neither done/ nor blocked/' {
+        Select-PendingSlice -SlicesDir $script:Dir -SliceId 'S64' | Should -BeNullOrEmpty
+        Select-PendingSlice -SlicesDir $script:Dir -SliceId 'S69' | Should -BeNullOrEmpty
+    }
+
+    It 'names the file when the front matter it has to read has no phase' {
+        $orphan = Join-Path $script:Dir 'S99-no-phase.md'
+        Set-Content -LiteralPath $orphan -Value "---`nslice: S99`n---`n" -NoNewline
+        { Select-PendingSlice -SlicesDir $script:Dir -SliceId 'S99' } | Should -Throw '*S99-no-phase.md has no*phase:*'
+        Remove-Item -LiteralPath $orphan -Force
+    }
+
+    It 'never reads past the slice it picked, so a broken file further down costs nothing' {
+        # The pipeline stops at the first match. A malformed slice sorting after the chosen one is
+        # somebody else's problem later, rather than a driver that cannot start tonight.
+        $orphan = Join-Path $script:Dir 'S99-no-phase.md'
+        Set-Content -LiteralPath $orphan -Value "---`nslice: S99`n---`n" -NoNewline
+        (Select-PendingSlice -SlicesDir $script:Dir -Phase 8).Name | Should -Be 'S68-remarks.md'
+        Remove-Item -LiteralPath $orphan -Force
+    }
+}
