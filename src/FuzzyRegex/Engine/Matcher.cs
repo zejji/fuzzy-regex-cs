@@ -1962,6 +1962,91 @@ internal static class Matcher
         MatchStatus.From(textPos <= state.TextStart);
 
     /// <summary>
+    /// Asks a zero-width position assertion whether it holds at a position. Upstream inlines this
+    /// switch into the sixteen matcher cases that share it (<c>:12060</c> and the fifteen lines
+    /// listed beside them); here it is one method, because <see cref="AnchorIsPinned"/> asks the
+    /// same question about a position the matcher is not standing on.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The assertion, one of the opcodes <c>Optimiser.IsPositionAssertion</c> names.</param>
+    /// <param name="textPos">The position to ask about.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    internal static int TryMatchZeroWidth(MatchState state, Node node, int textPos) =>
+        node.Op switch
+        {
+            Opcode.Boundary => TryMatchBoundary(state, node, textPos),
+            Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
+            Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, textPos),
+            Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, textPos),
+            Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
+            Opcode.EndOfLineU => TryMatchEndOfLineU(state, textPos),
+            Opcode.EndOfString => TryMatchEndOfString(state, textPos),
+            Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
+            Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, textPos),
+            Opcode.EndOfWord => TryMatchEndOfWord(state, textPos),
+            Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, textPos),
+            Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
+            Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
+            Opcode.StartOfLineU => TryMatchStartOfLineU(state, textPos),
+            Opcode.StartOfWord => TryMatchStartOfWord(state, textPos),
+            _ => TryMatchStartOfString(state, textPos),
+        };
+
+    /// <summary>
+    /// Whether an assertion at the head of the pattern pins a match to the search anchor, so that a
+    /// fuzzy section there may open with an inserted character.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>THIS PORT'S OWN RULE. It is the fix to upstream issues 563 and 564</b>, and
+    /// <c>docs/DIVERGENCES.md</c> carries it with the rows it changes. There is no option that
+    /// restores upstream's answer. Upstream's rule is <c>permit_insertion = !search || text_pos != search_anchor</c>
+    /// (<c>upstream/src/_regex.c</c>:10214), under its own comment "Permit insertion except
+    /// initially when searching (it's better just to start searching one character later)".
+    /// <c>search_anchor</c> is set once per matching operation (<c>init_match</c>, <c>:3410</c>)
+    /// and never per candidate start position, so the rule fires at exactly one of the positions a
+    /// scan visits, and <c>\m(?:Y){i}\M</c> loses 'XY' in 'XY YX' while finding it in ' XY YX'.
+    /// </para>
+    /// <para>
+    /// Starting one character later is the same match minus an insertion only while the pattern
+    /// still fits one character later. An assertion that holds here and fails there says it does
+    /// not, and that is the whole condition. Both halves are needed: lifting the rule whenever any
+    /// assertion held reddened upstream's own <c>test_fuzzy</c> rows 51, 52, 54 and 56, where the
+    /// assertion holds one character on too.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="step">Which way the fuzzy item travels, so that "one character on" follows it.</param>
+    /// <returns><see langword="true"/> if an insertion may open the match after all.</returns>
+    private static bool AnchorIsPinned(MatchState state, long step)
+    {
+        if (state.Pattern.AnchorGuards is not { Count: > 0 } guards)
+        {
+            return false;
+        }
+
+        int onePastAnchor = Step(state, state.SearchAnchor, step);
+
+        if (onePastAnchor == state.SearchAnchor || onePastAnchor < state.SliceStart || onePastAnchor > state.SliceEnd)
+        {
+            return false;
+        }
+
+        foreach (Node guard in guards)
+        {
+            if (
+                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success
+                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Upstream <c>try_match_CHARACTER</c> (<c>upstream/src/_regex.c</c> line 7026),
     /// <c>try_match_PROPERTY</c> (<c>:7154</c>), <c>try_match_RANGE</c> (<c>:7220</c>),
     /// <c>try_match_SET</c> (<c>:7292</c>) and their four <c>_IGN</c> counterparts, which are the
@@ -3614,7 +3699,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step);
 
         int status = MatchStatus.Failure;
 
@@ -3704,7 +3789,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step);
 
         step = advance ? data.Step : (sbyte)0;
 
@@ -3876,7 +3961,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step);
 
         int status = MatchStatus.Failure;
 
@@ -3970,7 +4055,7 @@ internal static class Matcher
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor;
+        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || AnchorIsPinned(state, data.Step);
 
         int status = MatchStatus.Failure;
 
@@ -4102,13 +4187,21 @@ internal static class Matcher
     /// already been left behind even though <c>text_pos</c> has not moved, so the "no insertion at
     /// the anchor" rule stops applying.
     /// </remarks>
+    /// <param name="state">The match state.</param>
     /// <param name="data">The attempt being set up.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
     /// <param name="atAnchor">Whether <c>text_pos</c> is still at the search anchor.</param>
     /// <returns>Whether an insertion may be tried.</returns>
-    private static bool PermitInsertionInFold(in FuzzyData data, bool search, bool atAnchor)
+    private static bool PermitInsertionInFold(MatchState state, in FuzzyData data, bool search, bool atAnchor)
     {
         if (!search || !atAnchor)
+        {
+            return true;
+        }
+
+        // NOT UPSTREAM: the issue 563 and 564 fix, which lifts the rule the other three lines of
+        // this method implement. See AnchorIsPinned.
+        if (AnchorIsPinned(state, data.Step))
         {
             return true;
         }
@@ -4150,7 +4243,7 @@ internal static class Matcher
         data.NewFoldedPos = foldedPos;
         data.FoldedLen = foldedLen;
         data.Step = step;
-        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -4247,7 +4340,7 @@ internal static class Matcher
 
         --fuzzyCounts[data.FuzzyType];
 
-        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -4496,7 +4589,7 @@ internal static class Matcher
         data.FoldedLen = foldedLen;
         data.NewGfoldedPos = gfoldedPos;
         data.Step = step;
-        data.PermitInsertion = PermitInsertionInFold(in data, search, state.TextPos == state.SearchAnchor);
+        data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
 
@@ -4609,7 +4702,12 @@ internal static class Matcher
         // rule differently here from the three places PermitInsertionInFold covers (:11019): one
         // '||' chain, and with no step test, so a reverse retry asks 'folded_pos != folded_len'
         // where the first attempt would have asked 'folded_pos != 0'. Ported as written.
-        data.PermitInsertion = !search || state.TextPos != state.SearchAnchor || data.NewFoldedPos != data.FoldedLen;
+        // ...plus the issue 563 and 564 fix, NOT UPSTREAM, exactly as at the other seven sites.
+        data.PermitInsertion =
+            !search
+            || state.TextPos != state.SearchAnchor
+            || AnchorIsPinned(state, data.Step)
+            || data.NewFoldedPos != data.FoldedLen;
 
         int status = MatchStatus.Failure;
 
@@ -6292,25 +6390,7 @@ internal static class Matcher
                 case Opcode.StartOfLineU: // At the start of a line.
                 case Opcode.StartOfString: // At the start of the string.
                 case Opcode.StartOfWord: // At the start of a word.
-                    status = node.Op switch
-                    {
-                        Opcode.Boundary => TryMatchBoundary(state, node, state.TextPos),
-                        Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, state.TextPos),
-                        Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, state.TextPos),
-                        Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, state.TextPos),
-                        Opcode.EndOfLine => TryMatchEndOfLine(state, state.TextPos),
-                        Opcode.EndOfLineU => TryMatchEndOfLineU(state, state.TextPos),
-                        Opcode.EndOfString => TryMatchEndOfString(state, state.TextPos),
-                        Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, state.TextPos),
-                        Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, state.TextPos),
-                        Opcode.EndOfWord => TryMatchEndOfWord(state, state.TextPos),
-                        Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, state.TextPos),
-                        Opcode.SearchAnchor => MatchStatus.From(state.TextPos == state.SearchAnchor),
-                        Opcode.StartOfLine => TryMatchStartOfLine(state, state.TextPos),
-                        Opcode.StartOfLineU => TryMatchStartOfLineU(state, state.TextPos),
-                        Opcode.StartOfWord => TryMatchStartOfWord(state, state.TextPos),
-                        _ => TryMatchStartOfString(state, state.TextPos),
-                    };
+                    status = TryMatchZeroWidth(state, node, state.TextPos);
 
                     if (status < 0)
                     {

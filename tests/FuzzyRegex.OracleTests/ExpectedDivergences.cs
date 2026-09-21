@@ -2335,6 +2335,25 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _reversedAnchorFullFoldOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The four rows of <c>fuzzy-insertion-at-a-pinned-anchor</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/s57c-anchor-pin-rows.jsonl</c> on
+    /// 2026-09-21.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Row 1 is the
+    /// seed-20260921 wave row 3752 minimised, and the only one of the four a generator has drawn.
+    /// The other three are the issues as reported: row 2 is issue 563's own example, row 3 is issue
+    /// 564's, and row 4 is <c>(?m)^</c>, where upstream's anchoring optimisation does not fire and
+    /// the rule bites a pattern whose plain <c>^</c> spelling escapes it.
+    /// </remarks>
+    private const string _anchorPinRows = """
+        {"generator": "rows", "pattern": "(?r)^a(?:b){i<=1}$", "flags": 0, "namedLists": {}, "subject": "ab\r", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "\\m(?:Y){i}\\M", "flags": 0, "namedLists": {}, "subject": "XY YX", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}, "codepointSpan": [3, 5]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [4], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?b)\\m(?:Y){1i+1d+1s<=2}\\M", "flags": 0, "namedLists": {}, "subject": " XY Z", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}, "codepointSpan": [4, 5]}]}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [2], "deletions": []}, "codepointSpan": [1, 3]}, {"groups": [{"number": 0, "success": true, "index": 4, "length": 1, "captures": [[4, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}, "codepointSpan": [4, 5]}]}}
+        {"generator": "rows", "pattern": "(?m)^(?:abc){i<=1}", "flags": 0, "namedLists": {}, "subject": "xabc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -5303,6 +5322,56 @@ internal static class ExpectedDivergences
                 _reversedAnchorFullFold.TryGetValue(Question(row), out string? judged)
                 && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
+        new(
+            Id: "fuzzy-insertion-at-a-pinned-anchor",
+            Reason: "THIS PORT PERMITS A FUZZY INSERTION AT THE SEARCH ANCHOR where a position "
+                + "assertion pins the match to it, and upstream does not. Upstream issues 563 and "
+                + "564, which are one bug; ledger entries 19 and 20; fixed by S57c on 2026-09-21 "
+                + "under the owner's no-known-bugs rule, and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM RULE IS ONE LINE: `permit_insertion = !search || text_pos != "
+                + "search_anchor` (upstream/src/_regex.c:10214), under its own comment \"Permit "
+                + "insertion except initially when searching (it's better just to start searching "
+                + "one character later)\". `search_anchor` is set once per matching operation "
+                + "(`init_match`, :3410) and never per candidate start, so the ban lands on exactly "
+                + "one of the positions a scan visits, and WHICH one depends on where the caller "
+                + "started the search rather than on the pattern.\n"
+                + "UPSTREAM CONTRADICTS ITSELF ON IT, measured 2026-09-21 on regex 2026.9.10 by "
+                + "`python tools/probes/issue-563-anchor-rule.py`. `\\m(?:Y){i}\\M` finds ['YX'] "
+                + "over 'XY YX' and ['XY', 'YX'] over ' XY YX', the same shape one character along. "
+                + "One span answers two ways according to the start it was asked from: "
+                + "`search(' XY', 0)` is (1, 3) and `search(' XY', 1)` is None. And `^` and `\\A` "
+                + "already escape the rule, because `basic_match` turns a start-anchored pattern "
+                + "into an anchored match and stops searching, so `^(?:abc){i<=1}` keeps the "
+                + "inserted character over 'xabc' while `(?m)^(?:abc){i<=1}` loses it.\n"
+                + "THE RULE THIS PORT APPLIES INSTEAD is narrower than the prohibition it lifts: "
+                + "the insertion is permitted only where a zero-width position assertion at the "
+                + "head of the pattern holds AT the anchor and fails one character on, which is "
+                + "exactly the case where \"start searching one character later\" cannot find the "
+                + "same match minus an insertion. `Optimiser.FindAnchorGuards` collects those "
+                + "assertions at compile time and `Matcher.AnchorIsPinned` re-tests them per call.\n"
+                + "THE WAVE SEES IT IN THE REVERSED DIRECTION, which is where row 1 of the example "
+                + "comes from: seed 20260921 row 3752, `interactions`, minimised to "
+                + "`(?r)^a(?:b){i<=1}$` over 'ab\\r'. Reversed, the anchor is the END of the "
+                + "subject, so upstream bans the trailing insertion and answers None where its own "
+                + "forward spelling of the same pattern answers (0, 3) with one insertion. Before "
+                + "the fix both engines were wrong on every row of this family, which is why no "
+                + "wave had ever reported it (design spec amendment 13).\n"
+                + "KEYED ON AN ABLATION RATHER THAN ON A SHAPE, and that is what stops it "
+                + "silencing anything. A row belongs here when taking away the one field the fix "
+                + "reads - `PatternObject.AnchorGuards`, emptied by "
+                + "`OracleComparer.RunWithoutTheAnchorPin` - makes this port reproduce upstream's "
+                + "recorded answer exactly, AND this port's live answer to the row is the one being "
+                + "judged. A row this port gets wrong for any other reason still diverges without "
+                + "the pin and is reported; a fabricated answer to a row of the family is reported "
+                + "too, which is the control in "
+                + "`A_row_the_anchor_pin_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "InheritedIssueTests.A_word_start_anchor_before_a_fuzzy_section_matches_at_"
+                + "position_zero_here, .A_reversed_fuzzy_match_may_insert_at_the_end_of_the_subject "
+                + "and .Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found",
+            Example: _anchorPinRows,
+            Applies: static (row, ours) => OnlyTheAnchorPinExplainsIt(row, ours)
+        ),
     ];
 
     /// <summary>Every entry, so a test can hold each one's example to account.</summary>
@@ -5639,6 +5708,40 @@ internal static class ExpectedDivergences
                 yield return subject[i];
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two runs, in the order that fails cheapest. First the row without the pin
+    /// (<see cref="OracleComparer.RunWithoutTheAnchorPin"/>): unless that reproduces upstream's
+    /// recorded answer, whatever the engines are disagreeing about is not this family. Then the row
+    /// as the engine really answers it, which must be the answer being judged - so an answer nobody
+    /// measured, such as a test's fabricated <c>NoMatchOutcome</c>, is never classified.
+    /// </para>
+    /// <para>
+    /// Neither run needs a switch in the engine. Emptying <c>AnchorGuards</c> on a compiled pattern
+    /// leaves <c>Matcher.AnchorIsPinned</c> returning false everywhere, which is upstream's rule
+    /// exactly, and the pattern it is emptied on was compiled for that one call.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the pin explains the divergence and nothing else does.</returns>
+    private static bool OnlyTheAnchorPinExplainsIt(OracleRow row, IOracleOutcome ours)
+    {
+        if (
+            OracleComparer.RunWithoutTheAnchorPin(row) is not { } unpinned
+            || OracleComparer.Compare(row, unpinned) != OracleVerdict.Agree
+        )
+        {
+            return false;
+        }
+
+        return OracleComparer.Run(row) is { } pinned
+            && string.Equals(pinned.Describe(), ours.Describe(), StringComparison.Ordinal);
     }
 
     /// <summary>

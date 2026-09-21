@@ -157,8 +157,20 @@ internal static class OracleComparer
     /// lazy twin. The wave itself is always run eagerly; this is for the test that runs each row
     /// both ways and requires the same answer.
     /// </param>
+    /// <param name="ablate">
+    /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
+    /// named piece of this engine's behaviour away and see what the row answers without it. Used by
+    /// <see cref="RunWithoutTheAnchorPin"/> and by nothing else; the wave always passes
+    /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
+    /// caller shares is mutated.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
-    internal static IOracleOutcome? Run(OracleRow row, TimeSpan timeout, bool lazy = false)
+    internal static IOracleOutcome? Run(
+        OracleRow row,
+        TimeSpan timeout,
+        bool lazy = false,
+        Action<FuzzyRegex>? ablate = null
+    )
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -208,6 +220,8 @@ internal static class OracleComparer
             // in the report is the difference between a finding and a fishing trip.
             return ErrorOutcome.From(e);
         }
+
+        ablate?.Invoke(compiled);
 
         try
         {
@@ -305,6 +319,38 @@ internal static class OracleComparer
         {
             return ErrorOutcome.From(e, whileMatching: true);
         }
+    }
+
+    /// <summary>Puts a row's question to this port with the issue 563/564 anchor pin switched off.</summary>
+    /// <remarks>
+    /// <para>
+    /// S57c fixed upstream issues 563 and 564: where a position assertion pins a fuzzy match to the
+    /// search anchor, this port permits an insertion there and upstream does not
+    /// (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:10214</c>). The fix reads one field,
+    /// <c>PatternObject.AnchorGuards</c>, which the optimiser fills in; emptying it on a compiled
+    /// pattern leaves an engine that applies upstream's rule exactly, because
+    /// <c>Matcher.AnchorIsPinned</c> then returns false at every site without looking at anything
+    /// else.
+    /// </para>
+    /// <para>
+    /// That is what makes the <c>fuzzy-insertion-at-a-pinned-anchor</c> entry a classification
+    /// rather than a silencer: a row belongs to the family when taking this one piece away
+    /// reproduces upstream's recorded answer exactly. A row this port gets wrong for any other
+    /// reason still diverges without the pin, and is reported.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheAnchorPin(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.AnchorGuards = null
+        );
     }
 
     /// <summary>Diffs one row's recorded answer against this port's.</summary>

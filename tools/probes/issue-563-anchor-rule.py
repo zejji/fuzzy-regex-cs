@@ -44,6 +44,16 @@
 #    BESTMATCH's re-anchoring, so that the LOOSER budget finds fewer matches.
 #       (?b)\m(?:Y){1i+1d+1s<=1}\M  over ' XY Z'  -> ['XY', 'Z']
 #       (?b)\m(?:Y){1i+1d+1s<=2}\M  over ' XY Z'  -> ['Z']
+#
+# 7. THE REVERSED DIRECTION, added 2026-09-21 by S57c and measured the same day. Under (?r) the
+#    search anchor is the END of the subject, so the rule bans the trailing insertion instead of
+#    the leading one, and the direction alone decides whether the match exists. Found by the
+#    differential oracle (seed 20260921, row 3752) once the fix made the two engines disagree:
+#       (?r)^a(?:b){i<=1}$  over 'ab\r'  -> None
+#           ^a(?:b){i<=1}$  over 'ab\r'  -> (0, 3), one insertion   <- the same pattern forwards
+#       (?r)a(?:b){i<=1}$   over 'ab\r'  -> None                    <- '$' alone pins it
+#       (?r)^a(?:b){i<=1}$  over 'ab'    -> (0, 2), no errors       <- nothing to insert
+#       (?r)^a(?:b){s<=1}$  over 'ab\r'  -> None                    <- no insertion budget
 
 import os
 import sys
@@ -78,6 +88,16 @@ SECTIONS = [
     ]),
 ]
 
+# Printed on their own, because the match TEXT of these rows hides the thing they are about: the
+# trailing '\r' the insertion has to absorb, and the error counts that say it was absorbed.
+REVERSED_ROWS = [
+    (r'(?r)^a(?:b){i<=1}$', 'ab\r'),
+    (r'^a(?:b){i<=1}$', 'ab\r'),
+    (r'(?r)a(?:b){i<=1}$', 'ab\r'),
+    (r'(?r)^a(?:b){i<=1}$', 'ab'),
+    (r'(?r)^a(?:b){s<=1}$', 'ab\r'),
+]
+
 
 def main():
     print('regex', regex.__version__)
@@ -95,6 +115,13 @@ def main():
         match = compiled.search(' XY', start)
         found = (match.span(), match.group()) if match else None
         print('  search(%r, pos=%d) -> %r' % (' XY', start, found))
+
+    print()
+    print('7. the reversed direction, oracle seed 20260921 row 3752 minimised')
+    for pattern, subject in REVERSED_ROWS:
+        match = regex.search(pattern, subject)
+        found = 'None' if match is None else '%s fuzzy=%s' % (match.span(), match.fuzzy_counts)
+        print('  %-28s over %-12s -> %s' % (pattern, ascii(subject), found))
 
 
 if __name__ == '__main__':

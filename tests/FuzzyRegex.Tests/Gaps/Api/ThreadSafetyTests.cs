@@ -693,6 +693,9 @@ public sealed class ThreadSafetyTests
             // passes (the required-string node, the start optimisations, the fuzzy survey).
             // S60 added two, both written by Compile and by nothing else: ReqStringText beside the
             // required-string node it belongs to, and HasSkipVerb in the node-numbering loop.
+            // S57c added AnchorGuards, written by Optimiser.FindAnchorGuards, the last pass
+            // OptimisePattern runs.
+            "PatternObject.AnchorGuards",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

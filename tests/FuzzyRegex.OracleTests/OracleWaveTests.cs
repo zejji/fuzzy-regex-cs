@@ -422,6 +422,42 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_anchor_pin_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-insertion-at-a-pinned-anchor`, written before the entry was
+        // trusted with a wave: an entry whose predicate cannot tell its own family from a defect
+        // is a silencer, not a classification (DECISIONS 2026-09-12).
+        //
+        // The entry is keyed on an ablation - switch off the S57c anchor pin, and this port gives
+        // upstream's recorded answer - so the two answers to test it with are the two an ablation
+        // cannot explain:
+        //
+        //   * upstream's OWN answer, which is what this port gave before S57c. If the entry
+        //     accepted it, a revert of the fix would be classified as the fix; and
+        //   * no match at all, which is the shape of an unrelated engine defect landing on one of
+        //     these rows, and the only one of the two that is not already excluded by the row
+        //     having to diverge before `For` is ever called.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-insertion-at-a-pinned-anchor", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
     public void An_accounted_divergence_is_reported_but_does_not_fail_the_run()
     {
         // Half one: the wave loop reclassifies, tallies and renders it as EXPECTED rather than

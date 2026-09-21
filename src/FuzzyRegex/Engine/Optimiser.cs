@@ -45,7 +45,110 @@ internal static class Optimiser
 
         // Mark all the group that are named.
         MarkNamedGroups(pattern);
+
+        // NOT UPSTREAM. Collect the assertions that pin a fuzzy match to the search anchor; see
+        // FindAnchorGuards. Last because it reads the graph the passes above leave behind.
+        FindAnchorGuards(pattern);
     }
+
+    /// <summary>
+    /// Fills in <see cref="PatternObject.AnchorGuards"/>: the zero-width position assertions the
+    /// pattern must pass before it does anything else. <b>Not an upstream pass</b> - it exists for
+    /// the fix to upstream issues 563 and 564, described in <c>docs/DIVERGENCES.md</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk follows <see cref="Node.Next1"/> from the start node and stops at the first node
+    /// that could send matching down more than one path, so everything it collects is passed on
+    /// every path through the pattern. That is the whole point: S50 held the same answer in a
+    /// <c>MatchState</c> field that the backtracking engine neither saved nor restored, and it was
+    /// wrong in both directions - an assertion that held only on an abandoned path still pinned the
+    /// anchor, and the clears that fixed that also threw away a pin set outside the construct.
+    /// A property of the pattern cannot be wrong about which path the engine is on.
+    /// </para>
+    /// <para>
+    /// It walks through two kinds of node. Group markers carry no test of their own. And a
+    /// one-character node with a step of 0 is the test the compiler hoists in front of a leading
+    /// anchor - <c>'^a'</c> compiles to <c>CHARACTER(step 0) - START_OF_STRING - CHARACTER(step
+    /// 1)</c>, see the remarks on <c>Matcher.Step</c> - so stopping there would miss the anchor it
+    /// was hoisted past.
+    /// </para>
+    /// <para>
+    /// An assertion inside a fuzzy section is not collected, and stops the walk: an error can get
+    /// past it, so it pins nothing.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    private static void FindAnchorGuards(PatternObject pattern)
+    {
+        if (!pattern.IsFuzzy)
+        {
+            return;
+        }
+
+        List<Node>? guards = null;
+        Node? node = pattern.StartNode;
+
+        // The chain this walk follows cannot loop - it stops at every node that branches or repeats
+        // - but it reads a graph four other passes have just rewritten, so it is bounded anyway.
+        for (int steps = pattern.NodeList.Count; node is not null && steps > 0; steps--)
+        {
+            if ((node.Status & NodeStatus.Fuzzy) != 0)
+            {
+                break;
+            }
+
+            if (IsPositionAssertion(node.Op))
+            {
+                (guards ??= []).Add(node);
+            }
+            else if (
+                node.Op is not (Opcode.StartGroup or Opcode.EndGroup)
+                && !(node.Step == 0 && NodeQueries.MatchesOneCharacter(node))
+            )
+            {
+                break;
+            }
+
+            node = node.Next1.Node;
+        }
+
+        pattern.AnchorGuards = guards;
+    }
+
+    /// <summary>
+    /// Whether an opcode asks only where the text position is, so that <c>Matcher</c> can answer it
+    /// at any position without matching anything.
+    /// </summary>
+    /// <remarks>
+    /// Exactly the opcodes <c>Matcher.TryMatchZeroWidth</c> answers. A lookaround is deliberately
+    /// not one of them: it runs a subpattern, and <c>(?=x)</c> before a fuzzy section is a
+    /// character test wearing an assertion's clothes - upstream loses the leading insertion there
+    /// and this port agrees with it.
+    /// </remarks>
+    /// <param name="op">The opcode.</param>
+    /// <returns><see langword="true"/> if it is a position assertion.</returns>
+    private static bool IsPositionAssertion(Opcode op) =>
+        op switch
+        {
+            Opcode.Boundary
+            or Opcode.DefaultBoundary
+            or Opcode.DefaultEndOfWord
+            or Opcode.DefaultStartOfWord
+            or Opcode.EndOfLine
+            or Opcode.EndOfLineU
+            or Opcode.EndOfString
+            or Opcode.EndOfStringLine
+            or Opcode.EndOfStringLineU
+            or Opcode.EndOfWord
+            or Opcode.GraphemeBoundary
+            or Opcode.SearchAnchor
+            or Opcode.StartOfLine
+            or Opcode.StartOfLineU
+            or Opcode.StartOfString
+            or Opcode.StartOfWord => true,
+            _ => false,
+        };
 
     /// <summary>
     /// Upstream <c>skip_one_way_branches</c> (line 23136): a branch with a single exit exists only

@@ -5,9 +5,9 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.UpstreamIssues;
 /// <summary>
 /// The five open upstream issues that S49's sweep proved this port inherits: 425, 554, 563, 564
 /// and 589. S49 wrote them all failing and skipped; <b>S50 fixed 425 and parked the other four</b>,
-/// so nothing here is skipped any more and the four parked tests pin the INHERITED answer with the
-/// blocker written above each assertion. 563, 564 and 589 were fixed and then REVERTED when this
-/// slice's own blind reviews broke the fixes.
+/// so nothing here is skipped any more. <b>S57c then fixed 563 and 564, which are one bug</b>, so
+/// those two tests now pin THIS PORT'S answer and upstream's is quoted beside it; 554 and 589 are
+/// still parked and still pin the INHERITED answer, with the blocker written above each assertion.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,10 +19,13 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.UpstreamIssues;
 /// </para>
 /// <para>
 /// Measured 2026-09-14 against <c>regex</c> 2026.9.10 and against this port, by
-/// <c>tools/probes/upstream-issue-sweep.py</c> and <c>tools/probes/port-issue-sweep.ps1</c>. Both
-/// engines give the wrong answer on all five, which is why the oracle cannot see them (design spec
-/// amendment 13) and why the tracker is the instrument. The full triage, including the six issues
-/// the sweep dismissed or attributed to upstream alone, is in
+/// <c>tools/probes/upstream-issue-sweep.py</c> and <c>tools/probes/port-issue-sweep.ps1</c>; 563
+/// and 564 re-measured 2026-09-21 by <c>tools/probes/issue-563-anchor-rule.py</c> and
+/// <c>tools/probes/port-issue-563-anchor-rule.ps1</c>. Both engines gave the wrong answer on all
+/// five, which is why the oracle could not see them (design spec amendment 13) and why the tracker
+/// was the instrument; now that 563 and 564 diverge, the oracle can, and
+/// <c>ExpectedDivergences</c> holds their family. The full triage, including the six issues the
+/// sweep dismissed or attributed to upstream alone, is in
 /// <c>docs/plan/upstream-issues/2026-09-14-triage.md</c>.
 /// </para>
 /// <para>
@@ -125,69 +128,87 @@ public sealed class InheritedIssueTests
     }
 
     [Test]
-    public void A_word_start_anchor_before_a_fuzzy_section_still_does_not_match_at_position_zero()
+    public void A_word_start_anchor_before_a_fuzzy_section_matches_at_position_zero_here()
     {
-        // Upstream issue 563, and issue 564 below it, which is the same bug reached another way.
-        // The maintainer's own comment on both is "It looks like a bug". Both engines return only
-        // 'YX' for the first row, and both return BOTH matches for the other two - so a single
-        // leading space, or a subject whose first word starts with the literal, is the whole
-        // difference. Position 0 is the only thing that fails.
+        // FIXED BY S57c, and the fix is a DELIBERATE DIVERGENCE: `docs/DIVERGENCES.md`, row
+        // "fuzzy-insertion-at-a-pinned-anchor", which also says how to get upstream's answer back.
+        // Upstream issues 563 and 564, still open, still reproduced by `regex` 2026.9.10. Every
+        // upstream answer quoted below was measured on 2026-09-21 by
+        // `python tools/probes/issue-563-anchor-rule.py`; this port's by
+        // `pwsh -File tools/probes/port-issue-563-anchor-rule.ps1`.
         //
-        //   findall(r'\m(?:Y){i}\M', 'XY YX')   -> ['YX']          <- wrong, 'XY' is missing
-        //   findall(r'\m(?:X){i}\M', 'XY YX')   -> ['XY', 'YX']
-        //   findall(r'\m(?:Y){i}\M', ' XY YX')  -> ['XY', 'YX']
+        // THE BUG. Upstream forbids a fuzzy section from opening with an inserted character at the
+        // search anchor, under its own comment at _regex.c:10213: "Permit insertion except
+        // initially when searching (it's better just to start searching one character later)".
+        // `search_anchor` is set once per matching operation (init_match, :3410) and never per
+        // candidate start position, so the rule fires at exactly ONE of the positions a scan
+        // visits. A single leading space is the whole difference:
         //
-        // PARKED BY S50, WHICH ESTABLISHED THE MECHANISM TO A LINE AND THEN FAILED TWICE TO FIX IT
-        // SOUNDLY. Everything below is what the next attempt needs; ledger entries 19 and 20 carry
-        // it in full, and `python tools/probes/issue-563-anchor-rule.py` re-runs every row.
+        //   findall(r'\m(?:Y){i}\M', 'XY YX')   -> ['YX']          <- upstream, 'XY' missing
+        //   findall(r'\m(?:Y){i}\M', ' XY YX')  -> ['XY', 'YX']    <- upstream, same shape, found
         //
-        // THE MECHANISM is _regex.c:10214, `permit_insertion = !search || text_pos !=
-        // search_anchor`, under upstream's own comment "Permit insertion except initially when
-        // searching (it's better just to start searching one character later)". `search_anchor` is
-        // set once per matching operation (init_match, :3410) and never per candidate start
-        // position, so the rule fires at exactly ONE of the positions a scan visits. The isolating
-        // probe is the same subject and the same winning span answered two ways purely by where the
-        // search was told to begin:
+        // THE RULE THIS PORT APPLIES INSTEAD. "Start searching one character later" is the same
+        // match minus an insertion only while the pattern still fits one character later. So the
+        // prohibition is lifted where a zero-width position assertion at the head of the pattern
+        // holds at the anchor and FAILS one character on, and nowhere else. Both halves are load
+        // bearing: S50 measured that lifting it whenever any assertion had held reddened
+        // upstream's own test_fuzzy rows 51, 52, 54 and 56, where the assertion holds one
+        // character on too.
         //
-        //   regex.compile(r'\m(?:Y){i}\M').search(' XY', 0)  -> span (1, 3) 'XY'
-        //   regex.compile(r'\m(?:Y){i}\M').search(' XY', 1)  -> None
-        //
-        // WHY A FIX IS JUSTIFIED AT ALL: it is a generalisation of upstream's own behaviour. '^' and
-        // '\A' already escape the rule, because basic_match turns a start-anchored pattern into an
-        // anchored match - so upstream KEEPS a match beginning with an inserted character for
-        // `^(?:abc){i<=1}` over 'xabc' and loses it for the identical `(?m)^` pattern.
-        //
-        // WHAT S50 BUILT AND WHY IT WENT BACK. A `MatchState.AssertionPinsStart` flag, set when a
-        // zero-width assertion held at the anchor AND failed one character on, read by
-        // `AtInsertionAnchor`. The one-step-on test is necessary and was found by breaking
-        // upstream's own test_fuzzy rows 51, 52, 54 and 56 without it. The flag is the part that
-        // does not work: it is bare mutable state that the backtracking engine never saves or
-        // restores, so it is wrong in BOTH directions, and two separate blind reviews each found a
-        // different half.
-        //
-        //   Under-clearing: an assertion that held only on a path the engine then abandoned still
-        //   pinned the anchor. Clearing it in the `Branch` and failed-lookaround backtrack arms
-        //   fixed those two shapes and left the repeats - `(?:\bq)*`, `(?:\bq)?`, `(?:\bq){0,3}`,
-        //   `(?:\bq)*+`, `(?>(?:\bq)*)` over 'xabc' all answered 'xabc' where upstream says 'abc'.
-        //
-        //   Over-clearing: those same unconditional clears also discard a pin set BEFORE and
-        //   OUTSIDE the construct, so adding a semantically inert `(?:z|)` or `(?!q)` after the
-        //   `\m` threw the fix away again - `\m(?:z|)(?:Y){i}\M` over 'XY' went back to no match.
-        //
-        // So the pin has to be part of the backtracking state rather than a field beside it, or be
-        // replaced by a compile-time "every path to this fuzzy item passes a position assertion"
-        // analysis combined with the dynamic one-step-on test. Either is a slice, and a named
-        // blocker in STATE.md.
-        //
-        // The inherited answer, pinned so a fix cannot land silently. When this row goes green the
-        // two below it are what the fix must also satisfy.
-        Values(@"\m(?:Y){i}\M", "XY YX").Should().Equal("YX");
+        // WHERE THE ANSWER LIVES, which is what S50 got wrong twice. It is a property of the
+        // PATTERN - `PatternObject.AnchorGuards`, filled by `Optimiser.FindAnchorGuards` - not a
+        // flag in `MatchState`. S50 used the flag, and because the backtracking engine neither
+        // saves nor restores it, it was wrong in both directions: an assertion that held only on
+        // an abandoned path still pinned the anchor, and the backtrack-arm clears that fixed that
+        // also threw away a pin set outside the construct. The guards are collected by walking the
+        // pattern's leading chain and stopping at the first node that can send matching down more
+        // than one path, so an assertion the engine can abandon is never collected in the first
+        // place. Every shape those two attempts broke is still below, and still green.
 
-        // The two rows that already agree, kept here so a fix that breaks them cannot pass.
+        // THE ROW THE ISSUE REPORTS. Upstream answers ['YX'].
+        Values(@"\m(?:Y){i}\M", "XY YX").Should().Equal("XY", "YX");
+
+        // The same shape one character along, where upstream's rule never fires and both engines
+        // have always agreed. This port now gives one answer to both, which is the point.
         Values(@"\m(?:X){i}\M", "XY YX").Should().Equal("XY", "YX");
         Values(@"\m(?:Y){i}\M", " XY YX").Should().Equal("XY", "YX");
 
-        // THE ROWS THE TWO FAILED ATTEMPTS BROKE, pinned so the next attempt has to keep them.
+        // Upstream already allows a RUNAWAY leading insertion at every position except the anchor,
+        // so these two subjects, one leading space apart, get different answers from it at the same
+        // relative position: findall(r'\m(?:Y){i}\M', 'q XY YX') -> ['XY', 'YX'] and over
+        // ' q XY YX' -> ['q XY', 'YX']. Here they agree. The runaway itself is upstream's own
+        // reading of an unbounded `{i}` and this port keeps it; what the fix removes is the
+        // position that answered differently from all the others.
+        Values(@"\m(?:Y){i}\M", "q XY YX").Should().Equal("q XY", "YX");
+        Values(@"\m(?:Y){i}\M", " q XY YX").Should().Equal("q XY", "YX");
+
+        // A MATCH UPSTREAM LOSES ALTOGETHER rather than shortens, which is the clearest form of the
+        // bug: there is no match one character later to fall back on, so "start searching one
+        // character later" costs the whole answer. Upstream gives [] to all four.
+        Values(@"\b(?:abc){i<=1}", "xabc").Should().Equal("xabc");
+        Values(@"\m(?:YZ){i}\M", "XYZ ZY").Should().Equal("XYZ");
+        Values(@"\G(?:abc){i<=1}", "xabc").Should().Equal("xabc");
+        Values(@"\m(?:z|)(?:Y){i}\M", "XY").Should().Equal("XY");
+        Values(@"\m(?!q)(?:Y){i}\M", "XY").Should().Equal("XY");
+
+        // THE INCONSISTENCY INSIDE UPSTREAM that says the fix is a generalisation of its own
+        // behaviour rather than a new rule. '^' and '\A' already escape the prohibition, because
+        // basic_match turns a start-anchored pattern into an anchored match and stops searching, so
+        // upstream KEEPS a match that opens with an inserted character for the first two rows and
+        // loses it for the third - the same assertion, at the same position, under a flag that
+        // should not matter here. Upstream: ['xabc'], ['xabc'], [].
+        Values("^(?:abc){i<=1}", "xabc").Should().Equal("xabc");
+        Values(@"\A(?:abc){i<=1}", "xabc").Should().Equal("xabc");
+        Values("(?m)^(?:abc){i<=1}", "xabc").Should().Equal("xabc");
+
+        // AND THE SAME IN REVERSE, which is the fix being a property of the pattern rather than of
+        // the direction. Reversed, the anchor is the end of the subject and the guard is the
+        // pattern's trailing assertion, so upstream loses the match at THAT end instead:
+        // findall(r'(?r)\m(?:Y){i}\M', 'XY YX') -> ['XY']. Here both directions find both matches,
+        // in their own order.
+        Values(@"(?r)\m(?:Y){i}\M", "XY YX").Should().Equal("YX", "XY");
+
+        // THE ROWS THE TWO FAILED ATTEMPTS BROKE, pinned so no attempt can break them again.
         // Every one is upstream's answer, measured against regex 2026.9.10 on 2026-09-14, and every
         // one is this port's answer today.
         //
@@ -202,6 +223,11 @@ public sealed class InheritedIssueTests
         Values(@"\b(?:abc){i<=2}", "ab abc").Should().Equal(" abc");
         Values(@"\B(?:abc){i<=2}", "xy abc").Should().Equal("y abc");
 
+        // A LOOKAROUND IS NOT A POSITION ASSERTION, deliberately: it runs a subpattern, and
+        // `(?=x)` before a fuzzy section is a character test wearing an assertion's clothes.
+        // Upstream loses the leading insertion here and this port agrees with it.
+        Values("(?=x)(?:abc){i<=1}", "xabc").Should().BeEmpty();
+
         // An assertion that holds at position 0 but only on a path the engine abandons: an
         // alternative it gives up on, the body of a NEGATIVE lookaround, or a repeat that matches
         // nothing. The first attempt answered 'xabc' on the first three; the second answered
@@ -215,27 +241,73 @@ public sealed class InheritedIssueTests
         Values(@"(?:\bq)*+(?:abc){i<=1}", "xabc").Should().Equal("abc");
         Values(@"(?>(?:\bq)*)(?:abc){i<=1}", "xabc").Should().Equal("abc");
 
-        // And an inert group after the assertion, which the second attempt's clears threw away.
-        Values(@"\m(?:z|)(?:Y){i}\M", "XY").Should().BeEmpty();
-        Values(@"\m(?!q)(?:Y){i}\M", "XY").Should().BeEmpty();
-
+        // The inert group after the assertion, which the second attempt's clears threw away, is
+        // now up with the rows the fix answers: a guard the pattern always passes is not something
+        // a later `(?:z|)` or `(?!q)` can take away.
         static string[] Values(string pattern, string subject) =>
             [.. new FuzzyRegex(pattern).Matches(subject).Select(static m => m.Value)];
     }
 
     [Test]
-    public void Loosening_a_fuzzy_budget_still_loses_a_match_the_tighter_one_found()
+    public void A_reversed_fuzzy_match_may_insert_at_the_end_of_the_subject()
     {
-        // Upstream issue 564, parked with 563 above because S50 proved they are ONE bug: the fix
-        // for 563 turned this row green with no code of its own, through BESTMATCH's re-anchoring,
-        // and reverting 563 took it back. The reporter suspected they were related and was right.
+        // The same bug at the other end of the subject, found by the differential oracle rather
+        // than by the issue reports: seed 20260921 row 3752, minimised. Under `(?r)` the search
+        // anchor is where a reversed search starts, which is the END of the subject, so upstream's
+        // one-position rule bans a TRAILING insertion instead of a leading one and the direction
+        // alone decides whether the match exists.
+        //
+        // Upstream regex 2026.9.10, measured 2026-09-21 by
+        // `python tools/probes/issue-563-anchor-rule.py`, section 7:
+        //
+        //   search(r'(?r)^a(?:b){i<=1}$', 'ab\r')  -> None
+        //   search(r'^a(?:b){i<=1}$', 'ab\r')      -> (0, 3), one insertion
+        //
+        // One pattern, one subject, one answer each way. The match is the same in both: 'a', then
+        // the fuzzy section matching 'b' and absorbing the '\r' as an insertion, then '$' at the
+        // end of the subject. '$' does not match before a '\r' - only before a final '\n' - so the
+        // '\r' has to be consumed for the pattern to reach the end at all.
+        Span(@"(?r)^a(?:b){i<=1}$", "ab\r").Should().Be((0, 3, 1));
+        Span(@"^a(?:b){i<=1}$", "ab\r").Should().Be((0, 3, 1));
+
+        // The leading '^' is not what pins it. Reversed, the pattern's trailing '$' is the first
+        // thing matched, so it is the guard, and upstream loses this row too.
+        Span(@"(?r)a(?:b){i<=1}$", "ab\r").Should().Be((0, 3, 1));
+
+        // The two controls that say the divergence needs the insertion. With nothing to absorb,
+        // and with a budget that cannot absorb it, both engines agree. Upstream: (0, 2) with no
+        // errors, then None.
+        Span(@"(?r)^a(?:b){i<=1}$", "ab").Should().Be((0, 2, 0));
+        Span(@"(?r)^a(?:b){s<=1}$", "ab\r").Should().Be((-1, -1, -1));
+
+        static (int Start, int End, int Insertions) Span(string pattern, string subject)
+        {
+            Match m = new FuzzyRegex(pattern).Match(subject);
+
+            return m.Success ? (m.Index, m.Index + m.Length, m.FuzzyCounts.Insertions) : (-1, -1, -1);
+        }
+    }
+
+    [Test]
+    public void Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found()
+    {
+        // Upstream issue 564. FIXED BY S57c with no code of its own, which is S50's finding
+        // confirmed a second time: 563 and 564 are ONE bug, reached two ways. BESTMATCH re-anchors
+        // its candidate walk at the match start when the budget is loosened, so the looser budget
+        // meets upstream's "no insertion at the search anchor" rule where the tighter one never
+        // did, and loses a match it should by definition still find. Reverting the 563 fix takes
+        // this row straight back, which is how the two were tied together in the first place.
+        //
+        // Upstream regex 2026.9.10, measured 2026-09-21 by
+        // `python tools/probes/issue-563-anchor-rule.py`:
         //
         //   findall(r'(?b)\m(?:Y){1i+1d+1s<=1}\M', ' XY Z')  -> ['XY', 'Z']
         //   findall(r'(?b)\m(?:Y){1i+1d+1s<=2}\M', ' XY Z')  -> ['Z']        <- 'XY' lost
         //
-        // Monotonicity is what a fix must deliver - a budget of <=2 admits every match a budget of
-        // <=1 admits, because every candidate the tighter constraint accepts also satisfies the
-        // looser one - and it is what this port does not deliver today.
+        // Monotonicity is the bar, rather than an expected match list: a budget of <=2 admits
+        // every match a budget of <=1 admits, because every candidate the tighter constraint
+        // accepts also satisfies the looser one. Covered by `docs/DIVERGENCES.md`, row
+        // "fuzzy-insertion-at-a-pinned-anchor", with 563.
         string[] tight =
         [
             .. new FuzzyRegex(@"(?b)\m(?:Y){1i+1d+1s<=1}\M").Matches(" XY Z").Select(static m => m.Value),
@@ -247,8 +319,9 @@ public sealed class InheritedIssueTests
 
         tight.Should().Equal("XY", "Z");
 
-        // The inherited answer. When this becomes `loose.Should().Contain(tight)` the bug is fixed.
-        loose.Should().Equal("Z");
+        // Monotonicity, which is the assertion the bug denied. Upstream answers ['Z'].
+        loose.Should().Contain(tight);
+        loose.Should().Equal("XY", "Z");
     }
 
     [Test]
