@@ -78,21 +78,39 @@ const DIGITS = '0123456789';
  *
  * Null is also the answer for a budget this cannot read. A page that says nothing is a page that is
  * merely unhelpful; a page that names a bound the engine is not applying is a page that is wrong.
+ *
+ * `pattern` is a pattern the engine accepted: `App.vue` asks only when the answer on screen parsed,
+ * and a `#budget-note` is never drawn beside a parse error (`page.test.ts`). The guards below turn
+ * away the shapes a budget cannot attach to that are cheap to spot - the start of the pattern, an
+ * unescaped `(` or `|`, a comment - but they do not cover every one of them. `(?:{e})`, `(?i){e}`
+ * and `a*{e}` are all "nothing for fuzzy constraint" upstream and this still reads `{e}` out of
+ * them (regex 2026.9.10, 2026-09-21). Telling those apart needs a parser for group headers and
+ * quantifiers, which is the engine's job, and the caller has already asked it.
  */
 export function unboundedBudget(pattern: string): UnboundedBudget | null {
     let inClass = false;
+    // Whether a budget written here would have nothing to apply to. True at the start of the
+    // pattern and after an unescaped `(` or `|`: `({e})` and `x|{e}` are the compile error
+    // "nothing for fuzzy constraint", so there is no pattern to advise on. An escaped `\(` is a
+    // character like any other and does take a budget - `\({e}` matches "zzzzzzzzzzzz" with eleven
+    // insertions and a substitution (regex 2026.9.10, 2026-09-21).
+    let nothingPrecedes = true;
     for (let at = 0; at < pattern.length; at += 1) {
         const character = pattern[at];
 
         if (character === '\\') {
             at += 1;
+            nothingPrecedes = false;
             continue;
         }
 
         if (inClass) {
             // `]` first in a class is that character and not the end of it: `[]{e}]` is a class of
             // four characters (measured, `tools/probes/s75-fuzzy-budget.py`).
-            if (character === ']') inClass = false;
+            if (character === ']') {
+                inClass = false;
+                nothingPrecedes = false;
+            }
             continue;
         }
 
@@ -103,10 +121,29 @@ export function unboundedBudget(pattern: string): UnboundedBudget | null {
             continue;
         }
 
-        // A budget applies to what precedes it, so a `{` with nothing to apply to is a literal
-        // brace, as it is after `(` or `|`.
-        if (character !== '{' || at === 0 || '(|'.includes(pattern[at - 1] ?? '')) continue;
+        // A `(?#...)` comment is not pattern, so a budget written inside one is text: upstream
+        // matches `(?#{e})colour` exactly and finds nothing in "czozlzozuzzr". It is not something
+        // a budget can apply to either, which is why `nothingPrecedes` is carried across it
+        // unchanged: `(?#c){e}` is the compile error "nothing for fuzzy constraint at position 5"
+        // (regex 2026.9.10, 2026-09-21).
+        if (character === '(' && pattern.startsWith('?#', at + 1)) {
+            const close = endOfComment(pattern, at + 2);
+            if (close === null) return null;
+            at = close;
+            continue;
+        }
 
+        if (character === '(' || character === '|') {
+            nothingPrecedes = true;
+            continue;
+        }
+
+        if (character !== '{' || nothingPrecedes) {
+            nothingPrecedes = false;
+            continue;
+        }
+
+        nothingPrecedes = false;
         const parsed = parseFuzzy(pattern, at);
         if (parsed === null) continue;
 
@@ -142,10 +179,11 @@ function unboundedLetters(items: readonly Item[], free: boolean): BudgetLetter[]
     // The kinds named without a bound. Every kind nobody named is zero, so these are the only ways
     // what is left can run away, and all of them have to be bounded for the pattern to be.
     //
-    // A kind can be named twice: once as a constraint and once with a price, which upstream allows
-    // even though two constraints on one kind are a parse error. The price wins, because it binds
-    // whatever the constraint says - `(?:colour){i,1i+1d<3}` and `{1i+1d<3,i}` both fail to insert
-    // the six characters that `{i}` alone inserts (measured, regex 2026.9.10, 2026-09-21).
+    // A kind can be named twice: once as a constraint and once with a price. The price wins,
+    // because it binds whatever the constraint says - `(?:colour){i,1i+1d<3}` and `{1i+1d<3,i}`
+    // both fail to insert the six characters that `{i}` alone inserts (measured, regex 2026.9.10,
+    // 2026-09-21). A kind constrained twice is read the same way, since upstream answers the
+    // repeat by re-reading the item as an equation: see `parseItem`.
     const bounded = new Set(named.filter((item) => item.bounded).map((item) => item.letter));
     return named
         .filter((item) => !item.bounded && !bounded.has(item.letter))
@@ -167,12 +205,10 @@ function parseFuzzy(pattern: string, from: number): { items: Item[]; free: boole
     const seen = new Set<string>();
 
     for (;;) {
-        const item = parseItem(pattern, at);
+        const item = parseItem(pattern, at, seen);
         if (item === null) return null;
 
         if (item.constraint !== null) {
-            // "re-use of fuzzy constraint" upstream, which abandons the fuzzy reading altogether.
-            if (seen.has(item.constraint.letter)) return null;
             seen.add(item.constraint.letter);
             items.push(item.constraint);
         } else {
@@ -201,13 +237,26 @@ function parseFuzzy(pattern: string, from: number): { items: Item[]; free: boole
     return { items, free, end: at + 1 };
 }
 
-/** One item: a constraint on a kind, or a cost equation and the kinds it prices. */
+/**
+ * One item: a constraint on a kind, or a cost equation and the kinds it prices.
+ *
+ * `seen` holds the kinds already constrained. Upstream's `parse_constraint` (line 762) raises
+ * ParseError for a kind constrained twice, and `parse_fuzzy_item` (line 679) answers that by
+ * re-reading the item as a cost equation, so `{s,s<=1}` is a constraint and then an equation that
+ * prices substitutions at one - it allows one substitution and no other error (measured against
+ * regex 2026.9.10, 2026-09-21). When the second reading fails too, `{e<=1,e}` and `{s<=1,s}` among
+ * them, the whole budget is not a budget and upstream reads the braces as text: `{e<=1,e}` matches
+ * the literal "colour{e<=1,e}".
+ */
 function parseItem(
     pattern: string,
     from: number,
+    seen: ReadonlySet<string>,
 ): { constraint: Item | null; priced: Item[]; end: number } | null {
     const constraint = parseConstraint(pattern, from);
-    if (constraint !== null) return { constraint: constraint.item, priced: [], end: constraint.end };
+    if (constraint !== null && !seen.has(constraint.item.letter)) {
+        return { constraint: constraint.item, priced: [], end: constraint.end };
+    }
 
     const equation = parseCostEquation(pattern, from);
     return equation === null ? null : { constraint: null, priced: equation.priced, end: equation.end };
@@ -286,6 +335,25 @@ function parseCount(pattern: string, from: number): number | null {
     let at = from;
     while (DIGITS.includes(pattern[at] ?? '')) at += 1;
     return at === from ? null : at;
+}
+
+/**
+ * Where a `(?#...)` comment's closing `)` sits, or null when it has none.
+ *
+ * `parse_comment`, upstream line 978, takes the character after a backslash with it, so an escaped
+ * `)` stays inside the comment: `(?#\)zzz)a` matches "a" and `(?#\)x{e})y` has no fuzziness at all.
+ * A comment nobody closed is a pattern upstream refuses - `(?#x` is "missing ) at position 4" - and
+ * a pattern that does not compile has no budget to name (regex 2026.9.10, 2026-09-21).
+ */
+function endOfComment(pattern: string, from: number): number | null {
+    for (let at = from; at < pattern.length; at += 1) {
+        if (pattern[at] === '\\') {
+            at += 1;
+            continue;
+        }
+        if (pattern[at] === ')') return at;
+    }
+    return null;
 }
 
 /** Where the test after `:` ends: the closing brace, with escapes and classes stepped over. */

@@ -46,9 +46,16 @@ CASES = [
     # A class that holds a closing bracket, then a brace pair that is literal text.
     ("[]{e}]x", "]x"),
     ("[]{e}]x", "}x"),
-    # Two bounds on one kind: upstream gives up on the fuzzy reading and the braces are literal.
+    # A kind constrained twice is re-read as a cost equation (`parse_fuzzy_item`, line 679), so
+    # `{s,s<=1}` prices substitutions at one and `{d,d<=1,i}` leaves insertions unlimited. When the
+    # second reading fails too, as for `e`, the whole budget is not one and the braces are literal.
+    ("(?:colour){s,s<=1}", "colouu"),
+    ("(?:colour){s,s<=1}", "colzuu"),
+    ("(?:colour){d,d<=1,i}", PADDED),
+    ("(?:colour){i,i<=1,d}", FAR),
     ("(?:colour){e<=1,e}", FAR),
     ("(?:colour){e<=1,e}", "colour{e<=1,e}"),
+    ("(?:colour){s<=1,s}", "colour{s<=1,s}"),
 ]
 
 

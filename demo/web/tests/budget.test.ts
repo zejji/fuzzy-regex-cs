@@ -27,6 +27,9 @@ describe('a budget with no bound is named', () => {
         ['(?:colour){d}', '{d}', ['d']],
         // A test on the errors bounds which characters an edit may touch, not how many there are.
         ['(?:colour){e:[a-z]}', '{e:[a-z]}', ['e']],
+        // A character class takes a budget like any other element: `[abc]{e}` matches "zzzzz" at
+        // (0, 1) with one substitution (regex 2026.9.10, measured 2026-09-21).
+        ['[abc]{e}', '{e}', ['e']],
         // The second spec is the unbounded one, and the page names the one it found.
         ['(?:a){e<=1}(?:b){d}', '{d}', ['d']],
         // Two kinds named and neither bounded, which is every letter that can still run away.
@@ -42,6 +45,12 @@ describe('a budget with no bound is named', () => {
         // nothing in nine characters (regex 2026.9.10, measured 2026-09-21).
         ['(?:colour){d,1i+1s<3}', '{d,1i+1s<3}', ['d']],
         ['(?:colour){s,1i+1d<3}', '{s,1i+1d<3}', ['s']],
+        // The same shape with the equation written as a repeated constraint. `{d,d<=1,i}` bounds
+        // deletions at one and leaves insertions unlimited: it inserts the six characters of
+        // "czozlzozuzzr", and the advice `{d,d<=1,i<=2}` stops at two (regex 2026.9.10,
+        // measured 2026-09-21).
+        ['(?:colour){d,d<=1,i}', '{d,d<=1,i}', ['i']],
+        ['(?:colour){i,i<=1,d}', '{i,i<=1,d}', ['d']],
     ])('%s is unbounded', (pattern, spec, letters) => {
         expect(unboundedBudget(pattern)).toEqual({ spec, letters });
     });
@@ -68,14 +77,17 @@ describe('a budget that is bounded is left alone', () => {
         // is a rewrite rather than a bound. Silence is the safe way to be wrong here.
         '(?:colour){0d+1i<3}',
         '(?:colour){0i+1d<3}',
-        // A kind can carry a price AND a constraint, which upstream allows even though two
-        // constraints on one kind are a parse error, and the price binds it either way round:
+        // A kind can carry a price AND a constraint, and the price binds it either way round:
         // `{i}` alone inserts six characters into "czozlzozuzzr" and neither of these matches it
         // at all (regex 2026.9.10, measured 2026-09-21).
         '(?:colour){i,1i+1d<3}',
         '(?:colour){1i+1d<3,i}',
         '(?:colour){d,1d+1i<3}',
         '(?:colour){s,1i+1s<3}',
+        // A kind constrained twice is that same pair written the short way: upstream reads the
+        // second item as an equation, so `{s,s<=1}` allows one substitution and nothing else - it
+        // matches "colouu" with counts (1, 0, 0) and not "colzuu" (regex 2026.9.10, 2026-09-21).
+        '(?:colour){s,s<=1}',
     ])('%s says nothing', (pattern) => {
         expect(unboundedBudget(pattern)).toBeNull();
     });
@@ -142,8 +154,60 @@ describe('what is not a fuzzy budget at all', () => {
     });
 
     it('does not read a budget out of a pattern the engine would refuse', () => {
-        // Two bounds on one kind is a parse error upstream ("re-use of fuzzy constraint"), so
-        // nothing here should be reported either.
+        // A kind constrained twice is not an error. Upstream re-reads the second item as a cost
+        // equation, and `e` is not a kind an equation can price, so the budget fails altogether and
+        // the braces are text: `(?:colour){e<=1,e}` matches the literal "colour{e<=1,e}" and
+        // nothing else. Same for `{s<=1,s}`, where the second `s` has no `<=` to make an equation
+        // of. (regex 2026.9.10, measured 2026-09-21.)
         expect(unboundedBudget('(?:colour){e<=1,e}')).toBeNull();
+        expect(unboundedBudget('(?:colour){e,e<=1}')).toBeNull();
+        expect(unboundedBudget('(?:colour){s<=1,s}')).toBeNull();
+    });
+
+    it('says nothing about a budget with nothing to apply to', () => {
+        // `({e})` and `x|{e}` are the compile error "nothing for fuzzy constraint" upstream
+        // (regex 2026.9.10, measured 2026-09-21), so there is no pattern to advise on.
+        expect(unboundedBudget('({e})')).toBeNull();
+        expect(unboundedBudget('(|{e})')).toBeNull();
+        expect(unboundedBudget('x|{e}')).toBeNull();
+    });
+
+    it('reads a comment as the text it is', () => {
+        // `(?#...)` is a comment, so `(?#{e})colour` has no fuzziness at all: upstream matches
+        // "colour" exactly and finds nothing in "czozlzozuzzr" (regex 2026.9.10, 2026-09-21).
+        expect(unboundedBudget('(?#{e})colour')).toBeNull();
+        // A backslash takes the next character into the comment with it, so an escaped `)` does
+        // not close it: `(?#\)x{e})y` matches "zzzzzyzzzzz" at (5, 6) with no errors, where
+        // `(?#a)b)colour` ends at its `)` and is "unbalanced parenthesis at position 6".
+        expect(unboundedBudget(String.raw`(?#\)x{e})y`)).toBeNull();
+        // A comment nobody closed is a pattern upstream refuses: `(?#a{e}` is "missing ) at
+        // position 7" and `(?#x` is the same error at position 4.
+        expect(unboundedBudget('(?#a{e}')).toBeNull();
+        expect(unboundedBudget('(?#x')).toBeNull();
+    });
+
+    it('sees through a comment to what the budget would apply to', () => {
+        // A comment is not something a budget can apply to, so `(?#c){e}` is the compile error
+        // "nothing for fuzzy constraint at position 5", exactly as `{e}` on its own is
+        // (regex 2026.9.10, 2026-09-21).
+        expect(unboundedBudget('(?#c){e}')).toBeNull();
+        expect(unboundedBudget('((?#c){e})')).toBeNull();
+        expect(unboundedBudget('(?#a)(?#b){e}')).toBeNull();
+    });
+});
+
+describe('an escaped character takes a budget like any other', () => {
+    // `\(` is the character `(`, not a group, so the budget after it has something to apply to:
+    // `\({e}` matches "zzzzzzzzzzzz" with eleven insertions and one substitution, where `({e})` is
+    // the compile error "nothing for fuzzy constraint" (regex 2026.9.10, measured 2026-09-21).
+    it.each([
+        [String.raw`\({e}`, '{e}'],
+        [String.raw`\|{e}`, '{e}'],
+    ])('%s is unbounded', (pattern, spec) => {
+        expect(unboundedBudget(pattern)).toEqual({ spec, letters: ['e'] });
+    });
+
+    it('leaves a bounded one alone', () => {
+        expect(unboundedBudget(String.raw`\({e<=2}`)).toBeNull();
     });
 });

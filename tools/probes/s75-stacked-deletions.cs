@@ -14,6 +14,7 @@
 //
 //     dotnet run tools/probes/s75-stacked-deletions.cs
 
+using System.Globalization;
 using Fuzzy.Text.RegularExpressions;
 
 const string pattern = "(foobar){e}";
@@ -21,9 +22,11 @@ const string subject = "xirefoabralfobarxie";
 
 Console.WriteLine($"pattern {pattern}  subject {subject}");
 Console.WriteLine();
-Console.WriteLine(
-    $"{"#", 3}  {"span", 9}  {"text", -10}  {"s", 2} {"i", 2} {"d", 2}  library deletions -> demo deletions"
-);
+
+// PadRight/PadLeft rather than interpolation alignment specifiers: CSharpier writes those with a
+// space after the comma and IDE0055 rejects the space, so a line using one satisfies neither of
+// this repo's formatting gates (the same note is on tools/probes/aot-smoke-slow-patterns.cs).
+Console.WriteLine("  #       span  text         s  i  d  library deletions -> demo deletions");
 
 int number = 0;
 foreach (Match match in FuzzyRegex.EnumerateMatches(subject, pattern))
@@ -36,9 +39,20 @@ foreach (Match match in FuzzyRegex.EnumerateMatches(subject, pattern))
     int[] demo = [.. library.Select(static (at, i) => at - i)];
 
     string span = $"({match.Index},{match.Index + match.Length})";
+    string counted =
+        counts.Substitutions.ToString(CultureInfo.InvariantCulture).PadLeft(2)
+        + " "
+        + counts.Insertions.ToString(CultureInfo.InvariantCulture).PadLeft(2)
+        + " "
+        + counts.Deletions.ToString(CultureInfo.InvariantCulture).PadLeft(2);
     Console.WriteLine(
-        $"{number, 3}  {span, 9}  {$"'{match.Value}'", -10}  "
-            + $"{counts.Substitutions, 2} {counts.Insertions, 2} {counts.Deletions, 2}  "
-            + $"[{string.Join(", ", library)}] -> [{string.Join(", ", demo)}]"
+        number.ToString(CultureInfo.InvariantCulture).PadLeft(3)
+            + "  "
+            + span.PadLeft(9)
+            + "  "
+            + $"'{match.Value}'".PadRight(10)
+            + "  "
+            + counted
+            + $"  [{string.Join(", ", library)}] -> [{string.Join(", ", demo)}]"
     );
 }

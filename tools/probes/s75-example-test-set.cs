@@ -27,6 +27,9 @@ foreach (string subject in subjects)
         );
     }
 
+    // PadRight rather than an interpolation alignment specifier: CSharpier writes those with a
+    // space after the comma and IDE0055 rejects the space, so a line using one satisfies neither of
+    // this repo's formatting gates (the same note is on tools/probes/aot-smoke-slow-patterns.cs).
     string quotedSubject = $"'{subject}'";
-    Console.WriteLine($"{quotedSubject, -36} [{string.Join(", ", found)}]");
+    Console.WriteLine(quotedSubject.PadRight(36) + " [" + string.Join(", ", found) + "]");
 }

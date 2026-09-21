@@ -35,8 +35,13 @@ const string padded = "czozlzozuzzr";
     (@"colour\{e\}", far),
     ("[]{e}]x", "]x"),
     ("[]{e}]x", "}x"),
+    ("(?:colour){s,s<=1}", "colouu"),
+    ("(?:colour){s,s<=1}", "colzuu"),
+    ("(?:colour){d,d<=1,i}", padded),
+    ("(?:colour){i,i<=1,d}", far),
     ("(?:colour){e<=1,e}", far),
     ("(?:colour){e<=1,e}", "colour{e<=1,e}"),
+    ("(?:colour){s<=1,s}", "colour{s<=1,s}"),
 ];
 
 foreach ((string pattern, string subject) in cases)
@@ -56,7 +61,10 @@ foreach ((string pattern, string subject) in cases)
         verdict = $"ERROR {error.Message}";
     }
 
+    // PadRight rather than an interpolation alignment specifier: CSharpier writes those with a
+    // space after the comma and IDE0055 rejects the space, so a line using one satisfies neither of
+    // this repo's formatting gates (the same note is on tools/probes/aot-smoke-slow-patterns.cs).
     string quotedPattern = $"'{pattern}'";
     string quotedSubject = $"'{subject}'";
-    Console.WriteLine($"{quotedPattern, -30} {quotedSubject, -16} {verdict}");
+    Console.WriteLine(quotedPattern.PadRight(30) + " " + quotedSubject.PadRight(16) + " " + verdict);
 }

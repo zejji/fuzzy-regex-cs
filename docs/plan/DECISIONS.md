@@ -849,8 +849,22 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   (`tools/probes/s75-hover-travel.mjs`).
 - 2026-09-21 (S75): the unbounded-budget line bounds every kind that has no bound, not the first.
   `(?:colour){i<=2,d}` matches 19 times in nine characters, the same as `{i,d}` (regex 2026.9.10).
+- 2026-09-21 (S75): the unbounded-budget line reads an escaped `\(` as the character it is, so
+  `\({e}` is named. Upstream matches it against "zzzzzzzzzzzz" with eleven insertions and a
+  substitution, where an unescaped `({e})` or `x|{e}` is the compile error "nothing for fuzzy
+  constraint" (regex 2026.9.10). A `(?#...)` comment is skipped for the same reason in reverse:
+  `(?#{e})colour` has no fuzziness, and the comment ends at the first `)` whether or not a
+  backslash precedes it.
 - 2026-09-21 (S75): a cost equation bounds only the kinds it prices at one or more. `{d,1i+1s<3}`
   is unbounded in `d` and the page names it; a kind the equation prices at zero - `{0d+1i<3}` - is
-  unbounded too and the page stays silent, because the only advice available is a re-pricing of the
-  equation and a second constraint on a priced kind is the "re-use of fuzzy constraint" upstream
-  refuses.
+  unbounded too and the page stays silent, because the only advice available is a re-pricing of
+  somebody's equation rather than a bound added to it.
+- 2026-09-21 (S75): a `.cs` probe aligns its columns with `PadRight`/`PadLeft`, never with an
+  interpolation alignment specifier. The pre-commit hook's `dotnet csharpier format` writes those
+  with a space after the comma and `IDE0055` rejects the space, so such a line cannot pass both
+  gates and the probe stops building. `tools/probes/s57-skip-partial-span.cs` still has it.
+- 2026-09-21 (S75): a kind constrained twice is not an error. Upstream's `parse_fuzzy_item` answers
+  the repeat by re-reading the item as a cost equation, so `{s,s<=1}` allows one substitution and
+  `{d,d<=1,i}` is unbounded in `i` - it inserts all six characters of "czozlzozuzzr". When the
+  second reading fails too, as in `{e<=1,e}` and `{s<=1,s}`, the braces are text:
+  `(?:colour){e<=1,e}` matches the literal "colour{e<=1,e}" (regex 2026.9.10).

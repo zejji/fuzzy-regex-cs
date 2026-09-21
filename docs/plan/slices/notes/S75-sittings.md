@@ -271,11 +271,10 @@ did not price. It does not bound a kind it never prices:
 kind the equation prices at zero - `{0d+1i<3}` - is unbounded too, and there the page stays silent
 on purpose: the only advice it could give is a re-pricing of somebody's equation.
 
-A kind can also carry both a price and a constraint. Upstream allows that, although two
-constraints on one kind are the parse error "re-use of fuzzy constraint", and the price binds the
+A kind can also carry both a price and a constraint. Upstream allows that, and the price binds the
 kind either way round: `{i}` inserts six characters into "czozlzozuzzr" and neither
 `{i,1i+1d<3}` nor `{1i+1d<3,i}` matches it at all (regex 2026.9.10, 2026-09-21,
-`.scratch/s75-priced-and-named.py`, the cases are pinned in `budget.test.ts`). Getting this wrong
+`tools/probes/s75-priced-and-named.py`, the cases are pinned in `budget.test.ts`). Getting this wrong
 in the first attempt at the fix also broke the advice: the line bounds a letter at its first
 occurrence in the budget text, so `{1i+1d<3,i}` came out as `{1i<=2+1d<3,i}`, which upstream
 refuses to compile.
@@ -299,3 +298,129 @@ Three blind passes, each over the changes the one before it had not seen.
 
 Still outstanding, and the reason this is a checkpoint: the independent verifier, and one blind
 pass over the last `budget.ts` fix.
+
+## Sitting 4 - 2026-09-21
+
+The close: the fourth blind pass, the independent verifier, and the bookkeeping.
+
+### The probe that only existed in scratch
+
+Sitting 3 measured a kind carrying both a price and a constraint with `.scratch/s75-priced-and-named.py`,
+and `.scratch/` is gitignored, so the evidence for the last fix would have died with the session.
+It is now `tools/probes/s75-priced-and-named.py`, with the two cases the notes cite but the scratch
+copy never held - a kind the equation never prices and a kind it prices at zero. Ten cases, run
+against regex 2026.9.10 on 2026-09-21:
+
+| pattern | subject | answer |
+|---|---|---|
+| `(?:colour){i}` | `czozlzozuzzr` | (0, 12) counts=(0, 6, 0) |
+| `(?:colour){i,1i+1d<3}` | `czozlzozuzzr` | no match |
+| `(?:colour){1i+1d<3,i}` | `czozlzozuzzr` | no match |
+| `(?:colour){d,1i+1s<3}` | `` | (0, 0) counts=(0, 0, 6) |
+| `(?:colour){0d+1i<3}` | `` | (0, 0) counts=(0, 0, 6) |
+
+The first three are the price binding the kind whichever side of the comma it is written; the last
+two are the two ways an equation leaves a kind unbounded, which is why the page names `d` in one and
+says nothing in the other.
+
+### A kind constrained twice is not an error
+
+Three sittings of notes, code comments and one decision record said that two constraints on one
+kind are the parse error "re-use of fuzzy constraint". The verifier could not find that message, and
+it does not exist: `{e<=1,e}`, `{s<=1,s<=2}` and `{i<=1,i<=2}` all compile.
+
+What upstream does is quieter. `parse_constraint` (line 762) raises a ParseError for the repeat,
+`parse_fuzzy_item` (line 679) catches it, restores the position and re-reads the same item as a cost
+equation, and only `parse_cost_term` raises a hard error. So the repeat is read as a price:
+
+| pattern | subject | answer |
+|---|---|---|
+| `(?:colour){s,s<=1}` | `colouu` | (0, 6) counts=(1, 0, 0) |
+| `(?:colour){s,s<=1}` | `colzuu` | no match |
+| `(?:colour){d,d<=1,i}` | `czozlzozuzzr` | (0, 12) counts=(0, 6, 0) |
+| `(?:colour){e<=1,e}` | `colour{e<=1,e}` | (0, 14) counts=(0, 0, 0) |
+
+The third row is the one that mattered: `{d,d<=1,i}` bounds deletions at one and leaves insertions
+unlimited, and the reader had been calling the whole budget unreadable and saying nothing. The
+fourth is what happens when the second reading fails too - `e` is not a kind an equation can price,
+so the budget is not a budget and the braces are literal text. `parseItem` now takes the kinds
+already constrained and falls back the same way (`tools/probes/s75-fuzzy-budget.py`, regex 2026.9.10,
+2026-09-21).
+
+The port already had this right: `tools/probes/s75-fuzzy-budget.cs` gives the same span and the same
+counts as upstream on all seven repeat-constraint rows, the literal `colour{e<=1,e}` included. Only
+the demo's text reader was wrong.
+
+### Comments, and what a budget applies to
+
+The fifth blind pass found the comment handling wrong in both directions, and
+`tools/probes/s75-comments.py` settles it:
+
+| pattern | subject | answer |
+|---|---|---|
+| `(?#\)x{e})y` | `zzzzzyzzzzz` | (5, 6) counts=(0, 0, 0) |
+| `(?#a)b)colour` | `colour` | ERROR unbalanced parenthesis at position 6 |
+| `(?#c){e}` | `z` | ERROR nothing for fuzzy constraint at position 5 |
+| `(?#a)x{e}` | `zzzzzzzzz` | (0, 1) counts=(1, 0, 0) |
+
+A backslash takes the next character into the comment with it (`parse_comment`, line 978), so an
+escaped `)` does not end one: the first row has no fuzziness at all, and the reader had been naming
+`{e}` in it. In the other direction a comment is not something a budget can apply to, so `(?#c){e}`
+is the same error as a bare `{e}`, while the `x` in the last row does take the budget. The scan now
+carries one flag - is there anything here for a budget to apply to - which starts true, goes true
+again after an unescaped `(` or `|`, and passes across a comment untouched. That flag also replaced
+the "look at the previous character" test that sitting 4 had written for `\({e}`.
+
+### What the budget line does not try to do
+
+The sixth pass showed the "nothing to apply to" guard is narrower than it looks: `(?:{e})`,
+`(?i){e}` and `a*{e}` are all "nothing for fuzzy constraint" upstream, and the reader still finds
+`{e}` in them. Telling those apart means parsing group headers and quantifiers, which is the
+engine's work, and the page has already asked the engine: `App.vue` reads the line off the pattern
+that produced the answer on screen and only when that pattern parsed, which `page.test.ts` pins with
+`(?:colour){e}(`. So the guard stays as it is - it makes the reader quieter, never wronger - and the
+limit is written into the function's own comment rather than papered over.
+
+### Review
+
+Three more blind passes this sitting, and the independent verifier.
+
+4. **Pass 4**, over sittings 1 to 3 as committed: three findings, all three reproduced and fixed -
+   an escaped `\({e}` losing its budget, a `(?#...)` comment read as pattern, and a test that could
+   not fail.
+5. **Pass 5**, over those fixes: five findings, all five reproduced, all about comments. An escaped
+   `)` does not end a comment (two of the five, the code and the sentence claiming otherwise); a
+   comment is not something a budget can apply to; and two assertions pinned neither, one of which
+   is now written as `(?#\)x{e})y` and the other joined by `(?#a{e}`.
+6. **Pass 6**, over the scan loop the fixes replaced: two findings. The first reproduced and is the
+   limit above, fixed as documentation rather than as code; the second - that the unclosed-comment
+   assertions cannot fail - did not survive, because the mutation it names (`return null` to
+   `break`) and the one this sitting used are different programs only on paper: every path through
+   an unclosed comment ends in null. Its two surviving mutations were real gaps in the tests, and
+   `[abc]{e}` and `({e})` are pinned now.
+
+The verifier re-ran every number this slice quotes. Two came back other than CONFIRMED: the probes
+under `tools/probes/*.cs` would not build (`IDE0055`, an alignment specifier written `{x, -30}`),
+and the phrase "re-use of fuzzy constraint" could not be produced by any pattern it tried. Both are
+fixed above.
+
+Removing the space is not the fix, and the first attempt at it survived exactly until the commit:
+the pre-commit hook runs `dotnet csharpier format` over the staged files and CSharpier puts the
+space back, while `dotnet run` on the same file fails `IDE0055` for having it. A line with an
+interpolation alignment specifier cannot satisfy both gates, so the three probes use `PadRight` and
+`PadLeft` instead, as `tools/probes/aot-smoke-slow-patterns.cs` already did and says. Output is
+unchanged, character for character. `tools/probes/s57-skip-partial-span.cs` still has the clash and
+will not build until it is written the same way.
+
+### Green at the close
+
+Re-run from the committed tree: ratchet GREEN, 6,487 tests against baseline 6,379; 427 web tests
+(417 at the checkpoint, plus the five this sitting's review fixes brought); `vue-tsc` clean; 123
+Pester tests; 40 documentation examples; `build-demo-web.ps1` GREEN; WASM smoke GREEN over 58
+published endpoints.
+
+`npm ci` still fails with EPERM while the stale vite dev server holds
+`lightningcss.win32-x64-msvc.node`, and it deletes `node_modules` before it fails, so the failure
+leaves the tree unable to type-check until `npm install --no-audit --no-fund` puts the packages
+back. `run-wasm-smoke.ps1 -SkipWebBuild` after a separate `build-demo-web.ps1 -SkipInstall` is the
+way round it.
