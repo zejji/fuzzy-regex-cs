@@ -1,4 +1,5 @@
-You are the independent verifier of spec amendment 16 limb (d) for slice S57b, sitting 3, in
+You are the independent verifier of spec amendment 16 limb (d) for slice S57b, sittings 3, 4 and
+5 together - everything since commit 99d9294, committed and uncommitted alike - in
 C:/Users/gerard.howell/source/repos/fuzzy-regex-cs. You did not see the verdicts being reached and
 you are not reviewing them. Your job is to RE-RUN the claims, from the files as they stand, and
 report each quoted number as CONFIRMED, DIFFERENT (with the value you got) or COULD NOT RUN (with
@@ -10,13 +11,34 @@ path, for any reason. To revert a control you applied, re-edit exactly what you 
 use the slice's own revert script if it names one. Finish by showing `git status --porcelain`
 and `git diff --stat`.
 
-WHAT TO VERIFY, PART 2. The same treatment for the paragraphs dated 2026-09-21 that this sitting
+WHAT TO VERIFY, PART 3 (sitting 5, uncommitted). Two pins for the last two gate rows.
+`reversed-body-change-lands-where-the-lookahead-reached` in
+`tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs` is row 72790's; its claims are repeated in
+the two tests named in its `PinnedBy` in
+`tests/FuzzyRegex.Tests/Gaps/Engine/FuzzyCountsAndChangesTests.cs`, in ledger entry 26 of
+`docs/plan/upstream-reports/LEDGER.md`, and in the "Sitting 4" and "Sitting 5" sections of
+`docs/plan/slices/notes/S57b-sittings.md`. Its instruments are
+`python tools/probes/s57b-row72790-change-order.py`,
+`python tools/probes/s57b-row72790-changes-in-a-scan.py` and
+`dotnet run tools/probes/s57b-row72790-port-changes-in-a-scan.cs`. Row 74947 is the tenth row of
+`bestmatch-loses-a-partial`; its claims are the paragraph beginning "S57b ADDS ROW 10" in that
+entry's `Reason`, the new paragraph in its `<summary>`/`<remarks>` block, the test
+`FuzzyBestMatchTests.Bestmatch_reversed_keeps_the_partial_both_of_upstreams_doors_hand_back`, and
+the paragraph added to ledger entry 13. Its instrument is
+`python tools/probes/s57b-row74947-two-doors.py`. Check for both that the row JSON added to the
+entry's rows constant is byte for byte the line `TestResults/oracle/wave-20260921.jsonl` holds (the
+header line makes row N line N+1) and that the added "ours" string is the `port` line
+`TestResults/oracle/report-20260921.txt` records for that row. Positions in the probes are
+CODEPOINTS and in the recorder UTF-16; both subjects are astral, so say which a number is.
+
+WHAT TO VERIFY, PART 2. The same treatment for the paragraphs dated 2026-09-21 that sitting 3
 added to six OTHER entries, each recording rows the seed-20260921 gate drew: the four rows added to
 `search-start-partial`, and one each to `partial-retry-carried-slice-forward`,
 `end-of-line-reads-a-skip-moved-slice`, `bestmatch-loses-a-candidate`,
 `posix-fuzzy-contradicts-its-own-flagless-answer` and `reversed-anchor-cannot-compile-a-full-fold`.
 Every span, count, split, deletion list and flag word those paragraphs quote is a claim to re-run.
-Their instrument is `python tools/probes/gate-divergence-doors.py 20260921`, plus
+Their instrument is `python tools/probes/gate-divergence-doors.py 20260921` - or, now that sitting
+5 has re-recorded that seed green, `gate-divergence-doors.py --rows <file>` over the rows - plus
 `python tools/probes/s57b-posix-overcharges-a-named-list-section.py` for the POSIX row. Check as
 well that each added row's JSON is the row `TestResults/oracle/wave-20260921.jsonl` holds at that
 line number (the file's header line makes file line N the row numbered N) and that each added
@@ -47,10 +69,11 @@ W=0x800 X=0x40). Check that each test's pattern, subject and OPTIONS are the row
 Positions: the oracle recorder converts to UTF-16, raw Python prints codepoints; say which one a
 number is in when they disagree.
 
-DO NOT run `pwsh -File tools/run-oracle.ps1` without `-Rows` or `-SkipRecord`, and do not edit any
-file. A bare run re-records three 126,080-row waves and takes half an hour; `-SkipRecord`
-re-consumes `TestResults/oracle/wave.jsonl`, which holds seed 20260921, and should report
-`diverge 2` - rows 72790 and 74947, which this sitting deliberately did not pin.
+DO NOT run `pwsh -File tools/run-oracle.ps1` without `-Rows`, and do not edit any file. A bare run
+re-records three 126,080-row waves and takes half an hour. `TestResults/oracle/wave.jsonl` now
+holds the `fuzzy,interactions` wave at seed 57057, so `-SkipRecord` does NOT replay the gate; to
+see a pin classify, cut its row out of `wave-20260921.jsonl` into a one-row file and replay that
+with `-Rows`.
 
 OUTPUT: one line per claim - the file:line, the claim in a few words, and CONFIRMED / DIFFERENT
 (value) / COULD NOT RUN (why). Group by entry. No preamble, no narration of what you did, no

@@ -21,7 +21,13 @@
 // (Matcher.cs:5155) reproduces upstream's leaked answer on ledger entry 11's own row and does not
 // move this one by a single position, so the leak family is not the mechanism either.
 //
-// WHAT IS LEFT is where a change made OUTSIDE a fuzzy lookahead is recorded. The second block is
+// THE ROW WITHOUT ITS MINIMUM is the second block, `{d<=2}` where the row writes `{1<=e<=2}`. It
+// answers the same five matches, and only the (3, 0) one still diverges - [3, 5, 6] here against
+// upstream's [4, 5, 5], the same misplacement. So the minimum is what exposes the misplacement on
+// the small row, not what causes it. The upstream half of this block is the `row 72790, no minimum`
+// case in the Python probe.
+//
+// WHAT IS LEFT is where a change made OUTSIDE a fuzzy lookahead is recorded. The third block is
 // the minimised row and its two controls, where upstream contradicts itself and this port does
 // not: all three spellings answer the same zero-width match at 0 with the same counts, the
 // lookahead deleting `\s` at 1 and the body deleting `b` at 0, and upstream moves the body's
@@ -48,7 +54,7 @@ static string Show(Match m)
     FuzzyChanges changes = m.FuzzyChanges;
 
     // The raw position each deletion was recorded at, undoing the running shift
-    // `match_fuzzy_changes` adds (upstream/src/_regex.c:20504-20560, Match.SplitFuzzyChanges).
+    // `match_fuzzy_changes` adds (upstream/src/_regex.c:20524-20598, the deletion shift at :20554-20557, Match.SplitFuzzyChanges).
     // Printed because the judgement compares the two engines' RAW lists: on row 72790 they are the
     // same three deletions in a different order.
     IEnumerable<int> raw = changes.Deletions.Select(static (position, index) => position - index);
@@ -81,6 +87,17 @@ Console.WriteLine($"    FullMatch(input, 3, 0)    {Show(row.FullMatch(Subject, 3
 Console.WriteLine();
 Console.WriteLine("A FRESH SCAN over that prefix, where the same match has no predecessor");
 Walk("Matches(0,3)    ", row.Matches(Subject, 0, 3));
+
+Console.WriteLine();
+Console.WriteLine("THE ROW WITHOUT ITS MINIMUM, `{d<=2}` where the row writes `{1<=e<=2}`");
+Walk(
+    "Matches         ",
+    new FuzzyRegex(
+        Pattern.Replace("{1<=e<=2}", "{d<=2}", StringComparison.Ordinal),
+        (FuzzyRegexOptions)0x2,
+        lists
+    ).Matches(Subject)
+);
 
 Console.WriteLine();
 Console.WriteLine("THE MINIMISED ROW AND ITS TWO CONTROLS, all over 'a'");

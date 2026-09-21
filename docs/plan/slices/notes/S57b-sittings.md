@@ -284,9 +284,12 @@ comparer over every one-edit shortening, keeping any that still diverged - down 
 milliseconds. Upstream keeps a one-substitution match where its own `(*PRUNE)` and verb-deleted
 spellings find a zero-error one, and with `(?b)` removed all three spellings agree on both the drawn
 and the minimised row. So the pruning is innocent and the moved bound is the cause, which is this
-entry exactly. The old objection that the anchored door pointed the wrong way is answered: asking the
-DRAWN object `match(4, 7)` re-uses the object whose slice the verb has already moved. Probe:
-`tools/probes/s57b-bestmatch-walk-row76160.py`.
+entry exactly. The old objection that the anchored door pointed the wrong way is NOT answered, and
+sitting 5 withdrew the answer this paragraph first gave. It said asking the DRAWN object
+`match(4, 7)` re-uses the object whose slice the verb has already moved; a freshly compiled object
+that has never scanned answers `(4, 7)` with `(1, 0, 1)` as well, so the state re-use it blames does
+not exist. The anchored door is still contaminated and the reason is unknown; the row rests on the
+minimisation. Probe: `tools/probes/s57b-bestmatch-walk-row76160.py`.
 
 **Rows 10 and 11 (seed 20260920 rows 81232 and 87091) -> `reversed-anchor-cannot-compile-a-full-fold`,
 and ledger entry 6.** Upstream raises `IndexError: tuple index out of range` while
@@ -328,9 +331,11 @@ regression: seeds 7 and 4242 draw the same rows they drew yesterday and both are
 
 **Nine of the eleven are members of families this repo has already judged**, and the batch
 instrument said so in one run - `python tools/probes/gate-divergence-doors.py 20260921`, which puts
-every judged family's own control to every diverging row. Each row went into the entry whose
-discriminator it meets, with the row VERBATIM out of `wave-20260921.jsonl` and this port's answer
-verbatim out of `report-20260921.txt`:
+every judged family's own control to every diverging row. That bare-seed form read the seed's RED
+report; sitting 5 re-recorded the gate green, so re-run it as `gate-divergence-doors.py --rows
+<file>` over the rows themselves. Each row went into the entry whose discriminator it meets, with
+the row's own JSON out of `wave-20260921.jsonl` - JSON-equal, with literal characters where the
+wave escapes them - and this port's answer out of `report-20260921.txt`:
 
 | Rows | Entry | What its own control answered |
 | --- | --- | --- |
@@ -447,7 +452,7 @@ family's own row and does not move row 72790 by a single position. Re-run it exa
   line with `git checkout -- src/FuzzyRegex/Engine/Matcher.cs`.
 
 **The mechanism: where a change made OUTSIDE a fuzzy lookahead is recorded.**
-`match_fuzzy_changes` (`upstream/src/_regex.c:20504-20560`) walks one list in the order the changes
+`match_fuzzy_changes` (`upstream/src/_regex.c:20524-20598, the deletion shift at :20554-20557`) walks one list in the order the changes
 were recorded and adds to each DELETION the number of deletions already emitted, so the same raw
 positions in a different order print as different numbers. Un-shifting both engines' lists is what
 makes the row readable: upstream's `[4, 5, 5]` is raw `[4, 4, 3]` and this port's `[3, 5, 6]` is raw
@@ -476,7 +481,13 @@ port is right and upstream misplaces a change recorded outside a fuzzy lookahead
 engines in one run with `pwsh -File tools/run-oracle.ps1 -Rows <that file>`: 8 agree, 2 diverge, and
 the two are the spellings whose lookahead carries a minimum error count. A non-fuzzy body agrees,
 and the section on its own outside a lookahead agrees. The minimum is not the cause, only what
-exposes it on the small row - row 72790's own `{d<=2}` spelling diverges identically.
+exposes it on the small row - row 72790's own `{d<=2}` spelling still misplaces the deletion the
+same way, upstream `[4, 5, 5]` against this port's `[3, 5, 6]`. That rewrite diverges on that one
+match only: the self-contradicting third match goes with the minimum, and both engines then answer
+it `(1, 2)`, counts `(0, 0, 1)`, deletion at 3. Both halves of that are printed - upstream by the
+`row 72790, no minimum` case of the Python probe, this port by the C# probe's
+`THE ROW WITHOUT ITS MINIMUM` block, added in sitting 5 when a review found the port half asserted
+and unmeasured.
 
 **Probes.** `tools/probes/s57b-row72790-change-order.py` (upstream, both spellings, un-shifted) and
 `tools/probes/s57b-row72790-port-changes-in-a-scan.cs` (this port, the three doors and the same
@@ -488,7 +499,7 @@ disproved.
 carrying the table above, keyed on the row and on this port's `Describe()` string, plus the drafted
 ledger entry for a new upstream defect - a change recorded outside a fuzzy lookahead in a reversed
 match lands on the position the lookahead reached. Note the row also carries the recorded
-`selfContradiction` `fuzzy-counts-match-changes` for its FOURTH match, where upstream counts one
+`selfContradiction` `fuzzy-counts-match-changes` for its THIRD match, where upstream counts one
 substitution and lists a deletion, so the entry has to cover both diverging matches. (2) Row 74947,
 still as sitting 3 left it. (3) The re-record, the gate, ratchet, one blind review and one verifier
 pass over sittings 3, 4 and 5 together, and close.
@@ -502,3 +513,87 @@ computed on a truncated subject - for row 72790 it returns `[3, 4, 5]`, which is
 answer to the question actually asked. The failure is in the safe direction: a starved control makes
 the strong arm REJECT, so the row is reported rather than pinned, which is exactly what happened.
 Left alone deliberately - narrowing it is a change to a live recorded fact and wants its own slice.
+
+## Sitting 5 (2026-09-21): both remaining rows pinned, the gate green at three seeds
+
+**Row 72790 is pinned as a new family**, `reversed-body-change-lands-where-the-lookahead-reached`,
+keyed on the row and on this port's `Describe()` string. The key has to carry both diverging matches
+of the scan, so the `ours` string is the whole five-match render: the second match is sitting 4's
+misplaced deletion, and the third is the row's own `selfContradiction`
+`fuzzy-counts-match-changes`, where upstream counts one substitution and lists a deletion. Its
+`Reason` carries sitting 4's table, the un-shifted raw lists, why neither neighbouring entry can
+take the row, and what the row is NOT. Two gap tests in `FuzzyCountsAndChangesTests`:
+`A_change_outside_a_reversed_lookahead_stays_where_the_body_matched` for the minimised shape and its
+two controls, and `A_reversed_list_scan_reports_the_substitution_its_counts_claim` for the gate row
+whole. Ledger entry 26 is drafted, not filed. Verified by replaying the row:
+`pwsh -File tools/run-oracle.ps1 -Rows <one-row file>` reports `expected 1 ... diverge 0 of 1 rows`
+and names the entry.
+
+**Row 74947 is NOT a new family, and sitting 3's proposal for it was wrong.** Sitting 3 read it as
+`reversed-skip-invents-a-match` inverted - a new `reversed-skip-missing-match` - because the door
+that usually settles these rows, deleting the verb, is missing. What is actually missing is only
+that ONE door, and the reason it is missing is ledger entry 14: with the verb deleted the pattern
+self-recurses round a fuzzy section that can match empty and exhausts memory. The two doors that DO
+answer both answer this port's result in full:
+
+```
+regex 2026.9.10, spans in CODEPOINTS (the subject is astral)
+  as drawn               None
+  (?b) deleted           (0, 2) PARTIAL groups=(None, None) counts=(1, 0, 0) changes=([1], [], [])
+  (*SKIP) -> (*PRUNE)    (0, 2) PARTIAL groups=(None, None) counts=(1, 0, 0) changes=([1], [], [])
+  verb deleted           MemoryError:
+```
+
+That pair is `bestmatch-loses-a-partial`'s own argument, and it is how S52's nineteenth sitting
+placed sweep rows 4 and 15 in the same entry. The recorder agrees independently: the row carries
+`selfContradiction: bestmatch-no-worse`. So the row went in as that entry's tenth row, with a
+paragraph in its `Reason`, a paragraph in ledger entry 13 covering all three ablation-placed rows,
+and the gap test
+`FuzzyBestMatchTests.Bestmatch_reversed_keeps_the_partial_both_of_upstreams_doors_hand_back`. Probe:
+`python tools/probes/s57b-row74947-two-doors.py`. The pin was verified the same way as 72790's.
+
+**The lesson, which is S52's lesson again.** A missing control is not evidence of a different fault.
+Sitting 3 reasoned from the shape of the evidence rather than from the evidence, and the fix was to
+run the ablations and read the output.
+
+**The gate, re-run at `-Count 6000` per seed on 2026-09-21 after both pins.** Seed 7 GREEN, seed
+4242 GREEN, seed 20260921 GREEN - 0 of 126,080 rows diverging at each. Run one seed at a time
+(`-Seeds 7`, then `-Seeds 4242`, then `-Seeds 20260921`); each fits in the ten-minute blocking cap
+where all three together do not.
+
+### Review
+
+One reviewer, the brief in `S57b-review-brief.md`, and the amendment-16 verifier over sittings 3, 4
+and 5 together, then a second blind pass over the delta those fixes made. Every finding was
+reproduced before anything changed. The real ones:
+
+- the gap test used `FuzzyRegexOptions.FullCase` (0x4000) where row 74947's flag word is 8,
+  MULTILINE, and the probe's comment mislabelled it the same way;
+- `match_fuzzy_changes` was cited at `_regex.c:20504-20560` in six places and its truncation site at
+  `:20522` in two; the function is `:20524-20598`, the deletion shift `:20554-20557`, the sum
+  `:20542-20546`;
+- row 72790's recorded `selfContradiction` was called its FOURTH match; it is the third;
+- the `{d<=2}` spelling was said to "diverge identically" when it diverges on one match of five, and
+  its port half was asserted with nothing measuring it - the C# probe now prints that spelling, and
+  the two engines agree on all five matches but the (3, 0) one, `[3, 5, 6]` here against `[4, 5, 5]`;
+- five citations of `gate-divergence-doors.py 20260921` stopped reproducing when this sitting
+  re-recorded that seed green, so they name the `--rows <file>` form;
+- `tools/probes/s57b-port-firstset-indexerror.cs:35` failed IDE0055 and would not run;
+- `bestmatch-walk-truncated-by-a-skip` explained its row-8 anchored door by state the drawn object
+  carries from the verb's moved slice. A freshly compiled object answers `(4, 7)` with `(1, 0, 1)`
+  too, so the explanation is withdrawn in the entry and in sitting 3's paragraph above; the row rests
+  on its minimisation.
+
+The one finding that did not survive was the claim that the ledger's older `_regex_core.py`
+citations sit two lines high. All three are exact: `END_OF_LINE_U` at `:506-510` (entry 5,
+`LEDGER.md:626`), `_fix_full_casefold` at `:3636` (entry 6, `LEDGER.md:827`) and `GLOBAL_FLAGS` at
+`:170-171` (entry 22, `LEDGER.md:2948`).
+
+**The extra wave is RED, with ten rows nobody has judged.**
+`pwsh -File tools/run-oracle.ps1 -Count 6000 -Generator fuzzy,interactions -Seeds 99991,57057` gives
+four diverging rows at 99991 (683 `fullmatch`, 9204 `sub`, 9720 `split`, 9951 `finditer-overlapped`)
+and six at 57057. That wave is 6000 rows PER GENERATOR, so it is a different sample from the default
+gate and this is its first run in this slice. The reports are
+`TestResults/oracle/report-99991.txt` and `report-57057.txt`; the waves beside them. The slice's
+"Done when" box for it stays unticked and the rows are the next sitting's batch - judge them with
+`python tools/probes/gate-divergence-doors.py <seed>` in one pass, as sitting 3 did for the gate.

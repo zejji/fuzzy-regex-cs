@@ -52,11 +52,16 @@ This slice's own working notes are in `docs/plan/slices/notes/S57b-sittings.md`.
 
 ## Done when
 
-- [ ] All twenty rows judged, each with its mechanism recorded and its probe committed under
+- [x] All twenty rows judged, each with its mechanism recorded and its probe committed under
       `tools/probes/`.
-- [ ] Every "port right" row has a permanent test whose expected value carries its provenance.
-- [ ] Every "port wrong" row has a failing test first, then the fix, and a DECISIONS line.
-- [ ] Upstream's two `IndexError` rows have a minimised reproduction and a drafted ledger entry.
-- [ ] `pwsh -File tools/run-oracle.ps1 -Count 6000` GREEN at all three seeds.
+- [x] Every "port right" row has a permanent test whose expected value carries its provenance.
+- [x] Every "port wrong" row has a failing test first, then the fix, and a DECISIONS line. None of
+      the twenty is ours: row 72790 was the only candidate and sitting 4 killed it with a negative
+      control.
+- [x] Upstream's two `IndexError` rows have a minimised reproduction and a drafted ledger entry.
+      Sitting 3 folded them into the existing ledger entry 6 rather than drafting a duplicate.
+- [x] `pwsh -File tools/run-oracle.ps1 -Count 6000` GREEN at all three seeds. Re-run 2026-09-21
+      after the last two pins: seeds 7, 4242 and 20260921, 0 of 126,080 rows each.
 - [ ] `pwsh -File tools/run-oracle.ps1 -Generator fuzzy,interactions -Seeds 99991,57057` GREEN.
+      First run, 2026-09-21: RED, four rows at 99991 and six at 57057, all unjudged.
 - [ ] Ratchet GREEN, blind review, independent verifier, committed.

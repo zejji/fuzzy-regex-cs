@@ -2,7 +2,7 @@ r"""Seed 20260921 row 72790, minimised: the ORDER a reversed match records its f
 
 Row 72790's two engines report three deletions each for the same zero-width match and the lists
 look nothing alike - upstream [4, 5, 5], this port [3, 5, 6]. They are the same three deletions.
-`match_fuzzy_changes` (`upstream/src/_regex.c:20504-20560`) walks ONE list of changes in the order
+`match_fuzzy_changes` (`upstream/src/_regex.c:20524-20598, the deletion shift at :20554-20557`) walks ONE list of changes in the order
 they were recorded and adds to each DELETION the number of deletions already emitted, so the same
 raw positions in a different order print as different numbers:
 
@@ -31,8 +31,12 @@ WHAT NARROWS IT. The ladder below is `tools/probes/s57b-row72790-ladder-rows.jso
 through both engines with `pwsh -File tools/run-oracle.ps1 -Rows <that file>`. Only two of its ten
 rows diverge, and they are the two whose lookahead holds a section with a minimum error count. A
 non-fuzzy body agrees, and the section on its own outside a lookahead agrees. Row 72790 needs a
-fuzzy lookahead and a fuzzy body too, but not the minimum: its `{d<=2}` spelling diverges the same
-way, so the minimum is what exposes the misplacement on the small row, not what causes it.
+fuzzy lookahead and a fuzzy body too, but not the minimum: its `{d<=2}` spelling misplaces the same
+deletion, upstream `[4, 5, 5]` (the `row 72790, no minimum` case below) against this port's
+`[3, 5, 6]` (the `THE ROW WITHOUT ITS MINIMUM` block of
+`tools/probes/s57b-row72790-port-changes-in-a-scan.cs`), so the minimum is what exposes the
+misplacement on the small row, not what causes it. The rewrite does drop the row's OTHER divergence,
+the self-contradicting third match, which both engines then answer `(1, 2)` counts `(0, 0, 1)`.
 
 WHAT THIS IS NOT. It is not ledger entry 11 mechanism A, the leak `start_match` leaves behind.
 Removing this port's own change-list clear (`Matcher.cs:5155`) makes it reproduce upstream's leaked

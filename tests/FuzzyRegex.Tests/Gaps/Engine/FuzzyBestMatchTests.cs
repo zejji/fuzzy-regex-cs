@@ -760,4 +760,66 @@ public sealed class FuzzyBestMatchTests
 
         drawnRow.Split("\rﬀıİAﬀß").Should().Equal("\rﬀıİ", "", "ﬀ", "");
     }
+
+    /// <summary>
+    /// Row 74947 of the seed 20260921 gate: a reversed <c>fullmatch</c> where upstream loses a
+    /// partial that both of its own ablations hand back, which is
+    /// <c>bestmatch-loses-a-partial</c> (ledger entry 13) rather than a family of its own.
+    /// </summary>
+    /// <remarks>
+    /// Spans in CODEPOINTS, because the subject is two astral characters.
+    /// <code>
+    /// as drawn             None
+    /// (?b) deleted         (0, 2) partial, one substitution at 1
+    /// (*SKIP) -> (*PRUNE)  (0, 2) partial, one substitution at 1     &lt;- ours, in full
+    /// the verb deleted     MemoryError
+    /// </code>
+    /// The usual third door does not answer here: with the verb deleted the pattern exhausts
+    /// memory, which is ledger entry 14's shape - a self-recursive call round a fuzzy section that
+    /// can match empty - and says nothing about this row either way. The other two are enough. A
+    /// flag documented to pick the BEST match cannot empty the set of matches, and <c>(*PRUNE)</c>
+    /// prunes what <c>(*SKIP)</c> prunes while moving no slice bound, so the difference between
+    /// them is about the bound the verb moves (<c>upstream/src/_regex.c:14553</c> reversed).
+    /// Measured 2026-09-21 on regex 2026.9.10,
+    /// <c>python tools/probes/s57b-row74947-two-doors.py</c>.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void Bestmatch_reversed_keeps_the_partial_both_of_upstreams_doors_hand_back()
+    {
+        const string astral = "\U00010428";
+        const string subject = astral + astral;
+        string pattern =
+            @"(?b)(?r)(\d*)+?(?P<g2>(?:\p{ASCII}"
+            + astral
+            + @"[[:alpha:]]{0,2}){e<=1}(?&g2)?)(?:(?:A"
+            + astral
+            + @"(?:A){e<=2,s<=1}){e<=1}(*SKIP)\p{Ll}|[[:alpha:]])";
+
+        // The row's flag word is 8, which is MULTILINE. Nothing in the pattern is anchored, so it
+        // decides nothing here; it is what the row asked and so it is what the test asks.
+        Match best = new FuzzyRegex(pattern, FuzzyRegexOptions.Multiline).FullMatch(subject, partial: true);
+
+        best.Success.Should().BeTrue("upstream answers this once either the flag or the verb goes");
+        best.PartialMatch.Should().BeTrue();
+
+        // (0, 2) and a substitution at 1 in codepoints; the subject is surrogate pairs throughout.
+        (best.Index, best.Length)
+            .Should()
+            .Be((0, 4));
+        best.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        best.FuzzyChanges.Substitutions.Should().Equal(2);
+        best.Groups[1].Success.Should().BeFalse();
+        best.Groups["g2"].Success.Should().BeFalse();
+
+        // The `(*PRUNE)` door, which upstream itself answers the same way.
+        Match pruned = new FuzzyRegex(
+            pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal),
+            FuzzyRegexOptions.Multiline
+        ).FullMatch(subject, partial: true);
+
+        (pruned.Index, pruned.Length).Should().Be((0, 4));
+        pruned.PartialMatch.Should().BeTrue();
+        pruned.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
 }

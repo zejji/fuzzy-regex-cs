@@ -32,7 +32,9 @@ static void Show(string label, string pattern, FuzzyRegexOptions options, string
         answer = $"threw {e.GetType().Name}: {e}";
     }
 
-    Console.WriteLine($"  {label, -30} over {Escape(subject), -18} {answer}");
+    // PadRight, not an interpolation alignment: CSharpier writes `{label, -30}` and the analyzers
+    // reject that spacing as IDE0055, so the two disagree and the probe will not run.
+    Console.WriteLine("  " + label.PadRight(30) + " over " + Escape(subject).PadRight(18) + " " + answer);
 }
 
 static string Escape(string s) =>

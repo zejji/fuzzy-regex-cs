@@ -2143,8 +2143,21 @@ port answered a partial where upstream answered nothing", which a port INVENTING
 satisfies - because it demands the whole answer, groups and counts included. This entry keeps its
 five judged rows and its own arm above the new one, so it still takes them first.
 
+**Three later rows were placed by two ablations each, not by an anchored door.** S52's nineteenth
+sitting (2026-09-16) added sweep rows 4 and 15, the pair its fifteenth sitting called "the two nobody
+can place"; S57b (2026-09-21) added row 74947 of the seed 20260921 gate. On all three, upstream as
+drawn answers None, deleting the `(?b)` gives this port's partial, and spelling the `(*SKIP)` as
+`(*PRUNE)` gives it too. The first ablation is this entry's own weak argument, and the second says
+which construct the flag's candidate walk trips over. Row 74947 cannot be asked the third, usual
+question: with the verb deleted its pattern exhausts memory, which is entry 14's shape, so the probe
+prints that `MemoryError` rather than hiding it. Re-run row 74947 with
+`python tools/probes/s57b-row74947-two-doors.py`, and S52's pair with
+`python tools/probes/sweep-ablation-matrix.py --emit <file> --rows 4,15` then
+`pwsh -File tools/run-oracle.ps1 -Rows <file>`.
+
 **Related:** entry 12, the other `BESTMATCH` match-loss, which this port reproduced faithfully until
-S46 fixed it, where it never reproduced this one; entries 1 and 5 for `(*SKIP)`.
+S46 fixed it, where it never reproduced this one; entries 1 and 5 for `(*SKIP)`; entry 14, whose
+shape blocks row 74947's third door.
 
 ## 14. A self-recursive call round a fuzzy section that can match empty exhausts memory
 
@@ -3235,3 +3248,82 @@ the loop rather than the fuzzy matcher under it. Port half:
 **Tests.** `Gaps/Engine/FuzzyEnhanceMatchTests.Enhancematch_reaches_a_two_error_fit_where_upstream_keeps_a_three_error_one`,
 with `.The_improvement_loop_is_not_what_stops_without_the_flag` as its control. The oracle pin is
 `enhancematch-loses-a-candidate`.
+
+## 26. A reversed match records a change made outside a fuzzy lookahead at the position the lookahead reached
+
+**Status:** not filed, per the owner's rule. Found by S57b in the 6000-row exit gate, seed 20260921
+row 72790. Ledger entry 11 is the neighbouring family - change positions that contradict their own
+counts - and this is a different fault: the counts are right, the kinds are right, and one position
+belongs to the wrong part of the pattern.
+
+**The promise.** `fuzzy_changes` gives the positions of the changes `fuzzy_counts` counts, so a
+deletion's position is where the deleted character sat. `match_fuzzy_changes`
+(`upstream/src/_regex.c:20524` to `:20598`, the deletion shift at `:20554-20557`) walks the recorded list once and adds to each deletion
+the number of deletions already emitted, which is why two engines that recorded the same deletions
+in a different order print different numbers. Un-shifting that running total is what makes two
+answers comparable, and it is what the reproduction below prints as "raw".
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-21 by
+`tools/probes/s57b-row72790-change-order.py`:
+
+```python
+for section in ('{d<=1}', '{e<=1}', '{1<=e<=2}'):
+    pattern = r'(?r)(?=(?:a\s)' + section + r')b{d<=1}'
+    # The minimum spelling draws a second match at (1, 1); this is the one all three share.
+    zero = [m for m in regex.compile(pattern).finditer('a') if m.span() == (0, 0)][0]
+    raw = [p - i for i, p in enumerate(zero.fuzzy_changes[2])]
+    print(section, zero.span(), zero.fuzzy_counts, zero.fuzzy_changes[2], raw)
+```
+
+```
+{d<=1} (0, 0) (0, 0, 2) [0, 2] [0, 1]
+{e<=1} (0, 0) (0, 0, 2) [0, 2] [0, 1]
+{1<=e<=2} (0, 0) (0, 0, 2) [1, 2] [1, 1]
+```
+
+All three spellings answer the same zero-width match at 0, the same counts, and the same fit: the
+lookahead deletes `\s` at 1, the body deletes `b` at 0. The third moves the body's deletion onto 1,
+the position the lookahead reached. **A minimum error count decides whether a fit is accepted and
+cannot move where a character was deleted**, and this fit spends two errors, so a floor of one
+rejects nothing. Upstream's own other two spellings are the control.
+
+**The gate row is the same fault at scale.** Row 72790 is
+`(?r)(?=(?:[^\d]?\sß){1<=e<=2})\L<w1>{d<=1}` scanned over `'ßß\r\n'` under `IGNORECASE` with
+`w1 = ['ß', 'İﬁİ']`. Its zero-width match at 3 costs three deletions on both sides, and upstream's
+raw list is `[4, 4, 3]` where this port's is `[3, 4, 4]` - the same three deletions, with the body's
+recorded last instead of first. Writing that row's section `{d<=2}` misplaces the same deletion in
+the same way - upstream `[4, 5, 5]` against this port's `[3, 5, 6]`, printed by the `row 72790, no
+minimum` case of `tools/probes/s57b-row72790-change-order.py` and the `THE ROW WITHOUT ITS MINIMUM`
+block of `tools/probes/s57b-row72790-port-changes-in-a-scan.cs` - so the minimum is what exposes the
+fault on a one-character subject, not what causes it. The rewrite does settle the row's other divergence, the self-contradicting third match, which
+both engines then answer `(1, 2)` with counts `(0, 0, 1)` and a deletion at 3.
+
+**What the fault is not.** It is not entry 11's mechanism A, the change list `start_match` leaves
+behind: deleting this port's own change-list clear makes it reproduce upstream's leaked answer on
+that family's own row (`(?:[ab][bc](*PRUNE)[wx]){e<=2}` over `'qab'`, `[d:3]` becomes `[s:0]`) and
+moves row 72790 by nothing. It is also not the mirror image of the reversed-lookahead fault in entry
+11's door E, where a change made INSIDE the lookahead is reported at the match start; here the
+misplaced change is the one made outside it.
+
+**What narrows it**, ten rows through both engines in one run
+(`tools/probes/s57b-row72790-ladder-rows.jsonl`): 8 agree and 2 diverge, and the two are the
+spellings whose lookahead carries a minimum error count. A non-fuzzy body agrees, and the section on
+its own outside a lookahead agrees. So the ingredients are `(?r)`, a fuzzy section inside a
+lookahead, and a fuzzy body after it.
+
+**Not established:** which line records the body's deletion late. The ordering is visible in the
+answers and was not traced to a statement in `_regex.c`, and nothing above rests on it - the
+self-contradiction settles the verdict on its own.
+
+**This port.** It records the body's change first, which is the order a reversed sequence runs in:
+the body is the rightmost element, so it is the first one reached. Port half:
+`tools/probes/s57b-row72790-port-changes-in-a-scan.cs`.
+
+**Tests.** `Gaps/Engine/FuzzyCountsAndChangesTests.A_change_outside_a_reversed_lookahead_stays_where_the_body_matched`,
+which carries upstream's two control spellings, and
+`.A_reversed_list_scan_reports_the_substitution_its_counts_claim`, which pins the gate row's two
+diverging matches. The oracle pin is `reversed-body-change-lands-where-the-lookahead-reached`.
+
+**The row also contradicts itself in entry 11's way**, on its third match: counts `(1, 0, 0)`, one
+substitution, and a change list holding one deletion at 3 and no substitution. That is entry 11's
+door F seen again, and the pin covers both matches because one row cannot be split between two pins.

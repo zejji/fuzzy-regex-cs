@@ -518,4 +518,101 @@ public sealed class FuzzyCountsAndChangesTests
         astral.FuzzyChanges.Substitutions.Should().Equal(2, 5);
         AssertChangesAgreeWithCounts(astral);
     }
+
+    /// <summary>
+    /// A reversed match records a change made OUTSIDE a fuzzy lookahead where the body matched, not
+    /// where the lookahead reached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The minimised reproducer behind seed-20260921 gate row 72790, cut to a one-character subject
+    /// and no flags. All three spellings below describe the same fit: the zero-width match at 0
+    /// costing two deletions, one for the lookahead's <c>\s</c> at 1 and one for the body's
+    /// <c>b</c> at 0.
+    /// </para>
+    /// <para>
+    /// <b>Upstream contradicts its own other two spellings here.</b> With the lookahead's section
+    /// written <c>{d&lt;=1}</c> or <c>{e&lt;=1}</c> it answers this port's list; with the MINIMUM
+    /// error count of <c>{1&lt;=e&lt;=2}</c> its body deletion moves from 0 to 1, the position the
+    /// lookahead reached. A minimum decides whether a fit is accepted and cannot move where a
+    /// character was deleted, and this fit spends two errors, so a floor of one rejects nothing.
+    /// Measured 2026-09-21 on regex 2026.9.10 by
+    /// <c>tools/probes/s57b-row72790-change-order.py</c>. The oracle pin is
+    /// <c>reversed-body-change-lands-where-the-lookahead-reached</c>.
+    /// </para>
+    /// <para>
+    /// The positions asserted are what the match reports, which is not the raw recording position:
+    /// <c>match_fuzzy_changes</c> (<c>upstream/src/_regex.c:20524-20598, the deletion shift at :20554-20557</c>, and
+    /// <c>Match.SplitFuzzyChanges</c> here) adds to each deletion the number of deletions already
+    /// emitted, so the raw pair 0 and 1 prints as 0 and 2.
+    /// </para>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_change_outside_a_reversed_lookahead_stays_where_the_body_matched()
+    {
+        Match drawn = new FuzzyRegex(@"(?r)(?=(?:a\s){1<=e<=2})b{d<=1}").Matches("a")[1];
+
+        (drawn.Index, drawn.Length).Should().Be((0, 0));
+        drawn.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+
+        // Upstream answers 1 and 2 for this spelling alone.
+        drawn.FuzzyChanges.Deletions.Should().Equal(0, 2);
+        AssertChangesAgreeWithCounts(drawn);
+
+        // Upstream's own controls: the same section without its minimum, where upstream answers
+        // what this port answers to all three.
+        foreach (string section in new[] { "{d<=1}", "{e<=1}" })
+        {
+            Match control = new FuzzyRegex($@"(?r)(?=(?:a\s){section})b{{d<=1}}").Match("a");
+
+            (control.Index, control.Length).Should().Be((0, 0));
+            control.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+            control.FuzzyChanges.Deletions.Should().Equal(0, 2);
+        }
+    }
+
+    /// <summary>
+    /// The gate row itself, whose two diverging matches are one misplaced deletion and one change
+    /// reported as the wrong kind for its own counts.
+    /// </summary>
+    /// <remarks>
+    /// Seed-20260921 gate row 72790, a reversed scan of a named-list section under IGNORECASE. Both
+    /// engines answer five matches with the same five spans and the same five counts. Upstream's
+    /// second match lists deletions at 4, 5 and 5 where this port lists 3, 5 and 6 - the same three
+    /// deletions in a different order, the minimised case above - and its third match counts one
+    /// substitution while listing a deletion, which is one answer contradicting itself.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_reversed_list_scan_reports_the_substitution_its_counts_claim()
+    {
+        Dictionary<string, IReadOnlyCollection<string>> lists = new() { ["w1"] = ["ß", "İﬁİ"] };
+        Match[] scan =
+        [
+            .. new FuzzyRegex(
+                @"(?r)(?=(?:[^\d]?\sß){1<=e<=2})\L<w1>{d<=1}",
+                FuzzyRegexOptions.IgnoreCase,
+                lists
+            ).Matches("ßß\r\n"),
+        ];
+
+        scan.Select(static m => (m.Index, m.Length)).Should().Equal((4, 0), (3, 0), (1, 1), (0, 1), (0, 0));
+
+        // The body's deletion stays at 3, where the body matched; upstream reports 4, where its
+        // lookahead reached, and the running shift turns that into 4, 5, 5 against 3, 5, 6.
+        scan[1].FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
+        scan[1].FuzzyChanges.Deletions.Should().Equal(3, 5, 6);
+
+        // One substitution counted, so one substitution position and no deletion. Upstream lists a
+        // deletion at 3 under the same counts.
+        scan[2].FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        scan[2].FuzzyChanges.Substitutions.Should().Equal(3);
+        scan[2].FuzzyChanges.Deletions.Should().BeEmpty("the counts say one substitution");
+
+        foreach (Match m in scan)
+        {
+            AssertChangesAgreeWithCounts(m);
+        }
+    }
 }
