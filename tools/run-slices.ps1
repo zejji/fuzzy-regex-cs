@@ -39,6 +39,7 @@
     tools/run-slices.ps1 -MaxSlices 3
     tools/run-slices.ps1 -DryRun
     tools/run-slices.ps1 -NoHeadroom   # a machine without Headroom, at full token cost
+    tools/run-slices.ps1 -StopBy 07:30 # be finished by 07:30, and start nothing that cannot be
 #>
 [CmdletBinding()]
 param(
@@ -47,6 +48,12 @@ param(
     # skip the earlier phase's files that main is still working through. 0 = any phase.
     [int]$Phase = 0,
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
+    # Be finished by this time of day (24-hour HH:mm, the next occurrence). The sitting gets the
+    # smaller of the gap and the budget's ceiling, and the run stops rather than starting a sitting
+    # too short to reach a commit. The standing case is the owner's 07:35 - see Resolve-SliceTimeout.
+    [string]$StopBy = '',
+    # Override budget.json's sliceTimeoutMinutes for this run only.
+    [int]$TimeoutMinutes = 0,
     [switch]$DryRun,
     [switch]$NoHeadroom
 )
@@ -449,14 +456,20 @@ while ($completed -lt $MaxSlices) {
         break
     }
 
+    $timeout = Resolve-SliceTimeout -BudgetMinutes $budget.sliceTimeoutMinutes -OverrideMinutes $TimeoutMinutes -StopBy $StopBy
+    if ($timeout.TooShort) {
+        Write-Host "Stopping: $($timeout.Reason)." -ForegroundColor Yellow
+        break
+    }
+
     if ($DryRun) {
         Write-Host 'Dry run: would start a slice session here.' -ForegroundColor DarkGray
         break
     }
 
     $headBefore = (Get-GitState).Head
-    Write-Host "  running $Model session..." -ForegroundColor DarkGray
-    $session = Invoke-SliceSession -TimeoutMinutes $budget.sliceTimeoutMinutes -HeadBefore $headBefore
+    Write-Host "  running $Model session ($($timeout.Reason))..." -ForegroundColor DarkGray
+    $session = Invoke-SliceSession -TimeoutMinutes $timeout.Minutes -HeadBefore $headBefore
 
     $failureReason = if (-not $session.Ok) { $session.Reason } else { Test-SliceLanded -HeadBefore $headBefore -SliceName $slice.Name }
 

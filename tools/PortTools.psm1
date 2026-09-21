@@ -867,8 +867,65 @@ function Test-AllowanceFloor {
     [pscustomobject]@{ Allowed = $true; Stale = $false; WaitUntil = $null; Reason = "five-hour at $($Allowance.FiveHourPercent)%" }
 }
 
+function Resolve-SliceTimeout {
+    <#
+    .SYNOPSIS
+        How long the next sitting may run: the budget's ceiling, an explicit override and a
+        wall-clock stop, whichever is soonest. Pure: no I/O, so it is unit-tested.
+
+    .DESCRIPTION
+        The recurring constraint is a time of day rather than a duration. The owner leaves for work
+        at 07:40, so nothing may still be running at 07:35, and a sitting started at 04:00 under
+        budget.json's 285 minutes would run to 08:45. -StopBy names the time to be finished by, and
+        the sitting gets the smaller of that gap and the ceiling.
+
+        A gap below -MinimumMinutes is refused rather than shortened: a fresh sitting spends 5-10M
+        tokens re-orienting before it can do anything, so starting one with twenty minutes left buys
+        a rollback, not a slice. The caller stops the run instead and says why.
+
+        -StopBy is the NEXT occurrence of that time, so 07:30 given at 22:00 means tomorrow morning
+        and the same string given at 07:00 means today.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$BudgetMinutes,
+        [int]$OverrideMinutes = 0,
+        [string]$StopBy = '',
+        [int]$MinimumMinutes = 60,
+        [datetime]$Now = (Get-Date)
+    )
+    $ceiling = if ($OverrideMinutes -gt 0) { $OverrideMinutes } else { $BudgetMinutes }
+    if (-not $StopBy) {
+        return [pscustomobject]@{ Minutes = $ceiling; TooShort = $false; Reason = "$ceiling minutes" }
+    }
+
+    $parsed = [datetime]::MinValue
+    $styles = [System.Globalization.DateTimeStyles]::None
+    if (-not [datetime]::TryParseExact($StopBy, 'HH:mm', [cultureinfo]::InvariantCulture, $styles, [ref]$parsed)) {
+        throw "-StopBy must be a 24-hour time of day as HH:mm; got '$StopBy'."
+    }
+
+    $stop = $Now.Date.AddHours($parsed.Hour).AddMinutes($parsed.Minute)
+    if ($stop -le $Now) { $stop = $stop.AddDays(1) }
+    $gap = [int][Math]::Floor(($stop - $Now).TotalMinutes)
+
+    if ($gap -lt $MinimumMinutes) {
+        return [pscustomobject]@{
+            Minutes = $gap; TooShort = $true
+            Reason = "only $gap minutes remain before $StopBy, and a sitting needs at least $MinimumMinutes"
+        }
+    }
+    if ($gap -lt $ceiling) {
+        return [pscustomobject]@{
+            Minutes = $gap; TooShort = $false
+            Reason = "$gap minutes, clamped by the $StopBy stop"
+        }
+    }
+    [pscustomobject]@{ Minutes = $ceiling; TooShort = $false; Reason = "$ceiling minutes" }
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
-    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor
+    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout

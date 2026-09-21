@@ -907,3 +907,62 @@ Describe 'Read-Allowance' {
         Read-Allowance -Paths @((Join-Path $script:Dir 'missing.json')) | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Resolve-SliceTimeout' {
+    BeforeAll {
+        # A Monday evening, so "07:30" is tomorrow and "23:00" is tonight.
+        $script:Evening = [datetime]'2026-09-21T22:00:00'
+    }
+
+    It 'gives the budget its full run when nothing constrains it' {
+        $result = Resolve-SliceTimeout -BudgetMinutes 285 -Now $script:Evening
+        $result.Minutes | Should -Be 285
+        $result.TooShort | Should -BeFalse
+    }
+
+    It 'lets an explicit override beat the budget' {
+        (Resolve-SliceTimeout -BudgetMinutes 285 -OverrideMinutes 90 -Now $script:Evening).Minutes | Should -Be 90
+    }
+
+    It 'keeps the budget when the stop is further away than the budget reaches' {
+        $result = Resolve-SliceTimeout -BudgetMinutes 285 -StopBy '07:30' -Now $script:Evening
+        $result.Minutes | Should -Be 285
+        $result.Reason | Should -Be '285 minutes'
+    }
+
+    It 'clamps to the stop when the stop comes first' {
+        # 04:02 to 07:30 is 208 minutes, well inside the 285 the budget would allow.
+        $result = Resolve-SliceTimeout -BudgetMinutes 285 -StopBy '07:30' -Now ([datetime]'2026-09-22T04:02:00')
+        $result.Minutes | Should -Be 208
+        $result.TooShort | Should -BeFalse
+        $result.Reason | Should -Match 'clamped by the 07:30 stop'
+    }
+
+    It 'reads a stop time earlier in the day as tomorrow' {
+        # 22:00 Monday to 07:30 Tuesday is 570 minutes, not a negative nine and a half hours.
+        (Resolve-SliceTimeout -BudgetMinutes 1200 -StopBy '07:30' -Now $script:Evening).Minutes | Should -Be 570
+    }
+
+    It 'reads a stop time later today as today' {
+        (Resolve-SliceTimeout -BudgetMinutes 1200 -StopBy '23:00' -Now $script:Evening).Minutes | Should -Be 60
+    }
+
+    It 'refuses a gap too short to reach a commit, and says how short' {
+        $result = Resolve-SliceTimeout -BudgetMinutes 285 -StopBy '07:30' -Now ([datetime]'2026-09-22T06:50:00')
+        $result.TooShort | Should -BeTrue
+        $result.Reason | Should -Match 'only 40 minutes remain before 07:30'
+    }
+
+    It 'lands the sitting before the stop rather than on it' {
+        # The driver kills the session at Now + Minutes, so the arithmetic must not round up past
+        # the stop - a fraction of a second either way is a minute of the owner's morning.
+        $now = [datetime]'2026-09-22T04:00:30'
+        $result = Resolve-SliceTimeout -BudgetMinutes 285 -StopBy '07:30' -Now $now
+        $now.AddMinutes($result.Minutes) | Should -BeLessOrEqual ([datetime]'2026-09-22T07:30:00')
+    }
+
+    It 'throws on a stop time it cannot read, rather than running to the full budget' {
+        { Resolve-SliceTimeout -BudgetMinutes 285 -StopBy 'half seven' -Now $script:Evening } |
+            Should -Throw '*24-hour time of day*'
+    }
+}
