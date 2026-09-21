@@ -1,0 +1,10 @@
+{"generator":"interactions","pattern":"(?r)(?=a\\s{d<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"a","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){d<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"a","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){e<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"a","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){1<=e<=2})b{d<=1}","flags":0,"namedLists":{},"subject":"a","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=a\\s{d<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){d<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){e<=1})b{d<=1}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){1<=e<=2})b{d<=1}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){1<=e<=2})b","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?:a\\s){1<=e<=2}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}

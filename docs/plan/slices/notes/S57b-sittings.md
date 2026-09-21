@@ -406,3 +406,99 @@ every one of the 58 DIFFERENT rows is one the report already gives to
 over the slice, so this entry never sees them. Checked by reading each DIFFERENT row's block out of
 its own `report-<seed>.txt`. The same numbers appear in `record-oracle.py`'s docstring for the
 recorded `cutSubjectOutcome` fact, and both were updated together.
+
+## Sitting 4 (2026-09-21): row 72790 judged - this port is right, and why
+
+Row 72790 was the one row sitting 3 called possibly OURS. It is not. This sitting killed the two
+hypotheses that made it look like a port defect, found the mechanism, and left the pin itself for a
+sitting that can carry it through the blind review rather than adding to the unreviewed-pin debt
+sitting 3 already owes.
+
+**The row.** `(?r)(?=(?:[^\d]?\sß){1<=e<=2})\L<w1>{d<=1}` scanned over `ßß\r\n` under IGNORECASE,
+`w1 = ['ß', 'İﬁİ']`, as a `finditer`. Five matches, two of which diverge. The second, the zero-width
+match at 3, is the open one: both engines answer `(3, 3)` with counts `(0, 0, 3)` and disagree only
+over where the three deletions went - upstream `[4, 5, 5]`, this port `[3, 5, 6]`.
+
+**What made it look like ours.** This port's list shares its last two positions with the PREVIOUS
+match of the same scan, which is the shape of a change list carried from one match into the next.
+
+**Hypothesis 1, a carry-over across the scan: dead.** `Matches`, which holds one engine state for
+the whole walk, and `EnumerateMatches`, whose state restarts per match, give the same answer. The
+same match asked alone gives `[3, 4, 5]`, but that is a DIFFERENT question and not evidence:
+anchoring a reversed match needs `match(pos=start, endpos=end)`, which truncates the subject at 3
+and starves a lookahead that reads past the match. Upstream moves under the same truncation, from
+`[4, 5, 5]` to `[3, 4, 5]`. Probe: `tools/probes/s57b-row72790-port-changes-in-a-scan.cs`.
+
+**Hypothesis 2, ledger entry 11 mechanism A, the `start_match` leak: dead, by negative control.**
+Deleting this port's own change-list clear makes it reproduce upstream's leaked answer on that
+family's own row and does not move row 72790 by a single position. Re-run it exactly:
+
+- Edit `src/FuzzyRegex/Engine/Matcher.cs`. The two lines as they read now are
+  `            Array.Clear(state.FuzzyCounts);` and `            state.FuzzyChanges.Clear();`
+  (`Matcher.cs:5154-5155`, inside `if (state.IsFuzzy)` under the `start_match:` label). Delete the
+  second and rebuild.
+- Rows, three of them, replayed with
+  `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57b-row72790-leak-control-rows.jsonl`:
+  row 72790 itself,
+  the minimised `(?r)(?=(?:a\s){1<=e<=2})b{d<=1}` over `ab` as a `finditer`, and ledger entry 11's
+  own row, `(?:[ab][bc](*PRUNE)[wx]){e<=2}` over `qab` as a `search`.
+- Result: the control FIRES - the `(*PRUNE)` row's port answer goes from `[d:3]` to `[s:0]`, which
+  is upstream's leaked answer exactly - and rows 1 and 2 do not change by one position. Restore the
+  line with `git checkout -- src/FuzzyRegex/Engine/Matcher.cs`.
+
+**The mechanism: where a change made OUTSIDE a fuzzy lookahead is recorded.**
+`match_fuzzy_changes` (`upstream/src/_regex.c:20504-20560`) walks one list in the order the changes
+were recorded and adds to each DELETION the number of deletions already emitted, so the same raw
+positions in a different order print as different numbers. Un-shifting both engines' lists is what
+makes the row readable: upstream's `[4, 5, 5]` is raw `[4, 4, 3]` and this port's `[3, 5, 6]` is raw
+`[3, 4, 4]` - the SAME three deletions, ordered differently. Upstream records the body's last, this
+port records it first, which is the order a reversed sequence runs in: the body is the rightmost
+element, so it is the first the engine reaches.
+
+**Upstream contradicts its own control, on a minimised row.** Take
+`(?r)(?=(?:a\s){1<=e<=2})b{d<=1}` over `a`. Both engines answer the zero-width match at 0 with
+counts `(0, 0, 2)`: the lookahead deletes `\s` at 1, the body deletes `b` at 0. Write the
+lookahead's section without its minimum error count and ask upstream again:
+
+| lookahead section | span | counts | upstream, raw | this port, raw |
+| --- | --- | --- | --- | --- |
+| `{d<=1}` | (0, 0) | (0, 0, 2) | [0, 1] | [0, 1] |
+| `{e<=1}` | (0, 0) | (0, 0, 2) | [0, 1] | [0, 1] |
+| `{1<=e<=2}` | (0, 0) | (0, 0, 2) | **[1, 1]** | [0, 1] |
+
+Same span, same counts, same fit - and the fit spends 2 errors, so a floor of 1 rejects nothing. A
+minimum error count decides whether a fit is ACCEPTED; it cannot move where a character was
+deleted. Upstream's body deletion moves from 0 to 1 anyway, onto the position the lookahead reached,
+and upstream's own other two spellings answer what this port answers. That is the judgement: the
+port is right and upstream misplaces a change recorded outside a fuzzy lookahead.
+
+**What narrows it.** `tools/probes/s57b-row72790-ladder-rows.jsonl`, ten rows replayed through both
+engines in one run with `pwsh -File tools/run-oracle.ps1 -Rows <that file>`: 8 agree, 2 diverge, and
+the two are the spellings whose lookahead carries a minimum error count. A non-fuzzy body agrees,
+and the section on its own outside a lookahead agrees. The minimum is not the cause, only what
+exposes it on the small row - row 72790's own `{d<=2}` spelling diverges identically.
+
+**Probes.** `tools/probes/s57b-row72790-change-order.py` (upstream, both spellings, un-shifted) and
+`tools/probes/s57b-row72790-port-changes-in-a-scan.cs` (this port, the three doors and the same
+minimised ladder). `tools/probes/s57b-row72790-changes-in-a-scan.py` from sitting 3 still runs; its
+closing paragraph, which reads the port's list as a possible carry-over, is what this sitting
+disproved.
+
+**Left for sitting 5.** (1) The entry for row 72790 and its gap test: a new family, `Reason`
+carrying the table above, keyed on the row and on this port's `Describe()` string, plus the drafted
+ledger entry for a new upstream defect - a change recorded outside a fuzzy lookahead in a reversed
+match lands on the position the lookahead reached. Note the row also carries the recorded
+`selfContradiction` `fuzzy-counts-match-changes` for its FOURTH match, where upstream counts one
+substitution and lists a deletion, so the entry has to cover both diverging matches. (2) Row 74947,
+still as sitting 3 left it. (3) The re-record, the gate, ratchet, one blind review and one verifier
+pass over sittings 3, 4 and 5 together, and close.
+
+**Why the leak-free control could not judge this row, which is worth its own line.** The entry
+`fuzzy-changes-leaked-from-an-abandoned-attempt` is keyed on the recorded `leakFreeFuzzy`, upstream
+asked `match(pos=start, endpos=end)`. `_leak_free_fuzzy`'s docstring says that anchoring breaks on a
+fuzzy section inside a lookahead, which has to read past `endpos`, and treats that as a question
+upstream will not answer. On a REVERSED row it answers anyway, with a different span-preserving fit
+computed on a truncated subject - for row 72790 it returns `[3, 4, 5]`, which is neither engine's
+answer to the question actually asked. The failure is in the safe direction: a starved control makes
+the strong arm REJECT, so the row is reported rather than pinned, which is exactly what happened.
+Left alone deliberately - narrowing it is a change to a live recorded fact and wants its own slice.

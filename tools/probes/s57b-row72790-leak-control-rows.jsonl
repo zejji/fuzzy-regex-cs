@@ -1,0 +1,3 @@
+{"generator":"interactions","pattern":"(?r)(?=(?:[^\\d]?\\sß){1<=e<=2})\\L<w1>{d<=1}","flags":2,"namedLists":{"w1":["ß","İﬁİ"]},"subject":"ßß\r\n","operation":"finditer"}
+{"generator":"interactions","pattern":"(?r)(?=(?:a\\s){1<=e<=2})b{d<=1}","flags":0,"namedLists":{},"subject":"ab","operation":"finditer"}
+{"generator":"interactions","pattern":"(?:[ab][bc](*PRUNE)[wx]){e<=2}","flags":0,"namedLists":{},"subject":"qab","operation":"search"}
