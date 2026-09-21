@@ -15,6 +15,7 @@
  * (`tools/probes/s75-alignment-inputs.py`, regex 2026.9.10, 2026-09-20).
  */
 
+import { startOfCharacter } from './highlight';
 import type { EditKind, Highlighted } from './highlight';
 
 /** One character of the match, or one place where characters are missing from it. */
@@ -44,10 +45,20 @@ export function alignment(subject: string, match: Highlighted): readonly Alignme
     const kinds = new Map<number, EditKind>();
     const missing = new Map<number, number>();
 
+    // Where the walk below will actually stand when it reaches this position. It steps a whole
+    // character at a time, so on `a😀b` it stands on 1 and never on 2 - and an error the engine
+    // reported at 2, the pair's second code unit, would be keyed where nothing looks. The subject
+    // pane widens the same way (`runFrom` in `highlight.ts`), so without this the two views
+    // disagree about one answer: the character marked above, nothing marked below. Clamped to
+    // `start` because a pair straddling the match's edge would otherwise widen to before it.
+    const cellFor = (at: number): number => Math.max(startOfCharacter(subject, at), start);
+
     const mark = (at: number, kind: EditKind): void => {
         // First kind wins, as in `highlight.ts`: two errors on one character is not an answer the
         // engine gives, and picking the later one is no more true than picking the earlier.
-        if (at >= start && at < end && !kinds.has(at)) kinds.set(at, kind);
+        if (at < start || at >= end) return;
+        const cell = cellFor(at);
+        if (!kinds.has(cell)) kinds.set(cell, kind);
     };
 
     for (const at of edits.substitutions) mark(at, 'sub');
@@ -56,7 +67,8 @@ export function alignment(subject: string, match: Highlighted): readonly Alignme
         // `<= end`: a deletion at the end of the match is the ordinary case of a pattern that
         // asked for one more character than the subject had.
         if (at < start || at > end) continue;
-        missing.set(at, (missing.get(at) ?? 0) + 1);
+        const cell = at === end ? end : cellFor(at);
+        missing.set(cell, (missing.get(cell) ?? 0) + 1);
     }
 
     if (kinds.size === 0 && missing.size === 0) return null;

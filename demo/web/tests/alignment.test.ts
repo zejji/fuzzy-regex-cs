@@ -57,6 +57,19 @@ test('a character outside the BMP is one cell, not two', () => {
     );
 });
 
+test('an error reported on the second half of a surrogate pair still reaches its cell', () => {
+    // The walk steps a whole character at a time, so it stands on index 1 and never on index 2.
+    // An error keyed at 2 would then be drawn nowhere, while the subject pane above it paints the
+    // character: one answer, two views, and only one of them showing the error. `highlight.ts`
+    // widens the same way, which is what these two assertions hold the two views to.
+    expect(cells('a😀b', { index: 0, length: 4, edits: { substitutions: [2], insertions: [], deletions: [] } })).toBe(
+        'a:-@0 😀:sub@1 b:-@3',
+    );
+    expect(cells('a😀b', { index: 0, length: 4, edits: { substitutions: [], insertions: [], deletions: [2] } })).toBe(
+        'a:-@0 :del@1 😀:-@1 b:-@3',
+    );
+});
+
 test('an error the match does not cover is not drawn', () => {
     // The engine cannot produce one - the positions come from the match's own walk - but the answer
     // arrives as JSON from a worker, and a cell outside the match would describe someone else's.

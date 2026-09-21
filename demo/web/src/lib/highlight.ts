@@ -235,7 +235,7 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
  * Slicing there puts a lone surrogate in a text node, which a browser paints as U+FFFD - the demo
  * corrupting the subject it exists to show.
  */
-function startOfCharacter(subject: string, at: number): number {
+export function startOfCharacter(subject: string, at: number): number {
     const code = subject.charCodeAt(at);
     const before = at > 0 ? subject.charCodeAt(at - 1) : 0;
     const low = code >= 0xdc00 && code <= 0xdfff;
