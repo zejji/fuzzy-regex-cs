@@ -72,6 +72,11 @@ pwsh -File tools/check-ratchet.ps1                  # must print GREEN
 pwsh -File tools/check-ratchet.ps1 -UpdateBaseline  # only once it is green
 ```
 
+Both of those also rewrite `tests/status-stamp.txt`, which records the test sources `docs/STATUS.md`
+was generated from. **Stage it with the page**: a commit that changes a test and leaves the stamp
+behind is refused, because that is how a stale status board reached CI (run 35569653546). Run the
+ratchet after the last test edit, not before it.
+
 **The pre-commit hook runs the IDE inspections** (`tools/check-inspections.ps1`, ReSharper CLI, about
 four minutes) on any commit that stages a `.cs` file, and refuses the commit on an ERROR such as
 "Anonymous function can be made static" (IDE0320). That pause is not a hang: wait for it. If it goes
