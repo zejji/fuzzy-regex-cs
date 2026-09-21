@@ -968,3 +968,17 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   the `FuzzyRegex` id stays unreserved (free on nuget.org as at 2026-09-21, registration 404 and no
   search hits), and the first real install round trip moves into the release itself rather than an
   rc.
+
+- 2026-09-21 (S57c): S50's figure for the one-step-on narrowing's load-bearing test rows -
+  upstream's `test_fuzzy` 51, 52, 54 and 56 - does not survive re-measurement. Dropping the
+  narrowing reddens exactly four tests: `test_fuzzy#51` and `#56` (by `[Property("Upstream", ...)]`),
+  the demo word-list example, and `A_word_start_anchor_before_a_fuzzy_section_matches_at_position_
+  zero_here`. `Matcher.cs`'s doc comment and `ExpectedDivergences.cs` now cite 51 and 56 only.
+
+- 2026-09-21 (S57c): the `ExpectedDivergences` ablation (emptying `PatternObject.AnchorGuards`)
+  cannot see a change to the one-step-on test's shape, only its presence - a mutated
+  `AnchorIsPinned` that still checks something at the anchor lands in the same `expected` bucket as
+  the shipped rule, at every seed tried (`S57c-A`, generator `fuzzy-anchored`, seeds 7/4242/20260921
+  and a fresh seed 13031995, all `diverge 0`). `tools/probes/s57c-one-step-on-rows.jsonl` is a
+  second, direct instrument for exactly this reason: 4 of 7 rows classified on shipped code, 5 under
+  the fault.

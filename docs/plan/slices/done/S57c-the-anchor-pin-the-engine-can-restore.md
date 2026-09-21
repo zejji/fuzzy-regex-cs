@@ -77,12 +77,47 @@ either mistake without the suite saying so.
 
 ## Done when
 
-- [ ] The design chosen and written down with what the alternative would have cost.
-- [ ] Entries 19 and 20 both answer correctly; the probe's before and after quoted.
-- [ ] The two inherited pins inverted with their provenance; every regression row the reverted
+- [x] The design chosen and written down with what the alternative would have cost.
+- [x] Entries 19 and 20 both answer correctly; the probe's before and after quoted.
+- [x] The two inherited pins inverted with their provenance; every regression row the reverted
       attempts broke still green.
-- [ ] `DIVERGENCES.md` row and a discriminated `ExpectedDivergences` entry, the negative control
+- [x] `DIVERGENCES.md` row and a discriminated `ExpectedDivergences` entry, the negative control
       written first.
-- [ ] Ratchet, the default wave and the 6000-row wave green at three seeds; blind review (hunt: state
+- [x] Ratchet, the default wave and the 6000-row wave green at three seeds; blind review (hunt: state
       that the backtracking engine does not restore; a pin surviving an abandoned path; the
       one-step-on narrowing quietly dropped), commit.
+
+## Closing notes
+
+Landed: `Optimiser.FindAnchorGuards` / `PatternObject.AnchorGuards` / `Matcher.AnchorIsPinned`
+(compile-time route, chosen over per-frame backtracking state because it costs nothing at match
+time and S61 is about to measure that hot path), the one-step-on narrowing S50 already proved
+necessary, the two inherited pins inverted in `InheritedIssueTests.cs`, a `DIVERGENCES.md` row and
+an `ExpectedDivergences` entry keyed on an ablation (`OracleComparer.RunWithoutTheAnchorPin`), and
+ledger entries 19 and 20 marked fixed together, entry 20 riding entry 19's fix with no code of its
+own (re-measured, not assumed).
+
+Surprising: S50's own figure for the narrowing's load-bearing test rows - `test_fuzzy` 51, 52, 54
+and 56 - does not survive re-measurement. Dropping the one-step-on conjunct reddens exactly four
+tests, two of which carry `[Property("Upstream", "RegexTests.test_fuzzy#51")]` and `#56`; the other
+two are the demo word-list example and `A_word_start_anchor_before_a_fuzzy_section_matches_at_
+position_zero_here`. `Matcher.cs`'s doc comment and `ExpectedDivergences.cs` now cite 51 and 56
+only, measured 2026-09-21.
+
+This sitting also found that the oracle's `ExpectedDivergences` ablation (emptying `AnchorGuards`)
+cannot see a change to the one-step-on test's *shape*: a mutated `AnchorIsPinned` that still checks
+something at the anchor gets absorbed into the same `expected` bucket as the correct rule, at every
+seed tried, which is why `tools/probes/s57c-one-step-on-rows.jsonl` exists as a second, direct
+instrument. See `docs/plan/slices/notes/S57c-sittings.md`, Sitting 3, for the full numbers, the
+Control A recipe and the review/verifier record.
+
+**Review.** One blind pass (Sonnet); one candidate finding, reproduced and did not survive (a
+`LEDGER.md` attribution to "S57c" that is correct across the slice's sittings even though the
+specific hunk predates this one); no fixes, no second pass needed. The independent verifier
+(Opus) re-ran all nine judged-row claims from a fresh read of the committed tree and confirmed
+every one, including by applying and reverting the fault itself. Full detail in the sittings
+notes.
+
+Next slice should know: S57c's new `fuzzy-anchored` generator surfaced an unrelated, unjudged
+divergence at seed 1234567 (spec amendment 36) - that is S57e, not this slice, and
+`fuzzy-anchored` stays off `run-oracle.ps1`'s default list until S57e judges it.

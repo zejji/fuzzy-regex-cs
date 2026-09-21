@@ -1,0 +1,7 @@
+{"pattern": "(?r)^a(?:b){i<=1}$", "flags": 0, "subject": "ab\r", "operation": "search"}
+{"pattern": "\\m(?:Y){i}\\M", "flags": 0, "subject": "XY YX", "operation": "finditer"}
+{"pattern": "(?b)\\m(?:Y){1i+1d+1s<=2}\\M", "flags": 0, "subject": " XY Z", "operation": "finditer"}
+{"pattern": "(?m)^(?:abc){i<=1}", "flags": 0, "subject": "xabc", "operation": "search"}
+{"pattern": "\\b(?:abc){i<=2}", "flags": 0, "subject": "x abc", "operation": "search"}
+{"pattern": "\\b(?:abc){i<=2}", "flags": 0, "subject": "ab abc", "operation": "search"}
+{"pattern": "\\B(?:abc){i<=2}", "flags": 0, "subject": "xy abc", "operation": "search"}

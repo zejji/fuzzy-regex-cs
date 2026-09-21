@@ -116,3 +116,88 @@ and design-spec edits - plus changes to `Engine/Matcher.cs`, `ExpectedDivergence
 It is unreviewed and was written mid-sitting, so treat it as a draft to check rather than as
 landed work: cherry-pick what survives reading, re-run the wave, and take the blind review and the
 verifier over the result as the plan already says.
+
+## Sitting 3 (2026-09-21) - finished the slice
+
+`rescue/s57c-sitting2` was diffed against a stale base (`45d3f2f`), so a naive
+`git diff HEAD..rescue/s57c-sitting2` showed large unrelated deletions from work HEAD had gained
+independently since the checkpoint. Per-file `git log 45d3f2f..HEAD -- <file>` separated the 13
+files untouched since the checkpoint (cherry-picked wholesale via `git diff HEAD..rescue/s57c-sitting2
+-- <files> | git apply`) from two that had diverged (`docs/plan/ROADMAP.md`, `docs/COMPARISON.md`),
+merged by hand from the rescue branch's content.
+
+`tools/probes/s57c-one-step-on-rows.jsonl`, which the rescue branch's own diff referenced as
+supporting evidence, was never actually committed there (confirmed via `git ls-tree -r
+rescue/s57c-sitting2`). Rather than guess its lost content, it was rebuilt from scratch: 7 directed
+rows, reasoned through the engine mechanics and confirmed by running both the shipped code and the
+one-step-on-dropped fault against it. That gave four rows classified on shipped code and five under
+the fault - different from the interrupted sitting's unverified claim of one vs three - so the
+`ExpectedDivergences.cs` prose and the `Matcher.cs` doc comment were written to state the measured
+numbers rather than repeat the lost ones. `test_fuzzy` rows 51 and 56 (not S50's original 51, 52, 54,
+56) are the two that map to the four failing tests under the fault; the independent verifier
+confirmed the mapping directly from each test's `[Property("Upstream", "RegexTests.test_fuzzy#N")]`
+attribute (see below).
+
+### Final verification, run in this order against the code committed
+
+1. `pwsh -File tools/check-ratchet.ps1` - GREEN, 6509/6509 passing (6401 distinct ids).
+2. `pwsh -File tools/check-ratchet.ps1 -UpdateBaseline` - baseline updated to 6401.
+3. `pwsh -File tools/run-oracle.ps1` (default wave, 6380 rows, seeds 7/4242/20260921) - GREEN,
+   `diverge 0` at all three seeds.
+4. `pwsh -File tools/run-oracle.ps1 -Count 6000` (126,080 rows, same three seeds) - GREEN,
+   `diverge 0` at all three seeds.
+5. `tools/check-doc-examples.ps1` - 45 ok, 0 fail (from sitting 2's work, re-confirmed unaffected).
+
+### Control A, `S57c-A` (`tools/controls.json`)
+
+In `Matcher.cs`, `AnchorIsPinned`, drop the one-step-on conjunct:
+
+```csharp
+            if (
+                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success
+                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure
+            )
+            {
+                return true;
+            }
+```
+
+becomes:
+
+```csharp
+            if (TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success)
+            {
+                return true;
+            }
+```
+
+Wave: generator `fuzzy-anchored`, 2000 rows. `python tools/run-controls.py --ids S57c-A`:
+seed 7, `agree 1997 expected 3 diverge 0`; seed 4242, `agree 1992 expected 8 diverge 0`; seed
+20260921, `agree 1995 expected 5 diverge 0`. Re-run at a fresh seed the control has not used,
+13031995: `agree 1990 expected 10 diverge 0`. The classifier absorbs every row the fault reaches
+into `expected` rather than `diverge`, which is the ablation's blind spot this control exists to
+show - see `ExpectedDivergences.cs`'s "WHAT THE ABLATION CANNOT SEE" paragraph. The directed-rows
+probe (`tools/probes/s57c-one-step-on-rows.jsonl`, 7 rows) is what actually distinguishes shipped
+from faulted: `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57c-one-step-on-rows.jsonl` gives
+`expected 4` on shipped code and `expected 5` under the same fault.
+
+### Review
+
+One blind pass, Sonnet, brief scoped to `git diff HEAD` (17 files, 223 insertions/32 deletions) plus
+the untracked `.jsonl`. One candidate finding: that `docs/plan/upstream-reports/LEDGER.md` describes
+`issue-563-anchor-rule.py`'s "seventh section" (the reversed-direction rows) as added by "S57c's own
+probe" although that section's diff hunk sits outside this sitting's changes. Reproduced and did not
+survive: the section exists, its content matches the prose exactly, and it was added by S57c's
+sitting-1 checkpoint (`45d3f2f`) - "S57c" is the whole slice, not this sitting's diff alone, so the
+attribution is correct. No second pass was needed; no fixes went in. `dotnet build`: 0 warnings, 0
+errors.
+
+### Independent verifier
+
+One fresh Opus subagent, no sight of the review or sitting 1/2's verdicts, re-ran all nine numbered
+claims from the LEDGER, `ExpectedDivergences.cs` and `Matcher.cs`'s doc comment against the committed
+tree, applying and reverting the one-step-on mutation itself (never with git) to get the faulted
+numbers. All nine CONFIRMED, including the exact failing-test count and names under the fault (4:
+the demo word-list example, `A_word_start_anchor_before_a_fuzzy_section_matches_at_position_zero_here`,
+and the two `test_fuzzy#51`/`#56` tests) and the Control A seed numbers above. Tree confirmed
+byte-identical to pre-verification (`git diff --stat` unchanged) after its revert.

@@ -2673,12 +2673,18 @@ that recognised the body as having no alternative would need O(1) state per repe
 not a byte figure that would vary by machine. The 1GB bound is a fixed constant, so the test is
 deterministic rather than a race against the machine.
 
-## 19. `\m` before a fuzzy section does not match at position 0 (upstream issue 563)
+## 19. `\m` before a fuzzy section does not match at position 0 (upstream issue 563) - FIXED HERE (S57c)
 
-**Status:** not filed; inherited here. **PARKED BY S50**, together with entry 20, which S50 proved is
-the same bug. The mechanism is now established to a line, and two fix designs were built and
-reverted - see "What S50 built and why it went back" at the end of this entry, which is the most
-useful thing in it. Upstream issue 563 is open since 2025-04-17, and the maintainer's own comment is
+**Status:** not filed; inherited, and **fixed here on 2026-09-21 by S57c**, together with entry 20,
+which S50 proved is the same bug. The fix is the third of the designs below, the compile-time one:
+`Optimiser.FindAnchorGuards` collects the pattern's leading position assertions into
+`PatternObject.AnchorGuards`, and `Matcher.AnchorIsPinned` permits the insertion only where a guard
+holds at the anchor and fails one character on. A property of the pattern cannot be wrong about
+which path the engine is on, which is what killed both of S50's attempts. The divergence has a row
+in `docs/DIVERGENCES.md` and an oracle entry, `fuzzy-insertion-at-a-pinned-anchor`, keyed on an
+ablation that empties that one field. The mechanism is established to a line, and two fix designs
+were built and reverted - see "What S50 built and why it went back" at the end of this entry, which
+is the most useful thing in it. Upstream issue 563 is open since 2025-04-17, and the maintainer's own comment is
 "It looks like a bug, but I'm not sure whether I want to fix it in case I break something in the
 current codebase."
 
@@ -2783,11 +2789,25 @@ improvised at the end of one.
 answer plus every row the two attempts broke, so the next attempt has to keep them. Re-run the
 evidence with `python tools/probes/issue-563-anchor-rule.py`.
 
-## 20. Loosening a fuzzy budget loses a match (upstream issue 564)
+**S57c took the second route, on 2026-09-21.** The compile-time walk stops at the first node that
+could send matching down more than one path, so every assertion it collects is passed on every path
+through the pattern, and all ten repeat shapes the second attempt broke stay green with no clearing
+anywhere. The per-frame cost of the first route is what decided it: S61 is about to measure that hot
+path, and this design spends nothing at match time beyond the two assertion tests the rule needs.
+The inherited pins in `InheritedIssueTests` are now inverted to the fixed answers, with the upstream
+call and answer quoted beside each. S57c's own probe adds a seventh section to
+`issue-563-anchor-rule.py`: under `(?r)` the anchor is the END of the subject, so the same rule bans
+a trailing insertion, and `(?r)^a(?:b){i<=1}$` over `'ab\r'` is `None` upstream where its own
+forward spelling answers `(0, 3)`. The differential oracle drew that row itself (seed 20260921, row
+3752) once the fix made the two engines disagree.
 
-**Status:** not filed; inherited here. **PARKED BY S50 with entry 19, which S50 proved is the same
-bug.** Upstream issue 564 is open since 2025-04-17, same date and same maintainer comment as entry 19
-("It looks like a bug").
+## 20. Loosening a fuzzy budget loses a match (upstream issue 564) - FIXED HERE (S57c)
+
+**Status:** not filed; inherited, and **fixed here on 2026-09-21 by S57c with entry 19, which S50
+proved is the same bug.** Entry 19's fix carried this row with no code of its own, and S57c
+re-measured that rather than assuming it: both budgets now answer `['XY', 'Z']`, and the test
+`Loosening_a_fuzzy_budget_keeps_every_match_the_tighter_one_found` asserts it. Upstream issue 564 is
+open since 2025-04-17, same date and same maintainer comment as entry 19 ("It looks like a bug").
 
 **The reporter's suspicion that the two are related was right, and this is now a finding rather than
 a hypothesis:** entry 19's one-clause change turned this row green with no code of its own, so both

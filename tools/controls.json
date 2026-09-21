@@ -1747,5 +1747,21 @@
       99991,
       55
     ]
+  },
+  {
+    "id": "S57c-A",
+    "name": "anchor-pin-without-the-one-step-on-test",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static bool AnchorIsPinned(MatchState state, long step)",
+    "anchorNth": 1,
+    "before": "            if (\n                TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success\n                && TryMatchZeroWidth(state, guard, onePastAnchor) == MatchStatus.Failure\n            )\n",
+    "after": "            if (TryMatchZeroWidth(state, guard, state.SearchAnchor) == MatchStatus.Success)\n",
+    "generator": "fuzzy-anchored",
+    "count": 2000,
+    "seeds": [
+      7,
+      4242,
+      20260921
+    ]
   }
 ]
