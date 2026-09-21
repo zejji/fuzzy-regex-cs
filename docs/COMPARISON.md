@@ -39,7 +39,7 @@ Module-level functions:
 | `regex.split(pattern, string)` | `FuzzyRegex.Split(input, pattern, options, ...)` (static) | `-1` means no limit; upstream's `maxsplit=0` does - see "**`Split` spells "no limit" as `maxSplits = -1`**" below. |
 | `regex.splititer(pattern, string)` | `FuzzyRegex.EnumerateSplits(input, pattern, options, ...)` (static) | Lazy twin of `Split`. |
 | `regex.escape(pattern)` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` (static) | Same idea; upstream's `special_only` and `literal_spaces` are `specialOnly` and `literalSpaces` here, both usable by name on either side. |
-| `regex.purge()` | no equivalent yet (planned) | Upstream clears its module-global pattern cache; this port has no pattern cache yet. `FuzzyRegex.CacheSize` is **PLANNED (Phase 7)** per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table - do not treat it as available today. |
+| `regex.purge()` | `FuzzyRegex.CacheSize = 0` | Upstream clears its module-global pattern cache. The static conveniences here read a bounded most-recently-used cache of fifteen patterns, which S59 added; setting `CacheSize` to `0` empties it and stops it storing, where `purge` clears a cache that stays enabled. The constructors never consult it. |
 
 Compiled `Pattern`'s methods (an instance of upstream's `Pattern`, a compiled `FuzzyRegex` here):
 every matching method above (`search` through `splititer`) has an instance counterpart with the
