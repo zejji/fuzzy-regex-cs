@@ -28,7 +28,12 @@ Then orient, in this order and no further:
 
 1. `docs/plan/STATE.md` - current slice, blockers, next action.
 2. `docs/plan/ROADMAP.md` - which phase this is and what comes next.
-3. `docs/plan/slices/` - the pending queue. Your slice is the lowest-numbered file there.
+3. `docs/plan/slices/` - the pending queue. **If `.claude/driver/session-slice.txt` exists, it
+   names your slice and it is binding**; the driver wrote it when it started this sitting.
+   Only when that file is absent is your slice the lowest-numbered file in the queue. The
+   two rules disagree whenever a worktree's branch is behind main - a branch cut at another
+   slice's mid-slice checkpoint still has that slice pending - and on 2026-09-21 a sitting
+   launched for S80 spent 18.5M tokens finishing S57c for that reason.
 4. `docs/STATUS.md` - generated parity board, so you know what already works.
 
 Read the slice file itself in full. It names its scope, its upstream line references and its

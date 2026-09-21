@@ -924,8 +924,39 @@ function Resolve-SliceTimeout {
     [pscustomobject]@{ Minutes = $ceiling; TooShort = $false; Reason = "$ceiling minutes" }
 }
 
+function Write-DriverHandover {
+    <#
+    .SYNOPSIS
+        Writes the two files a sitting needs and cannot be told any other way: when the driver will
+        kill it, and which slice it is for.
+
+    .DESCRIPTION
+        A `claude -p` session cannot be messaged once it starts. tools/session-hook.ps1 reads the
+        deadline and reports the time left; .claude/skills/port-slice/SKILL.md reads the slice name
+        and treats it as binding.
+
+        The slice name matters because the session would otherwise pick the lowest-numbered file in
+        the queue, which is a different answer in a worktree whose branch is behind main: on
+        2026-09-21 a sitting launched for S80 finished S57c instead, at a cost of 18.5M tokens,
+        because the branch had been cut at S57c's own mid-slice checkpoint.
+
+        These live in .claude/driver/ rather than .scratch/, which slice sessions clear - a sitting
+        deleted the deadline file out from under itself on 2026-09-15.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][datetimeoffset]$Deadline,
+        [Parameter(Mandatory)][string]$SliceName
+    )
+    $dir = Join-Path $RepoRoot '.claude/driver'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'session-deadline.txt') -Value $Deadline.ToString('o') -NoNewline
+    Set-Content -LiteralPath (Join-Path $dir 'session-slice.txt') -Value $SliceName -NoNewline
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
-    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout
+    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout, Write-DriverHandover

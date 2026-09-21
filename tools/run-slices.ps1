@@ -156,7 +156,7 @@ function Invoke-SliceSession {
         self-orients from STATE.md, the roadmap, the slice file and the generated status, so a
         long briefing here would only add stale context.
     #>
-    param([int]$TimeoutMinutes, [string]$HeadBefore)
+    param([int]$TimeoutMinutes, [string]$HeadBefore, [string]$SliceName)
 
     $process = $null
 
@@ -190,8 +190,7 @@ function Invoke-SliceSession {
             $startInfo.Environment['ENABLE_TOOL_SEARCH'] = 'true'
         }
         $deadline = [datetimeoffset]::Now.AddMinutes($TimeoutMinutes)
-        New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.claude/driver') | Out-Null
-        Set-Content -LiteralPath (Join-Path $repoRoot '.claude/driver/session-deadline.txt') -Value $deadline.ToString('o') -NoNewline
+        Write-DriverHandover -RepoRoot $repoRoot -Deadline $deadline -SliceName $SliceName
         Remove-Item -LiteralPath (Join-Path $repoRoot '.claude/driver/orchestrator-message.txt.delivered') -Force -ErrorAction SilentlyContinue
         $arguments = @(
             '-p', '--model', $Model, '--output-format', 'json',
@@ -469,7 +468,7 @@ while ($completed -lt $MaxSlices) {
 
     $headBefore = (Get-GitState).Head
     Write-Host "  running $Model session ($($timeout.Reason))..." -ForegroundColor DarkGray
-    $session = Invoke-SliceSession -TimeoutMinutes $timeout.Minutes -HeadBefore $headBefore
+    $session = Invoke-SliceSession -TimeoutMinutes $timeout.Minutes -HeadBefore $headBefore -SliceName $slice.BaseName
 
     $failureReason = if (-not $session.Ok) { $session.Reason } else { Test-SliceLanded -HeadBefore $headBefore -SliceName $slice.Name }
 

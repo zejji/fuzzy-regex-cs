@@ -966,3 +966,39 @@ Describe 'Resolve-SliceTimeout' {
             Should -Throw '*24-hour time of day*'
     }
 }
+
+Describe 'Write-DriverHandover' {
+    BeforeAll {
+        $script:Repo = Join-Path ([System.IO.Path]::GetTempPath()) ("handover-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Force -Path $script:Repo | Out-Null
+        $script:Deadline = [datetimeoffset]'2026-09-22T07:30:00+01:00'
+    }
+    AfterAll {
+        Remove-Item -LiteralPath $script:Repo -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'creates .claude/driver and writes both files' {
+        Write-DriverHandover -RepoRoot $script:Repo -Deadline $script:Deadline -SliceName 'S80-a-guide-that-does-not-assume-python'
+        Join-Path $script:Repo '.claude/driver/session-deadline.txt' | Should -Exist
+        Join-Path $script:Repo '.claude/driver/session-slice.txt' | Should -Exist
+    }
+
+    It 'names the slice the driver chose, with no trailing newline for the skill to trip over' {
+        Write-DriverHandover -RepoRoot $script:Repo -Deadline $script:Deadline -SliceName 'S57e-the-insertion-position'
+        Get-Content -LiteralPath (Join-Path $script:Repo '.claude/driver/session-slice.txt') -Raw |
+            Should -BeExactly 'S57e-the-insertion-position'
+    }
+
+    It 'overwrites the previous sitting name rather than appending to it' {
+        Write-DriverHandover -RepoRoot $script:Repo -Deadline $script:Deadline -SliceName 'S57d-first'
+        Write-DriverHandover -RepoRoot $script:Repo -Deadline $script:Deadline -SliceName 'S57e-second'
+        Get-Content -LiteralPath (Join-Path $script:Repo '.claude/driver/session-slice.txt') -Raw |
+            Should -BeExactly 'S57e-second'
+    }
+
+    It 'writes the deadline in a form the session hook can parse back' {
+        Write-DriverHandover -RepoRoot $script:Repo -Deadline $script:Deadline -SliceName 'S80'
+        $text = Get-Content -LiteralPath (Join-Path $script:Repo '.claude/driver/session-deadline.txt') -Raw
+        [datetimeoffset]::Parse($text.Trim()) | Should -Be $script:Deadline
+    }
+}
