@@ -234,6 +234,10 @@ A named list is a fixed set of literal alternatives, supplied at compile time an
 name in the pattern; combined with a fuzzy budget it fuzzy-matches against every word in the list
 at once, taking the closest fit.
 
+The example opens with `(?e)`, the `EnhanceMatch` flag described above, because the tightest fit is
+what a list of words is usually for. Drop it and the first match here is ` dog` with a leading
+space, since a budget of one error is enough to pay for that space.
+
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
