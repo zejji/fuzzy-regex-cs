@@ -17,8 +17,12 @@ sh "$(dirname "$0")/check-identity.sh" commit || exit 1
 # commit that stages a .cs file. It takes about four minutes; that is the price of not shipping
 # what the IDE calls an error. Docs-only commits skip it.
 
+# Deletions included here, and only here: a deleted test changes the counts on docs/STATUS.md just
+# as a new one does, while the formatting step below has nothing to format in a file that is gone.
+staged_tests=$(git diff --cached --name-only --diff-filter=ACMRD -z -- 'tests/*.cs' | tr '\0' '\n')
+
 staged=$(git diff --cached --name-only --diff-filter=ACMR -z -- '*.cs' | tr '\0' '\n')
-[ -z "$staged" ] && exit 0
+[ -z "$staged" ] && [ -z "$staged_tests" ] && exit 0
 
 # A file that is staged *and* has further unstaged edits cannot be re-staged safely: the
 # `git add` below would sweep those edits into the commit. Refuse rather than commit content
@@ -31,8 +35,31 @@ if [ -n "$partial" ]; then
   exit 1
 fi
 
-printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 dotnet csharpier format || exit 1
-printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git add
+if [ -n "$staged" ]; then
+  printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 dotnet csharpier format || exit 1
+  printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 git add
+fi
+
+# docs/STATUS.md is generated from a test RUN, so a commit that changes the tests without
+# re-running the ratchet ships a page describing a different set of them. CI catches that by
+# regenerating the page on three runners and comparing (run 35569653546, 2026-09-21); this catches
+# it here, in milliseconds, by comparing the stamp the ratchet wrote beside the page with the tests
+# actually being committed. tools/status-stamp.ps1 says what the stamp covers.
+#
+# After the formatting above, deliberately: the stamp then describes the bytes that are committed.
+if [ -n "$staged_tests" ]; then
+  recorded=$(tr -d '\r\n' < tests/status-stamp.txt 2>/dev/null)
+  actual=$(pwsh -NoProfile -File tools/status-stamp.ps1 | tr -d '\r\n')
+  if [ "$recorded" != "$actual" ]; then
+    echo "pre-commit: the tests have changed since docs/STATUS.md was generated."
+    echo "  recorded: ${recorded:-(no tests/status-stamp.txt)}"
+    echo "  actual:   $actual"
+    echo "Run 'pwsh -File tools/check-ratchet.ps1', then stage docs/STATUS.md and tests/status-stamp.txt."
+    exit 1
+  fi
+fi
+
+[ -z "$staged" ] && exit 0
 
 # ReSharper's command-line inspector over the whole solution, ERROR severity, --no-build (the
 # caller has built; the ratchet always has). Fails the commit on any finding.

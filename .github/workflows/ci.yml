@@ -98,12 +98,14 @@ jobs:
       - name: The generated status board must be up to date
         shell: pwsh
         run: |
-          # check-ratchet.ps1 rewrites docs/STATUS.md. If that changes anything, the committed
-          # board was stale - regenerate it and commit rather than letting the numbers drift.
-          $diff = git diff --name-only -- docs/STATUS.md
+          # check-ratchet.ps1 rewrites docs/STATUS.md and the stamp beside it. If either changes,
+          # the committed board was stale - regenerate and commit rather than letting the numbers
+          # drift. The stamp is checked here too so a stale one cannot reach main and fail the
+          # pre-commit gate on the next person to touch a test.
+          $diff = git diff --name-only -- docs/STATUS.md tests/status-stamp.txt
           if ($diff) {
-            git --no-pager diff -- docs/STATUS.md
-            throw 'docs/STATUS.md is out of date. Run tools/check-ratchet.ps1 and commit the result.'
+            git --no-pager diff -- docs/STATUS.md tests/status-stamp.txt
+            throw 'docs/STATUS.md or tests/status-stamp.txt is out of date. Run tools/check-ratchet.ps1 and commit the result.'
           }
 
       - name: Upload test report

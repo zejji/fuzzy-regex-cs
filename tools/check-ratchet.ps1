@@ -113,6 +113,14 @@ $upstreamCommit = (git -C (Join-Path $repoRoot 'upstream') rev-parse HEAD).Trim(
     [System.Text.UTF8Encoding]::new($false))
 Write-Host "Wrote $statusPath" -ForegroundColor DarkGray
 
+# The stamp that says which test sources the page above describes. The pre-commit hook recomputes
+# it and refuses a commit whose tests have moved on since; tools/status-stamp.ps1 says why.
+$stampPath = Join-Path $repoRoot 'tests/status-stamp.txt'
+[System.IO.File]::WriteAllText(
+    $stampPath,
+    (& (Join-Path $PSScriptRoot 'status-stamp.ps1') -Root $repoRoot) + "`n",
+    [System.Text.UTF8Encoding]::new($false))
+
 $verdict = Test-Ratchet -Results $results -AcceptRemovals:$AcceptRemovals `
     -BaselinePassing @(Get-BaselinePassing -BaselinePath $baselinePath)
 
