@@ -62,8 +62,24 @@ module needs to know where this port deliberately behaves differently.
   visible only where a pattern weights its error kinds differently. `BESTMATCH` needed more than a
   tie-break to get there - an error-count budget cannot reach a cheaper match that spends the same
   number of errors - so it walks the slice twice, the first walk bounded by cost.
+- Phase 6: **the bug sweep, and the promises a library has to keep beyond matching correctly.**
+  Per-call `MatchTimeout` and `CancellationToken`, polled on the matcher's own loop rather than
+  between matches; a compiled pattern that is immutable and safe to share across threads, as
+  upstream and .NET `Regex` both promise; and the API surface completed against upstream's, so
+  nothing upstream exposes is missing here. Upstream's own test suite runs with **nothing skipped**,
+  and the differential oracle is green at three seeds over 126,080 rows a seed.
+
+  Phase 6 is not finished. Three inherited bugs are identified, reproduced and scheduled rather than
+  fixed - a word-start anchor before a fuzzy section, a partial `fullmatch` that denies a prefix
+  whose completion exists, and a repeated capture group whose backtracking cost grows with the
+  repetitions. They are `docs/plan/upstream-reports/LEDGER.md` entries 18 to 21, and the owner's
+  standing rule is that no known bug ships, so none of them will reach 1.0 unfixed.
 
 ### Changed
+
+- **`Version1` is the default**, matching upstream's own recommendation; `Version0` is available
+  per-pattern for `re`- and .NET-style set syntax and simple case folding. An inline `(?V0)` now
+  selects version 0, which upstream's own flag handling does not when its default is version 1.
 
 - **Tracks mrab-regex 2026.9.10** (commit `7dd71c1`), up from 2026.8.12. Three of the four engine
   and parser fixes in that range are ported - upstream issues 611, 612 and 613 - and the fourth,
@@ -127,5 +143,27 @@ feature, and none of them by a ported test.
 - A POSIX fuzzy match reported the errors it had spent as zero, because saving and restoring the
   best match so far carried neither the fuzzy counts nor the list of changes. Upstream carries
   neither correctly either; this is fixed here rather than reproduced.
+
+Phase 6's were found by reading upstream's C and its issue tracker rather than by a wave, because the
+oracle is blind to a bug this port reproduces faithfully: comparing the two engines reports agreement.
+Each is fixed here even though upstream still has it, and each is recorded in
+`docs/plan/upstream-reports/LEDGER.md` with its mechanism.
+
+- **Case folding applied a Turkish locale rule with no locale asked for.** Upstream's table builder
+  merges `CaseFolding.txt`'s Turkic-only `T` rows into both default tables, which that file itself
+  says to exclude by default. Two consequences: `İ` (U+0130) never reached its full case fold, and
+  `(?i)I` matched `ı`. This port now agrees with PCRE2, Perl and .NET instead, and deliberately
+  differs from upstream on four of `test_turkic`'s sixteen cells.
+- **`BESTMATCH` lost a match that plain fuzzy matching finds**, when the best fit ended in a trailing
+  insertion.
+- **A fuzzy match reported change positions that contradicted its own change counts.** Four distinct
+  doors into the same symptom; three more remain upstream's alone.
+- **A self-recursive call around a fuzzy section that can match empty exhausted memory.** A progress
+  guard is not enough: progress bounds the depth and not the branching.
+- **Branch reset gave two groups in the same branch the same number**, for the shape upstream's own
+  issue reports. Two other orderings still do, and are the one item on this list left open, because
+  fixing them means choosing between two options upstream has left unchosen.
+- **A reversed partial match reported running out of text at the slice start, or did not, depending
+  on which optimisation had run.**
 
 [Unreleased]: https://github.com/zejji/fuzzy-regex-cs/commits/main

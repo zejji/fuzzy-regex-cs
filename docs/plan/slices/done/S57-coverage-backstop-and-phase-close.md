@@ -71,10 +71,58 @@ coverage - and hands Phase 7 what it regresses against.
 
 ## Done when
 
-- [ ] Coverage backstop run; every untested file or branch tested or recorded.
-- [ ] Gate walked in order with numbers; ledger table shows no inherited-unfixed entry.
-- [ ] `tools/run-aot-tests.ps1` GREEN again, the IL2065 decided one of the three ways and the
+- [x] Coverage backstop run; every untested file or branch tested or recorded.
+- [x] Gate walked in order with numbers; ledger table built, and every inherited-unfixed entry
+      given a slice or an owner decision rather than left to reach 1.0 by default. Phase 6 does
+      not close here: it closes with S61, when the last of them lands (design spec amendment 35).
+- [x] `tools/run-aot-tests.ps1` GREEN again, the IL2065 decided one of the three ways and the
       reason written down.
-- [ ] Symbol accounting, controls, bookkeeping, Phase 7 handover.
-- [ ] Ratchet GREEN, blind review (hunt: a gate item ticked from an earlier slice's numbers rather
+- [x] Symbol accounting, controls, bookkeeping, Phase 7 handover.
+- [x] Ratchet GREEN, blind review (hunt: a gate item ticked from an earlier slice's numbers rather
       than re-run; a ledger entry whose "fixed" has no test), commit.
+
+## Closing notes - 2026-09-21, four sittings
+
+Per-sitting detail is in `notes/S57-sittings.md`; this is what a later slice needs.
+
+**What landed.** The coverage backstop, re-measured here rather than quoted: 878 uncovered lines in
+257 members, 8 members wholly unreached and each judged, and **0 wholly-unentered opcode arms**, down
+from 6. Phase 6's exit gate walked in its own order, every item re-run on this tree. The symbol
+accounting, the S44-S56 control re-runs, the CHANGELOG's Phase 6 entry, the measured rate, and
+`docs/plan/PHASE-7-HANDOVER.md`, which is the file a Phase 7 slice should read first.
+
+**The surprise, and the thing that changed the plan.** The gate's last item asks for a table of every
+ledger entry in one of four final states, and five entries were still "inherited, unfixed": 17 in
+part, 18, 19, 20 and 21. The port reproduces all five, pinned by
+`tests/FuzzyRegex.Tests/Gaps/UpstreamIssues/InheritedIssueTests.cs`. The finding that mattered was
+not the five - sitting 2 had already tabled them - but that **nothing in the queue scheduled any of
+them**, so the owner's rule that no known bug ships would have been broken by default rather than by
+decision. They were given slices: S57c (19 and 20, which the ledger proves are one bug), S57d (21),
+S61 item 7 (18). Entry 17 is an owner decision, because its two remaining orderings can only be
+fixed by choosing between two options upstream has left unchosen since 2021.
+
+**So Phase 6 does not close here. It closes with S61**, when the last inherited entry lands, and
+Phase 6's closing bookkeeping goes with it. Design spec amendment 35 and the matching ROADMAP
+paragraphs record this; the estimate moves from 18-23 slices to 20-25.
+
+**For the next slice.** S57c and S57d sort ahead of S60b, so correctness runs before the next
+optimisation slice. Both specs name what S50 measured and must not be lost - S57c the one-step-on
+narrowing, S57d the two narrowings and the `(\.+?)\1\b` partial rows that killed S50's fix.
+
+**Controls.** This sitting ran none: no code changed, and a control needs a fault to inject. The
+S44-S56 re-runs the slice asked for are in `notes/S57-sittings.md` with their four values each
+(snippet, generator, rows, seed) and both seeds' numbers.
+
+**Review.** Three blind passes over the final sitting. Pass 1 raised eleven findings, all eleven
+reproduced and fixed; pass 2, over the fixes, raised two, both reproduced and fixed; pass 3 over
+those returned "No defects found." Every finding was the same defect class - a number or a citation
+that did not match the source it summarised, including ledger entry 13 listed as fixed here when
+this port never reproduced it, S60 dated a day late in three documents, and a 21% error bar
+attributed to the slice that used it rather than the research that measured it. Nothing was a false
+positive, which is the opposite of this project's usual four-in-five rate and is what a prose-only
+delta produces: a prose defect reproduces by opening the file it cites. The earlier sittings'
+reviews are in `notes/S57-sittings.md`.
+
+**Measured rate.** 2.59 sessions a slice over the 22 Phase 6 slices in `docs/plan/slice-log.jsonl`;
+about 2.75 once S56b and S57b, which the log does not hold, are counted. ROADMAP's 10-15 estimate
+for the phase was out by a factor of two.

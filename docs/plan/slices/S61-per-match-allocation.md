@@ -51,6 +51,21 @@ plus one `GroupData` per group, a `RepeatData[]` plus one per repeat, three `Byt
 6. **Nothing lands that changes an oracle answer.** Reuse is where stale state leaks between
    matches, so the reset path is tested directly: the same state reused across two matches gives
    the answers two fresh states give, over a wave, not over one example.
+7. **Ledger entry 18, the one inherited bug whose fix is an allocation change** (assigned here by
+   S57, 2026-09-21). A repeated capture group costs hundreds of bytes per repetition: the engine
+   pushes one `MatchBodyTailStateData` block per repetition that nothing pops while the repeat runs,
+   even where the body is deterministic and there is nothing to backtrack into. This port is worse
+   than the thing it reproduces - about 3x `regex`'s bytes a repetition, which is itself about 2x
+   stdlib `re`'s - and it hits its 1 GB backtracking bound at `n = 4,000,000` where upstream still
+   manages 6,000,000. **A body with no alternative should cost O(1) state per repetition.** The test
+   the entry asks for is `FullMatch("(ab)*", "ab" * 4_000_000)` succeeding - the size this port fails
+   at today, asserted as a size rather than as a measured byte count. When it goes green the test is
+   rewritten to upstream's own 6,000,000 ceiling, which is what
+   `InheritedIssueTests.cs:116-118` already says to do. Where upstream's own bytes go is
+   explicitly not established, so this is a fix here and not a port of one. It is the last entry on
+   Phase 6's inherited-bug fix list, so **Phase 6 does not close until it lands**; if the allocation
+   work is declined or deferred, say so in writing and hand the entry back to a slice of its own
+   rather than leaving it unowned.
 
 ## Verification
 
@@ -84,6 +99,8 @@ plus one `GroupData` per group, a `RepeatData[]` plus one per repeat, three `Byt
 - [ ] Measured before and after, time and bytes per workload, in the commit message; the
       OPTIMISATION-NOTES rows implemented are deleted with their comments, and anything deferred
       gains a `ponytail:`/`Phase 7` comment and a row.
+- [ ] Ledger entry 18 fixed - `FullMatch("(ab)*", "ab" * 4_000_000)` succeeds - and the entry's
+      status rewritten, or the entry handed to its own slice in writing.
 - [ ] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
       `sync-divergence:` marker; `tools/check-sync-divergence.ps1` green.
 - [ ] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a rented buffer not returned

@@ -560,6 +560,33 @@ and Phase 7 handover stay in S57 with them, because all three write that the pha
 phase does not close until the 6000-row gate is green at three seeds.** Estimate 17-22 becomes
 18-23.
 
+**The 6000-row gate went green on 2026-09-21** - S57b judged forty-one rows in six sittings, every
+one this port right or upstream's own defect - so all four of the exit-gate items below are green:
+zero skips, both waves green at three seeds, 7,342 mutants with zero survivors, and no file in
+`src/FuzzyRegex` unreached by every test.
+
+**Phase 6's other exit test - the inherited-bug fix list - is given slices: S57c, S57d and S61's new
+item 7 (2026-09-21, spec amendment 35).** The owner's rule of 2026-09-12 is that inherited bugs this
+port reproduces are Phase 6's fix list and reach 1.0 fixed. S57's second sitting tabled the 24 ledger
+entries that existed then - S57b has since added 25 and 26, both upstream-only and pinned - and found
+five still inherited and unfixed - 17 in part, 18, 19, 20 and 21, each parked
+deliberately by S50 - and the finding that mattered was not the count but that **nothing in the queue
+scheduled any of them**, so they would have reached 1.0 unfixed by default rather than by decision.
+S57c takes entries 19 and 20, which S50 proved are one bug, and needs the anchor pin held in the
+backtracking state rather than in a field beside it. S57d takes entry 21 with PCRE2's `hitend` model
+and re-judges the left-hand `(?r)\b$` twin, a permanent pin that rests on the argument the entry
+rejects. Entry 18 joins S61 as item 7, because its fix is an allocation change and S61 is the
+allocation slice, so Phase 6's closing bookkeeping lands with a Phase 7 slice. **Entry 17 gets no
+slice:** its remaining two orderings need the maintainer's option 3, and upstream has chosen neither
+option on an issue open since 2021, so fixing it means inventing semantics - it is an owner decision,
+stated with the evidence in STATE.md. Estimate 18-23 becomes 20-25.
+
+**Phase 7 started before that list emptied, and this records it rather than resolves it.** The
+2026-09-12 decision gates Phase 7 on the bug sweep; S60 landed on 2026-09-20 with five entries still
+open. The later owner decision of 2026-09-16 runs Phases 7, 8 and 9 in parallel, which is what has
+been happening. S57c and S57d sort ahead of S60b, so the correctness work runs before the next
+optimisation slice by default.
+
 **Phase 6 has an exit gate, in this order.** "Sweep for coverage gaps" without criteria produces a
 number nobody acts on, so the phase closes against these, biggest signal first.
 

@@ -1029,3 +1029,45 @@ amended text is inline above; this list is the record of what changed and why.
     deadline, the allowance hook or a blocker forces it; `sliceTimeoutMinutes` rises from 240 to
     285 so one sitting can span most of a five-hour window. Optimisation slices are not cut:
     S62b and S62c stay in Phase 7 as written.
+
+35. **Phase 6's inherited-bug fix list is given slices: S57c, S57d and S61's new item 7 (2026-09-21,
+    decided by S57's fourth sitting).** The phase has two exit tests and they are not the same test.
+    Its four gate items - skips, oracle, mutation, coverage - are all green as of 2026-09-21. The
+    other is the owner's rule of 2026-09-12 (amendment 16, DECISIONS): *no known bug ships in this
+    port*, and *inherited bugs the port reproduces are Phase 6's fix list and reach 1.0 fixed*. S57's
+    second sitting tabled the 24 ledger entries that existed then, and entries 25 and 26, added by
+    S57b afterwards, are both upstream-only and pinned. It found five inherited and unfixed - 17 in
+    part,
+    18, 19, 20 and 21, every one parked deliberately by S50 with its mechanism established - and
+    then found the thing that actually needed deciding: **nothing in the queue scheduled any of
+    them**, so on the plan as written they would have arrived at 1.0 unfixed by default rather than
+    by decision. They are now scheduled, which is what the rule requires and what no amount of
+    re-tabling would have produced. Verified from the committed pins rather than from the entries'
+    prose: `Gaps/UpstreamIssues/InheritedIssueTests.cs` holds five tests whose names begin *still
+    does not*, *still loses* and *still denies*, each asserting the inherited answer.
+
+    - **S57c takes entries 19 and 20**, which S50 proved are one bug. S50's rule survives and its
+      mechanism does not: the anchor pin has to be part of the backtracking state, or be replaced by
+      a compile-time analysis.
+    - **S57d takes entry 21**, and its fix is a named design - PCRE2's `hitend` model, letting
+      backtracking run to completion and turning only a final failure into a partial - plus the
+      left-hand `(?r)\b$` twin, which is currently a permanent pin resting on the very argument the
+      entry rejects.
+    - **Entry 18 becomes S61 item 7** rather than a slice of its own, because its fix is an
+      allocation change and S61 is the allocation slice with the harness already built. Phase 6's
+      closing bookkeeping therefore lands with a Phase 7 slice; that is the cheapest route to the
+      same result, not a reordering of the phases.
+    - **Entry 17 gets no slice, because fixing it means choosing semantics upstream has not
+      chosen.** Its remaining two orderings need the maintainer's option 3, and he has picked neither
+      option 2 nor 3 on an issue open since 2021. So it stays in the gate's own fourth allowed state,
+      *owner decision pending with the evidence*: fix it here with option 3 and a `DIVERGENCES.md`
+      row, as S45 did for the Turkic folding, or wait for upstream. Stated for the owner in STATE.md.
+
+    **One thing this amendment records rather than resolves.** The 2026-09-12 decision says Phase 7
+    does not start until the bug sweep closes, and Phase 7 started on 2026-09-20 with S60 while the
+    fix list still held five entries. The later owner decision of 2026-09-16 runs Phases 7, 8 and 9
+    in parallel, and that is what has been happening. S57c and S57d sort ahead of S60b in the queue,
+    so correctness work runs before the next optimisation slice by default, which is the order the
+    ROADMAP argues for. **What does not change:** the four gate items and their numbers, every
+    permanent pin, and the rule that an optimisation changing an answer has ported a bug. Phase 6 is
+    two slices longer; the estimate moves from 18-23 to 20-25.

@@ -901,3 +901,14 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   a group inside an unchanged overall match, got a new test.
 - 2026-09-21 (S57b): `-Count 6000` is rows PER GENERATOR, so a two-generator wave is 12,000 rows a
   seed. Say which when quoting a wave's size.
+- 2026-09-21 (S57): Phase 6's four gate items are green, but the owner's no-known-bug rule is not
+  met and nothing in the queue scheduled the five inherited entries, so they would have reached 1.0
+  unfixed by default. Scheduled instead: S57c (ledger 19 and 20), S57d (21), S61 item 7 (18). Design
+  spec amendment 35; Phase 6 is 20-25 slices, and its closing bookkeeping lands with S61.
+- 2026-09-21 (S57): ledger entry 17's two remaining branch-reset orderings are an OWNER DECISION,
+  not a slice. Fixing them means choosing between two options upstream has left unchosen since 2021,
+  so a fix here would invent semantics upstream may later contradict. "Owner decision pending with
+  the evidence" is one of the exit gate's own four allowed final states.
+- 2026-09-21 (S57): line coverage is a backstop and never a target - it answers "is any file or
+  branch untested at all". The number to hold is 0 wholly-unentered opcode arms; the eight members
+  still wholly unreached are each judged in the slice's notes.

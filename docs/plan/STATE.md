@@ -1,33 +1,30 @@
 # State
 
-**S57b is DONE (2026-09-21, six sittings). Nothing is in progress. Take S57 next**, now unblocked
-and holding only its items 10 and 11: Phase 6's bookkeeping, the measured rate, the CHANGELOG entry
-and the Phase 7 handover. Sitting 6 judged the extra wave's last ten rows into four existing
-`ExpectedDivergences` entries; detail in `notes/S57b-sittings.md`.
+**S57 is DONE (2026-09-21, four sittings). Nothing is in progress. Take S57c next.** It delivered the
+coverage backstop, the gate walked, the CHANGELOG entry and `docs/plan/PHASE-7-HANDOVER.md`.
 
-**Phase 6's exit gate is GREEN, 2026-09-21.** `run-oracle.ps1 -Count 6000` at seeds 7, 4242 and
-20260921: 0 of 126,080 rows each. The extra wave, `-Count 6000 -Generator fuzzy,interactions
--Seeds 99991,57057`: GREEN at both. Run one seed at a time; three together exceed the blocking cap.
-Ratchet GREEN, 6503 tests, baseline 6395. The third seed is the RUN DATE (`run-oracle.ps1:256`), so
-re-recording on a new day draws a fresh sample and the gate can be red tomorrow on rows nobody has
-seen - that is the gate working, and S57b's closing notes say how to judge such a batch in one pass.
+**Phase 6's four gate items are green, and Phase 6 is NOT closed.** The gate's other test is the
+owner's rule that no known bug ships, and five inherited ledger entries are still reproduced here.
+S57 scheduled them rather than re-tabling them (design spec amendment 35): **S57c** is entries 19
+and 20, **S57d** is 21, **S61 item 7** is 18. Phase 6's closing bookkeeping lands with S61. S57c
+and S57d sort ahead of S60b, so correctness runs before the next optimisation slice.
 
-**Phase 7** regresses against 878 uncovered lines, 257 members, 0 wholly-unentered opcode arms, and
-carries S56's caveats and the queued `engine-topup-01..09` windows
-(`docs/plan/mutation/2026-09-20-engine.md`). `tools/run-controls.py` needs a `suite` mode before
-S50's C, S50b's four, S52d's A and S53b's B can be registered. Benchmarks here need both Stryker
-scripts in `.claude/worktrees/stryker` stopped. **Unfixed and unscheduled ledger entries:** 17 (in
-part), 18, 19, 20, 21, 25; 17 to 21 are three pieces of work whose slices amend ROADMAP and the
-spec, and that is the owner's call.
+**Ledger entry 17 is the OWNER'S DECISION, and the only thing S57 needs from you.** Its two
+remaining branch-reset orderings can only be fixed by choosing between two options upstream has left
+unchosen since 2021, so a fix here would invent semantics upstream may contradict. It sits as "owner
+decision pending with the evidence", which the gate allows. Entries 25 and 26 landed after the gate
+table, both upstream-only and pinned, so neither joins the fix list.
 
-**Maintenance:** stale citations in `gate-divergence-doors.py:137` (now `record-oracle.py:1338`)
-and in four comments citing `_regex.c:20535-20537` (now `:20555-20558`); `check-ratchet.ps1:94`
-writes the upstream-commit line wrongly with no submodule; MAIN has a stray
-`.github/workflows/pages.yml`; `_leak_free_fuzzy` answers a starved question on a reversed row
-whose lookahead reads past the match end (S57b sitting 4; fails safe, wants its own slice).
+**The gate numbers, 2026-09-21.** `-Count 6000` at seeds 7, 4242 and 20260921: 0 of 126,080 rows
+each, one seed at a time; the extra wave green at both of its. Ratchet GREEN, 6503 tests, base 6395.
 
-**Owner, both from S73:** the `docs/demo/` reference layouts, and publishing (push `phase9-demo`,
-then Pages > Source = GitHub Actions). **Environment:** a stale vite dev server (PID 27600, port
-5179) holds `lightningcss.win32-x64-msvc.node`, so `npm ci` fails with EPERM in `demo/web`;
-`npm --prefix demo/web install --no-audit --no-fund` repairs it, then `build-demo-web.ps1
--SkipInstall` and `run-wasm-smoke.ps1 -SkipWebBuild`.
+**Maintenance:** stale citations in `gate-divergence-doors.py:137` (now `record-oracle.py:1338`) and
+in four comments citing `_regex.c:20535-20537` (now `:20555-20558`); `check-ratchet.ps1:94` writes
+the upstream-commit line wrongly with no submodule; MAIN has a stray `.github/workflows/pages.yml`;
+`run-controls.py` needs a `suite` mode before seven controls register; `_leak_free_fuzzy` starves a
+reversed row whose lookahead reads past the match end (S57b sitting 4).
+
+**Owner, both from S73:** the `docs/demo/` reference layouts, and publishing (push `phase9-demo`, then
+Pages > Source = GitHub Actions). **Environment:** a stale vite dev server (PID 27600, port 5179) holds
+`lightningcss.win32-x64-msvc.node`, so `npm ci` fails with EPERM in `demo/web`; repair with
+`npm --prefix demo/web install --no-audit --no-fund`. Benchmarks need both Stryker scripts stopped.

@@ -402,7 +402,7 @@ left open, since those are the ones that could have moved. Entries 16-24 are rea
 | 8 | upstream-only; port right |
 | 9 | upstream-only; **port side WHOLLY CLOSED** - crash half S43, count half S48b |
 | 10 | **CLOSED** - upstream fixed it in 2026.8.30, both clamps ported by S44 |
-| 11 | A/B **fixed here (S47)**, C/D **fixed here (S48b)**; E and F upstream-only |
+| 11 | A/B **fixed here (S47)**, C/D **fixed here (S48b)**; E, F and G upstream-only |
 | 12 | inherited; **fixed here (S46)** |
 | 13 | upstream-only; never reproduced here, mechanism traced by S47c |
 | 14 | inherited; **fixed here (S47)** |
@@ -505,8 +505,10 @@ Three test files closed the reachable ones, each expectation measured against re
 
 The remaining 683 uncovered lines sit inside members the suite does reach, and no opcode arm is
 wholly unentered, so they are sub-branches of exercised code rather than untested capabilities.
-**Stryker cannot be quoted as covering them**: its 0 survivors are 7,579 mutants TESTED out of
+**Stryker cannot be quoted as covering them**: its 0 survivors are 7,342 mutants TESTED out of
 285,965 generated, the rest `Ignored` by the chunking - a mutation score, not a coverage claim.
+(Sitting 4 corrected this line: it first read 7,579, which the per-chunk table above does not
+support - 7,267 killed plus 75 timeout is 7,342, and 18 RuntimeError rows sit outside both.)
 
 The number for Phase 7 to regress against: **878 uncovered lines, 257 members, 0 wholly-unentered
 opcode arms**, from `s57-coverage3.cobertura.xml`, 6,475 tests.
@@ -715,3 +717,102 @@ and `14aad0a~1` = `3f1bf91`. It removed its worktree and left the tree as it fou
 
 **Gates at this commit.** Ratchet GREEN, 6,476 tests, baseline updated to 6,368 distinct ids. Oracle
 GREEN at the three default seeds. The 6000-row gate is RED and that is the checkpoint: S57b takes it.
+
+## Sitting 4 - 2026-09-21
+
+Items 10, 11 and 12, and the blocker sitting 3 left. S57b had since taken the twenty rows and the
+6000-row gate was green, so the only question left was the one the gate itself asks last.
+
+### The blocker, and why scheduling was the answer
+
+The gate's ledger bullet says every entry must end in one of four states - fixed here, port right and
+pinned, upstream-only, or owner decision pending with the evidence - and that an "inherited, unfixed"
+entry means the phase is not closed. Sitting 2's table found five: 17 (in part), 18, 19, 20, 21. The
+port carries all five, and `tests/FuzzyRegex.Tests/Gaps/UpstreamIssues/InheritedIssueTests.cs` is the
+proof - five tests whose names assert the inherited answer ("still does not", "still loses", "still
+denies"), which is a stronger source than the ledger's own prose.
+
+The finding that decided it: **nothing in the queue scheduled any of them.** Not one pending slice
+named an entry. So the owner's rule - no known bug ships - would have been broken by default rather
+than by decision, and re-tabling the five in a fifth document would not have changed that. They were
+given slices instead:
+
+| entry | where it goes | why there |
+| --- | --- | --- |
+| 19, 20 | **S57c** (new) | one bug per S50; the pin the engine can restore |
+| 21 | **S57d** (new) | `hitend`, and both of S50's measured narrowings |
+| 18 | **S61 item 7** | the only one whose fix is an allocation change, which is S61's subject |
+| 17 | **owner decision** | see below |
+
+Entry 17 got no slice. Reading it in full showed its two remaining orderings need the maintainer's
+option 3, unchosen upstream since 2021, so building that machinery here would invent semantics
+upstream may later contradict. "Owner decision pending with the evidence" is one of the gate's own
+four allowed states, so this is the gate being satisfied, not bypassed.
+
+Consequence: **Phase 6 does not close in S57.** It closes with S61, when the last inherited entry
+lands. The estimate moves from 18-23 slices to 20-25. Recorded as design spec amendment 35, with the
+matching ROADMAP paragraphs, and stated rather than resolved: Phase 7 started (S60) before the fix
+list emptied, under the 2026-09-16 parallel-phases decision.
+
+### The measured rate
+
+22 slices over 57 logged sessions is 2.59 sessions a slice (`docs/plan/slice-log.jsonl`, computed in
+`.scratch/phase6-rate.py`, gitignored). S56b and S57b are absent from the log - S57b has seven
+session headings, six numbered plus a resumed "Sitting 3, second half" - so about 66 sessions over
+24 landed slices, 2.75, is the floor. ROADMAP's 10-15 estimate
+for Phase 6 was wrong by a factor of two before this sitting added two more slices.
+
+### Bookkeeping and the handover
+
+CHANGELOG gained the Phase 6 entry, and it says plainly that Phase 6 is not finished and names the
+entries that are scheduled rather than fixed. `docs/plan/PHASE-7-HANDOVER.md` is new: the rule that
+outranks every optimisation, the numbers Phase 7 regresses against, the edge cases an optimiser is
+tempted to special-case, the work Phase 6 leaves open, and how to judge a divergence.
+
+One correction while writing it. The first draft cited `.scratch/s57-coverage3.cobertura.xml` as the
+coverage source; the file no longer exists, which by amendment 16 is COULD NOT RUN, not evidence. It
+was replaced by the command that re-takes the measurement, plus the two cautions that cost sitting 1
+time: cobertura lists a `<line>` under every class containing it, so a naive reader double-counts
+(824 uncovered lines reported in `Matcher.cs`, which has 412), and two `DemoEngineContractTests`
+cases fail under instrumentation because it pushes them past the demo's two-second `MatchTimeout`.
+
+### Review - three passes, thirteen findings, all thirteen reproduced and fixed
+
+Unusual for this project, where roughly four findings in five do not survive reproduction. The
+reason is that this sitting produced only prose, and a prose defect reproduces by opening the file
+it cites. Nothing here was a false positive.
+
+**Pass 1, eleven findings**, every one a claim that did not match its own source:
+
+- CHANGELOG listed ledger entry 13 among the bugs "fixed here", and the port never reproduced it
+  (`LEDGER.md:2122-2125`, and this file's own table row 13). Clause deleted.
+- CHANGELOG said two of entry 11's doors remain upstream's alone; the table at `LEDGER.md:1505-1507`
+  has three, E, F and G. Corrected, and the same stale "E and F" found in this file's table.
+- S60 dated 2026-09-21 in three documents; `791d628` is 2026-09-20.
+- The handover said `--job short`'s 21% error bar was S58's measurement. It is
+  `docs/plan/phase7-research/SUMMARY.md:6`, 2026-09-16, three days before S58 ran.
+- "Those five controls" where the same sentence enumerates seven (1 + 4 + 1 + 1).
+- STATE said ledger entry 25 is unjudged; S57b judged and pinned it, and entry 26 as well.
+- The Stryker line in these notes said 7,579 tested where the chunk table above it sums to 7,342.
+- The handover promised eight wholly-unreached members and listed seven; `GuardRepeatRange` was the
+  missing one.
+- ROADMAP and the spec said the gate tabled "all 24 ledger entries" when 25 and 26 now exist.
+- The handover wrote `search-start-*` entries plural; only `search-start-partial` remains.
+- S61's new item 7 called 4,000,000 "upstream's own ceiling"; it is where this port fails, and
+  upstream's ceiling is 6,000,000.
+
+**Pass 2, two findings**, both in the pass-1 fixes: the handover now claimed
+`search-start-skip-slice` went because an arm was ported, where
+`ExpectedDivergences.cs:36-43` says S35 fixed the port and the staleness alarm caught it; and the
+"three more doors" correction had left this file's own table row 11 saying "E and F". **Pass 3 over
+those two: "No defects found."**
+
+The lesson for a documentation slice: every number is a citation, and a citation nobody opened is a
+guess. Nine of the thirteen were numbers quoted from a sibling document rather than from the source
+that document was summarising.
+
+### Gates at this commit
+
+Ratchet GREEN, 6,503 tests, baseline 6,395 distinct ids; `docs/STATUS.md` regenerated and unchanged,
+which is what an unchanged test count should produce. No divergence was judged in this sitting, so
+there is no verifier step (spec amendment 34). No code changed: the delta is documents.
