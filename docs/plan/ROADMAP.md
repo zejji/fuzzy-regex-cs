@@ -808,6 +808,19 @@ tokenizer the snippet box already had (0.25 kB gzipped, all in) and landing the 
 section with focus, a scroll and one fade:
 `docs/plan/slices/done/S77-help-code-colour-and-the-jump-that-lands.md`.
 
+**S80 joins Phase 8 (owner finding and approval, 2026-09-21; spec amendment 36).** Reading the
+markdown as a newcomer would, the owner found that everything of interest to somebody who has not
+come from Python sits in `README.md`. Measured: four flags (`Multiline`, `Singleline`,
+`IgnorePatternWhitespace`, `FullCase`) are named in neither `README.md` nor `COMPARISON.md`, eight
+more appear only as answers to "what is upstream's flag called here?", and four public members
+(`IsMatchAtStart`, `IsFullMatch`, `MaxCompiledNodes`, `NamedLists`) appear in neither. **S80**
+writes `docs/GUIDE.md` for a reader who knows `System.Text.RegularExpressions` and has never seen
+Python `regex`, organised by the question being asked, with every flag in one table and every
+sample pinned by a test, and adds the convention test that fails the build when a public member or
+an inline flag letter is documented nowhere. Spec:
+`docs/plan/slices/S80-a-guide-that-does-not-assume-python.md`. It touches no `src/`, so it runs in
+the `docs` worktree alongside Phase 6.
+
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
 Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus
