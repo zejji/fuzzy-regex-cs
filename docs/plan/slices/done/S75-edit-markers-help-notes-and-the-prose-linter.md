@@ -7,6 +7,8 @@ delivers: []
 
 # S75 - edit markers, help notes and the prose linter
 
+> Per-sitting notes, measurements and what is left: `docs/plan/slices/notes/S75-sittings.md`.
+
 > **Owner decisions (2026-09-20, from the first look at S73 and S74).** Five findings from the
 > owner's review of the demo and its code, plus a writing rule that now applies to the whole repo.
 > Each was agreed in conversation; the owner reviews this spec before a sitting runs. Run it in the
@@ -186,23 +188,23 @@ test suite green. The new example run in the browser and its spans compared with
 
 ## Done when
 
-- [ ] The `s`/`i`/`d` letters sit in a marker row under the text, clear of the underline, the
+- [x] The `s`/`i`/`d` letters sit in a marker row under the text, clear of the underline, the
       border and the next line, measured at 4x at both widths; no character moves and a copy stays
       clean; note on hover, focus and tap; legend under the subject when a fuzzy match is shown;
       alignment view for the selected match.
-- [ ] Stacked deletions drawn once with a count; an empty match at the end of the subject visible;
+- [x] Stacked deletions drawn once with a count; an empty match at the end of the subject visible;
       an unbounded budget named in one line under the pattern, with a test for each of the four
       letters and for a bounded pattern that must show nothing.
-- [ ] Six heading help notes, each linking to its COMPARISON.md section through the help tab, all
+- [x] Six heading help notes, each linking to its COMPARISON.md section through the help tab, all
       passing the copy linter.
-- [ ] The test-set example in `examples.json`, verified against the engine, spans quoted.
-- [ ] Every identifier the snippet emits pinned by `nameof` or reflection; the compile probe either
+- [x] The test-set example in `examples.json`, verified against the engine, spans quoted.
+- [x] Every identifier the snippet emits pinned by `nameof` or reflection; the compile probe either
       an opt-in test or a recorded command with the reason no test convention fit.
-- [ ] The copy linter runs over `README.md` and `docs/*.md` with guards and a reasoned allow list;
+- [x] The copy linter runs over `README.md` and `docs/*.md` with guards and a reasoned allow list;
       all seven pass; the XML doc comments measured and either included or handed on with a count.
-- [ ] Tests above green; screenshots and the fold check committed; typecheck, vitest, build,
+- [x] Tests above green; screenshots and the fold check committed; typecheck, vitest, build,
       `build-demo-web.ps1` and the C# suite green.
-- [ ] Blind review (hunt: a run whose note names the wrong index; an alignment that drifts when an
+- [x] Blind review (hunt: a run whose note names the wrong index; an alignment that drifts when an
       insertion and a deletion are adjacent; a heading link that opens the help tab at the wrong
       section; an allow-list entry with no reason; a docs paragraph the extraction skipped because
       of a table or a fence it did not recognise; a snippet identifier not in the record), fix,
@@ -228,3 +230,92 @@ test suite green. The new example run in the browser and its spans compared with
   sources (Wikipedia:Signs of AI writing; GOV.UK A to Z style guide), read 2026-09-19.
 - `docs/plan/slices/done/S74-flags-control.md`, closing notes, for the help mechanism this slice
   reuses.
+
+## Closing notes - 2026-09-21
+
+Four sittings. What each one measured, and the commands that reproduce every number, are in
+`docs/plan/slices/notes/S75-sittings.md`; this is what landed.
+
+**The markers (item 1).** The `s`, `i` and `d` letters now sit in a marker row 13 px under their
+run, in a line box opened from 28 px to 40 px only on a result that has markers in it. The letter's
+top was 2.8 px above the bottom of the highlight's border before, which is why the border's dark
+line was drawn through it and, under a wavy underline, read as a tick; it clears the border by
+2.2 px now and the line below by about 10 px. Measured in Chrome at `deviceScaleFactor` 4, at
+1366x768 and 390x844, by `tools/probes/s75-marker-row.mjs`. Neighbouring errors of one kind are one
+run carrying a count, so six substituted characters take one letter and eleven stacked deletions
+draw one gap labelled with how many characters are missing. Every letter is a CSS `content` string
+on an absolutely positioned pseudo-element, so copying the subject still copies the subject.
+
+Three more pieces of item 1: a legend under the subject whenever a result holds a fuzzy match; a
+note on each marked run, reachable by pointer, keyboard and tap, naming the kind and the index; and
+an alignment view for the selected match, a cell per subject character with its position and what
+happened to it. The line under the pattern for a budget with no bound is the fourth
+(`demo/web/src/lib/budget.ts`).
+
+**The alignment view has no pattern row, and cannot have one from the engine as it stands.**
+`fuzzy_changes` is three lists of subject positions with nothing on the pattern side, and a pattern
+is not a sequence of characters to line up against one: `(?:colou?r|couleur){e<=2}` on "calor"
+answers `fuzzy_changes=([1], [], [4])` and never says which branch matched
+(`tools/probes/s75-alignment-inputs.py`). The owner decides whether a pattern row is worth engine
+work.
+
+**Help notes (item 2).** All six input headings carry the `(?)` button from S74, driven by
+`demo/web/src/lib/help-notes.ts`, each note one or two sentences ending in a link that opens the
+help tab at its COMPARISON.md section.
+
+**The worked example (item 3).** `(?:colour){e<=2:[a-z]}` over "colour, color, col our and col0ur"
+is the nineteenth example button, keyed `fuzzy-test-set`. It gives (0,6) "colour" with no errors and
+(8,13) "color" with one substitution and one deletion; "col our" and "col0ur" match nothing at all,
+because the edit an insertion would have to touch is a space or a digit and the test allows only
+`[a-z]`. Both engines agree row for row: `tools/probes/s75-example-test-set.py` and
+`tools/probes/s75-example-test-set.cs`.
+
+**Snippet identifiers (item 4).** Rather than compare the generated snippet with a stored string,
+`tools/probes/demo-snippet-compiles.mjs` takes the C# the page writes and compiles it. A rename
+anywhere in the public API that the snippet uses then fails, which is the property the slice asked
+for, and it needs no list to keep in step.
+
+**The copy linter over the documents (item 5).** `README.md` and the six pages under `docs/` go
+through the same `COPY_RULES` as the demo's strings, with fenced code, inline code and tables
+dropped before the paragraphs are linted, and the public XML doc comments in `src/FuzzyRegex` go
+through it too. It found 43 phrasings in the documents and 18 in the doc comments. Both are zero
+now, the allow list is still empty, and every source has a guard so an extraction that found
+nothing could not pass. The library source changed in this slice only inside `///` comments, which
+`git diff 99b31fc..HEAD -- src/` confirms, so the engine's behaviour is untouched and the slice ran
+no oracle controls.
+
+**The budget line reads the pattern the way the engine does.** It says something only when it is
+sure, and three rounds of review found places where it was sure and wrong. It now bounds every kind
+that has no bound rather than the first; it reads a repeated constraint as upstream does, by
+re-reading the second one as a cost equation, which is what makes `{d,d<=1,i}` unbounded in `i` and
+`{e<=1,e}` no budget at all; and it keeps quiet about a budget with nothing to apply to, seeing
+through a `(?#...)` comment to decide that, while still reading an escaped `\({e}` as a budget on
+the character `(`. Every case is measured against regex 2026.9.10, by
+`tools/probes/s75-fuzzy-budget.py`, `s75-priced-and-named.py` and `s75-comments.py`, and the answers
+are pinned in `demo/web/tests/budget.test.ts`. The port itself matched upstream throughout; the
+divergences were all in the demo's reader.
+
+**Review.** Six blind passes across four sittings, each over changes the pass before it had not
+seen, plus the independent verifier at the end. They raised 20 findings; 18 reproduced and were
+fixed, and two were rejected because they did not reproduce. Passes 1 to 3 covered the markers, the notes,
+the tab order and the first budget fixes. Passes 4 to 6 covered the budget reader alone and found
+every defect listed above: the escaped `\(`, the `(?#...)` comment in both directions, the repeated
+constraint, and two tests that pinned nothing. Pass 6's remaining finding - that the reader still
+reads a budget out of `(?:{e})` and `a*{e}`, which the engine refuses - is recorded as the
+function's stated limit rather than fixed, because the page asks it only about patterns the engine
+accepted and `page.test.ts` pins that gate. The verifier re-ran every number the notes quote and
+returned two that were not CONFIRMED: the `.cs` probes did not build (an `IDE0055` alignment
+specifier), and the parse error "re-use of fuzzy constraint", quoted in three files, does not exist.
+Both are fixed, and `docs/plan/slices/notes/S75-sittings.md` has the per-pass detail.
+
+**Green at the close**, re-run from the committed tree: ratchet GREEN, 6,487 tests against baseline
+6,379; 427 web tests; `vue-tsc` clean; 123 Pester tests; 40 documentation examples; the demo web
+build GREEN; WASM smoke GREEN over 58 published endpoints.
+
+**For the next slice.** `npm ci` fails with EPERM in `demo/web` while a stale vite dev server holds
+`lightningcss.win32-x64-msvc.node`, and it deletes `node_modules` before it fails, so the failure
+leaves the tree unable to type-check. Repair with `npm install --no-audit --no-fund` and build with
+`tools/build-demo-web.ps1 -SkipInstall`, then `tools/run-wasm-smoke.ps1 -SkipWebBuild`. The tab-stop
+count is now 32 on the desktop and 9 on the phone, and `App.vue`'s comments quote it, so re-measure
+with `tools/probes/s73-widths.mjs` after adding any control. Any new paragraph in `README.md` or the
+six documents has to pass the copy linter, which runs in `npm test`.

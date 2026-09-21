@@ -14,7 +14,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// reasoning at the throw sites in <c>Parsing/PatternCompiler.cs</c>).
 /// </para>
 /// <para>
-/// Upstream's other errors map onto other .NET types, not this one: <c>IndexError</c> from
+/// Upstream's other errors map onto .NET types of their own: <c>IndexError</c> from
 /// <c>expand</c> becomes <see cref="ArgumentException"/>; an escaped internal error such as
 /// <c>AttributeError</c> or <c>KeyError</c> becomes <see cref="NotSupportedException"/> or
 /// <see cref="ArgumentOutOfRangeException"/>; the 1 GB backtracking bound and a runaway
@@ -65,8 +65,9 @@ public class FuzzyRegexParseException : Exception
     /// <c>-1</c> if not supplied.
     /// </summary>
     /// <remarks>
-    /// <b>Indices are UTF-16 code units</b>, not codepoints, so this differs from upstream's
-    /// <c>error.pos</c> for a pattern holding a non-BMP character before the failure point.
+    /// <b>Indices are UTF-16 code units</b>, where upstream counts codepoints, so this differs
+    /// from upstream's <c>error.pos</c> for a pattern holding a non-BMP character before the
+    /// failure point.
     /// </remarks>
     public int Offset { get; } = -1;
 }

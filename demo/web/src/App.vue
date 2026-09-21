@@ -3,6 +3,8 @@
 import { computed, nextTick, onMounted, onUnmounted, proxyRefs, ref, useTemplateRef, watch } from 'vue';
 
 import { spawnEngineWorker, useDemo } from './demo';
+import { alignment, type AlignmentCell } from './lib/alignment';
+import { budgetNote, unboundedBudget } from './lib/budget';
 import { copyText } from './lib/clipboard';
 import {
     CHECKBOXES,
@@ -17,7 +19,15 @@ import {
     type FlagName,
     type RadioGroup,
 } from './lib/flags';
-import type { EditKind } from './lib/highlight';
+import HeadingHelp from './HeadingHelp.vue';
+import {
+    headingNote,
+    noteId,
+    PEEK_GRACE_MS,
+    type HeadingAsk,
+    type HeadingNote,
+} from './lib/help-notes';
+import type { EditKind, EditRun } from './lib/highlight';
 import { createPool } from './lib/pool';
 import { toCSharp, tokenize } from './lib/snippet';
 import type { Example } from './types';
@@ -33,6 +43,7 @@ const {
     answeredSubject,
     answeredPattern,
     examples,
+    helpKey,
     helpSections,
     engine,
     engineError,
@@ -46,6 +57,7 @@ const {
     matches,
     view,
     capped,
+    markers,
     current,
     replaced,
     partial,
@@ -92,7 +104,7 @@ function setGroup(group: RadioGroup, option: FlagName): void {
 }
 
 /**
- * Which flag is explaining itself, and whether the visitor asked for it or is only passing over it.
+ * Which sentence is open, and whether the visitor asked for it or is only passing over it.
  *
  * One at a time, because the sentence is a paragraph in the flow under its own row rather than a
  * layer floating over one: two open at once move the grid twice, and nobody is reading both. In the
@@ -103,25 +115,80 @@ function setGroup(group: RadioGroup, option: FlagName): void {
  * away again on the way out; a press holds it, because a tap leaves no pointer behind to hold it,
  * and a second press or Escape dismisses it. Hoverable, dismissable and persistent is WCAG 1.4.13,
  * and this is the cheapest shape that is all three.
+ *
+ * Keyed by the note's own element id since S75, where it was a flag name: the same mechanism now
+ * carries the fourteen flag sentences, the six heading notes and the note on a marked run inside
+ * the subject. One key space and one open sentence, so a flag's `(?)` shuts a heading's.
  */
-const helpFor = ref<FlagName | null>(null);
+const helpFor = ref<string | null>(null);
 const helpPinned = ref(false);
 
-function toggleHelp(name: FlagName): void {
-    const pinnedHere = helpPinned.value && helpFor.value === name;
-    helpFor.value = pinnedHere ? null : name;
+/** The id of one flag's sentence, which is also its key in {@link helpFor}. */
+const flagNoteId = (name: FlagName): string => `flag-help-${name}`;
+
+/**
+ * The close a pointer leaving a `(?)` has asked for, while the sentence waits out its grace.
+ *
+ * {@link PEEK_GRACE_MS} says why there is a wait at all: without it the pointer cannot reach the
+ * sentence, which is what WCAG 1.4.13 "Hoverable" asks for. One timer, because one sentence is
+ * open at a time.
+ */
+let closingPeek: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The sentence the pointer is resting on, which is not the same thing as the one it opened.
+ *
+ * WCAG 1.4.13 asks that revealed content stay while the pointer is over it, and the `(?)` can stop
+ * being pointed at or focused while the sentence itself still is: a visitor who tabs to the button
+ * and then reads the sentence with the pointer over it loses the button's focus the moment they
+ * Tab on. The close is what the pointer leaving the sentence asks for, so the pointer being on it
+ * refuses one.
+ */
+let pointerOnNote: string | null = null;
+
+function holdPeek(): void {
+    if (closingPeek !== null) clearTimeout(closingPeek);
+    closingPeek = null;
+}
+
+function toggleHelp(id: string): void {
+    holdPeek();
+    const pinnedHere = helpPinned.value && helpFor.value === id;
+    helpFor.value = pinnedHere ? null : id;
     helpPinned.value = !pinnedHere;
 }
 
-function peekHelp(name: FlagName): void {
-    if (!helpPinned.value) helpFor.value = name;
+function peekHelp(id: string): void {
+    holdPeek();
+    if (!helpPinned.value) helpFor.value = id;
 }
 
-function unpeekHelp(name: FlagName): void {
-    if (!helpPinned.value && helpFor.value === name) helpFor.value = null;
+function unpeekHelp(id: string): void {
+    if (helpPinned.value || helpFor.value !== id || pointerOnNote === id) return;
+
+    // Checked again when the timer fires: the pointer may have moved on to another `(?)` in the
+    // meantime, and closing then would take away a sentence somebody has just asked for.
+    holdPeek();
+    closingPeek = setTimeout(() => {
+        closingPeek = null;
+        if (!helpPinned.value && helpFor.value === id) helpFor.value = null;
+    }, PEEK_GRACE_MS);
+}
+
+/** The pointer arriving on the sentence itself, which is the journey the grace was buying time for. */
+function peekNote(id: string): void {
+    pointerOnNote = id;
+    peekHelp(id);
+}
+
+/** The pointer leaving the sentence, which is the only thing a peeked sentence waits for. */
+function unpeekNote(id: string): void {
+    if (pointerOnNote === id) pointerOnNote = null;
+    unpeekHelp(id);
 }
 
 function closeHelp(): void {
+    holdPeek();
     helpFor.value = null;
     helpPinned.value = false;
 }
@@ -146,7 +213,49 @@ watch(helpFor, (name) => {
     else document.addEventListener('keydown', dismissHelpOnEscape);
 });
 
-onUnmounted(() => document.removeEventListener('keydown', dismissHelpOnEscape));
+onUnmounted(() => {
+    document.removeEventListener('keydown', dismissHelpOnEscape);
+    holdPeek();
+});
+
+/**
+ * The press at the end of a heading note: the documentation's own words on that heading, in the
+ * help tab.
+ *
+ * A button and not an anchor, because nothing is navigated to - the section is already in the page,
+ * behind the other tab - and a link that does not go anywhere is the commonest way a keyboard user
+ * is lied to. The tab is switched whatever `help.json` holds, unlike a sample's click: this is
+ * somebody asking for that section by name, so an empty panel saying the help did not load is a
+ * truer answer than a press that appears to do nothing.
+ *
+ * The focus follows to the tab itself, which is the one stop in the tab set, so a keyboard visitor
+ * arrives at what they asked for rather than two tab presses away from it.
+ */
+function openHelpTab(note: HeadingNote): void {
+    helpKey.value = note.helpKey;
+    tab.value = 'help';
+    closeHelp();
+    void nextTick(() => document.getElementById('tab-help')?.focus());
+}
+
+/** The four things a heading's `(?)` and its note can be asked for, answered by the state above. */
+function askHelp(note: HeadingNote, ask: HeadingAsk): void {
+    if (ask === 'toggle') toggleHelp(noteId(note.id));
+    else if (ask === 'peek') peekHelp(noteId(note.id));
+    else if (ask === 'unpeek') unpeekHelp(noteId(note.id));
+    else if (ask === 'peek-note') peekNote(noteId(note.id));
+    else if (ask === 'unpeek-note') unpeekNote(noteId(note.id));
+    else openHelpTab(note);
+}
+
+// Named here rather than looked up in the template, so a heading that names a note nothing defines
+// is a failure at start-up with the id in the message, not a `(?)` that opens onto nothing.
+const patternNote = headingNote('pattern');
+const subjectNote = headingNote('subject');
+const flagsNote = headingNote('flags');
+const modeNote = headingNote('mode');
+const replacementNote = headingNote('replacement');
+const namedListsNote = headingNote('named-lists');
 
 // --- the shell's one breakpoint ----------------------------------------------------------------
 
@@ -380,6 +489,102 @@ const EDIT_NAMES: Readonly<Record<EditKind, string>> = {
 const editName = (kind: EditKind): string => EDIT_NAMES[kind];
 
 /**
+ * What one mark inside a highlight is called: its kind, and how many errors of that kind it stands
+ * for when it stands for several. The number is in the title for every kind, because a pointer and
+ * a screen reader both get it there, and on screen only for a deletion, whose gap has no characters
+ * of its own to be counted.
+ */
+const runName = (kind: EditKind, count: number): string =>
+    count === 1 ? editName(kind) : `${count} ${editName(kind)}s`;
+
+/** The three kinds in the order the legend lists them, which is the order the labels use. */
+const EDIT_KINDS: readonly EditKind[] = ['sub', 'ins', 'del'];
+
+/** The key for the one note on a marked run, in the same space as the flag and heading notes. */
+const RUN_NOTE = 'edit-run-note';
+
+/** What the open note on a marked run says, held apart from `helpFor`, which only holds the key. */
+const runNoteText = ref('');
+
+/**
+ * Where an error was spent, in words, for the note under the subject.
+ *
+ * A deletion is said as "before": the gap is drawn between two characters and stands for a
+ * character the subject does not have, so there is nothing at that index to be "at". The index is
+ * the engine's own, in UTF-16 code units, which is what the group table and the share link use.
+ */
+const runNote = (kind: EditKind, index: number, count: number): string =>
+    kind === 'del'
+        ? `${runName(kind, count)} before index ${index}`
+        : `${runName(kind, count)} ${count === 1 ? 'at' : 'from'} index ${index}`;
+
+/**
+ * A pointer resting on a mark, leaving it, or pressing it.
+ *
+ * Pointer and touch only, and that is a limit rather than an oversight. A highlight is already a
+ * control - `role="button"`, in the roving tabindex - and axe-core's `nested-interactive` rule
+ * refuses a focusable element inside one, so the marks cannot be tab stops of their own. What a
+ * keyboard and a screen reader get instead is the highlight's `aria-label`, which names every kind
+ * and count it holds, and the alignment view under the groups (S75).
+ */
+function askRun(run: EditRun, ask: 'peek' | 'unpeek' | 'pin'): void {
+    if (run.kind === null) return;
+    const text = runNote(run.kind, run.index, run.count);
+
+    if (ask === 'unpeek') {
+        unpeekHelp(RUN_NOTE);
+        return;
+    }
+    if (ask === 'peek') {
+        if (!helpPinned.value) runNoteText.value = text;
+        peekHelp(RUN_NOTE);
+        return;
+    }
+
+    // A press on the mark that is already pinned shuts it; a press on any other mark moves the
+    // pin, which is what a second tap on a second mark means.
+    if (helpPinned.value && helpFor.value === RUN_NOTE && runNoteText.value === text) {
+        closeHelp();
+        return;
+    }
+    runNoteText.value = text;
+    helpFor.value = RUN_NOTE;
+    helpPinned.value = true;
+}
+
+/**
+ * The selected match, character by character, or null when it spent no errors.
+ *
+ * Against `answeredSubject`, like every other offset on the page: these indices are into the text
+ * the engine was given, which stops being the text on screen the moment somebody types.
+ */
+const alignmentCells = computed(() => (current.value === null ? null : alignment(answeredSubject.value, current.value)));
+
+/**
+ * The characters with no shape of their own, drawn as a stand-in and named in words.
+ *
+ * A cell holding a space is a blank square with a letter under it, and read out it is "at index
+ * 5", which names nothing at all. A subject with a space in it is the ordinary case: `{e}` against
+ * "calor and the colour" spends its last error on the space after "calor".
+ */
+const BLANKS: Readonly<Record<string, { glyph: string; name: string }>> = {
+    ' ': { glyph: '␣', name: 'space' },
+    '\t': { glyph: '⇥', name: 'tab' },
+    '\n': { glyph: '↵', name: 'newline' },
+    '\r': { glyph: '↵', name: 'carriage return' },
+};
+
+/** What is drawn in a cell: the character, or a stand-in for one that has no shape. */
+const cellGlyph = (cell: AlignmentCell): string => BLANKS[cell.text]?.glyph ?? cell.text;
+
+/** What one alignment cell is read out as: the character, where it is, and what happened to it. */
+const cellLabel = (cell: AlignmentCell): string => {
+    if (cell.kind === 'del') return runNote('del', cell.index, cell.count);
+    const name = BLANKS[cell.text]?.name ?? cell.text;
+    return `${name} at index ${cell.index}` + (cell.kind === null ? '' : `, ${editName(cell.kind)}`);
+};
+
+/**
  * What a screen reader is told a highlight is: its number, its text, what it spent, and whether it
  * is partial.
  *
@@ -424,6 +629,20 @@ const markLabel = (index: number, text: string): string => {
 const caretRow = computed(() =>
     failureOffset.value === null ? '' : '\n' + ' '.repeat(failureOffset.value) + '^',
 );
+
+/**
+ * The line under the pattern when its fuzzy budget has no bound, or null when there is nothing to
+ * say (S75, item 1).
+ *
+ * Read off `answeredPattern`, so the line belongs to the answer on screen rather than to the
+ * half-typed box, and only when that pattern parsed: braces in a pattern the engine refused mean
+ * nothing yet, and the parse error is the thing to read.
+ */
+const budgetWarning = computed(() => {
+    if (failure.value !== '') return null;
+    const budget = unboundedBudget(answeredPattern.value);
+    return budget === null ? null : budgetNote(budget);
+});
 
 // --- one tab stop per group of matches, not one per match ------------------------------------
 //
@@ -691,10 +910,10 @@ window.__demoInternals = { createPool, spawnEngineWorker };
         <!--
           The keyboard's way past the input pane, and the first thing in the document.
 
-          Measured before it existed (`tools/probes/s73-widths.mjs`, 2026-09-20): twenty-six tabs
-          from the top of the page to the first control in the answer at every width above the gate,
-          eighteen of them the example buttons, which are always on screen there. The answer is what
-          the page is for, so it is one tab away.
+          Measured before it existed (`tools/probes/s73-widths.mjs`, re-run 2026-09-21):
+          thirty-two tabs from the top of the page to the first control in the answer at every
+          width above the gate, nineteen of them the example buttons, which are always on screen
+          there. The answer is what the page is for, so it is one tab away.
         -->
         <a class="skip-link" href="#results" @click.prevent="skipToAnswer">Skip to the answer</a>
 
@@ -727,7 +946,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                 <!-- One column, labels above their field, hints below it and persistent. -->
                 <section class="flex flex-col gap-4" aria-label="The case">
                     <div>
-                        <label class="field-label" for="pattern">Pattern</label>
+                        <!--
+                          A heading names a box to somebody who already knows what the box is. The
+                          `(?)` is for everybody else, and its sentence ends at the documentation
+                          (S75, item 2). The same six lines repeat under each of the six headings.
+                        -->
+                        <HeadingHelp
+                            :note="patternNote"
+                            :open="helpFor === noteId(patternNote.id)"
+                            :pinned="helpPinned"
+                            @ask="askHelp(patternNote, $event)"
+                        >
+                            <label class="field-label" for="pattern">Pattern</label>
+                        </HeadingHelp>
                         <input
                             id="pattern"
                             ref="patternField"
@@ -737,6 +968,15 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             autocapitalize="off"
                             autocomplete="off"
                         />
+                        <!--
+                          `role="status"` because this appears after the answer comes back, without
+                          the visitor doing anything to it: a screen reader that never mentions it
+                          leaves them with a page full of markers and no reason given. Polite, so it
+                          waits its turn behind whatever is being read.
+                        -->
+                        <p v-if="budgetWarning !== null" id="budget-note" class="field-hint" role="status">
+                            {{ budgetWarning }}
+                        </p>
                         <!--
                           The failure that has a place in the pattern goes UNDER the pattern, with a
                           caret at the character the engine named; everything else goes to the block
@@ -775,7 +1015,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                     </div>
 
                     <div>
-                        <label class="field-label" for="subject">Subject</label>
+                        <HeadingHelp
+                            :note="subjectNote"
+                            :open="helpFor === noteId(subjectNote.id)"
+                            :pinned="helpPinned"
+                            @ask="askHelp(subjectNote, $event)"
+                        >
+                            <label class="field-label" for="subject">Subject</label>
+                        </HeadingHelp>
                         <textarea
                             id="subject"
                             v-model="subject"
@@ -849,6 +1096,22 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             </summary>
 
                             <div class="flags-body">
+                                <!--
+                                  The Flags note opens INSIDE the panel, not beside the word on the
+                                  shut row. A `<summary>` is itself the disclosure's button, and
+                                  axe-core's `nested-interactive` rule refuses a focusable element
+                                  inside an interactive control ("Interactive control elements must
+                                  not have focusable descendants") - a `(?)` there would be a page
+                                  that fails its own accessibility gate. The button carries its name
+                                  in `aria-label`, so it needs no heading beside it to be announced.
+                                -->
+                                <HeadingHelp
+                                    :note="flagsNote"
+                                    :open="helpFor === noteId(flagsNote.id)"
+                                    :pinned="helpPinned"
+                                    @ask="askHelp(flagsNote, $event)"
+                                />
+
                                 <div class="flag-grid">
                                     <div v-for="name in CHECKBOXES" :key="name">
                                         <div class="flag-row">
@@ -866,14 +1129,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                 :id="`flag-help-button-${name}`"
                                                 class="flag-help-button"
                                                 type="button"
-                                                :aria-expanded="helpFor === name"
-                                                :aria-controls="`flag-help-${name}`"
+                                                :aria-expanded="helpFor === flagNoteId(name)"
+                                                :aria-controls="flagNoteId(name)"
                                                 :aria-label="`What ${name} does`"
-                                                @click="toggleHelp(name)"
-                                                @mouseenter="peekHelp(name)"
-                                                @mouseleave="unpeekHelp(name)"
-                                                @focus="peekHelp(name)"
-                                                @blur="unpeekHelp(name)"
+                                                @click="toggleHelp(flagNoteId(name))"
+                                                @mouseenter="peekHelp(flagNoteId(name))"
+                                                @mouseleave="unpeekHelp(flagNoteId(name))"
+                                                @focus="peekHelp(flagNoteId(name))"
+                                                @blur="unpeekHelp(flagNoteId(name))"
                                             >
                                                 ?
                                             </button>
@@ -885,9 +1148,11 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                           accessibility tree as well as off the screen.
                                         -->
                                         <p
-                                            :id="`flag-help-${name}`"
+                                            :id="flagNoteId(name)"
                                             class="flag-help"
-                                            :hidden="helpFor !== name"
+                                            :hidden="helpFor !== flagNoteId(name)"
+                                            @mouseenter="peekNote(flagNoteId(name))"
+                                            @mouseleave="unpeekNote(flagNoteId(name))"
                                         >
                                             {{ FLAG_HELP[name] }}
                                         </p>
@@ -920,22 +1185,24 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                                     :id="`flag-help-button-${option}`"
                                                     class="flag-help-button"
                                                     type="button"
-                                                    :aria-expanded="helpFor === option"
-                                                    :aria-controls="`flag-help-${option}`"
+                                                    :aria-expanded="helpFor === flagNoteId(option)"
+                                                    :aria-controls="flagNoteId(option)"
                                                     :aria-label="`What ${option} does`"
-                                                    @click="toggleHelp(option)"
-                                                    @mouseenter="peekHelp(option)"
-                                                    @mouseleave="unpeekHelp(option)"
-                                                    @focus="peekHelp(option)"
-                                                    @blur="unpeekHelp(option)"
+                                                    @click="toggleHelp(flagNoteId(option))"
+                                                    @mouseenter="peekHelp(flagNoteId(option))"
+                                                    @mouseleave="unpeekHelp(flagNoteId(option))"
+                                                    @focus="peekHelp(flagNoteId(option))"
+                                                    @blur="unpeekHelp(flagNoteId(option))"
                                                 >
                                                     ?
                                                 </button>
                                             </div>
                                             <p
-                                                :id="`flag-help-${option}`"
+                                                :id="flagNoteId(option)"
                                                 class="flag-help"
-                                                :hidden="helpFor !== option"
+                                                :hidden="helpFor !== flagNoteId(option)"
+                                                @mouseenter="peekNote(flagNoteId(option))"
+                                                @mouseleave="unpeekNote(flagNoteId(option))"
                                             >
                                                 {{ FLAG_HELP[option] }}
                                             </p>
@@ -951,7 +1218,19 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                           three of them together are choosing.
                         -->
                         <fieldset aria-describedby="mode-hint">
-                            <legend class="field-label">Mode</legend>
+                            <!--
+                              `as="legend"` because a legend must be the fieldset's first child to
+                              name it, so this heading row cannot be wrapped in anything.
+                            -->
+                            <HeadingHelp
+                                :note="modeNote"
+                                :open="helpFor === noteId(modeNote.id)"
+                                :pinned="helpPinned"
+                                as="legend"
+                                @ask="askHelp(modeNote, $event)"
+                            >
+                                <span class="field-label">Mode</span>
+                            </HeadingHelp>
                             <div class="flex flex-wrap gap-x-6 gap-y-2">
                                 <div
                                     v-for="option in MODES"
@@ -981,7 +1260,16 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                           ignored.
                         -->
                         <div v-if="mode === 'replace'">
-                            <label class="field-label" for="replacement">Replacement template</label>
+                            <HeadingHelp
+                                :note="replacementNote"
+                                :open="helpFor === noteId(replacementNote.id)"
+                                :pinned="helpPinned"
+                                @ask="askHelp(replacementNote, $event)"
+                            >
+                                <label class="field-label" for="replacement">
+                                    Replacement template
+                                </label>
+                            </HeadingHelp>
                             <input
                                 id="replacement"
                                 v-model="replacement"
@@ -999,7 +1287,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         </div>
 
                         <div>
-                            <label class="field-label" for="named-lists">Named lists</label>
+                            <HeadingHelp
+                                :note="namedListsNote"
+                                :open="helpFor === noteId(namedListsNote.id)"
+                                :pinned="helpPinned"
+                                @ask="askHelp(namedListsNote, $event)"
+                            >
+                                <label class="field-label" for="named-lists">Named lists</label>
+                            </HeadingHelp>
                             <textarea
                                 id="named-lists"
                                 v-model="namedLists"
@@ -1251,7 +1546,7 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                         <p
                             ref="subjectPane"
                             class="subject-pane"
-                            :class="{ 'opacity-60': busy }"
+                            :class="{ 'opacity-60': busy, 'has-markers': markers }"
                             :aria-busy="busy"
                             @keydown="onSubjectKeydown"
                         ><template v-for="(part, i) in view.segments" :key="i"><mark
@@ -1281,8 +1576,47 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                             v-if="run.kind !== null"
                                             class="edit"
                                             :class="'edit-' + run.kind"
-                                            :title="editName(run.kind)"
+                                            :data-count="run.kind === 'del' && run.count > 1 ? run.count : null"
+                                            :title="runName(run.kind, run.count)"
+                                            @mouseenter="askRun(run, 'peek')"
+                                            @mouseleave="askRun(run, 'unpeek')"
+                                            @click="askRun(run, 'pin')"
                                         >{{ run.text }}</span><template v-else>{{ run.text }}</template></template></template></mark><template v-else>{{ part.text }}</template></template></p>
+                        <!--
+                          Where the error under the pointer was spent. Under the subject and not
+                          over it: a layer floating beside the character it describes covers the
+                          characters next to it, which on this page are the answer.
+
+                          `hidden` rather than `v-if` so the paragraph keeps its place in the
+                          layout and the line below it does not jump as a pointer crosses the marks.
+                        -->
+                        <p
+                            id="edit-run-note"
+                            class="field-hint"
+                            :hidden="helpFor !== RUN_NOTE"
+                            @mouseenter="peekNote(RUN_NOTE)"
+                            @mouseleave="unpeekNote(RUN_NOTE)"
+                        >
+                            {{ runNoteText }}
+                        </p>
+                        <!--
+                          The key to the marks, shown only when there are marks to read. Not
+                          controls: a chip that looked pressable would be a promise the page cannot
+                          keep, and there is nothing here to press.
+                        -->
+                        <p v-if="markers" class="edit-legend">
+                            <span v-for="kind in EDIT_KINDS" :key="kind" class="edit-chip">
+                                <!-- A sample of the mark itself, with the stylesheet's letter under
+                                     it. `aria-hidden`, because a lone "a" read out between the
+                                     words of the key is noise; the word beside it is the key. -->
+                                <!-- "ab" and not one letter: a single "a" in front of the word
+                                     reads as the article, so the key said "a substitution". -->
+                                <span class="edit" :class="'edit-' + kind" aria-hidden="true">{{
+                                    kind === 'del' ? '' : 'ab'
+                                }}</span>
+                                <span class="edit-name">{{ editName(kind) }}</span>
+                            </span>
+                        </p>
                         <p v-if="view.total === 0" class="note">No matches.</p>
                     </section>
 
@@ -1497,6 +1831,43 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                             <p class="note">
                                 A repeated group keeps every capture it made. Python's standard
                                 <code class="font-mono">re</code> keeps only the last.
+                            </p>
+                        </section>
+
+                        <!--
+                          The selected match spread out, one cell per character, for the errors
+                          that are too small to read in place. A list and not a table: a screen
+                          reader reads a table row by row, so a character row above a kind row
+                          would be read as two unrelated lines, while each item here carries its
+                          own character, position and kind in one label.
+                        -->
+                        <section v-if="alignmentCells">
+                            <h2 class="section-label">Match {{ selected + 1 }}, character by character</h2>
+                            <ol class="alignment">
+                                <li
+                                    v-for="(cell, c) in alignmentCells"
+                                    :key="c"
+                                    class="alignment-cell"
+                                    :aria-label="cellLabel(cell)"
+                                >
+                                    <span
+                                        class="alignment-character"
+                                        :class="cell.kind === null ? null : 'edit edit-' + cell.kind"
+                                        :data-count="cell.kind === 'del' && cell.count > 1 ? cell.count : null"
+                                        aria-hidden="true"
+                                        >{{ cellGlyph(cell) }}</span
+                                    >
+                                    <!-- The position, on the cells that have something to say. On
+                                         every cell it is a row of numbers under a row of letters,
+                                         and the numbers are the louder of the two. -->
+                                    <span v-if="cell.kind !== null" class="alignment-index" aria-hidden="true">{{
+                                        cell.index
+                                    }}</span>
+                                </li>
+                            </ol>
+                            <p class="note">
+                                One cell per character of the subject, marked where the match spent
+                                an error, at the position the engine gives for it.
                             </p>
                         </section>
                     </template>

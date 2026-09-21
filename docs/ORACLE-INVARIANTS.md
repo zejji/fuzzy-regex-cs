@@ -10,7 +10,7 @@ This file is the list of those contradictions stated as properties, so the recor
 on every wave row with no port involved, and the comparer can check them on the port's answers too.
 Written for S52c scope item 1 (owner request 2026-09-15, design spec amendment 25).
 
-**The list is an instrument, not a claim about correctness.** An invariant firing means one of two
+**The list is an instrument. It makes no claim about correctness.** An invariant firing means one of two
 things: the engine is wrong, or the invariant is. Scope item 3 triages every violation and prunes
 the list with the documentation quoted when the invariant is the thing that was wrong. That is the
 calibration, and it is expected to remove items from this file.
@@ -34,7 +34,7 @@ And two costs:
 - **Tier** - `SHIP` (first checker), `DEFER` (real but not yet worth its call budget), `REJECTED`
   (false as the slice stated it; kept here with the reason so it is not re-proposed).
 
-**A `SHIP` invariant with no calibration is not a mistake.** Several are near-free and total
+**A `SHIP` invariant with no calibration still earns its place.** Several are near-free and total
 (`escape-round-trip`, `split-rejoins`); a cheap check that has never fired is cheap evidence, and
 the ledger only records what somebody thought to look for.
 
@@ -267,22 +267,22 @@ the same call over the slice `[a, m)` with `partial=True` reports a match.
 **Ground.** `upstream/docs/Features.html` line 576: *"A partial match is one that matches up to the
 end of string, but that string has been truncated and you want to know whether a complete match
 could be possible if the string had not been truncated."* The truncation of a known complete match
-is the one case where the answer is not a matter of judgement.
+is the one case where the answer needs no judgement.
 
 **Calibration.** Ledger 21 (upstream issue 589 - a partial `fullmatch` denies a prefix whose
 completion exists; the maintainer considers it correct, this repo disagrees on his own documentation
 and on PCRE2 10.47), 15 (`(*SKIP)` blocks the one repeat retreat a partial match needs - a
 regression in 2026.9.10), 2.
 
-**Cost control.** One `m` per row, chosen by the row's seed, not every `m`.
+**Cost control.** One `m` per row, chosen by the row's seed rather than every `m`.
 
 ### `full-implies-partial` - SHIP, cost +1
 
 **Statement.** If a call succeeds without `partial`, the same call with `partial=True` reports a
 match with the same span, and reports it as complete rather than partial.
 
-**Ground.** `partial=True` is documented as *adding* partial matches to the answers, not replacing
-them.
+**Ground.** `partial=True` is documented as *adding* partial matches to the answers rather than
+replacing them.
 
 **Calibration.** Ledger 13, 12.
 
@@ -326,7 +326,7 @@ direction).
 **Note the strengthening.** The slice's starting list had only limb (b), the error count. Limb (a),
 existence, is what entries 12 and 13 actually are.
 
-**COST FREE IN PRACTICE, not `+1`.** `_CONTROLS` in `tools/record-oracle.py` has recorded
+**COST FREE IN PRACTICE, rather than `+1`.** `_CONTROLS` in `tools/record-oracle.py` has recorded
 `bestmatchFreeOutcome` since S48b, so the flagless twin is already on the row and this invariant
 asks upstream nothing. The same is true of `posix-chooses-among-flagless-answers` below, which is
 how the first checker reaches ledger 12 and ledger 9's families at no call budget at all.
@@ -360,8 +360,8 @@ machinery exists.
 the same span."
 
 **Why that is false.** Without `BESTMATCH` the engine reports the *first* acceptable match it
-reaches, not the cheapest. A looser budget changes the order in which the fuzzy section may spend,
-so a more expensive answer for the same span is a legitimate outcome, not a contradiction.
+reaches rather than the cheapest. A looser budget changes the order in which the fuzzy section may
+spend, so a more expensive answer for the same span is a legitimate outcome.
 
 **What ships instead.** The same statement **under `BESTMATCH` only**, where the engine is defined
 to report the cheapest. Outside `BESTMATCH` the existence limb above is the whole of the property.
@@ -400,7 +400,7 @@ ledger 9, 16 and 23 was wrong about that. Two reasons, and only the first is a l
    match where POSIX did - the checker therefore compares only rows where the two answered at the
    SAME start, and treats a different start as ambiguity rather than as a finding. Ledger 16 is an
    overlapped SCAN dropping its longest match, which this shape does not reach at all.
-2. **Ledger 9 is a crash**, which is `no-fault-where-a-twin-answers`'s business and not this one's.
+2. **Ledger 9 is a crash**, which belongs to `no-fault-where-a-twin-answers` rather than to this one.
 
 So this remains the highest-yield invariant *by calibration* and has yet to earn it by firing. What
 would change that is limb (b) over a scan rather than over one match, which needs the position
@@ -414,12 +414,12 @@ sampling `search-none-anchored-none` also wants; that is the strongest single ca
 
 **Ground.** The inline form is documented as the flag.
 
-**Calibration.** Ledger 22 (`(?V0)` does not mean version 0 when `DEFAULT_VERSION` is `VERSION1` -
-fixed in this port by S50b).
+**Calibration.** Ledger 22 (under `DEFAULT_VERSION VERSION1`, `(?V0)` and `regex.V0` fold the same
+pattern two ways - fixed in this port by S50b).
 
 ### `v0-v1-agree-outside-nested-sets-and-full-case-folding` - REJECTED
 
-**Why.** The documented differences between V0 and V1 are not a closed list of two; they cover set
+**Why.** The documented differences between V0 and V1 go well beyond two; they cover set
 operators, nested sets, the meaning of a bare `[`, full case-folding, and more. An invariant whose
 exception list is open-ended cannot separate a bug from an exception, and would spend triage time at
 a rate the ledger gives no reason to expect a return on. `inline-version-equals-flag` above is the
@@ -468,7 +468,7 @@ port's "no match", which the differential oracle could only report as a disagree
 self-consistent answer. On every cell where upstream is self-consistent the two engines agree.
 
 **The ablations attribute it.** Removing the `(?r)` makes the invariant hold AND makes both engines
-agree; removing the `\b` does neither. So the mechanism is the reversed partial path and not the
+agree; removing the `\b` does neither. So the mechanism is the reversed partial path rather than the
 boundary: it is upstream's lazy arm reaching a partial its greedy arm does not.
 
 **What this does and does not settle.** It settles that the port is the self-consistent engine on
@@ -544,10 +544,10 @@ whole alphabet.
 
 ---
 
-## H. Not metamorphic, but the ledger earns them a place
+## H. The ledger earns these a place, though they are not metamorphic
 
-Six ledger entries are not "two answers disagree" but "one door falls over while another answers".
-The recorder already runs ablation twins (`pruneOutcome` and the other three controls), so these
+Six ledger entries are about one door falling over while another answers, which is a different
+shape from "two answers disagree". The recorder already runs ablation twins (`pruneOutcome` and the other three controls), so these
 cost nothing beyond reading outcomes the row already carries.
 
 ### `no-fault-where-a-twin-answers` - SHIP, cost FREE
@@ -574,23 +574,23 @@ heeded rather than merely noted.
 flat it fired 7 times in 126,240 rows and every one was the invariant being wrong. Both are guarded
 in `_self_check` because each is one predicate deep.
 
-1. **A TIMEOUT beside a RANKING flag's twin is not a fault.** Five of the seven were a `(?b)` row
+1. **A TIMEOUT beside a RANKING flag's twin is expected.** Five of the seven were a `(?b)` row
    that spent its whole ten seconds while the same row without `(?b)` answered. `BESTMATCH` is
    documented to do more work - *"By default, fuzzy matching searches for the first match that meets
    the given constraints ... The BESTMATCH flag will make it search for the best match instead"*
    (`upstream/README.rst:592`) - and POSIX's leftmost-longest must see every match at a position
    before picking the longest. Taking either flag away leaves an engine that may stop at the first
-   acceptable answer, so the twin finishing is a COST difference, not a contradiction. **The other
+   acceptable answer, so the twin finishing is a COST difference and no contradiction. **The other
    two controls keep the timeout case**, and that is why this is a narrowing rather than "drop
    timeouts": `(?>` to `(?:` and `(*SKIP)` to `(*PRUNE)` both REMOVE pruning, so the twin explores
    at least as much - a row that hangs WITH the pruning construct and finishes without it cannot be
    explained by cost, and that is ledger entry 10 itself.
-2. **A substitution twin that REPLACED NOTHING is not an answer.** The remaining two were `subf`
-   rows raising `IndexError` while matching - the shape of ledger 6, and not what it was. Measured
+2. **A substitution twin that REPLACED NOTHING has answered nothing.** The remaining two were `subf`
+   rows raising `IndexError` while matching - the shape of ledger 6, though a different cause. Measured
    in `tools/probes/upstream-free-tier-invariant-grounds.py` section 7: upstream's `subf` renders
    the template with `str.format` over the GROUP LIST, so `{0[2]}` on a pattern with no group 2 is
    `IndexError: list index out of range`, and `regex.subf('abcdefgh', '{0[2]}...', 'abcdefgh')`
-   raises it with no verb, no fuzzy section and no reversal in sight. **The template is only
+   raises it on a plain pattern with no verb, fuzzy section or reversal involved. **The template is only
    rendered where something matched**, which is the whole mechanism: on both rows the twin replaced
    NOTHING, so it never rendered the template and never reached the question. A twin that DID
    replace proves the template is fine for the pattern, and then the row's own raise is a real
@@ -627,14 +627,14 @@ the number is small:
 
 **That is the honest ceiling, and it is a fact about dialects rather than about TRE.** TRE offers a
 SEARCH and nothing else, so every anchored operation is out; its syntax is POSIX ERE, so `\p{...}`,
-backreferences, lookarounds, verbs and `\K` are out; and it has no BESTMATCH, no ENHANCEMATCH, no
-per-section budget and no `fuzzy_changes`. The generators that produce violations are exactly the
+backreferences, lookarounds, verbs and `\K` are out; and it has no BESTMATCH, ENHANCEMATCH,
+per-section budget or `fuzzy_changes`. The generators that produce violations are exactly the
 ones - `interactions`, `verbs`, composed `fuzzy` - whose alphabet is furthest from that core.
 
 So on the rows this file is for, **the invariants are the instrument and the second engine is not
 available**, which is the reverse of the usual arrangement and is why this file exists. The 10
 CONFIRMED rows are not the point; that the probe answers them at all is what says a zero elsewhere
-is a dialect gap and not a broken instrument, and `--self-test` is there for the same reason.
+is a dialect gap rather than a broken instrument, and `--self-test` is there for the same reason.
 
 **Two of TRE's answers were this probe's own bugs before they were evidence**, which is worth
 recording as a method note. The first dialect gate let `(?i)`-prefixed and lazily-quantified

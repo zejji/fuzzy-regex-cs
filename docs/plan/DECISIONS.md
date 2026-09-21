@@ -820,3 +820,72 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-21 (S57b, sitting 3): a filled reviewer or verifier brief is written to `docs/plan/slices/notes/<slice>-review-brief.md` and `-verifier-brief.md`, not to `.scratch/`. The allowance hook forced a checkpoint while both agents were still working, and a brief that dies with the scratch directory costs the next sitting the whole of writing it again.
 - 2026-09-21 (S57b, sitting 5): a MISSING ablation is not evidence of a different fault. Seed 20260921 row 74947 lost the verb-deleted door to a `MemoryError` - ledger entry 14's shape, a self-recursive call round an empty-matching fuzzy section - and sitting 3 read the gap as the tell of a new `reversed-skip-missing-match` family. The two doors that do answer, `(?b)` deleted and `(*SKIP)` spelled `(*PRUNE)`, both give this port's answer in full, which is `bestmatch-loses-a-partial`'s own pair of arguments and how S52's nineteenth sitting placed sweep rows 4 and 15. The row went in there as row 10. Run the ablations before naming a family.
 - 2026-09-21 (S57b, sitting 5): a pin keyed on `ours.Describe()` for a SCAN row carries every match in the render, not the diverging one. Row 72790 diverges on two of its five matches, so the key covers both and the entry's Reason has to explain both, including the `selfContradiction` one.
+- 2026-09-20 (S75): deletions in one place are drawn as ONE gap carrying their count, reversing
+  S73's "two deletions are two marks". A deletion has no character of its own to separate two marks
+  by, so the owner's `(foobar){e}` case drew eleven `d` letters at two x-positions. The count keeps
+  the fact S73 wanted; one mark per deletion did not survive an unbounded budget.
+- 2026-09-20 (S75): a counted gap is 20 px wide and closed on both sides, where a single deletion's
+  gap is 6 px and open. Measured, not taste: two 6 px gaps next to each other - how the owner's case
+  ends - centre their labels 8.4 px apart, and a label is 14.3 px wide, so they overlapped by 6 px.
+- 2026-09-20 (S75): neighbouring errors of one kind are one mark with one letter, and a run carries
+  how many errors it stands for. Only a deletion draws that number: its gap has nothing to show how
+  wide the hole is, where a run of six substituted characters shows six underlined characters. Every
+  kind names its number in the mark's `title`, which is where a pointer and a screen reader agree.
+- 2026-09-20 (S75): the subject's marker row is opened by a class on a result that has markers
+  (`.subject-pane.has-markers`), not on every result. It costs a third again in height and an exact
+  match has nothing to put there. The condition is read off the runs the page will paint rather than
+  off the match counts, because a match past the display cap is counted and never drawn.
+- 2026-09-20 (S75): the alignment view has a subject row and no pattern row. `fuzzy_changes` is
+  three lists of subject positions and says nothing about the pattern, and a pattern is not a
+  sequence of characters anyway - `(?:colou?r|couleur){e<=2}` over "calor" never says which branch
+  matched (`tools/probes/s75-alignment-inputs.py`). A pattern row needs engine work, so whether it
+  is worth paying for is the owner's call.
+- 2026-09-20 (S75): `{s<=1,e}` is bounded, so the page says nothing about it. Naming any kind sets
+  every unnamed kind to zero, which caps the unbounded `e` at one error in total. Measured over 22
+  cases against regex 2026.9.10 and against this port, row for row identical
+  (`tools/probes/s75-fuzzy-budget.py`, `s75-fuzzy-budget.cs`, `s75-fuzzy-defaults.py`).
+- 2026-09-20 (S75): the note on a marked run opens on hover and on tap, and the keyboard and
+  screen-reader path is the mark's own `aria-label` plus the alignment view, not a control inside
+  the mark. axe-core's `nested-interactive` forbids focusable descendants of the
+  `<mark role="button">` highlights, so there is nowhere inside a mark to put one.
+- 2026-09-21 (S75): the worked example for a fuzzy test set is its own example button, keyed
+  `fuzzy-test-set`, rather than a paragraph of help. The page already teaches by loading a pattern
+  and a subject, and its spans are checked against both engines
+  (`tools/probes/s75-example-test-set.py`, `s75-example-test-set.cs`).
+- 2026-09-21 (S75): the C# snippet's identifiers are pinned by compiling the snippet the page
+  writes (`tools/probes/demo-snippet-compiles.mjs`), not by comparing it with a stored string. A
+  stored string pins the words; only the compiler pins the API.
+- 2026-09-21 (S75): the copy linter reads the seven documents and the public XML doc comments as
+  well as the page, with an empty allow list. It found 43 phrasings in the documents and 18 in the
+  doc comments, and both are 0.
+- 2026-09-21 (S75): a heading note's "read more" press is a tab stop only while the note is pinned.
+  A peeked note closes when the `(?)` loses the focus, so a press that was always a tab stop was
+  chosen as the next stop and then removed before the focus arrived - one Tab that did nothing
+  (Chrome, 2026-09-21).
+- 2026-09-21 (S75): a note the pointer opened waits `PEEK_GRACE_MS` (400 ms) before closing, and
+  the pointer resting on the note refuses the close outright. WCAG 2.2 SC 1.4.13 "Hoverable" asks
+  that the pointer be able to reach revealed content; these notes sit a few pixels below their
+  button, and before the grace the note was gone after a 332 ms journey across a 4 px gap
+  (`tools/probes/s75-hover-travel.mjs`).
+- 2026-09-21 (S75): the unbounded-budget line bounds every kind that has no bound, not the first.
+  `(?:colour){i<=2,d}` matches 19 times in nine characters, the same as `{i,d}` (regex 2026.9.10).
+- 2026-09-21 (S75): the unbounded-budget line reads an escaped `\(` as the character it is, so
+  `\({e}` is named. Upstream matches it against "zzzzzzzzzzzz" with eleven insertions and a
+  substitution, where an unescaped `({e})` or `x|{e}` is the compile error "nothing for fuzzy
+  constraint" (regex 2026.9.10). A `(?#...)` comment is skipped for the same reason in reverse:
+  `(?#{e})colour` has no fuzziness, and the comment ends at the first `)` whether or not a
+  backslash precedes it.
+- 2026-09-21 (S75): a cost equation bounds only the kinds it prices at one or more. `{d,1i+1s<3}`
+  is unbounded in `d` and the page names it; a kind the equation prices at zero - `{0d+1i<3}` - is
+  unbounded too and the page stays silent, because the only advice available is a re-pricing of
+  somebody's equation rather than a bound added to it.
+- 2026-09-21 (S75): a `.cs` probe aligns its columns with `PadRight`/`PadLeft`, never with an
+  interpolation alignment specifier. The pre-commit hook's `dotnet csharpier format` writes those
+  with a space after the comma and `IDE0055` rejects the space, so such a line cannot pass both
+  gates and the probe stops building. `tools/probes/s57-skip-partial-span.cs` is fixed the same way
+  and prints the same six rows.
+- 2026-09-21 (S75): a kind constrained twice is not an error. Upstream's `parse_fuzzy_item` answers
+  the repeat by re-reading the item as a cost equation, so `{s,s<=1}` allows one substitution and
+  `{d,d<=1,i}` is unbounded in `i` - it inserts all six characters of "czozlzozuzzr". When the
+  second reading fails too, as in `{e<=1,e}` and `{s<=1,s}`, the braces are text:
+  `(?:colour){e<=1,e}` matches the literal "colour{e<=1,e}" (regex 2026.9.10).

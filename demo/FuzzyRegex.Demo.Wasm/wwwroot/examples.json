@@ -24,6 +24,14 @@
     "subject": "3oifaowefbaoraofuiebofasebfaobfaorfeoaro"
   },
   {
+    "key": "fuzzy-test-set",
+    "title": "Edits limited to letters",
+    "note": "The set after the colon says which characters an edit may touch. Lowercase letters only here, so \"color\" matches within the budget. \"col our\" and \"col0ur\" are missed, because reaching them would spend an error on a space or a digit.",
+    "pattern": "(?:colour){e<=2:[a-z]}",
+    "flags": "",
+    "subject": "colour, color, col our and col0ur"
+  },
+  {
     "key": "bestmatch",
     "title": "The first match the budget allows",
     "note": "An unbounded budget takes the leftmost thing that fits, six substitutions deep. The next two samples do better on this subject.",

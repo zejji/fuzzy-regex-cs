@@ -148,6 +148,20 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
 
     const capped = computed(() => view.value.total > view.value.shown);
 
+    /**
+     * Whether anything in the subject is marked as an error, which decides two things on the page:
+     * the subject block opens up a row under the text for the letters, and the legend that says
+     * what those letters mean appears under it.
+     *
+     * Read off the runs the page will actually paint rather than off the counts, because they can
+     * disagree. A match can spend an error the highlight does not draw - one outside its own span,
+     * which `segments` drops - and a match past the display cap is counted in the answer and never
+     * painted. A legend for letters that are not on screen explains nothing.
+     */
+    const markers = computed(() =>
+        view.value.segments.some((segment) => segment.runs?.some((run) => run.kind !== null) === true),
+    );
+
     const current = computed<Match | null>(() => matches.value[selected.value] ?? null);
 
     /**
@@ -478,6 +492,7 @@ export function useDemo({ spawn = spawnEngineWorker, examplesUrl, helpUrl }: Dem
         matches,
         view,
         capped,
+        markers,
         current,
         replaced,
         partial,

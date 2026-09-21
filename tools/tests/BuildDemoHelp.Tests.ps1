@@ -38,7 +38,11 @@ Body.
 
 Body.
 
-### `FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first
+### `{e<=n:[set]}`: constrain which characters an edit may touch
+
+Body.
+
+### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first
 
 Body.
 
@@ -67,6 +71,14 @@ Body.
 Body.
 
 ### A per-call `timeout` on every input-dependent method
+
+Body.
+
+### **Indices are UTF-16 code units**, where upstream counts codepoints
+
+Body.
+
+### Version 1 is the default
 
 Body.
 
@@ -202,11 +214,14 @@ Describe 'build-demo-help.ps1' {
         $report | Should -Match 'GREEN'
     }
 
-    It 'documents every feature the sidebar names, and no others' {
+    It 'documents every feature the sidebar names and every panel a heading note opens, and no others' {
         # The two lists are written out twice - the map in build-demo-help.ps1 and the `features`
         # array in tests/FuzzyRegex.Tests/Gaps/Demo/DemoExamplesTests.cs - and both are checked
         # against examples.json, which is the file the page actually reads. Drop a key from either
         # side and one of the two gates goes red.
+        #
+        # A panel is opened by a worked example or by one of the six heading notes (S75, item 2), so
+        # the map is checked against both sources. A key in neither is a panel nothing opens.
         #
         # Run against the REAL docs/COMPARISON.md, so this also proves the shipped mapping resolves.
         $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -227,6 +242,14 @@ Describe 'build-demo-help.ps1' {
         # `Set-StrictMode -Version Latest`; this form is clean there.
         $demonstrated = @($examples | ForEach-Object { if ($_.PSObject.Properties.Name -contains 'key') { $_.key } } | Where-Object { $_ } | Select-Object -Unique)
 
-        $documented | Should -Be $demonstrated
+        # The keys the six heading notes link to, read out of the file the page imports. Those the
+        # samples already cover are dropped, so what is left is the tail of the map: the panels that
+        # exist for a heading note alone.
+        $notes = Get-Content -LiteralPath (Join-Path $repo 'demo/web/src/lib/help-notes.ts') -Raw
+        $linked = @([regex]::Matches($notes, "helpKey:\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+        $linked | Should -Not -BeNullOrEmpty
+        $headingOnly = @($linked | Where-Object { $demonstrated -notcontains $_ })
+
+        $documented | Should -Be (@($demonstrated) + $headingOnly)
     }
 }

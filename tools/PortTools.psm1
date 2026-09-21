@@ -351,7 +351,7 @@ function New-StatusReport {
     $waiting = @($Results | Where-Object WaitingOn | Group-Object WaitingOn | Sort-Object Count -Descending)
     $lines.Add('## Tests waiting on a capability')
     $lines.Add('')
-    $lines.Add('What the next slice should deliver, biggest win first.')
+    $lines.Add('What the next slice should build, biggest win first.')
     $lines.Add('')
     if ($waiting.Count -eq 0) {
         $lines.Add('None: every test is enabled.')

@@ -252,7 +252,19 @@ test('nothing but a link is underlined', async () => {
         .flatMap(([, selector]) => selectorList(selector ?? ''));
 
     expect(underlined.length, 'no rule underlines anything, so the link style is gone').toBeGreaterThan(0);
-    for (const selector of underlined) {
+
+    // The one control that is underlined and is not an `<a>`: the press at the end of a heading
+    // note, which opens the help tab (S75, item 2). It goes nowhere, so it is a `<button>` and not
+    // an anchor with a dead `href` - but it reads as a link, and a link-shaped control that is not
+    // underlined is told apart from its sentence by colour alone, which is WCAG 1.4.1. That it is
+    // a button and that pressing it does something is held by page.test.ts, not here.
+    const linkLike = ['.note-link'];
+
+    // An allowance nothing uses is an allowance that outlives its reason, so each one has to be
+    // among the rules this run actually found.
+    for (const allowed of linkLike) expect(underlined).toContain(allowed);
+
+    for (const selector of underlined.filter((one) => !linkLike.includes(one))) {
         // A selector naming the <a> element, which a utility class never does: `class="underline"`
         // compiles to `.underline` and says nothing about what wears it, so an underline a link
         // needs is written in this file against `a`, not in the template.
@@ -1041,8 +1053,64 @@ test('the flag grid asks the panel for its columns, not the window', async () =>
 /** WCAG 2.2's 24x24 minimum (2.5.8), which is what a 24 px round button is exactly. */
 test('a flag help button is a target a finger can hit', async () => {
     const css = await builtCss();
-    const button = found(/\.flag-help-button\{([^}]*)\}/.exec(css), 'a .flag-help-button rule')[1] as string;
+    // Anchored at the start of the selector, so the rule read is the one that sizes the button and
+    // not `.field-heading .flag-help-button`, which only moves it (S75, item 2). Unanchored, the
+    // first rule in the file whose selector merely ENDS in this class was the one measured.
+    const button = found(
+        /(?:^|[}])\.flag-help-button\{([^}]*)\}/.exec(css),
+        'a .flag-help-button rule',
+    )[1] as string;
 
     expect(button).toMatch(/width:calc\(var\(--spacing\)\s*\*\s*6\)/);
     expect(button).toMatch(/height:calc\(var\(--spacing\)\s*\*\s*6\)/);
+});
+
+/**
+ * The marker row exists, and only on a result that has markers to put in it.
+ *
+ * The three distances it buys cannot be asserted here - jsdom has no layout, and the numbers come
+ * from `tools/probes/s75-marker-row.mjs` in a real browser. What this holds is the pair of
+ * declarations those numbers were measured against, so a change to either is a change a test names.
+ */
+test('the subject opens a marker row for the edit letters, and only when there are any', async () => {
+    const css = await builtCss();
+    const row = found(/\.subject-pane\.has-markers\{([^}]*)\}/.exec(css), 'a .has-markers rule')[1] as string;
+
+    // 40px over the plain pane's 28: 13px under the line for a 10px letter, 1px of border and 2px
+    // of gap. Measured at 4x at 1366 and 390 - see the slice's closing notes.
+    expect(row).toMatch(/line-height:calc\(var\(--spacing\)\s*\*\s*10\)/);
+
+    // The pane without the class keeps the 28px it always had. Read off the rule the build actually
+    // writes: Tailwind groups the pane with `.replaced-pane`, so a test looking for a literal
+    // `.subject-pane{` asserts against a string that is never there and can never fail.
+    const plain = found(/\.subject-pane,\.replaced-pane\{([^}]*)\}/.exec(css), 'the plain pane rule')[1] as string;
+    expect(plain).toMatch(/line-height:calc\(var\(--spacing\)\s*\*\s*7\)/);
+    expect(plain).not.toMatch(/line-height:calc\(var\(--spacing\)\s*\*\s*10\)/);
+});
+
+/**
+ * The letter sits below the highlight's border rather than through it, and a counted one stays on
+ * one line.
+ *
+ * Both halves were found by measuring, not by reading: at -8px the letter's top was 2.8px ABOVE the
+ * border's bottom, and "5 d" with no `white-space` shrank to fit a 6px gap, wrapped after the digit
+ * and doubled its own height.
+ */
+test('the edit letter clears the mark it belongs to, and a counted one does not wrap', async () => {
+    const css = await builtCss();
+    // `:after` and not `::after`: the build writes the one-colon form, which is the same
+    // pseudo-element and the only one the browser ever receives.
+    const letter = found(/\.edit:after\{([^}]*)\}/.exec(css), 'an .edit:after rule')[1] as string;
+    const counted = found(/\.edit-del\[data-count\]:after\{([^}]*)\}/.exec(css), 'a counted gap rule')[1] as string;
+
+    expect(letter).toMatch(/bottom:calc\(var\(--spacing\)\s*\*\s*-3\.25\)/);
+    expect(letter).toMatch(/white-space:nowrap/);
+    expect(counted).toMatch(/content:attr\(data-count\)\s*" d"/);
+    expect(counted).toMatch(/left:50%/);
+
+    // The gap a counted label is centred over. At the 6px of a single deletion, two counted gaps
+    // side by side - the owner's case ends with exactly that - overlapped their labels by 6px.
+    const gap = found(/\.edit-del\[data-count\]\{([^}]*)\}/.exec(css), 'a counted gap width rule')[1] as string;
+    expect(gap).toMatch(/width:calc\(var\(--spacing\)\s*\*\s*5\)/);
+    expect(gap).toMatch(/border-right:2px dashed/);
 });

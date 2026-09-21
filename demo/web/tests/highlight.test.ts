@@ -6,11 +6,18 @@ import type { Span } from '../src/types';
 const texts = (result: ReturnType<typeof segments>) =>
     result.segments.map((s) => (s.match === null ? s.text : `[${s.text}]`)).join('');
 
-/** The edits inside the matches, as `kind:text` per run, so a test can name the whole breakdown. */
+/**
+ * The edits inside the matches, as `kind:text` per run, so a test can name the whole breakdown.
+ * A deletion run that stands for more than one missing character is written `del*5`.
+ */
 const runs = (result: ReturnType<typeof segments>) =>
     result.segments
         .filter((s) => s.match !== null)
-        .map((s) => (s.runs ?? []).map((run) => `${run.kind ?? '-'}:${run.text}`).join('|'))
+        .map((s) =>
+            (s.runs ?? [])
+                .map((run) => `${run.kind ?? '-'}${run.count > 1 ? `*${run.count}` : ''}:${run.text}`)
+                .join('|'),
+        )
         .join(' ');
 
 test('the subject comes back whole, with the matches marked', () => {
@@ -161,17 +168,101 @@ test('a fuzzy match is broken into the characters each error was spent on', () =
     expect(runs(result)).toBe('sub:x|ins:f|-:ooba|del:');
 });
 
-test('two deletions in the same place are two marks, not one', () => {
+test('each run carries the subject index it starts at', () => {
+    // The page says where an error was spent - "substitution at index 0" - and a run that does not
+    // know its own position cannot be described. The same "xfoobat" answer as above.
+    const result = segments('xfoobat', [
+        { index: 0, length: 6, edits: { substitutions: [0], insertions: [1], deletions: [6] } },
+    ]);
+
+    const [match] = result.segments.filter((s) => s.match !== null);
+    expect(match?.runs?.map((run) => `${run.kind ?? '-'}@${run.index}`)).toEqual([
+        'sub@0',
+        'ins@1',
+        '-@2',
+        // The gap sits at the position of the character that is missing, which for a deletion at
+        // the end of the match is the index one past its last character.
+        'del@6',
+    ]);
+});
+
+test('deletions in the same place are one gap carrying their count', () => {
     // (?:abcdef){d<=2} against "abef", read off the subject: "abef" is "abcdef" with "c" and "d"
     // missing, both from the one place, after "ab" and before "ef", which is subject position 2.
     // Upstream's own answer for the same match is `fuzzy_changes = ([], [], [2, 3])`, shifted as if
     // the deletions were put back; `DemoEngine.Edits` un-shifts it, and the derivation above is how
     // that 2,2 is checked without going through either implementation.
+    //
+    // Two gaps drawn side by side were 3 px of dashed border apart and read as one wide mark, and
+    // the letters under them overlapped. One gap that says how many characters are missing carries
+    // the same fact and can be read (S75, owner's finding 2026-09-20).
     const result = segments('abef', [
         { index: 0, length: 4, edits: { substitutions: [], insertions: [], deletions: [2, 2] } },
     ]);
 
-    expect(runs(result)).toBe('-:ab|del:|del:|-:ef');
+    expect(runs(result)).toBe('-:ab|del*2:|-:ef');
+});
+
+test('a single deletion is a gap with no count to draw', () => {
+    const result = segments('abef', [
+        { index: 0, length: 4, edits: { substitutions: [], insertions: [], deletions: [2] } },
+    ]);
+
+    const [match] = result.segments.filter((s) => s.match !== null);
+    expect(runs(result)).toBe('-:ab|del:|-:ef');
+    expect(match?.runs?.find((run) => run.kind === 'del')?.count).toBe(1);
+});
+
+test('neighbouring errors of one kind are one run, so one letter marks them all', () => {
+    // The first of the owner's five matches: `(foobar){e}` answers (0,6) on "xirefoabralfobarxie"
+    // with six substitutions, one per character (tools/probes/s75-stacked-deletions.py and .cs,
+    // 2026-09-20). One run per character drew six `s` letters in a row under one word.
+    const result = segments('xirefoabralfobarxie', [
+        { index: 0, length: 6, edits: { substitutions: [0, 1, 2, 3, 4, 5], insertions: [], deletions: [] } },
+    ]);
+
+    expect(runs(result)).toBe('sub*6:xirefo');
+});
+
+test('errors of different kinds side by side stay separate runs', () => {
+    // Grouping is by kind, so a substitution next to an insertion is still two marks: they are two
+    // colours, two underlines and two letters, and merging them would say the wrong thing.
+    const result = segments('xfoobat', [
+        { index: 0, length: 6, edits: { substitutions: [0], insertions: [1], deletions: [6] } },
+    ]);
+
+    expect(runs(result)).toBe('sub:x|ins:f|-:ooba|del:');
+});
+
+test('a gap breaks a run of one kind in two', () => {
+    // "ab" and "cd" are both substituted, with a character missing between them. The gap is drawn
+    // between the two, so the run cannot span it and each half keeps its own letter.
+    const result = segments('abcd', [
+        { index: 0, length: 4, edits: { substitutions: [0, 1, 2, 3], insertions: [], deletions: [2] } },
+    ]);
+
+    expect(runs(result)).toBe('sub*2:ab|del:|sub*2:cd');
+});
+
+test("the owner's stacked deletions become one counted gap and an empty match keeps its own", () => {
+    // `(foobar){e}` against "xirefoabralfobarxie", the last two of its five matches. Upstream
+    // answers (18,19) with 1 substitution and 5 deletions, then an empty (19,19) with 6, and this
+    // port answers the same spans and counts; the deletion positions below are what DemoEngine
+    // hands the page, un-shifted back into the subject. Both halves measured 2026-09-20 by
+    // tools/probes/s75-stacked-deletions.py (regex 2026.9.10) and tools/probes/s75-stacked-deletions.cs.
+    //
+    // Drawn one mark per deletion this was eleven `d` letters on top of each other at one
+    // x-position, which is what the owner saw.
+    const result = segments('xirefoabralfobarxie', [
+        { index: 18, length: 1, edits: { substitutions: [18], insertions: [], deletions: [19, 19, 19, 19, 19] } },
+        {
+            index: 19,
+            length: 0,
+            edits: { substitutions: [], insertions: [], deletions: [19, 19, 19, 19, 19, 19] },
+        },
+    ]);
+
+    expect(runs(result)).toBe('sub:e|del*5: del*6:');
 });
 
 test('an exact match has no breakdown at all', () => {

@@ -26,8 +26,8 @@ internal sealed class PatternCache
 {
     /// <summary>
     /// The bound a new cache starts at. Fifteen, because <c>Regex.CacheSize</c> is fifteen -
-    /// measured on .NET 10.0.10 by <c>tools/probes/bcl-regex-cachesize.ps1</c> (2026-09-19),
-    /// not read off a documentation page.
+    /// measured on .NET 10.0.10 by <c>tools/probes/bcl-regex-cachesize.ps1</c> (2026-09-19)
+    /// rather than read off a documentation page.
     /// </summary>
     internal const int DefaultSize = 15;
 

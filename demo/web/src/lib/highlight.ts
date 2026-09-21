@@ -24,6 +24,25 @@ export type EditKind = 'sub' | 'ins' | 'del';
 export interface EditRun {
     readonly text: string;
     readonly kind: EditKind | null;
+    /**
+     * How many errors of this kind the run stands for: the characters it covers on a `sub` or `ins`
+     * run, and the characters missing from one place on a `del` run. 1 on plain text.
+     *
+     * Both cases are the same fact - one mark for neighbouring errors of one kind - and only the
+     * deletion draws the number. `(foobar){e}` ends with a match missing five characters and an
+     * empty match missing six; a mark each put those five on top of each other, 3 px of dashed
+     * border apart with their letters overlapping, and the gap has no characters of its own to show
+     * how wide the hole is. A run of six substitutions does (S75).
+     */
+    readonly count: number;
+    /**
+     * Where the run starts in the subject, in UTF-16 code units, as the engine counts.
+     *
+     * The page names the position when a pointer rests on a mark, and a `del` run is the one that
+     * needs saying: the gap is drawn between two characters and stands for characters that are not
+     * there at all, so "deletion before index 6" is the only way to read it off the page.
+     */
+    readonly index: number;
 }
 
 /** One run of the subject as the page paints it. `match` is null for the text between matches. */
@@ -149,16 +168,38 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
     const runs: EditRun[] = [];
     let plainFrom = start;
     const flush = (upto: number): void => {
-        if (upto > plainFrom) runs.push({ text: subject.slice(plainFrom, upto), kind: null });
+        if (upto > plainFrom) {
+            runs.push({ text: subject.slice(plainFrom, upto), kind: null, count: 1, index: plainFrom });
+        }
         plainFrom = upto;
     };
 
+    // ONE run for neighbouring errors of the same kind, carrying how many characters it covers.
+    // The letter marks the run, so a character each drew six `s` letters in a row under the owner's
+    // first match, where the six characters are one substituted word (S75, spec line 40).
+    let openFrom = start;
+    let openKind: EditKind | null = null;
+    let openCount = 0;
+    const close = (upto: number): void => {
+        if (openKind === null) return;
+        runs.push({ text: subject.slice(openFrom, upto), kind: openKind, count: openCount, index: openFrom });
+        plainFrom = upto;
+        openKind = null;
+        openCount = 0;
+    };
+
     for (let at = start; at <= end; ) {
-        // One mark per deletion, because two characters missing from one place is twice the story
-        // one is, and the chip beside the match counts them the same way.
-        for (let i = carets.get(at) ?? 0; i > 0; i--) {
+        // ONE mark for all the deletions in one place, carrying how many there are. Two characters
+        // missing from one place is still twice the story one is, which is why the count is drawn;
+        // what it is not is two marks, because a deletion has no width of its own to separate them
+        // by and five of them landed on one x-position (S75, the owner's `(foobar){e}` case).
+        const missing = carets.get(at) ?? 0;
+        if (missing > 0) {
+            // A gap is drawn between the characters either side of it, so a run of one kind cannot
+            // span it: the two halves are two marks with a hole between them.
+            close(at);
             flush(at);
-            runs.push({ text: '', kind: 'del' });
+            runs.push({ text: '', kind: 'del', count: missing, index: at });
         }
 
         if (at === end) break;
@@ -167,15 +208,22 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
         // Never past the end of the match: a pair whose second half is outside the span would take
         // the run with it, and the segment after this one paints that half again.
         const upto = Math.min(at + widthOfCharacter(subject, at), end);
-        if (kind !== undefined) {
-            flush(at);
-            runs.push({ text: subject.slice(at, upto), kind });
-            plainFrom = upto;
+        if (kind === undefined) {
+            close(at);
+        } else {
+            if (kind !== openKind) {
+                close(at);
+                flush(at);
+                openFrom = at;
+                openKind = kind;
+            }
+            openCount += 1;
         }
 
         at = upto;
     }
 
+    close(end);
     flush(end);
     return runs;
 }
@@ -187,7 +235,7 @@ function editRuns(subject: string, start: number, end: number, edits: Edits): re
  * Slicing there puts a lone surrogate in a text node, which a browser paints as U+FFFD - the demo
  * corrupting the subject it exists to show.
  */
-function startOfCharacter(subject: string, at: number): number {
+export function startOfCharacter(subject: string, at: number): number {
     const code = subject.charCodeAt(at);
     const before = at > 0 ? subject.charCodeAt(at - 1) : 0;
     const low = code >= 0xdc00 && code <= 0xdfff;

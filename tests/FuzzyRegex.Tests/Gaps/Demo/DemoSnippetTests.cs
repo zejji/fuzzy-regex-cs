@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using AwesomeAssertions.Execution;
 using Fuzzy.Text.RegularExpressions.Tests.Conventions;
 using FuzzyRegexDemo.Wasm;
 
@@ -92,6 +93,198 @@ public sealed class DemoSnippetTests
             .Order(StringComparer.Ordinal)
             .Should()
             .Equal(Enum.GetNames<FuzzyRegexOptions>().Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Every name from this library that the snippet prints is the name the library actually uses.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The generator writes C# as text, so each type and member it names is a string literal in
+    /// TypeScript, which has no <c>nameof</c>. Rename <c>EnumerateMatches</c> in the library and
+    /// nothing goes red: the page keeps working, the panel keeps printing, and the code it hands a
+    /// visitor does not compile. Two of these were pinned before S75 - the flag names and the
+    /// timeout - and the other sixteen were not.
+    /// </para>
+    /// <para>
+    /// The expectations are built with <c>nameof</c> and reflection, never typed out, so a rename
+    /// that reaches the library breaks this file at COMPILE time rather than at assertion time: a
+    /// <c>nameof</c> naming a member that no longer exists is an error, which is the property the
+    /// owner asked for. <c>partial</c> is read from the method's own
+    /// <see cref="System.Reflection.ParameterInfo"/>, because an argument name is not a member and
+    /// <c>nameof</c> cannot reach it.
+    /// </para>
+    /// </remarks>
+    [Test]
+    public void The_snippet_names_the_library_the_library_names_itself()
+    {
+        Problems(SnippetApi()).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The pin above fails when a name in the record is wrong, which is the only thing that makes it
+    /// worth having.
+    /// </summary>
+    /// <remarks>
+    /// The doctored record is a COPY, per the slice's instruction: editing <c>snippet.ts</c> to prove
+    /// the point would leave the repository one forgotten undo away from shipping the defect. The
+    /// second case is the one a smaller test would miss - a key removed from the record is a name the
+    /// template prints and nobody checks.
+    /// </remarks>
+    [Test]
+    public void The_pin_fails_when_a_name_in_the_record_is_wrong()
+    {
+        Dictionary<string, string> doctored = new(SnippetApi(), StringComparer.Ordinal)
+        {
+            ["enumerateMatches"] = "EnumerateAllMatches",
+        };
+
+        using (new AssertionScope())
+        {
+            Problems(doctored).Should().ContainSingle().Which.Should().Contain("enumerateMatches");
+
+            Dictionary<string, string> shortened = new(SnippetApi(), StringComparer.Ordinal);
+            shortened.Remove("deletions");
+            Problems(shortened).Should().ContainSingle().Which.Should().Contain("deletions");
+        }
+    }
+
+    /// <summary>
+    /// Every way the record and the real API disagree, one sentence each. A method rather than an
+    /// assertion so that the test above can hand it a record with a fault in it.
+    /// </summary>
+    private static List<string> Problems(IReadOnlyDictionary<string, string> record)
+    {
+        Dictionary<string, string> expectations = Expected();
+        List<string> problems = [];
+
+        foreach ((string key, string expected) in expectations)
+        {
+            if (!record.TryGetValue(key, out string? printed))
+            {
+                problems.Add($"CSHARP_API has no '{key}'; the snippet prints '{expected}' with nothing pinning it");
+            }
+            else if (!string.Equals(printed, expected, StringComparison.Ordinal))
+            {
+                problems.Add($"CSHARP_API.{key} is '{printed}' and the library calls it '{expected}'");
+            }
+        }
+
+        // The other direction: an entry nobody checks is an entry that can say anything at all.
+        problems.AddRange(
+            record
+                .Keys.Where(key => !expectations.ContainsKey(key))
+                .Select(static key => $"CSHARP_API.{key} names nothing this test knows how to check")
+        );
+
+        return problems;
+    }
+
+    /// <summary>
+    /// What each entry of <c>CSHARP_API</c> has to be, from the library itself.
+    /// </summary>
+    /// <remarks>
+    /// The keys are roles rather than spellings: <c>matchType</c> and <c>matchMethod</c> are the same
+    /// word today, and a rename could move one without the other.
+    /// </remarks>
+    private static Dictionary<string, string> Expected() =>
+        new(StringComparer.Ordinal)
+        {
+            ["packageId"] = PackageId(),
+            ["namespace"] = typeof(FuzzyRegex).Namespace!,
+            ["regexType"] = nameof(FuzzyRegex),
+            ["optionsType"] = nameof(FuzzyRegexOptions),
+            // Fully qualified: `using System.Text.RegularExpressions` is in force here and both
+            // namespaces have a Match, so a bare `nameof(Match)` does not compile.
+            ["matchType"] = nameof(Fuzzy.Text.RegularExpressions.Match),
+            ["countsType"] = nameof(FuzzyCounts),
+            ["enumerateMatches"] = nameof(FuzzyRegex.EnumerateMatches),
+            ["matchMethod"] = nameof(FuzzyRegex.Match),
+            ["replace"] = nameof(FuzzyRegex.Replace),
+            ["partialParameter"] = PartialParameterName(),
+            ["success"] = nameof(Fuzzy.Text.RegularExpressions.Match.Success),
+            ["index"] = nameof(Fuzzy.Text.RegularExpressions.Match.Index),
+            ["length"] = nameof(Fuzzy.Text.RegularExpressions.Match.Length),
+            ["partialMatch"] = nameof(Fuzzy.Text.RegularExpressions.Match.PartialMatch),
+            ["fuzzyCounts"] = nameof(Fuzzy.Text.RegularExpressions.Match.FuzzyCounts),
+            ["substitutions"] = nameof(FuzzyCounts.Substitutions),
+            ["insertions"] = nameof(FuzzyCounts.Insertions),
+            ["deletions"] = nameof(FuzzyCounts.Deletions),
+        };
+
+    /// <summary>
+    /// The name of the <c>bool</c> argument the snippet passes by name to the instance
+    /// <c>FuzzyRegex.Match</c>.
+    /// </summary>
+    /// <remarks>
+    /// A named argument is the one thing here that <c>nameof</c> cannot see: renaming a parameter
+    /// keeps the library compiling and breaks every caller that named it, the snippet included. The
+    /// method has exactly one <c>bool</c> parameter, and that is asserted rather than assumed.
+    /// </remarks>
+    private static string PartialParameterName()
+    {
+        System.Reflection.ParameterInfo[] flags =
+        [
+            .. typeof(FuzzyRegex)
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Where(static method => string.Equals(method.Name, nameof(FuzzyRegex.Match), StringComparison.Ordinal))
+                .SelectMany(static method => method.GetParameters())
+                .Where(static parameter => parameter.ParameterType == typeof(bool)),
+        ];
+
+        flags.Should().ContainSingle("the snippet passes exactly one bool by name to the instance Match");
+        return flags[0].Name!;
+    }
+
+    /// <summary>The NuGet package the snippet's first line tells a visitor to install.</summary>
+    private static string PackageId()
+    {
+        System.Text.RegularExpressions.Match declared = Regex.Match(
+            RepoFile("src/FuzzyRegex/FuzzyRegex.csproj"),
+            @"<PackageId>(?<id>[^<]+)</PackageId>",
+            RegexOptions.None,
+            TimeSpan.FromSeconds(5)
+        );
+
+        declared.Success.Should().BeTrue("the project must declare a PackageId for the snippet to name");
+        return declared.Groups["id"].Value;
+    }
+
+    /// <summary>
+    /// The <c>CSHARP_API</c> record in <c>snippet.ts</c>, read as text.
+    /// </summary>
+    /// <remarks>
+    /// One entry per line, <c>key: 'value',</c>, so a <c>//</c> comment line inside the record is
+    /// skipped by not matching rather than by being stripped.
+    /// </remarks>
+    private static Dictionary<string, string> SnippetApi()
+    {
+        System.Text.RegularExpressions.Match record = Regex.Match(
+            WebSource("lib/snippet.ts"),
+            @"export const CSHARP_API = \{(?<body>.*?)\n\} as const;",
+            RegexOptions.Singleline,
+            TimeSpan.FromSeconds(5)
+        );
+
+        record.Success.Should().BeTrue("snippet.ts must declare CSHARP_API as a literal record");
+
+        Dictionary<string, string> read = Regex
+            .Matches(
+                record.Groups["body"].Value,
+                @"(?m)^\s{4}(?<key>[A-Za-z]+):\s*'(?<value>[^']*)',",
+                RegexOptions.None,
+                TimeSpan.FromSeconds(5)
+            )
+            .ToDictionary(
+                static entry => entry.Groups["key"].Value,
+                static entry => entry.Groups["value"].Value,
+                StringComparer.Ordinal
+            );
+
+        // The guard on the extraction: a regex that matched nothing would make every assertion above
+        // pass by finding no disagreement at all.
+        read.Should().NotBeEmpty("the record has entries and this is how they are read");
+        return read;
     }
 
     /// <summary>

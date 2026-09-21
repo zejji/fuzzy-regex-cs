@@ -47,19 +47,27 @@ $repo = Split-Path -Parent $PSScriptRoot
 if (-not $Comparison) { $Comparison = Join-Path $repo 'docs/COMPARISON.md' }
 if (-not $Destination) { $Destination = Join-Path $repo 'demo/FuzzyRegex.Demo.Wasm/wwwroot/help.json' }
 
-# The map from a sample's feature key to the sections of COMPARISON.md that explain it. This is the
-# whole contract between the documentation and the demo: every key `examples.json` uses appears
-# here, and every heading here must exist in COMPARISON.md or the build stops.
+# The map from a feature key to the sections of COMPARISON.md that explain it. This is the whole
+# contract between the documentation and the demo: every key `examples.json` uses appears here,
+# every key the heading notes link to appears here, and every heading here must exist in
+# COMPARISON.md or the build stops.
 #
 # A key may name several headings - "fuzzy" is three, because the three budget forms are three
 # sections there - and they are rendered in the order written here.
+#
+# The last two are opened by a heading note rather than by a sample (S75, item 2): the Subject note
+# points at the UTF-16 rule and the Flags note at the version default. `help-notes.ts` holds the
+# other side of that link, and BuildDemoHelp.Tests.ps1 compares the two lists with this one.
 $map = [ordered]@{
     fuzzy        = @(
         '### `{e<=n}`: allow up to `n` errors of any kind',
         '### `{s,i,d,e}`: separate budgets per kind of error',
         '### Cost forms: `{Ni+Md<n}` weights errors instead of just counting them'
     )
-    bestmatch    = @('### `FuzzyRegexOptions.BestMatch` / `(?b)`: rank by the best fuzzy match, not the first')
+    # Its own key rather than a fourth heading under `fuzzy`, because the sample that uses it is
+    # about the test set alone (S75, item 3) and the help tab should open on that one section.
+    'fuzzy-test-set' = @('### `{e<=n:[set]}`: constrain which characters an edit may touch')
+    bestmatch    = @('### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first')
     enhancematch = @('### `FuzzyRegexOptions.EnhanceMatch` / `(?e)`: tighten a match after it is found')
     namedlists   = @('### `\L<name>`: fuzzy matching against a named list of words')
     posix        = @('### `FuzzyRegexOptions.Posix` / `(?p)`: leftmost-longest instead of leftmost-first')
@@ -67,6 +75,8 @@ $map = [ordered]@{
     reverse      = @('### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right')
     replace      = @('### Replacement templates speak upstream''s language')
     timeout      = @('### A per-call `timeout` on every input-dependent method')
+    indices      = @('### **Indices are UTF-16 code units**, where upstream counts codepoints')
+    version      = @('### Version 1 is the default')
 }
 
 if (-not (Test-Path -LiteralPath $Comparison)) {

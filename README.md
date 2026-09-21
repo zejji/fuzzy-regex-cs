@@ -76,7 +76,7 @@ Console.WriteLine($"{substitutions} substitution(s), {insertions} insertion(s), 
 ### Enumerating matches with a timeout
 
 `EnumerateMatches` finds matches lazily, one at a time, so an early exit does not pay for the
-whole subject. Its `timeout` bounds each step, not the whole walk; see the divergence "A per-call
+whole subject. Its `timeout` bounds each step rather than the whole walk; see the divergence "A per-call
 `timeout` on every input-dependent method" in [`docs/DIVERGENCES.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/DIVERGENCES.md).
 
 ```csharp
@@ -105,11 +105,11 @@ foreach (Match match in regex.EnumerateMatches("one two three", timeout: TimeSpa
 
 ## Coming from `System.Text.RegularExpressions`
 
-- **`Match` means a search, not an anchored match.** Upstream's anchored `match` is
-  `MatchAtStart`, and `fullmatch` is `FullMatch`. See "`Match` means upstream's `search`;
-  upstream's anchored `match` is `MatchAtStart`" in `docs/DIVERGENCES.md`.
-- **Replacement templates use `\1`, not `$1`.** See "Replacement templates speak upstream's
-  language" in `docs/DIVERGENCES.md`.
+- **`Match` searches the whole subject.** Upstream's anchored `match` is `MatchAtStart`, and
+  `fullmatch` is `FullMatch`. See "`Match` means upstream's `search`; upstream's anchored `match`
+  is `MatchAtStart`" in `docs/DIVERGENCES.md`.
+- **Replacement templates use `\1` where .NET uses `$1`.** See "Replacement templates speak
+  upstream's language" in `docs/DIVERGENCES.md`.
 - **`Split` returns `string?[]` with a `null` entry where a capturing group did not take
   part**, rather than omitting the entry as the built-in `Regex.Split` does. See "`Split` returns
   `string?[]` and puts `null` where a capturing group did not take part" in
@@ -130,7 +130,7 @@ the reason to use it over `System.Text.RegularExpressions`:
 - **nested sets and set operations** - `[[a-z]--[aeiou]]` is "a to z except the vowels", where
   `System.Text.RegularExpressions` offers subtraction alone (`[a-z-[aeiou]]`);
 - **full Unicode case-folding** under `IgnoreCase`, so `ß` matches `SS` and `ﬁ` matches `fi`.
-  `System.Text.RegularExpressions` folds simply and matches neither.
+  `System.Text.RegularExpressions` applies simple case folding and matches neither.
 
 Pass `FuzzyRegexOptions.Version0`, or write `(?V0)` at the start of the pattern, to get the `re`
 and `Regex` reading back. The only pattern that changes meaning is an unescaped `[` inside a set:

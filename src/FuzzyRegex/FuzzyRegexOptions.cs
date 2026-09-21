@@ -15,7 +15,7 @@ namespace Fuzzy.Text.RegularExpressions;
 /// Where a .NET name and an upstream name exist for the same behaviour, the .NET name is used
 /// and the upstream spelling is given here, so a <c>System.Text.RegularExpressions</c> user needs
 /// no new vocabulary. Upstream flags this port does not expose - <c>LOCALE</c>, <c>DEBUG</c> and
-/// <c>TEMPLATE</c> - are simply absent rather than present and ignored. <c>LOCALE</c> can still be
+/// <c>TEMPLATE</c> - are absent rather than present and ignored. <c>LOCALE</c> can still be
 /// set from inside a pattern, as <c>(?L)</c>; it is left out here because it asks for the C
 /// library's current locale, which .NET has no equivalent of and which no oracle row could pin.
 /// </para>
@@ -64,7 +64,7 @@ public enum FuzzyRegexOptions
     /// <b>Already on.</b> Upstream's <c>_main._compile</c> ORs it into every text pattern that
     /// names no encoding (<c>upstream/regex/_main.py</c> lines 570-574), so this port does too and
     /// <see cref="FuzzyRegex.Options"/> reports it on every pattern. It is exposed so that a
-    /// caller can say so explicitly and read it back, not because passing it changes anything.
+    /// caller can say so explicitly and read it back; passing it changes nothing.
     /// Combining it with <see cref="Ascii"/> is rejected, as upstream rejects it.
     /// </remarks>
     Unicode = 0x20,
@@ -102,7 +102,7 @@ public enum FuzzyRegexOptions
     /// </summary>
     /// <remarks>
     /// The rules join a word across an apostrophe and across other characters a simple
-    /// <c>\w</c> test would break on, so this changes what matches, not just how fast.
+    /// <c>\w</c> test would break on, so the set of matches changes.
     /// Measured against <c>regex</c> 2026.9.10 on 2026-09-16:
     /// <c>regex.findall(r'\b\w+\b', "can't", regex.WORD)</c> is <c>[]</c> where the same call
     /// without the flag is <c>['can', 't']</c> - UAX #29 keeps <c>can't</c> whole, so no boundary

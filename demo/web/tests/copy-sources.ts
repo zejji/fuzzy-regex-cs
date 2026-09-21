@@ -5,18 +5,22 @@
  * after the rewrite is measured over exactly the strings the linter checks. Two extractions would
  * be two different answers to "how many words does this page ask a visitor to read".
  *
+ * `SOURCES` is the page. `DOC_SOURCES` is the documentation a reader arriving from the page reads
+ * next, added in S75: the same rules, because the rules are about how prose reads and not about
+ * where it is shown. They are two records rather than one so that `wordCount` can stay a count of
+ * what the PAGE asks of a visitor.
+ *
  * Out of scope on purpose:
- *   - the help panels' prose, which `tools/build-demo-help.ps1` lifts out of `docs/COMPARISON.md`.
- *     That is Phase 8's file and is fixed there.
- *   - `demo/README.md`, and every other document in the repository. A visitor to the page never
- *     reads them, the word count is a count of what the page asks of a visitor, and linting prose
- *     written for maintainers under interface-copy rules would ban the words that belong in it
- *     ("deploy", "key difference").
+ *   - `docs/plan/`, which is the port's working notes, written for whoever is running the port.
+ *   - `demo/README.md` and the other build instructions, for the same reason.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { budgetNote } from '../src/lib/budget';
 import { FLAG_HELP, RADIO_GROUPS, summaryText } from '../src/lib/flags';
+import { HEADING_NOTES } from '../src/lib/help-notes';
 
 const read = (relative: string): string =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
@@ -184,6 +188,27 @@ export const SOURCES: Record<string, Copy[]> = {
         ...RADIO_GROUPS.map((group) => ({ where: `flags.ts ${group.name} legend`, text: group.legend })),
         { where: 'flags.ts summary row', text: summaryText(new Set()) },
     ],
+    // The six heading notes: the sentence, the words on the press that opens the help tab, and the
+    // button's own name, which only a screen reader ever hears. Imported rather than scanned for the
+    // reason flags.ts is - and for a second one: the sentences hold backslashes (`\L<name>`, `\1`),
+    // which the literal scan would read through its own escape rule.
+    'help-notes.ts': HEADING_NOTES.flatMap((note) => [
+        { where: `help-notes.ts ${note.id}`, text: note.note },
+        { where: `help-notes.ts ${note.id} link`, text: note.linkText },
+        { where: `help-notes.ts ${note.id} label`, text: note.label },
+    ]),
+    // The line under the pattern when a fuzzy budget has no bound. Assembled per letter rather than
+    // scanned, because the sentence is built from two halves and a spec the pattern supplies, and
+    // what a visitor reads is the whole of it.
+    'budget.ts': [
+        ...(['e', 's', 'i', 'd'] as const).map((letter) => ({
+            where: `budget.ts {${letter}}`,
+            text: budgetNote({ spec: `{${letter}}`, letters: [letter] }),
+        })),
+        // The sentence a budget with more than one unbounded kind gets, which is worded differently
+        // enough - a list of kinds, and "two of each" - to be read on its own.
+        { where: 'budget.ts {s,i,d}', text: budgetNote({ spec: '{s,i,d}', letters: ['s', 'i', 'd'] }) },
+    ],
     // The engine's own refusals - the caps, the timeout, the named-list errors - arrive as
     // `answer.error` and land in that same paragraph. Linting the C# keeps the whole channel
     // covered: a message a visitor reads is copy wherever it is written.
@@ -204,6 +229,208 @@ export const SOURCES: Record<string, Copy[]> = {
         (match) => ({ where: 'tools/build-demo-help.ps1', text: match[1] ?? '' }),
     ),
 };
+
+/**
+ * A markdown document as the blocks a reader reads, one `Copy` per block, each naming its line.
+ *
+ * What is dropped, and why: a fenced code block is code, a table cell is a field and not a sentence
+ * (a column of `100.0%` has no prose in it to lint), and inline code is an identifier a rule would
+ * otherwise read as a word. An HTML comment is a note to whoever maintains the file.
+ *
+ * What is kept is every heading, paragraph, list item and quoted line, separately, so a failure
+ * names one sentence and one line rather than a whole section. A heading is a block of its own
+ * because "Why a budget?" reads to a reader exactly as it would in the page's own copy.
+ */
+export function docParagraphs(source: string, where: string): Copy[] {
+    const found: Copy[] = [];
+    const lines = source.replace(/<!--[\s\S]*?-->/g, '').split('\n');
+
+    let block: string[] = [];
+    let line = 0;
+    let fence = '';
+
+    const flush = (): void => {
+        // One word is enough here, where a script literal needs two: a markdown block is prose by
+        // construction, so a one-word heading ("Install", or "Seamless") is copy and not an
+        // identifier the scan has to tell a sentence from.
+        const text = inlineProse(block.join(' '));
+        if (isProse(text)) found.push({ where: `${where}:${line}`, text });
+        block = [];
+    };
+
+    for (const [index, raw] of lines.entries()) {
+        const number = index + 1;
+
+        const fenced = /^\s*(```|~~~)/.exec(raw)?.[1];
+        if (fenced !== undefined) {
+            if (fence === '') {
+                flush();
+                fence = fenced;
+            } else if (raw.trimStart().startsWith(fence)) {
+                fence = '';
+            }
+            continue;
+        }
+        if (fence !== '') continue;
+
+        // A table row, and the `|---|---:|` rule under it. Both start with a pipe in every table in
+        // these files, which is enough: markdown allows a row without one and none is written here.
+        if (/^\s*\|/.test(raw)) {
+            flush();
+            continue;
+        }
+
+        if (raw.trim() === '') {
+            flush();
+            continue;
+        }
+
+        // A heading, a list item or a quoted line each start their own block. Continuation lines of
+        // a list item are indented and simply join the block they are inside.
+        const opener = /^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/.exec(raw)?.[0];
+        if (opener !== undefined) {
+            flush();
+            line = number;
+            block.push(raw.slice(opener.length));
+            continue;
+        }
+
+        if (block.length === 0) line = number;
+        block.push(raw);
+    }
+    flush();
+    return found;
+}
+
+/**
+ * One markdown block as its words: code spans, markup and link targets taken out.
+ *
+ * The link text stays and its URL goes, because the words are what a reader reads. A code span
+ * becomes a space rather than nothing, so that `` `Match` `` between two words does not join them.
+ */
+const inlineProse = (text: string): string =>
+    tidy(
+        text
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+            .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+            .replace(/<https?:[^>]*>/g, ' ')
+            .replace(/`{1,3}[^`]*`{1,3}/g, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\*\*/g, ''),
+    );
+
+/**
+ * The library's own XML doc comments as the paragraphs a reader reads, one `Copy` per paragraph.
+ *
+ * The same shape as `docParagraphs`, in the other markup. A `<code>` sample is a code block, a
+ * `<c>` span and a `<see cref="..."/>` are inline code, and every other tag - `<summary>`,
+ * `<para>`, `<param>`, `<item>` - is a paragraph boundary, so splitting on what is left of the
+ * tags gives one piece per prose region. `<b>` and `<i>` keep their words, as `**` does in
+ * markdown.
+ *
+ * These reach a reader through IntelliSense and the generated API reference, which is where a
+ * .NET caller meets this library's words at all.
+ */
+export function docComments(source: string, where: string): Copy[] {
+    const found: Copy[] = [];
+    const lines = source.split('\n');
+
+    let block: string[] = [];
+    let line = 0;
+
+    // Blanked rather than dropped, so that every remaining character keeps its line: a doc comment
+    // on a 400-line file is only findable if the failure names the paragraph's own line.
+    const blank = (match: string): string => match.replace(/[^\n]/g, ' ');
+
+    const flush = (): void => {
+        const xml = block
+            .join('\n')
+            .replace(/<code>[\s\S]*?<\/code>/g, blank)
+            .replace(/<c>[\s\S]*?<\/c>/g, blank)
+            .replace(/<(?:see|seealso|paramref|typeparamref)\b[^>]*\/?>/g, blank)
+            .replace(/<\/(?:see|seealso)>/g, blank)
+            .replace(/<\/?(?:b|i|em|strong)>/g, blank);
+
+        // Cut at each tag, keeping where the cut was, rather than `split`: the offset is what turns
+        // a paragraph into a line number.
+        const pieces: { readonly at: number; readonly text: string }[] = [];
+        let cursor = 0;
+        for (const tag of xml.matchAll(/<[^>]+>/g)) {
+            pieces.push({ at: cursor, text: xml.slice(cursor, tag.index) });
+            cursor = tag.index + tag[0].length;
+        }
+        pieces.push({ at: cursor, text: xml.slice(cursor) });
+
+        for (const piece of pieces) {
+            const text = tidy(piece.text)
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&amp;/g, '&');
+            // Two words, where a markdown block needs one: splitting on tags leaves fragments, and
+            // a lone word is markup residue rather than a sentence somebody wrote.
+            if (!isProse(text, 2)) continue;
+
+            // The blank lines the piece opens with belong to the tag before it, so the paragraph
+            // starts at its first word.
+            const before = xml.slice(0, piece.at + (/\S/.exec(piece.text)?.index ?? 0));
+            found.push({ where: `${where}:${line + (before.match(/\n/g)?.length ?? 0)}`, text });
+        }
+        block = [];
+    };
+
+    for (const [index, raw] of lines.entries()) {
+        const doc = /^\s*\/\/\/ ?(.*)$/.exec(raw);
+        if (doc === null) {
+            flush();
+            continue;
+        }
+        if (block.length === 0) line = index + 1;
+        block.push(doc[1] ?? '');
+    }
+    flush();
+    return found;
+}
+
+/**
+ * The documents a reader of the library reads: the front page and the six reference pages.
+ *
+ * Not `docs/plan/`. That is the port's own working notes - slice specs, decisions, the roadmap -
+ * written for whoever is running the port, and holding it to copy written for readers of the
+ * library would be linting a different thing for a different audience.
+ *
+ * `docs/STATUS.md` is generated by `New-StatusReport` in `tools/PortTools.psm1`, so a rule firing
+ * on it is fixed in that function and not in the file.
+ */
+export const DOC_SOURCES: Record<string, Copy[]> = Object.fromEntries(
+    [
+        'README.md',
+        'docs/COMPARISON.md',
+        'docs/DIVERGENCES.md',
+        'docs/ORACLE-INVARIANTS.md',
+        'docs/PORTMAP.md',
+        'docs/STATUS.md',
+        'docs/VERIFICATION.md',
+    ].map((path) => [path, docParagraphs(read(`../../../${path}`), path)] as const),
+);
+
+/**
+ * The public API's doc comments, by the file holding them.
+ *
+ * The files at the root of `src/FuzzyRegex` and no deeper: that is the public surface, where
+ * `Parsing/`, `Engine/` and `Unicode/` are the port's internals and are written to mirror
+ * upstream's own comments. Read from the directory rather than listed, so a public type added
+ * tomorrow is linted without anybody remembering to add it here.
+ */
+export const API_SOURCES: Record<string, Copy[]> = Object.fromEntries(
+    // `import.meta.dirname` rather than `new URL(..., import.meta.url)`: Vite reads that second
+    // form, with a literal path, as an asset reference and rewrites it, which leaves
+    // `fileURLToPath` with "The URL must be of scheme file". `read` escapes it only because its
+    // path is a parameter.
+    readdirSync(join(import.meta.dirname, '../../../src/FuzzyRegex'))
+        .filter((name) => name.endsWith('.cs'))
+        .map((name) => [name, docComments(read(`../../../src/FuzzyRegex/${name}`), name)] as const),
+);
 
 /** Words a visitor is asked to read, counted over the same strings the linter checks. */
 export const wordCount = (): Record<string, number> => {

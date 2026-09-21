@@ -313,11 +313,11 @@ public sealed class FuzzyRegex
     /// encoding, because upstream puts it there.
     /// </para>
     /// <para>
-    /// <b>Version 1 is the default</b>. A plain pattern that names neither version reports
+    /// <b>Version 1 is the default</b>. A plain pattern that names neither version still reports
     /// <see cref="FuzzyRegexOptions.Version1"/> plus <see cref="FuzzyRegexOptions.FullCase"/>
-    /// here, not nothing: <c>new FuzzyRegex("a").Options</c> is
-    /// <c>Version1 | FullCase | Unicode</c>, because the version-implied defaults are folded
-    /// into the compiled flags rather than kept as a separate, unreported field.
+    /// here: <c>new FuzzyRegex("a").Options</c> is <c>Version1 | FullCase | Unicode</c>, because
+    /// the version-implied defaults are folded into the compiled flags rather than kept as a
+    /// separate, unreported field.
     /// </para>
     /// </remarks>
     public FuzzyRegexOptions Options => (FuzzyRegexOptions)(_compiled.Flags & ~_unexposedFlags);
@@ -325,7 +325,7 @@ public sealed class FuzzyRegex
     /// <summary>
     /// The named lists this instance was compiled with, keyed by name. Upstream
     /// <c>Pattern.named_lists</c>, which returns each list as a <c>frozenset</c>; the values here
-    /// are therefore sets, not the caller's original ordering.
+    /// are therefore sets, which drop the caller's original ordering.
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlySet<string>> NamedLists => _compiled.NamedLists;
 
@@ -346,11 +346,11 @@ public sealed class FuzzyRegex
     /// about 500 GB at 250 bytes each, so it is already further than any process can go.
     /// </para>
     /// <para>
-    /// <b>Nodes created, not nodes kept.</b> The optimiser prunes unreachable nodes once the graph
-    /// is built, and for a counted repeat that is about half of them - <c>(a{100}){100}</c> creates
-    /// 20,913 nodes and keeps 10,509 - so a graph the budget refuses may be smaller than the budget
-    /// once finished. Created is the number worth bounding, because the memory is spent before the
-    /// pruning runs.
+    /// <b>The count is of nodes created, before pruning.</b> The optimiser prunes unreachable
+    /// nodes once the graph is built, and for a counted repeat that is about half of them -
+    /// <c>(a{100}){100}</c> creates 20,913 nodes and keeps 10,509 - so a graph the budget refuses
+    /// may be smaller than the budget once finished. Created is the number worth bounding, because
+    /// the memory is spent before the pruning runs.
     /// </para>
     /// </remarks>
     public int MaxCompiledNodes { get; }
@@ -632,8 +632,8 @@ public sealed class FuzzyRegex
     /// <paramref name="cancellationToken"/> was already cancelled. Read here rather than only in
     /// the engine so that the contract holds on every path: a subject too short for the pattern
     /// never reaches the engine at all (see <see cref="Engine.Substitution.Subx"/>'s min-width
-    /// shortcut), and "a cancelled token throws unless the work happened to be trivial" is not a
-    /// contract anyone can use.
+    /// shortcut), and "a cancelled token throws unless the work happened to be trivial" is
+    /// unusable as a contract.
     /// </exception>
     private Engine.MatchLimits LimitsFor(TimeSpan? timeout, CancellationToken cancellationToken)
     {
@@ -1116,9 +1116,9 @@ public sealed class FuzzyRegex
     /// <remarks>
     /// <c>ponytail:</c> the span is copied to a string, because the engine indexes a
     /// <see cref="string"/> throughout - <c>MatchState.Text</c> is one, as upstream's subject is a
-    /// Python <c>str</c>. So this overload spares the caller a conversion and not the allocation.
-    /// Lift it by moving the engine onto <c>ReadOnlySpan&lt;char&gt;</c>, which is a Phase 7
-    /// question and touches every opcode, not this method.
+    /// Python <c>str</c>. So this overload spares the caller a conversion but still allocates.
+    /// Lift it by moving the engine onto <c>ReadOnlySpan&lt;char&gt;</c>, a Phase 7 question that
+    /// touches every opcode rather than this method.
     /// </remarks>
     public int Count(
         ReadOnlySpan<char> input,
@@ -1316,9 +1316,9 @@ public sealed class FuzzyRegex
     /// </summary>
     /// <param name="input">The subject to split.</param>
     /// <param name="maxSplits">
-    /// The most splits to make, or <c>-1</c> for no limit. This is upstream's <c>maxsplit</c>: a
-    /// count of splits, not of resulting pieces, which is what the <c>count</c> argument of
-    /// <c>Regex.Split</c> means. The names differ because the meanings do.
+    /// The most splits to make, or <c>-1</c> for no limit. This is upstream's <c>maxsplit</c>, a
+    /// count of splits, where the <c>count</c> argument of <c>Regex.Split</c> counts the resulting
+    /// pieces. The names differ because the meanings do.
     /// </param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the split when it is cancelled.</param>
@@ -1794,8 +1794,8 @@ public sealed class FuzzyRegex
     /// <summary>
     /// Replaces matches by expanding a <c>str.format</c>-style template, where <c>{0}</c> is the
     /// whole match and <c>{1}</c> is group 1. Upstream <c>regex.subf</c>. This is a different
-    /// templating language from the one <see cref="Replace(string, string, int, int, int, TimeSpan?, CancellationToken)"/> takes, not a
-    /// formatting option on it.
+    /// templating language from the one <see cref="Replace(string, string, int, int, int, TimeSpan?, CancellationToken)"/> takes,
+    /// rather than a formatting option on it.
     /// </summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="pattern">The pattern to apply.</param>
@@ -1853,10 +1853,10 @@ public sealed class FuzzyRegex
     /// </summary>
     /// <param name="input">The text to escape.</param>
     /// <param name="specialOnly">
-    /// Escape only the characters that are special in a pattern. This is the default, it is
-    /// upstream's, and it is also the behaviour closest to <c>Regex.Escape</c> - measured, not
-    /// assumed: over printable ASCII the two disagree on 5 characters of 95, against 19 of 95
-    /// for <see langword="false"/>. Pass <see langword="false"/> to escape every non-alphanumeric
+    /// Escape only the characters that are special in a pattern. This is the default and it is
+    /// upstream's. It is also the behaviour closest to <c>Regex.Escape</c>, measured over
+    /// printable ASCII: the two disagree on 5 characters of 95, against 19 of 95 for
+    /// <see langword="false"/>. Pass <see langword="false"/> to escape every non-alphanumeric
     /// character instead.
     /// </param>
     /// <param name="literalSpaces">
