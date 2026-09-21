@@ -821,6 +821,12 @@ an inline flag letter is documented nowhere. Spec:
 `docs/plan/slices/S80-a-guide-that-does-not-assume-python.md`. It touches no `src/`, so it runs in
 the `docs` worktree alongside Phase 6.
 
+**Slices waiting on a precondition live in `docs/plan/slices/blocked/` (2026-09-21).** The driver
+takes the lowest-numbered pending slice in its phase and reads only the top level of the slices
+directory, so a gated slice left beside a runnable one will be started ahead of it: a Phase 8
+driver launched for S80 began S68 instead. S68 and S69 now sit in `blocked/` with the precondition
+for each written down, and moving a file back is the human act that says it may run.
+
 **Phase 8 sliced, 2026-09-18**, from `2026-09-16-llm-friendly-docs-research.md`'s "Do" list and the
 owner's 2026-09-14 note that the user documentation is written from `DIVERGENCES.md`. Six slices,
 Sonnet unless stated: **S64** README as the complete getting-started and nupkg readme, plus
