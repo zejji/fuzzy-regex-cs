@@ -640,6 +640,82 @@ public sealed class DemoEngineContractTests
             .Contain("defined twice");
     }
 
+    /// <summary>
+    /// What the named-lists box does with commas, semicolons and spaces, which is the part its hint
+    /// never said (owner, 2026-09-21; S79).
+    /// </summary>
+    /// <remarks>
+    /// These rules were read off <c>TryParseNamedLists</c> and are now pinned, because the page is
+    /// about to describe them to a reader: a sentence in the interface is a promise, and a promise
+    /// nothing tests is one the next refactor can break silently. A word may hold a space, so
+    /// "hot dog" is one seven-character word - the rule a reader is most likely to get wrong.
+    /// </remarks>
+    [Test]
+    [Arguments("f: hot dog", "hot dog", 7)] // a space does not separate words
+    [Arguments("f: hot dog, cat", "hot dog", 7)] // and still does not when a comma is there too
+    [Arguments("f:    spaced   ", "spaced", 6)] // each word is trimmed, and so is the name's side
+    public void A_word_in_a_named_list_may_hold_a_space(string lists, string subject, int length)
+    {
+        JsonElement[] matches = [.. Matches(DemoEngine.Run(@"\L<f>", "", subject, "", "", lists))];
+
+        matches.Select(Span).Should().Equal((0, length));
+    }
+
+    /// <summary>The separators, and the first colon, as the parser reads them.</summary>
+    [Test]
+    public void A_named_list_is_split_on_commas_and_semicolons_and_on_the_first_colon_only()
+    {
+        using (new AssertionScope())
+        {
+            // The semicolon ALONE, so that dropping it from the separator list fails this and not
+            // only the mixed row below, which a comma would carry on its own.
+            Matches(DemoEngine.Run(@"\L<f>", "", "banana", "", "", "f: apple; banana"))
+                .Select(Span)
+                .Should()
+                .Equal((0, 6));
+
+            // Both separators, mixed in one line.
+            Matches(DemoEngine.Run(@"\L<f>", "", "cherry", "", "", "f: apple; banana, cherry"))
+                .Select(Span)
+                .Should()
+                .Equal((0, 6));
+
+            // The FIRST colon ends the name, so a word may contain one.
+            Matches(DemoEngine.Run(@"\L<f>", "", "a:b", "", "", "f: a:b")).Select(Span).Should().Equal((0, 3));
+
+            // Blank lines are skipped rather than refused.
+            Matches(DemoEngine.Run(@"\L<f>", "", "apple", "", "", "\n\nf: apple\n\n"))
+                .Select(Span)
+                .Should()
+                .Equal((0, 5));
+        }
+    }
+
+    /// <summary>
+    /// Names are compared ordinally, so case matters: <c>Fruit</c> and <c>fruit</c> are two lists,
+    /// and a pattern naming one does not see the other.
+    /// </summary>
+    [Test]
+    public void A_named_list_name_is_case_sensitive()
+    {
+        using (new AssertionScope())
+        {
+            // Two lists whose names differ only in case, BOTH named by the pattern: this is the
+            // row that exercises the demo's own comparer, because under a case-insensitive one the
+            // second line would collide with the first and be refused as a duplicate.
+            Matches(DemoEngine.Run(@"\L<Fruit>|\L<fruit>", "", "pear", "", "", "Fruit: apple\nfruit: pear"))
+                .Select(Span)
+                .Should()
+                .Equal((0, 4));
+
+            // And the other half of the rule: a list the pattern does not name leaves the name it
+            // does name undefined, rather than being quietly ignored.
+            Error(DemoEngine.Run(@"\L<Fruit>", "", "apple", "", "", "fruit: apple"))
+                .Should()
+                .Contain("undefined named list");
+        }
+    }
+
     [Test]
     public void An_unknown_mode_is_an_error_naming_it()
     {

@@ -61,3 +61,45 @@ carry the rest.
 - [ ] The box's hint and the heading note say what the parser does, in a reader's words.
 - [ ] `demo/web/tests/copy.test.ts` passes over the new strings, and the help build stays green.
 - [ ] Read on the published build at 1366 and 390, because both strings live in the input pane.
+
+## Closing notes (2026-09-21)
+
+**What landed.** The `{e<=n:[set]}` section now answers the question a reader with a per-kind budget
+or a cost equation actually has, and the named-lists box says what it does with commas, semicolons,
+spaces and case. Both were measured on `regex` 2026.9.10 and this port, which agreed on every row.
+
+**The set constrains two of the three kinds, not all three.** An insertion is allowed only if the
+character it brings in is in the set, a substitution only if the character it puts there is, and a
+deletion is not constrained at all - it removes a character and adds none. Measured three ways:
+`(?:a--b){i<=1,d<=2,s<=0:[a-z]}` on "ab" answers identically to the same pattern with `[a-z-]` and
+with no set at all, deleting two hyphens the set does not hold. The set's job does not change with
+the budget form: `{i<=2,d<=0,s<=0,2d+1s<4:[a-z]}` still refuses to insert a digit, though `2d+1s`
+prices no insertions.
+
+**The section's opening sentence had been wrong since it was written**, saying an edit that
+"removes" a character from the set counts against the budget. The blind review caught it as a
+contradiction with the new paragraphs rather than on its own, which is the argument for writing the
+detail down: a vague sentence cannot be contradicted, and a precise one can.
+
+**Named lists, read off `TryParseNamedLists` and now pinned:** one list per line, blank lines
+skipped; the first colon ends the name, so a word may contain one; names are compared ordinally, so
+`Fruit` and `fruit` are two lists; words are separated by a comma or a semicolon and each is
+trimmed; a space does not separate, so `hot dog` is one word of seven characters; and a list the
+pattern never names is refused rather than ignored.
+
+**Two tests were weaker than they looked, and mutation is what showed it.** The mixed
+"apple; banana, cherry" row passed with the semicolon removed from `_wordSeparators`, because the
+comma carried it; and the case-sensitivity test exercised `FuzzyRegex.ToCompilerNamedLists` rather
+than the demo's own comparer, so it passed with `DemoEngine`'s `StringComparer.Ordinal` turned to
+`OrdinalIgnoreCase`. Both are now written so that the mutant fails them: a semicolon-only row, and a
+pattern naming both `\L<Fruit>` and `\L<fruit>` over two lists. Each mutant was run and seen to fail
+the right test, and the file was restored.
+
+**Review.** One blind pass over the diff, then a second over the fixes (Opus; briefs at
+`.scratch/S79-review-brief.md` and `.scratch/S79-delta-brief.md`). The first raised five findings and
+all five reproduced: two wrong generalisations in prose I had written, one pre-existing wrong
+sentence they contradicted, and the two weak tests above.
+
+**Green at the close.** 41 documentation examples, 443 web tests, `vue-tsc` clean, the help build
+GREEN at 16 keys, ratchet GREEN at 6,508 tests against a baseline of 6,400, and the box hint and
+heading note read correctly on the published build at 1366 and 390.

@@ -165,8 +165,10 @@ Console.WriteLine(exact.Success);   // False
 
 ### `{e<=n:[set]}`: constrain which characters an edit may touch
 
-The part after the colon is a character set; only edits that add, remove or substitute a character
-from that set are allowed to count against the budget.
+The part after the colon is a character set, and it constrains the edits that put a character into
+the match: an insertion is allowed only if the character it brings in is in the set, and a
+substitution only if the character it puts there is. A deletion removes a character and adds none,
+so the set does not constrain it at all.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
@@ -176,6 +178,29 @@ Console.WriteLine(ok.Success);   // True - the inserted 'e' is in [a-z]
 
 Match rejected = FuzzyRegex.FullMatch("a-", @"(?:a){e<=1:[a-z]}");
 Console.WriteLine(rejected.Success);   // False - the inserted '-' is not in [a-z]
+```
+
+The set is the last thing inside the braces, so it follows whichever budget form is already there: a
+budget per kind of error, a cost equation, or both. `{i<=1,d<=1,s<=1:[a-z]}` and
+`{i<=1,d<=2,s<=3,2d+1s<4:[a-z]}` are both valid, and in each the set does the same job - it
+constrains insertions and substitutions, and leaves deletions alone. Which kinds the equation
+prices makes no difference to it: `{i<=2,d<=0,s<=0,2d+1s<4:[a-z]}` refuses to insert a digit,
+though `2d+1s` says nothing about insertions.
+
+Writing the set first is neither an error nor a test set. `{[a-z]:i<=1,d<=1,s<=1}` compiles here and
+upstream, and matches nothing where the correct spelling matches - measured on 2026-09-21 against
+`regex` 2026.9.10 and this port, which agree on every row here.
+
+That deletions go unconstrained is worth stating twice, because it is the rule that surprises:
+`(?:col-our){d<=1:[a-z]}` matches "colour" by removing a hyphen the set does not hold, and answers
+identically with the hyphen added to the set or with no set at all.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match perKind = FuzzyRegex.Match("colur", @"(?:colour){i<=1,d<=1,s<=1:[a-z]}");
+Console.WriteLine(perKind.Value);   // colur - one substitution and one deletion, both within [a-z]
+Console.WriteLine(FuzzyRegex.Match("col0ur", @"(?:colour){i<=1,d<=2,s<=3,2d+1s<4:[a-z]}").Success);   // False - the substitution would put a digit in
 ```
 
 ### `FuzzyRegexOptions.BestMatch` / `(?b)`: take the best fuzzy match rather than the first
