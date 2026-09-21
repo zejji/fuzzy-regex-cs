@@ -982,3 +982,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   and a fresh seed 13031995, all `diverge 0`). `tools/probes/s57c-one-step-on-rows.jsonl` is a
   second, direct instrument for exactly this reason: 4 of 7 rows classified on shipped code, 5 under
   the fault.
+
+- 2026-09-21 (S80): `UserDocumentationCompletenessTests` reads `PublicAPI.Unshipped.txt`, not
+  `PublicAPI.Shipped.txt` - nothing has reached 1.0, so Shipped is a single line and a gate over it
+  would pass while documenting nothing. When the 1.0 release moves those lines into Shipped, the
+  gate must read both files.

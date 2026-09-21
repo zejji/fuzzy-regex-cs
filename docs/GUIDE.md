@@ -41,7 +41,7 @@ would not. Section 4 covers separate budgets per error kind and weighted cost fo
 ## Choosing an entry point
 
 `FuzzyRegex` mirrors `Regex` member for member, so most of what you already know still applies:
-every reader method exists as both a `static` convenience that takes a pattern string (and caches
+most reader methods exist as both a `static` convenience that takes a pattern string (and caches
 the fifteen most recently used patterns, see `CacheSize` in Section 7) and an instance method on
 a compiled `FuzzyRegex`, for a pattern used more than a handful of times. Group by the question
 you are asking:
@@ -51,8 +51,8 @@ you are asking:
 | Method | Answers |
 |---|---|
 | `IsMatch` | Does the pattern match anywhere in the subject? |
-| `IsMatchAtStart` | Does it match starting exactly at the given position? |
-| `IsFullMatch` | Does it match the entire subject, start to end? |
+| `IsMatchAtStart` | Does it match starting exactly at the given position? (instance only - the static form is `MatchAtStart(...).Success`) |
+| `IsFullMatch` | Does it match the entire subject, start to end? (instance only - the static form is `FullMatch(...).Success`) |
 
 **Where is the first one?**
 
@@ -99,8 +99,9 @@ Console.WriteLine(output);
 
 **Escaping user input.** `Escape` turns a plain string into a pattern that matches it literally,
 the same purpose as `Regex.Escape`. Its two extra parameters, both upstream's, are `specialOnly`
-(escape only characters that need it, on by default) and `literalSpaces` (also escape spaces, for
-a pattern compiled with `IgnorePatternWhitespace`).
+(escape only characters that need it, on by default) and `literalSpaces` (leave spaces unescaped;
+by default they are escaped too, so the result still matches literally under
+`IgnorePatternWhitespace`).
 
 **One pattern, many calls: static or instance?** Every static method above compiles its pattern
 argument through the same fifteen-entry cache `FuzzyRegex.CacheSize` sizes. That is fine for a
@@ -186,11 +187,11 @@ form such as `{2i+1s<4}` - attaches to a group the same way a quantifier does. `
 it.
 
 A **named list** lets a fuzzy pattern check a placeholder against a fixed vocabulary instead of
-matching characters: `(?:%(colour)e<=1)` matches a member of a list named `colour`, allowing one
+matching characters: `\L<colour>{e<=1}` matches a member of a list named `colour`, allowing one
 error, where `colour` is supplied through the `namedLists` constructor or static-method
 parameter. `NamedLists` reads a compiled pattern's own lists back as
-`IReadOnlyDictionary<string, IReadOnlySet<string>>`. See "Fuzzy syntax in one page" for the full
-`%` syntax and a worked example.
+`IReadOnlyDictionary<string, IReadOnlySet<string>>`. See "`\L<name>`: fuzzy matching against a
+named list of words" in `docs/COMPARISON.md` for the full syntax and a worked example.
 
 ## Timeouts and cancellation
 
@@ -235,15 +236,16 @@ A `Match` is a `Group` is a `Capture`, each adding fields the one before it does
 
 - **`Capture`**: `Index`, `Length`, `Value`, and `ValueSpan` for the same text as a
   `ReadOnlySpan<char>`, with no allocation.
-- **`Group`** adds `Name`, `Success`, and `Captures` - every time this group took part in the
-  match, including any earlier ones, for a group inside a repeated quantifier such as `(?:\w+,?)+`.
+- **`Group`** adds `Name`, `Success`, and `Captures` (a `CaptureCollection`) - every time this
+  group took part in the match, including any earlier ones, for a group inside a repeated
+  quantifier such as `(?:\w+,?)+`.
 - **`Match`** adds `Groups`, `LastGroupNumber` and `LastGroupName` (the last group that actually
   captured, upstream's `lastindex`/`lastgroup`), `PartialMatch` (true for a match that stopped at
   the end of the subject because there was no more text to try, only meaningful when the call that
   produced it passed `partial: true`), `NextMatch()` (find the next match after this one, without
   restarting the scan), and `FuzzyCounts`/`FuzzyChanges` (below).
 
-`Match.Groups` is both an ordered list and an `IReadOnlyDictionary<string, Group>`: index it by
+`Match.Groups` (a `GroupCollection`) is both an ordered list and an `IReadOnlyDictionary<string, Group>`: index it by
 number (`match.Groups[1]`) or by name (`match.Groups["year"]`), and use `ContainsKey`,
 `TryGetValue`, `Keys` and `Values` exactly as on any dictionary. Before matching,
 `FuzzyRegex.GroupNumbers` and `GroupNames` list every group the compiled pattern defines, and
@@ -280,12 +282,14 @@ instead.
 
 **Exceptions.** `FuzzyRegexParseException` is thrown for anything wrong with the pattern itself -
 a syntax error, an unknown flag combination, a pattern over `MaxCompiledNodes` - and carries
-`Pattern` (the input pattern) and `Offset` (where in it parsing failed) alongside `Message`. Every
-other bad input raises the .NET exception a `Regex` caller already expects: `ArgumentNullException`
-for a null pattern or subject, `ArgumentOutOfRangeException` for a `beginning` or `length` outside
-the subject, `RegexMatchTimeoutException` when a `matchTimeout` or per-call `timeout` expires, and
-`OperationCanceledException` when a `CancellationToken` is cancelled. See "Exception mapping" in
-`docs/COMPARISON.md` for the complete table and a runnable `FuzzyRegexParseException` example.
+`Pattern` (the input pattern) and `Offset` (where in it parsing failed) alongside `Message`. Bad
+input elsewhere raises `ArgumentNullException` for a null pattern or subject,
+`ArgumentOutOfRangeException` for a group number the pattern does not define,
+`RegexMatchTimeoutException` when a `matchTimeout` or per-call `timeout` expires, and
+`OperationCanceledException` when a `CancellationToken` is cancelled. A `beginning` or `length`
+outside the subject is clamped to it rather than rejected - negative values count from the end, as
+in Python slicing. See "Exception mapping" in `docs/COMPARISON.md` for the complete table and a
+runnable `FuzzyRegexParseException` example.
 
 ## Thread safety
 

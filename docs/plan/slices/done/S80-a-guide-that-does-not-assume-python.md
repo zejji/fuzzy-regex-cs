@@ -110,10 +110,54 @@ answers "what does this take" and never "which one do I want".
 
 ## Done when
 
-- [ ] `docs/GUIDE.md` covers the eight sections above, every sample pinned by a test.
-- [ ] Every public member and every inline flag letter is named in `README.md` or `docs/GUIDE.md`,
+- [x] `docs/GUIDE.md` covers the eight sections above, every sample pinned by a test.
+- [x] Every public member and every inline flag letter is named in `README.md` or `docs/GUIDE.md`,
       enforced by the new convention test rather than by reading.
-- [ ] `README.md` links the guide (and `docs/FLAGS.md` if the split happened); no other README
+- [x] `README.md` links the guide (and `docs/FLAGS.md` if the split happened); no other README
       change.
-- [ ] Closing notes: what the guide asserts that Phase 7 could change, and anything the flag table
+- [x] Closing notes: what the guide asserts that Phase 7 could change, and anything the flag table
       had to state as "measured" because the enum comment and the behaviour disagreed.
+
+## Closing notes
+
+**Length and split.** `docs/GUIDE.md` measured 299 lines finished - well under the 700-line
+threshold, so the flag reference stayed inline rather than moving to a separate `docs/FLAGS.md`.
+
+**Shipped vs Unshipped.** The spec's own correction (2026-09-21, recorded above) was carried into
+the gate as written: `UserDocumentationCompletenessTests` reads `PublicAPI.Unshipped.txt` and
+asserts a floor on both the raw line count (>140, measured 146) and the distinct extracted name
+count (>65, measured 75), so a broken path or an accidental read of the near-empty
+`PublicAPI.Shipped.txt` fails loudly instead of passing over nothing.
+
+**What Phase 7 could invalidate.** The guide states default values and behaviour measured against
+the current implementation, not the public contract: `CacheSize`'s default, the enum's default
+flag combination, and the "on by default" column of the flag table are all read from a live run
+(`tools/check-doc-examples.ps1`), not from a comment, so they will only go stale if the ratchet
+stops catching a real behaviour change. None of the corrected claims below are optimisation-shaped
+- they are static facts (a syntax form, which methods have a static overload, clamping vs an
+exception, a parameter's polarity) - so Phase 7 should not need to touch this file at all.
+
+**Blind review.** One reviewer pass on the full S80 diff (the new convention test, `docs/GUIDE.md`,
+`README.md`, the copy-linter row, `tools/check-doc-examples.ps1`) per `docs/VERIFICATION.md`. It
+raised four findings, all in `docs/GUIDE.md` prose, none in the test or tooling:
+
+1. The named-list example used an invented syntax, `(?:%(colour)e<=1)`. The real syntax is
+   `\L<name>{budget}`. Reproduced against the reviewer's own working example
+   (`@"(?:\L<colour>){e<=1}"` matching `"rad"` against `["red","blue"]`), then independently
+   re-verified the unwrapped form the guide actually uses, `\L<colour>{e<=1}`, with a throwaway
+   console program: `success=True value=rad`. Fixed the prose and its cross-reference to
+   `COMPARISON.md`'s "Fuzzy syntax in one page".
+2. "Every reader method has both a static and an instance form" is false: `IsFullMatch` and
+   `IsMatchAtStart` are instance-only. Fixed the section's intro sentence and added a note to each
+   affected table row.
+3. The Exceptions paragraph claimed `beginning`/`length` out of range throws
+   `ArgumentOutOfRangeException`. They clamp instead (`Engine.MatchState.ClampIndex`, Python-slice
+   negative-index semantics); the real trigger for that exception is an undefined group number.
+   Fixed the paragraph.
+4. `literalSpaces` was described backwards - it means "leave spaces unescaped", not "also escape
+   spaces". Fixed the parameter description.
+
+All four were reproduced against source or a live run before the fix, per VERIFICATION.md rule 1.
+All four fixes are corrections to already-reviewed prose (no new public API, no tooling change, no
+code the reviewer had not seen), so per rule 4 no second blind pass was needed; the full test
+suite, doc-examples check, copy linter and ratchet were re-run after the fixes and are all green.
