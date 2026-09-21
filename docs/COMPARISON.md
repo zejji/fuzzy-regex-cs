@@ -935,8 +935,9 @@ no match at all, because it reports a partial only when a node runs out of chara
 boundary reads none.
 
 The case for saying so is the streaming caller the option exists for. Take "is this chunk something
-other than a keyword", `(?!(True|False)\b)(.*)`, and feed it the chunk `"True"`. Upstream answers
-None, which tells the caller no further text can rescue this. A next chunk of `"s"` does: the word is
+other than a keyword", `(?!(True|False)\b)(.*)`, and ask it of the chunk `"True"` at the start of
+that chunk. Upstream answers None, which tells the caller no further text can rescue this. A next
+chunk of `"s"` does: the word is
 then `Trues`, the lookahead's `\b` fails, and the pattern matches. PCRE2 takes this port's side and
 names `\z`, `\Z`, `\b`, `\B` and `$` as the constructs that "always give a partial match"
 ([pcre2partial(3)](https://www.pcre.org/current/doc/html/pcre2partial.html), read 2026-09-21).

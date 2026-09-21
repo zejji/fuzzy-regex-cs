@@ -1746,13 +1746,16 @@ public sealed class PartialMatchingTests
     /// the boundary was reached.
     /// </summary>
     /// <remarks>
-    /// PCRE2 defines none: on a partial match "only the first pair in the ovector is set", and the
-    /// rest is undefined (<c>pcre2partial(3)</c>, read 2026-09-21 at
+    /// PCRE2 defines none: on a partial match "the first two elements in the ovector point to the
+    /// portion of the subject that was matched" and "the values in the rest of the ovector are
+    /// undefined" (<c>pcre2partial(3)</c>, read 2026-09-21 at
     /// <see href="https://www.pcre.org/current/doc/html/pcre2partial.html"/>). Measured, that is
-    /// uninitialised memory - <c>tools/probes/pcre2-hitend-partial-span.py</c> section C prints
-    /// <c>(8819262122025316210,4981658938864334708)</c> for the two groups of <c>(a)(b)\B</c>. So
-    /// there is nothing to copy, and reporting a group whose span the model does not define would
-    /// be inventing an answer. Upstream reports None for this row altogether.
+    /// uninitialised memory: <c>tools/probes/pcre2-hitend-partial-span.py</c> section C printed
+    /// <c>(8819262122025316210,4981658938864334708)</c> for the two groups of <c>(a)(b)\B</c> on
+    /// 2026-09-21 and a different pair of large integers on the next run, which is the point - the
+    /// numbers are not spans and do not repeat. So there is nothing to copy, and reporting a group
+    /// whose span the model does not define would be inventing an answer. Upstream reports None for
+    /// this row altogether.
     /// <para>
     /// A partial found the ordinary way is unaffected and still carries its groups, which
     /// <see cref="A_partial_match_keeps_the_groups_that_had_already_closed"/> pins.
@@ -1782,12 +1785,15 @@ public sealed class PartialMatchingTests
     /// scan has failed.
     /// </summary>
     /// <remarks>
-    /// PCRE2 calls this the soft option, and it is the default there and the only behaviour here:
-    /// "the partial match is remembered, but matching continues as normal", and the partial is
-    /// returned only "if no complete match can be found" (<c>pcre2partial(3)</c>, read 2026-09-21).
-    /// Its hard option, which returns the partial even when a complete match exists, has no
-    /// equivalent in this port or upstream. Both rows agree with upstream, measured by
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> on regex 2026.9.10, 2026-09-21.
+    /// PCRE2 calls this the soft option, and it is the only behaviour here: "the partial match is
+    /// remembered, but matching continues as normal", and the partial is returned only "if no
+    /// complete match can be found" (<c>pcre2partial(3)</c>, read 2026-09-21). PCRE2 has no default
+    /// of its own to compare with - a caller who passes neither partial option gets no partial at
+    /// all, which is the <c>plain</c> column of
+    /// <c>tools/probes/pcre2-partial-truncation-assertions.py</c>. Its hard option, which returns
+    /// the partial even when a complete match exists, has no equivalent in this port or upstream.
+    /// Both rows agree with upstream, measured by the <c>True\b</c> and <c>a+\B</c> rows of
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c> on regex 2026.9.10, 2026-09-22.
     /// </remarks>
     [Test]
     public void A_complete_match_beats_a_boundary_partial()
@@ -1819,8 +1825,8 @@ public sealed class PartialMatchingTests
     /// there is always more text that might match - and the port already pins upstream's own
     /// zero-width answer as wrong in <c>docs/DIVERGENCES.md</c> under <c>search-start-partial</c>,
     /// so producing one here would contradict that. Measured against upstream, which agrees on
-    /// every row below:
-    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-21.
+    /// every row below: they are the last three rows of
+    /// <c>tools/probes/upstream-partial-needs-text-exhaustion.py</c>, regex 2026.9.10, 2026-09-22.
     /// </remarks>
     [Test]
     // Nothing to consume, so the boundary is the whole pattern and the attempt is empty.
@@ -1851,25 +1857,48 @@ public sealed class PartialMatchingTests
     /// <c>tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs</c> has tests carrying its own examples
     /// and a later engine change cannot quietly move them. Upstream answers no match to all three,
     /// which is what the wave recorded from regex 2026.9.10.
+    /// <para>
+    /// Each row carries the flag word the wave recorded it under, because that is part of the
+    /// question the two engines were asked. <c>FuzzyRegexOptions.Version0</c> is on every row for the
+    /// same reason: none of the three patterns names a version, and the recorder resolves those under
+    /// <c>DEFAULT_VERSION</c>, which its header states as 8192 - version 0 - where this port's own
+    /// default is version 1 (<c>OracleWave.OracleRow.DefaultVersion</c>, S50b).
+    /// </para>
     /// </remarks>
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    // Seed 7, `partial` row 4867, search. `\m` is a word start, and there is none at the end of the
-    // subject, which is two astral uppercase letters.
-    [Arguments(@"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$", "\U00010400\U0001D518", "search", 4)]
-    // Seed 4242, `fuzzy` row 6027, fullmatch. The deletion budget is never spent.
-    [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2)]
-    // Seed 20260921, `partial` row 4830, fullmatch. The lookbehind condition is false after 'b', so
-    // the conditional contributes nothing and the pattern is `b\B`.
-    [Arguments(@"b\B(?(?<![\w\s])\p{Ll})", "b", "fullmatch", 1)]
+    // Seed 7, `partial` row 4867, search, flags 0x400a. `\m` is a word start, and there is none at
+    // the end of the subject, which is two astral uppercase letters.
+    [Arguments(
+        @"^(\p{Lu}+?)(?(?<=\p{Nd})[A-Z])\m$",
+        "\U00010400\U0001D518",
+        "search",
+        4,
+        FuzzyRegexOptions.IgnoreCase
+            | FuzzyRegexOptions.Multiline
+            | FuzzyRegexOptions.FullCase
+            | FuzzyRegexOptions.Version0
+    )]
+    // Seed 4242, `fuzzy` row 6027, fullmatch, flags 0. The deletion budget is never spent.
+    [Arguments(@"(?fi)(?:[ab]+\B){d<=1}", "ba", "fullmatch", 2, FuzzyRegexOptions.Version0)]
+    // Seed 20260921, `partial` row 4830, fullmatch, flags 0x2. The lookbehind condition is false
+    // after 'b', so the conditional contributes nothing and the pattern is `b\B`.
+    [Arguments(
+        @"b\B(?(?<![\w\s])\p{Ll})",
+        "b",
+        "fullmatch",
+        1,
+        FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Version0
+    )]
     public void A_boundary_partial_is_what_the_oracle_waves_found(
         string pattern,
         string subject,
         string door,
-        int expectedLength
+        int expectedLength,
+        FuzzyRegexOptions options
     )
     {
-        var compiled = new FuzzyRegex(pattern);
+        var compiled = new FuzzyRegex(pattern, options);
         Match m = string.Equals(door, "search", StringComparison.Ordinal)
             ? compiled.Match(subject, partial: true)
             : compiled.FullMatch(subject, partial: true);

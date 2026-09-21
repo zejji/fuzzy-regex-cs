@@ -1763,5 +1763,22 @@
       4242,
       20260921
     ]
+  },
+  {
+    "id": "S57d-A",
+    "name": "hitend-without-the-consumed-something-narrowing",
+    "file": "src/FuzzyRegex/Engine/Matcher.cs",
+    "anchor": "    private static void NoteBoundaryAtTruncationPoint(MatchState state, int textPos)",
+    "anchorNth": 1,
+    "before": "            MatchState.PartialRight => textPos >= state.TextEnd && textPos > state.MatchPos,\n            MatchState.PartialLeft => textPos <= state.SliceStart && textPos < state.MatchPos,\n",
+    "after": "            MatchState.PartialRight => textPos >= state.TextEnd,\n            MatchState.PartialLeft => textPos <= state.SliceStart,\n",
+    "generator": "literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,timeout",
+    "count": 300,
+    "seeds": [
+      7,
+      4242,
+      20260921,
+      31337
+    ]
   }
 ]

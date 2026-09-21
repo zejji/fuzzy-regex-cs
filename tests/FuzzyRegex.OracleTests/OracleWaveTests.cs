@@ -471,7 +471,7 @@ public sealed class OracleWaveTests
         // exactly one thing when a boundary runs the attempt out of text: a partial spanning the
         // attempt's start to the end of the available text, with `ClearGroups` run, so no capture
         // group is set and `lastindex` is -1. Every other answer on the same row is a different
-        // defect, and the four below are the four ways to be one:
+        // defect, and the five below are the five ways to be one:
         //
         //   * the right shape over the wrong span, which is a partial the escalation did not build
         //   * a zero-width partial at the truncation point, which is the fault the escalation's

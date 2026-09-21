@@ -996,3 +996,26 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   than shortened**, because a fresh sitting spends 5-10M tokens re-orienting before it can do
   anything: starting one with twenty minutes left buys a rollback, not a slice. The refusal prints
   as a `Stopping:` line, which the orchestrator's log monitor already watches for.
+- **2026-09-22 (S57d): a boundary at the truncation point sets a flag; it never returns an answer.**
+  `NoteBoundaryAtTruncationPoint` records that a boundary was asked about the end of the available
+  text and leaves the verdict alone, and `Matcher.DoMatch` reads the flag once, after the whole
+  partial pass has failed. S50 returned `PARTIAL` from the predicate instead, which ended the match
+  before backtracking finished and truncated the `(\.+?)\1\b` capture groups. The lesson generalises:
+  a predicate that reports a state of the SEARCH rather than of the POSITION has to hand that state
+  to the one place that owns the final answer, or every caller of the predicate becomes an exit.
+- **2026-09-22 (S57d): an escalated partial reports no capture groups.** No path through the pattern
+  completed, so whatever the groups hold is what the last failed attempt happened to leave. PCRE2
+  agrees by refusing to define them - `pcre2partial(3)`, "the values in the rest of the ovector are
+  undefined". The clearing is load-bearing only where a verb prunes the backtracking unwind, which is
+  why `(a)(*SKIP)(b)\B` is a permanent test and `(a)(b)\B` cannot detect the fault.
+- **2026-09-22 (S57d): upstream reports a partial when a NODE runs out of text, never when a boundary
+  fails at the end of it.** Measured, not reasoned: `a+\B` and `aa\B` reach the same `\B` at the same
+  position of `'aa'` and both fail, and only the one whose repeat can ask for a third character
+  answers a partial (`tools/probes/upstream-partial-needs-text-exhaustion.py`). That is why the
+  `(?r)\b$` over `''` pin stays None here - nothing is consumed, so nothing can run out - and two of
+  the three reasons its comment gave in 2026-09-12 were withdrawn as unmeasured.
+- **2026-09-22 (S57d): a test that pins an oracle row compiles it the way the comparer did.** That is
+  the row's flag word AND the recorder's `DEFAULT_VERSION`, which the wave header states as 8192,
+  version 0, where this port's own default has been version 1 since S50b. A pin written as
+  `new FuzzyRegex(pattern)` asks a different question from the one the wave asked and can pass while
+  the row it claims to pin has moved.

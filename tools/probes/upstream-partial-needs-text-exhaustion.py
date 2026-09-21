@@ -12,7 +12,7 @@ upstream reports, never the boundary failing at the end of it.
 
     python tools/probes/upstream-partial-needs-text-exhaustion.py
 
-WHAT IT MEASURED, regex 2026.9.10, on 2026-09-21:
+WHAT IT MEASURED, regex 2026.9.10, on 2026-09-21, and on 2026-09-22 for the last four rows:
 
   'a+\\B'                              'aa'     search=match (0, 1)     match=match (0, 1)     fullmatch=PARTIAL (0, 2)
   'aa\\B'                              'aa'     search=PARTIAL (1, 2)   match=None             fullmatch=None
@@ -27,8 +27,15 @@ WHAT IT MEASURED, regex 2026.9.10, on 2026-09-21:
   '(?r)\\Ba'                           'a'      search=PARTIAL (0, 0)   match=None             fullmatch=None
   '(?r)\\Ba+'                          'a'      search=PARTIAL (0, 1)   match=PARTIAL (0, 1)   fullmatch=PARTIAL (0, 1)
   '(?r)\\b(?(?!\\p{L}).|[^a])\\K(\\s)' '\r\n'   search=PARTIAL (0, 0)   match=None             fullmatch=None
+  '\\X(?<!a)'                          'a'      search=PARTIAL (1, 1)   match=None             fullmatch=None
+  '(a)(b)\\B'                          'ab'     search=PARTIAL (2, 2)   match=None             fullmatch=None
+  '(a)(*SKIP)(b)\\B'                   'ab'     search=PARTIAL (2, 2)   match=None             fullmatch=None
+  'True\\b'                            'True'   search=match (0, 4)     match=match (0, 4)     fullmatch=match (0, 4)
+  '\\b'                                ''       search=None             match=None             fullmatch=None
+  '\\b\\b'                             ''       search=None             match=None             fullmatch=None
+  '\\B'                                'a'      search=None             match=None             fullmatch=None
 
-Four things follow, and each one pins a test:
+Five things follow, and each one pins a test:
 
   * The boundary never escalates. `aa\B` and `a{2}\B` refuse a partial at a position where `a+\B`
     grants one.
@@ -47,6 +54,9 @@ Four things follow, and each one pins a test:
     fullmatch door is None for the same reason `aa\B` is: the `\b` fails at 0 having asked for
     nothing. Its search door answers a zero-width partial at 0, which is the `search-start-partial`
     prefilter above rather than this rule.
+  * The last four rows are where the two engines agree and the port must keep agreeing. `True\b`
+    matches completely, so no escalation can arise; `\b` over '', `\b\b` over '' and `\B` over 'a'
+    all fail with nothing consumed, which is the narrowing S57d applies to PCRE2's model.
 """
 
 import regex
@@ -69,9 +79,24 @@ ROWS = [
     # `a+` can ask for a character before the text where `a` cannot.
     (r"(?r)\Ba", "a", 0),
     (r"(?r)\Ba+", "a", 0),
-    # Row 6027 of the seed-20260921 6000-row gate, the one reversed row three seeds of the wave
+    # Row 98169 of the seed-20260921 6000-row gate, the one reversed row any wave of this slice
     # found. Only its fullmatch door is asked there.
     (r"(?r)\b(?(?!\p{L}).|[^a])\K(\s)", "\r\n", regex.I | regex.V1),
+    # The grapheme boundary, which is the seventh predicate and the only one that is not a word
+    # boundary: `\X` ends where a grapheme cluster ends, and more text could move that.
+    (r"\X(?<!a)", "a", 0),
+    # The two rows of `A_boundary_partial_reports_no_groups`. The second is the one that makes the
+    # group clearing load-bearing, because the verb prunes the backtracking unwind.
+    (r"(a)(b)\B", "ab", 0),
+    (r"(a)(*SKIP)(b)\B", "ab", regex.V1),
+    # A complete match, so the escalation never runs: `A_complete_match_beats_a_boundary_partial`.
+    (r"True\b", "True", 0),
+    # The three rows of `A_boundary_that_consumed_nothing_reports_no_partial`, where the port stops
+    # short of PCRE2. Nothing is consumed, so nothing runs out, and upstream answers None at every
+    # door - which is this port's answer too.
+    (r"\b", "", 0),
+    (r"\b\b", "", 0),
+    (r"\B", "a", 0),
 ]
 
 

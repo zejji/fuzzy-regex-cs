@@ -123,7 +123,7 @@ caused it and the fault was in the new `ExpectedDivergences` entry, not the engi
 
 The predicate's span limb was forward-only. A reversed match runs out of text at its START, so the
 escalated partial reaches position 0 and the far end is wherever the attempt had got to
-(`Matcher.cs:10867`, `state.TextPos = state.Reverse ? state.SliceStart : state.SliceEnd`). Widened to
+(`Matcher.cs:10872`, `state.TextPos = state.Reverse ? state.SliceStart : state.SliceEnd`). Widened to
 `IsReversed(row) ? start == (row.Pos ?? 0) : start + length == (row.EndPos ?? row.Subject.Length)`.
 Gate then GREEN at 20260921 with 11 rows classified, all read and in-family.
 
@@ -180,14 +180,23 @@ it is not: a complete match wins in both engines, so that row is identical here 
 Replaced everywhere with the row that does diverge, `(?!(True|False)\b)(.*)` over `'True'`, whose
 next chunk of `'s'` makes `'Trues'` and matches (measured, regex 2026.9.10, 2026-09-21).
 
-Still to do, in order:
+## Sitting 4, 2026-09-21 into 2026-09-22 - the gate, the controls, the review, and the close
 
-1. Re-run the `-Count 6000` gate at seeds 7, 4242 and 20260921 against the committed code. Seeds 7
-   and 4242 were green before the predicate's `length > 0` limb landed, so all three need re-running.
-2. Final re-run of both controls against the code about to ship, per the skill's rule that a control
-   measured mid-slice measures code that no longer exists.
-3. `docs/PORTMAP.md`: no upstream symbol was ported here (the model is PCRE2's, not upstream's), so
-   the expectation is no row, but the slice has to say so rather than skip the check.
-4. Blind review, then the independent verifier over the one judged divergence (the `(?r)\b$` twin).
-5. Close the slice: `git mv` to `done/`, closing notes with the Review paragraph and both control
-   recipes above, `STATE.md`, `DECISIONS.md`.
+The five outstanding items all landed. The `-Count 6000` gate is GREEN at seeds 7, 4242 and
+20260921 - 126,080 rows a seed, 0 diverging - run detached while the sitting did only non-build work,
+so the builds and the wave never contended. Both controls were re-measured against the shipping code
+and are recorded in the closing notes with their snippets, generator, count and seeds; Control A now
+lives in `tools/controls.json` as `S57d-A`. `docs/PORTMAP.md` gets no row: nothing was ported, since
+upstream has no hitend and the model is PCRE2's.
+
+The amendment 16 verifier re-ran every quoted upstream and PCRE2 answer from the committed files: 54
+CONFIRMED, 1 DIFFERENT, 0 COULD NOT RUN. The DIFFERENT was a claim that PCRE2's soft option is its
+default - a caller who passes neither option gets no partial at all - and two attributions that named
+the wrong source were corrected with it.
+
+The blind review then raised five findings, all five reproduced and all five fixed: a `Matcher.cs`
+line reference five lines out, two comments citing a probe that did not contain the rows they claimed
+(the four rows were added to it and re-measured), the oracle-row pin compiling without the flag words
+and `DEFAULT_VERSION` the wave recorded, and a streaming example stating a verdict without naming the
+door it holds at. The second pass, over that delta, found nothing. Fixing the pin renamed three test
+ids, so the baseline was updated with `-AcceptRemovals` a second time.

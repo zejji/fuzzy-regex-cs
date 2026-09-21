@@ -378,8 +378,10 @@ public sealed class InheritedIssueTests
 
         // A complete match still wins over the escalation, which is what makes this PCRE2's SOFT
         // semantics rather than its HARD ones: asking for a partial does not cost 'Truest' its
-        // complete match. pcre2partial(3) puts the same row at HARD=PARTIAL (0,6) and SOFT=match
-        // (0,6), and upstream's `partial` has only the soft sense.
+        // complete match. PCRE2 10.47 answers the same row SOFT=match (0,6) and HARD=PARTIAL (0,6)
+        // - measured by tools/probes/pcre2-partial-truncation-assertions.py, not read off the man
+        // page, which illustrates the two options with a date rather than this pattern. Upstream's
+        // `partial` has only the soft sense.
         Match complete = pattern.FullMatch("Truest", partial: true);
 
         complete.Success.Should().BeTrue();
