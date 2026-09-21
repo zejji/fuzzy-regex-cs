@@ -316,8 +316,28 @@ export interface Token {
     readonly text: string;
 }
 
-/** The keywords this generator can emit. A list, not a language: nothing else reaches the panel. */
-const KEYWORDS = new Set(['using', 'new', 'foreach', 'in', 'if', 'string', 'true', 'false']);
+/**
+ * The keywords the panels can show. A list, not a language.
+ *
+ * The first eight are everything this generator emits. The rest are what the help panels' samples
+ * use, which are lifted from `docs/COMPARISON.md` and so are edited by hand: `snippet.test.ts`
+ * reads the shipped `help.json` and fails when a sample brings a word that is not here (S77).
+ */
+const KEYWORDS = new Set([
+    'using',
+    'new',
+    'foreach',
+    'in',
+    'if',
+    'string',
+    'true',
+    'false',
+    'var',
+    'const',
+    'int',
+    'try',
+    'catch',
+]);
 
 /**
  * Splits C# into coloured runs, for a panel that renders spans from an array.

@@ -54,6 +54,12 @@ foreach (string key in match.Groups.Keys)
 // day: 16
 ```
 
+The static conveniences keep the fifteen most recently used patterns compiled, the bound
+`Regex.CacheSize` uses and `FuzzyRegex.CacheSize` changes. Hold a `new FuzzyRegex(pattern)` instead
+when one pattern runs over and over, or when more than fifteen are in rotation and each call evicts
+the pattern the next one wants: a constructor never reads the cache, so the pattern is parsed once
+and stays compiled for as long as the object is held.
+
 ### Fuzzy match with an error budget
 
 `(?:pattern){e<=2}` allows up to two errors - substitutions, insertions or deletions - inside

@@ -912,3 +912,24 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-21 (S57): line coverage is a backstop and never a target - it answers "is any file or
   branch untested at all". The number to hold is 0 wholly-unentered opcode arms; the eight members
   still wholly unreached are each judged in the slice's notes.
+
+- 2026-09-21 (S76): the built-in engine and this port read `[\w-[\d]]` differently and neither
+  complains. Version 1 unions `\w`, a literal dash and the nested set, so "abc123-" matches whole;
+  `System.Text.RegularExpressions` subtracts the digits and matches "abc". It also closes a class at
+  the first unescaped `]`, so upstream's `[[a-z]--[aeiou]]` is a class, two dashes, a vowel and a
+  literal `]` there - it matches "a--e]" and nothing in "abcde". Measured on .NET 10.0.11 and
+  regex 2026.9.10.
+- 2026-09-21 (S76): the sigma pairing is a single-character fold, not a full-folding effect. Capital
+  sigma matches the final form here under `(?V0)` and under `(?-f)`, where the built-in engine
+  matches neither; only the multi-character folds (ß to "SS", ﬁ to "FI") belong to version 1.
+
+- 2026-09-21 (S77): a class removed and added again in one synchronous block does not restart a CSS
+  animation, because the browser never sees the element without the class. Force the style to be
+  computed in between - `element.classList.remove(c); void element.offsetWidth;
+  element.classList.add(c)`. Measured on the published demo: a second press 520 ms into the 1.2 s
+  fade left `getAnimations()` reading 516 ms and then 733 ms; with the flush it reads 33 ms.
+  Cancelling the animations is NOT the fix, though it measures like one: after the class is removed
+  there is nothing to cancel, and what restarts the pass is the flush `getAnimations()` forces.
+- 2026-09-21 (S77): jsdom focuses a hidden element, so a fault where the target is inside a shut
+  disclosure passes every unit test and fails in a browser. The demo's narrow layout hides the tabs
+  with `hidden` on a div rather than a `<details>`; the browser probe is what caught it.

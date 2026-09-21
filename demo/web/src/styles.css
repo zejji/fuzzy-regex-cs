@@ -754,6 +754,24 @@
         @apply rounded-md border border-shell-edge bg-shell;
     }
 
+    /* The section a heading note just sent the reader to, for one pass of about a second.
+       The focus ring is the cue that carries the meaning - this is the one that catches the eye
+       from across the page while it is moving. One pass, in the accent rather than in red: red says
+       an error happened, and a flash that repeats runs into WCAG 2.2.2 and 2.3.1 (S77).
+
+       `App.vue` already checks `prefers-reduced-motion` and does not add the class, so this query
+       is the belt to that braces: a stylesheet that animates on its own would defeat the check the
+       moment somebody reuses the class. */
+    .help-panel-arrived {
+        animation: help-arrived 1.2s ease-out 1;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .help-panel-arrived {
+            animation: none;
+        }
+    }
+
     /* The disclosure's own control. 40 px tall against WCAG 2.2's 24x24 (2.5.8), and the pointer
        cue is a real one because the whole row is the target. */
     .help-panel > summary {
@@ -810,6 +828,27 @@
 
     .tok-number {
         @apply text-orange-700;
+    }
+
+    /* The same five runs in a help panel, where the surface is the dark shell and not the light
+       snippet panel. The hues above are chosen against `slate-50` and do not carry over: measured
+       by `tests/contrast.test.ts`, violet-700 on `shell-raised` is 2.07:1, where a reader needs
+       4.5:1 at this size. Each one moves to the light end of its own ramp, so a keyword is still
+       violet and a string still green (S77). */
+    .help-code .tok-keyword {
+        @apply text-violet-300;
+    }
+
+    .help-code .tok-string {
+        @apply text-emerald-300;
+    }
+
+    .help-code .tok-comment {
+        @apply text-slate-400;
+    }
+
+    .help-code .tok-number {
+        @apply text-orange-300;
     }
 }
 
@@ -879,5 +918,20 @@
        64rem, so the pane's padding is always the `sm:` one. */
     .data-table th {
         top: calc(var(--spacing) * -5);
+    }
+}
+
+/* The arrival highlight, outside `@layer` so nothing has to win a specificity argument with it.
+   It fades a wash of the accent out from behind the section, leaving the panel as it was: a cue
+   that ends, rather than a state a reader has to dismiss. */
+@keyframes help-arrived {
+    from {
+        background-color: var(--color-shell-raised);
+        box-shadow: 0 0 0 2px var(--color-accent-bright);
+    }
+
+    to {
+        background-color: var(--color-shell);
+        box-shadow: 0 0 0 2px transparent;
     }
 }

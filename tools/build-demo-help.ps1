@@ -75,6 +75,16 @@ $map = [ordered]@{
     reverse      = @('### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right')
     replace      = @('### Replacement templates speak upstream''s language')
     timeout      = @('### A per-call `timeout` on every input-dependent method')
+    namedgroups  = @('### `Match.Groups` is an `IReadOnlyDictionary<string, Group>` as well as a list')
+    # The last three samples ask about syntax rather than about a difference from upstream, so they
+    # open the sections written for that comparison (S76). Set operations name the version section
+    # too, because they are version 1's and a reader who turns version 0 on loses them.
+    setops       = @(
+        '### Set operations: `[[a-z]--[aeiou]]` here, `[a-z-[aeiou]]` in the built-in engine',
+        '### Version 1 is the default'
+    )
+    unicodeprops = @('### Unicode properties: `\p{Greek}` names a script here, `\p{IsGreek}` names a block there')
+    ignorecase   = @('### `IgnoreCase` folds a whole string here, one character at a time in the built-in engine')
     indices      = @('### **Indices are UTF-16 code units**, where upstream counts codepoints')
     version      = @('### Version 1 is the default')
 }

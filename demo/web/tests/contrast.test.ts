@@ -93,6 +93,15 @@ const PAIRS: readonly (readonly [string, string, number, string])[] = [
     // visible edge at all. slate-400 is 2.51:1 and still short of it.
     ['--color-slate-500', '--color-slate-50', 3, "the snippet panel's border: 1.4.11"],
 
+    // The same five runs in a help panel, where the surface is the dark shell rather than the light
+    // snippet panel (S77). The snippet's own hues are far too dark to reuse here - violet-700 on
+    // shell-raised measures 2.07:1 - so the help panel gets the light end of each ramp instead.
+    ['--color-shell-text', '--color-shell-raised', 4.5, 'the uncoloured part of a help sample'],
+    ['--color-violet-300', '--color-shell-raised', 4.5, 'a keyword in a help sample'],
+    ['--color-emerald-300', '--color-shell-raised', 4.5, 'a string in a help sample'],
+    ['--color-slate-400', '--color-shell-raised', 4.5, 'a comment in a help sample'],
+    ['--color-orange-300', '--color-shell-raised', 4.5, 'a number in a help sample'],
+
     // The match highlights, measured in S72 and held here so the figures cannot drift silently.
     ['--color-slate-900', '--color-hit-a', 4.5, 'the subject inside a match'],
     ['--color-slate-900', '--color-hit-b', 4.5, 'the subject inside the next match along'],

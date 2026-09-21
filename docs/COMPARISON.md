@@ -39,7 +39,7 @@ Module-level functions:
 | `regex.split(pattern, string)` | `FuzzyRegex.Split(input, pattern, options, ...)` (static) | `-1` means no limit; upstream's `maxsplit=0` does - see "**`Split` spells "no limit" as `maxSplits = -1`**" below. |
 | `regex.splititer(pattern, string)` | `FuzzyRegex.EnumerateSplits(input, pattern, options, ...)` (static) | Lazy twin of `Split`. |
 | `regex.escape(pattern)` | `FuzzyRegex.Escape(input, specialOnly, literalSpaces)` (static) | Same idea; upstream's `special_only` and `literal_spaces` are `specialOnly` and `literalSpaces` here, both usable by name on either side. |
-| `regex.purge()` | no equivalent yet (planned) | Upstream clears its module-global pattern cache; this port has no pattern cache yet. `FuzzyRegex.CacheSize` is **PLANNED (Phase 7)** per `docs/DIVERGENCES.md`'s "Upstream members with no port equivalent" table - do not treat it as available today. |
+| `regex.purge()` | `FuzzyRegex.CacheSize = 0` | Upstream clears its module-global pattern cache. The static conveniences here read a bounded most-recently-used cache of fifteen patterns, which S59 added; setting `CacheSize` to `0` empties it and stops it storing, where `purge` clears a cache that stays enabled. The constructors never consult it. |
 
 Compiled `Pattern`'s methods (an instance of upstream's `Pattern`, a compiled `FuzzyRegex` here):
 every matching method above (`search` through `splititer`) has an instance counterpart with the
@@ -302,6 +302,82 @@ only part the two share: `FuzzyRegexOptions` carries upstream's bit values rathe
 `RegexOptions`'s. The one place a reversed search answers differently from upstream is a
 reversed *partial* match at a slice start; see "**Reversed partial matches run out of text at the
 slice start**" below.
+
+## Syntax the built-in engine spells differently
+
+Three places where a pattern that works here means something else in
+`System.Text.RegularExpressions`, or nothing at all. The first two follow Python's `regex` exactly;
+the third, case folding, follows it apart from the Turkic `I` pairings, which that section names.
+Every answer below was measured on 2026-09-21 against .NET 10.0.11, `regex` 2026.9.10 and this port.
+
+### Set operations: `[[a-z]--[aeiou]]` here, `[a-z-[aeiou]]` in the built-in engine
+
+Version 1, which is this port's default, lets one set nest inside another and reads four operators
+between them: `--` subtracts, `&&` intersects, `||` unions and `~~` takes the symmetric difference.
+The built-in engine has subtraction alone, written as a single dash before a nested class.
+
+The two spellings collide quietly. Neither engine rejects the other's, so the same pattern gives two
+different answers with no error to warn you.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match here = FuzzyRegex.Match("abc123-", @"[\w-[\d]]+");
+Console.WriteLine(here.Value);   // abc123- - word characters and a literal dash, unioned
+Console.WriteLine(System.Text.RegularExpressions.Regex.Match("abc123-", @"[\w-[\d]]+").Value);   // abc - there, the digits are subtracted
+```
+
+Going the other way, `[[a-z]--[aeiou]]` matches `bcd` in "abcde" here and nothing at all there,
+because the built-in engine closes a character class at the first unescaped `]`. It reads a class of
+`[` and `a` to `z`, then two literal dashes, then a vowel, then a literal `]` - which is why it
+matches the subject "a--e]". Upstream's other spelling, `[\w--\d]`, is a parse error there:
+`Invalid pattern '[\w--\d]+' at offset 7. Cannot include class \d in character range.`
+
+Set operations ride on version 1, so `FuzzyRegexOptions.Version0` or `(?V0)` turns them back into
+plain classes here, which is what upstream does by default.
+
+### Unicode properties: `\p{Greek}` names a script here, `\p{IsGreek}` names a block there
+
+Here, as upstream, `\p{Greek}` is the Greek script, and `\p{IsGreek}` is another way to write it.
+The Greek block is `\p{InGreek}` or `\p{Block=Greek}`. Script and block are not the same set: U+1F00,
+the Greek letter alpha with psili, has script Greek and lives in the Greek Extended block.
+
+The built-in engine has no scripts. `\p{Greek}` there is the parse error `Unknown property 'Greek'`,
+and `\p{IsGreek}` is the block, so it does not match U+1F00 while `\p{IsGreekExtended}` does. A
+pattern carried across keeps its spelling and changes its meaning.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match here = FuzzyRegex.Match("ἀ", @"\p{IsGreek}");
+Console.WriteLine(here.Success);   // True - the script, which covers the Greek Extended block
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("ἀ", @"\p{IsGreek}"));   // False - there, IsGreek is the block alone
+```
+
+This port also carries upstream's named properties beyond the general categories, such as
+`\p{Alphabetic}` and `\p{Word}`. The built-in engine knows neither, and rejects an unknown name as a
+parse error, as this port does.
+
+### `IgnoreCase` folds a whole string here, one character at a time in the built-in engine
+
+Version 1 turns on full case folding, so a single character matches the several it folds to, in both
+directions: `ß` matches "SS", and the ligature `ﬁ` matches "FI". The built-in engine folds one
+character to one character and matches neither. Both engines pair `k` with the Kelvin sign U+212A,
+which is a single-character fold.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match here = FuzzyRegex.Match("SS", "ß", FuzzyRegexOptions.IgnoreCase);
+Console.WriteLine(here.Success);   // True - full case folding, version 1's default
+Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch("SS", "(?i)ß"));   // False - one character folds to one character
+```
+
+Greek brings a second difference, and full folding is not what causes it: capital sigma matches the
+final form `ς` here and does not there, and that pairing survives both `(?V0)` and `(?-f)`. Full
+folding itself belongs to version 1, so either of those turns it off and leaves single-character
+folding behind. The Turkic `I` pairings are the one fold upstream applies that this port does not;
+see "**The Turkic `I` pairings are not applied by default**" below.
 
 ## Behaviour that differs and why
 

@@ -6,6 +6,9 @@
 // real browser: that the runtime boots in a Web Worker, that terminate() kills a wedged
 // construction, that the page keeps painting. That is checks.html, driven in a real browser.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { type Demo, useDemo } from '../src/demo';
@@ -329,6 +332,41 @@ test('an examples.json that is not a list of worked examples leaves the tour emp
 
     expect(demo.examples.value).toEqual([]);
     expect(errors).toHaveBeenCalled();
+});
+
+/**
+ * Every sample opens a Help tab with something in it.
+ *
+ * The tab renders `helpSections`, which is `entries[helpKey]`, so a sample carrying no key resolved
+ * to no sections at all: four of the nineteen opened onto the page's "Load a sample to read what it
+ * shows." - the reader told to do the thing they had just done (owner, 2026-09-20; S76).
+ *
+ * Read from the real `examples.json` and the real generated `help.json`, because the fault was a
+ * disagreement BETWEEN those two files, and a stub agrees with itself.
+ */
+test('every sample opens a help panel with at least one section in it', async () => {
+    const wwwroot = join(import.meta.dirname, '../../FuzzyRegex.Demo.Wasm/wwwroot');
+    const examples = readFileSync(join(wwwroot, 'examples.json'), 'utf8');
+    let help: string;
+    try {
+        help = readFileSync(join(wwwroot, 'help.json'), 'utf8');
+    } catch {
+        // Generated into an untracked path, and tools/build-demo-web.ps1 writes it before it runs
+        // these tests. Said plainly here so a bare `npm test` in a fresh clone reports the missing
+        // step rather than a puzzle about an empty panel.
+        throw new Error('help.json is generated: run tools/build-demo-help.ps1 before the web tests');
+    }
+
+    stubFiles(examples, help);
+
+    const demo = track(useDemo({ spawn: () => new FakeWorker() }));
+    await demo.initialise();
+
+    expect(demo.examples.value.length).toBeGreaterThan(0);
+    for (const example of demo.examples.value) {
+        demo.load(example);
+        expect(demo.helpSections.value.length, `"${example.title}" opens an empty Help tab`).toBeGreaterThan(0);
+    }
 });
 
 test('loading a sample empties the boxes it does not name', async () => {

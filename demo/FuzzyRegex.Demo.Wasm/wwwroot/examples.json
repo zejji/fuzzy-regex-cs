@@ -126,6 +126,7 @@
     "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
   },
   {
+    "key": "namedgroups",
     "title": "Named groups and every capture",
     "note": "A repeated group keeps every capture it made. The group table lists them all.",
     "pattern": "(?:(?<word>\\w+),?\\s*)+",
@@ -133,6 +134,7 @@
     "subject": "alpha, beta, gamma"
   },
   {
+    "key": "setops",
     "title": "Set operations",
     "note": "One character set subtracted from another: word characters minus digits.",
     "pattern": "[\\w--[\\d]]+",
@@ -140,6 +142,7 @@
     "subject": "abc123def456"
   },
   {
+    "key": "unicodeprops",
     "title": "Unicode properties",
     "note": "A script property matches by what a character is, wherever it sits in an alphabet.",
     "pattern": "\\p{Greek}+",
@@ -147,6 +150,7 @@
     "subject": "alpha then αβγ then beta"
   },
   {
+    "key": "ignorecase",
     "title": "Case-insensitive, with a flag",
     "note": "Flags are typed by name, so a typo is an error. Take IgnoreCase away and see.",
     "pattern": "\\bfuzzy\\b",

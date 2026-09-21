@@ -1143,3 +1143,25 @@ test('the edit letter clears the mark it belongs to, and a counted one does not 
     expect(gap).toMatch(/width:calc\(var\(--spacing\)\s*\*\s*5\)/);
     expect(gap).toMatch(/border-right:2px dashed/);
 });
+
+/**
+ * A help panel's code is coloured for the dark shell, not for the light snippet panel.
+ *
+ * `contrast.test.ts` measures the hues; this is the other half, that the page actually asks for
+ * them. Without these four rules the panel would inherit the snippet's own violet-700, which
+ * measures 2.07:1 on `shell-raised` and is the kind of fault that looks like a design choice from
+ * across the room (S77).
+ */
+test('a help sample is coloured for the surface it sits on', async () => {
+    const css = await builtCss();
+
+    for (const kind of ['keyword', 'string', 'comment', 'number']) {
+        const override = new RegExp(`\.help-code \.tok-${kind}\{([^}]*)\}`).exec(css);
+        const plain = new RegExp(`\.tok-${kind}\{([^}]*)\}`).exec(css);
+
+        const overrideColour = found(override, `a .help-code .tok-${kind} rule`)[1] as string;
+        const plainColour = found(plain, `a .tok-${kind} rule`)[1] as string;
+        expect(overrideColour).toMatch(/color:/);
+        expect(overrideColour, `the ${kind} run reuses the snippet's colour on the dark shell`).not.toBe(plainColour);
+    }
+});

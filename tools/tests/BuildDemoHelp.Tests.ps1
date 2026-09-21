@@ -74,6 +74,22 @@ Body.
 
 Body.
 
+### `Match.Groups` is an `IReadOnlyDictionary<string, Group>` as well as a list
+
+Body.
+
+### Set operations: `[[a-z]--[aeiou]]` here, `[a-z-[aeiou]]` in the built-in engine
+
+Body.
+
+### Unicode properties: `\p{Greek}` names a script here, `\p{IsGreek}` names a block there
+
+Body.
+
+### `IgnoreCase` folds a whole string here, one character at a time in the built-in engine
+
+Body.
+
 ### **Indices are UTF-16 code units**, where upstream counts codepoints
 
 Body.
