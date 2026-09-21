@@ -970,3 +970,29 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   No predicate that answers by running this engine can do better, because the reference run is
   broken too. Where an ablation is the only workable key, the tests that carry upstream's own
   answers are what hold the rule's shape, and the limitation belongs in the entry's `Reason` text.
+
+- 2026-09-21 **A sitting launched for one slice can do a different one, because the driver and the
+  session choose independently, and a worktree branched at a mid-slice checkpoint is where they
+  disagree.** The driver picks by phase and by `-Slice`; `.claude/skills/port-slice/SKILL.md` step 3
+  told the session its slice was "the lowest-numbered file" in `docs/plan/slices/`. On main those
+  agree. The docs worktree was cut from `ffe7a9c`, S57c's own mid-slice checkpoint, so S57c was
+  still pending THERE, and a sitting launched for S80 spent 18.5M tokens finishing it - arriving at
+  a `Matcher.cs` byte-identical to the one main had committed an hour earlier from the same
+  checkpoint (`git diff a066ec1 199532f -- src/FuzzyRegex/Engine/Matcher.cs` is empty). Neither
+  `blocked/` nor `-Slice` could have prevented it: both constrain the driver, and the driver was
+  already right. **The driver now writes `.claude/driver/session-slice.txt` and the skill treats it
+  as binding when present** (`Write-DriverHandover`, commit `05220d5`), falling back to the
+  lowest-numbered rule when absent so an interactive session is unaffected. The duplicate's
+  `ExpectedDivergences` prose is the better of the two - five of seven probe rows classified under
+  the broken rule against four under the shipped one, where main's entry says three against one -
+  so the merge should keep the docs branch's text and main's everything else.
+
+- 2026-09-21 **A sitting's ceiling is a time of day, not a duration.** `budget.json`'s
+  `sliceTimeoutMinutes` is 285, so a sitting started at 04:00 runs to 08:45, and the owner leaves
+  for work at 07:40. The overnight workaround - stop launching after 02:45 - wastes the rest of the
+  night every time a sitting finishes early, which is most of them. `Resolve-SliceTimeout` (commit
+  `29294f9`) takes the budget ceiling, an optional override and `-StopBy HH:mm`, and returns the
+  soonest; `tools/launch-slice.ps1` passes it through. **A gap under 60 minutes is refused rather
+  than shortened**, because a fresh sitting spends 5-10M tokens re-orienting before it can do
+  anything: starting one with twenty minutes left buys a rollback, not a slice. The refusal prints
+  as a `Stopping:` line, which the orchestrator's log monitor already watches for.
