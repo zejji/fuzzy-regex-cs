@@ -1378,9 +1378,14 @@ window.__demoInternals = { createPool, spawnEngineWorker };
                                 autocapitalize="off"
                                 aria-describedby="named-lists-hint"
                             ></textarea>
+                            <!-- The second sentence is the rule readers got wrong: the box splits
+                                 words on punctuation only, so a space stays inside the word (owner,
+                                 2026-09-21). DemoEngineContractTests pins both. -->
                             <p id="named-lists-hint" class="field-hint">
                                 For <code class="font-mono">\L&lt;name&gt;</code> in a pattern: one
-                                list per line, as <code class="font-mono">name: word, word</code>.
+                                list per line, as <code class="font-mono">name: word, word</code>. A
+                                comma or a semicolon ends a word; a space does not, so
+                                <code class="font-mono">hot dog</code> is one word.
                             </p>
                         </div>
                     </div>

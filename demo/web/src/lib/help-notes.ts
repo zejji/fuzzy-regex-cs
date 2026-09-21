@@ -116,7 +116,7 @@ export const HEADING_NOTES: readonly HeadingNote[] = [
         // One change to them: the spec said "one word per line", and the box takes one LIST per line,
         // as `name: word, word` - `namedLists` in lib/snippet.ts and `DemoEngine.TryParseNamedLists`
         // both read it that way, and the hint under the box already says so.
-        note: 'A named list is a set of words the pattern can match as one alternative, written \\L<name>. Give the list here, one list per line, and the pattern refers to it by name. Fuzzy budgets apply to the list as a whole.',
+        note: 'A named list is a set of words the pattern can match as one alternative, written \\L<name>. Give the list here, one list per line, and the pattern refers to it by name. Fuzzy budgets apply to the list as a whole. The first colon on a line ends the name, names match exactly so Fruit and fruit are different, and a list the pattern never names is refused rather than ignored.',
         linkText: 'How a named list is matched',
         helpKey: 'namedlists',
     },

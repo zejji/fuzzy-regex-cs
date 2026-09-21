@@ -32,3 +32,9 @@ the Apache License, Version 2.0.
 The Unicode character property tables are generated from the Unicode Character
 Database, Copyright (c) 1991-2026 Unicode, Inc., distributed under the Unicode
 License v3 (https://www.unicode.org/license.txt).
+
+The browser demo's icon draws the letters F and R from Cascadia Code, Copyright
+(c) 2019 - Present, Microsoft Corporation, licensed under the SIL Open Font
+License, Version 1.1 (https://github.com/microsoft/cascadia-code/blob/main/LICENSE).
+Only those two outlines are used, recoloured and set on a tile; no part of the
+font file itself is redistributed here.
