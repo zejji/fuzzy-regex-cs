@@ -947,3 +947,24 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   constant across `Parsing/`s 9,151 lines - 4,375 of them the 47 node classes in `Nodes.cs` - and
   eight consumer files outside it, where lifting `BuildRepeat`'s unrolling attacks the node COUNT
   that makes the last figure 20x the third. Same principle, and the numbers say do the count first.
+
+- 2026-09-21 (owner finding, then approval): **the user documentation gains a guide written for a
+  .NET reader, and a convention test that keeps it complete (S80, spec amendment 36).** The owner
+  read the markdown as a newcomer would and found that everything of interest to somebody not
+  coming from Python sits in `README.md`. Measured the same day: `Multiline`, `Singleline`,
+  `IgnorePatternWhitespace` and `FullCase` are named in neither `README.md` nor `COMPARISON.md`;
+  eight more flags appear only as migration answers; `IsMatchAtStart`, `IsFullMatch`,
+  `MaxCompiledNodes` and `NamedLists` appear in neither. The existing gates could not see this:
+  `PublicApiDocumentationTests` checks XML docs and `ComparisonCoversDivergencesTests` checks
+  divergence rows. `COMPARISON.md` keeps its job as the migration and divergence document.
+  `docs/GUIDE.md` is organised by the question a reader is asking, and the new test fails the build
+  when a public member or an inline flag letter is documented nowhere. One file unless it passes
+  700 lines, at which point the flag reference splits to `docs/FLAGS.md`; the test reads a list of
+  documentation files so that a later split adds a filename rather than rewriting the gate.
+
+- 2026-09-21 (owner): **nothing is published to nuget.org until most of the optimisation work is
+  done.** No prerelease either, so `1.0.0` lands after S63 closes Phase 7 and S68 writes the
+  `<remarks>` divergence notes, which is the order S69 already assumed. The cost accepted with it:
+  the `FuzzyRegex` id stays unreserved (free on nuget.org as at 2026-09-21, registration 404 and no
+  search hits), and the first real install round trip moves into the release itself rather than an
+  rc.
