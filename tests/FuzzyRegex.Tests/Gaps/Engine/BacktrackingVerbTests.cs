@@ -1063,4 +1063,79 @@ public sealed class BacktrackingVerbTests
         (pruned.Index, pruned.Length).Should().Be((1, 5));
         pruned.FuzzyChanges.Substitutions.Should().Equal(3);
     }
+
+    /// <summary>
+    /// Row 74399 of the seed-20260920 6000-row gate, judged by S57b as
+    /// <c>skip-moved-slice-changes-the-match-set</c>: under <c>(?r)</c> the bound a <c>(*SKIP)</c>
+    /// wrote in one attempt is still there for the next, and on an overlapped scan that changes
+    /// which matches the scan reports.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>RE_OP_SKIP</c> assigns <c>slice_end</c> under <c>(?r)</c>
+    /// (<c>upstream/src/_regex.c:14553</c>) and <c>init_match</c> (<c>:3404</c>) resets the stacks,
+    /// the groups and the guards but not the slice, so the scan's later attempts run in the view of
+    /// the subject the verb left behind.
+    /// </para>
+    /// <para>
+    /// Measured 2026-09-21 on regex 2026.9.10 by
+    /// <c>python tools/probes/s57b-skip-moved-slice-changes-the-match-set.py</c>, in CODEPOINTS:
+    /// </para>
+    /// <code>
+    /// as drawn             4 | (2, 5) | (2, 4) | (2, 3) | (0, 2)
+    /// (*SKIP) -> (*PRUNE)  3 | (2, 5) | (1, 3) one substitution at 3 | (0, 2)
+    /// the verb deleted     the same three
+    /// </code>
+    /// Upstream's drawn scan is not a superset of the pruned one: it reports two matches neither
+    /// control finds and loses one both of them find. The row carries no walk to judge it by,
+    /// because the pattern ends in <c>\b</c> and the recorder refuses to truncate the subject of a
+    /// reversed pattern that reads its end, and the <c>\b</c> tell is no use either - the assertion
+    /// holds at every codepoint of this subject.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_reversed_overlapped_scan_answers_the_pruning_equivalent_match_set()
+    {
+        const string pattern = @"(?r)(?:\s??(*SKIP)[^a]|[\w--[0-9]])\L<w1>{s<=1:\w}\b";
+        string subject =
+            "a"
+            + char.ConvertFromUtf32(0x1F3FB)
+            + char.ConvertFromUtf32(0x10400)
+            + char.ConvertFromUtf32(0x1F600)
+            + char.ConvertFromUtf32(0x1D518);
+        string zeroWidthJoiner = char.ConvertFromUtf32(0x200D);
+        Dictionary<string, IReadOnlyCollection<string>> lists = new(StringComparer.Ordinal)
+        {
+            ["w1"] =
+            [
+                zeroWidthJoiner + zeroWidthJoiner,
+                char.ConvertFromUtf32(0x1D518) + "aA",
+                char.ConvertFromUtf32(0x1F3FB),
+                char.ConvertFromUtf32(0x1F600) + char.ConvertFromUtf32(0x1D518),
+            ],
+        };
+
+        Match[] scan =
+        [
+            .. new FuzzyRegex(pattern, FuzzyRegexOptions.Version1, lists).Matches(subject, overlapped: true),
+        ];
+
+        scan.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
+        scan[1].FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+        scan[1].FuzzyChanges.Substitutions.Should().Equal(5);
+
+        // The control, run here rather than only quoted: `(*PRUNE)` prunes the same backtracking
+        // and moves no bound, so a scan that agrees with it is a scan the verb's meaning explains.
+        Match[] pruned =
+        [
+            .. new FuzzyRegex(
+                pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal),
+                FuzzyRegexOptions.Version1,
+                lists
+            ).Matches(subject, overlapped: true),
+        ];
+
+        pruned.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
+        pruned[1].FuzzyChanges.Substitutions.Should().Equal(5);
+    }
 }

@@ -245,3 +245,164 @@ out of range` while COMPILING and so cannot be an oracle pin at all. Then the re
 gate, and the closing ceremony. **The cut-subject door figures in
 `reversed-partial-answers-the-cut-subject`'s Reason (831 named / 777 SAME / 54 DIFFERENT) were
 measured BEFORE the re-record and must be re-measured before the slice closes.**
+
+## Sitting 3 (2026-09-21): the last six rows judged
+
+Four new `ExpectedDivergences.cs` entries and one widened one, four gap tests, and the compile-time
+pair folded into ledger entry 6. Every row below was judged from a door that upstream itself
+answers, never from the row's shape.
+
+**Rows 1 and 7 (seed 7 row 75921, seed 20260920 row 72433) -> `leaked-changes-beside-a-truncated-partial`.**
+Two of ledger entry 11's faults compose on one row, which is why neither sibling entry can take
+them: `fuzzy-changes-leaked-from-an-abandoned-attempt` needs the two engines' counts to agree, and
+`fuzzy-counts-of-a-partial-are-the-innermost-sections` needs the drawn positions to be a prefix of
+this port's. Row 75921 contradicts itself in KIND without a second engine - counts claiming one
+INSERTION, a SUBSTITUTION in the list beside them, and a DELETION when the same compiled object is
+asked anchored at the match it just found. Row 72433's door is its own recorded `leakFreeFuzzy`, upstream's
+`match(pos=start, endpos=end)`, which moves the substitution from 0 to 1; deleting the pattern's
+`(*PRUNE)` gives the same, so the verb is not what put 0 in the drawn list. On both rows upstream's
+leak-free answer is a per-kind prefix of this port's with counts componentwise no larger, which is
+`match_fuzzy_changes` cutting the list to `sum(fuzzy_counts)` (`_regex.c:20522`) beside counts that
+are the innermost open section's. Probe: `tools/probes/s57b-leak-beside-truncation.py`.
+
+**Row 8 (seed 20260920 row 74399) -> `skip-moved-slice-changes-the-match-set`.** The first row of
+ledger entry 5's family where the carried slice changes WHICH matches a reversed overlapped scan
+reports rather than one match's edit script. No sibling can take it: the three reversed
+`overlapped-skip-*` entries are keyed on the recorded walk, which this row has not got because the
+pattern ends in `\b`, and the `\b` tell is useless here since the assertion holds at every codepoint
+of the subject. The judge is upstream's own `(*PRUNE)` spelling, which prunes the same backtracking
+and moves no bound: it and the verb-deleted control both report three matches, this port reports
+exactly those three, and upstream's drawn scan reports four that are not a superset - it adds
+`(2, 4)` and `(2, 3)` and loses `(1, 3)`. Probe:
+`tools/probes/s57b-skip-moved-slice-changes-the-match-set.py`.
+
+**Row 2 (seed 7 row 76160) -> the existing `bestmatch-walk-truncated-by-a-skip`, now eight rows.**
+Three sittings left this row unjudged because its `(?b)` + `(*PRUNE)` door does not answer: 3,092
+seconds and then `MemoryError`. What opened it was minimising the row - nine rounds of the gate's own
+comparer over every one-edit shortening, keeping any that still diverged - down to
+`(?b:(}){e}(*SKIP)|)` over a lone U+00DF at the row's own flags, where every control answers in
+milliseconds. Upstream keeps a one-substitution match where its own `(*PRUNE)` and verb-deleted
+spellings find a zero-error one, and with `(?b)` removed all three spellings agree on both the drawn
+and the minimised row. So the pruning is innocent and the moved bound is the cause, which is this
+entry exactly. The old objection that the anchored door pointed the wrong way is answered: asking the
+DRAWN object `match(4, 7)` re-uses the object whose slice the verb has already moved. Probe:
+`tools/probes/s57b-bestmatch-walk-row76160.py`.
+
+**Rows 10 and 11 (seed 20260920 rows 81232 and 87091) -> `reversed-anchor-cannot-compile-a-full-fold`,
+and ledger entry 6.** Upstream raises `IndexError: tuple index out of range` while
+compiling, so the comparer sees a recorded error against an answer. Minimised to `(?r)^İﬀ` under
+IGNORECASE|FULLCASE, with four necessary ingredients: the `(?r)`, the anchor, `FULLCASE`, and a
+literal whose full fold changes its length. `Sequence._fix_full_casefold`
+(`_regex_core.py:3636-3667`) finds fold chunks in the FOLDED text and slices the UNFOLDED tuple with
+those offsets, so on `İﬀ` the chunk at folded `(2, 4)` slices empty, and `(?r)` asks that empty
+`String` first, where `get_firstset` indexes `characters[-1]`. The same mis-slice answers wrongly
+where it does not raise: upstream's forward `^İﬀ` does not match `i̇ff`, its own full fold, under the
+flag whose only job is to make it. The entry is keyed on this port's exact answer, not on "upstream
+raised", because a row upstream cannot compile checks nothing otherwise. Probes:
+`tools/probes/s57b-upstream-firstset-indexerror.py` and `s57b-port-firstset-indexerror.cs`.
+
+**That pair was first drafted as ledger entry 26 and the entry was then deleted.** S35 had already
+filed the same defect as entry 6, from `(?r)^İﬁ` with U+FB01 rather than U+FB00, and entry 6 already
+carried the mechanism, the silent forward half and a 2026-09-12 verification against 2026.9.10. What
+S57b actually adds is three lines, now inside entry 6: `\A` raises exactly as `^` does, the second
+ligature need not be the same one, and `_flush_characters` could skip an empty chunk as a second
+guard. **Before drafting a ledger entry, grep `LEDGER.md` for the upstream function the mechanism
+names** - `_fix_full_casefold` would have found entry 6 in one search, and the duplicate survived
+being written, tested and referenced from three files before the sitting's own reading of
+`docs/DIVERGENCES.md` caught it.
+
+**The flag word is read from the row, not from the pattern.** Two of the four tests first transcribed
+a row's flags from how the row reads - `0x400a` taken for REVERSE because the family is reversed -
+and `0x400a` is `FULLCASE|IGNORECASE|MULTILINE`; row 72433 carries no `(?r)` at all. Both were caught
+by the test failing, and `tools/probes/s57b-gate-rows.jsonl` plus a two-line decode of
+`regex.A/B/D/E/F/I/L/M/P/R/S/U/V0/V1/W/X` is the only reliable route.
+
+## Sitting 3, second half (2026-09-21): the re-record, and the eleven rows the new day drew
+
+**The gate at `-Count 6000`, re-recorded.** Seed 7 GREEN, 0 diverging of 126,080 rows. Seed 4242
+GREEN, 0 of 126,080. Seed 20260921 RED, 11 of 126,080. The twenty rows this slice judged came from
+seeds 7, 4242 and 20260920, and **the third default seed is the run date** (`run-oracle.ps1:256`
+builds its default as `"7,4242,$(Get-Date -Format 'yyyyMMdd')"`), so the day the slice re-runs its
+own gate it draws a sample of 126,080 rows nobody has ever looked at. None of the eleven is a
+regression: seeds 7 and 4242 draw the same rows they drew yesterday and both are green.
+
+**Nine of the eleven are members of families this repo has already judged**, and the batch
+instrument said so in one run - `python tools/probes/gate-divergence-doors.py 20260921`, which puts
+every judged family's own control to every diverging row. Each row went into the entry whose
+discriminator it meets, with the row VERBATIM out of `wave-20260921.jsonl` and this port's answer
+verbatim out of `report-20260921.txt`:
+
+| Rows | Entry | What its own control answered |
+| --- | --- | --- |
+| 100927, 101194, 101236, 105994 | `search-start-partial` | `searchOnlyPartial` true, the anchor grid holds this port's span and not upstream's, `(*PRUNE)` and the verb deleted both equal this port |
+| 104371 | `partial-retry-carried-slice-forward` | upstream answers the zero-width partial at the far end of the slice it searched, pos 3 gives this port's (3, 6) |
+| 119504 | `end-of-line-reads-a-skip-moved-slice` | upstream's four separators end at 4, 3, 2 and 1 where its own `$` is true at 4 alone |
+| 124755 | `bestmatch-loses-a-candidate` | upstream answers no match; without `(?b)` the same engine answers this port's two-insertion fit |
+| 74201 | `posix-fuzzy-contradicts-its-own-flagless-answer` | dropping `(?p)` moves upstream from two deletions to this port's one; dropping `(?e)` moves nothing |
+| 99993 | `reversed-anchor-cannot-compile-a-full-fold` | the same `IndexError` from `_regex_core.py:4035`, read off the traceback |
+
+Row 74201 needed a door the batch instrument does not ask - which of `(?e)` and `(?p)` spends the
+extra error - so it has its own probe, `tools/probes/s57b-posix-overcharges-a-named-list-section.py`.
+Re-consuming the recorded wave against the new pins (`pwsh -File tools/run-oracle.ps1 -SkipRecord`,
+which re-reads `wave.jsonl` without re-recording) takes seed 20260921 from 11 diverging to 2.
+
+**Row 74947 is not pinned, and the reason is evidence rather than time.** It is a reversed
+`fullmatch` asked with `partial=True` where upstream answers no match and its own `(*PRUNE)`
+spelling answers the partial this port answers, change for change. That is the one-attempt argument
+`reversed-skip-invents-a-match` rests on - inside a single attempt the two verbs must prune
+identically, because the only lines that differ are the two that move a bound
+(`upstream/src/_regex.c:14553` reversed, `:14555` forward) - with the symptom INVERTED: the verb
+loses a match instead of inventing one. The file splits by symptom (`overlapped-skip-extra-match-reversed`
+against `-missing-match-reversed`), so this wants its own entry and its own gap test, and the
+second control is missing: the verb deleted raises `MemoryError` here, so only one of the usual two
+doors answers.
+
+**Row 72790 is open, and it may be this port's defect rather than upstream's.** A reversed
+`finditer` whose third match is upstream contradicting itself - counts `(1, 0, 0)`, one
+substitution, and the one position reported as a DELETION - which is
+`fuzzy-changes-of-the-wrong-kind-for-their-own-counts` exactly. But its SECOND match diverges in the
+positions alone, and there `tools/probes/s57b-row72790-changes-in-a-scan.py` says something the
+triage did not expect:
+
+```
+scan, match 0 (4, 4)   deletions [4, 5, 6]   both engines agree
+scan, match 1 (3, 3)   deletions [4, 5, 5]   upstream inside the scan
+alone,        (3, 3)   deletions [3, 4, 5]   upstream asked on its own, three ways
+this port     (3, 3)   deletions [3, 5, 6]
+```
+
+Upstream inside the scan carries two positions of the previous match and repeats one; asked alone
+it answers a clean run. **This port matches neither**, and its list shares its last two positions
+with the previous match, which is the shape of a carry-over on THIS side. Judge that before pinning
+anything: if the port is leaking, the row is an engine fix with a failing test first, and pinning it
+under the neighbouring entry would hide it.
+
+**The structural finding, and it is the owner's call.** The gate's third seed is the run date, so
+every day draws a fresh 126,080-row sample, and ten or so of its rows are members of families
+already judged. The pins are keyed on the row - the 2026-09-14 ruling for this file, and the right
+default, because a predicate over two rendered answers has twice absorbed a real engine defect. The
+consequence is that the gate is green on the day its rows are judged and red the next morning, and
+"GREEN at three seeds" can only ever mean the three seeds that ran. Three ways out, none of them
+this slice's to take:
+
+1. **Leave it.** Each day's gate costs an hour of judging. Honest, and it keeps finding real rows -
+   this sitting's 72790 among them.
+2. **Fix the seed.** Replace the date with a third constant. The gate stops sampling new ground,
+   which is the property VERIFICATION.md rule 7a bought.
+3. **Give the mature families a predicate arm** keyed on the RECORDED controls rather than on a
+   judged string - `searchOnlyPartial && ours == pruneOutcome && expected != pruneOutcome` for the
+   skip families, `ours == bestmatchFreeOutcome` for `bestmatch-loses-a-candidate`. These are live
+   facts the recorder computes per row, not transcriptions, so the alarm keeps its teeth; the risk
+   is the one the S37 review found, a port defect landing exactly on upstream's control answer.
+   Narrower than it sounds now that the controls exist, and it is the only option that converges.
+
+**The cut-subject door, re-measured against the re-recorded gate.** Sitting 2 left this owed: the
+figures in `reversed-partial-answers-the-cut-subject`'s Reason were taken before the re-record, so
+they described reports that no longer exist. `python tools/probes/s57b-cut-subject-door.py 7 4242
+20260921` now gives **853 rows named, 795 SAME, 58 DIFFERENT, 0 could not ask** (was 831 / 777 / 54
+at seeds 7, 4242 and 20260920). The claim the entry rests on survives the re-measure unchanged:
+every one of the 58 DIFFERENT rows is one the report already gives to
+`reversed-partial-runs-out-at-the-slice-start`, and every one of the 58 records `upstream no match`
+over the slice, so this entry never sees them. Checked by reading each DIFFERENT row's block out of
+its own `report-<seed>.txt`. The same numbers appear in `record-oracle.py`'s docstring for the
+recorded `cutSubjectOutcome` fact, and both were updated together.

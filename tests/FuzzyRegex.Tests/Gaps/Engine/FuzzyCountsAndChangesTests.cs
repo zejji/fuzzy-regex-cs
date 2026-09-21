@@ -456,4 +456,66 @@ public sealed class FuzzyCountsAndChangesTests
         (cutFree.Index, cutFree.Length).Should().Be((5, 7));
         cutFree.FuzzyChanges.Substitutions.Should().Equal(9);
     }
+
+    /// <summary>
+    /// The two rows S57b judged as <c>leaked-changes-beside-a-truncated-partial</c>: on a PARTIAL
+    /// match upstream prints a change list that is both stale and cut short, and this port prints
+    /// the whole edit script its own counts claim.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rows 75921 of the seed-7 6000-row gate and 72433 of the seed-20260920 one. Two of ledger
+    /// entry 11's faults compose on each: <c>start_match</c> clears the counts and leaves the
+    /// changes standing (<c>upstream/src/_regex.c:11790-11792</c>), so a position an abandoned
+    /// attempt recorded survives into the answer, and <c>match_fuzzy_changes</c> then cuts the list
+    /// to <c>sum(fuzzy_counts)</c> (<c>:20522</c>), which on a partial are the innermost open
+    /// section's counts rather than the whole match's.
+    /// </para>
+    /// <para>
+    /// Measured 2026-09-21 on regex 2026.9.10 by
+    /// <c>python tools/probes/s57b-leak-beside-truncation.py</c>, in CODEPOINTS (the second
+    /// subject is astral, so the UTF-16 positions asserted below are wider):
+    /// </para>
+    /// <code>
+    /// row 75921  as drawn (4, 5) counts (0,1,0) sub[2] | anchored there (4, 5) counts (0,1,0) del[4]
+    /// row 72433  as drawn (1, 4) counts (1,0,0) sub[0] | anchored there and verb deleted, sub[1]
+    /// </code>
+    /// The first row's drawn answer contradicts itself in KIND: one insertion counted, a
+    /// substitution listed, and a deletion listed when the same object is asked anchored.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_partial_lists_every_change_its_own_counts_claim()
+    {
+        Match forward = new FuzzyRegex(
+            @"(?e)(?>(?:([\w\s])(?:\w){1<=e<=2}){e<=1:\d})\m$",
+            FuzzyRegexOptions.Ascii
+        ).Match("bB.a.", partial: true);
+
+        forward.PartialMatch.Should().BeTrue();
+        (forward.Index, forward.Length).Should().Be((4, 1));
+        forward.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 1));
+        forward.FuzzyChanges.Insertions.Should().Equal(4);
+        forward.FuzzyChanges.Deletions.Should().Equal(4);
+        AssertChangesAgreeWithCounts(forward);
+
+        // The second row. Its pattern spells its own verb `(*PRUNE)`, so the verb moves no bound
+        // and the stale position upstream reports is the leak and nothing else. Its subject is
+        // astral, so the spans below are UTF-16 and twice the codepoint offsets the probe prints.
+        string zeroWidthJoiner = char.ConvertFromUtf32(0x200D);
+        string subject =
+            char.ConvertFromUtf32(0x1F3FB) + char.ConvertFromUtf32(0x1F3FB) + zeroWidthJoiner + zeroWidthJoiner;
+        Match astral = new FuzzyRegex(
+            @"(?:(\p{L})(?:([\w\s]*)){e<=2,i<=1}){2i+1d+1s<=2}\B(?:(?:([[:alpha:]])"
+                + zeroWidthJoiner
+                + @"([[:alpha:]]*?)){s<=1,i<=1,d<=1}(*PRUNE)\p{ASCII}|[^a-f])$",
+            FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline
+        ).Match(subject, partial: true);
+
+        astral.PartialMatch.Should().BeTrue();
+        (astral.Index, astral.Length).Should().Be((2, 4));
+        astral.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+        astral.FuzzyChanges.Substitutions.Should().Equal(2, 5);
+        AssertChangesAgreeWithCounts(astral);
+    }
 }

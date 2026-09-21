@@ -698,4 +698,66 @@ public sealed class FuzzyBestMatchTests
         (gone.Index, gone.Index + gone.Length).Should().Be((0, 1));
         gone.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
     }
+
+    /// <summary>
+    /// The minimisation of seed 7 row 76160, the eighth row of
+    /// <c>bestmatch-walk-truncated-by-a-skip</c>: a <c>(*SKIP)</c> in the branch that matched costs
+    /// upstream the PERFECT alternative beside it, and this port keeps it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The drawn row is a 100-character pattern whose <c>(*PRUNE)</c> door never opens - 3,092
+    /// seconds on 2026-09-21 and then <c>MemoryError</c> - so S57b ran the gate's own comparer over
+    /// every one-edit shortening of it, keeping any that still diverged, until nothing smaller did.
+    /// What is left is nineteen characters, and every control on it answers in milliseconds.
+    /// </para>
+    /// <para>
+    /// Measured 2026-09-21 on regex 2026.9.10 by
+    /// <c>python tools/probes/s57b-bestmatch-walk-row76160.py</c>:
+    /// </para>
+    /// <code>
+    /// as drawn             split ['', 'ß', '', None, '']   search (0, 1) ONE substitution   &lt;- upstream
+    /// (*SKIP) -> (*PRUNE)  split ['', None, 'ß', None, '']  search (0, 0) NO errors          &lt;- ours
+    /// the verb deleted     the same as (*PRUNE)
+    /// no (?b), all three   split ['', 'ß', '', '', '']      search (0, 1) ONE substitution
+    /// </code>
+    /// The last line is what classifies it. With <c>(?b)</c> gone the three spellings agree, so the
+    /// verb's pruning decides nothing; with <c>(?b)</c> present they part company, and the
+    /// candidate upstream loses costs no errors at all where the one it keeps costs one.
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void Bestmatch_keeps_the_perfect_alternative_a_skip_moved_the_slice_past()
+    {
+        const string pattern = "(?b:(}){e}(*SKIP)|)";
+        const string subject = "ß";
+        const FuzzyRegexOptions drawn =
+            FuzzyRegexOptions.Posix | FuzzyRegexOptions.FullCase | FuzzyRegexOptions.IgnoreCase;
+
+        FuzzyRegex skip = new(pattern, drawn);
+
+        skip.Split(subject).Should().Equal("", null, subject, null, "");
+
+        Match m = skip.Match(subject);
+
+        (m.Index, m.Length).Should().Be((0, 0));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        // The control: `(*PRUNE)` prunes the same backtracking and moves no bound, and upstream
+        // itself answers this port's split with it.
+        new FuzzyRegex(pattern.Replace("(*SKIP)", "(*PRUNE)", StringComparison.Ordinal), drawn)
+            .Split(subject)
+            .Should()
+            .Equal("", null, subject, null, "");
+
+        // And the drawn row, which this port answers the verb-free way where upstream spends a
+        // substitution: upstream's own verb-deleted spelling gives these four parts.
+        FuzzyRegex drawnRow = new(
+            @"(?b)(?:(?:[^\p{L}]{0,1}(?:ß){e<=1}){e<=2,s<=1}(*SKIP).|[a-f])"
+                + @"(?:(?P<g1>[a\d]*?)([\w\s])[^a-f]){s<=1,i<=1,d<=1}\b",
+            drawn
+        );
+
+        drawnRow.Split("\rﬀıİAﬀß").Should().Equal("\rﬀıİ", "", "ﬀ", "");
+    }
 }

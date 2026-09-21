@@ -629,4 +629,57 @@ public sealed class CaseFoldingTests
             .Success.Should()
             .BeFalse();
     }
+
+    /// <summary>
+    /// A reversed anchored pattern holding a literal whose FULL fold changes its length compiles
+    /// here and matches that fold. Upstream cannot compile it at all: ledger entry 6, and the
+    /// oracle pin <c>reversed-anchor-cannot-compile-a-full-fold</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>regex.compile('(?r)^İﬀ', regex.IGNORECASE | regex.FULLCASE)</c> raises
+    /// <c>IndexError: tuple index out of range</c> in <c>String.get_firstset</c>.
+    /// <c>Sequence._fix_full_casefold</c> (<c>upstream/regex/_regex_core.py:3636-3667</c>) finds the
+    /// chunks that need full folding in the FOLDED text and then slices the UNFOLDED characters
+    /// with those offsets, and U+0130 folds to two characters, so the chunk for U+FB00 is sliced
+    /// empty and the parse tree keeps an empty <c>String</c> node that <c>(?r)</c> asks first.
+    /// </para>
+    /// <para>
+    /// The same mis-sliced chunk makes the FORWARD spelling compile and then answer wrongly:
+    /// upstream's <c>^İﬀ</c> does not match <c>i̇ff</c>, its own full fold, under the flag whose
+    /// only job is to make it match. Both halves measured 2026-09-21, upstream by
+    /// <c>python tools/probes/s57b-upstream-firstset-indexerror.py</c> and this port by
+    /// <c>dotnet run tools/probes/s57b-port-firstset-indexerror.cs</c>.
+    /// </para>
+    /// </remarks>
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_reversed_anchored_full_fold_compiles_and_matches()
+    {
+        const FuzzyRegexOptions caseless = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase;
+        const string folded = "i̇ff";
+
+        foreach (string pattern in new[] { "(?r)^İﬀ", @"(?r)\A" + "İﬀ", "^İﬀ" })
+        {
+            Match m = new FuzzyRegex(pattern, caseless).Match(folded);
+
+            m.Success.Should().BeTrue("{0} matches the full fold of its own literal", pattern);
+            (m.Index, m.Length).Should().Be((0, 4));
+        }
+
+        // The two gate rows themselves, seed 20260920 rows 81232 and 87091, each under the
+        // operation it was drawn with. Upstream raises on both while compiling.
+        new FuzzyRegex("(?r)^ß(?<=İİﬀ)(?:(?<=" + @"\p{Nd})" + "İ)?$", caseless)
+            .Split("ß\rSﬁİﬀİ")
+            .Should()
+            .Equal("ß\rSﬁİﬀİ");
+
+        new FuzzyRegex(
+            "(?r)^(?:(?(?<![ﬁ])ﬁ[^a]|(?(?<!(?:ﬁ|" + @"\p{Ll})+)\p{Nd}*?" + "|))İ|İ)ﬁ$",
+            caseless | FuzzyRegexOptions.Multiline
+        )
+            .FullMatch("ﬁﬁİ")
+            .Success.Should()
+            .BeFalse();
+    }
 }

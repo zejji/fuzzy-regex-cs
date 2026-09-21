@@ -1405,9 +1405,9 @@ def _cut_subject_outcome(compiled, subject: str, operation: str, pos, endpos, pa
     still read the character before ``pos`` - Python ``re``'s rule, which the ruling left alone - so a
     pattern that looks across the slice start answers differently once the text before it is gone.
     Measured by ``tools/probes/s57b-cut-subject-door.py`` over the three-seed 6000-row gate of
-    2026-09-20: of the 831 reversed partial rows with a non-zero slice that those reports NAME - the
+    2026-09-21: of the 853 reversed partial rows with a non-zero slice that those reports NAME - the
     divergences and the rows the entry below already accounts for, not the rows that simply agreed -
-    777 give this port's answer and 54 do not, and every one of the 54 is a row where upstream
+    795 give this port's answer and 58 do not, and every one of the 58 is a row where upstream
     answers no match over the slice. The consumer keeps its separate limb for those.
 
     ASKED ONLY OF A REVERSED PARTIAL OVER A NON-ZERO SLICE. ``text_end`` IS the slice end on every

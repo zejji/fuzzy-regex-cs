@@ -865,6 +865,21 @@ and the silent wrong answers need no anchor and no `(?r)` at all.
 **Verified against 2026.9.10 on 2026-09-12:** both the traceback and both wrong answers reproduce
 unchanged.
 
+**The 6000-row gate drew it twice, 2026-09-21 (S57b).** Seed 20260920 rows 81232 and 87091 are
+random patterns upstream cannot compile, so the oracle records an error against an answer. They
+add three facts to the above. `\A` raises exactly as `^` does, so the trigger is the first-set walk
+and not the caret. The second ligature need not be the same one: `(?r)^İﬀ` raises where `(?r)^ﬀﬀ`
+and `(?r)^aﬀ` compile, which is the expansion arithmetic rather than any pair of characters. And
+belt and braces, `_flush_characters` (`:3617-3626`) could skip an empty chunk instead of building a
+`String` from it, which would stop the traceback while leaving the wrong answers. **Not
+established:** whether any other caller of `_fix_full_casefold` depends on the current, shifted
+offsets. Nothing here rests on the answer. Probes:
+`tools/probes/s57b-upstream-firstset-indexerror.py` for upstream and
+`tools/probes/s57b-port-firstset-indexerror.cs` for this port, both reading the two rows out of
+`tools/probes/s57b-gate-rows.jsonl`. The oracle pin is
+`reversed-anchor-cannot-compile-a-full-fold` and the gap test is
+`CaseFoldingTests.A_reversed_anchored_full_fold_compiles_and_matches`.
+
 ---
 
 ## 7. The default case-folding tables carry CaseFolding.txt's Turkic-only rows - FIXED HERE (S45)
