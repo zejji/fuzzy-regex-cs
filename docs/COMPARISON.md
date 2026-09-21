@@ -234,6 +234,10 @@ A named list is a fixed set of literal alternatives, supplied at compile time an
 name in the pattern; combined with a fuzzy budget it fuzzy-matches against every word in the list
 at once, taking the closest fit.
 
+The example opens with `(?e)`, the `EnhanceMatch` flag described above, because the tightest fit is
+what a list of words is usually for. Drop it and the first match here is ` dog` with a leading
+space, since a budget of one error is enough to pay for that space.
+
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
@@ -298,6 +302,9 @@ Console.WriteLine((whole.Success, whole.PartialMatch));   // (True, False)
 
 Match wrong = date.Match("not a date", partial: true);
 Console.WriteLine((wrong.Success, wrong.PartialMatch, wrong.Index));   // (True, True, 10)
+
+Match contradicted = date.Match("2026-0b", partial: true);
+Console.WriteLine((contradicted.PartialMatch, contradicted.Index, contradicted.Length));   // (True, 7, 0)
 ```
 
 The third answer is the one to read twice: an empty partial match at the end of the subject is
@@ -306,6 +313,14 @@ subject is a prefix of something the pattern could still accept. `partial` is av
 `Match`, `MatchAtStart` and `FullMatch` only. The scanning entry points do not take it, because
 upstream's `finditer` and `findall` do not either; neither does `IsMatch`, which asks a yes/no
 question that a partial match cannot answer without the match itself to inspect.
+
+The fourth answer is that same rule read from the other side. `2026-0b` starts like a date, and then `\d`
+meets the `b` and refuses it, so the candidate that began at index 0 is contradicted rather than unfinished, and
+the empty tail at index 7 is again all that survives: a partial match is one that ran out of
+subject, and a character the pattern refuses ends a candidate outright. An error budget changes the
+answer, because it lets that `b` be a substitution rather than a contradiction -
+`(?:\d{4}-\d{2}-\d{2}){e<=1}` returns a partial match of all seven characters at index 0, partial
+because the subject ran out while the budget still had room.
 
 ### `FuzzyRegexOptions.RightToLeft` / `(?r)`: search from the right
 
