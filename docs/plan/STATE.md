@@ -24,12 +24,11 @@ place (73420, 74554, 103000, 116428).
 its three seeds. This checkpoint changes documentation only - no file under `src/` or `tests/` is
 touched, so the parity board cannot have moved.
 
-**The ratchet on this checkpoint is RED by TIMEOUT, not by a test:** "the test run did not finish
-within 1200 s and was killed", after a clean build. Its advice, "a hung test is an engine loop: diff
-src/ against HEAD before re-running", does not apply - `git status` is documentation only. The run
-was started with `$env:IntermediateOutputPath` redirected, which rebuilds every project from
-scratch; whether that is the cause is not established. **Re-run it first thing next sitting**, with
-the variable set only if a Release build needs it.
+**The ratchet is GREEN here, and `$env:IntermediateOutputPath` is what reddens it.** Two runs on
+this tree differing in that one variable: with it set to `obj/s57f-release/` the test run was killed
+at the 1200 s timeout; with it unset the same suite finished in 34 s, 6531/6531, and left
+`docs/STATUS.md` and the stamp byte-identical. **Set that variable only for a Release build that the
+wedged compiler would otherwise block, never for the ratchet.**
 
 **Phase 6's four gate items are green, and Phase 6 is NOT closed.** One inherited ledger entry is
 still reproduced: **S61 item 7** is entry 18. Entry 17 is the owner's decision rather than a slice.
