@@ -18,6 +18,18 @@ The controls themselves live in `tools/controls.json`, one object per control:
      "before": "...", "after": "...",
      "generator": "quantifiers", "count": 600, "seeds": [7, 20260901]}
 
+A control whose signal is named test failures rather than a diverge column sets `signal` to
+`suite`, names the tests it expects to redden, and needs no generator, count or seeds:
+
+    {"id": "S50-C", "name": "425-reverted",
+     "file": "src/FuzzyRegex/Parsing/Info.cs",
+     "anchor": "...", "before": "...", "after": "",
+     "signal": "suite", "expectedFailures": ["Branch_reset_numbers_two_groups..."]}
+
+`project` picks the test project, defaulting to tests/FuzzyRegex.Tests. A wave control that spans
+every generator needs nothing new: `generator` already takes the comma-separated list that
+tools/record-oracle.py accepts, which is how S57d-A is registered.
+
 `anchor`/`anchorNth` locate the *site*: the mutation is applied to the first occurrence of
 `before` at or after the nth occurrence of `anchor`. Two sites in this engine share their text
 (the forward and the backtrack half of the same opcode), so a bare string replace would silently
@@ -41,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import time
+from xml.etree import ElementTree
 from pathlib import Path
 
 # Tracked rather than left in .scratch/, which slice sessions clear. S18's controls were lost
@@ -60,6 +73,13 @@ SUMMARY = re.compile(
     r"agree (\d+)\s+unsupported (\d+)\s+(?:expected (\d+)\s+)?diverge (\d+)\s+of (\d+) rows"
 )
 CONSUME_TIMEOUT = 240
+# A suite control's signal is named test failures, not a diverge column: S50's control C reverts a
+# branch-reset fix and exactly one ported test goes red. Recorded here because `dotnet test` is run
+# the way tools/check-ratchet.ps1 runs it, through the Microsoft.Testing.Platform TRX report, which
+# is the only output that names the failures rather than counting them.
+SUITE_TRX = REPO / "TestResults" / "control-suite.trx"
+SUITE_TIMEOUT = 1200
+DEFAULT_SUITE_PROJECT = "tests/FuzzyRegex.Tests/FuzzyRegex.Tests.csproj"
 # Written before a mutation is applied and deleted after the restore. A killed run (the driver's
 # sitting timeout, a closed terminal) never reaches the `finally` below, and the mutation stays in
 # the tree: S43 sitting 2 and S44 sitting 1 were both lost to S42-1B's left-over mutation, which
@@ -139,6 +159,34 @@ def wave_for(generator: str, count: int, seed: int) -> Path:
         path.unlink(missing_ok=True)
         raise SystemExit(f"recording {generator} seed {seed} failed:\n{result.stdout}\n{result.stderr}")
     return path
+
+
+def run_suite(project: str) -> tuple[list[str], str]:
+    """Runs a test project and returns the names of the tests that failed, plus a note.
+
+    A suite control fires by reddening named tests, so a count is not enough: a mutation that
+    reddens a different test from the one its slice recorded is a control that no longer measures
+    what it claims. The TRX names them; the console summary does not.
+    """
+    SUITE_TRX.parent.mkdir(parents=True, exist_ok=True)
+    SUITE_TRX.unlink(missing_ok=True)
+    result = run(
+        ["dotnet", "test", project, "--", "--report-trx", "--report-trx-filename", SUITE_TRX.name],
+        timeout=SUITE_TIMEOUT,
+    )
+    if not SUITE_TRX.exists():
+        return [], f"no TRX written (exit {result.returncode}): {result.stdout[-400:]}"
+
+    # The TRX namespace is fixed by the format; findall with it is cheaper than a wildcard match.
+    ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+    root = ElementTree.parse(SUITE_TRX).getroot()
+    failed = [
+        element.get("testName", "?")
+        for element in root.findall(".//t:UnitTestResult", ns)
+        if element.get("outcome") == "Failed"
+    ]
+    total = len(root.findall(".//t:UnitTestResult", ns))
+    return sorted(failed), f"{len(failed)} failed of {total}"
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
@@ -237,6 +285,8 @@ def main() -> int:
         return 1 if bad else 0
 
     for control in controls:
+        if control.get("signal", "wave") == "suite":
+            continue
         for seed in control["seeds"]:
             wave_for(control["generator"], control["count"], seed)
     if args.record_only:
@@ -255,6 +305,20 @@ def main() -> int:
             fmt = run(["dotnet", "csharpier", "format", str(path)])
             if fmt.returncode != 0:
                 print(f"{control['id']:8} {control['name']:34} FORMAT FAILED {fmt.stderr.strip()[:200]}")
+                continue
+
+            if control.get("signal", "wave") == "suite":
+                failed, note = run_suite(control.get("project", DEFAULT_SUITE_PROJECT))
+                expected = sorted(control.get("expectedFailures", []))
+                verdict = "FIRED" if failed == expected else "MOVED"
+                print(f"{control['id']:8} {control['name']:34} suite  {note:>18}  {verdict}")
+                if failed != expected:
+                    # Naming both sides, because "the control moved" is only actionable with them:
+                    # a control that reddens nothing has lost its teeth, and one that reddens a
+                    # different test is measuring something its slice never claimed.
+                    print(f"         expected: {expected or '(none)'}")
+                    print(f"         got:      {failed or '(none)'}")
+                sys.stdout.flush()
                 continue
 
             for seed in control["seeds"]:

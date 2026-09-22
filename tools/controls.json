@@ -1733,6 +1733,20 @@
     ]
   },
   {
+    "id": "S50-C",
+    "name": "425-reverted",
+    "file": "src/FuzzyRegex/Parsing/Info.cs",
+    "anchor": "internal int OpenGroup(string? name = null)",
+    "anchorNth": 1,
+    "before": "                if (BranchGroupNumbers.Contains(GroupCount))\n                {\n                    continue;\n                }\n\n",
+    "after": "",
+    "signal": "suite",
+    "expectedFailures": [
+      "A_branch_reset_branch_skips_a_group_number_a_reused_name_has_already_claimed",
+      "Branch_reset_numbers_two_groups_in_the_same_branch_differently"
+    ]
+  },
+  {
     "id": "S53b-A",
     "name": "sub-keeps-only-the-slice",
     "file": "src/FuzzyRegex/Engine/Substitution.cs",
