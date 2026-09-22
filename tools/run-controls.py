@@ -167,26 +167,43 @@ def run_suite(project: str) -> tuple[list[str], str]:
     A suite control fires by reddening named tests, so a count is not enough: a mutation that
     reddens a different test from the one its slice recorded is a control that no longer measures
     what it claims. The TRX names them; the console summary does not.
+
+    Popen with the output on a file and kill_tree on a timeout, for the reason `consume` gives
+    above and this function originally ignored: `dotnet test` spawns MSBuild nodes and a test host
+    that inherit the handles, so subprocess.run's timeout kills the direct child and then blocks
+    draining a pipe the grandchildren still hold. Measured 2026-09-22 with a 3-second bound that
+    took 25.1 seconds to raise - and while it blocks, the caller's `finally` never runs, so the
+    mutation stays in the working tree.
     """
     SUITE_TRX.parent.mkdir(parents=True, exist_ok=True)
     SUITE_TRX.unlink(missing_ok=True)
-    result = run(
-        ["dotnet", "test", project, "--", "--report-trx", "--report-trx-filename", SUITE_TRX.name],
-        timeout=SUITE_TIMEOUT,
-    )
+    log = REPO / ".scratch" / "control-suite.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "w", encoding="utf-8") as handle:
+        proc = subprocess.Popen(
+            ["dotnet", "test", project,
+             "--", "--report-trx", "--report-trx-filename", SUITE_TRX.name],
+            cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
+        )
+        try:
+            proc.wait(timeout=SUITE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            return [], f"TIMEOUT: the suite did not finish within {SUITE_TIMEOUT}s (process tree killed)"
+
     if not SUITE_TRX.exists():
-        return [], f"no TRX written (exit {result.returncode}): {result.stdout[-400:]}"
+        tail = "\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-6:])
+        return [], f"no TRX written: {tail}"
 
     # The TRX namespace is fixed by the format; findall with it is cheaper than a wildcard match.
+    # UnitTestResult only - ResultSummary also carries outcome="Failed" and RunInfo carries
+    # outcome="Error", and neither is a test.
     ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
     root = ElementTree.parse(SUITE_TRX).getroot()
-    failed = [
-        element.get("testName", "?")
-        for element in root.findall(".//t:UnitTestResult", ns)
-        if element.get("outcome") == "Failed"
-    ]
-    total = len(root.findall(".//t:UnitTestResult", ns))
-    return sorted(failed), f"{len(failed)} failed of {total}"
+    results = root.findall(".//t:UnitTestResult", ns)
+    failed = [e.get("testName", "?") for e in results if e.get("outcome") == "Failed"]
+    return sorted(failed), f"{len(failed)} failed of {len(results)}"
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
@@ -266,9 +283,13 @@ def main() -> int:
     # `--seeds 2` takes each control's FIRST seed, which is the one its slice recorded, plus the
     # next, which is why a phase close that adds a fresh seed inserts it at index 1 rather than
     # appending it. S36 added this; the default is unchanged.
+    # `if "seeds" in control` because a suite control has none by design, and this loop runs before
+    # --check and before anything else can report. Without the guard `--seeds 2`, the standard
+    # phase-close invocation, dies with KeyError on the first suite control (measured 2026-09-22).
     if args.seeds:
         for control in controls:
-            control["seeds"] = control["seeds"][: args.seeds]
+            if "seeds" in control:
+                control["seeds"] = control["seeds"][: args.seeds]
 
     if args.check:
         restore_leftover()
@@ -310,9 +331,14 @@ def main() -> int:
             if control.get("signal", "wave") == "suite":
                 failed, note = run_suite(control.get("project", DEFAULT_SUITE_PROJECT))
                 expected = sorted(control.get("expectedFailures", []))
-                verdict = "FIRED" if failed == expected else "MOVED"
+                # A run that never produced a TRX has not "moved", it has not answered. Saying
+                # MOVED there would read as a finding about the control rather than about the run.
+                if note.startswith("TIMEOUT") or note.startswith("no TRX"):
+                    verdict = "NO ANSWER"
+                else:
+                    verdict = "FIRED" if failed == expected else "MOVED"
                 print(f"{control['id']:8} {control['name']:34} suite  {note:>18}  {verdict}")
-                if failed != expected:
+                if verdict == "MOVED":
                     # Naming both sides, because "the control moved" is only actionable with them:
                     # a control that reddens nothing has lost its teeth, and one that reddens a
                     # different test is measuring something its slice never claimed.

@@ -57,8 +57,11 @@ else {
     Write-Output "poller already running (PID $($poller[0].ProcessId))"
 }
 
+Import-Module (Join-Path $repo 'tools/PortTools.psm1') -Force
+
 $proc = Start-Process -FilePath 'pwsh' `
-    -ArgumentList (@('-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1', '-Phase', $Phase, '-Slice', $Slice, '-Model', $Model) + ($StopBy ? @('-StopBy', $StopBy) : @())) `
+    -ArgumentList (Resolve-DriverArguments -DriverPath (Join-Path $repo 'tools/run-slices.ps1') `
+        -Phase $Phase -Slice $Slice -Model $Model -StopBy $StopBy) `
     -WorkingDirectory $repo `
     -RedirectStandardOutput $log `
     -RedirectStandardError $err `

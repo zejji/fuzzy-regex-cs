@@ -1047,6 +1047,40 @@ function Write-DriverHandover {
     Set-Content -LiteralPath (Join-Path $dir 'session-slice.txt') -Value $SliceName -NoNewline
 }
 
+function Resolve-DriverArguments {
+    <#
+    .SYNOPSIS
+        The argument list tools/launch-slice.ps1 hands Start-Process for one detached driver run.
+
+    .DESCRIPTION
+        Extracted from launch-slice.ps1 so it can be tested. An empty array element does not reach
+        the child's command line at all, so passing an empty -Slice or -StopBy VALUE produces
+        `-Slice -Model opus`, and run-slices.ps1 then refuses to bind with "Missing an argument for
+        parameter 'OnlySlice'" while launch-slice.ps1 has already printed DETACHED_PID as though a
+        driver were running. Found by a blind review on 2026-09-22.
+
+        An empty value therefore means OMIT the switch, which is also what the escape hatch means:
+        launch-slice.ps1 documents `-Slice ''` as "take the lowest-numbered pending slice", and
+        omitting -Slice leaves run-slices.ps1's $OnlySlice at its own empty default, which is that
+        behaviour exactly.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DriverPath,
+        [int]$MaxSlices = 1,
+        [int]$Phase = 0,
+        [string]$Slice = '',
+        [string]$Model = 'opus',
+        [string]$StopBy = ''
+    )
+    $arguments = [System.Collections.Generic.List[string]]::new()
+    $arguments.AddRange([string[]]@('-NoProfile', '-File', $DriverPath, '-MaxSlices', "$MaxSlices", '-Phase', "$Phase"))
+    if ($Slice) { $arguments.AddRange([string[]]@('-Slice', $Slice)) }
+    $arguments.AddRange([string[]]@('-Model', $Model))
+    if ($StopBy) { $arguments.AddRange([string[]]@('-StopBy', $StopBy)) }
+    , $arguments.ToArray()
+}
+
 function Read-SliceFrontMatter {
     <#
     .SYNOPSIS
@@ -1107,4 +1141,4 @@ Export-ModuleMember -Function `
     Get-UpstreamCommit, New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
     Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout,
-    Write-DriverHandover, Read-SliceFrontMatter, Select-PendingSlice
+    Write-DriverHandover, Read-SliceFrontMatter, Select-PendingSlice, Resolve-DriverArguments

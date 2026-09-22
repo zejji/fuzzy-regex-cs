@@ -1315,3 +1315,43 @@ Describe 'Select-PendingSlice' {
         Remove-Item -LiteralPath $orphan -Force
     }
 }
+
+Describe 'Resolve-DriverArguments' {
+    # Extracted from tools/launch-slice.ps1 so the argument list can be tested at all. A blind
+    # review found on 2026-09-22 that the documented escape hatch `-Slice ''` never launched
+    # anything: an empty array element vanishes from Start-Process's command line, so the driver
+    # saw `-Slice -Model` and refused to bind, while launch-slice still printed DETACHED_PID.
+    BeforeAll { $script:Driver = 'C:/repo/tools/run-slices.ps1' }
+
+    It 'passes the slice id when one is given' {
+        $a = Resolve-DriverArguments -DriverPath $script:Driver -Phase 7 -Slice 'S82' -Model 'opus'
+        $a -join ' ' | Should -BeLike '*-Slice S82*'
+    }
+
+    It 'OMITS -Slice entirely when the slice is empty, rather than passing an empty argument' {
+        $a = Resolve-DriverArguments -DriverPath $script:Driver -Phase 7 -Slice '' -Model 'opus'
+        $a | Should -Not -Contain '-Slice'
+        $a | Should -Not -Contain ''
+    }
+
+    It 'omits -StopBy when it is empty and includes it when it is not' {
+        $without = Resolve-DriverArguments -DriverPath $script:Driver -Phase 7 -Slice 'S82'
+        $without | Should -Not -Contain '-StopBy'
+        $with = Resolve-DriverArguments -DriverPath $script:Driver -Phase 7 -Slice 'S82' -StopBy '07:30'
+        $with -join ' ' | Should -BeLike '*-StopBy 07:30*'
+    }
+
+    It 'never emits an empty or null element, whatever is left out' {
+        $a = Resolve-DriverArguments -DriverPath $script:Driver
+        $a | Should -Not -Contain ''
+        @($a | Where-Object { $null -eq $_ }).Count | Should -Be 0
+    }
+
+    It 'always carries the driver, the model and a single-slice run' {
+        $a = Resolve-DriverArguments -DriverPath $script:Driver -Phase 6 -Model 'sonnet'
+        $a -join ' ' | Should -BeLike "*-File $script:Driver*"
+        $a -join ' ' | Should -BeLike '*-MaxSlices 1*'
+        $a -join ' ' | Should -BeLike '*-Model sonnet*'
+        $a -join ' ' | Should -BeLike '*-Phase 6*'
+    }
+}
