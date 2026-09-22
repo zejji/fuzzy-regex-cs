@@ -160,7 +160,8 @@ internal static class OracleComparer
     /// <param name="ablate">
     /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
-    /// <see cref="RunWithoutTheAnchorPin"/> and by nothing else; the wave always passes
+    /// <see cref="RunWithoutTheAnchorPin"/> and <see cref="RunWithoutTheFoldFix"/> and by nothing
+    /// else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -350,6 +351,35 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.AnchorGuards = null
+        );
+    }
+
+    /// <summary>Puts a row's question to this port with the S83 full-fold deletion fix switched off.</summary>
+    /// <remarks>
+    /// <para>
+    /// S83 fixed a fuzzy deletion that finishes a full-case-folded string or backreference: upstream
+    /// charges the next subject character's folding as a half-matched leftover even though no part
+    /// of it was used (<c>docs/DIVERGENCES.md</c>, <c>_regex.c:14856</c>, <c>:14154</c>). Setting
+    /// <c>PatternObject.ChargeUntouchedFoldings</c> on a compiled pattern makes
+    /// <c>Matcher.FoldingIsPartUsed</c> apply upstream's test exactly, at every site that reads it.
+    /// </para>
+    /// <para>
+    /// The <c>full-fold-fuzzy-deletion</c> entry keys on this the way
+    /// <c>fuzzy-insertion-at-a-pinned-anchor</c> keys on <see cref="RunWithoutTheAnchorPin"/>: a row
+    /// belongs to the family only when switching the fix off reproduces upstream's recorded answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheFoldFix(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.ChargeUntouchedFoldings = true
         );
     }
 

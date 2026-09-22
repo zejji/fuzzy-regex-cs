@@ -1183,3 +1183,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
     signed off, gated on a measured gain: it is the only shape that lets a span caller walk matches
     with no copy of the subject at all, which pooling cannot do, and a .NET developer reaches for it
     by that name.
+- 2026-09-22 (S83): a fuzzy deletion that finishes a full-folded string or backreference charges no
+  leftovers unless part of the folding was used (`Matcher.FoldingIsPartUsed`, ledger entry 28);
+  upstream V1 is the buggy engine and V0 is the reference for these rows. The oracle entry
+  `full-fold-fuzzy-deletion` is keyed on an ablation flag, `PatternObject.ChargeUntouchedFoldings`,
+  after S57c's anchor pin, rather than on a shape predicate: a flag that restores upstream's test at
+  all six sites classifies exactly the rows the fix moved and nothing else.

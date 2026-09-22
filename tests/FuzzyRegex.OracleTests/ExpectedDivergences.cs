@@ -2617,6 +2617,32 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?m)^(?:abc){i<=1}", "flags": 0, "namedLists": {}, "subject": "xabc", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         """;
 
+    /// <summary>
+    /// The eleven rows of <c>full-fold-fuzzy-deletion</c>, recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/s83-fold-deletion-rows.jsonl</c> on
+    /// 2026-09-22.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Rows 1 to 7
+    /// are the wave rows the fix moved: seed 7 rows 6250 and 6587, seed 4242 rows 6047, 6106, 6392
+    /// and 6443, and seed 20260922 row 6080. Rows 8 to 11 are the defect minimised, one per site
+    /// the fix touched: a folded string forward and reversed, and a folded backreference forward
+    /// and reversed.
+    /// </remarks>
+    private const string _foldFixRows = """
+        {"generator": "rows", "pattern": "(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa0a😀", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?r)\\B(?:ﬀo[ab]){d<=1}", "flags": 0, "namedLists": {}, "subject": "xßFOA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?straße){d<=2}", "flags": 0, "namedLists": {}, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?fi)(?:ﬀo(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "namedLists": {}, "subject": "FaFOBAaQb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)\\b(?:ﬀo(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "ßFOz", "operation": "sub", "template": "<>", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "ßFOz", "count": 0}}
+        {"generator": "rows", "pattern": "(?fi)\\b(oba)(?:.(?:\\1)){2i+1d+1s<=2:f}", "flags": 0, "namedLists": {}, "subject": "obabO0", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
+        {"generator": "rows", "pattern": "(?fi)(?:ﬆx😀𝟮){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": " 0t😀𝟮", "operation": "split", "count": 1, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" 0t😀𝟮"]}}
+        {"generator": "rows", "pattern": "(?fi)(?:fi){d<=1}", "flags": 0, "namedLists": {}, "subject": "fe", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:fi){d<=1}", "flags": 0, "namedLists": {}, "subject": "ei", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(fi)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "fife", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){d<=1}(fi)", "flags": 0, "namedLists": {}, "subject": "eifi", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -5779,6 +5805,40 @@ internal static class ExpectedDivergences
             Applies: static (row, ours) => OnlyTheAnchorPinExplainsIt(row, ours)
         ),
         new(
+            Id: "full-fold-fuzzy-deletion",
+            Reason: "THIS PORT CHARGES ONE EDIT FOR A FUZZY DELETION THAT FINISHES A FULL-CASE-FOLDED "
+                + "string or backreference, and upstream charges more or fails. Ledger entry 28; "
+                + "fixed by S83 on 2026-09-22 under the owner's no-known-bugs rule, and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: when a pattern letter fails inside a STRING_FLD item, the next "
+                + "subject character's folding is already loaded (`folded_pos` 0 of `folded_len`). A "
+                + "deletion only moves the pattern on, so when it finishes the item nothing of that "
+                + "folding has been used. The leftovers loop at upstream/src/_regex.c:14856 and the "
+                + "backtrack check at :14874 both test `folded_pos < folded_len` and treat it as "
+                + "half-matched, charging a further edit per folded character or backtracking. The "
+                + "reversed arm and REF_GROUP_FLD "
+                + "(:14154, :14255) test the same way. This port charges leftovers only when part of "
+                + "the folding was used (`Matcher.FoldingIsPartUsed`).\n"
+                + "THE MINIMAL CASE, measured 2026-09-22 on regex 2026.9.10: `(?fi)(?:fi){d<=1}` over "
+                + "'fe' is None under V1, while `(?i)(?:fi){d<=1}` under V0, which never builds a "
+                + "STRING_FLD item, gives (0, 1) with one deletion. So does this port. Allowing a "
+                + "second deletion, `{d<=2}`, makes V1 find (2, 2) instead, a match it could have "
+                + "had at 0.\n"
+                + "THE WAVE ROWS all agree with upstream V0 once the pattern's ligatures are spelled "
+                + "out (sharp s as ss, the ff and st ligatures as two letters), or are valid matches "
+                + "within budget where V1 finds none. Seed 7 row 6250 is also upstream contradicting "
+                + "itself: it matches under `{d<=1}` and not under the looser `{s<=1,i<=1,d<=1}`.\n"
+                + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`. A row belongs "
+                + "here when `OracleComparer.RunWithoutTheFoldFix`, which sets "
+                + "`PatternObject.ChargeUntouchedFoldings` and so restores upstream's test at every "
+                + "site, reproduces upstream's recorded answer exactly, AND this port's live answer "
+                + "is the one being judged. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FullFoldFuzzyDeletionTests",
+            Example: _foldFixRows,
+            Applies: static (row, ours) => OnlyTheFoldFixExplainsIt(row, ours)
+        ),
+        new(
             Id: "boundary-at-the-end-of-the-text",
             Reason: "Deliberate divergence, slice S57d, 2026-09-21 (upstream issue 589, ledger "
                 + "entry 21; docs/DIVERGENCES.md). Where a word or grapheme boundary is decided at "
@@ -6236,6 +6296,32 @@ internal static class ExpectedDivergences
 
         return OracleComparer.Run(row) is { } pinned
             && string.Equals(pinned.Describe(), ours.Describe(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether the S83 full-fold deletion fix is the whole of the difference between the two
+    /// engines on a row.
+    /// </summary>
+    /// <remarks>
+    /// The same two runs as <see cref="OnlyTheAnchorPinExplainsIt"/>: first without the fix
+    /// (<see cref="OracleComparer.RunWithoutTheFoldFix"/>), which must reproduce upstream's recorded
+    /// answer, then as the engine really answers, which must be the answer being judged.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the fix explains the divergence and nothing else does.</returns>
+    private static bool OnlyTheFoldFixExplainsIt(OracleRow row, IOracleOutcome ours)
+    {
+        if (
+            OracleComparer.RunWithoutTheFoldFix(row) is not { } unfixed
+            || OracleComparer.Compare(row, unfixed) != OracleVerdict.Agree
+        )
+        {
+            return false;
+        }
+
+        return OracleComparer.Run(row) is { } live
+            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
     }
 
     /// <summary>

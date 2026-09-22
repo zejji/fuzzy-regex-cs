@@ -96,6 +96,79 @@ versions is timing different work. Add a line to S63's slice file saying so.
 
 ## Done when
 
-The tests above are green and each was seen red without the fix; ratchet green; oracle green at
-three seeds with the new divergences pinned; ledger, DIVERGENCES and the upstream draft written;
-the corpus check recorded in the sitting notes; slice moved to `done/`.
+- [x] The tests above are green and each was seen red without the fix.
+- [x] Ratchet green.
+- [x] Oracle green at three seeds with the new divergences pinned.
+- [x] Ledger, DIVERGENCES and the upstream draft written.
+- [x] The corpus check recorded in the sitting notes.
+- [x] Slice moved to `done/`.
+
+Sitting notes: `docs/plan/slices/notes/S83-sittings.md`.
+
+## Closing notes (2026-09-22)
+
+**What landed.** `Matcher.FoldingIsPartUsed` decides whether a folding still has leftovers to
+charge: forward, `0 < foldedPos < foldedLen`; reversed, the mirror. It replaces upstream's test at
+six sites: the `STRING_FLD` and `STRING_FLD_REV` leftovers loops and final backtracks, and the
+subject side of `REF_GROUP_FLD` and `REF_GROUP_FLD_REV`. The slice named four sites; the audit
+found the backreference pair had the same defect (`(fi)(?:\1){d<=1}` over 'fife'). A folding that
+was part-used is still charged, so `(?fi)(?:sst){e<=1}` over 'ßﬆ' keeps its insertion.
+`PatternObject.ChargeUntouchedFoldings` restores upstream's rule, and the oracle entry
+`full-fold-fuzzy-deletion` keys on it (`OracleComparer.RunWithoutTheFoldFix`), after S57c's
+anchor-pin precedent. Ledger entry 28, a DIVERGENCES row, a COMPARISON section and a draft report
+(`docs/plan/upstream-reports/entry-28-full-fold-fuzzy-deletion.md`, not filed). S63's slice file
+now says a Python timing must state its flags and version.
+
+`(?fi)(?:fi){d<=2}` over 'fe' is (0, 1) after the fix, one deletion, where both engines gave (2, 2)
+with two. That is V0's answer and the first match within the budget, so it is pinned.
+
+**Surprises.** Wave row 6250 (seed 7) shows upstream contradicting itself: a match under `{d<=1}`
+and none under the looser `{s<=1,i<=1,d<=1}`. The blind review found a second shared defect, the
+opposite case: a full-folded backreference that ends half-way through a folding backtracks without
+trying an edit (`(s)(?:\1){e<=1}` over 'sß' is None in both engines). It is out of scope and has no
+slice yet; STATE.md raises it for the owner.
+
+**For the next slice.** A row the fix moves can also cross another deliberate divergence. Seed
+31337 row 6123 does: once the fix lets the match reach a `\B` at the end of the text, the S57d
+boundary rule decides the answer. The ablation claims such a row first, which is correct, but judge
+it by removing the other construct, as the sitting notes do.
+
+**Review.** Three blind passes with one brief.
+- Pass 1 raised one finding, reproduced and fixed: the new SHIPPED divergence had no COMPARISON
+  heading, so `Every_SHIPPED_divergence_is_named_in_the_comparison_page` failed. Its aside, the
+  backreference defect above, was reproduced and deferred.
+- Pass 2, over the pass-1 fixes, raised three findings, all reproduced and fixed. LEDGER and the
+  draft had swapped the roles of `_regex.c:14856` (the leftovers loop) and `:14874` (the backtrack
+  check), and the probe's docstring misdescribed its output. The same swap in the oracle entry's
+  Reason text was fixed with them.
+- Pass 3, over that delta: "No defects found."
+
+The independent verifier (fresh Opus) re-ran all six judged claims from the committed files: the
+upstream V1 and V0 values, the port's values, the seven wave rows against V0, the three-seed
+oracle, the ablation on the 11 recorded rows, and the corpus counts. All six came back CONFIRMED.
+
+**Controls**, final re-runs against the committed code and generator.
+
+> Control A, the entry's predicate: in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`,
+> entry `full-fold-fuzzy-deletion`, change
+> ```
+>             Applies: static (row, ours) => OnlyTheFoldFixExplainsIt(row, ours)
+> ```
+> to
+> ```
+>             Applies: static (row, ours) =>
+>                 OnlyTheFoldFixExplainsIt(row, ours) || row.Pattern.Contains("fi", StringComparison.Ordinal)
+> ```
+> Run: `pwsh -File tools/run-oracle.ps1 -SkipRecord` over the default wave recorded at seed 31337
+> (6680 rows). Result: the oracle tests give 1 failed, 29 passed; the failure is
+> `A_row_the_fold_fix_does_not_explain_is_not_accounted_for`. The control is a unit test over a
+> fixed row, so the seed does not change it.
+
+> Control B, the ablation: in `src/FuzzyRegex/Engine/PatternObject.cs`, change
+> `    internal bool ChargeUntouchedFoldings;` to `    internal bool ChargeUntouchedFoldings = true;`.
+> Run: `pwsh -File tools/run-oracle.ps1 -Seeds "7,4242,20260922,31337"`, default generators, 6680
+> rows per seed. Result: no row is EXPECTED as `full-fold-fuzzy-deletion` at any seed, and agree
+> rises from the fixed run's 6637, 6637, 6657 and 6647 to 6639, 6641, 6658 and 6650. That is 2, 4, 1
+> and 3 rows, every row the entry claims. Diverge is 0 throughout; the run is RED only through the
+> meta-tests, which require every entry's example rows to still diverge. Seed 31337 is the unused
+> seed.

@@ -696,6 +696,9 @@ public sealed class ThreadSafetyTests
             // S57c added AnchorGuards, written by Optimiser.FindAnchorGuards, the last pass
             // OptimisePattern runs.
             "PatternObject.AnchorGuards",
+            // S83 added ChargeUntouchedFoldings, which the library never writes. Only
+            // OracleComparer.RunWithoutTheFoldFix sets it, on a pattern compiled for that one call.
+            "PatternObject.ChargeUntouchedFoldings",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

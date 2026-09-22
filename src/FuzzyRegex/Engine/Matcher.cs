@@ -4311,6 +4311,35 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (S83): whether the comparison stopped part way through a subject character's
+    /// folding, which is the leftovers test at the end of <c>STRING_FLD</c>, <c>REF_GROUP_FLD</c> and
+    /// their reversed forms.
+    /// </summary>
+    /// <remarks>
+    /// Upstream asks only whether any of the folding is left (<c>folded_pos &lt; folded_len</c>, or
+    /// <c>folded_pos &gt; 0</c> reversed, <c>upstream/src/_regex.c</c>:14856). That is also true of a
+    /// folding loaded for the next subject character when a fuzzy deletion then finished the item,
+    /// with none of it compared. That character is untouched, and treating it as half-matched costs
+    /// an extra edit or loses the match: <c>(?fi)(?:fi){d&lt;=1}</c> over <c>fe</c> finds nothing
+    /// upstream, where deleting the i gives (0, 1). An untouched folding sits at its start, 0
+    /// forward and <paramref name="foldedLen"/> reversed.
+    /// <see cref="PatternObject.ChargeUntouchedFoldings"/> restores upstream's test for the oracle.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="foldedPos">How far into the subject character's folding the comparison got.</param>
+    /// <param name="foldedLen">The length of that folding, 0 if none is loaded.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <returns>Whether some but not all of the folding was used.</returns>
+    private static bool FoldingIsPartUsed(MatchState state, int foldedPos, int foldedLen, int step)
+    {
+        bool upstreamRule = state.Pattern.ChargeUntouchedFoldings;
+
+        return step > 0
+            ? foldedPos < foldedLen && (foldedPos > 0 || upstreamRule)
+            : foldedPos > 0 && (foldedPos < foldedLen || upstreamRule);
+    }
+
+    /// <summary>
     /// Upstream <c>fuzzy_match_string_fld</c> (line 10635): a first try at fuzzing a string whose
     /// subject side is being full-case-folded.
     /// </summary>
@@ -8056,7 +8085,8 @@ internal static class Matcher
                     stringPos = -1;
 
                     // A folding that ran out on one side but not the other did not line up.
-                    if (foldedPos > 0 || gfoldedPos > 0)
+                    // NOT UPSTREAM: upstream tests 'folded_pos > 0' (:14255); see FoldingIsPartUsed.
+                    if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1) || gfoldedPos > 0)
                     {
                         goto backtrack;
                     }
@@ -8180,7 +8210,9 @@ internal static class Matcher
                     stringPos = -1;
 
                     // A folding that ran out on one side but not the other did not line up.
-                    if (foldedPos < foldedLen || gfoldedPos < gfoldedLen)
+                    // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' (:14154); see
+                    // FoldingIsPartUsed.
+                    if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1) || gfoldedPos < gfoldedLen)
                     {
                         goto backtrack;
                     }
@@ -8458,9 +8490,11 @@ internal static class Matcher
                         // The pattern ran out part way through the subject character's folding, and
                         // a fuzzy string is allowed to charge the leftovers as errors rather than
                         // fail (:14855). Every other arm reaches its 'goto backtrack' below instead.
+                        // NOT UPSTREAM: upstream tests 'folded_pos < folded_len' here and at :14874;
+                        // see FoldingIsPartUsed.
                         if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            while (foldedPos < foldedLen)
+                            while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
                             {
                                 status = FuzzyMatchStringFld(
                                     state,
@@ -8494,7 +8528,7 @@ internal static class Matcher
 
                         // The subject character's folding was longer than what the pattern
                         // consumed, so this string is only part of it.
-                        if (foldedPos < foldedLen)
+                        if (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
                         {
                             goto backtrack;
                         }
@@ -8824,9 +8858,10 @@ internal static class Matcher
 
                         // The pattern ran out part way through the subject character's folding
                         // (:14962), the mirror of STRING_FLD's own loop.
+                        // NOT UPSTREAM: upstream tests 'folded_pos > 0'; see FoldingIsPartUsed.
                         if ((node.Status & NodeStatus.Fuzzy) != 0)
                         {
-                            while (foldedPos > 0)
+                            while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
                             {
                                 status = FuzzyMatchStringFld(
                                     state,
@@ -8860,7 +8895,7 @@ internal static class Matcher
 
                         // The subject character's folding was longer than what the pattern
                         // consumed, so this string is only part of it.
-                        if (foldedPos > 0)
+                        if (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
                         {
                             goto backtrack;
                         }

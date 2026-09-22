@@ -462,6 +462,31 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `full-fold-fuzzy-deletion`, built the same way as the anchor pin's
+        // above: upstream's own answer is what this port gave before S83, so accepting it would
+        // classify a revert of the fix as the fix; and no match stands in for an unrelated defect.
+        // Most of these rows' upstream answer IS no match, so for them the two cases coincide.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e => string.Equals(e.Id, "full-fold-fuzzy-deletion", StringComparison.Ordinal))
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
     public void A_partial_of_the_wrong_span_is_not_accounted_for_as_a_boundary_partial()
     {
         // The control for `boundary-at-the-end-of-the-text`, named in that entry's own Reason.

@@ -1,0 +1,11 @@
+{"pattern": "(?b)(?fi)(\u00dfa)(?:(?:\\1)\\B0a\ud83d\ude00){s<=1,i<=1,d<=1}", "flags": 0, "subject": "\u00dfasa0a\ud83d\ude00", "operation": "match"}
+{"pattern": "(?fi)(?r)\\B(?:\ufb00o[ab]){d<=1}", "flags": 0, "subject": "x\u00dfFOA", "operation": "finditer-overlapped"}
+{"pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?stra\u00dfe){d<=2}", "flags": 0, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped"}
+{"pattern": "(?fi)(?:\ufb00o(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "subject": "FaFOBAaQb", "operation": "match"}
+{"pattern": "(?fi)\\b(?:\ufb00o(?:[^a-f][a-f]){e<=3,1i+1d+2s<=3}){e<=3,1i+1d+2s<=3}", "flags": 0, "subject": "\u00dfFOz", "operation": "sub", "template": "<>", "count": 3}
+{"pattern": "(?fi)\\b(oba)(?:.(?:\\1)){2i+1d+1s<=2:f}", "flags": 0, "subject": "obabO0", "operation": "finditer-overlapped"}
+{"pattern": "(?fi)(?:\ufb06x\ud83d\ude00\ud835\udfee){e<=3,1i+1d+2s<=3}", "flags": 0, "subject": " 0t\ud83d\ude00\ud835\udfee", "operation": "split", "count": 1}
+{"pattern": "(?fi)(?:fi){d<=1}", "flags": 0, "subject": "fe", "operation": "search"}
+{"pattern": "(?rfi)(?:fi){d<=1}", "flags": 0, "subject": "ei", "operation": "search"}
+{"pattern": "(?fi)(fi)(?:\\1){d<=1}", "flags": 0, "subject": "fife", "operation": "search"}
+{"pattern": "(?rfi)(?:\\1){d<=1}(fi)", "flags": 0, "subject": "eifi", "operation": "search"}

@@ -283,6 +283,22 @@ internal sealed class PatternObject
     /// </remarks>
     internal IReadOnlyList<Node>? AnchorGuards;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a full-case-folded string or group
+    /// reference treats a subject folding it loaded but never used as half-matched, which is
+    /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the
+    /// S83 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// When a fuzzy deletion finishes a <c>STRING_FLD</c> or <c>REF_GROUP_FLD</c> item, the next
+    /// subject character's folding may already be loaded with none of it compared. Upstream tests
+    /// only <c>folded_pos &lt; folded_len</c> (<c>upstream/src/_regex.c</c>:14856, :14874, :14154
+    /// and their reversed mirrors), so it charges an extra edit for that character or backtracks:
+    /// <c>(?fi)(?:fi){d&lt;=1}</c> finds nothing in <c>fe</c>. This port charges only a folding that
+    /// is part-used; see <c>Matcher.FoldingIsPartUsed</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool ChargeUntouchedFoldings;
+
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
 

@@ -1057,6 +1057,29 @@ pattern over the same span answers two ways according to where the caller starte
 Upstream issues 563 and 564 have tracked it since 17 April 2025, with the maintainer's own comment
 "It looks like a bug". There is no option to restore the upstream answer.
 
+### A fuzzy deletion that finishes a full-case-folded string or backreference costs one edit
+
+Under `IgnoreCase` with version 1, a literal holding a pair that one character can fold to (fi, ff,
+st, ss) is matched against each subject character's full folding, so `ﬁ` matches `fi` and `ß`
+matches `ss`. Upstream's bookkeeping for that folding goes wrong when a fuzzy deletion is the last
+step of the literal: it charges an extra edit for a subject character nothing was compared with, so
+a one-deletion match costs two edits or is not found at all.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Delete the E and the T: two edits, inside the budget of two.
+var phrase = new FuzzyRegex("(?:copper field studio){e<=2}", FuzzyRegexOptions.IgnoreCase);
+Match m = phrase.Match("COPPER FILD SUDIO HARBOUR");
+Console.WriteLine(m.Success ? m.Value : "no match");   // COPPER FILD SUDIO - upstream: no match
+```
+
+Upstream in version 0, which folds one character at a time and never builds these items, finds the
+same match, and so does this port on all 300,000 searches of a benchmark corpus of short records.
+A folding that was partly used is still charged, so `(?fi)(?:sst){e<=1}` over `ßﬆ` still needs its
+one insertion. There is no option to restore the upstream answer; `(?V0)` gives simple folding,
+where the two engines already agree.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

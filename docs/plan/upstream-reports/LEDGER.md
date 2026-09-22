@@ -3450,3 +3450,44 @@ Failing that, the minimum a report should ask for is consistency between `'.a'` 
 `partial-the-pattern-can-never-complete` in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`
 with the test
 `Gaps/Engine/PartialMatchingTests.A_partial_fullmatch_needs_a_completion_that_could_exist`.
+
+## 28. A fuzzy deletion that finishes a full-case-folded string is charged twice - FIXED HERE (S83)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-28-full-fold-fuzzy-deletion.md`. Found
+2026-09-22 by `ManyInputsBenchmarks`' answer check, which compared this port with upstream under
+`regex.I` and disagreed on 106 of 300,000 phrase searches.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-22 by
+`tools/probes/s83-full-fold-fuzzy-deletion.py`:
+
+```
+V1 search('(?:fi){d<=1}', 'fe') -> None
+V0 search('(?:fi){d<=1}', 'fe') -> span=(0, 1) fuzzy_counts=(0, 0, 1)
+V1 search('(?:fi){d<=2}', 'fe') -> span=(2, 2) fuzzy_counts=(0, 0, 2)
+V1 search('(?:copper field studio){e<=2}', 'COPPER FILD SUDIO ...') -> None
+V0 search('(?:copper field studio){e<=2}', 'COPPER FILD SUDIO ...') -> span=(0, 17), two deletions
+```
+
+All under `regex.I`. Version 1 means full case folding, which compiles a literal holding fi, ff, st
+or ss into a `STRING_FLD` item; Version 0 never builds one.
+
+**Why upstream is wrong.** Deleting `i` from `fi` leaves `f`, one edit within `{d<=1}`, and README.rst:590
+says fuzzy search returns "the first match that meets the given constraints". Upstream also
+contradicts itself: allowing a second deletion moves the answer to an empty match at the end, and on
+seed 7 row 6250 of the oracle's fuzzy wave, `(?fi)(\xdfa)(?:(?:\1)\B0a\U0001f600)` matches
+`'\xdfasa0a\U0001f600'` under `{d<=1}` and not under the looser `{s<=1,i<=1,d<=1}`.
+
+**Mechanism.** When a pattern letter fails inside the item, the next subject character's folding is
+already loaded (`folded_pos` 0). A deletion moves only the pattern on; if it finishes the item, the
+leftovers loop at `_regex.c:14856` and the backtrack check at `:14874` read that untouched folding as a
+half-matched character and charge it or backtrack. `RE_OP_STRING_FLD_REV` mirrors it, and
+`RE_OP_REF_GROUP_FLD` and its reversed twin test the same way at `:14154` and `:14255`. Not the same
+defect as S35's `_fix_full_casefold` chunk remap.
+
+**Blind review.** See S83's closing notes.
+
+**This port.** `Matcher.FoldingIsPartUsed` charges a folding only when part of it was used, at all
+six sites. Real data: 0 span differences from upstream V0 over the same 300,000 searches. Pinned
+by `Gaps/Engine/FullFoldFuzzyDeletionTests.cs` and by `full-fold-fuzzy-deletion` in
+`tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, which classifies the seven wave rows the fix
+moved by switching the fix off (`OracleComparer.RunWithoutTheFoldFix`).

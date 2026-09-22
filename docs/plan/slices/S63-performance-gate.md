@@ -47,6 +47,11 @@ is fastest, since that is advice a user needs.
    asserted to return the same thing - same match count, same spans. A faster number for a
    different answer is not a number, and this repo already owns the machinery that defines "the
    same answer".
+   Every Python-side timing states its flags. This port's IgnoreCase means Version 1 full case
+   folding, so a fuzzy row timed against `regex.I` alone (Version 0) is timing different work, and
+   since S83 upstream's Version 1 answers differ from this port's on full-folded fuzzy rows
+   (ledger entry 28). The answer check therefore compares against V0, and each timing names the
+   version it ran.
 3. **Results committed** under `bench/baselines/<machine-id>/` with everything needed to re-derive
    them: the machine description, the `regex` and Python versions, the .NET SDK and runtime
    versions, the git SHA, the job, the artifacts folder, the noise floor in force, and the date.
