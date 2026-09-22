@@ -1561,6 +1561,76 @@ public sealed class PartialMatchingTests
         (verbless.Index, verbless.Length).Should().Be((0, 3));
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void A_partial_fullmatch_needs_a_completion_that_could_exist()
+    {
+        // Row 97332 of the 6000-row date-seed gate (`pwsh -File tools/run-oracle.ps1 -Count 6000
+        // -Seeds 20260922`), pinned as `partial-the-pattern-can-never-complete`. Upstream answers a
+        // partial over the whole subject; this port answers nothing at all, because no longer
+        // subject could complete the match.
+        //
+        // PROVENANCE, measured 2026-09-22 on regex 2026.9.10 by
+        // tools/probes/s57f-fullmatch-partial-with-no-completion.py. Every line is
+        // `fullmatch(subject, partial=True)`, and the spans are codepoints:
+        //
+        //   '(\S??)\.\b' over '.\r', IGNORECASE|MULTILINE  PARTIAL (0, 2)  <- the row as drawn
+        //   '(\S??)\.'   over '.a'                         PARTIAL (0, 2)  <- minimised, no flags
+        //   '(\S??)[.]'  over '.a'                         PARTIAL (0, 2)  <- so not the string search
+        //   '\.'         over '.a'                         None            <- the repeat is the variable
+        //   '(\S?)\.'    over '.a'                         None            <- and it has to be LAZY
+        //   '(\S??)\.'   over '.'                          match (0, 1)    <- the pattern does match
+        //   '(\S??)\.'   over '.ab'                        None            <- upstream, one character on
+        //   of the 156 subjects '.a' + s, for every s up to three characters over
+        //     {'.', 'a', 'X', space, tab}, NONE is a complete fullmatch
+        //
+        // THE SECOND ENGINE AGREES WITH THIS PORT. PCRE2 10.47, driven directly by
+        // tools/probes/pcre2-fullmatch-partial-with-no-completion.py on 2026-09-22, answers None for
+        // `(\S??)\.\z` over '.a' under PARTIAL_SOFT and PARTIAL_HARD alike, and None for '.ab',
+        // 'aba' and 'abab' - every subject upstream reports the phantom over. Its partial machinery
+        // is reachable on the same pattern: over '.' under PARTIAL_HARD it escalates the complete
+        // match to a partial, because `\z` at the end of the available text is unresolved.
+        //
+        // WHY (0, 2) CANNOT BE A PARTIAL. upstream/README.rst:270 defines a partial as the answer to
+        // whether "a complete match could be possible if the string had not been truncated", and the
+        // worked example at :288 states the negative case: `regex.compile(r'\d{4}').fullmatch('a',
+        // partial=True)` is None, commented "It'll never match." `(\S??)\.` matches at most two
+        // characters and a two-character match ends in '.', so no text appended to '.a' can ever
+        // fullmatch it. Upstream contradicts itself one character later, too: '.ab' is None although
+        // it is exactly as uncompletable as '.a'.
+        //
+        // PERMANENT, and judged in this port's favour.
+        const string drawn = @"(\S??)\.\b";
+        FuzzyRegex asDrawn = new(drawn, FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline);
+
+        asDrawn.FullMatch(".\r", partial: true).Success.Should().BeFalse("upstream answers a partial (0, 2)");
+
+        // The same divergence with the flags, the boundary and the carriage return all removed, which
+        // is the form the argument above is made over.
+        FuzzyRegex minimised = new(@"(\S??)\.");
+
+        minimised.FullMatch(".a", partial: true).Success.Should().BeFalse("upstream answers a partial (0, 2)");
+
+        // Not vacuous: the pattern really does fullmatch a subject it can complete, and it answers a
+        // partial where one is genuinely available - an empty subject can still grow into '.'. Both
+        // engines agree on these two, and on '.ab' below.
+        minimised.FullMatch(".", partial: true).Success.Should().BeTrue();
+        minimised.FullMatch(".", partial: true).PartialMatch.Should().BeFalse();
+        minimised.FullMatch("", partial: true).PartialMatch.Should().BeTrue();
+
+        // Upstream's own answer one character later, which both engines give: '.ab' cannot complete
+        // either, and there upstream agrees that nothing is the answer.
+        minimised.FullMatch(".ab", partial: true).Success.Should().BeFalse("upstream agrees here");
+
+        // The same phantom with a two-character literal, where upstream reports a partial over both
+        // subjects although neither can complete. PCRE2 answers None over both, and so does this
+        // port, which is what makes upstream's '.ab' answer a self-contradiction rather than a rule.
+        FuzzyRegex twoLetters = new(@"(\S??)ab");
+
+        twoLetters.FullMatch("aba", partial: true).Success.Should().BeFalse("upstream answers a partial (0, 3)");
+        twoLetters.FullMatch("abab", partial: true).Success.Should().BeFalse("upstream answers a partial (0, 4)");
+    }
+
     /// <summary>
     /// A repeat whose body ran out of subject part-way through its next repetition, with the
     /// minimum already met: the match so far is partial, not complete.

@@ -3347,3 +3347,77 @@ diverging matches. The oracle pin is `reversed-body-change-lands-where-the-looka
 **The row also contradicts itself in entry 11's way**, on its third match: counts `(1, 0, 0)`, one
 substitution, and a change list holding one deletion at 3 and no substitution. That is entry 11's
 door F seen again, and the pin covers both matches because one row cannot be split between two pins.
+
+## 27. A partial `fullmatch` reports a prefix whose completion cannot exist
+
+**Status:** not filed, per the owner's rule. Found by S57f in the 6000-row exit gate, seed 20260922
+row 97332. This is the mirror image of entry 21: there upstream denies a partial whose completion
+demonstrably exists, here it grants one that no subject could complete. Both are open in upstream's
+tracker - 589 and 367 - and they pull in opposite directions, which is why this entry is careful
+about which half of 367 it claims.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-22 by
+`tools/probes/s57f-fullmatch-partial-with-no-completion.py`:
+
+```python
+>>> regex.compile(r'(\S??)\.').fullmatch('.a', partial=True)
+<regex.Match object; span=(0, 2), match='.a', partial=True>   # no longer subject can complete it
+>>> regex.compile(r'(\S??)\.').fullmatch('.ab', partial=True)
+None                                                          # one character on, and it agrees
+```
+
+**Why the first answer is wrong.** `upstream/README.rst:270` defines a partial match as the answer
+to whether "a complete match could be possible if the string had not been truncated", and its worked
+example at `:288` states the negative case: `regex.compile(r'\d{4}').fullmatch('a', partial=True)` is
+`None`, commented "It'll never match." `(\S??)\.` matches at most two characters, and a
+two-character match must end in a full stop, so a subject beginning `'.a'` cannot be fullmatched
+however it grows. Measured as well as argued: of the 156 subjects `'.a' + s`, for every `s` up to
+three characters over `{'.', 'a', 'X', space, tab}`, none is a complete fullmatch.
+
+**Upstream contradicts itself**, which is what makes this a defect rather than a documented limit.
+All four of these are uncompletable, and upstream answers two of them one way and two the other:
+
+```
+'(\S??)\.'  '.a'    PARTIAL (0, 2)
+'(\S??)\.'  '.ab'   None
+'(\S??)ab'  'aba'   PARTIAL (0, 3)
+'(\S??)ab'  'abab'  PARTIAL (0, 4)
+```
+
+**What narrows it.** The lazy optional repeat in front of the literal is the whole of it. Deleting
+the repeat (`\.` over `'.a'`) gives `None`, and making it greedy (`(\S?)\.`) gives `None` too. It is
+not the required-string search: `(\S??)[.]` puts a character class where the string node was and
+answers the same phantom. It is not the repeat-count partial at `_regex.c:5006` either, whose
+condition needs the repeat to have consumed to the end of the text, where this one consumes one
+character of two.
+
+**Not established:** which line sets the partial. That needs a traced build, and nothing above rests
+on it - upstream's own answer at `'.ab'` settles the verdict.
+
+**The second engine agrees with this port.** PCRE2 10.47, driven directly by
+`tools/probes/pcre2-fullmatch-partial-with-no-completion.py` on 2026-09-22, answers `None` for
+`(\S??)\.\z` over `'.a'` under `PCRE2_PARTIAL_SOFT` and `PCRE2_PARTIAL_HARD` alike, and `None` over
+`'.ab'`, `'aba'` and `'abab'`. Its partial machinery is reachable on the same pattern, so that is not
+an accident of how the probe asks: over `'.'` under `PARTIAL_HARD` it escalates the complete match to
+a partial, because `\z` at the end of the available text is unresolved. The fullmatch door is asked
+as `PCRE2_ANCHORED` plus a trailing `\z`, because PCRE2 rejects `PCRE2_ENDANCHORED` together with a
+partial option (error -34).
+
+**This does not reopen 367 in general.** S49 measured PCRE2 granting the same permissive partials
+upstream does on 367's own rows and judged 367 a documentation gap rather than an engine bug
+(`tools/probes/pcre2-partial-truncation-assertions.py`, 2026-09-14). Every one of those rows has a
+lookaround at the truncation point, whose verdict a longer subject genuinely could change, and
+deciding completability in general is not possible. This row has no assertion at the truncation
+point at all, the pattern's maximum width settles completability in one line, and the second engine
+refuses the partial. The narrow claim is the one to file: **a partial should not be reported where
+the attempt failed on text the engine already held.**
+
+**Proposed fix.** Report a partial only where a node asked for a character beyond the available
+text, which is the rule upstream states for itself elsewhere and the rule
+`tools/probes/upstream-partial-needs-text-exhaustion.py` measured it following on every other family.
+Failing that, the minimum a report should ask for is consistency between `'.a'` and `'.ab'`.
+
+**This port.** It answers `None`, and the answer is pinned permanently as
+`partial-the-pattern-can-never-complete` in `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`
+with the test
+`Gaps/Engine/PartialMatchingTests.A_partial_fullmatch_needs_a_completion_that_could_exist`.

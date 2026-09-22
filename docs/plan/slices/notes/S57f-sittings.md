@@ -265,3 +265,132 @@ by testing the remaining six for it: IGNORECASE off, then the letter swapped, an
 upstream moves to this port's answer. Only three of the ten rows carry IGNORECASE at all, and
 76484 was one of them - the other two are 73420, whose subject is astral with no Turkic character in
 it, and 76118 over the subject `' A'`, so neither is likely to fall to this test.
+
+## Sitting 2 - 2026-09-22, from 09:38
+
+The sitting that judged the remaining six rows and pinned all ten.
+
+### The ten rows were re-recorded first, and they still diverge
+
+`.scratch/s57f-ten.jsonl` holds the ten rows as JSONL, lifted from sitting 1's report. Recording
+them again from upstream and running the port over them gives `agree 0 unsupported 0 expected 0
+diverge 10 of 10 rows`, so every pin below is made against evidence measured in this sitting rather
+than against a report from the last one. After the pins the same file runs `expected 10 diverge 0`.
+
+### Six rows judged, in three pairs and two singles
+
+Each row was ablated before it was reasoned about, which is S52's lesson and the slice's own
+instruction. The ablations were run through both engines: upstream directly in Python, the port
+through `tools/run-oracle.ps1 -Rows`.
+
+| Row | Mechanism | Where it landed |
+| --- | --- | --- |
+| 73420 | POSIX and BESTMATCH together destroy a match either one alone keeps | `posix-fuzzy-contradicts-its-own-flagless-answer`, row 16 |
+| 76118 | POSIX charges a substitution to a span its own POSIX-free engine matches exactly | `posix-fuzzy-contradicts-its-own-flagless-answer`, row 17 |
+| 74554 | `(*SKIP)` carries a moved slice into the partial retry; upstream's `(*PRUNE)` spelling answers this port's answer | `partial-retry-carried-slice-forward`, row 11 |
+| 103000 | the same, on a sliced search: upstream's partial spans the whole slice, its `(*PRUNE)` spelling the one unit this port answers | `search-start-partial`, row 26 |
+| 74222 | fuzzy changes leaked from an abandoned attempt, under `(?e)` | `fuzzy-changes-leaked-from-an-abandoned-attempt`, a new third arm |
+| 77887 | ENHANCEMATCH stops one step early and keeps a two-error fit where a one-error fit exists | `enhancematch-loses-a-candidate`, row 2 |
+
+### The ablation batch, and how to re-run it
+
+`tools/probes/s57f-ablation-rows.jsonl` holds all 26 ablations behind the table above, in the order
+below. Re-run them with `pwsh -File tools/run-oracle.ps1 -Rows tools/probes/s57f-ablation-rows.jsonl`.
+It prints `agree 16  unsupported 0  expected 7  timeout 0  resource 0  diverge 3  of 26 rows`, and
+then RED: three ablations are meant to keep diverging, so RED is the expected verdict for this file
+and not a regression. What each row says:
+
+| # | Ablation | Verdict | What it settles |
+| --- | --- | --- | --- |
+| 1 | 73420 as drawn | EXPECTED | the pin catches the row |
+| 2 | 73420 no `(?b)` | agree | BESTMATCH is half the conjunction |
+| 3 | 73420 no `(?p)` | agree | POSIX is the other half |
+| 4 | 73420 flags 0 | DIVERGE | IGNORECASE is inert |
+| 5 | 76118 as drawn | EXPECTED | the pin catches the row |
+| 6 | 76118 no `(?e)` | agree | needed by the port's answer, though upstream does not move |
+| 7 | 76118 no `(?r)` | agree | the same |
+| 8 | 76118 no POSIX | agree | the only flag that moves upstream |
+| 9 | 74554 as drawn | EXPECTED | the pin catches the row |
+| 10 | 74554 `(*PRUNE)` | agree | upstream's other verb answers this port's answer |
+| 11 | 74554 verb deleted | agree | prunes nothing, so not a control - it reaches a complete match |
+| 12 | 74554 no `\K` | DIVERGE | inert |
+| 13 | 74554 no inner `{i<=1}` | DIVERGE | inert |
+| 14 | 74554 no outer `{1<=e<=2}` | agree | NOT inert: the row needs a fuzzy section around the verb |
+| 15 | 74554 no `partial` | agree | both engines answer nothing |
+| 16 | 103000 as drawn | EXPECTED | the pin catches the row |
+| 17 | 103000 `(*PRUNE)` | agree | upstream's other verb answers this port's answer |
+| 18 | 103000 verbs deleted | agree | as row 11 |
+| 19 | 103000 no slice | agree | the slice is an ingredient |
+| 20 | 103000 no `partial` | agree | so is the partial |
+| 21 | 74222 as drawn | EXPECTED | the third arm catches it |
+| 22 | 74222 no `(?e)` | EXPECTED | the STRONG arm catches it - the recorder's control is readable again |
+| 23 | 77887 as drawn | EXPECTED | the pin catches the row |
+| 24 | 77887 `{e<=1}` | agree | the cheaper fit was reachable through a narrower section |
+| 25 | 77887 `{s<=1}` | agree | the same |
+| 26 | 77887 `{s<=1,d<=1}` | agree | the same |
+
+The upstream half of rows 1 to 8 is also in `tools/probes/s57f-posix-flag-ablations.py`, which shows
+what changes in upstream's own answer rather than in the pair's agreement. They are different
+questions, and rows 6 and 7 are where they part: the two engines agree once `(?e)` or `(?r)` goes,
+and upstream has not moved at all.
+
+Two of the six rows needed more than an ablation.
+
+**74222 could not be keyed by either existing arm, and the reason is the recorder rather than the
+row.** The strong arm asks upstream the anchored question and demands its answer be this port's, but
+the pattern carries `(?e)`, so the re-ask is itself an ENHANCEMATCH call: over a zero-width span it
+improves to a no-error fit and describes a different match altogether. The weak arm only fires where
+upstream declines the anchored question, and here it answers. Widening the entry to accept a null
+control would have made the loose arm looser, which the entry's own Reason argues against, so the row
+is keyed one row wide instead. What judges it is deleting the `(?e)`: that changes neither engine's
+answer about the disputed match, it makes upstream's anchored re-ask answer this port's positions on
+both matches the engines disagree over - deletions at 3, 4 and at 0, 1 - and it puts the leak's
+signature back on the other four matches, where upstream's positions are the previous match's, one
+step down the reversed scan. The `(?e)`-free row then runs `expected 1 diverge 0` under the strong
+arm.
+
+**77887 had two readings and a probe separates them.** Reading (2), "POSIX's longest-match rule
+outranks the error count, so upstream is right to keep the longer, dearer span", is dead: upstream
+itself shrinks a POSIX span to spend fewer errors. `regex.search(r'(?p)(?e)(?:ab|abcd){e<=2}',
+'abcz')` answers the exact two-character `ab` at no cost, where its own `(?p)`-only answer is the
+four-character `abcz` at two insertions, and `(?r)(?p)(?e)` behaves the same way. Reading (1) holds
+on the real row: written `{e<=1}`, `{s<=1}` or `{s<=1,d<=1}` - each a strict subset of the row's own
+`{s<=1,i<=1,d<=1}` - the same engine answers codepoints (0, 8) with one substitution, which is this
+port's first match. A fit reachable through a narrower section was reachable through the wider one.
+Upstream reaches that span itself, as its scan's second match, and charges it a substitution and an
+insertion. `python tools/probes/s57f-posix-against-enhancematch.py`.
+
+### Row 97332 got a new entry, a second engine, and a ledger draft
+
+Sitting 1 judged it: upstream reports a partial `fullmatch` over `'.a'` for `(\S??)\.` that no
+longer subject could complete. This sitting asked PCRE2, because the row belongs to upstream issue
+367's family and S49 had already judged 367 a documentation gap on the ground that PCRE2 is equally
+permissive. **It is not, here.** PCRE2 10.47 answers None for `(\S??)\.\z` over `'.a'` under
+PARTIAL_SOFT and PARTIAL_HARD alike, and None over `'.ab'`, `'aba'` and `'abab'` - every subject
+upstream reports the phantom over - while its partial machinery stays reachable on the same pattern:
+over `'.'` under PARTIAL_HARD it escalates the complete match to a partial, because `\z` at the end
+of the available text is unresolved. The difference from S49's rows is that every one of those has a
+LOOKAROUND at the truncation point, whose verdict a longer subject genuinely could change. This row
+has no assertion there at all. `python tools/probes/pcre2-fullmatch-partial-with-no-completion.py`.
+
+The row is pinned as `partial-the-pattern-can-never-complete`, tested by
+`PartialMatchingTests.A_partial_fullmatch_needs_a_completion_that_could_exist`, recorded in
+`docs/DIVERGENCES.md` and `docs/COMPARISON.md`, and drafted as ledger entry 27.
+
+### Four probes and a rows file are now in the tree rather than in scratch
+
+- `tools/probes/s57f-ablation-rows.jsonl` - the 26 ablations above, as the oracle reads them.
+- `tools/probes/s57f-posix-flag-ablations.py` - what each flag does to UPSTREAM's own answer on
+  rows 73420 and 76118.
+- `tools/probes/s57f-posix-against-enhancematch.py` - the two readings of 77887, separated.
+- `tools/probes/s57f-fullmatch-partial-with-no-completion.py` - 97332's minimisation, upstream's
+  self-contradiction as the subject grows, and the brute-force search for a completion.
+- `tools/probes/pcre2-fullmatch-partial-with-no-completion.py` - the second engine on 97332.
+
+Each records its own measured output, with the date, in its docstring, so a later reader can tell
+whether upstream has moved without re-deriving what it used to do.
+
+### One analyzer finding, fixed on its merits
+
+`ExpectedDivergences.cs` failed the Release build with `S125: Remove this commented out code` on a
+comment line that happened to end in a semicolon. Reworded; nothing suppressed.

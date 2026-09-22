@@ -1119,3 +1119,27 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `PublicAPI.Shipped.txt` - nothing has reached 1.0, so Shipped is a single line and a gate over it
   would pass while documenting nothing. When the 1.0 release moves those lines into Shipped, the
   gate must read both files.
+
+- 2026-09-22 (S57f): row 74222's leak divergence is keyed one row wide rather than through either
+  existing arm of `fuzzy-changes-leaked-from-an-abandoned-attempt`, because the pattern carries
+  `(?e)`: the strong arm's anchored re-ask is then itself an ENHANCEMATCH call, which improves the
+  span and answers about a different match, and the weak arm needs upstream to decline that re-ask.
+  What judges the row is deleting the `(?e)` - the disputed answers do not change and upstream's
+  anchored re-ask then equals this port's.
+
+- 2026-09-22 (S57f): upstream's POSIX does not rank a longer span above a cheaper one -
+  `(?p)(?e)(?:ab|abcd){e<=2}` over `'abcz'` shrinks its own POSIX answer to the exact `ab` to spend
+  no errors (`tools/probes/s57f-posix-against-enhancematch.py`). So row 77887's ENHANCEMATCH span is
+  a divergence in ENHANCEMATCH's search, not POSIX's rule.
+
+- 2026-09-22 (S57f): PCRE2 does not share upstream's permissive partial on row 97332's family, which
+  is the opposite of S49's finding for issue 367. The rows S49 judged all place a LOOKAROUND at the
+  truncation point, where a longer subject genuinely could change the verdict; this row has no
+  assertion there and no completion exists, and PCRE2 10.47 answers None under PARTIAL_SOFT and
+  PARTIAL_HARD alike. A 367-family row therefore has to be judged on whether a completion can exist,
+  not by citing S49.
+- 2026-09-22 (S57f): an ablation that restores agreement does not name the mechanism on its own. Ask
+  which engine moved: run the ablated row against upstream alone as well as through the oracle. Row
+  76118 agrees again if `(?e)` or `(?r)` goes, yet upstream answers the same under both, so only
+  POSIX moves upstream and the other two move this port. The same goes for calling a section inert -
+  measure it, because 74554's outer `{1<=e<=2}` reads like scaffolding and is load-bearing.

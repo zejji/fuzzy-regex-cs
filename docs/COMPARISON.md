@@ -959,6 +959,26 @@ boundary. The partial spans the attempt that reached the end of the text and rep
 groups, since no path through the pattern finished. Under `(?r)` the end of the available text is its
 start, and the rule reads the same way there.
 
+### A partial match is refused where the match failed on text the engine already held
+
+The other side of the rule above. A partial match says a longer subject could complete the match, so
+this port reports one only where the attempt asked for a character the text did not have yet. Where
+it failed on a character it already had, no further text can change the outcome and the answer is no
+match. Upstream reports a partial on some of these.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = new FuzzyRegex(@"(\S??)\.").FullMatch(".a", partial: true);
+Console.WriteLine(m.Success);   // False - upstream answers a partial over the whole of ".a"
+```
+
+Nothing appended to `".a"` can complete that match: the pattern matches at most two characters, and a
+two-character match ends in a full stop. Upstream's own documentation agrees in principle - it
+defines a partial as the answer to whether "a complete match could be possible if the string had not
+been truncated" - and its answer one character later agrees in practice, since `".ab"` is no match
+there too. PCRE2 refuses the partial on every one of these subjects.
+
 ### Compile budget
 
 A counted repeat is compiled by writing out one copy of its body per repetition, so nested counted

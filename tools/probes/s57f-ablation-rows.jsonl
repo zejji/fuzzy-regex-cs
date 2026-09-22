@@ -1,0 +1,26 @@
+{"pattern": "(?b)(?r)(?p)^\\L<w1>{1<=e<=2}(?:\\p{Lu}(\\p{ASCII})\\s){s<=1,i<=1,d<=1}$", "flags": 2, "subject": "\ud835\udd18\ud801\udc00\ud835\udd18\ud801\udc00\ud801\udc00", "operation": "sub", "template": "\\1\\t\\x41", "count": 1, "namedLists": {"w1": ["\ud801\udc00", "\ud835\udd18"]}}
+{"pattern": "(?r)(?p)^\\L<w1>{1<=e<=2}(?:\\p{Lu}(\\p{ASCII})\\s){s<=1,i<=1,d<=1}$", "flags": 2, "subject": "\ud835\udd18\ud801\udc00\ud835\udd18\ud801\udc00\ud801\udc00", "operation": "sub", "template": "\\1\\t\\x41", "count": 1, "namedLists": {"w1": ["\ud801\udc00", "\ud835\udd18"]}}
+{"pattern": "(?b)(?r)^\\L<w1>{1<=e<=2}(?:\\p{Lu}(\\p{ASCII})\\s){s<=1,i<=1,d<=1}$", "flags": 2, "subject": "\ud835\udd18\ud801\udc00\ud835\udd18\ud801\udc00\ud801\udc00", "operation": "sub", "template": "\\1\\t\\x41", "count": 1, "namedLists": {"w1": ["\ud801\udc00", "\ud835\udd18"]}}
+{"pattern": "(?b)(?r)(?p)^\\L<w1>{1<=e<=2}(?:\\p{Lu}(\\p{ASCII})\\s){s<=1,i<=1,d<=1}$", "flags": 0, "subject": "\ud835\udd18\ud801\udc00\ud835\udd18\ud801\udc00\ud801\udc00", "operation": "sub", "template": "\\1\\t\\x41", "count": 1, "namedLists": {"w1": ["\ud801\udc00", "\ud835\udd18"]}}
+{"pattern": "(?e)(?r)^[^a-f]?(?(?=\\w)\\D)(?:A[A-Z]?){e<=2,s<=1}$", "flags": 65546, "subject": " A", "operation": "finditer"}
+{"pattern": "(?r)^[^a-f]?(?(?=\\w)\\D)(?:A[A-Z]?){e<=2,s<=1}$", "flags": 65546, "subject": " A", "operation": "finditer"}
+{"pattern": "(?e)^[^a-f]?(?(?=\\w)\\D)(?:A[A-Z]?){e<=2,s<=1}$", "flags": 65546, "subject": " A", "operation": "finditer"}
+{"pattern": "(?e)(?r)^[^a-f]?(?(?=\\w)\\D)(?:A[A-Z]?){e<=2,s<=1}$", "flags": 10, "subject": " A", "operation": "finditer"}
+{"pattern": "(?:(?:A(?:\\W){i<=1}){1<=e<=2}(*SKIP)\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W){i<=1}){1<=e<=2}(*PRUNE)\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W){i<=1}){1<=e<=2}\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W){i<=1}){1<=e<=2}(*SKIP)\\D|[a\\d])([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W)){1<=e<=2}(*SKIP)\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W){i<=1})(*SKIP)\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": true}
+{"pattern": "(?:(?:A(?:\\W){i<=1}){1<=e<=2}(*SKIP)\\D|[a\\d])\\K([[:alpha:]]){3,}$", "flags": 256, "subject": "\n AAA", "operation": "match", "partial": false}
+{"pattern": "(?:[\\p{L}\\p{N}](*SKIP)[a-f]|[[a-f]~~[d-k]])(?:\\p{ASCII}(*SKIP)[[a-z]--[aei]]|[\\w--[0-9]])\\b", "flags": 264, "subject": "\ud801\udc28A\ud801\udc28A\ud801\udc28\ud83d\ude00a\r\n", "operation": "search", "partial": true, "codepointSlice": [0, 7]}
+{"pattern": "(?:[\\p{L}\\p{N}](*PRUNE)[a-f]|[[a-f]~~[d-k]])(?:\\p{ASCII}(*PRUNE)[[a-z]--[aei]]|[\\w--[0-9]])\\b", "flags": 264, "subject": "\ud801\udc28A\ud801\udc28A\ud801\udc28\ud83d\ude00a\r\n", "operation": "search", "partial": true, "codepointSlice": [0, 7]}
+{"pattern": "(?:[\\p{L}\\p{N}][a-f]|[[a-f]~~[d-k]])(?:\\p{ASCII}[[a-z]--[aei]]|[\\w--[0-9]])\\b", "flags": 264, "subject": "\ud801\udc28A\ud801\udc28A\ud801\udc28\ud83d\ude00a\r\n", "operation": "search", "partial": true, "codepointSlice": [0, 7]}
+{"pattern": "(?:[\\p{L}\\p{N}](*SKIP)[a-f]|[[a-f]~~[d-k]])(?:\\p{ASCII}(*SKIP)[[a-z]--[aei]]|[\\w--[0-9]])\\b", "flags": 264, "subject": "\ud801\udc28A\ud801\udc28A\ud801\udc28\ud83d\ude00a\r\n", "operation": "search", "partial": true}
+{"pattern": "(?:[\\p{L}\\p{N}](*SKIP)[a-f]|[[a-f]~~[d-k]])(?:\\p{ASCII}(*SKIP)[[a-z]--[aei]]|[\\w--[0-9]])\\b", "flags": 264, "subject": "\ud801\udc28A\ud801\udc28A\ud801\udc28\ud83d\ude00a\r\n", "operation": "search", "partial": false, "codepointSlice": [0, 7]}
+{"pattern": "(?e)(?r)(?>(?:\\w*\\p{Lu}?){e<=2:\\d})(?P<g1>[0b]*)(?:(?(1)(?=(?P>g1))[\\w\\s]))+?", "flags": 8, "subject": "00\r\nabb", "operation": "finditer"}
+{"pattern": "(?r)(?>(?:\\w*\\p{Lu}?){e<=2:\\d})(?P<g1>[0b]*)(?:(?(1)(?=(?P>g1))[\\w\\s]))+?", "flags": 8, "subject": "00\r\nabb", "operation": "finditer"}
+{"pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){s<=1,i<=1,d<=1}", "flags": 0, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped"}
+{"pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){e<=1}", "flags": 0, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped"}
+{"pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){s<=1}", "flags": 0, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped"}
+{"pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){s<=1,d<=1}", "flags": 0, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped"}
