@@ -811,7 +811,8 @@ public sealed class FuzzyRegex
                 )
                 : default,
             // Copied for the same reason the groups are: the state is reused by the next match.
-            fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null
+            fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null,
+            oneUnitPerCharacter: state.OneUnitPerCharacter
         );
     }
 

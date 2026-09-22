@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Fuzzy.Text.RegularExpressions.Parsing;
@@ -205,13 +206,13 @@ internal sealed class MatchState : IDisposable
     internal RepeatData[] Repeats = [];
 
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
-    internal readonly ByteStack Sstack = new();
+    internal readonly ByteStack Sstack;
 
     /// <summary>Upstream <c>bstack</c>: the backtracking stack.</summary>
-    internal readonly ByteStack Bstack = new();
+    internal readonly ByteStack Bstack;
 
     /// <summary>Upstream <c>pstack</c>: the pruning stack.</summary>
-    internal readonly ByteStack Pstack = new();
+    internal readonly ByteStack Pstack;
 
     /// <summary>
     /// NOT UPSTREAM'S: the group calls that are open right now, one key per call, as
@@ -546,12 +547,15 @@ internal sealed class MatchState : IDisposable
     /// <returns>The index.</returns>
     internal CharacterIndex GetCharacterIndex() => _characterIndex ??= new CharacterIndex(this);
 
-    private MatchState(PatternObject pattern, string text)
+    private MatchState(PatternObject pattern, string text, ArrayPool<byte>? pool, bool? oneUnitPerCharacter)
     {
+        Sstack = new ByteStack(pool);
+        Bstack = new ByteStack(pool);
+        Pstack = new ByteStack(pool);
         Pattern = pattern;
         Text = text;
         TextLength = text.Length;
-        OneUnitPerCharacter = text.AsSpan().IndexOfAnyInRange('\uD800', '\uDBFF') < 0;
+        OneUnitPerCharacter = oneUnitPerCharacter ?? text.AsSpan().IndexOfAnyInRange('\uD800', '\uDBFF') < 0;
     }
 
     /// <summary>
@@ -567,6 +571,16 @@ internal sealed class MatchState : IDisposable
     /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
     /// <param name="matchAll">Whether the match must cover the whole slice.</param>
     /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
+    /// <param name="pool">
+    /// Where the stacks rent their buffers, or <see langword="null"/> for
+    /// <see cref="ArrayPool{T}.Shared"/>. Only <c>PoolDisciplineTests</c> passes anything else; see
+    /// <see cref="ByteStack"/>.
+    /// </param>
+    /// <param name="oneUnitPerCharacter">
+    /// <see cref="OneUnitPerCharacter"/> for this subject when an earlier state already worked it
+    /// out, or <see langword="null"/> to scan the subject for it. <see cref="Match.NextMatch"/>
+    /// passes it on so that a walk does not rescan the whole subject at every step.
+    /// </param>
     /// <returns>The state, ready to match.</returns>
     internal static MatchState Create(
         PatternObject pattern,
@@ -577,7 +591,9 @@ internal sealed class MatchState : IDisposable
         bool partial,
         bool visibleCaptures,
         bool matchAll,
-        MatchLimits limits
+        MatchLimits limits,
+        ArrayPool<byte>? pool = null,
+        bool? oneUnitPerCharacter = null
     )
     {
         // The capture groups (state_init_2, upstream/src/_regex.c:18327). Upstream caches the block
@@ -610,7 +626,7 @@ internal sealed class MatchState : IDisposable
             repeats[r] = new RepeatData();
         }
 
-        var state = new MatchState(pattern, text)
+        var state = new MatchState(pattern, text, pool, oneUnitPerCharacter)
         {
             VisibleCaptures = visibleCaptures,
             MatchAll = matchAll,
@@ -768,6 +784,18 @@ internal sealed class MatchState : IDisposable
     /// <param name="pos">The position to look back from, which must be greater than 0.</param>
     /// <returns>The codepoint before it.</returns>
     internal uint CharBefore(int pos) => CharAt(PrevPos(pos));
+
+    /// <summary>
+    /// Starts the time budget again from now. Not upstream's: its one scanner state times the whole
+    /// walk, and only this port's lazy walks time each step (see <c>Iteration.Enumerate</c>).
+    /// </summary>
+    internal void RestartClock()
+    {
+        if (Timeout != NoTimeout)
+        {
+            StartTime = Stopwatch.GetTimestamp();
+        }
+    }
 
     /// <summary>
     /// Upstream <c>init_match</c> (<c>upstream/src/_regex.c</c> line 3404).

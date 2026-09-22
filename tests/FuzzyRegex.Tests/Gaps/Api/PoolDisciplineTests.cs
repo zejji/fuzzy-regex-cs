@@ -157,6 +157,71 @@ public sealed class PoolDisciplineTests
         }
     }
 
+    [Test]
+    public void A_lazy_walk_rents_one_state_for_the_whole_walk_rather_than_one_per_match()
+    {
+        // S61. Before it, each step of EnumerateMatches built and disposed a state of its own, so a
+        // walk rented its stacks once per match. Holding one state across the walk rents them once:
+        // a stack that grows rents again, so the bound is "a handful", not "one", and a walk of
+        // two hundred matches sits far above it under the old shape.
+        var pool = new TrackingPool();
+        (FuzzyRegex words, string subject) = AMegabyteOfWords();
+
+        int matches = Iteration
+            .Enumerate(words, subject, 0, subject.Length, overlapped: false, partial: false, words.PatternLimits, pool)
+            .Take(200)
+            .Count();
+
+        matches.Should().Be(200);
+        pool.Rented.Should().BeGreaterThan(0, "the walk has to use its stacks for the bound below to mean anything");
+        pool.Rented.Should()
+            .BeLessThan(10, "one state serves the whole walk, so its stacks are rented once, not per match");
+    }
+
+    [Test]
+    public void A_lazy_walk_abandoned_after_two_matches_returns_every_buffer_it_rented()
+    {
+        // The hazard S58 named: a state held across a yield return is a state an abandoned iterator
+        // must still release. A foreach that breaks disposes its enumerator, and the enumerator's
+        // Dispose runs the walk's `using`, which is what returns the stacks.
+        var pool = new TrackingPool();
+        (FuzzyRegex words, string subject) = AMegabyteOfWords();
+
+        using (
+            IEnumerator<Match> walk = Iteration
+                .Enumerate(
+                    words,
+                    subject,
+                    0,
+                    subject.Length,
+                    overlapped: false,
+                    partial: false,
+                    words.PatternLimits,
+                    pool
+                )
+                .GetEnumerator()
+        )
+        {
+            walk.MoveNext().Should().BeTrue();
+            walk.MoveNext().Should().BeTrue();
+
+            pool.Outstanding.Should()
+                .BeGreaterThan(0, "mid-walk the state is still held, with its stacks, for the next match");
+        }
+
+        pool.Outstanding.Should().Be(0, "disposing the abandoned walk hands back every buffer it rented");
+        pool.DoubleReturns.Should().BeEmpty();
+        pool.ForeignReturns.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A pattern whose every match pushes onto the backtracking stack, and a subject of about a
+    /// million characters holding two hundred thousand matches of it.
+    /// </summary>
+    /// <returns>The pattern and the subject.</returns>
+    private static (FuzzyRegex Pattern, string Subject) AMegabyteOfWords() =>
+        (new FuzzyRegex(@"(\w+)\s"), string.Concat(Enumerable.Repeat("word ", 200_000)));
+
     /// <summary>The backing array a stack currently holds, which is empty once it has let it go.</summary>
     /// <param name="stack">The stack to read.</param>
     /// <returns>The array.</returns>

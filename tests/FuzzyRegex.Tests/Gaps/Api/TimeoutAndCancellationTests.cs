@@ -293,6 +293,41 @@ public sealed class TimeoutAndCancellationTests
     }
 
     [Test]
+    [Arguments(nameof(FuzzyRegex.EnumerateMatches))]
+    [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
+    public void A_lazy_walk_does_not_charge_the_callers_time_between_steps_to_its_budget(string method)
+    {
+        // S61 moved the lazy walks onto one state for the whole walk, and a state carries one
+        // start time, so without a clock restart per step the caller's own work between two
+        // matches would time the walk out. The built-in Regex times each match of a lazy walk
+        // (tools/probes/bcl-lazy-walk-timeout.cs), and DIVERGENCES keeps this port there.
+        FuzzyRegex pattern = new(@"\w+");
+        TimeSpan budget = TimeSpan.FromMilliseconds(50);
+        IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
+            ? pattern.EnumerateMatches("a b c d", timeout: budget)
+            : pattern.EnumerateSplits("a b c d", timeout: budget);
+
+        int steps = 0;
+        Action pull = () =>
+        {
+            foreach (object? _ in walk)
+            {
+                steps++;
+                long started = Stopwatch.GetTimestamp();
+                while (Stopwatch.GetElapsedTime(started) < budget * 3)
+                {
+                    Thread.SpinWait(1_000);
+                }
+            }
+        };
+
+        pull.Should().NotThrow();
+        steps
+            .Should()
+            .BeGreaterThan(3, "the walk has to spend several budgets' worth of caller time to prove anything");
+    }
+
+    [Test]
     public void A_per_call_timeout_replaces_the_pattern_budget_for_that_call()
     {
         // One Stopwatch tick of budget, so the pattern's own budget fires on anything at all.
