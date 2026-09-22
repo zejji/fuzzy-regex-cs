@@ -272,6 +272,9 @@ function Invoke-SliceSession {
             # never written to the log, and the session transcript does not record denials either.
             # So the count was unactionable and the allowlist could only have been widened by
             # guessing, which is how a safety boundary quietly stops being one.
+            $denialLogPath = Join-Path $repoRoot '.claude/driver/denied-commands.log'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $denialLogPath) | Out-Null
+
             $denials |
                 ForEach-Object {
                     # No '?.' on a bare variable here: PowerShell parses `$x?.` as a variable named
@@ -290,11 +293,20 @@ function Invoke-SliceSession {
                 Sort-Object Count -Descending |
                 Select-Object -First 15 |
                 ForEach-Object {
-                    # Truncated: a denied command can be a whole script, and this goes in a log a
-                    # human skims.
+                    # The console line stays short because this goes in a log a human skims, but
+                    # the WHOLE command goes to the denial log: on 2026-09-21 a sitting was denied
+                    # `cd <path> && pwsh -File tools/check-ratchet.ps1 ...` and the 120-character
+                    # cut fell exactly where the interesting part began, so the allowlist could not
+                    # be fixed - three shapes of that command were in the transcript and the two
+                    # rules it needs were already present. A truncated denial is an unanswerable
+                    # question; keep the full text somewhere.
+                    Add-Content -LiteralPath $denialLogPath -Value ("{0}  x{1}  {2}" -f (Get-Date -Format 'o'), $_.Count, $_.Name)
+
                     $shown = $_.Name.Substring(0, [Math]::Min(120, $_.Name.Length))
+                    if ($_.Name.Length -gt 120) { $shown = "$shown..." }
                     Write-Host "      x$($_.Count)  $shown" -ForegroundColor DarkYellow
                 }
+            Write-Host "      full text of each: $denialLogPath" -ForegroundColor DarkGray
         }
 
         return [pscustomobject]@{
