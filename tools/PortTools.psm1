@@ -1047,8 +1047,64 @@ function Write-DriverHandover {
     Set-Content -LiteralPath (Join-Path $dir 'session-slice.txt') -Value $SliceName -NoNewline
 }
 
+function Read-SliceFrontMatter {
+    <#
+    .SYNOPSIS
+        A slice file's id and phase, read from the YAML front matter at the top of it.
+
+    .DESCRIPTION
+        Both fields are mandatory: a slice whose phase is missing cannot be placed in the queue, and
+        one whose id is missing cannot be named on a command line. Only the first 20 lines are read,
+        which is the front matter and the title.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $id = $null; $phase = $null
+    foreach ($line in Get-Content -LiteralPath $Path -TotalCount 20) {
+        if ($null -eq $id -and $line -match '^\s*slice:\s*(\S+)\s*$') { $id = $Matches[1] }
+        if ($null -eq $phase -and $line -match '^\s*phase:\s*(\d+)\s*$') { $phase = [int]$Matches[1] }
+    }
+    $name = Split-Path -Leaf $Path
+    if ($null -eq $id) { throw "$name has no 'slice:' line in its front matter; the driver cannot name it." }
+    if ($null -eq $phase) { throw "$name has no 'phase:' line in its front matter; the driver cannot tell which phase it belongs to." }
+
+    [pscustomobject]@{ Id = $id; Phase = $phase }
+}
+
+function Select-PendingSlice {
+    <#
+    .SYNOPSIS
+        The slice a driver run should take next: the lowest-numbered pending one, or the one named.
+
+    .DESCRIPTION
+        Pending means "at the top level of the slices directory". Finished slices live in `done/`
+        and slices whose preconditions are not met live in `blocked/`, and neither is read - the
+        subdirectories are how the queue says "not this one". Returns $null when nothing matches,
+        which the caller reports rather than papering over: on 2026-09-21 a Phase 8 driver launched
+        for S80 took S68 instead, because S68 sorts first and was still sitting beside it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SlicesDir,
+        # 0 = any phase.
+        [int]$Phase = 0,
+        # '' = the lowest-numbered pending slice. Otherwise a front-matter id, case-insensitively.
+        [string]$SliceId = ''
+    )
+
+    Get-ChildItem -LiteralPath $SlicesDir -Filter 'S*.md' -File -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        Where-Object {
+            $front = Read-SliceFrontMatter -Path $_.FullName
+            ($Phase -eq 0 -or $front.Phase -eq $Phase) -and ($SliceId -eq '' -or $front.Id -eq $SliceId)
+        } |
+        Select-Object -First 1
+}
+
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
     Get-UpstreamCommit, New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
-    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout, Write-DriverHandover
+    Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout,
+    Write-DriverHandover, Read-SliceFrontMatter, Select-PendingSlice

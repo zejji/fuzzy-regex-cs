@@ -1011,7 +1011,7 @@ using Fuzzy.Text.RegularExpressions;
 
 // One insertion, 'x', at the position the search began.
 Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
-Console.WriteLine(m.Success ? m.Value : "no match");   // xabc - upstream finds no match at all
+Console.WriteLine(m.Success ? m.Value : "no match");   // xabc - upstream: no match
 ```
 
 This port permits the insertion where a position assertion at the head of the pattern holds at the

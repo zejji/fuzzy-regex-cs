@@ -141,6 +141,8 @@ describe('the linter sees the strings it was written for', () => {
     it.each([
         ['README.md', 30, 'fuzzy (approximate) matching'],
         ['docs/COMPARISON.md', 100, 'take the best fuzzy match rather than the first'],
+        // Measured 2026-09-21 at 57 paragraph-level blocks; floor set below that, not at it.
+        ['docs/GUIDE.md', 45, 'An error budget lives inside the pattern, next to the part of it that may be wrong'],
         // Almost all of this file is one wide table, and a table cell is dropped. Nine blocks of
         // prose around it is what there is to lint, so the floor is low on purpose.
         ['docs/DIVERGENCES.md', 8, 'The Status column is load-bearing'],

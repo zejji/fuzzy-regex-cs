@@ -1079,3 +1079,43 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   call and then every later git call in the process, including the whole of
   `tools/tests/StatusStamp.Tests.ps1`, the file the runner reaches next. A test now asserts the
   variables are absent, not empty, after the call.
+
+- 2026-09-21 (owner finding, then approval): **the user documentation gains a guide written for a
+  .NET reader, and a convention test that keeps it complete (S80, spec amendment 36).** The owner
+  read the markdown as a newcomer would and found that everything of interest to somebody not
+  coming from Python sits in `README.md`. Measured the same day: `Multiline`, `Singleline`,
+  `IgnorePatternWhitespace` and `FullCase` are named in neither `README.md` nor `COMPARISON.md`;
+  eight more flags appear only as migration answers; `IsMatchAtStart`, `IsFullMatch`,
+  `MaxCompiledNodes` and `NamedLists` appear in neither. The existing gates could not see this:
+  `PublicApiDocumentationTests` checks XML docs and `ComparisonCoversDivergencesTests` checks
+  divergence rows. `COMPARISON.md` keeps its job as the migration and divergence document.
+  `docs/GUIDE.md` is organised by the question a reader is asking, and the new test fails the build
+  when a public member or an inline flag letter is documented nowhere. One file unless it passes
+  700 lines, at which point the flag reference splits to `docs/FLAGS.md`; the test reads a list of
+  documentation files so that a later split adds a filename rather than rewriting the gate.
+
+- 2026-09-21 (owner): **nothing is published to nuget.org until most of the optimisation work is
+  done.** No prerelease either, so `1.0.0` lands after S63 closes Phase 7 and S68 writes the
+  `<remarks>` divergence notes, which is the order S69 already assumed. The cost accepted with it:
+  the `FuzzyRegex` id stays unreserved (free on nuget.org as at 2026-09-21, registration 404 and no
+  search hits), and the first real install round trip moves into the release itself rather than an
+  rc.
+
+- 2026-09-21 (S57c): S50's figure for the one-step-on narrowing's load-bearing test rows -
+  upstream's `test_fuzzy` 51, 52, 54 and 56 - does not survive re-measurement. Dropping the
+  narrowing reddens exactly four tests: `test_fuzzy#51` and `#56` (by `[Property("Upstream", ...)]`),
+  the demo word-list example, and `A_word_start_anchor_before_a_fuzzy_section_matches_at_position_
+  zero_here`. `Matcher.cs`'s doc comment and `ExpectedDivergences.cs` now cite 51 and 56 only.
+
+- 2026-09-21 (S57c): the `ExpectedDivergences` ablation (emptying `PatternObject.AnchorGuards`)
+  cannot see a change to the one-step-on test's shape, only its presence - a mutated
+  `AnchorIsPinned` that still checks something at the anchor lands in the same `expected` bucket as
+  the shipped rule, at every seed tried (`S57c-A`, generator `fuzzy-anchored`, seeds 7/4242/20260921
+  and a fresh seed 13031995, all `diverge 0`). `tools/probes/s57c-one-step-on-rows.jsonl` is a
+  second, direct instrument for exactly this reason: 4 of 7 rows classified on shipped code, 5 under
+  the fault.
+
+- 2026-09-21 (S80): `UserDocumentationCompletenessTests` reads `PublicAPI.Unshipped.txt`, not
+  `PublicAPI.Shipped.txt` - nothing has reached 1.0, so Shipped is a single line and a gate over it
+  would pass while documenting nothing. When the 1.0 release moves those lines into Shipped, the
+  gate must read both files.

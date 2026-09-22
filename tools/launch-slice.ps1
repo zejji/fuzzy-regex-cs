@@ -22,6 +22,10 @@
 param(
     [Parameter(Mandatory)][string]$Tag,
     [int]$Phase = 0,
+    # Which slice to run. The tag by default, because a tag has always been a slice id and the
+    # driver otherwise takes the lowest-numbered pending slice in the phase - which on 2026-09-21
+    # started S68 for a launch tagged s80. Pass '' to get that behaviour back deliberately.
+    [string]$Slice = $Tag,
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
     # Passed straight through to run-slices.ps1: be finished by this time of day, and start no
     # sitting too short to reach a commit.
@@ -35,7 +39,7 @@ $err = Join-Path $repo ".scratch/driver-$Tag.err"
 New-Item -ItemType Directory -Force -Path (Join-Path $repo '.scratch') | Out-Null
 
 $proc = Start-Process -FilePath 'pwsh' `
-    -ArgumentList (@('-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1', '-Phase', $Phase, '-Model', $Model) + ($StopBy ? @('-StopBy', $StopBy) : @())) `
+    -ArgumentList (@('-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1', '-Phase', $Phase, '-Slice', $Slice, '-Model', $Model) + ($StopBy ? @('-StopBy', $StopBy) : @())) `
     -WorkingDirectory $repo `
     -RedirectStandardOutput $log `
     -RedirectStandardError $err `

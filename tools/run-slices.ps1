@@ -27,6 +27,12 @@
 .PARAMETER MaxSlices
     Stop after this many successful slices. Default: run until another stop condition fires.
 
+.PARAMETER Slice
+    Run one named slice instead of the lowest-numbered pending one: the id in its front matter,
+    case-insensitively, such as `S80`. The driver stops rather than guessing when nothing pending
+    carries that id, so a typo cannot start the wrong slice. `tools/launch-slice.ps1` passes its tag
+    here by default.
+
 .PARAMETER DryRun
     Show what the driver would do - which slice, and the budget verdict - and start nothing.
 
@@ -37,6 +43,7 @@
 .EXAMPLE
     tools/run-slices.ps1
     tools/run-slices.ps1 -MaxSlices 3
+    tools/run-slices.ps1 -Phase 8 -Slice S80   # this slice, whatever sorts before it
     tools/run-slices.ps1 -DryRun
     tools/run-slices.ps1 -NoHeadroom   # a machine without Headroom, at full token cost
     tools/run-slices.ps1 -StopBy 07:30 # be finished by 07:30, and start nothing that cannot be
@@ -47,6 +54,16 @@ param(
     # Restrict the run to one phase's slices, so a driver in a worktree (Phase 7 optimisation) can
     # skip the earlier phase's files that main is still working through. 0 = any phase.
     [int]$Phase = 0,
+    # Name one slice rather than taking the lowest-numbered pending one. The driver reads only the
+    # top level of docs/plan/slices/ and sorts by name, so a gated slice sitting beside a runnable
+    # one is started ahead of it (2026-09-21: a Phase 8 driver launched for S80 began S68, which is
+    # gated until after Phase 7). Empty = the old behaviour.
+    #
+    # Named $OnlySlice rather than $Slice because PowerShell variable names are case-insensitive:
+    # a parameter called $Slice IS the loop's $slice, so the loop's assignment of a FileInfo into a
+    # [string] parameter coerced it to a path and $slice.Name then threw. The alias keeps the
+    # command line reading -Slice.
+    [Alias('Slice')][string]$OnlySlice = '',
     [ValidateSet('opus', 'sonnet', 'fable')][string]$Model = 'opus',
     # Be finished by this time of day (24-hour HH:mm, the next occurrence). The sitting gets the
     # smaller of the gap and the budget's ceiling, and the run stops rather than starting a sitting
@@ -127,20 +144,13 @@ $allowedTools = @(
 )
 
 function Get-PendingSlice {
-    Get-ChildItem -LiteralPath $slicesDir -Filter 'S*.md' -File -ErrorAction SilentlyContinue |
-        Sort-Object Name |
-        Where-Object { $Phase -eq 0 -or (Get-SlicePhase -SliceFile $_) -eq $Phase } |
-        Select-Object -First 1
+    Select-PendingSlice -SlicesDir $slicesDir -Phase $Phase -SliceId $OnlySlice
 }
 
 function Get-SlicePhase {
     param([System.IO.FileInfo]$SliceFile)
 
-    foreach ($line in Get-Content -LiteralPath $SliceFile.FullName -TotalCount 20) {
-        if ($line -match '^\s*phase:\s*(\d+)\s*$') { return [int]$Matches[1] }
-    }
-
-    throw "$($SliceFile.Name) has no 'phase:' line in its front matter; the driver cannot tell which phase it belongs to."
+    (Read-SliceFrontMatter -Path $SliceFile.FullName).Phase
 }
 
 function Get-GitState {
@@ -423,7 +433,12 @@ $checkpoints = 0
 while ($completed -lt $MaxSlices) {
     $slice = Get-PendingSlice
     if (-not $slice) {
-        Write-Host 'Stopping: no pending slices left. This is a phase boundary - author the next phase and restart.' -ForegroundColor Cyan
+        if ($OnlySlice) {
+            Write-Host "Stopping: nothing pending carries the id '$OnlySlice'$(if ($Phase) { " in phase $Phase" }). Check the spelling, and check docs/plan/slices/blocked/ and done/." -ForegroundColor Cyan
+        }
+        else {
+            Write-Host 'Stopping: no pending slices left. This is a phase boundary - author the next phase and restart.' -ForegroundColor Cyan
+        }
         break
     }
 

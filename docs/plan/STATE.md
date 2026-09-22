@@ -37,6 +37,14 @@ at the 1200 s timeout; with it unset the same suite finished in 34 s, 6531/6531,
 `docs/STATUS.md` and the stamp byte-identical. **Set that variable only for a Release build that the
 wedged compiler would otherwise block, never for the ratchet.**
 
+**S80 is done and merged into main (2026-09-22).** `docs/GUIDE.md` (299 lines) covers all
+eight required sections and is linked from README's "Where the docs are".
+`tools/check-doc-examples.ps1` and `tests/FuzzyRegex.Tests/Docs/GuideSamples.cs` pin its 7
+samples; `demo/web/tests/copy.test.ts` carries the `docs/GUIDE.md` guard row.
+`UserDocumentationCompletenessTests.cs` gates every public member in
+`PublicAPI.Unshipped.txt` and every `RegexFlags.InlineFlags` letter against `README.md` plus
+`docs/GUIDE.md`, proven to fail on a deleted member and on a deleted flag letter.
+
 **Phase 6's four gate items are green, and Phase 6 is NOT closed.** One inherited ledger entry is
 still reproduced: **S61 item 7** is entry 18. Entry 17 is the owner's decision rather than a slice.
 

@@ -164,6 +164,9 @@ release CPython's global interpreter lock during a match, and this port never ta
 
 ## Where the docs are
 
+- [`docs/GUIDE.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/GUIDE.md) - the guide
+  for a reader who knows `System.Text.RegularExpressions` and has never used Python `regex`:
+  every flag, every entry point, and how to read a result.
 - [`docs/COMPARISON.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/COMPARISON.md) - the
   complete Python `regex` and `System.Text.RegularExpressions` mapping, with a worked example for
   every difference.
