@@ -48,13 +48,14 @@ public sealed class InheritedIssueTests
         //   regex:     {'groups': ('!', None), 'bug': '!', 'groupindex': {'bug': 1}, 'ngroups': 2}
         //   this port:  bug='!' bugIndex=1 | g1='!' g2=None
         //
-        // The maintainer has NOT settled which numbering rule is right; his 2021-09-28 comment
-        // offers three, and option 1 is explicitly "(current behaviour)". Options 2 and 3 both
-        // skip a number already used in the branch, so both give branch 2 the numbers 1 and 2 and
-        // both make 'bug' reach 'BUG'. This test asserts what those two agree on and therefore
-        // does rule out option 1 - on the ground that under it `(?P<bug>BUG)`'s text is
-        // unreachable through any API, and `Groups["bug"]` returns text a DIFFERENT group matched.
-        // Ledger entry 17 has the full argument.
+        // The maintainer's 2021-09-28 comment offers three numbering rules, and option 1 is
+        // explicitly "(current behaviour)". Options 2 and 3 both skip a number already used in the
+        // branch, so both give branch 2 the numbers 1 and 2 and both make 'bug' reach 'BUG'. This
+        // test asserts what those two agree on and therefore does rule out option 1 - on the
+        // ground that under it `(?P<bug>BUG)`'s text is not reachable by number, and
+        // `Groups["bug"]` returns text a DIFFERENT group matched. Ledger entry 17 has the full
+        // argument. S50 fixed this shape with option 2; S82 replaced that with option 3, which
+        // fixes the mirror-image shapes below as well, so the port now has one rule and not two.
         var pattern = new FuzzyRegex("(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))");
 
         Match m = pattern.MatchAtStart("BUG!");
@@ -62,6 +63,47 @@ public sealed class InheritedIssueTests
         m.Success.Should().BeTrue();
         m.Groups["bug"].Value.Should().Be("BUG");
         m.Groups.Cast<Group>().Skip(1).Select(static g => g.Success ? g.Value : null).Should().Contain("!");
+    }
+
+    /// <summary>
+    /// The three shapes option 2 could not reach, where the unnamed group is written before the
+    /// reused name. S82 fixes them with option 3, and this port's numbering is now a divergence
+    /// from upstream rather than a bug shared with it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream numbers each branch from the same start and skips nothing, so the second branch's
+    /// unnamed group takes the number the name already owns and the two write to one slot.
+    /// Measured on <c>regex</c> 2026.9.10, 2026-09-22, by
+    /// <c>tools/probes/s82-branch-reset-option3.py</c>:
+    /// </para>
+    /// <code>
+    /// (?|(?P&lt;bug&gt;xxx)(!)|(!)(?P&lt;bug&gt;BUG))  on '!BUG'  groups=('BUG', None)
+    /// (?|(?P&lt;n&gt;a)(b)|(c)(?P&lt;n&gt;d))          on 'cd'    groups=('d', None)
+    /// (?|(?P&lt;n&gt;a)(b)(c)|(x)(?P&lt;n&gt;y)(z))    on 'xyz'   groups=('y', 'z', None)
+    /// </code>
+    /// <para>
+    /// The rule and the reason are in <c>docs/DIVERGENCES.md</c>; what the third row adds is that
+    /// the displaced group can be in the middle of the branch, not only at its start.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">A branch reset whose second branch reuses a name after an unnamed group.</param>
+    /// <param name="subject">A subject the second branch matches.</param>
+    /// <param name="expected">The group values this port gives, in order from group 1.</param>
+    [Test]
+    [Arguments("(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))", "!BUG", new[] { "BUG", "!" })]
+    [Arguments("(?|(?P<n>a)(b)|(c)(?P<n>d))", "cd", new[] { "d", "c" })]
+    [Arguments("(?|(?P<n>a)(b)(c)|(x)(?P<n>y)(z))", "xyz", new[] { "y", "x", "z" })]
+    public void Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use(
+        string pattern,
+        string subject,
+        string[] expected
+    )
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart(subject);
+
+        m.Success.Should().BeTrue();
+        m.Groups.Cast<Group>().Skip(1).Select(static g => g.Value).Should().Equal(expected);
     }
 
     [Test]

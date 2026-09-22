@@ -361,14 +361,16 @@ public sealed class ComparisonSamples
     }
 
     /// <summary>
-    /// "A branch-reset branch skips a group number a reused name has already claimed".
+    /// "In a branch reset, a group never takes a number another group in the same branch will use".
     /// </summary>
     [Test]
-    public void A_branch_reset_branch_skips_a_group_number_a_reused_name_has_already_claimed()
+    public void In_a_branch_reset_a_group_never_takes_a_number_another_group_will_use()
     {
         Match m = FuzzyRegex.FullMatch("BUG!", "(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))");
+        Match n = FuzzyRegex.FullMatch("!BUG", "(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))");
 
         m.Groups["bug"].Value.Should().Be("BUG");
+        n.Groups[2].Value.Should().Be("!");
     }
 
     /// <summary>"Reversed partial matches run out of text at the slice start".</summary>

@@ -229,6 +229,32 @@ public sealed class BranchResetTests
         m.Groups["b"].Captures.Select(static c => c.Value).Should().Equal("b");
     }
 
+    /// <summary>
+    /// The second alternative's unnamed <c>(c)</c> and its <c>(?&lt;a&gt;d)</c> want the same
+    /// number, and this port gives way to the name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>DIVERGES FROM UPSTREAM, deliberately (S82, upstream issue 425).</b> Upstream numbers each
+    /// branch from the same start and skips nothing, so <c>(c)</c> takes the 1 that <c>a</c> owns
+    /// and <c>(?&lt;a&gt;d)</c> writes over it. Its answer on 2026.9.10, measured 2026-09-22 by
+    /// <c>tools/probes/s82-branch-reset-option3.py</c>:
+    /// </para>
+    /// <code>
+    /// groups=('d', None, 'e')   captures={'a': ['c', 'd'], 'b': []}
+    /// </code>
+    /// <para>
+    /// Here no group takes a number another group in the same branch will use, so <c>(c)</c> moves
+    /// to 2 and the branch answers exactly as <c>test_branch_reset#16-17</c>'s
+    /// <c>(?|(?&lt;a&gt;a)(?&lt;b&gt;b)|(?&lt;b&gt;c)(d))(e)</c> already does over the same subject:
+    /// every matched text is reachable by number, and 'c' lands in the slot its position gives it.
+    /// The rule and the argument are in <c>docs/DIVERGENCES.md</c> and ledger entry 17.
+    /// </para>
+    /// <para>
+    /// The row is KEPT rather than dropped: it is what upstream's <c>test_branch_reset</c> asserts,
+    /// and a row that records the divergence is worth more than a row that hides it.
+    /// </para>
+    /// </remarks>
     [Test]
     [Property("Upstream", "RegexTests.test_branch_reset#22-23")]
     public void Branch_reset_duplicate_name_group_reports_both_of_the_second_alternatives_captures()
@@ -236,9 +262,9 @@ public sealed class BranchResetTests
         Match m = Upstream.MatchAtStart("cde", @"(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)");
 
         m.Groups[1].Value.Should().Be("d");
-        m.Groups[2].Success.Should().BeFalse();
+        m.Groups[2].Value.Should().Be("c");
         m.Groups[3].Value.Should().Be("e");
-        m.Groups["a"].Captures.Select(static c => c.Value).Should().Equal("c", "d");
-        m.Groups["b"].Captures.Should().BeEmpty();
+        m.Groups["a"].Captures.Select(static c => c.Value).Should().Equal("d");
+        m.Groups["b"].Captures.Select(static c => c.Value).Should().Equal("c");
     }
 }

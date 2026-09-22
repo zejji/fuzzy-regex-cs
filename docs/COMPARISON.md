@@ -888,27 +888,35 @@ Match m = FuzzyRegex.FullMatch("abab", "(?P<g1>(?:ab)?(?&g1)?)");
 Console.WriteLine((m.Index, m.Length));   // (0, 4)
 ```
 
-### A branch-reset branch skips a group number a reused name has already claimed
+### In a branch reset, a group never takes a number another group in the same branch will use
 
-In a branch-reset group `(?|...)`, when the same name is reused across branches, this port hands
-the later occurrence a group number the earlier occurrence's name has already claimed, so the later
-write is the one that survives under that name. Upstream instead keeps the group numbered from
-scratch per branch, so an earlier branch's text becomes unreachable through the name.
+A branch-reset group `(?|...)` restarts the numbering at every `|`, so each branch hands out the
+same numbers. A name reused across branches keeps the number it was given first. Upstream combines
+those two rules by numbering each branch straight through, which lets an unnamed group take a
+number that a name later in the same branch also owns. Both groups then write to one slot and the
+later write wins, so the other group's text is left with no number of its own and `groups()` reports
+`None` for a group that matched.
 
-This is the maintainer's own fix for one specific ordering - the NAMED group coming first in each
-branch. Where the UNNAMED group comes first instead, the name's number is already fixed by an
-earlier branch and this port still answers as upstream does, losing the earlier branch's text the
-same way: `(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))` over `'!BUG'` is `groups=('BUG', None)` on both
-engines, with the first branch's `'!'` unreachable through the name on either. Fixing that ordering
-too needs machinery neither engine has chosen to build; see `docs/DIVERGENCES.md`'s row for the
-detail.
+This port reserves those numbers before the branch is parsed, so no two groups in one branch share
+a slot. The reservation is the maintainer's own option 3 from upstream issue 425, and it applies
+whichever group comes first:
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
+// The named group first.
 Match m = FuzzyRegex.FullMatch("BUG!", "(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))");
-Console.WriteLine(m.Groups["bug"].Value);   // BUG - upstream answers "!"
+Console.WriteLine(m.Groups["bug"].Value);      // BUG - upstream answers "!"
+
+// The unnamed group first: upstream gives ('BUG', None) and leaves "!" with no number.
+Match n = FuzzyRegex.FullMatch("!BUG", "(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))");
+Console.WriteLine(n.Groups[2].Value);          // ! - upstream reports no match for group 2
 ```
+
+Upstream can still recover both texts through `m.captures(1)`, which lists every write to the
+shared slot. What its numbering costs is knowing which group each capture came from. See
+`docs/DIVERGENCES.md` for the full row, including the one ported upstream test that asserts
+upstream's answer and is inverted here.
 
 ### Reversed partial matches run out of text at the slice start
 

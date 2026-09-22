@@ -2534,37 +2534,42 @@ Every reproduction below is re-runnable from the committed tree:
 Each has a failing test skipped `needs:issue-<n>` in
 `tests/FuzzyRegex.Tests/Gaps/UpstreamIssues/InheritedIssueTests.cs`, which S50 un-skips.
 
-## 17. Branch reset gives two groups in the same branch the same number (upstream issue 425)
+## 17. Branch reset gives two groups in the same branch the same number (upstream issue 425) - FIXED HERE (S50, completed by S82)
 
-**Status:** not filed; inherited here and **FIXED HERE (S50)** for the shape the issue reports, with
-two other orderings parked. Upstream issue 425 is open since 2021-09-28 with two maintainer comments.
+**Status:** not filed; inherited here and **FIXED HERE (S50, completed by S82)**. Upstream issue 425
+is open since 2021-09-28 with two maintainer comments.
 
-**What S50 changed.** `Info.OpenGroup` now skips a number that a reused name has already claimed in
-the branch being parsed, which is the maintainer's own **option 2**. `ParseCommon` scopes the set to
-one branch and restores it afterwards, because branch resets nest. The pattern above answers
-`bug='BUG'`, `groups=('BUG', '!')`. It is a no-op outside a branch reset, where numbers are handed
-out in order and never reused, and **no compile-parity corpus row changes** - corpus row 613,
-`(?|(?<a>a)(?<b>b)|(?<b>c)(d))(e)`, is the one that would, and it is green.
+**What this port does.** S50 shipped the maintainer's **option 2**: `Info.OpenGroup` skips a number
+that a reused name has already claimed in the branch being parsed. That left the mirror-image
+orderings broken, so the port answered one bug family by two rules depending on which group was
+written first. S82 replaced it with **option 3**, which is one rule: in a branch reset, a group never
+takes a number another group in the same branch will use. `ParseFunctions.ReserveBranchGroupNumbers`
+re-scans each branch's source before the branch is parsed and pre-seeds `Info.BranchGroupNumbers`
+with the numbers that names appearing later in the branch already own; `OpenGroup` was left alone,
+because it already tests that set before the name lookup. It is a no-op outside a branch reset, where
+numbers are handed out in order and never reused.
 
-**Two orderings are PARKED and this entry is explicit about them,** because an earlier draft of the
-fix broke upstream's own `test_branch_reset#16-17` by advancing the counter to the reused name's
-number instead of merely skipping it. Where the UNNAMED group comes first the collision is the other
-way round and option 2 cannot reach it, because the name's number is already fixed by an earlier
-branch:
+**The three shapes, all measured on 2026-09-22 by `tools/probes/s82-branch-reset-option3.py`** against
+`regex` 2026.9.10:
 
 ```
-(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))  over '!BUG'  -> groups=('BUG', None), '!' lost
-(?|(?P<n>a)(b)|(c)(?P<n>d))          over 'cd'    -> groups=('d', None),   'c' lost
+(?|(?P<bug>xxx)(!)|(?P<bug>BUG)(!))   'BUG!'  upstream ('!', None)       here ('BUG', '!')
+(?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG))   '!BUG'  upstream ('BUG', None)     here ('BUG', '!')
+(?|(?P<n>a)(b)(c)|(x)(?P<n>y)(z))     'xyz'   upstream ('y', 'z', None)  here ('y', 'x', 'z')
 ```
 
-Both reproduce on upstream 2026.9.10 and both still reproduce here. Only **option 3** - "skip group
-numbers that have been used anywhere in that branch" - fixes them, and that needs the branch's later
-named groups known before its earlier unnamed ones are numbered, which the single-pass parser cannot
-do without a source-level pre-scan. The maintainer has not chosen between options 2 and 3, so
-building option 3's machinery would be inventing semantics upstream may contradict. Carried as a
-named blocker in STATE.md.
+The third is the one neither option 2 nor the issue's own text reaches: the name sits in the MIDDLE
+of the branch, so the group that loses its number is neither the first nor the last. Under upstream's
+numbering `(x)` and `(?P<n>y)` share slot 1 and `(z)` takes 2, which leaves slot 3 - a group that
+matched - reported as `None`.
 
-**Reproduction**, `regex` 2026.9.10 and this port, measured 2026-09-14:
+**One compile-parity corpus row moves**, #614, `(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)`: `groupCount` (3)
+and `groupIndex` (`{a: 1, b: 2}`) are unchanged and only the two `GROUP` opcodes' numbers differ, so
+the bytecode this port emits for it is the bytecode upstream itself emits for row #613,
+`(?|(?<a>a)(?<b>b)|(?<b>c)(d))(e)`. The row is pinned as a deliberate divergence rather than
+re-recorded, so it fails if it ever agrees with upstream again.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-14 and unchanged on 2026-09-22:
 
 ```python
 >>> import regex
@@ -2574,7 +2579,7 @@ named blocker in STATE.md.
 ('!', ('!', None), {'bug': 1}, 2)
 ```
 
-This port answers `bug='!' bugIndex=1 | g1='!' g2=None` - identical.
+This port answered the same before S50. It now answers `bug='BUG' bugIndex=1 | g1='BUG' g2='!'`.
 
 **The mechanism.** In the second branch, `(?P<bug>BUG)` takes number 1 because the branch reset
 restarts the numbering, and `(!)` *also* takes number 1, because the reset does not skip a number
@@ -2594,9 +2599,13 @@ Options **2 and 3 both** give branch 2 the numbers 1 and 2, so both make `bug` r
 keeps today's answer. So this entry, and the test, do commit a fixer to rejecting option 1, and the
 grounds are not "two options out of three":
 
-- **Under option 1 a capture group's text is unreachable through any API.** `(?P<bug>BUG)` matches
-  'BUG' and nothing can retrieve it - not by name, not by number, not through `captures`.
-- **Worse, the name resolves to another group's text.** `groupindex` maps `bug` to 1 and group 1
+- **Under option 1 a group's text has no group of its own to be read from.** `(?P<bug>BUG)` matches
+  'BUG' and neither `m.group('bug')` nor `m.group(1)` nor `m.group(2)` returns it. **Correction,
+  2026-09-22: `m.captures(1)` DOES return it**, as `['BUG', '!']` - this entry's first draft said
+  the text was unreachable through any API, and that is too strong. What option 1 costs is not the
+  text but the mapping: `captures` is a flat list of writes to one slot, so nothing says which
+  group wrote which entry, and `groups()` reports `None` for a group that matched.
+- **The name resolves to another group's text.** `groupindex` maps `bug` to 1 and group 1
   holds '!', so `m.group('bug')` returns text matched by a different group in the pattern. That is
   not a numbering convention anyone chose; it is two groups writing to one slot.
 - **The maintainer calls it the problem himself**, in his first comment: "The problem here is that
@@ -2606,14 +2615,34 @@ grounds are not "two options out of three":
 So what is genuinely open upstream is the choice between options 2 and 3 - they differ only on a
 branch's *later* groups - and both fix this row.
 
-**What the test asserts,** deliberately narrower than the issue: `bug` reaches 'BUG', and '!' lives
-in some other group. Options 2 and 3 agree on that, so S50 picks between them freely; what the test
-does rule out is leaving the behaviour as it is.
+**Correction, 2026-09-22: upstream's own suite asserts the answer this entry asks to change, and a
+report must say so.** `test_branch_reset` (`upstream/regex/tests/test_regex.py:1653-1662`, added for
+Hg issue 87) pins `(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)`, and its 'cde' rows assert exactly option 1:
 
-**Proposed fix (for the eventual report).** In the branch-reset handler, start each branch's counter
-at the same value but advance past any number the branch has already assigned - the maintainer's
-own option 2 - so a named group that resolves to an earlier number does not leave its slot free for
-the next unnamed group in the same branch.
+```python
+.groups()        == ("d", None, "e")
+.capturesdict()  == {"a": ["c", "d"], "b": []}
+```
+
+Under option 3 those two become `("d", "c", "e")` and `{"a": ["d"], "b": ["c"]}`. The 'abe' rows are
+unchanged, as is every other row of the method. So the fix is not purely additive upstream: it asks
+the maintainer to change a test he wrote, which is a reason to present the choice rather than a patch.
+This port inverts that ported test and pins it, rather than dropping it (`Ported/BranchReset/BranchResetTests.cs`).
+
+**Proposed fix (for the eventual report).** Take **option 3**, the maintainer's own third candidate:
+number consecutively, but skip any number another group in the same branch will use. In a single-pass
+parser that needs the branch's later named groups known before its earlier groups are numbered, which
+is one source-level pre-scan of the branch at each branch start: walk the branch's text, and for every
+`(?P<name>`, `(?<name>` whose `<` does not begin a lookbehind, reserve the number that name already
+has. `parse_common` then hands out numbers as it does today, skipping the reserved set. This port's
+implementation is `ParseFunctions.ReserveBranchGroupNumbers` (S82), 240 lines with its documentation,
+which is what it costs to handle the hazards a naive scan gets wrong: character classes, `(?#...)`
+comments, escapes, conditionals, nested branch resets and verbose mode.
+
+Evidence to attach: the three shapes above, the observation that option 2 fixes only the first of
+them, and the note that the change is invisible outside a branch reset. Option 2 is the cheaper
+patch and the report should say so; what recommends option 3 is that it is one rule rather than a
+rule per ordering.
 
 ## 18. A repeated capture group costs hundreds of bytes per repetition (upstream issue 554)
 

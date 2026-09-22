@@ -581,6 +581,13 @@ slice:** its remaining two orderings need the maintainer's option 3, and upstrea
 option on an issue open since 2021, so fixing it means inventing semantics - it is an owner decision,
 stated with the evidence in STATE.md. Estimate 18-23 becomes 20-25.
 
+**That owner decision came on 2026-09-22, and Phase 6 gains S82 (spec amendment 37).** The owner
+chose the maintainer's option 3 and one rule instead of two: in a branch reset, a group never takes a
+number another group in the same branch will use. So entry 17 does get a slice after all, and it is
+the last of Phase 6's inherited-bug list except entry 18, which stays with S61. The decision was made
+knowing upstream's own `test_branch_reset` asserts the answer the fix changes, so the port inverts
+that ported row and pins it, exactly as S50's divergence is pinned. Estimate 21-26 becomes 22-27.
+
 **Phase 6 gains S57e (2026-09-21, spec amendment 36).** S57c's new `fuzzy-anchored` generator found
 a row at seed 1234567 that nobody has judged - `(?b)(?r)\m(?:.fo){e<=2}` over `'x fx'`, same span
 and same error counts in both engines, different recorded insertion position. It is not S57c's rule

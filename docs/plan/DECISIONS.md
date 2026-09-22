@@ -1143,3 +1143,14 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   76118 agrees again if `(?e)` or `(?r)` goes, yet upstream answers the same under both, so only
   POSIX moves upstream and the other two move this port. The same goes for calling a section inert -
   measure it, because 74554's outer `{1<=e<=2}` reads like scaffolding and is load-bearing.
+- 2026-09-22 (owner, S82; spec amendment 37): **branch resets take the maintainer's option 3** - in a
+  branch reset, a group never takes a number another group in the same branch will use. S50's option 2
+  is replaced, so the port answers upstream issue 425's family by one rule instead of one rule per
+  ordering. The mechanism is a source-level pre-scan of each branch
+  (`ParseFunctions.ReserveBranchGroupNumbers`), which is the only way a single-pass parser can know a
+  branch's later named groups before numbering its earlier ones; `Info.OpenGroup` was already written
+  to skip the set it seeds. The cost is a deliberate divergence from a passing upstream test
+  (`test_regex.py:1653-1662`) and one compile-parity row, #614, both pinned rather than dropped.
+- 2026-09-22 (S82): `(?'name'...)` is not a spelling either engine supports - upstream raises
+  `unknown extension at position 2` and `parse_name` reads to `>` or `)` only - so anything claiming
+  "all three spellings" of a named group means two. Pinned by `BranchResetPreScanTests`.

@@ -1742,8 +1742,22 @@
     "after": "",
     "signal": "suite",
     "expectedFailures": [
-      "A_branch_reset_branch_skips_a_group_number_a_reused_name_has_already_claimed",
-      "Branch_reset_numbers_two_groups_in_the_same_branch_differently"
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[[a-z]--[q]](?<n>Z)), XzZ)",
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[]q](?<n>Z)), X]Z)",
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[qz](?<n>Z)), XqZ)",
+      "A_definition_after_a_conditional_still_reserves_its_number",
+      "A_definition_after_a_lookbehind_still_reserves_its_number",
+      "A_definition_behind_an_escaped_backslash_still_reserves_its_number",
+      "A_definition_inside_a_nested_branch_reset_still_reserves_its_number",
+      "A_definition_referred_to_later_in_the_branch_still_reserves_its_number",
+      "A_verbose_definition_whose_name_is_written_with_spaces_still_reserves_its_number",
+      "Branch_reset_duplicate_name_group_reports_both_of_the_second_alternatives_captures",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG)), !BUG, BUG, !)",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<n>a)(b)(c)|(x)(?P<n>y)(z)), xyz, y, x, z)",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<n>a)(b)|(c)(?P<n>d)), cd, d, c)",
+      "Branch_reset_numbers_two_groups_in_the_same_branch_differently",
+      "Compiles_to_upstreams_bytecode(#614 '(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)' flags=0x0)",
+      "In_a_branch_reset_a_group_never_takes_a_number_another_group_will_use"
     ]
   },
   {
@@ -1793,6 +1807,33 @@
       4242,
       20260921,
       31337
+    ]
+  },
+  {
+    "id": "S82-A",
+    "name": "425-option-3-pre-seed-removed",
+    "file": "src/FuzzyRegex/Parsing/ParseFunctions.cs",
+    "anchor": "    private static void ReserveName(Source scan, Info info)",
+    "anchorNth": 1,
+    "before": "            info.BranchGroupNumbers.Add(group);\n",
+    "after": "            _ = group;\n",
+    "signal": "suite",
+    "expectedFailures": [
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[[a-z]--[q]](?<n>Z)), XzZ)",
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[]q](?<n>Z)), X]Z)",
+      "A_definition_after_a_character_class_still_reserves_its_number((?|(?<n>a)(b)|(X)[qz](?<n>Z)), XqZ)",
+      "A_definition_after_a_conditional_still_reserves_its_number",
+      "A_definition_after_a_lookbehind_still_reserves_its_number",
+      "A_definition_behind_an_escaped_backslash_still_reserves_its_number",
+      "A_definition_inside_a_nested_branch_reset_still_reserves_its_number",
+      "A_definition_referred_to_later_in_the_branch_still_reserves_its_number",
+      "A_verbose_definition_whose_name_is_written_with_spaces_still_reserves_its_number",
+      "Branch_reset_duplicate_name_group_reports_both_of_the_second_alternatives_captures",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<bug>xxx)(!)|(!)(?P<bug>BUG)), !BUG, BUG, !)",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<n>a)(b)(c)|(x)(?P<n>y)(z)), xyz, y, x, z)",
+      "Branch_reset_leaves_a_number_for_a_name_the_rest_of_the_branch_will_use((?|(?P<n>a)(b)|(c)(?P<n>d)), cd, d, c)",
+      "Compiles_to_upstreams_bytecode(#614 '(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)' flags=0x0)",
+      "In_a_branch_reset_a_group_never_takes_a_number_another_group_will_use"
     ]
   }
 ]

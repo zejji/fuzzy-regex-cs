@@ -24,14 +24,15 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.CompileParity;
 public sealed class CompileParityTests
 {
     /// <summary>
-    /// The corpus rows whose bytecode this port DELIBERATELY does not reproduce, because S45
-    /// replaced upstream's Turkic case data with the default one that <c>CaseFolding.txt</c>
-    /// specifies - see <see cref="Fuzzy.Text.RegularExpressions.Unicode.TurkicDefaults"/>.
+    /// The corpus rows whose bytecode this port DELIBERATELY does not reproduce, each with the
+    /// short reason the failure message carries.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Each row is listed with what moved, all of it inside the four codepoints
-    /// U+0049, U+0069, U+0130 and U+0131:
+    /// Four of them are S45's: it replaced upstream's Turkic case data with the default one that
+    /// <c>CaseFolding.txt</c> specifies - see
+    /// <see cref="Fuzzy.Text.RegularExpressions.Unicode.TurkicDefaults"/>. Each is listed with what
+    /// moved, all of it inside the four codepoints U+0049, U+0069, U+0130 and U+0131:
     /// </para>
     /// <list type="bullet">
     /// <item><c>(?fi)FFI</c> - the trailing <c>I</c> full-folds to <c>i</c> here and to <c>I</c>
@@ -45,19 +46,30 @@ public sealed class CompileParityTests
     /// folds to, <c>105 775</c> - <c>i</c> and U+0307.</item>
     /// </list>
     /// <para>
-    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a fifth
+    /// The fifth is S82's, and it is a numbering divergence rather than a case one: in
+    /// <c>(?|(?&lt;a&gt;a)(?&lt;b&gt;b)|(c)(?&lt;a&gt;d))(e)</c> the second branch's unnamed
+    /// <c>(c)</c> takes 1 upstream, which <c>(?&lt;a&gt;d)</c> then overwrites, and takes 2 here,
+    /// because no group may take a number another group in the same branch will use (upstream issue
+    /// 425, <c>docs/DIVERGENCES.md</c>). Only the two <c>GROUP</c> opcodes move: the row's
+    /// <c>groupCount</c> of 3 and its <c>groupIndex</c> of <c>{a: 1, b: 2}</c> are unchanged, and
+    /// the bytecode this port emits is the bytecode upstream itself emits for the neighbouring
+    /// corpus row <c>(?|(?&lt;a&gt;a)(?&lt;b&gt;b)|(?&lt;b&gt;c)(d))(e)</c>.
+    /// </para>
+    /// <para>
+    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a sixth
     /// row that starts diverging fails the equality below, and a listed row that stops diverging
     /// fails the inequality. Re-recording the corpus against a newer <c>regex</c> gets the same
     /// alarm either way.
     /// </para>
     /// </remarks>
-    private static readonly HashSet<string> _turkicDivergentPatterns =
-    [
-        "(?fi)FFI",
-        "(?i)\\Aİ\\Z",
-        "(?i)\\Aı\\Z",
-        "(?iV1)[\\w--a]",
-    ];
+    private static readonly Dictionary<string, string> _pinnedDivergentPatterns = new(StringComparer.Ordinal)
+    {
+        ["(?fi)FFI"] = "S45, Turkic case data",
+        ["(?i)\\Aİ\\Z"] = "S45, Turkic case data",
+        ["(?i)\\Aı\\Z"] = "S45, Turkic case data",
+        ["(?iV1)[\\w--a]"] = "S45, Turkic case data",
+        ["(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)"] = "S82, branch-reset group numbering",
+    };
 
     [Test]
     [MethodDataSource(typeof(Corpus), nameof(Corpus.Compiles))]
@@ -69,15 +81,16 @@ public sealed class CompileParityTests
             PatternCompiler.Compile(row.Pattern, row.Flags, row.NamedLists, Corpus.DefaultVersion)
         );
 
-        if (_turkicDivergentPatterns.Contains(row.Pattern))
+        if (_pinnedDivergentPatterns.TryGetValue(row.Pattern, out string? reason))
         {
             compiled
                 .Code.Should()
                 .NotEqual(
                     row.Code,
-                    "row #{0} is pinned as a deliberate Turkic divergence; if it now agrees with "
+                    "row #{0} is pinned as a deliberate divergence ({1}); if it now agrees with "
                         + "upstream, the pin is stale and belongs off the list",
-                    row.Index
+                    row.Index,
+                    reason
                 );
 
             return;

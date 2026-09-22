@@ -1180,6 +1180,243 @@ internal static class ParseFunctions
         return new Atomic(subpattern);
     }
 
+    /// <summary>
+    /// NOT UPSTREAM'S (S82, upstream issue 425). Reserves the numbers that names appearing later
+    /// in this branch-reset branch already own, so that <see cref="Info.OpenGroup"/> does not hand
+    /// one of them to an earlier group in the same branch.
+    /// </summary>
+    /// <param name="source">The scanner, positioned at the start of the branch. Not moved.</param>
+    /// <param name="info">The parse state. Only <see cref="Info.BranchGroupNumbers"/> is written.</param>
+    /// <remarks>
+    /// <para>
+    /// This is the pre-scan option 3 needs and option 2 did not: a branch's later named groups have
+    /// to be known before its earlier unnamed ones are numbered, and the parser is single-pass.
+    /// It reads the branch's source text on a scratch <see cref="Source"/>, stopping at the
+    /// <c>|</c> or <c>)</c> that ends the branch, and it never throws - a malformed branch is the
+    /// real parse's error to report, a few lines later.
+    /// </para>
+    /// <para>
+    /// The dispatch mirrors <see cref="ParseSequence"/> and <see cref="ParseParen"/> because it has
+    /// to agree with them about what a definition is. A name inside a character class, a
+    /// <c>(?#...)</c> comment or an escape is not one; <c>(?&lt;=</c> and <c>(?&lt;!</c> are
+    /// lookbehinds; <c>(?P=</c>, <c>(?P&gt;</c>, <c>(?(name)</c> and <c>\g&lt;name&gt;</c> use a
+    /// name without defining one; and a name the pattern has not defined yet claims a fresh number
+    /// when it is opened, so there is nothing to reserve for it.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: the scan keeps the whitespace setting the branch starts with. A branch that turns
+    /// <c>(?x)</c> on or off part-way through can therefore disagree with the parser about a
+    /// <c>#</c> comment or a name written with spaces in the rest of that branch. Reading the flags
+    /// would mean re-running <see cref="ParseFlagSet"/> here; the upgrade path is to do that at
+    /// each <c>(?</c> whose body is flag letters.
+    /// </para>
+    /// </remarks>
+    private static void ReserveBranchGroupNumbers(Source source, Info info)
+    {
+        var scan = new Source(source.String) { Pos = source.Pos, IgnoreSpace = source.IgnoreSpace };
+        Info? setScratch = null;
+        int depth = 0;
+
+        while (true)
+        {
+            int ch = scan.Get();
+            switch (ch)
+            {
+                case Source.EndOfSource:
+                    return;
+
+                case '\\':
+                    // parse_escape reads the escaped character with the whitespace skipping off.
+                    _ = scan.Get(overrideIgnore: true);
+                    break;
+
+                case '[':
+                    setScratch ??= SetScratch(info);
+                    SkipSet(scan, setScratch);
+                    break;
+
+                case '|':
+                    if (depth == 0)
+                    {
+                        // The end of this branch.
+                        return;
+                    }
+
+                    break;
+
+                case ')':
+                    if (depth == 0)
+                    {
+                        // The end of the branch-reset group.
+                        return;
+                    }
+
+                    depth--;
+                    break;
+
+                case '(':
+                    depth += ScanOpenParen(scan, info);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads whatever follows a <c>(</c> during <see cref="ReserveBranchGroupNumbers"/>'s scan,
+    /// reserving the number when it opens a named group.
+    /// </summary>
+    /// <param name="scan">The scratch scanner, positioned just after the <c>(</c>.</param>
+    /// <param name="info">The parse state, for <see cref="Info.GroupIndex"/>.</param>
+    /// <returns>What this parenthesis adds to the nesting depth: 1, or 0 for a comment.</returns>
+    private static int ScanOpenParen(Source scan, Info info)
+    {
+        // parse_paren reads the two characters after the "(" raw, so "( ?<n>x)" is not a named
+        // group even under IgnorePatternWhitespace.
+        int afterParen = scan.Pos;
+        if (scan.Get(overrideIgnore: true) != '?')
+        {
+            scan.Pos = afterParen;
+            return 1;
+        }
+
+        int afterQuestion = scan.Pos;
+        switch (scan.Get(overrideIgnore: true))
+        {
+            case '#':
+                // A comment, which parse_comment ends at the first unescaped ")" - so this
+                // parenthesis has already closed.
+                SkipComment(scan);
+                return 0;
+
+            case '(':
+                // A conditional. Its "(name)" uses a name rather than defining one, and the ")"
+                // that closes it has to balance a "(" or the branch's own "|" would be read too
+                // early - so the inner "(" goes back for the main loop to count.
+                scan.Pos = afterQuestion;
+                return 1;
+
+            case 'P':
+                // parse_extension: only "(?P<" defines a name. "(?P=" and "(?P>" use one.
+                if (scan.Get() == '<')
+                {
+                    ReserveName(scan, info);
+                    return 1;
+                }
+
+                break;
+
+            case '<':
+                // "(?<": a named group unless "=" or "!" follows, which parse_paren reads with the
+                // whitespace skipping on.
+                int afterAngle = scan.Pos;
+                if (scan.Get() is '=' or '!')
+                {
+                    // A lookbehind.
+                    return 1;
+                }
+
+                scan.Pos = afterAngle;
+                ReserveName(scan, info);
+                return 1;
+
+            default:
+                break;
+        }
+
+        // Anything else - ":", a flag set, a lookahead, a call, a nested branch reset - is an
+        // ordinary parenthesis whose body the main loop reads.
+        scan.Pos = afterQuestion;
+        return 1;
+    }
+
+    /// <summary>
+    /// Reads a group name during <see cref="ReserveBranchGroupNumbers"/>'s scan and reserves the
+    /// number it already owns, if it owns one.
+    /// </summary>
+    /// <param name="scan">The scratch scanner, positioned at the first character of the name.</param>
+    /// <param name="info">The parse state.</param>
+    /// <remarks>
+    /// <see cref="ParseName"/>'s own collector, so that a verbose-mode name is read the way the
+    /// parser reads it - which drops the spaces inside it. The validation is left out because an
+    /// invalid name is not in <see cref="Info.GroupIndex"/> either.
+    /// </remarks>
+    private static void ReserveName(Source scan, Info info)
+    {
+        string name = scan.GetWhile(static c => c is ')' or '>', include: false);
+        if (info.GroupIndex.TryGetValue(name, out int group))
+        {
+            info.BranchGroupNumbers.Add(group);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ParseComment"/> without the "missing )" it raises at the end of the pattern.
+    /// </summary>
+    /// <param name="scan">The scratch scanner, positioned just after the <c>(?#</c>.</param>
+    private static void SkipComment(Source scan)
+    {
+        while (true)
+        {
+            int ch = scan.Get(overrideIgnore: true);
+            if (ch is Source.EndOfSource or ')')
+            {
+                return;
+            }
+
+            if (ch == '\\')
+            {
+                _ = scan.Get(overrideIgnore: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves the scratch scanner past a character set by letting <see cref="ParseSet"/> read it.
+    /// </summary>
+    /// <param name="scan">The scratch scanner, positioned just after the <c>[</c>.</param>
+    /// <param name="scratch">A throwaway <see cref="Info"/> for the nodes and named lists to go into.</param>
+    /// <remarks>
+    /// The set grammar is not re-implemented here, because the pre-scan only needs to know where
+    /// the set ends and getting that wrong by one <c>]</c> would hand the rest of the branch to the
+    /// wrong reader. The rules it would have to repeat are real: a leading <c>]</c> is a member and
+    /// not the end, a nested set is a nested set only under version 1, and <c>[:alpha:]</c> is one
+    /// item or five depending on whether it parses. A set that does not parse at all leaves the
+    /// scan where the error was found, and the real parse raises the same error a moment later.
+    /// </remarks>
+    private static void SkipSet(Source scan, Info scratch)
+    {
+        try
+        {
+            _ = ParseSet(scan, scratch);
+        }
+        catch (FuzzyRegexParseException)
+        {
+            // Not this scan's error to report.
+        }
+    }
+
+    /// <summary>
+    /// A throwaway <see cref="Info"/> that reads the same flags as the real one, so that
+    /// <see cref="SkipSet"/> applies the right version and the real parse state is not written to.
+    /// </summary>
+    /// <param name="info">The parse state to copy the flags from.</param>
+    /// <returns>The scratch state.</returns>
+    private static Info SetScratch(Info info)
+    {
+        // The constructor folds the default version's flags in, which would change the version this
+        // set is read under, so the flags are assigned rather than passed.
+        var scratch = new Info(0, info.Kwargs, info.DefaultVersion)
+        {
+            Flags = info.Flags,
+            GuessEncoding = info.GuessEncoding,
+        };
+
+        return scratch;
+    }
+
     /// <summary>Upstream <c>parse_common</c> (lines 1082-1098).</summary>
     /// <param name="source">The scanner.</param>
     /// <param name="info">The parse state.</param>
@@ -1189,18 +1426,22 @@ internal static class ParseFunctions
         // Capture group numbers in different branches can reuse the group numbers.
         int initialGroupCount = info.GroupCount;
 
-        // NOT UPSTREAM'S (S50, upstream issue 425): each branch gets its own view of which numbers
-        // a reused name has already claimed, and the branch reset as a whole leaves none behind.
-        // Saved and restored rather than just cleared, because branch resets nest.
+        // NOT UPSTREAM'S (S50, then S82, upstream issue 425): each branch gets its own view of
+        // which numbers are spoken for, and the branch reset as a whole leaves none behind. Saved
+        // and restored rather than just cleared, because branch resets nest. The pre-scan is what
+        // makes it option 3 rather than option 2 - a number a name will use LATER in this branch is
+        // reserved before the branch's earlier groups are numbered.
         int[] outerBranchGroupNumbers = [.. info.BranchGroupNumbers];
         info.BranchGroupNumbers.Clear();
 
+        ReserveBranchGroupNumbers(source, info);
         List<RegexBase> branches = [ParseSequence(source, info)];
         int finalGroupCount = info.GroupCount;
         while (source.MatchText("|"))
         {
             info.GroupCount = initialGroupCount;
             info.BranchGroupNumbers.Clear();
+            ReserveBranchGroupNumbers(source, info);
             branches.Add(ParseSequence(source, info));
             finalGroupCount = Math.Max(finalGroupCount, info.GroupCount);
         }
