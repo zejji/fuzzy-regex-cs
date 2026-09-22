@@ -1906,7 +1906,7 @@ if (insertion_permitted(state, inner_node, inner_counts) &&
 ```
 
 and it DOUBLE-COUNTS. For a pattern with a single fuzzy section, `END_FUZZY` has already merged the
-inner counts into `state->fuzzy_counts` (`:12473-12484`), so the two terms are the same errors added
+inner counts into `state->fuzzy_counts` (`:12475-12513`), so the two terms are the same errors added
 twice, so the arm demands roughly twice the budget the section's own limits demand. On `(?:x){e<=N}`
 that comes out as *n* trailing insertions needing `max_errors` above *2n-1* rather than above *n-1*;
 the correction at the top of this entry is that the arithmetic for a section body of any other shape

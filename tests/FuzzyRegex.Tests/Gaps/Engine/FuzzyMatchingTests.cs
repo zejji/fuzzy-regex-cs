@@ -319,7 +319,7 @@ public sealed class FuzzyMatchingTests
         // `state->fuzzy_counts` is scoped to the innermost OPEN fuzzy section: FUZZY saves the
         // enclosing section's on the sstack (upstream/src/_regex.c:13137) and zeroes it
         // (:13143), END_FUZZY adds
-        // the inner back into the outer on the way out (:12473-12484). A partial match returns from
+        // the inner back into the outer on the way out (:12475-12513). A partial match returns from
         // inside the section, so none of that unwinding happens and the counter holds the inner
         // section's errors alone - while the change list, which is global, holds every one of them.
         // Upstream then reports the first `sum(counts)` entries of that list (:20522), which does

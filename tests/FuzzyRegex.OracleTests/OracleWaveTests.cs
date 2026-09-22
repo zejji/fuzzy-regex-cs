@@ -594,6 +594,40 @@ public sealed class OracleWaveTests
         ExpectedDivergences.For(row, row.BestmatchFree).Should().BeNull();
     }
 
+    [Test]
+    public void A_bestmatch_row_answered_more_cheaply_than_the_judged_answer_is_not_accounted_for()
+    {
+        // S57e. Rows 25 and 27 of `bestmatch-loses-a-candidate` cannot use the flagless
+        // discriminator, because upstream's flagless answer is its flagged answer on them, so the
+        // entry keys them on this port's judged answer instead. "Cheaper than upstream" on its own
+        // would not do: a port that dropped an error while matching the same span says exactly that,
+        // and it is a defect, not this family.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static entry =>
+                        string.Equals(entry.Id, "bestmatch-loses-a-candidate", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static candidate =>
+                string.Equals(candidate.Pattern, @"(?b)(?e)\b(?:\d+\d\s){e<=3}", StringComparison.Ordinal)
+            );
+
+        MatchOutcome theirs = (MatchOutcome)row.Expected;
+        theirs.Fuzzy.Should().NotBeNull();
+
+        // Upstream answers (0, 6) for three substitutions; this port answers it for one substitution
+        // and one insertion. The answer below is the same span for two substitutions - cheaper than
+        // upstream, and not what this port says.
+        MatchOutcome cheaperButNotOurs = theirs with
+        {
+            Fuzzy = new OracleFuzzy(2, 0, 0, [3, 4], [], []),
+        };
+
+        ExpectedDivergences.For(row, cheaperButNotOurs).Should().BeNull();
+    }
+
     /// <summary>
     /// Six fabricated rows this entry must REFUSE, recorded by
     /// <c>python tools/record-oracle.py --rows</c> on 2026-09-14 against regex 2026.9.10.

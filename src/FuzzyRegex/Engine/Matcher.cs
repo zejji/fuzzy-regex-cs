@@ -8683,7 +8683,7 @@ internal static class Matcher
                     // divergence, ledger entry 12, fixed by S46 (2026-09-14). Upstream writes
                     // 'total_errors(state->fuzzy_counts) + total_errors(inner_counts) <
                     // state->max_errors' (:15515-15517), and END_FUZZY has already merged
-                    // 'inner_counts' INTO 'state->fuzzy_counts' twenty lines earlier (:12473-12484),
+                    // 'inner_counts' INTO 'state->fuzzy_counts' on the way in (:12475-12513),
                     // so the two terms are the same errors added twice. Every other 'max_errors'
                     // test in upstream's file asks about ONE set of counts ('any_error_permitted'
                     // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and

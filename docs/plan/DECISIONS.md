@@ -1019,3 +1019,15 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   version 0, where this port's own default has been version 1 since S50b. A pin written as
   `new FuzzyRegex(pattern)` asks a different question from the one the wave asked and can pass while
   the row it claims to pin has moved.
+
+- **2026-09-22 (S57e): a pin that excuses "cheaper than upstream" cannot see a port that lost count.**
+  Rows 25 and 27 of `bestmatch-loses-a-candidate` are the first where upstream KEEPS a match and this
+  port beats it, so the flagless-answer key every earlier row uses says nothing about them. The first
+  predicate written for them excused any answer with fewer errors than upstream's, and an always-true
+  mutant survived the whole oracle suite. The entry now holds this port's judged answer for those rows
+  by exact string (`_bestmatchWorseMatchOurs`), which fails closed if a row is inserted or reordered.
+- **2026-09-22 (S57e): entry 12's merge citation is `:12475-12513`.** `:12473-12484` covers the
+  arithmetic that adds the inner counts to the outer, but the write into `state->fuzzy_counts` is the
+  `Py_MEMCPY` at `:12513`. The independent verifier caught it; all nine copies in the tree are
+  corrected, and the sentences claiming the merge happens "twenty lines earlier" than the guard - it
+  is about three thousand lines away, in a different function - now say "on the way in".

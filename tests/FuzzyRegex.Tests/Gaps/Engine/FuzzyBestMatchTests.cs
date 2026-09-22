@@ -261,7 +261,7 @@ public sealed class FuzzyBestMatchTests
         // The mechanism is two lines meeting. END_FUZZY's backtrack arm is the only place a TRAILING
         // insertion can come from, and it was guarded by 'total_errors(state->fuzzy_counts) +
         // total_errors(inner_counts) < state->max_errors' (:15516) - which DOUBLE-COUNTS, because
-        // END_FUZZY has already merged 'inner_counts' into 'state->fuzzy_counts' (:12473-12484), so
+        // END_FUZZY has already merged 'inner_counts' into 'state->fuzzy_counts' (:12475-12513), so
         // the two terms are the same errors added twice. Every other 'max_errors' test in upstream's
         // file asks about ONE set of counts ('any_error_permitted' :9672, 'this_error_permitted'
         // :9690, 'insertion_permitted' :9708), and 'insertion_permitted' on the line above already
@@ -340,6 +340,62 @@ public sealed class FuzzyBestMatchTests
         noInsertion.Success.Should().BeTrue();
         (noInsertion.Index, noInsertion.Index + noInsertion.Length).Should().Be((0, 4));
         noInsertion.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
+    }
+
+    [Test]
+    public void Bestmatch_reversed_records_the_insertion_where_its_own_flagless_answer_does()
+    {
+        // THE SAME DEFECT WITHOUT A LOST MATCH - the doubled term moves an error instead of
+        // refusing one. S57e, 2026-09-22, row 1982 of
+        //   pwsh -File tools/run-oracle.ps1 -Generator fuzzy-anchored -Count 2000 -Seeds 1234567
+        // Both engines answer (0, 4) at one substitution and one insertion and both put the
+        // substitution at 4. Only the insertion moves. Upstream, regex 2026.9.10:
+        //
+        //   regex.search(r'(?b)(?r)\m(?:.fo){e<=2}', 'x fx')  ->  (0, 4) counts=(1, 1, 0)
+        //                                                          changes=([4], [2], [])
+        //   regex.search(r'(?r)\m(?:.fo){e<=2}',     'x fx')  ->  (0, 4) counts=(1, 1, 0)
+        //                                                          changes=([4], [1], [])
+        //
+        // Two alignments cost two errors here, so neither answer is the better match and the
+        // question is only which one each engine reaches. What names the cause is one line of
+        // source, tested from both sides:
+        //   python tools/probes/s57e-double-count-moves-the-insertion.py
+        // Deleting upstream's doubled term from END_FUZZY's backtrack arm
+        // (upstream/src/_regex.c:15516-15519) moves upstream's insertion to 1 and recovers entry
+        // 12's own lost match in the same build; restoring that term in 'Matcher.cs' moves this
+        // port's insertion to 2. The flagless answer stays put in both builds, which is what says
+        // the guard is doing this and not some difference in alignment order.
+        //
+        // PERMANENT, and judged in this port's favour: BESTMATCH is documented as a ranking flag
+        // over the flagless engine's candidates (upstream/README.rst:592), so an answer the same
+        // engine does not give without the flag is upstream contradicting its own definition.
+        // Classified as 'bestmatch-loses-a-candidate' in
+        // tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs, row 24.
+        Match m = new FuzzyRegex(@"(?b)(?r)\m(?:.fo){e<=2}").Match("x fx");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 4));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(4);
+        // Upstream records 2 here; its own flagless engine records 1, as this port does.
+        m.FuzzyChanges.Insertions.Should().Equal(1);
+
+        // The control: with the flag deleted both engines record the insertion at 1.
+        Match plain = new FuzzyRegex(@"(?r)\m(?:.fo){e<=2}").Match("x fx");
+
+        plain.Success.Should().BeTrue();
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 4));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        plain.FuzzyChanges.Substitutions.Should().Equal(4);
+        plain.FuzzyChanges.Insertions.Should().Equal(1);
+
+        // And the ablation that says the reverse match is part of the shape: forwards, the two
+        // engines agree on a different match entirely, at two substitutions and no insertion.
+        Match forwards = new FuzzyRegex(@"(?b)\m(?:.fo){e<=2}").Match("x fx");
+
+        forwards.Success.Should().BeTrue();
+        (forwards.Index, forwards.Index + forwards.Length).Should().Be((0, 3));
+        forwards.FuzzyCounts.Should().Be(new FuzzyCounts(2, 0, 0));
     }
 
     [Test]
@@ -821,5 +877,86 @@ public sealed class FuzzyBestMatchTests
         (pruned.Index, pruned.Length).Should().Be((0, 4));
         pruned.PartialMatch.Should().BeTrue();
         pruned.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0));
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    [Test]
+    public void Bestmatch_finds_the_two_error_match_upstream_settles_for_three_errors_over()
+    {
+        // THE SAME DEFECT KEEPING A WORSE MATCH - upstream does not lose this one, it answers a
+        // costlier one. S57e, 2026-09-22, row 128947 of the 6000-row gate at seed 20260922, drawn
+        // the moment 'fuzzy-anchored' joined the default generator list. Upstream, regex 2026.9.10:
+        //
+        //   regex.fullmatch(r'(?b)(?e)\b(?:\d+\d\s){e<=3}', '215x b')
+        //       -> (0, 6) counts=(3, 0, 0) changes=([3, 4, 5], [], [])
+        //
+        // This port answers the same span for two errors: substitute the 'x' at 3 for the space the
+        // pattern wants, then insert the trailing 'b' the section has no element for. Three errors
+        // against two, under a flag upstream's own README calls a search for the best match
+        // (upstream/README.rst:592), so upstream is failing its own rule.
+        //
+        // The flagless answer judges nothing here - it is upstream's flagged answer exactly
+        // ((3, 0, 0) again), because a first-match engine returns what it reaches first and never
+        // ranks. What names the cause is the guard, measured from both sides:
+        //   python tools/probes/s57e-double-count-moves-the-insertion.py
+        // Build upstream with the doubled term deleted from END_FUZZY's backtrack arm
+        // (upstream/src/_regex.c:15516-15519) and upstream answers (0, 6) at one substitution and
+        // one insertion, which is this port's answer; restore that term in 'Matcher.cs' and this
+        // port answers upstream's (0, 6) at three substitutions. The trailing insertion is the one
+        // the doubled term refuses, and without it three substitutions is all that fits.
+        //
+        // PERMANENT, and judged in this port's favour. Classified as
+        // 'bestmatch-loses-a-candidate' in tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs,
+        // row 27.
+        Match m = new FuzzyRegex(@"(?b)(?e)\b(?:\d+\d\s){e<=3}").FullMatch("215x b");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 6));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(3);
+        m.FuzzyChanges.Insertions.Should().Equal(5);
+
+        // The row carries both ranking flags, so here is which one is needed: either alone reaches
+        // the two-error match in this port, and upstream reaches it under neither.
+        foreach (string pattern in new[] { @"(?b)\b(?:\d+\d\s){e<=3}", @"(?e)\b(?:\d+\d\s){e<=3}" })
+        {
+            Match one = new FuzzyRegex(pattern).FullMatch("215x b");
+
+            one.Success.Should().BeTrue();
+            (one.Index, one.Index + one.Length).Should().Be((0, 6));
+            one.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0), "upstream answers (3, 0, 0)");
+        }
+
+        // And with no ranking flag at all the two engines agree, which is the point of the defect
+        // only biting where a budget is finite: nothing is ranking, so nothing is lost.
+        Match plain = new FuzzyRegex(@"\b(?:\d+\d\s){e<=3}").FullMatch("215x b");
+
+        plain.Success.Should().BeTrue();
+        (plain.Index, plain.Index + plain.Length).Should().Be((0, 6));
+        plain.FuzzyCounts.Should().Be(new FuzzyCounts(3, 0, 0));
+        plain.FuzzyChanges.Substitutions.Should().Equal(3, 4, 5);
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
+    // Row 5787 of a 6000-row `fuzzy-anchored` wave at seed 8675309, drawn by S57e's own negative
+    // control. Upstream answers no match; upstream's own run without `(?b)` answers the span and the
+    // counts below, so the recorder files its `bestmatch-no-worse` self-contradiction on the row.
+    // The cause is ledger entry 12's doubled backtrack guard: with that term restored in
+    // `Matcher.cs` the wave's one divergence goes away because this port stops finding the match
+    // too. Classified as `bestmatch-loses-a-candidate`, row 28.
+    [Test]
+    public void Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds()
+    {
+        // The substitution is the zero-width joiner at 1. The two insertions are the second capital
+        // 'S' at 6, one 's' more than the 'ss' that folds to 'ß' needs, and the astral digit at 8,
+        // whose surrogate pair is why this port's length is 10 where upstream counts 9 codepoints.
+        Match m = new FuzzyRegex(@"(?b)(?e)(?fi)\b(?:straße){e<=3:\w}").FullMatch("s\u200DRaSsSe\U0001D7EE");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 10));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 2, 0), "upstream answers no match at all");
+        m.FuzzyChanges.Substitutions.Should().Equal(1);
+        m.FuzzyChanges.Insertions.Should().Equal(6, 8);
     }
 }

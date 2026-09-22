@@ -1,0 +1,3 @@
+{"generator": "fuzzy-anchored", "pattern": "(?b)\\B(?:😀𝟮x\\s){e<=3}", "flags": 0, "namedLists": {}, "subject": "😀x 😀", "operation": "fullmatch"}
+{"generator": "fuzzy-anchored", "pattern": "(?b)(?i)\\m(a😀)(?:(?:\\1)){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "a😀😀b", "operation": "fullmatch"}
+{"generator": "fuzzy-anchored", "pattern": "(?b)(?e)\\b(?:\\d+\\d\\s){e<=3}", "flags": 0, "namedLists": {}, "subject": "215x b", "operation": "fullmatch"}

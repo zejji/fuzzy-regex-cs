@@ -1,0 +1,1 @@
+{"generator": "fuzzy-anchored", "pattern": "(?b)(?r)\\m(?:.fo){e<=2}", "flags": 0, "namedLists": {}, "subject": "x fx", "operation": "finditer"}

@@ -589,6 +589,27 @@ empty), and judging it needs the full divergence ceremony, so it is its own slic
 `fuzzy-anchored` is off `run-oracle.ps1`'s default list: the default third seed is today's date, so
 a generator red at some seeds is red on some days. Estimate 20-25 becomes 21-26.
 
+**S57e closed it on 2026-09-22 and the generator is back on the default list.** The row is ledger
+entry 12 - the doubled term in upstream's `END_FUZZY` backtrack arm, which S46 dropped from this
+port - and it is the first row of that family measured from both sides: deleting the term from an
+upstream build moves upstream's insertion to this port's position, restoring it in this port moves
+this port's to upstream's, and neither build moves the flagless answer. Pinned as row 24 of
+`bestmatch-loses-a-candidate` rather than fixed, because BESTMATCH ranks the flagless engine's
+candidates and cannot invent an alignment that engine does not offer.
+
+Putting the generator back on the default list cost four more rows of the same entry, judged in the
+same slice: rows 25 to 28, two of them a shape the family had not shown before, where upstream keeps
+a match this port beats - three substitutions where two errors suffice. The flagless control cannot
+judge those two, because upstream answers the same thing with the flag and without it, so they are
+judged on the two probe arms and keyed on this port's judged answer itself. Row 28 came out of the
+slice's own negative control, at a 6000-row wave at a seed it had not used.
+
+**Phase 6 gains S57f (2026-09-22).** The same gate run drew ten divergences at the new date seed
+20260922 that have nothing to do with `fuzzy-anchored` - seven `interactions`, one `partial`, one
+`partial-sliced` and one `verbs`. S57e proved they are the seed's and not its own by re-running the
+gate at that seed with its generator change reverted, which leaves exactly those ten. They are their
+own slice, on the S57b pattern. Estimate 21-26 becomes 22-27.
+
 **Phase 7 started before that list emptied, and this records it rather than resolves it.** The
 2026-09-12 decision gates Phase 7 on the bug sweep; S60 landed on 2026-09-20 with five entries still
 open. The later owner decision of 2026-09-16 runs Phases 7, 8 and 9 in parallel, which is what has

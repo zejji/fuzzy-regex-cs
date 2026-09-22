@@ -142,9 +142,10 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The eleven rows of <c>bestmatch-loses-a-candidate</c>, recorded by
-    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c> -
-    /// rows 1 to 9 on 2026-09-14, rows 10 and 11 on 2026-09-15.
+    /// The twenty-eight rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
+    /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
+    /// it in the paragraph below that judges it.
     /// </summary>
     /// <remarks>
     /// <b>These rows are the entry's KEY as well as its staleness alarm since S47b</b>, so a row is
@@ -258,6 +259,60 @@ internal static class ExpectedDivergences
     /// <c>python tools/probes/s57b-extra-wave-flag-ablations.py
     /// tools/probes/s57b-extra-wave-rows.jsonl</c>.
     /// </para>
+    /// <para>
+    /// <b>Row 24 is S57e's, and it is the second row of this family that MOVES an error instead of
+    /// losing a match</b> - the first is the <c>interactions</c> row the paragraph above describes as
+    /// found BY the control rather than by the signature. It is row 1982 of <c>pwsh -File
+    /// tools/run-oracle.ps1 -Generator fuzzy-anchored -Count 2000 -Seeds 1234567</c>:
+    /// <c>(?b)(?r)\m(?:.fo){e&lt;=2}</c> as a <c>finditer</c> over <c>x fx</c>. Both engines answer
+    /// (0, 4) at one substitution and one insertion, and both put the substitution at 4. Upstream
+    /// records the insertion at 2, this port at 1, and upstream with the <c>(?b)</c> deleted records
+    /// it at 1 as well. Two alignments of that cost exist, so the row is not about which match is
+    /// better but about which of the two each engine lands on.
+    /// <b>The mechanism was measured from both sides, one line of source each way</b>, which no
+    /// earlier row of this entry has. Build upstream with the doubled term deleted from
+    /// <c>END_FUZZY</c>'s backtrack arm (<c>upstream/src/_regex.c</c>:15516-15519) and upstream's
+    /// answer moves to insertion 1; restore that term in this port's <c>Matcher.cs</c> and this
+    /// port's answer moves to insertion 2. Neither build moves the flagless answer. The guard is
+    /// therefore what separates the engines here, and not some difference in alignment order.
+    /// Measured 2026-09-22 on regex 2026.9.10,
+    /// <c>python tools/probes/s57e-double-count-moves-the-insertion.py</c> for the upstream arm; the
+    /// port arm is recorded as a control in the S57e closing notes.
+    /// </para>
+    /// <para>
+    /// <b>Rows 25 to 27 are S57e's as well, and on two of them upstream KEEPS A WORSE MATCH rather
+    /// than losing one.</b> They are what putting <c>fuzzy-anchored</c> on the default generator list
+    /// drew at once: rows 128691 and 130147 of the seed-7 6000-row gate and row 128947 of the
+    /// seed-20260922 one. On rows 25 and 27 both engines answer the same span, and upstream spends
+    /// three substitutions where this port spends two errors - one insertion beside a deletion on row
+    /// 25, one substitution beside one insertion on row 27 - under a flag documented as a search for
+    /// the best match.
+    /// <b>The flagless control cannot judge those two</b>, because upstream's flagless answer IS its
+    /// flagged answer here: a first-match engine returns what it reaches first and never claimed to
+    /// rank. The two arms of the probe judge them instead. Delete the doubled term from an upstream
+    /// build and upstream answers, in the codepoints it reports, (0, 4) at one insertion and one
+    /// deletion on both rows 25 and 26 and (0, 6) at one substitution and one insertion on row 27 -
+    /// this port's answers to the code unit. Restore that term in this port's <c>Matcher.cs</c> and
+    /// this port answers what the shipped upstream answers, 3 rows of 3 agreeing where none did.
+    /// Row 26 is the family's ordinary shape - upstream refuses the match outright and the recorder
+    /// files its own <c>bestmatch-no-worse</c> self-contradiction on it - so the flagless answer keys
+    /// it as it keys rows 1 to 24. Rows 25 and 27 are keyed on this port's judged answer itself,
+    /// which is <see cref="_bestmatchWorseMatchOurs"/>. Measured 2026-09-22 on regex 2026.9.10,
+    /// <c>python tools/probes/s57e-double-count-moves-the-insertion.py</c> and <c>pwsh -File
+    /// tools/run-oracle.ps1 -Rows tools/probes/s57e-gate-rows.jsonl</c>.
+    /// </para>
+    /// <para>
+    /// <b>Row 28 is the one S57e's own negative control turned up</b>, at row 5787 of a 6000-row
+    /// <c>fuzzy-anchored</c> wave at seed 8675309 - a seed picked because the slice had not used it.
+    /// It is the family's ordinary shape: <c>(?b)(?e)(?fi)\b(?:straße){e&lt;=3:\w}</c> against
+    /// <c>"s‍RaSsSe𝟮"</c>, where upstream answers no match, upstream's own flagless
+    /// run answers (0, 10) at one substitution and two insertions, and this port answers that. The
+    /// recorder files the <c>bestmatch-no-worse</c> self-contradiction on it, and the same control
+    /// that judged rows 25 to 27 judges this one. Before the row was pinned, that wave read
+    /// <c>agree 5969 expected 30 diverge 1</c>; with the doubled term restored in <c>Matcher.cs</c>
+    /// it read <c>agree 5970 expected 30 diverge 0</c>, this row being the difference. Pinned, it
+    /// reads <c>agree 5969 expected 31 diverge 0</c>.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -283,6 +338,11 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy", "pattern": "(?b)(?fi)(?:.){e}", "flags": 0, "namedLists": {}, "subject": "\ud835\udfee\ud83c\udffbb", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 4], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "fuzzy", "pattern": "(?b)(?fi)(?:😀){e<=3}", "flags": 0, "namedLists": {}, "subject": "😀0x", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2, 3], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "fuzzy", "pattern": "(?b)(?fi)(?r)(?:\\Bx(?:\\1)){e<=2}(ßa)", "flags": 0, "namedLists": {}, "subject": "TSsAßa", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 4, "length": 2, "captures": [[4, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator":"fuzzy-anchored","pattern":"(?b)(?r)\\m(?:.fo){e<=2}","flags":0,"namedLists":{},"subject":"x fx","operation":"finditer","codepointSpan":null,"outcome":{"kind":"matches","matches":[{"groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]}],"lastIndex":-1,"lastGroup":null,"partial":false,"fuzzyCounts":[1,1,0],"fuzzyChanges":{"substitutions":[4],"insertions":[2],"deletions":[]},"codepointSpan":[0,4]}]},"leakFreeFuzzy":[{"fuzzyCounts":[1,1,0],"fuzzyChanges":{"substitutions":[4],"insertions":[2],"deletions":[]}}],"bestmatchFreeOutcome":{"kind":"matches","matches":[{"groups":[{"number":0,"success":true,"index":0,"length":4,"captures":[[0,4]]}],"lastIndex":-1,"lastGroup":null,"partial":false,"fuzzyCounts":[1,1,0],"fuzzyChanges":{"substitutions":[4],"insertions":[1],"deletions":[]},"codepointSpan":[0,4]}]}}
+        {"generator": "fuzzy-anchored", "pattern": "(?b)\\B(?:😀𝟮x\\s){e<=3}", "flags": 0, "namedLists": {}, "subject": "😀x 😀", "operation": "fullmatch", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [2, 3, 4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [2, 3, 4], "insertions": [], "deletions": []}}}
+        {"generator": "fuzzy-anchored", "pattern": "(?b)(?i)\\m(a😀)(?:(?:\\1)){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "a😀😀b", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [5], "deletions": [3]}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "fuzzy-anchored", "pattern": "(?b)(?e)\\b(?:\\d+\\d\\s){e<=3}", "flags": 0, "namedLists": {}, "subject": "215x b", "operation": "fullmatch", "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 4, 5], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 4, 5], "insertions": [], "deletions": []}}}
+        {"generator": "fuzzy-anchored", "pattern": "(?b)(?e)(?fi)\\b(?:straße){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "s‍RaSsSe𝟮", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 2, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [6, 8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -1600,6 +1660,39 @@ internal static class ExpectedDivergences
         .ParseRows(_bestmatchLostCandidateRows)
         .Select(Question)
         .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// This port's judged answer to the rows of <see cref="_bestmatchLostCandidateRows"/> that the
+    /// flagless discriminator cannot key, by their position in that list, counting from zero.
+    /// </summary>
+    /// <remarks>
+    /// Rows 25 and 27, S57e's worse-match pair. Upstream's flagless answer is its flagged answer on
+    /// both, so the entry's usual discriminator says nothing about them, and "this port spent fewer
+    /// errors than upstream" will not do on its own: a port that simply lost count of its errors
+    /// says exactly that on the same span, and that is a defect rather than this family. So the
+    /// answer itself is pinned, as <see cref="_enhancematchLostCandidate"/> pins its one row. If a
+    /// later row is inserted above either of these the position stops matching, the entry stops
+    /// applying, and the wave goes red - which is the direction an alarm should fail in.
+    /// </remarks>
+    private static readonly Dictionary<int, string> _bestmatchWorseMatchOurs = new()
+    {
+        [24] = "match 0:(0,6)[(0,6)] last=-1/- fuzzy=(0,1,1)[s:][i:4][d:2]",
+        [26] = "match 0:(0,6)[(0,6)] last=-1/- fuzzy=(1,1,0)[s:3][i:5][d:]",
+    };
+
+    /// <summary>
+    /// The questions of <see cref="_bestmatchWorseMatchOurs"/>'s rows, mapped to this port's judged
+    /// answer to each.
+    /// </summary>
+    private static readonly Dictionary<string, string> _bestmatchWorseMatchKept = OracleWave
+        .ParseRows(_bestmatchLostCandidateRows)
+        .Select(static (row, i) => (Key: Question(row), Index: i))
+        .Where(static pair => _bestmatchWorseMatchOurs.ContainsKey(pair.Index))
+        .ToDictionary(
+            static pair => pair.Key,
+            static pair => _bestmatchWorseMatchOurs[pair.Index],
+            StringComparer.Ordinal
+        );
 
     /// <summary>
     /// The one row of <c>enhancematch-loses-a-candidate</c>: row 122739 of the seed-20260920
@@ -4128,9 +4221,10 @@ internal static class ExpectedDivergences
                 + "S46 on 2026-09-14. `END_FUZZY`'s backtrack arm is the only place a TRAILING "
                 + "insertion can come from, and upstream guards it with "
                 + "`total_errors(state->fuzzy_counts) + total_errors(inner_counts) < "
-                + "state->max_errors` (upstream/src/_regex.c:15515-15517), which DOUBLE-COUNTS: "
-                + "`END_FUZZY` merged `inner_counts` INTO `state->fuzzy_counts` twenty lines earlier "
-                + "(:12473-12484), so the two terms are the same errors added twice. Every other "
+                + "state->max_errors` (upstream/src/_regex.c:15516-15519, cited as :15515-15517 in "
+                + "the older notes this entry grew from), which DOUBLE-COUNTS: "
+                + "`END_FUZZY` merged `inner_counts` INTO `state->fuzzy_counts` on the way in "
+                + "(:12475-12513), so the two terms are the same errors added twice. Every other "
                 + "`max_errors` test in the file asks about ONE set of counts (`any_error_permitted` "
                 + ":9672, `this_error_permitted` :9690, `insertion_permitted` :9708), and "
                 + "`insertion_permitted` on the line above already bounds `inner_counts` by the "
@@ -4244,23 +4338,67 @@ internal static class ExpectedDivergences
                 + "port's answer and the row's own recorded `bestmatchFreeOutcome`. A ranking flag "
                 + "that loses the only candidate is this entry's first symptom, and one `(?:.){e}` "
                 + "section is the smallest pattern yet to show it. Measured 2026-09-21 on regex "
-                + "2026.9.10, `python tools/probes/gate-divergence-doors.py 20260921`, which reads that seed's RED report. The gate has been re-recorded green since, so re-run it as `... gate-divergence-doors.py --rows <file>` over the rows themselves.",
+                + "2026.9.10, `python tools/probes/gate-divergence-doors.py 20260921`, which reads that seed's RED report. The gate has been re-recorded green since, so re-run it as `... gate-divergence-doors.py --rows <file>` over the rows themselves.\n"
+                + "THE TWENTY-FOURTH ROW IS THE FIRST OF THIS FAMILY MEASURED FROM BOTH SIDES (S57e, "
+                + "2026-09-22). `(?b)(?r)\\m(?:.fo){e<=2}` over 'x fx' loses nothing: both engines "
+                + "answer (0, 4) at one substitution and one insertion. Only WHERE the insertion is "
+                + "recorded differs - upstream 2, this port 1, and upstream without the `(?b)` 1 as "
+                + "well. Deleting the doubled term from an upstream build moves upstream to 1, and "
+                + "restoring it in this port moves this port to 2, while the flagless answer stays "
+                + "put in both builds. That is the guard named to the line in both directions, which "
+                + "the nine-row shape and the port-side control of rows 14 to 18 could not do on "
+                + "their own. `python tools/probes/s57e-double-count-moves-the-insertion.py`.\n"
+                + "ROWS 25 TO 27 ARE THE FIRST WHERE UPSTREAM KEEPS A WORSE MATCH (S57e, 2026-09-22), "
+                + "and they are what `fuzzy-anchored` drew the moment it joined the default generator "
+                + "list. On rows 25 and 27 both engines answer the same span and upstream spends "
+                + "THREE substitutions where this port spends two errors. A flag whose README calls "
+                + "it a search for the best match cannot prefer a costlier candidate, so the question "
+                + "is only whether the cheaper one is a candidate the doubled term refuses - and it "
+                + "is: with the term deleted, upstream answers this port's answer on all three, and "
+                + "with the term restored here, this port answers upstream's on all three. NOTE WHAT "
+                + "DOES NOT WORK ON THESE TWO: upstream's flagless answer equals its own flagged "
+                + "answer, so the discriminator every earlier row is keyed on says nothing. That is "
+                + "not a weakness in those rows, it is what a first-match engine is - it returns the "
+                + "match it reaches first and never ranks - and it is why the predicate now has a "
+                + "second arm that pins THIS PORT'S ANSWER to those two rows outright. 'Cheaper than "
+                + "upstream' would not do as the test: a port that lost count of its own errors says "
+                + "the same thing on the same span, and that is a defect rather than this family.\n"
+                + "ROW 28 CAME OUT OF S57e's OWN NEGATIVE CONTROL: a 6000-row `fuzzy-anchored` wave "
+                + "at seed 8675309, a seed the slice had not otherwise used, drew one more row of the "
+                + "ordinary shape at row 5787. Upstream answers no match, upstream's own flagless run "
+                + "answers (0, 10) at one substitution and two insertions, and this port answers that, "
+                + "so the recorder files its `bestmatch-no-worse` self-contradiction. The control "
+                + "settles it the same way: restoring the doubled term takes the wave from "
+                + "`diverge 1` to `diverge 0`.",
             PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_"
                 + "insertions, .Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget, "
-                + ".Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford and "
-                + ".Bestmatch_and_enhancematch_together_keep_the_match_bestmatch_alone_would_lose",
-            // Nine rows rather than one, because each is a judged member of the family and the
+                + ".Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford, "
+                + ".Bestmatch_and_enhancematch_together_keep_the_match_bestmatch_alone_would_lose "
+                + "and, for the moved-insertion shape, .Bestmatch_reversed_records_the_insertion_"
+                + "where_its_own_flagless_answer_does, and for the worse-match shape, "
+                + ".Bestmatch_finds_the_two_error_match_upstream_settles_for_three_errors_over and "
+                + ".Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds",
+            // Twenty-eight rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
-            // DOWNGRADES rather than loses, and a `finditer` that loses one match of three.
+            // DOWNGRADES rather than loses, a `finditer` that loses one match of three, and two rows
+            // where upstream keeps a match this port beats outright.
             // Recorded by
             // `python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl`, 2026-09-14.
             Example: _bestmatchLostCandidateRows,
             Applies: static (row, ours) =>
                 _bestmatchLostCandidate.Contains(Question(row))
-                && row.BestmatchFree is not null
-                && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+                && (
+                    (
+                        row.BestmatchFree is not null
+                        && string.Equals(ours.Describe(), row.BestmatchFree.Describe(), StringComparison.Ordinal)
+                    )
+                    || (
+                        _bestmatchWorseMatchKept.TryGetValue(Question(row), out string? judged)
+                        && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                    )
+                )
         ),
         new(
             Id: "posix-fuzzy-contradicts-its-own-flagless-answer",

@@ -5542,12 +5542,14 @@ FUZZY_ZERO_WIDTH = ("^", "$", r"\b", r"\B", r"\A", r"\Z")
 # 12,000-row wave: the generators drew the assertion and the fuzzy section independently and
 # never together in front.
 #
-# IT IS OFF THE DEFAULT LIST IN `tools/run-oracle.ps1` until S57e judges the row it found: seed
-# 1234567, row 1982 of 2000, `(?b)(?r)\m(?:.fo){e<=2}` over 'x fx', where the two engines record
-# the same span and the same error counts but a different insertion position. That row is not
-# about S57c's rule - under `(?r)` the leading `\m` is not at the head of the reversed graph, so
-# `PatternObject.AnchorGuards` is empty and the narrowing never runs - and the default third seed
-# is today's date, so a generator red at some seeds is red on some days.
+# WHAT IT FOUND FIRST, and it was not S57c's rule: seed 1234567, row 1982 of 2000,
+# `(?b)(?r)\m(?:.fo){e<=2}` over 'x fx', where both engines answer the same span at the same error
+# counts and only the recorded insertion position differs. S57e judged it ledger entry 12 - the
+# doubled term in upstream's `END_FUZZY` backtrack arm, which this port dropped in S46 - and pinned
+# it as row 24 of `bestmatch-loses-a-candidate`. The generator went onto the default list with that
+# judgement, and the 6000-row gate drew three more rows of the same entry at once - rows 25 to 27,
+# two of them upstream keeping a three-error match where this port fits the same span in two. A
+# fourth, row 28, came out of the slice's own negative control at seed 8675309.
 #
 # The assertions are the ones that can FAIL one step along from an anchor: `\b` and `\m` at the
 # start of a subject whose first two characters are both word characters, `\M` and `$` at the end

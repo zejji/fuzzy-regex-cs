@@ -15,23 +15,15 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT 'fuzzy-anchored' AND THE FOUR LONG-SUBJECT ONES.
-    'partial-sliced' joined the list in S33, 'verbs' in S34 and 'timeout' in S52 sitting 14.
+    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
+    joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14 and 'fuzzy-anchored' in
+    S57e.
 
     'fuzzy-anchored' is 'fuzzy' with a zero-width assertion in front of the whole pattern. S57c
     added it because its negative control could not be made to fire on any other generator: the
     rule it guards - a fuzzy insertion permitted at the search anchor where a leading assertion
     pins the match there - needs the assertion and the fuzzy section in one pattern, in that
     order, and every other generator draws them independently.
-
-    IT IS OFF THE DEFAULT LIST because it reaches a divergence S57c did not judge, and the default
-    third seed is today's date, so a generator that is red at some seeds is red on some days.
-    Measured 2026-09-21: 2000 rows at seeds 7, 4242 and 20260921 agree, and at seed 1234567 row
-    1982 diverges - pattern '(?b)(?r)\m(?:.fo){e<=2}' over 'x fx', same span and the same error
-    counts in both engines, upstream recording the insertion at index 2 and this port at index 1.
-    S57c's fix is not the cause: under (?r) the leading \m is not at the head of the reversed
-    graph, so PatternObject.AnchorGuards is empty on that row and the runtime narrowing never runs.
-    S57e judges it. Put this generator back on the list in the slice that closes it.
 
     'timeout' IS CAPPED AT 80 ROWS however large -Count is, and it is the only generator that
     ignores the count. Its question space is finite - ten measured-catastrophic shapes against the
@@ -267,7 +259,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,timeout',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

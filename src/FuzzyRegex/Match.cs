@@ -342,7 +342,7 @@ public sealed class Match : Group
     /// match's tally: <c>FUZZY</c> zeroes it on entering a section and saves the enclosing
     /// section's on the sstack (<c>:13137</c>, and the <c>memset</c> at <c>:13143</c>), and
     /// <c>END_FUZZY</c> adds the inner back into the
-    /// outer on the way out (<c>:12473-12484</c>). On a complete match every section has closed and
+    /// outer on the way out (<c>:12475-12513</c>). On a complete match every section has closed and
     /// the counter therefore IS the total, which is why it is still what a complete match reports.
     /// A partial match returns from inside the section, before any of that unwinding, so the
     /// counter holds the innermost section's errors alone - while the change list, which is global
