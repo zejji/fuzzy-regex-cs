@@ -224,6 +224,29 @@ nothing else: upstream's `[\p{ASCII}&&\p{L}]` reaches U+0131 and this port's doe
 the conditional groups are inert. `split` carries no spans either, so this row wants the same
 treatment as 116428: a port-side `-Rows` confirmation, then the row list.
 
-That makes three of the ten read, two of them the same known family. The next sitting should test
-the remaining rows for it first - IGNORECASE off, and see whether upstream moves to this port's
-answer - because it is one cheap run and it has now explained two rows.
+### Row 76484 judged: the Turkic folding family, and this one is confirmed on both sides
+
+A reversed `sub` under IGNORECASE|VERSION1|FULLCASE over `'İİİ\r\nİßßß'`, with a
+fuzzy section and a `(*SKIP)`: upstream makes two replacements, the port none. Three rows through
+`tools/run-oracle.ps1 -Rows`, which records upstream and runs the port over the same pair - `agree 2
+unsupported 0 diverge 1 of 3 rows`:
+
+| Row | Change | Result |
+| --- | --- | --- |
+| 1 | the row as drawn | DIVERGE - upstream 2 replacements, port 0 |
+| 2 | every U+0130 swapped for `A` | agree - both engines make the same replacement |
+| 3 | IGNORECASE removed | agree - both engines match nothing at all |
+
+So neither the fuzzy section nor the `(*SKIP)` nor the conditional is involved: the port makes the
+same match as upstream the moment the letter is one whose fold it shares, and refuses every match
+when the letter is U+0130. Upstream's own spans say the same - `[(5, 7), (0, 2)]` with the row's
+flags, `[]` with IGNORECASE removed, `[(5, 7)]` with the letter swapped for `A` or `b`.
+
+This is the strongest of the three, because the port side was run rather than inferred. Rows 74120
+and 116428 want the same two control rows before they are called judged.
+
+That makes four of the ten read and three of them the same known family, so the next sitting starts
+by testing the remaining six for it: IGNORECASE off, then the letter swapped, and see whether
+upstream moves to this port's answer. Only three of the ten rows carry IGNORECASE at all, and
+76484 was one of them - the other two are 73420, whose subject is astral with no Turkic character in
+it, and 76118 over the subject `' A'`, so neither is likely to fall to this test.

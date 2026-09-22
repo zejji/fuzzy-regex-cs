@@ -17,14 +17,16 @@ Upstream also contradicts itself one character further along: `'.ab'` is no matc
 `(\S??)ab` is a partial. The pin - a test, a `docs/DIVERGENCES.md` row and an upstream-report draft -
 lands with the rest of the batch, so the independent verifier sees all ten at once (amendment 34).
 
-**Rows 116428 and 74120 are part-judged: both are `turkic-default-folding`.** Upstream's `[A-Z]` and
-its `[\p{ASCII}&&\p{L}]` reach U+0131 under IGNORECASE and this port's do not; drop IGNORECASE and
-upstream gives the port's answer exactly. Both are span-less operations - a `sub` and a `split` - so
-they want a port-side `-Rows` confirmation and then a row added to `_turkicWithoutSpansRows`, the way
-S52's ninth sitting did it.
+**Rows 76484, 116428 and 74120 are `turkic-default-folding`.** Upstream's `[A-Z]` and its
+`[\p{ASCII}&&\p{L}]` reach U+0130 and U+0131 under IGNORECASE and this port's do not. 76484 is
+confirmed on both sides through `-Rows`: swap the letter for `A` and the engines agree, remove
+IGNORECASE and they agree, and only the Turkic row diverges. 74120 and 116428 have upstream's half
+of that and want the same two control rows. All three are span-less operations - two `sub` and a
+`split` - so each wants a row in `_turkicWithoutSpansRows`, the way S52's ninth sitting did it.
 
-**Next**: try that one cheap test on the remaining seven rows before anything else - IGNORECASE off,
-and see whether upstream moves to this port's answer. It has explained two rows already.
+**Next**: run those two control rows for 74120 and 116428, then the same test over the remaining
+six. Only 73420 and 76118 of the rest carry IGNORECASE and neither subject holds a Turkic character,
+so expect the family to stop there.
 
 **Measured green at S57e's commit:** ported suite 6531/6531, ratchet GREEN, the default wave GREEN at
 its three seeds. This checkpoint changes documentation only - no file under `src/` or `tests/` is
