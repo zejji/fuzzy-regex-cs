@@ -206,3 +206,24 @@ direction" (`:1646`).
 one-character-versus-two under IGNORECASE alone (an `-Rows` run), then add the row to
 `_turkicWithoutSpansRows` with the judged answer on both sides, the way S52's ninth sitting added
 rows 7 and 8.
+
+### Row 74120, part-judged: the Turkic folding family again, this time in a split
+
+Same shape as 116428 and the same one-variable test. The row is a reversed `split` under
+IGNORECASE|VERSION1|FULLCASE over `'\rıı ﬁﬁ'`; upstream hands back two parts,
+the port one. Upstream's own answers, with one flag changed at a time:
+
+```
+row flags                 [' ﬁﬁ', ''] - match span (0, 3)
+IGNORECASE removed        ['\rıı ﬁﬁ']   the whole subject, one part
+FULLCASE removed          [' ﬁﬁ', '']             unchanged
+```
+
+With IGNORECASE removed upstream gives the port's answer exactly, so the difference is the fold and
+nothing else: upstream's `[\p{ASCII}&&\p{L}]` reaches U+0131 and this port's does not. FULLCASE and
+the conditional groups are inert. `split` carries no spans either, so this row wants the same
+treatment as 116428: a port-side `-Rows` confirmation, then the row list.
+
+That makes three of the ten read, two of them the same known family. The next sitting should test
+the remaining rows for it first - IGNORECASE off, and see whether upstream moves to this port's
+answer - because it is one cheap run and it has now explained two rows.
