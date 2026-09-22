@@ -13,7 +13,8 @@
     drift away from the numbers it labels.
 
     RED on any benchmark slower than the baseline by more than -Threshold, on any benchmark
-    allocating more than -Threshold times the baseline's bytes per operation, and on any baselined
+    allocating more bytes per operation than the baseline beyond -AllocationNoiseFloor and
+    -AllocationSlackBytes, and on any baselined
     benchmark missing from the run - a disappearing benchmark and a lost measurement look identical
     from the outside, which is the rule tools/check-ratchet.ps1 already applies to tests.
 
@@ -28,7 +29,8 @@
     executed nothing. bench/FuzzyRegex.Benchmarks.slnx exists to stop that walk at bench/.
 
 .PARAMETER Threshold
-    How much slower than the baseline a benchmark may be before the run is RED. Defaults to 1.25,
+    How much slower than the baseline a benchmark may be before the run is RED. Time only; allocation
+    has its own rule, see -AllocationNoiseFloor. Defaults to 1.25,
     which is the v1.0 gate's own per-workload tolerance (the `benchmark` skill); reusing that
     number rather than inventing a second one.
 
@@ -62,7 +64,13 @@
 .PARAMETER AllocationNoiseFloor
     The same, for the allocated-bytes ratio. A separate number because allocation is very nearly
     deterministic where time is not, so sharing one floor would throw away most of the allocation
-    signal - which is Phase 7's first optimisation lever.
+    signal - which is Phase 7's first optimisation lever. Allocation has no -Threshold: any rise
+    outside this floor and -AllocationSlackBytes is RED (S61).
+
+.PARAMETER AllocationSlackBytes
+    A move in allocated bytes per operation this small is `same` whatever its ratio. The harness
+    itself moves a few hundred bytes between runs, which at a baseline of a few hundred bytes is a
+    large ratio and at a baseline of megabytes is invisible.
 
 .EXAMPLE
     pwsh -File tools/compare-benchmarks.ps1
@@ -87,7 +95,12 @@ param(
     # ratios spanned 0.88916 to 1.0768, and 1/0.88916 = 1.1247 is the wider side. Allocation moved at
     # most 307 bytes in 11.06 MB, 2.8e-5, so its floor is four orders of magnitude tighter.
     [double]$NoiseFloor = 1.13,
-    [double]$AllocationNoiseFloor = 1.0001
+    [double]$AllocationNoiseFloor = 1.0001,
+    # Measured 2026-09-23 (S61), two --job short --inProcess runs of an unchanged tree on a busy
+    # machine: the largest move was 672 bytes an operation (FuzzyPhraseThreeAlternation, 4,656 then
+    # 3,984), and ValidateEmails went 517 then 582, which is 1.13x. The ratio floor cannot excuse
+    # that at a few hundred bytes, so a move this small is excused whatever its ratio.
+    [long]$AllocationSlackBytes = 1024
 )
 
 Set-StrictMode -Version Latest
@@ -268,8 +281,8 @@ if ($baselineJob -ne 'unrecorded' -and $baselineJob -ne $thisJob) {
     Write-Host '  Different jobs have different spreads before any code changes, so these ratios mix' -ForegroundColor Yellow
     Write-Host '  a real difference with a measurement-method one. Re-run with the baseline"s job.' -ForegroundColor Yellow
 }
-if ($NoiseFloor -gt 1 -or $AllocationNoiseFloor -gt 1) {
-    Write-Host ("Floor:    time {0:N2}x, allocation {1:N2}x - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor)
+if ($NoiseFloor -gt 1 -or $AllocationNoiseFloor -gt 1 -or $AllocationSlackBytes -gt 0) {
+    Write-Host ("Floor:    time {0:N2}x, allocation {1:N2}x or {2} B - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor, $AllocationSlackBytes)
 }
 $baselineContended = @(if ($baseline.PSObject.Properties['contended']) { $baseline.contended })
 if ($baselineContended.Count -gt 0) {
@@ -306,10 +319,10 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     # measured nothing comes to look like a win.
     $withinFloor = $NoiseFloor -gt 1 -and $ratio -le $NoiseFloor -and $ratio -ge (1 / $NoiseFloor)
 
-    # Allocation is compared as well as time, and to the same threshold. Phase 7's first lever is
-    # allocation elimination (`benchmark` skill), so a change that trades bytes for nanoseconds is
-    # exactly what this has to be able to see; a baseline that recorded allocations and never read
-    # them back would have let any allocation regression through.
+    # Allocation is compared as well as time. Phase 7's first lever is allocation elimination
+    # (`benchmark` skill), so a change that trades bytes for nanoseconds is exactly what this has to
+    # be able to see; a baseline that recorded allocations and never read them back would have let
+    # any allocation regression through.
     $wasBytes = $baseline.benchmarks.$name.allocatedBytes
     $nowBytes = $current[$name].allocatedBytes
 
@@ -323,12 +336,16 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     $allocAppeared = (-not $allocUnmeasured) -and $wasBytes -eq 0 -and $nowBytes -gt 0
     $allocRatio = if (-not $allocUnmeasured -and $wasBytes -gt 0) { $nowBytes / $wasBytes } else { 1 }
     # A separate floor from the time one: allocation is very nearly deterministic, so sharing a
-    # floor sized for timing jitter would discard most of the allocation signal.
-    $allocWithinFloor = $AllocationNoiseFloor -gt 1 -and $allocRatio -le $AllocationNoiseFloor `
-        -and $allocRatio -ge (1 / $AllocationNoiseFloor)
+    # floor sized for timing jitter would discard most of the allocation signal. The slack covers
+    # the harness's own few hundred bytes an operation, which no ratio floor can at small values.
+    $allocWithinFloor = (-not $allocUnmeasured -and [math]::Abs($nowBytes - $wasBytes) -le $AllocationSlackBytes) -or
+        ($AllocationNoiseFloor -gt 1 -and $allocRatio -le $AllocationNoiseFloor -and $allocRatio -ge (1 / $AllocationNoiseFloor))
     # `lost` and `appeared` are NOT excused by the floor. Both mean the measurement changed kind
     # rather than degree, and a floor is a statement about degree.
-    $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt $Threshold -and -not $allocWithinFloor)
+    # Any rise the floor does not explain fails, not only one past -Threshold (S61 scope item 5):
+    # there is no timing jitter here to forgive, so a rise is a change somebody made, and a speed
+    # win that costs bytes is declared by updating the baseline, not hidden under a tolerance.
+    $allocRegressed = $allocLost -or $allocAppeared -or ($allocRatio -gt 1 -and -not $allocWithinFloor)
 
     $allocCell =
     if ($allocUnmeasured) { '    n/a' }
@@ -365,7 +382,7 @@ foreach ($name in $new) {
 Write-Host ''
 if ($regressions.Count -eq 0 -and $missing.Count -eq 0) {
     $scope = if ($Filter -eq '*') { 'the suite' } else { "the '$Filter' subset" }
-    Write-Host "Benchmarks: GREEN - nothing in $scope more than $($Threshold)x slower, or allocating $($Threshold)x more, than the baseline." -ForegroundColor Green
+    Write-Host "Benchmarks: GREEN - nothing in $scope more than $($Threshold)x slower, or allocating more beyond the floor, than the baseline." -ForegroundColor Green
     exit 0
 }
 

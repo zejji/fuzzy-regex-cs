@@ -120,7 +120,8 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         # The timing floor is wide and the allocation floor is narrow, which is the whole point of
         # two parameters: allocation is very nearly deterministic, so 8% of it is a real change.
         $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
-            -BaselinePath $Baseline -Threshold 1.05 -NoiseFloor 1.25 -AllocationNoiseFloor 1.02 -Job medium 2>&1 | Out-String
+            -BaselinePath $Baseline -Threshold 1.05 -NoiseFloor 1.25 -AllocationNoiseFloor 1.02 `
+            -AllocationSlackBytes 0 -Job medium 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 1
         $report | Should -Match 'allocates more'
     }
@@ -130,9 +131,25 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1080
 
         $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
-            -BaselinePath $Baseline -Threshold 1.05 -NoiseFloor 1.25 -AllocationNoiseFloor 1.15 -Job medium 2>&1 | Out-String
+            -BaselinePath $Baseline -Threshold 1.05 -NoiseFloor 1.25 -AllocationNoiseFloor 1.15 `
+            -AllocationSlackBytes 0 -Job medium 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 0
         $report | Should -Match 'GREEN'
+    }
+
+    It 'excuses an allocation that moved by no more than the slack, whatever the ratio' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 517
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 582
+
+        # S61's two runs of an unchanged tree (2026-09-23): ValidateEmails read 517 B and then 582 B
+        # per operation, 1.13x, and FuzzyPhraseThreeAlternation 4,656 B and then 3,984 B. A ratio
+        # floor alone would call the first a regression; a few hundred bytes across 100,000 calls
+        # is the harness, not the engine.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0
+        $report | Should -Match 'GREEN'
+        $report | Should -Match 'same'
     }
 
     It 'never lets the floor excuse a lost allocation reading, however wide the floor' {
@@ -148,25 +165,29 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         $report | Should -Match 'lost'
     }
 
-    It 'does NOT fail a run for an allocation change between the allocation floor and -Threshold' {
-        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 1000
-        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1200
+    It 'fails a run for any allocation rise beyond the floor and the slack, not only one past -Threshold' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 120000
 
-        # This pins current behaviour rather than desired behaviour, and it is here because the
-        # shipped defaults make it easy to read the opposite off S58's measurement. A floor can only
-        # EXCUSE a ratio: what fails a run is -Threshold, which governs both axes, and the floor
-        # forgives a ratio that is over -Threshold but inside the floor ("calls a slowdown inside
-        # the floor `same`" and "excuses an allocation ratio inside the allocation floor" pin that
-        # direction). A floor BELOW -Threshold therefore forgives nothing, so with the shipped
-        # defaults - -Threshold 1.25, floors 1.13 and 1.0001 - a benchmark allocating 1.20x its
-        # baseline is GREEN, even though the machine can resolve allocation to 2.8e-5.
-        # Whether allocation deserves a tighter threshold of its own is S63's call (its scope item
-        # 7), not a measurement slice's; if S63 changes it, this test is the one to invert.
+        # S61 scope item 5: allocation is gated on its own floor, not on -Threshold. Until S61 this
+        # test pinned the opposite - with -Threshold 1.25 governing both axes, a benchmark
+        # allocating 1.20x its baseline was GREEN although S58 measured the machine's allocation
+        # noise at 2.8e-5. Allocation has no time-style jitter to forgive, so any rise the floor
+        # and the slack do not explain is a change somebody made.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match 'allocates more \(1\.2x\)'
+    }
+
+    It 'does not call an allocation drop a regression' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 20000
+
         $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
             -BaselinePath $Baseline -Job medium 2>&1 | Out-String
         $LASTEXITCODE | Should -Be 0
-        $report | Should -Match 'GREEN'
-        $report | Should -Match '1\.20x'
+        $report | Should -Match '0\.20x'
     }
 
     It 'prints the floor it is applying, so a comparison cannot silently use one' {
@@ -174,8 +195,9 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 1000
 
         $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
-            -BaselinePath $Baseline -NoiseFloor 1.25 -AllocationNoiseFloor 1.02 -Job medium 2>&1 | Out-String
-        $report | Should -Match 'Floor:\s+time 1\.25x, allocation 1\.02x'
+            -BaselinePath $Baseline -NoiseFloor 1.25 -AllocationNoiseFloor 1.02 -AllocationSlackBytes 512 `
+            -Job medium 2>&1 | Out-String
+        $report | Should -Match 'Floor:\s+time 1\.25x, allocation 1\.02x or 512 B'
     }
 }
 
