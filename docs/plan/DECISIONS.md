@@ -1159,3 +1159,27 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   unreachable in both engines, because the required string is always the first item of the sequence
   that yields one. The continuation after a start test needs `StepOver`, not `Step`: a `STRING`
   node's step is its whole length and this port's positions count code units.
+
+- 2026-09-22 (owner, S61's two decisions, from `docs/plan/2026-09-19-span-threading-decision.md`):
+  **implement every option with a provable gain; breaking API changes are acceptable because there
+  are no external consumers yet, provided the result follows .NET's own API idioms.**
+  - **Span threading: option (a)**, `MatchState.Text` as `ReadOnlyMemory<char>` plus `Memory`
+    overloads - **gated on the hot-path benchmark.** Every character read goes through `Text.Span`,
+    37 call sites deep, so it costs every caller a little to save allocations for some. Flat within
+    S58's noise floor: land it. Slower beyond the floor: do not land it; bring the owner the numbers,
+    because that is a speed-for-allocation trade and not a free win. Option (b), `unsafe` pinning, is
+    declined; option (c), documenting the copy, applies to whatever (a) leaves uncovered.
+  - **Lazy walk: steps 1 and 2 both signed off** - hoist the per-subject work out of the per-step
+    state (about 99% of the 12,643 ms walk), then pool the state and release it on `Dispose`.
+  - **The `ref struct` question, settled on measured precedent rather than preference.** .NET 10.0.12,
+    by reflection on 2026-09-22: `Regex.EnumerateMatches(ReadOnlySpan<char>)` returns
+    `ValueMatchEnumerator` and `EnumerateSplits` returns `ValueSplitEnumerator`, both `ref struct`s
+    that are not `IEnumerable`, yielding `ValueMatch` (`Index`, `Length` only) - while
+    `Regex.Matches` stays an `IEnumerable` `MatchCollection`. So the idiom is a `ref struct` BESIDE the
+    rich API, never instead of it. **Replacing** this port's `IEnumerable<Match>` walk with a
+    `ref struct` is declined: it breaks that idiom (no LINQ, no field, no `async`) and gains nothing
+    over pooling, which S58 measured removes the same fixed per-step cost. **Adding** a BCL-shaped
+    `EnumerateMatches(ReadOnlySpan<char>)` returning a `ValueMatchEnumerator` of `ValueMatch` is
+    signed off, gated on a measured gain: it is the only shape that lets a span caller walk matches
+    with no copy of the subject at all, which pooling cannot do, and a .NET developer reaches for it
+    by that name.

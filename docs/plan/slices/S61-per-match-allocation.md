@@ -89,7 +89,10 @@ plus one `GroupData` per group, a `RepeatData[]` plus one per repeat, three `Byt
 
 ## Done when
 
-- [ ] Both S58 decisions are recorded as signed off before any code is written; neither is guessed.
+- [x] Both S58 decisions are recorded as signed off before any code is written; neither is guessed.
+      (Owner, 2026-09-22, DECISIONS: span option (a) gated on the hot-path benchmark; lazy-walk
+      steps 1 and 2; plus a BCL-shaped `ValueMatchEnumerator` beside the `IEnumerable` walk, gated
+      on a measured gain. Replacing the `IEnumerable` walk with a `ref struct` is declined.)
 - [ ] The chosen span and lazy-walk shapes implemented, or a declined decision written up with its
       measured cost and date.
 - [ ] Abandoned-iterator buffer return proven by the debug `ArrayPool` wrapper, not by inspection.
