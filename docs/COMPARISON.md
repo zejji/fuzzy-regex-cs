@@ -1080,6 +1080,44 @@ A folding that was partly used is still charged, so `(?fi)(?:sst){e<=1}` over `�
 one insertion. There is no option to restore the upstream answer; `(?V0)` gives simple folding,
 where the two engines already agree.
 
+### A full-folded backreference that ends half-way through a folding charges the rest as an edit
+
+The same folding applies to a backreference. When the group's text runs out part way through a
+subject character's folding, the rest of that folding is charged as an edit here, as upstream
+already does for a literal. Upstream's backreference gives up on the match instead.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// ß folds to ss. The group's s matches the first s; the second costs one substitution.
+var twice = new FuzzyRegex(@"(s)(?:\1){e<=1}", FuzzyRegexOptions.IgnoreCase);
+Console.WriteLine(twice.Match("sß").Value);   // sß - upstream: no match
+```
+
+Upstream in version 0, where `ß` is one character, finds the same match with one substitution, and
+so does upstream's literal `(?:sss){e<=1}` over `ßß` in version 1. There is no option to restore
+the upstream answer.
+
+### A retried fuzzy edit in a full-folded backreference steps past what it used up
+
+A fuzzy match tries one kind of edit and, if the rest of the pattern then fails, goes back and
+tries the next. In a backreference under `IgnoreCase` with version 1, upstream's second try
+compares a character the edit has already used, so it fails where it should succeed. No ligature
+is involved.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// A substitution of x for a is tried first and fails at the b; the retry inserts the x.
+var repeated = new FuzzyRegex(@"(ab)(?:\1){e<=1}", FuzzyRegexOptions.IgnoreCase);
+Console.WriteLine(repeated.Match("abxab").Value);   // abxab - upstream: no match
+```
+
+Upstream finds the same match without `IgnoreCase`, or in version 0. The fix also changes a
+best-match answer: `(?b)(?fi)(ßa)(?:\1){s<=1,i<=1,d<=1}` over `ßasa` costs one deletion here and two
+edits upstream, whose own literal form `(?:ßa)` finds the one deletion. There is no option to
+restore the upstream answer.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

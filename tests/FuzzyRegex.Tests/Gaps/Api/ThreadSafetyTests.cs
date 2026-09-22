@@ -699,6 +699,11 @@ public sealed class ThreadSafetyTests
             // S83 added ChargeUntouchedFoldings, which the library never writes. Only
             // OracleComparer.RunWithoutTheFoldFix sets it, on a pattern compiled for that one call.
             "PatternObject.ChargeUntouchedFoldings",
+            // S84 added these two, also never written by the library. Only
+            // OracleComparer.RunWithoutTheGroupFoldLeftovers and RunWithoutTheRetriedFoldSteps set
+            // them, on a pattern compiled for that one call.
+            "PatternObject.SkipGroupFoldLeftovers",
+            "PatternObject.SkipRetriedFoldSteps",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

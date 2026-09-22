@@ -299,6 +299,37 @@ internal sealed class PatternObject
     /// </remarks>
     internal bool ChargeUntouchedFoldings;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy full-case-folded group reference
+    /// whose group runs out part way through a subject character's folding backtracks, which is
+    /// upstream's rule. The oracle sets it on a pattern it compiled for one call, to show that the
+    /// S84 leftovers fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Under full case folding ß folds to ss, so a group holding s matches only half of it. The
+    /// literal <c>STRING_FLD</c> arm charges the other half as an edit (<c>upstream/src/_regex.c</c>:14855);
+    /// <c>REF_GROUP_FLD</c> (:14154) and its reversed mirror (:14255) backtrack, so
+    /// <c>(s)(?:\1){e&lt;=1}</c> finds nothing in <c>sß</c>. This port runs the literal arm's loop
+    /// in both; see <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool SkipGroupFoldLeftovers;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
+    /// group reference re-enters the comparison without first stepping past a folding the edit
+    /// finished, which is upstream's rule. The oracle sets it on a pattern it compiled for one call,
+    /// to show that the S84 retry fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// After a first fuzzy try, <c>REF_GROUP_FLD</c>'s loop body moves to the next subject or group
+    /// character when the edit used up that side's folding. A retry re-enters at the top of the arm
+    /// and skips those steps, so it compares the finished character again:
+    /// <c>(?i)(ab)(?:\1){e&lt;=1}</c> finds nothing in <c>abxab</c> under V1, where inserting the x
+    /// matches. The literal <c>STRING_FLD</c> arm takes the step (<c>upstream/src/_regex.c</c>:14801);
+    /// see <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool SkipRetriedFoldSteps;
+
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
 

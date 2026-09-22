@@ -1189,3 +1189,10 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `full-fold-fuzzy-deletion` is keyed on an ablation flag, `PatternObject.ChargeUntouchedFoldings`,
   after S57c's anchor pin, rather than on a shape predicate: a flag that restores upstream's test at
   all six sites classifies exactly the rows the fix moved and nothing else.
+- 2026-09-22 (S84): a full-folded fuzzy backreference is judged against upstream's answer for the
+  same pattern with `(?:\1)` written out as the group's literal text; where the two disagree the
+  literal is right, and the port gives the literal's answer. Two ablation flags,
+  `SkipGroupFoldLeftovers` (ledger 29) and `SkipRetriedFoldSteps` (ledger 30), key the oracle entries.
+  S83's row 6250 (seed 7) needs S83's fix and the retry fix together, so it moved to
+  `full-fold-backreference-retry`, whose predicate accepts the retry ablation alone or both.
+  The deletion-only case the S84 spec listed is a separate defect shared by the literal arm: S85.

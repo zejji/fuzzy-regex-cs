@@ -1,0 +1,13 @@
+{"pattern":"(?fi)(s)(?:\\1){e<=1}","flags":0,"subject":"sß","operation":"search"}
+{"pattern":"(?fi)(s)(?:\\1){i<=1}","flags":0,"subject":"sß","operation":"search"}
+{"pattern":"(?rfi)(?:\\1){e<=1}(s)","flags":0,"subject":"ßs","operation":"search"}
+{"pattern":"(?fi)(as)(?:\\1){e<=1}","flags":0,"subject":"asaß","operation":"search"}
+{"pattern":"(?fi)(a😀)(?:b\\p{L}\\b(?:\\1)){1<=e<=2:[^t]}","flags":0,"subject":"a😀b😀ﬆ","operation":"split","count":3}
+{"pattern":"(?fi)(ﬀo)(?:a*?😀(?:[ab]+(?:\\1)){e<=3:[a-s]}){e<=3,1i+1d+2s<=3:f}","flags":0,"subject":"ﬀoaa😀affo","operation":"fullmatch","pos":0,"endpos":9}
+{"pattern":"(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}","flags":0,"subject":"ßasa0a😀","operation":"match"}
+{"pattern":"(?fi)\\m(ßa)(?:(?:\\1)b+?𝟮.){e<=3,1i+1d+2s<=3}","flags":0,"subject":"ßaTssAb𝟮TA","operation":"fullmatch"}
+{"pattern":"(?fi)(?r)(?:\\p{Nd}\\A(?:\\1)){e<=3}(oba)","flags":0,"subject":"‍OBaToba","operation":"match"}
+{"pattern":"(?e)(?fi)\\m(ﬆx)(?:(?:\\1)[ab]*?a){e<=3:\\w}","flags":0,"subject":"ﬆxX","operation":"fullmatch","partial":true,"pos":0,"endpos":3}
+{"pattern":"(?fi)(ab)(?:\\1){e<=1}","flags":0,"subject":"abxab","operation":"search"}
+{"pattern":"(?rfi)(?:\\1){e<=1}(ab)","flags":0,"subject":"abxab","operation":"search"}
+{"pattern":"(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}","flags":0,"subject":"ßasa","operation":"search"}

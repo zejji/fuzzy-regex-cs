@@ -3490,4 +3490,85 @@ defect as S35's `_fix_full_casefold` chunk remap.
 six sites. Real data: 0 span differences from upstream V0 over the same 300,000 searches. Pinned
 by `Gaps/Engine/FullFoldFuzzyDeletionTests.cs` and by `full-fold-fuzzy-deletion` in
 `tests/FuzzyRegex.OracleTests/ExpectedDivergences.cs`, which classifies the seven wave rows the fix
-moved by switching the fix off (`OracleComparer.RunWithoutTheFoldFix`).
+moved by switching the fix off (`OracleComparer.RunWithoutTheFoldFix`). Since S84, seed 7 row 6250
+also needs entry 30's fix before the engines differ, and `full-fold-backreference-retry` claims it.
+
+## 29. A full-folded backreference that ends half-way through a folding backtracks - FIXED HERE (S84)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-29-30-full-fold-backreference.md`, shared
+with entry 30. Found 2026-09-22 by S83's blind review.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-22 by
+`tools/probes/s84-full-fold-backreference.py`:
+
+```
+V1 search('(s)(?:\\1){e<=1}', 'sß') -> None
+V0 search('(s)(?:\\1){e<=1}', 'sß') -> span=(0, 2) fuzzy_counts=(1, 0, 0) fuzzy_changes=([1], [], [])
+V1 search('(?:sss){e<=1}', 'ßß')    -> span=(0, 2) fuzzy_counts=(1, 0, 0) fuzzy_changes=([1], [], [])
+V1 search('(s)(?:\\1){i<=1}', 'sß') -> None
+V1 search('(?:sss){i<=1}', 'ßß')    -> span=(0, 2) fuzzy_counts=(0, 1, 0) fuzzy_changes=([], [1], [])
+```
+
+All under `regex.I`. The reversed arm (`(?r)(?:\1){e<=1}(s)` over 'ßs') and a longer group
+(`(as)(?:\1){e<=1}` over 'asaß') fail the same way; V0 gives (0, 2) and (0, 4) with one
+substitution.
+
+**Why upstream is wrong.** Under full folding 'sß' is s-s-s and the pattern asks for s-s with one
+edit: substituting the third s, or inserting it, is one edit. Upstream's literal with the same
+folded text finds it, and README.rst:590 says fuzzy search returns "the first match that meets the
+given constraints".
+
+**Mechanism.** `RE_OP_REF_GROUP_FLD` loops while group text remains (`_regex.c:14102`). When the
+group runs out with the subject character's folding part-used, it falls to the final check at
+`:14154` and backtracks. `RE_OP_STRING_FLD` in the same state runs a leftovers loop,
+`while (folded_pos < folded_len)` at `:14855`, that offers each remaining folded character to
+`fuzzy_match_string_fld`. `RE_OP_REF_GROUP_FLD_REV` mirrors the forward arm at `:14255`.
+
+**This port.** Both backreference arms run the same leftovers loop through `FuzzyMatchGroupFld`,
+guarded by S83's `Matcher.FoldingIsPartUsed`, with one addition: `NextFuzzyMatchGroupFld` offers a
+deletion only while the group has a folded character left, on the first try and on a retry alike.
+In the leftovers loop there is none, so a deletion would change nothing, and when deletions are
+free the loop would take it for ever, as upstream's literal loop does today:
+`regex.search(r'(?:sss){0d+1s+1i<=1:[x]}', 'ßß', regex.I | regex.V1)` raises MemoryError. That
+literal-arm defect is slice S85's. Pinned by
+`Gaps/Engine/FullFoldBackreferenceLeftoversTests.cs` and by `full-fold-backreference-leftovers` in
+`ExpectedDivergences.cs` (`OracleComparer.RunWithoutTheGroupFoldLeftovers`). No row of the default
+wave at seeds 7, 4242 or 20260922 reaches it.
+
+## 30. A retried fuzzy edit in a full-folded backreference compares a used-up character again - FIXED HERE (S84)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-29-30-full-fold-backreference.md`, shared
+with entry 29. Found 2026-09-22 by S84, while explaining S83's best-match case.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-22 by
+`tools/probes/s84-full-fold-backreference.py`:
+
+```
+V1 search('(ab)(?:\\1){e<=1}', 'abxab')                 -> None
+V0 search('(ab)(?:\\1){e<=1}', 'abxab')                 -> span=(0, 5) fuzzy_counts=(0, 1, 0) fuzzy_changes=([], [2], [])
+V1 case-sensitive search('(ab)(?:\\1){e<=1}', 'abxab')  -> span=(0, 5) fuzzy_counts=(0, 1, 0) fuzzy_changes=([], [2], [])
+V1 search('(?b)(?f)(ßa)(?:\\1){s<=1,i<=1,d<=1}', 'ßasa') -> span=(0, 4) fuzzy_counts=(1, 0, 1)
+V1 search('(?b)(?f)(ßa)(?:ßa){s<=1,i<=1,d<=1}', 'ßasa')  -> span=(0, 4) fuzzy_counts=(0, 0, 1)
+```
+
+`regex.I` except where marked. The reversed arm (`(?r)(?:\1){e<=1}(ab)` over 'abxab') fails the
+same way.
+
+**Why upstream is wrong.** Inserting the x is one edit, and the same engine finds it when the
+backreference does not full-fold. The best-match case is upstream contradicting itself: its literal
+form finds a one-edit match of the same span that the backreference reports as two.
+
+**Mechanism.** A fuzzy edit pushes a retry frame, and when the path fails further on,
+`retry_fuzzy_match_group_fld` sets up the next kind of edit and re-enters the arm with
+`string_pos >= 0`. The re-entry branch (`_regex.c:14094`) reloads both foldings and goes straight
+into the loop, skipping the two steps the loop body takes after an edit (`:14145` advances the
+subject past a used-up folding, `:14148` the group). A retried insertion that used up the x is
+therefore compared with the x again, and fails. `RE_OP_STRING_FLD` takes the subject's step on
+re-entry (`:14801`, reversed `:14907`).
+
+**This port.** Both backreference arms take the two steps on re-entry. They also fold the group
+character on re-entry only while group text remains, because entry 29's leftovers loop can push a
+retry with the group used up, a state upstream never reaches. Pinned by the same test file and by
+`full-fold-backreference-retry` (`OracleComparer.RunWithoutTheRetriedFoldSteps`), which claims six
+rows of the default wave at three seeds. Each agrees with upstream once `(?:\1)` is replaced by the
+group's text; the probe prints both.

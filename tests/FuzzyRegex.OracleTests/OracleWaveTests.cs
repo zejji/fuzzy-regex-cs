@@ -462,15 +462,19 @@ public sealed class OracleWaveTests
     }
 
     [Test]
-    public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for()
+    [Arguments("full-fold-fuzzy-deletion")]
+    [Arguments("full-fold-backreference-leftovers")]
+    [Arguments("full-fold-backreference-retry")]
+    public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for(string id)
     {
-        // The control for `full-fold-fuzzy-deletion`, built the same way as the anchor pin's
-        // above: upstream's own answer is what this port gave before S83, so accepting it would
-        // classify a revert of the fix as the fix; and no match stands in for an unrelated defect.
-        // Most of these rows' upstream answer IS no match, so for them the two cases coincide.
+        // The control for the three full-fold entries (S83, S84), built the same way as the anchor
+        // pin's above: upstream's own answer is what this port gave before the fix, so accepting it
+        // would classify a revert of the fix as the fix; and no match stands in for an unrelated
+        // defect. Most of these rows' upstream answer IS no match, so for them the two cases
+        // coincide.
         ExpectedDivergence entry = ExpectedDivergences
             .All.Should()
-            .ContainSingle(static e => string.Equals(e.Id, "full-fold-fuzzy-deletion", StringComparison.Ordinal))
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
             .Subject;
 
         foreach (OracleRow row in OracleWave.ParseRows(entry.Example))

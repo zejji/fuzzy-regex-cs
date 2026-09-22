@@ -160,8 +160,9 @@ internal static class OracleComparer
     /// <param name="ablate">
     /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
-    /// <see cref="RunWithoutTheAnchorPin"/> and <see cref="RunWithoutTheFoldFix"/> and by nothing
-    /// else; the wave always passes
+    /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
+    /// <see cref="RunWithoutTheGroupFoldLeftovers"/> and <see cref="RunWithoutTheRetriedFoldSteps"/>
+    /// and by nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -382,6 +383,75 @@ internal static class OracleComparer
             ablate: static compiled => compiled.PatternObject.ChargeUntouchedFoldings = true
         );
     }
+
+    /// <summary>
+    /// Puts a row's question to this port with the S84 leftovers loop switched off in the full-fold
+    /// backreference.
+    /// </summary>
+    /// <remarks>
+    /// S84 charges the rest of a subject folding as an edit when a fuzzy full-folded backreference
+    /// runs out of group text half-way through it, as the literal arm does (<c>_regex.c:14855</c>).
+    /// Upstream's <c>REF_GROUP_FLD</c> backtracks instead (<c>:14154</c>, <c>:14255</c>), so
+    /// <c>(?i)(s)(?:\1){e&lt;=1}</c> over 'sß' is no match under V1. Setting
+    /// <c>PatternObject.SkipGroupFoldLeftovers</c> restores that. The
+    /// <c>full-fold-backreference-leftovers</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheGroupFoldLeftovers(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.SkipGroupFoldLeftovers = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with the S84 retry steps switched off in the full-fold
+    /// backreference, and optionally the S83 fold fix too.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// S84 makes a retried fuzzy edit in <c>REF_GROUP_FLD</c> take the steps past a folding it used
+    /// up, as <c>STRING_FLD</c> does (<c>_regex.c:14801</c>, <c>:14907</c>). Upstream re-enters the
+    /// arm without them, so <c>(?i)(ab)(?:\1){e&lt;=1}</c> over 'abxab' is no match under V1.
+    /// Setting <c>PatternObject.SkipRetriedFoldSteps</c> restores that. The
+    /// <c>full-fold-backreference-retry</c> entry keys on this.
+    /// </para>
+    /// <para>
+    /// Some rows need both repairs before this port and upstream differ: seed 7's
+    /// <c>(?b)(?fi)(ßa)(?:(?:\1)\B0a😀){s&lt;=1,i&lt;=1,d&lt;=1}</c> over 'ßasa0a😀' reproduces
+    /// upstream only with the S83 fix off as well, so <paramref name="withoutTheFoldFix"/> takes
+    /// both away.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withoutTheFoldFix">Also set <c>PatternObject.ChargeUntouchedFoldings</c>.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheRetriedFoldSteps(OracleRow row, bool withoutTheFoldFix)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: withoutTheFoldFix ? _skipRetriedFoldStepsAndTheFoldFix : _skipRetriedFoldSteps
+        );
+    }
+
+    private static readonly Action<FuzzyRegex> _skipRetriedFoldSteps = static compiled =>
+        compiled.PatternObject.SkipRetriedFoldSteps = true;
+
+    private static readonly Action<FuzzyRegex> _skipRetriedFoldStepsAndTheFoldFix = static compiled =>
+    {
+        compiled.PatternObject.SkipRetriedFoldSteps = true;
+        compiled.PatternObject.ChargeUntouchedFoldings = true;
+    };
 
     /// <summary>Diffs one row's recorded answer against this port's.</summary>
     /// <param name="row">The row, carrying upstream's answer.</param>

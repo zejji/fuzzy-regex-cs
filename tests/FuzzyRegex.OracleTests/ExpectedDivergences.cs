@@ -2618,19 +2618,19 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The eleven rows of <c>full-fold-fuzzy-deletion</c>, recorded by
+    /// The ten rows of <c>full-fold-fuzzy-deletion</c>, rows 2 to 11 of what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s83-fold-deletion-rows.jsonl</c> on
     /// 2026-09-22.
     /// </summary>
     /// <remarks>
-    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Rows 1 to 7
-    /// are the wave rows the fix moved: seed 7 rows 6250 and 6587, seed 4242 rows 6047, 6106, 6392
-    /// and 6443, and seed 20260922 row 6080. Rows 8 to 11 are the defect minimised, one per site
-    /// the fix touched: a folded string forward and reversed, and a folded backreference forward
-    /// and reversed.
+    /// The staleness alarm only; the entry is keyed on an ablation, not on these rows. Rows 1 to 6
+    /// are the wave rows the fix moved: seed 7 row 6587, seed 4242 rows 6047, 6106, 6392 and 6443,
+    /// and seed 20260922 row 6080. Rows 7 to 10 are the defect minimised, one per site the fix
+    /// touched: a folded string forward and reversed, and a folded backreference forward and
+    /// reversed. Seed 7 row 6250 was row 1 until S84; since S84 it needs that slice's retry repair
+    /// as well, so it moved to <see cref="_groupFoldRetryRows"/>.
     /// </remarks>
     private const string _foldFixRows = """
-        {"generator": "rows", "pattern": "(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa0a😀", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(?r)\\B(?:ﬀo[ab]){d<=1}", "flags": 0, "namedLists": {}, "subject": "xßFOA", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}}
         {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?:[ab]+x0ba*?straße){d<=2}", "flags": 0, "namedLists": {}, "subject": "AAx0bAAStRaSS ", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "bestmatchFreeOutcome": {"kind": "matches", "matches": []}}
         {"generator": "rows", "pattern": "(?fi)(?:ﬀo(?:\\p{L}a+\\p{L}){e<=2:s}){e<=3:f}", "flags": 0, "namedLists": {}, "subject": "FaFOBAaQb", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
@@ -2641,6 +2641,46 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?rfi)(?:fi){d<=1}", "flags": 0, "namedLists": {}, "subject": "ei", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(fi)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "fife", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){d<=1}(fi)", "flags": 0, "namedLists": {}, "subject": "eifi", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// The four rows of <c>full-fold-backreference-leftovers</c>, rows 1 to 4 of what is recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/s84-fold-backreference-rows.jsonl</c> on
+    /// 2026-09-22.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation. No wave row at the three
+    /// default seeds reaches this repair, so all four are the defect minimised: a group of one
+    /// letter forward and reversed, charged as a substitution or an insertion, and a longer group.
+    /// </remarks>
+    private const string _groupFoldLeftoverRows = """
+        {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){i<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){e<=1}(s)", "flags": 0, "namedLists": {}, "subject": "ßs", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(as)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "asaß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        """;
+
+    /// <summary>
+    /// The nine rows of <c>full-fold-backreference-retry</c>, rows 5 to 13 of what is recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/s84-fold-backreference-rows.jsonl</c> on
+    /// 2026-09-22.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation. Rows 1 to 6 are the wave rows
+    /// the repair moved: seed 7 rows 6208, 6243, 6250 and 6471, seed 4242 row 6114 and seed
+    /// 20260922 row 6591. Row 3 was <c>full-fold-fuzzy-deletion</c>'s until S84. Rows 7 to 9 are
+    /// the defect minimised: an insertion forward and reversed, and S83's best-match deletion.
+    /// </remarks>
+    private const string _groupFoldRetryRows = """
+        {"generator": "rows", "pattern": "(?fi)(a😀)(?:b\\p{L}\\b(?:\\1)){1<=e<=2:[^t]}", "flags": 0, "namedLists": {}, "subject": "a😀b😀ﬆ", "operation": "split", "count": 3, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a😀b😀ﬆ"]}}
+        {"generator": "rows", "pattern": "(?fi)(ﬀo)(?:a*?😀(?:[ab]+(?:\\1)){e<=3:[a-s]}){e<=3,1i+1d+2s<=3:f}", "flags": 0, "namedLists": {}, "subject": "ﬀoaa😀affo", "operation": "fullmatch", "pos": 0, "endpos": 10, "codepointSlice": [0, 9], "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [7, 8, 9]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 3], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [7, 8, 9]}}]}
+        {"generator": "rows", "pattern": "(?b)(?fi)(ßa)(?:(?:\\1)\\B0a😀){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa0a😀", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)\\m(ßa)(?:(?:\\1)b+?𝟮.){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "ßaTssAb𝟮TA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?r)(?:\\p{Nd}\\A(?:\\1)){e<=3}(oba)", "flags": 0, "namedLists": {}, "subject": "\u200dOBaToba", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?e)(?fi)\\m(ﬆx)(?:(?:\\1)[ab]*?a){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "ﬆxX", "operation": "fullmatch", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "rows", "pattern": "(?fi)(ab)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){e<=1}(ab)", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}]}
         """;
 
     private static readonly ExpectedDivergence[] _entries =
@@ -5826,8 +5866,8 @@ internal static class ExpectedDivergences
                 + "had at 0.\n"
                 + "THE WAVE ROWS all agree with upstream V0 once the pattern's ligatures are spelled "
                 + "out (sharp s as ss, the ff and st ligatures as two letters), or are valid matches "
-                + "within budget where V1 finds none. Seed 7 row 6250 is also upstream contradicting "
-                + "itself: it matches under `{d<=1}` and not under the looser `{s<=1,i<=1,d<=1}`.\n"
+                + "within budget where V1 finds none. Seed 7 row 6250 was one of them until S84; it "
+                + "now needs S84's retry repair too, and belongs to `full-fold-backreference-retry`.\n"
                 + "KEYED ON AN ABLATION, like `fuzzy-insertion-at-a-pinned-anchor`. A row belongs "
                 + "here when `OracleComparer.RunWithoutTheFoldFix`, which sets "
                 + "`PatternObject.ChargeUntouchedFoldings` and so restores upstream's test at every "
@@ -5837,6 +5877,67 @@ internal static class ExpectedDivergences
             PinnedBy: "FullFoldFuzzyDeletionTests",
             Example: _foldFixRows,
             Applies: static (row, ours) => OnlyTheFoldFixExplainsIt(row, ours)
+        ),
+        new(
+            Id: "full-fold-backreference-leftovers",
+            Reason: "THIS PORT CHARGES THE REST OF A FOLDING AS AN EDIT WHEN A FUZZY FULL-FOLDED "
+                + "BACKREFERENCE RUNS OUT HALF-WAY THROUGH IT, where upstream backtracks. Ledger entry "
+                + "29; fixed by S84 on 2026-09-22 under the owner's no-known-bugs rule, and recorded "
+                + "as a deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: under full case folding ß folds to ss, so a group holding s "
+                + "matches the first half of it. The literal STRING_FLD arm offers the other s to the "
+                + "fuzzy machinery (upstream/src/_regex.c:14855); REF_GROUP_FLD (:14154) and its "
+                + "reversed twin (:14255) backtrack instead.\n"
+                + "THE MINIMAL CASE, measured 2026-09-22 on regex 2026.9.10: `(?fi)(s)(?:\\1){e<=1}` "
+                + "over 'sß' is None, while V0, where ß is one character, gives (0, 2) with one "
+                + "substitution, and so does the literal form `(?fi)(?:sss){e<=1}` over 'ßß' under V1. "
+                + "This port gives (0, 2) with one substitution.\n"
+                + "KEYED ON AN ABLATION, like `full-fold-fuzzy-deletion`: a row belongs here when "
+                + "`OracleComparer.RunWithoutTheGroupFoldLeftovers`, which sets "
+                + "`PatternObject.SkipGroupFoldLeftovers`, reproduces upstream's recorded answer "
+                + "exactly, AND this port's live answer is the one being judged. No wave row at the "
+                + "three default seeds reaches it. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FullFoldBackreferenceLeftoversTests",
+            Example: _groupFoldLeftoverRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheGroupFoldLeftovers(row))
+        ),
+        new(
+            Id: "full-fold-backreference-retry",
+            Reason: "THIS PORT STEPS PAST A FOLDING THAT A RETRIED FUZZY EDIT USED UP IN A FULL-FOLDED "
+                + "BACKREFERENCE, where upstream compares the same character again. Ledger entry 30; "
+                + "fixed by S84 on 2026-09-22 under the owner's no-known-bugs rule, and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: a retried fuzzy edit re-enters REF_GROUP_FLD at the top of the "
+                + "arm and skips the two steps its loop body takes after a first try. STRING_FLD "
+                + "takes them (upstream/src/_regex.c:14801, reversed :14907). Any fuzzy backreference "
+                + "under IgnoreCase and full folding is a REF_GROUP_FLD item, so it needs no ß.\n"
+                + "THE MINIMAL CASE, measured 2026-09-22 on regex 2026.9.10: `(?fi)(ab)(?:\\1){e<=1}` "
+                + "over 'abxab' is None, while `(?i)(ab)(?:\\1){e<=1}` without full folding gives "
+                + "(0, 5) with one insertion. So does this port.\n"
+                + "THE WAVE ROWS each agree with upstream V1 once `(?:\\1)` is replaced by the group's "
+                + "text, measured by `python tools/probes/s84-full-fold-backreference.py`. Seed 7 row "
+                + "6250 needs S83's fold fix as well before the two engines differ.\n"
+                + "KEYED ON AN ABLATION: a row belongs here when "
+                + "`OracleComparer.RunWithoutTheRetriedFoldSteps`, which sets "
+                + "`PatternObject.SkipRetriedFoldSteps`, alone or together with "
+                + "`ChargeUntouchedFoldings`, reproduces upstream's recorded answer exactly, AND this "
+                + "port's live answer is the one being judged. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FullFoldBackreferenceLeftoversTests",
+            Example: _groupFoldRetryRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithoutTheRetriedFoldSteps(row, withoutTheFoldFix: false)
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithoutTheRetriedFoldSteps(row, withoutTheFoldFix: true)
+                )
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",
@@ -6323,6 +6424,24 @@ internal static class ExpectedDivergences
         return OracleComparer.Run(row) is { } live
             && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Whether one ablated run is the whole of the difference between the two engines on a row.
+    /// </summary>
+    /// <remarks>
+    /// The same two tests as <see cref="OnlyTheFoldFixExplainsIt"/>, for the S84 entries: the
+    /// ablated answer must reproduce upstream's recorded answer, and the live answer must be the
+    /// one being judged.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="ablated">This port's answer with the fix switched off.</param>
+    /// <returns><see langword="true"/> if the fix explains the divergence and nothing else does.</returns>
+    private static bool OnlyTheAblationExplainsIt(OracleRow row, IOracleOutcome ours, IOracleOutcome? ablated) =>
+        ablated is not null
+        && OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
+        && OracleComparer.Run(row) is { } live
+        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
 
     /// <summary>
     /// Whether the row's pattern runs right to left, by either of the two ways it can say so.

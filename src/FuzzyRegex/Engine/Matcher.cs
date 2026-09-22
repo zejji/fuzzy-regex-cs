@@ -78,6 +78,12 @@ internal struct FuzzyData
     /// Only <c>REF_GROUP_FLD</c> and <c>REF_GROUP_FLD_REV</c> have two foldings to keep apart.
     /// </summary>
     internal int NewGfoldedPos;
+
+    /// <summary>
+    /// NOT UPSTREAM (S84): the length of the group's folding, so a deletion can tell whether any of
+    /// it is left to delete. See <c>Matcher.NextFuzzyMatchGroupFld</c>.
+    /// </summary>
+    internal int GfoldedLen;
 }
 
 /// <summary>
@@ -4630,6 +4636,15 @@ internal static class Matcher
         {
             case FuzzyValue.Del:
                 // Could a character at text_pos have been deleted?
+                // NOT UPSTREAM (S84): only if the group has a character left. The leftovers loops
+                // in REF_GROUP_FLD and its reversed twin call here after the group has run out, and
+                // a deletion there changes nothing, so free deletions would repeat it for ever.
+                // Upstream's literal leftovers loop does (:14856).
+                if (data.Step > 0 ? data.NewGfoldedPos >= data.GfoldedLen : data.NewGfoldedPos <= 0)
+                {
+                    return MatchStatus.Failure;
+                }
+
                 data.NewGfoldedPos += data.Step;
 
                 return MatchStatus.Success;
@@ -4718,6 +4733,7 @@ internal static class Matcher
         data.NewFoldedPos = foldedPos;
         data.FoldedLen = foldedLen;
         data.NewGfoldedPos = gfoldedPos;
+        data.GfoldedLen = gfoldedLen;
         data.Step = step;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
@@ -4825,6 +4841,7 @@ internal static class Matcher
         data.Step = step;
         data.NewFoldedPos = newFoldedPos;
         data.NewGfoldedPos = newGfoldedPos;
+        data.GfoldedLen = gfoldedLen;
 
         --fuzzyCounts[data.FuzzyType];
 
@@ -8003,7 +8020,30 @@ internal static class Matcher
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
                         // way in, so that is the one thing that reaches this arm.
                         foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
-                        gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
+
+                        // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
+                        // STRING_FLD_REV takes the subject's step here (:14907).
+                        gfoldedLen =
+                            stringPos > span.Start
+                                ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded)
+                                : 0;
+
+                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        {
+                            if (foldedPos <= 0 && foldedLen > 0)
+                            {
+                                state.TextPos = state.PrevPos(state.TextPos);
+                                foldedPos = 0;
+                                foldedLen = 0;
+                            }
+
+                            if (gfoldedPos <= 0 && stringPos > span.Start)
+                            {
+                                stringPos = state.PrevPos(stringPos);
+                                gfoldedPos = 0;
+                                gfoldedLen = 0;
+                            }
+                        }
                     }
 
                     // Try comparing.
@@ -8082,6 +8122,41 @@ internal static class Matcher
                         }
                     }
 
+                    // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's leftovers loop below.
+                    if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
+                    {
+                        while (FoldingIsPartUsed(state, foldedPos, foldedLen, -1))
+                        {
+                            status = FuzzyMatchGroupFld(
+                                state,
+                                search,
+                                node,
+                                ref foldedPos,
+                                foldedLen,
+                                stringPos,
+                                ref gfoldedPos,
+                                gfoldedLen,
+                                -1
+                            );
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+
+                            if (foldedPos <= 0 && foldedLen > 0)
+                            {
+                                state.TextPos = state.PrevPos(state.TextPos);
+                            }
+                        }
+                    }
+
                     stringPos = -1;
 
                     // A folding that ran out on one side but not the other did not line up.
@@ -8125,7 +8200,34 @@ internal static class Matcher
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
                         // way in, so that is the one thing that reaches this arm.
                         foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
-                        gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
+
+                        // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
+                        // used up, where upstream reads the character after it.
+                        gfoldedLen =
+                            stringPos < span.End
+                                ? Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded)
+                                : 0;
+
+                        // NOT UPSTREAM (S84): upstream re-enters the loop without the two steps that
+                        // follow a fuzzy call in its body, so a retried edit that finishes a folding
+                        // compares the same character again: '(?i)(ab)(?:\1){e<=1}' over 'abxab' is
+                        // None upstream under V1. STRING_FLD takes the subject's step here (:14801).
+                        if (!state.Pattern.SkipRetriedFoldSteps)
+                        {
+                            if (foldedPos >= foldedLen && foldedLen > 0)
+                            {
+                                state.TextPos = state.NextPos(state.TextPos);
+                                foldedPos = 0;
+                                foldedLen = 0;
+                            }
+
+                            if (gfoldedPos >= gfoldedLen && stringPos < span.End)
+                            {
+                                stringPos = state.NextPos(stringPos);
+                                gfoldedPos = 0;
+                                gfoldedLen = 0;
+                            }
+                        }
                     }
 
                     // Try comparing.
@@ -8204,6 +8306,43 @@ internal static class Matcher
                         if (gfoldedPos >= gfoldedLen)
                         {
                             stringPos = state.NextPos(stringPos);
+                        }
+                    }
+
+                    // NOT UPSTREAM (S84): the group ran out part way through the subject character's
+                    // folding. STRING_FLD charges the leftovers as errors (:14855); upstream's
+                    // REF_GROUP_FLD backtracks, so '(s)(?:\1){e<=1}' over 'sß' is None under V1.
+                    if ((node.Status & NodeStatus.Fuzzy) != 0 && !state.Pattern.SkipGroupFoldLeftovers)
+                    {
+                        while (FoldingIsPartUsed(state, foldedPos, foldedLen, 1))
+                        {
+                            status = FuzzyMatchGroupFld(
+                                state,
+                                search,
+                                node,
+                                ref foldedPos,
+                                foldedLen,
+                                stringPos,
+                                ref gfoldedPos,
+                                gfoldedLen,
+                                1
+                            );
+
+                            if (status < 0)
+                            {
+                                return status;
+                            }
+
+                            if (status == MatchStatus.Failure)
+                            {
+                                stringPos = -1;
+                                goto backtrack;
+                            }
+
+                            if (foldedPos >= foldedLen && foldedLen > 0)
+                            {
+                                state.TextPos = state.NextPos(state.TextPos);
+                            }
                         }
                     }
 
