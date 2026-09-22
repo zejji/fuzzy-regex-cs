@@ -899,26 +899,65 @@ function Read-Allowance {
         (Join-Path $env:USERPROFILE '.claude\last-status.json')))
     $existing = @($Paths | Where-Object { Test-Path -LiteralPath $_ })
     if ($existing.Count -eq 0) { return $null }
-    $file = Get-ChildItem -LiteralPath $existing | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     # The driver runs under Set-StrictMode, where a missing property throws rather than yielding
     # $null, and the statusline snapshot is rewritten non-atomically on every prompt, so a read can
     # meet a half-written or shape-less file (it did, 2026-09-19 04:12: "The property 'rate_limits'
-    # cannot be found"). Any unreadable snapshot is "unknown", which the gate treats as go-ahead.
-    $prop = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.$n } else { $null } }
-    try { $data = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { return $null }
-    $rl = & $prop $data 'rate_limits'
-    if ($null -eq $rl) { return $null }
-    $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
-    $pct = { param($w) $v = & $prop $w 'used_percentage'; if ($null -ne $v) { [int]$v } else { $null } }
-    $reset = { param($w) $t = & $prop $w 'resets_at'; if ($null -ne $t) { [DateTimeOffset]::FromUnixTimeSeconds([long]$t).ToLocalTime() } else { $null } }  # local time, so the driver's 'waiting until' line reads right (it printed UTC on 2026-09-19)
-    [pscustomobject]@{
-        Source           = $file.Name
-        AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
-        FiveHourPercent  = & $pct $five
-        FiveHourResetsAt = & $reset $five
-        SevenDayPercent  = & $pct $seven
-        SevenDayResetsAt = & $reset $seven
+    # cannot be found").
+    #
+    # Newest first, and the first one that parses wins. Reading only the newest made one unreadable
+    # file blind the gate even when the other was fine: 2026-09-22 14:55 logged "allowance unknown"
+    # with the poller's snapshot three minutes old and readable beside a statusline file caught
+    # mid-rewrite. Only when NO snapshot parses is the answer "unknown", which the gate treats as
+    # go-ahead.
+    #
+    # "Parses" is not enough: a blind review of that fallback found that a snapshot with an empty
+    # `rate_limits`, a null window, a null or non-numeric `used_percentage` beat a good older file,
+    # handing the gate an empty percentage it read as go-ahead - or, for the non-numeric case,
+    # throwing out of run-slices.ps1. So a snapshot counts only when BOTH percentages the gate reads
+    # are numbers.
+    # The leading comma stops PowerShell unrolling an array value on the way out, which turned a
+    # one-element array into its element before anything could see it was an array.
+    $prop = { param($o, $n) if ($null -ne $o -and $o -isnot [string] -and $o.PSObject.Properties[$n]) { , $o.$n } else { $null } }
+    # A scalar only: `[string]@(85)` is "85", so an array would otherwise pass as its element.
+    $number = {
+        param($v)
+        $n = 0.0
+        if ($null -eq $v -or $v -is [bool] -or -not ($v -is [ValueType] -or $v -is [string])) { return $null }
+        if (-not [double]::TryParse([string]$v, [Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$n)) { return $null }
+        if ([double]::IsNaN($n) -or [double]::IsInfinity($n)) { return $null }
+        $n
     }
+    # Bounded before the cast, because [int] of NaN, Infinity or 1e300 throws, and run-slices.ps1
+    # has no try/catch around this call: a throw would end an unattended run rather than blind it.
+    $pct = {
+        param($w)
+        $n = & $number (& $prop $w 'used_percentage')
+        if ($null -ne $n -and $n -ge 0 -and $n -le 1000) { [int][Math]::Round($n) } else { $null }
+    }
+    # Optional, so an unusable value is $null rather than a reason to skip the snapshot: seconds as a
+    # float are floored, and an out-of-range value (milliseconds, say) is dropped instead of throwing.
+    $reset = {
+        param($w)
+        $n = & $number (& $prop $w 'resets_at')
+        if ($null -eq $n -or $n -lt 0 -or $n -gt 253402300799) { return $null }
+        [DateTimeOffset]::FromUnixTimeSeconds([long][Math]::Floor($n)).ToLocalTime()  # local time, so the driver's 'waiting until' line reads right (it printed UTC on 2026-09-19)
+    }
+    foreach ($file in (Get-ChildItem -LiteralPath $existing | Sort-Object LastWriteTime -Descending)) {
+        try { $data = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json } catch { continue }
+        $rl = & $prop $data 'rate_limits'
+        $five = & $prop $rl 'five_hour'; $seven = & $prop $rl 'seven_day'
+        $fivePercent = & $pct $five; $sevenPercent = & $pct $seven
+        if ($null -eq $fivePercent -or $null -eq $sevenPercent) { continue }
+        return [pscustomobject]@{
+            Source           = $file.Name
+            AgeMinutes       = [int]((Get-Date) - $file.LastWriteTime).TotalMinutes
+            FiveHourPercent  = $fivePercent
+            FiveHourResetsAt = & $reset $five
+            SevenDayPercent  = $sevenPercent
+            SevenDayResetsAt = & $reset $seven
+        }
+    }
+    $null
 }
 
 function Test-AllowanceFloor {

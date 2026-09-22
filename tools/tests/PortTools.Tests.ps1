@@ -906,6 +906,85 @@ Describe 'Read-Allowance' {
     It 'returns unknown when no file exists' {
         Read-Allowance -Paths @((Join-Path $script:Dir 'missing.json')) | Should -BeNullOrEmpty
     }
+    # 2026-09-22 14:55: the driver logged "allowance unknown" while the poller's file was three
+    # minutes old and fine, because the statusline's newer file was mid-rewrite and only the newest
+    # file was ever read. An unreadable newest snapshot must fall back, not blind the gate.
+    It 'falls back to an older readable snapshot when the newest is half-written' {
+        $good = Join-Path $script:Dir 'older-good.json'
+        $bad = Join-Path $script:Dir 'newer-partial.json'
+        '{"rate_limits":{"five_hour":{"used_percentage":18,"resets_at":1790082600},"seven_day":{"used_percentage":35,"resets_at":1790600400}}}' | Set-Content -LiteralPath $good
+        '{"rate_limits":{"five_hour":{"used_perc' | Set-Content -LiteralPath $bad -NoNewline
+        (Get-Item -LiteralPath $good).LastWriteTime = (Get-Date).AddMinutes(-3)
+        (Get-Item -LiteralPath $bad).LastWriteTime = Get-Date
+        $a = Read-Allowance -Paths @($bad, $good)
+        $a.FiveHourPercent | Should -Be 18
+        $a.Source | Should -Be 'older-good.json'
+        $a.AgeMinutes | Should -Be 3
+    }
+    It 'falls back to an older readable snapshot when the newest has no rate_limits' {
+        $good = Join-Path $script:Dir 'older-good-2.json'
+        $bad = Join-Path $script:Dir 'newer-shapeless.json'
+        '{"rate_limits":{"five_hour":{"used_percentage":61,"resets_at":1790082600},"seven_day":{"used_percentage":35,"resets_at":1790600400}}}' | Set-Content -LiteralPath $good
+        '{"model":{"id":"x"}}' | Set-Content -LiteralPath $bad
+        (Get-Item -LiteralPath $good).LastWriteTime = (Get-Date).AddMinutes(-5)
+        (Get-Item -LiteralPath $bad).LastWriteTime = Get-Date
+        (Read-Allowance -Paths @($bad, $good)).FiveHourPercent | Should -Be 61
+    }
+    # A blind review of the fallback, 2026-09-22: "parses" is not "usable". Each of these parses and
+    # carries a rate_limits, and each beat a good older file at 90% - leaving the gate with an empty
+    # percentage it read as go-ahead, or, for the string, throwing out of the driver.
+    It 'falls back past a newest snapshot whose numbers are unusable: <Case>' -ForEach @(
+        @{ Case = 'empty rate_limits'; Json = '{"rate_limits":{}}' }
+        @{ Case = 'null five_hour'; Json = '{"rate_limits":{"five_hour":null,"seven_day":{"used_percentage":35}}}' }
+        @{ Case = 'null percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":null},"seven_day":{"used_percentage":35}}}' }
+        @{ Case = 'rate_limits a string'; Json = '{"rate_limits":"x"}' }
+        @{ Case = 'non-numeric percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":"abc"},"seven_day":{"used_percentage":35}}}' }
+        @{ Case = 'seven_day missing'; Json = '{"rate_limits":{"five_hour":{"used_percentage":40}}}' }
+        # The second pass: a one-element array stringifies to its element, and values TryParse
+        # accepts but [int] cannot hold threw out of the function - and run-slices.ps1 has no
+        # try/catch around the call, so a throw ends an unattended run outright.
+        @{ Case = 'one-element array percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":[85]},"seven_day":{"used_percentage":10}}}' }
+        @{ Case = 'NaN percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":"NaN"},"seven_day":{"used_percentage":10}}}' }
+        @{ Case = 'Infinity percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":"Infinity"},"seven_day":{"used_percentage":10}}}' }
+        @{ Case = 'huge percentage'; Json = '{"rate_limits":{"five_hour":{"used_percentage":1e300},"seven_day":{"used_percentage":10}}}' }
+    ) {
+        $good = Join-Path $script:Dir "usable-$([guid]::NewGuid()).json"
+        $bad = Join-Path $script:Dir "unusable-$([guid]::NewGuid()).json"
+        '{"rate_limits":{"five_hour":{"used_percentage":90,"resets_at":1790082600},"seven_day":{"used_percentage":35,"resets_at":1790600400}}}' | Set-Content -LiteralPath $good
+        $Json | Set-Content -LiteralPath $bad
+        (Get-Item -LiteralPath $good).LastWriteTime = (Get-Date).AddMinutes(-3)
+        (Get-Item -LiteralPath $bad).LastWriteTime = Get-Date
+        $a = Read-Allowance -Paths @($bad, $good)
+        $a.FiveHourPercent | Should -Be 90
+        $a.Source | Should -Be (Split-Path -Leaf $good)
+    }
+    It 'keeps the percentage but drops a resets_at it cannot turn into a time: <Case>' -ForEach @(
+        @{ Case = 'milliseconds, out of range'; Reset = '1790000000000'; Expect = $null }
+        @{ Case = 'fractional seconds'; Reset = '1790000000.5'; Expect = 1790000000 }
+    ) {
+        $p = Join-Path $script:Dir "reset-$([guid]::NewGuid()).json"
+        ('{"rate_limits":{"five_hour":{"used_percentage":85,"resets_at":' + $Reset + '},"seven_day":{"used_percentage":10}}}') | Set-Content -LiteralPath $p
+        $a = Read-Allowance -Paths @($p)
+        $a.FiveHourPercent | Should -Be 85
+        if ($null -eq $Expect) { $a.FiveHourResetsAt | Should -BeNullOrEmpty }
+        else { $a.FiveHourResetsAt.ToUnixTimeSeconds() | Should -Be $Expect }
+    }
+    It 'still prefers the newest snapshot when it is readable' {
+        $old = Join-Path $script:Dir 'old-readable.json'
+        $new = Join-Path $script:Dir 'new-readable.json'
+        '{"rate_limits":{"five_hour":{"used_percentage":10,"resets_at":1790082600},"seven_day":{"used_percentage":35,"resets_at":1790600400}}}' | Set-Content -LiteralPath $old
+        '{"rate_limits":{"five_hour":{"used_percentage":70,"resets_at":1790082600},"seven_day":{"used_percentage":35,"resets_at":1790600400}}}' | Set-Content -LiteralPath $new
+        (Get-Item -LiteralPath $old).LastWriteTime = (Get-Date).AddMinutes(-10)
+        (Get-Item -LiteralPath $new).LastWriteTime = Get-Date
+        (Read-Allowance -Paths @($old, $new)).FiveHourPercent | Should -Be 70
+    }
+    It 'returns unknown when every snapshot is unreadable' {
+        $a = Join-Path $script:Dir 'all-bad-1.json'
+        $b = Join-Path $script:Dir 'all-bad-2.json'
+        '{"rate_limits":{' | Set-Content -LiteralPath $a -NoNewline
+        '{"model":{}}' | Set-Content -LiteralPath $b
+        Read-Allowance -Paths @($a, $b) | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Resolve-SliceTimeout' {
