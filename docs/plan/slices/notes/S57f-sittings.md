@@ -242,8 +242,23 @@ same match as upstream the moment the letter is one whose fold it shares, and re
 when the letter is U+0130. Upstream's own spans say the same - `[(5, 7), (0, 2)]` with the row's
 flags, `[]` with IGNORECASE removed, `[(5, 7)]` with the letter swapped for `A` or `b`.
 
-This is the strongest of the three, because the port side was run rather than inferred. Rows 74120
-and 116428 want the same two control rows before they are called judged.
+### Rows 74120 and 116428 now have the same two controls, and they hold
+
+Six rows in one `-Rows` run - each of the two rows as drawn, with IGNORECASE removed, and with its
+Turkic letter swapped for one whose fold the port shares (`b` for 116428, in the pattern's literal
+arm as well as the subject; `g` for 74120). `diverge 2 of 6 rows`, and the two are rows 1 and 4, the
+originals. Every control agrees:
+
+```
+row 1  116428 as drawn                    DIVERGE  upstream ' A\t>ﬀﬀ'   port ' A\t>ıﬀﬀ'
+row 2  116428, IGNORECASE removed         agree
+row 3  116428, ı swapped for b            agree
+row 4  74120 as drawn                     DIVERGE  upstream [' ﬁﬁ', '']  port ['\rıı ﬁﬁ']
+row 5  74120, IGNORECASE removed          agree
+row 6  74120, ı swapped for g             agree
+```
+
+So all three rows are judged on both sides, and the fold is the only variable in any of them.
 
 That makes four of the ten read and three of them the same known family, so the next sitting starts
 by testing the remaining six for it: IGNORECASE off, then the letter swapped, and see whether
