@@ -19,6 +19,21 @@ the Python `regex` median (pyperf) for the equivalent operation, with one tolera
 (pattern plus corpus plus operation), never an average; workloads Python cannot express (Span
 overloads and the like) are measured and excluded, and the published table says which and why.
 
+**The many-inputs workloads are gate workloads (owner, 2026-09-22).** `ManyInputsBenchmarks` runs
+one pattern over 100,000 short inputs, and `measure_python.py` must mirror every row of it on the
+SAME inputs. `dotnet run -c Release --project bench/FuzzyRegex.Benchmarks -- usage-corpus <dir>`
+writes them as UTF-8, LF, one input per line: read them with `.read().split("\n")[:-1]` and
+never strip, because most of the accented lines end in a space. `-- usage-answers` prints each row's
+untimed answer for the same-answer check.
+
+**The `FuzzyPhrase` rows have an absolute target as well as the relative one.** They are a fuzzy
+search at volume: one case-insensitive `{e<=2}` pattern for a 19-20 character phrase over 100,000
+records of 40 to 50 characters, where almost every record fails. The owner's target is well under a
+second for the whole set; the working bar is **500 ms for 100,000 records** on this machine, for
+the one-phrase rows and for the fastest of the three multi-phrase forms. The owner may tighten it.
+Missing it is triaged like any gate failure, and the committed table says which multi-phrase form
+is fastest, since that is advice a user needs.
+
 ## Scope
 
 1. **Both baselines refreshed on a quiet machine**, same machine and same session for the two
@@ -110,6 +125,9 @@ overloads and the like) are measured and excluded, and the published table says 
 - [ ] Both baselines refreshed on a quiet machine, same session, with `pyperf check` recorded; raw
       JSON committed with machine, versions, SHA, job and noise floor.
 - [ ] Every pairing asserted to give the same answer before its timing was recorded.
+- [ ] `measure_python.py` mirrors every `ManyInputsBenchmarks` row on the inputs `usage-corpus`
+      writes, and the `FuzzyPhrase` rows are reported against the 500 ms bar, with the fastest
+      multi-phrase form named.
 - [ ] Per-workload gate table committed, with the excluded rows and the `Regex` column, and the
       verdict stated in the terms the gate defines.
 - [ ] Every failing workload triaged into a named follow-up slice or a written owner decision.

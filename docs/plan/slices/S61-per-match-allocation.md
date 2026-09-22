@@ -19,6 +19,23 @@ plus one `GroupData` per group, a `RepeatData[]` plus one per repeat, three `Byt
 `MatchState.cs:501`, `:544-568`). The hazard is equally known: a rented buffer held across a
 `yield return` is one an abandoned iterator never returns.
 
+**Owner rules for this slice (2026-09-22).** Every decision is taken on hard benchmark evidence,
+for BOTH time and allocated bytes, recorded in the sitting notes beside the choice it settles; an
+optimisation with a provable gain is implemented, one without is not. Measure on the full suite,
+including `ManyInputsBenchmarks` - one pattern over 100,000 short inputs, the per-call shape - and
+not only on the single-subject workloads, because a change to state creation or buffer rental moves
+per-call cost far more than it moves a megabyte scan.
+
+**The new span enumerator is documented where a user looks, in the same commit that adds it.** If
+the BCL-shaped `EnumerateMatches(ReadOnlySpan<char>)` returning a `ValueMatchEnumerator` lands:
+its XML docs; `README.md` and `docs/GUIDE.md` (which `UserDocumentationCompletenessTests` requires
+of every public member, so a missing mention fails the build); `docs/COMPARISON.md`, which maps
+this API onto `System.Text.RegularExpressions` and must now say the two agree on this shape;
+`docs/DIVERGENCES.md` only if its behaviour differs from the BCL's; and the demo's API help if the
+demo lists the enumeration methods. The docs say plainly when to choose it over the `IEnumerable`
+walk: no copy of a span subject and no `Match` objects, at the price of index and length only, no
+LINQ, no field and no `async`.
+
 ## Scope
 
 1. **The span decision, as signed off** (`FuzzyRegex.cs:338`, `:873`). If the owner took the
@@ -89,6 +106,10 @@ plus one `GroupData` per group, a `RepeatData[]` plus one per repeat, three `Byt
 
 ## Done when
 
+- [ ] Every decision this slice took carries its before-and-after numbers - time AND allocated
+      bytes, on the full suite including `ManyInputsBenchmarks` - in the sitting notes.
+- [ ] If the span enumerator landed, every document the owner rule above lists names it, and
+      `UserDocumentationCompletenessTests` is green.
 - [x] Both S58 decisions are recorded as signed off before any code is written; neither is guessed.
       (Owner, 2026-09-22, DECISIONS: span option (a) gated on the hot-path benchmark; lazy-walk
       steps 1 and 2; plus a BCL-shaped `ValueMatchEnumerator` beside the `IEnumerable` walk, gated

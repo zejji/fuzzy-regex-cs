@@ -23,6 +23,32 @@ internal static class Program
             return;
         }
 
+        // `usage-corpus <dir>` writes ManyInputsBenchmarks' inputs for the Python side of the gate,
+        // so both engines are timed on identical lines. `usage-answers` prints each of those
+        // workloads' results once, untimed: the "same answer" check the gate needs before a time
+        // means anything, and the way to see the data is what it claims to be.
+        if (args is ["usage-corpus", string directory])
+        {
+            UsageCorpus.Emit(directory);
+            return;
+        }
+
+        if (args is ["usage-answers"])
+        {
+            var benchmarks = new ManyInputsBenchmarks();
+            foreach (
+                var method in typeof(ManyInputsBenchmarks)
+                    .GetMethods()
+                    .Where(static m =>
+                        m.IsDefined(typeof(BenchmarkDotNet.Attributes.BenchmarkAttribute), inherit: false)
+                    )
+            )
+            {
+                Console.WriteLine(method.Name.PadRight(44) + " " + method.Invoke(benchmarks, null));
+            }
+            return;
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
     }
 }
