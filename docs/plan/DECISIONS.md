@@ -1154,3 +1154,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-22 (S82): `(?'name'...)` is not a spelling either engine supports - upstream raises
   `unknown extension at position 2` and `parse_name` reads to `>` or `)` only - so anything claiming
   "all three spellings" of a named group means two. Pinned by `BranchResetPreScanTests`.
+- 2026-09-22 (S60b): `search_start` is ported with four narrowings - no partial arms, the matcher's
+  own predicates, withheld under `(*SKIP)`, and no `min_width` bound - and its `STRING` arm is
+  unreachable in both engines, because the required string is always the first item of the sequence
+  that yields one. The continuation after a start test needs `StepOver`, not `Step`: a `STRING`
+  node's step is its whole length and this port's positions count code units.

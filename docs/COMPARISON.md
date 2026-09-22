@@ -780,13 +780,17 @@ Match m = FuzzyRegex.FullMatch("a\u0131", "aI", FuzzyRegexOptions.IgnoreCase);
 Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı', I) matches
 ```
 
-### The search prefilters are not ported
+### The search prefilters answer the slow path's answer, not upstream's
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several
-pattern families, because the fast-path prefilters that let
-upstream skip ahead during a search are Phase 7 work here and are not implemented yet. Where the two
-disagree, this port's answer has been checked against a second independent engine and is treated as
-permanently correct rather than as a placeholder to invert later.
+pattern families. A prefilter is a cheap scan that picks the next position worth trying, so that the
+matcher is not asked about positions where it would obviously fail. This port has both of upstream's,
+but narrowed: they are withheld wherever upstream's own prefilter and upstream's own matcher would
+disagree, which happens when a `(*SKIP)` moves the region under consideration mid-attempt, when a
+partial match is being reported, and on the case-folded scans. So where the two engines differ, this
+port answers what upstream's own anchored `match` answers. That answer has been checked against a
+second independent engine and is treated as permanently correct rather than as a placeholder to
+invert later.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;

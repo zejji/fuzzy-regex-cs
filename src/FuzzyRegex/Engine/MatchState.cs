@@ -301,6 +301,20 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>min_width</c>, a codepoint count.</summary>
     internal long MinWidth;
 
+    /// <summary>
+    /// Whether <c>Matcher.SearchStart</c> is still worth calling.
+    /// </summary>
+    /// <remarks>
+    /// Upstream keeps this on the pattern (<c>do_search_start</c>, <c>_regex.c:588</c>) and clears it
+    /// there, so a pattern the prefilter cannot help stops paying for the call for the rest of the
+    /// program. This port cannot: a compiled pattern is frozen after <c>Compile</c> and shared across
+    /// threads without a lock, and <c>ThreadSafetyTests</c> holds it to that. So the flag is seeded
+    /// from <see cref="PatternObject.DoSearchStart"/> here and cleared on the state instead, and the
+    /// saving lasts one matching operation rather than forever. The cost of the difference is one
+    /// wasted <c>SearchStart</c> call per operation on a pattern it cannot help.
+    /// </remarks>
+    internal bool DoSearchStart;
+
     /// <summary>Upstream <c>encoding</c>, reduced to which table it is (see <see cref="Encodings"/>).</summary>
     internal CaseEncoding Encoding;
 
@@ -616,6 +630,7 @@ internal sealed class MatchState : IDisposable
         }
 
         state.Overlapped = overlapped;
+        state.DoSearchStart = pattern.DoSearchStart;
         state.MinWidth = pattern.MinWidth;
         state.Encoding = pattern.Encoding;
 

@@ -3305,6 +3305,31 @@ internal static class Matcher
             _ => state.PrevPos(pos),
         };
 
+    /// <summary>
+    /// Upstream's <c>start_pos + next-&gt;test-&gt;step</c> (<c>upstream/src/_regex.c</c> line 9191)
+    /// where the step can be wider than one character.
+    /// </summary>
+    /// <remarks>
+    /// A <c>STRING</c> node's step is its whole length (<c>make_STRING_node</c>, <c>:25811</c>), and
+    /// upstream can add it because its positions count characters. This port's count code units, so
+    /// the step is a walk. <see cref="Step"/> moves one character whatever the magnitude, which is
+    /// all its other callers need, and only the <c>STRING</c> arm of <see cref="SearchStart"/>
+    /// brings a wider step here.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">Where to step from.</param>
+    /// <param name="step">How many characters to move, and in which direction.</param>
+    /// <returns>The stepped position.</returns>
+    private static int StepOver(MatchState state, int pos, long step)
+    {
+        for (long moved = 0; moved < Math.Abs(step); ++moved)
+        {
+            pos = step > 0 ? state.NextPos(pos) : state.PrevPos(pos);
+        }
+
+        return pos;
+    }
+
     /// <summary>Upstream <c>total_errors</c> (<c>upstream/src/_regex.c</c> line 9643).</summary>
     /// <param name="fuzzyCounts">The counts.</param>
     /// <returns>Their sum.</returns>
@@ -5197,6 +5222,511 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Port of <c>equivalent_nodes</c> (<c>upstream/src/_regex.c</c> lines 11453-11489): whether two
+    /// nodes look for the same characters under the same case rules, so that searching for both
+    /// would be searching twice.
+    /// </summary>
+    /// <remarks>
+    /// A <c>CHARACTER</c> and a <c>STRING</c> are interchangeable here because a one-character
+    /// string is compiled as the former, and the four groups are the four case-and-direction
+    /// combinations; anything else answers <see langword="false"/>, including the folded
+    /// <c>STRING_FLD</c> spellings, which have no <c>CHARACTER</c> twin.
+    /// </remarks>
+    /// <param name="first">One node.</param>
+    /// <param name="second">The other.</param>
+    /// <returns><see langword="true"/> if the two look for the same thing.</returns>
+    private static bool EquivalentNodes(Node first, Node second) =>
+        (first.Op, second.Op) switch
+        {
+            (Opcode.Character or Opcode.String, Opcode.Character or Opcode.String) => SameValues(first, second),
+            (Opcode.CharacterIgn or Opcode.StringIgn, Opcode.CharacterIgn or Opcode.StringIgn) => SameValues(
+                first,
+                second
+            ),
+            (Opcode.CharacterIgnRev or Opcode.StringIgnRev, Opcode.CharacterIgnRev or Opcode.StringIgnRev) =>
+                SameValues(first, second),
+            (Opcode.CharacterRev or Opcode.StringRev, Opcode.CharacterRev or Opcode.StringRev) => SameValues(
+                first,
+                second
+            ),
+            _ => false,
+        };
+
+    /// <summary>
+    /// Port of <c>same_values</c> (<c>upstream/src/_regex.c</c> line 11443): whether two nodes carry
+    /// the same value list.
+    /// </summary>
+    /// <param name="first">One node.</param>
+    /// <param name="second">The other.</param>
+    /// <returns><see langword="true"/> if the two value lists are equal.</returns>
+    private static bool SameValues(Node first, Node second) =>
+        first.Values.Count == second.Values.Count && first.Values.SequenceEqual(second.Values);
+
+    /// <summary>
+    /// Upstream's <c>match_many_*</c> family (<c>upstream/src/_regex.c</c> lines 3537-4990): steps
+    /// from <paramref name="textPos"/> while the character there answers <paramref name="match"/>,
+    /// and returns the position it stopped at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream writes one <c>match_many_X</c> per opcode and every one of them is the same walk
+    /// with a different predicate, so this port has the predicate once - <see cref="MatchesMany"/> -
+    /// and the walk twice: here, stopping at a bound, and in <see cref="CountOne"/>, stopping at a
+    /// count. Upstream opens each arm with <c>match = node-&gt;match == match</c>, folding the node's
+    /// own negation into the argument. <see cref="MatchesMany"/> has already applied
+    /// <see cref="Node.Match"/> in exactly the arms upstream applies it in, so what is left is a
+    /// comparison against <paramref name="match"/>.
+    /// </para>
+    /// <para>
+    /// The walk steps with <see cref="MatchState.NextPos"/> rather than by one, for the reason every
+    /// walk in this port does: upstream's positions count characters and these count UTF-16 code
+    /// units, so a step of one would land inside an astral character. Backwards, the character to
+    /// test is the one the step is about to cross, which is why the predicate is asked about the
+    /// already-stepped position - the same arrangement <see cref="CountOne"/> uses and for the same
+    /// reason, that upstream reads <c>text_ptr[-1]</c> and one code unit back is not one character
+    /// back.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The one-character node to sweep for.</param>
+    /// <param name="textPos">Where to start.</param>
+    /// <param name="limit">The position to stop at.</param>
+    /// <param name="match">The answer to keep walking on.</param>
+    /// <param name="reverse">Whether this is one of upstream's <c>_REV</c> arms.</param>
+    /// <returns>The position the walk stopped at.</returns>
+    private static int MatchMany(MatchState state, Node node, int textPos, int limit, bool match, bool reverse)
+    {
+        int pos = textPos;
+
+        while (
+            (reverse ? pos > limit : pos < limit)
+            && MatchesMany(state, node, reverse ? state.PrevPos(pos) : pos) == match
+        )
+        {
+            pos = reverse ? state.PrevPos(pos) : state.NextPos(pos);
+        }
+
+        return pos;
+    }
+
+    /// <summary>
+    /// The twenty-four zero-width arms of upstream's <c>search_start_*</c> family
+    /// (<c>upstream/src/_regex.c</c> lines 7859-8308): the first position at or beyond
+    /// <paramref name="textPos"/> at which <paramref name="test"/> holds, or <c>-1</c> if the slice
+    /// runs out first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every one of them is the identical loop - ask the assertion, return the position if it holds,
+    /// give up at the slice bound, step - over a predicate this port already has once, in
+    /// <see cref="TryMatchZeroWidth"/>. Writing them out would be twenty-four copies of four lines
+    /// differing only in which predicate they name, and the predicates are the ones upstream's own
+    /// <c>try_match_*</c> arms name for the same opcodes.
+    /// </para>
+    /// <para>
+    /// <b>Three of them are jumps upstream and scans here</b>, and the answer is the same either
+    /// way. <c>search_start_END_OF_STRING</c> (<c>:8073</c>), <c>_END_OF_STRING_LINE</c>
+    /// (<c>:8095</c>) and <c>_START_OF_STRING</c> (<c>:8247</c>) go straight to the one position
+    /// their assertion can hold at, where this scan walks to it; both refuse the same subjects,
+    /// because the scan gives up at the same slice bound the jump tests against. They are worth a
+    /// jump and this is where a later sitting would put one.
+    /// </para>
+    /// <para>
+    /// <b><see cref="TryMatchEndOfWord"/> and its siblings do not compare against
+    /// <see cref="Node.Match"/> where the <c>search_start_*</c> twin does</b> (<c>:8142</c>). That
+    /// is upstream's own inconsistency and not a difference: <c>\m</c>, <c>\M</c> and <c>\y</c> have
+    /// no negated spelling, so the flag is always set on those nodes, and upstream's
+    /// <c>try_match_END_OF_WORD</c> (<c>:7141</c>) drops the comparison for that reason. The two
+    /// that do have one, <c>\b</c> and its default-boundary twin, compare in both families and this
+    /// port compares in both too.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="test">The zero-width assertion at the head of the pattern.</param>
+    /// <param name="textPos">Where to start looking.</param>
+    /// <param name="reverse">Whether the search runs backwards.</param>
+    /// <returns>Where the assertion holds, or <c>-1</c>.</returns>
+    private static int SearchStartZeroWidth(MatchState state, Node test, int textPos, bool reverse)
+    {
+        int pos = textPos;
+
+        while (true)
+        {
+            if (TryMatchZeroWidth(state, test, pos) == MatchStatus.Success)
+            {
+                return pos;
+            }
+
+            if (reverse ? pos <= state.SliceStart : pos >= state.SliceEnd)
+            {
+                return -1;
+            }
+
+            pos = reverse ? state.PrevPos(pos) : state.NextPos(pos);
+        }
+    }
+
+    /// <summary>
+    /// Port of <c>search_start</c> (<c>upstream/src/_regex.c</c> lines 8385-9236): the first
+    /// position at which the pattern's leading test node could match, so that a search skips the
+    /// positions on which the whole matcher would only have failed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the second half of the start optimisation whose first half landed in S60. The
+    /// required-string locator refuses a subject that cannot hold a match at all; this moves the
+    /// start position within a subject that can. Where the locator asks about a substring every
+    /// match must contain, this asks about the one node a match must begin with, so the two apply to
+    /// different patterns and upstream runs both.
+    /// </para>
+    /// <para>
+    /// <b>The prefilter may only skip a position at which the matcher would certainly have
+    /// failed</b>, and that rule is what the four narrowings below are. Upstream does not keep it,
+    /// and its own two doors disagree where it does not: <c>regex.search</c> refuses positions
+    /// <c>regex.match</c> accepts at the same position. Those disagreements are pinned in
+    /// <c>Gaps/Engine/PartialMatchingTests.cs</c>, <c>CaseInsensitiveMatchingTests.cs</c> and
+    /// <c>BacktrackingVerbTests.cs</c> and are not to be inverted; see
+    /// <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// <para>
+    /// <b>Narrowing 1: no partial arms.</b> Upstream lets this function answer
+    /// <c>RE_ERROR_PARTIAL</c> in its own right, at the slice bound its scan gave up on
+    /// (<c>:8403</c>, <c>:8412</c>, <c>:8473</c> and thirteen more). The span that produces starts
+    /// where the SEARCH began and ends where the scan stopped, so upstream reports partials its own
+    /// <c>match</c> refuses at the same position. This port does not call the prefilter at all when
+    /// a partial match was asked for, which is one condition rather than nineteen deletions, and the
+    /// partial search is the one this port has always run.
+    /// </para>
+    /// <para>
+    /// <b>Narrowing 2: the predicates are the matcher's.</b> Upstream's character sweeps go through
+    /// its encoding table, whose <c>*_has_property_ign</c> slot does not fold under an ASCII
+    /// encoding where its matcher's does, so <c>regex.search(r'(?ai)\p{Ll}', 'A')</c> is None and
+    /// <c>regex.match</c> of the same is (0, 1). <see cref="MatchMany"/> asks
+    /// <see cref="MatchesOne"/>, which is what this port's matcher asks, so the prefilter cannot
+    /// disagree with the matcher it is screening for. That leaves the deferred encoding slot
+    /// deferred - <c>Unicode/Encodings.cs</c> - and it is why porting this arm does not reopen the
+    /// three differences S22 measured.
+    /// </para>
+    /// <para>
+    /// <b>Narrowing 3: nothing here can be reached by a pattern holding a <c>(*SKIP)</c></b>, on the
+    /// same rule and for the same reason as <see cref="LocateRequiredString"/>'s: a verb moves where
+    /// the next attempt starts, so a prefilter that chooses the start position is choosing something
+    /// the verb owns. See <see cref="PatternObject.HasSkipVerb"/>.
+    /// </para>
+    /// <para>
+    /// <b>Narrowing 3 is the one no measurement supports, and it is kept anyway.</b> Switching it
+    /// off leaves the whole suite green and the oracle's <c>verbs</c>, <c>partial-sliced</c> and
+    /// <c>interactions</c> waves at 0 diverging rows of 4000 (2026-09-22, recorded in
+    /// <c>docs/plan/slices/notes/S60b-sittings.md</c>), where the same narrowing on
+    /// <see cref="LocateRequiredString"/> was caught red by a pinned test the moment it was
+    /// missing. The asymmetry has a reason: the locator skips positions at which the matcher might
+    /// well have succeeded, because all it knows is that a literal occurs further on, while
+    /// everything here skips only positions at which the start test itself fails - and an attempt
+    /// there cannot reach a verb, so there is no slice for the verb to move. That argument says
+    /// upstream is right to have no such condition, and upstream has none. What it does not do is
+    /// measure, and the two earlier defects in this area (S31's partial arms, S35's
+    /// <c>END_OF_LINE_rev</c> bound) were both found by measurement rather than by argument. So
+    /// lifting it is a widening for a sitting that can run the benchmarks and a review, not for the
+    /// one that ported the dispatcher.
+    /// </para>
+    /// <para>
+    /// <b>Narrowing 4: the <c>min_width</c> bound is not ported.</b> It is the one a measurement
+    /// forced, and the arithmetic behind it is written out at the top of the loop in the body
+    /// below.
+    /// </para>
+    /// <para>
+    /// <b>The memo is not ported.</b> Upstream caches the answer in
+    /// <c>state-&gt;search_positions</c> (<c>:8440-8464</c>), keyed by a search index that only ever
+    /// takes the value 0 from <c>basic_match</c> (<c>:11827</c>). It is reset once per state
+    /// (<c>:18563</c>) and never when the slice moves, so a <c>(*SKIP)</c> or a fuzzy re-run that
+    /// narrows the slice leaves entries behind that describe a region no longer under consideration.
+    /// A cache whose absence cannot change an answer is the safe half of it; keeping it would need
+    /// the invalidation upstream has not got. <c>ponytail:</c> a later sitting may add the memo with
+    /// invalidation of its own, and <c>docs/plan/OPTIMISATION-NOTES.md</c> carries the row.
+    /// </para>
+    /// <para>
+    /// <b>The five case-insensitive and reverse string arms fall through</b> to the
+    /// <c>default:</c> label, exactly as an opcode upstream does not list would, because the
+    /// searches behind them - <c>string_search_rev</c>, <c>_fld</c>, <c>_fld_rev</c>, <c>_ign</c>
+    /// and <c>_ign_rev</c> - are the same rows <see cref="LocateRequiredString"/> is still waiting
+    /// for. Falling through clears <see cref="MatchState.DoSearchStart"/>, which is upstream's
+    /// own mechanism for "this pattern gets no fast search", so the cost is one call per matching
+    /// operation and no answer changes.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The pattern's start node, upstream's <c>next-&gt;node</c>.</param>
+    /// <param name="test">The test node under it, upstream's <c>next-&gt;test</c>.</param>
+    /// <param name="newPosition">Where matching should resume.</param>
+    /// <returns>
+    /// <see cref="MatchStatus.Success"/> with <paramref name="newPosition"/> set, or
+    /// <see cref="MatchStatus.Failure"/> when no position in the slice can start a match.
+    /// </returns>
+    private static int SearchStart(MatchState state, Node node, Node test, out Position newPosition)
+    {
+        // Upstream passes the two as an 'RE_NextNode' it builds on the stack (:11737-11738). Here
+        // they are two arguments, because 'NextNode' is a class and one instance per matching
+        // operation is an allocation upstream does not make.
+        int startPos = state.TextPos;
+        newPosition = new Position(node, startPos);
+
+        // Upstream's opening bound test (:8400-8416). Its partial halves are narrowing 1's; what is
+        // left is the reverse arm, because the forward arm upstream has no failure case at all.
+        if (state.Reverse && startPos < state.SliceStart)
+        {
+            return MatchStatus.Failure;
+        }
+
+        // A fuzzy test node is not screened: the errors it is allowed to make mean the character
+        // this would look for need not be there (:8418-8427). Upstream stops calling the prefilter
+        // at all from here on, and so does this.
+        if ((test.Status & NodeStatus.Fuzzy) != 0)
+        {
+            state.DoSearchStart = false;
+            state.MatchPos = startPos;
+
+            return MatchStatus.Success;
+        }
+
+        while (true)
+        {
+            // Upstream's 'again:' (:8429). Its 'partial_side == RE_PARTIAL_NONE' clause is narrowing
+            // 1's and this method is not called otherwise.
+            //
+            // NARROWING 4, AND THE ONLY ONE A MEASUREMENT FORCED. Upstream's next lines refuse a start
+            // position with fewer than 'min_width' characters left before the slice bound
+            // (:8431-8440). THAT TEST IS NOT PORTED, because 'MinWidth' can exceed the width of a
+            // match this port makes, and the prefilter rule - only skip a position the matcher would
+            // certainly have failed at - then does not hold.
+            //
+            // TWO FAMILIES MATCH NARROWER THAN 'MinWidth', and the guard loses both. Restoring it
+            // over the code as committed turns 12 tests red (2026-09-22, the sittings notes record
+            // the control). Ten are fuzzy: an error budget that allows deletions lets a match be
+            // shorter than the pattern's narrowest exact width, and the early return above only
+            // covers a start test that is itself fuzzy. The other two are group calls, below.
+            //
+            // A GROUP CALLED FROM A LOOKBEHIND ADDS THE CALLED GROUP'S WIDTH TO THE ENCLOSING
+            // SEQUENCE, though a lookaround consumes nothing. Measured on 2026-09-22 by the shortest
+            // subject each pattern matches, which is what the whole-slice guard below admits:
+            //
+            //   (?(DEFINE)(?<a>aaaa))(?<=(?&a))?c    shortest match 5    <- call inside a lookbehind
+            //   (?(DEFINE)(?<a>aaaa))(?<=aaaa)?c     shortest match 1    <- same lookbehind, spelled out
+            //   (?(DEFINE)(?<a>aaaa))(?=(?&a))?c     shortest match 1    <- same call, looking ahead
+            //   (?(DEFINE)(?<a>aaaa))(?:(?&a))?c     shortest match 1    <- same call, no lookaround
+            //
+            // Only the first inflates, and by exactly the called group's four characters. That is the
+            // compile-side face of the defect S30 and S37 pinned on the matching side: a group called
+            // from a lookbehind is laid out as if it were not inside the lookbehind at all.
+            //
+            // So both of this port's group-call pins die on the guard, and each was written years
+            // before this slice:
+            //
+            //   GroupCallTests.A_group_called_from_a_lookbehind_with_anything_after_it_matches_here_and_not_upstream
+            //     '(?(DEFINE)(?<a>a))(?<=(?&a))c' over 'ac'. MinWidth is 2, the match is 'c' at 1,
+            //     and 1 + 2 > 2 refuses it.
+            //
+            //   GroupCallTests.A_zero_width_piece_holding_a_group_call_cannot_remove_a_match_here
+            //     MinWidth is 7 and the second match is four code units at 3, so 3 + 7 > 8 refuses it.
+            //
+            // Both tests pin OUR answer against upstream's, and upstream loses both matches. Porting
+            // the guard imports the answer they exist to reject. Dropping it can only cost attempts
+            // the matcher goes on to fail; it cannot change an answer.
+            //
+            // THE SAME ARITHMETIC IS STILL LIVE at the three 'available < state.MinWidth' sites below
+            // and in 'Substitution.cs', measured over the WHOLE slice rather than from each start
+            // position - a weaker bound, not a sound one, and the reason neither pin reaches it. Left
+            // alone here: correcting the width of a call inside a lookbehind is a compiler change with
+            // its own evidence to gather, and it is recorded as its own finding.
+            switch (test.Op)
+            {
+                case Opcode.AnyAll:
+                case Opcode.AnyAllRev:
+                    // Every position matches '(?s).', so there is nothing to skip (:8481-8483).
+                    break;
+
+                case Opcode.Any:
+                case Opcode.AnyU:
+                case Opcode.Character:
+                case Opcode.CharacterIgn:
+                case Opcode.Property:
+                case Opcode.PropertyIgn:
+                case Opcode.Range:
+                case Opcode.RangeIgn:
+                case Opcode.SetDiff:
+                case Opcode.SetDiffIgn:
+                case Opcode.SetInter:
+                case Opcode.SetInterIgn:
+                case Opcode.SetSymDiff:
+                case Opcode.SetSymDiffIgn:
+                case Opcode.SetUnion:
+                case Opcode.SetUnionIgn:
+                    startPos = MatchMany(state, test, startPos, state.SliceEnd, false, false);
+
+                    if (startPos >= state.SliceEnd)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    break;
+
+                case Opcode.AnyRev:
+                case Opcode.AnyURev:
+                case Opcode.CharacterRev:
+                case Opcode.CharacterIgnRev:
+                case Opcode.PropertyRev:
+                case Opcode.PropertyIgnRev:
+                case Opcode.RangeRev:
+                case Opcode.RangeIgnRev:
+                case Opcode.SetDiffRev:
+                case Opcode.SetDiffIgnRev:
+                case Opcode.SetInterRev:
+                case Opcode.SetInterIgnRev:
+                case Opcode.SetSymDiffRev:
+                case Opcode.SetSymDiffIgnRev:
+                case Opcode.SetUnionRev:
+                case Opcode.SetUnionIgnRev:
+                    startPos = MatchMany(state, test, startPos, state.SliceStart, false, true);
+
+                    if (startPos <= state.SliceStart)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    break;
+
+                case Opcode.Boundary:
+                case Opcode.DefaultBoundary:
+                case Opcode.DefaultEndOfWord:
+                case Opcode.DefaultStartOfWord:
+                case Opcode.EndOfLine:
+                case Opcode.EndOfString:
+                case Opcode.EndOfStringLine:
+                case Opcode.EndOfWord:
+                case Opcode.GraphemeBoundary:
+                case Opcode.StartOfLine:
+                case Opcode.StartOfString:
+                case Opcode.StartOfWord:
+                    // The '_U' spellings of these are absent from upstream's switch and so from
+                    // this one: 'EndOfLineU', 'StartOfLineU' and 'EndOfStringLineU' take the
+                    // 'default:' arm, which is what upstream does with them too.
+                    startPos = SearchStartZeroWidth(state, test, startPos, state.Reverse);
+
+                    if (startPos < 0)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    break;
+
+                case Opcode.SearchAnchor:
+                    // '\G' can only hold where the search began (:8874-8884).
+                    if (state.Reverse ? startPos < state.SearchAnchor : startPos > state.SearchAnchor)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    startPos = state.SearchAnchor;
+                    break;
+
+                case Opcode.String:
+                {
+                    // Upstream's 'search_start_STRING' (:8309).
+                    //
+                    // THIS ARM IS UNREACHABLE, here and upstream, and it is ported because upstream
+                    // has it rather than because anything runs it. Reaching it needs a STRING start
+                    // test that is not the required string, and a pattern cannot have one: the
+                    // required string is the first item of the sequence that yields one
+                    // ('Sequence.get_required_string', '_regex_core.py:3698'), so a pattern whose
+                    // start test is a STRING has that same string as its required string, and the
+                    // required-string clause in 'BasicMatch' - upstream's own, at ':11770' - then
+                    // withholds the prefilter. Measured on
+                    // 2026-09-22 against regex 2026.9.10 by wrapping '_get_required_string'
+                    // ('_main.py:602'): 'cat.*dog', '(cat)dog', 'catz?dogdogdog', 'cat[0-9]*' and
+                    // 'cat(?:x|y)dog' all compile to 'req_offset=0, req_chars=(99, 97, 116)', which
+                    // is 'cat' - the start test in every one of them.
+                    //
+                    // Its own shortcut, the one upstream takes when the node carries the
+                    // required-string flag, is a second layer of the same fact and is not ported.
+                    //
+                    // The step below is 'StepOver' and not 'Step' because of this arm: a STRING
+                    // node's step is its whole length, and stepping one character instead turned 82
+                    // tests red the moment that clause was switched off. See the negative controls
+                    // in 'docs/plan/slices/notes/S60b-sittings.md'.
+                    startPos = SimpleStringSearch(state, test, startPos, state.SliceEnd, out _, out bool cancelled);
+
+                    if (cancelled)
+                    {
+                        return MatchStatus.Cancelled;
+                    }
+
+                    if (startPos < 0)
+                    {
+                        return MatchStatus.Failure;
+                    }
+
+                    break;
+                }
+
+                default:
+                    // Upstream's 'default:' (:9175-9182): no fast search for this pattern, so stop
+                    // paying for the call. STRING_FLD, STRING_FLD_REV, STRING_IGN, STRING_IGN_REV
+                    // and STRING_REV reach it here and not upstream - see the remarks.
+                    state.DoSearchStart = false;
+                    state.MatchPos = startPos;
+                    newPosition = new Position(node, startPos);
+
+                    return MatchStatus.Success;
+            }
+
+            // Can we look further ahead? (:9186-9224.)
+            if (test != node)
+            {
+                newPosition = new Position(node, startPos);
+                break;
+            }
+
+            int textPos = StepOver(state, startPos, test.Step);
+
+            if (test.Next1.Node is null || textPos < state.SliceStart || textPos > state.SliceEnd)
+            {
+                // UPSTREAM LEAVES 'new_position->text_pos' UNSET ON THIS PATH. It assigns only
+                // 'new_position->node' on the way in (:8398) and reaches "it's a possible match"
+                // without ever writing the position, so 'basic_match' reads whatever its caller's
+                // stack held (:11835). Nothing this port can do makes that reachable - a test node
+                // whose step lands outside the slice has already been refused by the arm above, and
+                // every pattern ends in a SUCCESS node so 'next_1' is set - but C# has to write
+                // something, and the position this arm means is the one the scan stopped at.
+                newPosition = new Position(node, startPos);
+                break;
+            }
+
+            int status = TryMatch(state, test.Next1, textPos, out newPosition);
+            if (status < 0)
+            {
+                return status;
+            }
+
+            if (status != MatchStatus.Failure)
+            {
+                break;
+            }
+
+            // This position is refused after all, so try the next one.
+            startPos = Step(state, startPos, state.Reverse ? -1 : 1);
+
+            if (state.Reverse ? startPos < state.SliceStart : startPos > state.SliceEnd)
+            {
+                return MatchStatus.Failure;
+            }
+        }
+
+        // It's a possible match.
+        state.MatchPos = startPos;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
     /// Port of <c>basic_match</c> (<c>upstream/src/_regex.c</c> lines 11714-17403).
     /// </summary>
     /// <param name="state">The match state.</param>
@@ -5266,9 +5796,24 @@ internal static class Matcher
 
         state.FewestErrors = state.MaxErrors;
 
-        // 'do_search_start' is still a Phase 7 prefilter, so a search the required string does not
-        // refuse takes the slow path that tries the pattern at every position - upstream's
-        // 'next_match_2'. The required-string locator itself landed in S60, just below.
+        // Whether the start-position prefilter runs at all (:11767-11772). The first two clauses are
+        // narrowings 1 and 3 from SearchStart's remarks, which carry the reasoning; in short, a
+        // prefilter may only skip a position the matcher would certainly have failed at, and
+        // upstream's partial arms break that. Each clause is a separate '&&' so that a negative
+        // control can switch off one at a time.
+        //
+        // Upstream's own condition is the last one: when the start test IS the required string, the
+        // locator has already done this search and 'search_start' would only repeat it. It is not a
+        // narrowing: with the STRING arm's step right, switching it off leaves the suite green, and
+        // it earns its place by saving a second search rather than by changing an answer. Switching
+        // it off is how the step was found wrong in the first place - 82 tests red, 2026-09-22.
+        bool searchStartAllowed =
+            state.PartialSide == MatchState.PartialNone
+            && !pattern.HasSkipVerb
+            && !(pattern.ReqString is Node required && EquivalentNodes(startTest, required));
+
+        bool doSearchStart = state.DoSearchStart && searchStartAllowed;
+
         Node node;
         int status;
 
@@ -5355,7 +5900,52 @@ internal static class Matcher
         {
             state.TextPos = foundPos;
 
-            // Avoiding 'search_start', which is not ported.
+            if (doSearchStart)
+            {
+                next_match_1:
+                status = SearchStart(state, startNode, startTest, out Position newPosition);
+                if (status != MatchStatus.Success)
+                {
+                    // Upstream also forwards RE_ERROR_PARTIAL here (:11828-11830). This port's
+                    // prefilter has no partial arms to forward - see SearchStart - so what reaches
+                    // this line is a failure or a cancellation.
+                    return status;
+                }
+
+                node = newPosition.Node;
+                state.TextPos = newPosition.TextPos;
+
+                if (node.Op == Opcode.Success)
+                {
+                    // The same test 'next_match_2' makes below, including the MatchAll clause that
+                    // is this port's and not upstream's.
+                    if (state.TextPos != state.SearchAnchor || !state.MustAdvance)
+                    {
+                        bool matched =
+                            !state.MatchAll
+                            || (state.Reverse ? state.TextPos == state.SliceStart : state.TextPos == state.SliceEnd);
+
+                        if (matched)
+                        {
+                            return MatchStatus.Success;
+                        }
+                    }
+
+                    state.TextPos = Step(state, state.MatchPos, patternStep);
+                    goto next_match_1;
+                }
+
+                // 'do_search_start' may have been cleared (:11847-11848).
+                doSearchStart = state.DoSearchStart && searchStartAllowed;
+
+                // Upstream falls out of its 'if (search)' block here; this port says the same thing
+                // with the 'goto advance' the rest of this method already uses, which keeps the slow
+                // arm below at the indentation it has had since S07.
+                goto advance;
+            }
+
+            // Avoiding 'search_start': either this pattern is one it cannot help, or one of the
+            // narrowings above withholds it.
             node = startNode;
 
             next_match_2:
@@ -10599,6 +11189,15 @@ internal static class Matcher
             // is a `count_one()` size underflow reading off the heap. It stays inert only for the
             // reverse and folded arms, which are still the Phase 7 deferral this file's header
             // records; deleting it as dead code was always wrong and is now visibly so.
+            //
+            // S60b WAS ASKED TO PIN IT AND COULD NOT, and the reason is worth writing down rather
+            // than re-deriving. THE WHOLE BRANCH IS UNREACHED: instrumented on 2026-09-22 and run
+            // over all 6563 tests, this line was executed zero times. Reaching it needs
+            // 'bestGroups' to be null after the loop above, which needs every second-pass attempt at
+            // every entry and every offset to fail - and the first pass has just succeeded at
+            // 'entry.MatchPos' within 'errorLimit' errors against the same slice, so the only
+            // candidate mechanism left is the 'MaxCost' cap a cost equation adds. Settling that is a
+            // BESTMATCH question, not a prefilter one, and it is written up in the sittings notes.
             state.ReqPos = -1;
 
             state.MaxErrors = fewestErrors;
