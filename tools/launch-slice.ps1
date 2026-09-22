@@ -38,6 +38,25 @@ $err = Join-Path $repo ".scratch/driver-$Tag.err"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $repo '.scratch') | Out-Null
 
+# The driver's allowance gate is only as good as tools/usage-poll.ps1, and nothing restarts that.
+# It died at some point on the night of 2026-09-21 and the 09:38 sitting the next morning started
+# blind - "allowance unknown (no allowance snapshot); starting anyway" - which is the gate not
+# gating. Start one here if none is running, so launching a slice cannot leave it unwatched.
+# Matching on '-File ... usage-poll.ps1' rather than the bare name, and skipping this process,
+# because a query whose own command line names the script matches itself: measured 2026-09-22,
+# twice - a process count of "1 driver running" and then of "2 pollers", both of them the query.
+$poller = @(Get-CimInstance Win32_Process -Filter "Name = 'pwsh.exe'" |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*usage-poll.ps1*' })
+if (-not $poller) {
+    $pollProc = Start-Process -FilePath 'pwsh' `
+        -ArgumentList '-NoProfile', '-File', (Join-Path $repo 'tools/usage-poll.ps1') `
+        -WorkingDirectory $repo -WindowStyle Hidden -PassThru
+    Write-Output "POLLER_PID=$($pollProc.Id) (none was running)"
+}
+else {
+    Write-Output "poller already running (PID $($poller[0].ProcessId))"
+}
+
 $proc = Start-Process -FilePath 'pwsh' `
     -ArgumentList (@('-NoProfile', '-File', (Join-Path $repo 'tools/run-slices.ps1'), '-MaxSlices', '1', '-Phase', $Phase, '-Slice', $Slice, '-Model', $Model) + ($StopBy ? @('-StopBy', $StopBy) : @())) `
     -WorkingDirectory $repo `
