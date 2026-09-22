@@ -150,8 +150,8 @@ empty afterwards. One claim came back DIFFERENT and was fixed rather than argued
 citation `:12473-12484` covers the arithmetic that adds the inner counts to the outer, but the write
 into `state->fuzzy_counts` is the `Py_MEMCPY` at `:12513`. Every copy of that citation in the tree
 now reads `:12475-12513`, and the sentences that said the merge happens "twenty lines earlier" than
-the guard - it is in a different function, about three thousand lines away - now say "on the way
-in".
+the guard - both are in `basic_match`, the merge in its match switch and the guard in its backtrack
+switch three thousand lines on - now say "on the way in".
 
 **The waves, measured 2026-09-22 against the committed tree.** `fuzzy-anchored`, 2000 rows: seed
 1234567 agree 1997 expected 3, seed 7 agree 1995 expected 5, seed 4242 agree 1991 expected 9, and
@@ -159,17 +159,25 @@ seed 271828 - one the slice had not used - agree 1991 expected 9. All `diverge 0
 at its three seeds: agree 6639, 6641 and 6658 of 6680, `diverge 0` at each. The 6000-row gate: seeds
 7 and 4242 `diverge 0`, seed 20260922 `diverge 10`, which are S57f's ten rows and no others.
 
-**Review.** One reviewer, two blind passes so far, brief unchanged. The first pass raised two findings and
-both reproduced: the `Applies` predicate excused ANY answer cheaper than upstream's, which an
-always-true mutant survived, so the judged answers are now pinned by exact string
-(`_bestmatchWorseMatchOurs`); and the row-28 paragraph quoted pre-pin numbers as if they were the
-committed tree's. The second pass, over the delta the first never saw, raised three and all three
-reproduced: `docs/PORTMAP.md` kept the phrase "twenty lines earlier" after its citation was
-corrected; the comment above `Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds`
-misassigned every position the test asserts; and the "both waves green at three seeds" box was
-ticked while the 6000-row gate is red at the date seed. All three fixed here. A third pass, over
-those three fixes, is what this slice still owes; the allowance window ran out first, so this commit
-is a checkpoint and the next sitting sends it.
+**Review.** One reviewer, four blind passes, each over the delta the pass before it never saw.
+Findings raised 6, reproduced 6, fixed 6.
+
+The first pass raised two and both reproduced: the `Applies` predicate excused ANY answer cheaper
+than upstream's, which an always-true mutant survived, so the judged answers are now pinned by exact
+string (`_bestmatchWorseMatchOurs`); and the row-28 paragraph quoted pre-pin numbers as if they were
+the committed tree's.
+
+The second pass raised three and all three reproduced: `docs/PORTMAP.md` kept the phrase "twenty
+lines earlier" after its citation was corrected; the comment above
+`Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds` misassigned every position the test
+asserts; and the "both waves green at three seeds" box was ticked while the 6000-row gate is red at
+the date seed.
+
+The third pass, over those three fixes, raised one and it reproduced: the sentence explaining the
+citation correction said the merge site and the guard sit in different functions, and both are in
+`basic_match` (`upstream/src/_regex.c:11714`), about three thousand lines apart in its two switches.
+Corrected in this file and in `docs/plan/DECISIONS.md`. The fourth pass, over those two sentences,
+returned "No defects found."
 
 **What the next slice should know.**
 

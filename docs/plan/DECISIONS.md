@@ -1029,5 +1029,6 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - **2026-09-22 (S57e): entry 12's merge citation is `:12475-12513`.** `:12473-12484` covers the
   arithmetic that adds the inner counts to the outer, but the write into `state->fuzzy_counts` is the
   `Py_MEMCPY` at `:12513`. The independent verifier caught it; all nine copies in the tree are
-  corrected, and the sentences claiming the merge happens "twenty lines earlier" than the guard - it
-  is about three thousand lines away, in a different function - now say "on the way in".
+  corrected, and the sentences claiming the merge happens "twenty lines earlier" than the guard - both
+  are in `basic_match`, the merge in its match switch and the guard in its backtrack switch three
+  thousand lines on - now say "on the way in".
