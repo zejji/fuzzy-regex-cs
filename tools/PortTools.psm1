@@ -288,6 +288,98 @@ function Get-BaselinePassing {
     return $baseline.passing
 }
 
+function Get-UpstreamCommit {
+    <#
+    .SYNOPSIS
+        The commit the upstream/ submodule is checked out at.
+
+    .DESCRIPTION
+        `git -C <dir> rev-parse HEAD` does not fail when <dir> is an ordinary directory. git walks
+        UP to the enclosing repository and answers ITS commit, so in a clone where `upstream/` has
+        never been initialised the bare call returns THIS port's own HEAD, and both docs/STATUS.md
+        and tests/parity-baseline.json then name a commit that is not an upstream commit at all.
+        Wrong, and silently so, which is the reason this is a function rather than one line at the
+        call site.
+
+        The questions asked are about the repository, never about the spelling of a path, because
+        comparing paths is what the first two drafts did and a junction, a symlink and a relative
+        path each defeated it. Two questions, and both are needed - measured 2026-09-22, git 2.55:
+
+        - `--show-superproject-working-tree` names the enclosing superproject, and is empty for a
+          plain repository, a bare one, and a linked worktree placed at `upstream/`.
+        - `--show-prefix` is empty only at the ROOT of a working tree, so it rejects the layout the
+          first question misses: when the port itself is a submodule and its own `upstream/` was
+          never initialised (a `git submodule update --init` without `--recursive`), git walks up
+          into the port, reports the port's superproject, and answers the port's own commit. There
+          the prefix is `upstream/`. It also rejects a subdirectory of the submodule.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$UpstreamPath
+    )
+
+    $notCheckedOut = "$UpstreamPath is not a checked-out submodule, so there is no upstream " +
+        'commit to measure against. Run `git submodule update --init upstream`.'
+
+    if (-not (Test-Path -LiteralPath $UpstreamPath -PathType Container)) { throw $notCheckedOut }
+
+    # An exported GIT_DIR points every call below at another repository, which is the same silently
+    # wrong answer in a different disguise, so the calls run without those variables. git does not
+    # export them to its own hooks, but a wrapper script can.
+    # Removed through the Env: provider, not `[Environment]::SetEnvironmentVariable($name, $null)`:
+    # that call leaves the variable SET and empty, and git reads an empty GIT_DIR as a repository
+    # path, answering `fatal: not a git repository: ''` - measured on PowerShell 7.6.4, 2026-09-22.
+    $redirects = 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE'
+    $saved = @{}
+    foreach ($name in $redirects) {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+    }
+
+    # One line of trimmed stdout, or an empty string: what git prints when it cannot answer goes to
+    # stderr, so a failed call and a genuinely empty answer are the same thing to every check below.
+    function Read-GitAnswer([string]$Path, [string]$Question) {
+        return (@(git -C $Path rev-parse $Question 2>$null) -join '').Trim()
+    }
+
+    try {
+        # Each check reads the ANSWER, not the exit code. Every failing call here - not a
+        # repository, no such directory, a bare repository, an unborn HEAD - either prints nothing
+        # on stdout or prints something that is not the answer's shape, so the exit code adds a
+        # second clause that no layout can reach on its own and therefore no test can pin.
+        # An ABSOLUTE path, which is what git prints here, and the check is not belt and braces: git
+        # older than 2.13.0 does not know `--show-superproject-working-tree`, and `rev-parse` ECHOES
+        # an option it does not recognise to stdout and exits 0, which would otherwise read as a
+        # superproject and let the port's own HEAD through. The test is on the shape rather than on
+        # the directory existing, because git answers in UTF-8 and PowerShell decodes it with the
+        # console code page: on Windows at code page 850 a superproject at `pört` comes back with
+        # `ö` as two wrong characters and no such directory exists. Only the leading characters are
+        # read here, and those are ASCII.
+        $superproject = Read-GitAnswer $UpstreamPath '--show-superproject-working-tree'
+        if ($superproject -notmatch '^(/|[A-Za-z]:[\\/])') { throw $notCheckedOut }
+
+        # Empty at the ROOT of a working tree, `upstream/` anywhere below it.
+        if (Read-GitAnswer $UpstreamPath '--show-prefix') { throw $notCheckedOut }
+
+        # `rev-parse HEAD` prints the literal string `HEAD` both in a bare repository, where it
+        # exits 0, and on an unborn branch, where it exits 128. Neither is a commit.
+        $commit = Read-GitAnswer $UpstreamPath 'HEAD'
+        if ($commit -notmatch '^[0-9a-f]{40}$') {
+            throw "$UpstreamPath has no commit checked out. " +
+                'Run `git submodule update --init upstream`.'
+        }
+
+        return $commit
+    }
+    finally {
+        foreach ($name in $redirects) {
+            if ($null -eq $saved[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+            else { Set-Item -LiteralPath "Env:$name" -Value $saved[$name] }
+        }
+    }
+}
+
 function New-StatusReport {
     <#
     .SYNOPSIS
@@ -957,6 +1049,6 @@ function Write-DriverHandover {
 
 Export-ModuleMember -Function `
     Read-TestResults, Get-FeatureArea, Test-Ratchet, Update-Baseline, Get-BaselinePassing,
-    New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
+    Get-UpstreamCommit, New-StatusReport, Get-SessionTokenUsage, Get-RateLimitResetsAt, Test-BudgetGate, Read-Budget,
     Get-SliceLogEntry, Write-SliceLogEntry, Get-SliceFailureReason, Undo-FailedSlice,
     Test-HeadroomProxy, Read-Allowance, Test-AllowanceFloor, Resolve-SliceTimeout, Write-DriverHandover

@@ -102,7 +102,15 @@ catch {
     Write-Host '  The build most likely failed. Run `dotnet build` and look at the errors.' -ForegroundColor Yellow
     exit 1
 }
-$upstreamCommit = (git -C (Join-Path $repoRoot 'upstream') rev-parse HEAD).Trim()
+# Exit rather than throw, for the reason above, and before anything is written: a status board
+# naming the wrong commit is worse than no status board, because nothing about it looks wrong.
+try {
+    $upstreamCommit = Get-UpstreamCommit -UpstreamPath (Join-Path $repoRoot 'upstream')
+}
+catch {
+    Write-Host "Ratchet: RED - $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
 
 # WriteAllText, not Set-Content: Set-Content appends the platform newline, which would put a
 # CRLF at the end of the file on Windows and an LF everywhere else - reintroducing exactly the

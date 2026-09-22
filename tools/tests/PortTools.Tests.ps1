@@ -1002,3 +1002,251 @@ Describe 'Write-DriverHandover' {
         [datetimeoffset]::Parse($text.Trim()) | Should -Be $script:Deadline
     }
 }
+
+Describe 'Get-UpstreamCommit' {
+    BeforeAll {
+        # An outer repository with a plain `upstream/` directory inside it: what a clone looks like
+        # before `git submodule update --init`. `git -C upstream rev-parse HEAD` walks UP out of that
+        # directory and answers the OUTER repository's commit, which is the fault under test.
+        $script:Outer = Join-Path $TestDrive 'outer'
+        New-Item -ItemType Directory -Path (Join-Path $script:Outer 'upstream') -Force | Out-Null
+        git -C $script:Outer init --quiet 2>&1 | Out-Null
+        git -C $script:Outer -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m first 2>&1 | Out-Null
+        $script:OuterHead = (git -C $script:Outer rev-parse HEAD).Trim()
+
+        # The same layout with `upstream/` checked out as a real submodule, which is what a
+        # `git submodule update --init` leaves behind. `protocol.file.allow` is needed because git
+        # 2.38 stopped cloning a submodule from a local path by default (CVE-2022-39253).
+        $script:Source = Join-Path $TestDrive 'source'
+        New-Item -ItemType Directory -Path $script:Source -Force | Out-Null
+        git -C $script:Source init --quiet 2>&1 | Out-Null
+        git -C $script:Source -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m inner 2>&1 | Out-Null
+        $script:InnerHead = (git -C $script:Source rev-parse HEAD).Trim()
+        $source = $script:Source
+
+        $script:Checked = Join-Path $TestDrive 'checked'
+        $script:CheckedUpstream = Join-Path $script:Checked 'upstream'
+        New-Item -ItemType Directory -Path $script:Checked -Force | Out-Null
+        git -C $script:Checked init --quiet 2>&1 | Out-Null
+        git -C $script:Checked -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m outer 2>&1 | Out-Null
+        git -C $script:Checked -c protocol.file.allow=always submodule add --quiet ($source -replace '\\', '/') upstream 2>&1 | Out-Null
+    }
+
+    It 'reads the commit the submodule is checked out at' {
+        Get-UpstreamCommit -UpstreamPath $script:CheckedUpstream | Should -Be $script:InnerHead
+    }
+
+    It 'refuses the enclosing repository when the submodule is not checked out' {
+        # The message is asserted, not just the throw: `Should -Throw` alone also passes when the
+        # function does not exist, which is no test at all.
+        { Get-UpstreamCommit -UpstreamPath (Join-Path $script:Outer 'upstream') } |
+            Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'never answers the enclosing commit, which is what the bare rev-parse gives' {
+        # The bare call really does answer the outer commit, so the assertion above is testing
+        # something. Without this line a function that returned nothing would look correct.
+        (git -C (Join-Path $script:Outer 'upstream') rev-parse HEAD).Trim() | Should -Be $script:OuterHead
+        $answer = $null
+        try { $answer = Get-UpstreamCommit -UpstreamPath (Join-Path $script:Outer 'upstream') } catch { }
+        $answer | Should -Not -Be $script:OuterHead
+    }
+
+    It 'refuses a path that is not there at all' {
+        { Get-UpstreamCommit -UpstreamPath (Join-Path $TestDrive 'no-such-upstream') } |
+            Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'refuses a repository with no commits rather than recording the word HEAD' {
+        # `git rev-parse HEAD` exits 128 in a repository with no commits and prints the literal
+        # string `HEAD` on stdout, which a draft of this function returned as the commit.
+        $unborn = Join-Path $TestDrive 'unborn/upstream'
+        New-Item -ItemType Directory -Path $unborn -Force | Out-Null
+        git -C $unborn init --quiet 2>&1 | Out-Null
+        (git -C $unborn rev-parse HEAD 2>$null) | Should -Be 'HEAD'
+        { Get-UpstreamCommit -UpstreamPath $unborn } | Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'refuses a BARE repository, where the same rev-parse exits zero' {
+        # The exit code alone does not catch this one: a bare repository answers `HEAD` and exits 0.
+        $bare = Join-Path $TestDrive 'bare/upstream'
+        New-Item -ItemType Directory -Path $bare -Force | Out-Null
+        git -C $bare init --quiet --bare 2>&1 | Out-Null
+        (git -C $bare rev-parse HEAD 2>$null) | Should -Be 'HEAD'
+        $LASTEXITCODE | Should -Be 0
+        { Get-UpstreamCommit -UpstreamPath $bare } | Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'refuses a linked worktree of the enclosing repository placed at upstream/' {
+        # A working tree of its own, so any "is this a checkout?" test accepts it - and its HEAD is
+        # the port's commit, which is the answer this function exists to stop being recorded.
+        $wt = Join-Path $TestDrive 'worktree'
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        git -C $wt init --quiet 2>&1 | Out-Null
+        git -C $wt -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m one 2>&1 | Out-Null
+        git -C $wt worktree add --quiet -b linked (Join-Path $wt 'upstream') 2>&1 | Out-Null
+        (git -C (Join-Path $wt 'upstream') rev-parse HEAD).Trim() |
+            Should -Be (git -C $wt rev-parse HEAD).Trim()
+        { Get-UpstreamCommit -UpstreamPath (Join-Path $wt 'upstream') } |
+            Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'ignores an exported GIT_DIR pointing at another repository' {
+        $saved = $env:GIT_DIR
+        $env:GIT_DIR = Join-Path $script:Outer '.git'
+        try { Get-UpstreamCommit -UpstreamPath $script:CheckedUpstream | Should -Be $script:InnerHead }
+        finally { if ($null -eq $saved) { Remove-Item Env:GIT_DIR } else { $env:GIT_DIR = $saved } }
+    }
+
+    It 'reads the same commit however the path is spelled' {
+        # The check asks git a question about the repository rather than comparing two spellings of
+        # a path, so a relative path, a trailing separator and forward slashes all answer the same
+        # thing. The first draft compared paths and rejected the relative one.
+        Get-UpstreamCommit -UpstreamPath ($script:CheckedUpstream + [System.IO.Path]::DirectorySeparatorChar) |
+            Should -Be $script:InnerHead
+        Get-UpstreamCommit -UpstreamPath ($script:CheckedUpstream -replace '\\', '/') |
+            Should -Be $script:InnerHead
+        Push-Location $script:Checked
+        try { Get-UpstreamCommit -UpstreamPath 'upstream' | Should -Be $script:InnerHead }
+        finally { Pop-Location }
+    }
+
+    It 'refuses an uninitialised upstream/ inside a port that is itself a submodule' {
+        # `git submodule update --init` without `--recursive` leaves this: someone has vendored the
+        # port into their own repository, so `upstream/` is an empty directory inside a working tree
+        # that IS a submodule. git walks up into the port, reports the port's superproject, and
+        # answers the port's own commit - the exact answer this function exists to refuse.
+        # Built from scratch rather than from the shared fixture: the gitlink has to be COMMITTED in
+        # the port for a non-recursive clone of it to leave the empty `upstream/` directory behind.
+        $port = Join-Path $TestDrive 'port'
+        New-Item -ItemType Directory -Path $port -Force | Out-Null
+        git -C $port init --quiet 2>&1 | Out-Null
+        git -C $port -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m port 2>&1 | Out-Null
+        git -C $port -c protocol.file.allow=always submodule add --quiet ($script:Source -replace '\\', '/') upstream 2>&1 | Out-Null
+        git -C $port -c user.name=t -c user.email=t@t commit --quiet -m 'add upstream' 2>&1 | Out-Null
+
+        $super = Join-Path $TestDrive 'super'
+        New-Item -ItemType Directory -Path $super -Force | Out-Null
+        git -C $super init --quiet 2>&1 | Out-Null
+        git -C $super -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m super 2>&1 | Out-Null
+        git -C $super -c protocol.file.allow=always submodule add --quiet ($port -replace '\\', '/') port 2>&1 | Out-Null
+
+        $nested = Join-Path $super 'port/upstream'
+        (git -C $nested rev-parse HEAD).Trim() |
+            Should -Be (git -C (Join-Path $super 'port') rev-parse HEAD).Trim()
+        { Get-UpstreamCommit -UpstreamPath $nested } | Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'refuses a subdirectory of the submodule, which is not its checkout root' {
+        $sub = Join-Path $script:CheckedUpstream 'regex'
+        New-Item -ItemType Directory -Path $sub -Force | Out-Null
+        { Get-UpstreamCommit -UpstreamPath $sub } | Should -Throw -ExpectedMessage '*submodule*'
+    }
+
+    It 'refuses a submodule whose HEAD is on an unborn branch' {
+        # The only layout that reaches the second guard: a real submodule - so both repository
+        # questions pass - with no commit on HEAD, where `rev-parse HEAD` exits 128 and prints the
+        # literal string `HEAD`. Asserted on the second guard's own message, because the first
+        # guard's message also contains the word "submodule".
+        $orphan = Join-Path $TestDrive 'orphan'
+        New-Item -ItemType Directory -Path $orphan -Force | Out-Null
+        git -C $orphan init --quiet 2>&1 | Out-Null
+        git -C $orphan -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m outer 2>&1 | Out-Null
+        git -C $orphan -c protocol.file.allow=always submodule add --quiet ($script:Source -replace '\\', '/') upstream 2>&1 | Out-Null
+        $orphanUpstream = Join-Path $orphan 'upstream'
+        git -C $orphanUpstream checkout --quiet --orphan fresh 2>&1 | Out-Null
+
+        git -C $orphanUpstream rev-parse --show-superproject-working-tree | Should -Not -BeNullOrEmpty
+        (git -C $orphanUpstream rev-parse HEAD 2>$null) | Should -Be 'HEAD'
+        { Get-UpstreamCommit -UpstreamPath $orphanUpstream } |
+            Should -Throw -ExpectedMessage '*no commit checked out*'
+    }
+
+    It 'reads a submodule whose superproject path is not ASCII' {
+        # git answers in UTF-8 and PowerShell decodes native output with the console encoding, so
+        # the `ö` below comes back as the wrong characters on any console that is not UTF-8 - code
+        # page 850 on this machine. Anything this function does with the answer has to survive that,
+        # and a directory-existence check on it does not.
+        #
+        # The encoding is forced rather than assumed: on a UTF-8 console, which is what the Linux
+        # and macOS CI legs have, the answer decodes correctly and this case would pass either way,
+        # pinning nothing. Latin-1 is built in on every platform, so no code-page provider is
+        # needed, and it mis-decodes the two UTF-8 bytes of `ö` the same way a code page does.
+        $outer = Join-Path $TestDrive 'pört'
+        New-Item -ItemType Directory -Path $outer -Force | Out-Null
+        git -C $outer init --quiet 2>&1 | Out-Null
+        git -C $outer -c user.name=t -c user.email=t@t commit --quiet --allow-empty -m outer 2>&1 | Out-Null
+        git -C $outer -c protocol.file.allow=always submodule add --quiet ($script:Source -replace '\\', '/') upstream 2>&1 | Out-Null
+
+        $savedEncoding = [Console]::OutputEncoding
+        [Console]::OutputEncoding = [System.Text.Encoding]::Latin1
+        try {
+            $answer = (@(git -C (Join-Path $outer 'upstream') rev-parse --show-superproject-working-tree) -join '').Trim()
+            Test-Path -LiteralPath $answer -PathType Container |
+                Should -BeFalse -Because 'the mis-decoded answer names no directory'
+
+            Get-UpstreamCommit -UpstreamPath (Join-Path $outer 'upstream') |
+                Should -Be $script:InnerHead
+        }
+        finally { [Console]::OutputEncoding = $savedEncoding }
+    }
+
+    It 'refuses a git too old to know --show-superproject-working-tree' {
+        # git before 2.13.0 does not have the option, and `rev-parse` echoes an option it does not
+        # recognise to STDOUT and exits 0 - so the answer is non-empty and the enclosing repository's
+        # HEAD comes back as the upstream commit. Pinned with a stand-in git on PATH rather than an
+        # old binary: this one knows every other option, and simply echoes that one back.
+        $bin = Join-Path $TestDrive 'oldgit'
+        New-Item -ItemType Directory -Path $bin -Force | Out-Null
+        $real = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+        if ($IsWindows) {
+            Set-Content -LiteralPath (Join-Path $bin 'git.cmd') -Encoding ascii -Value @(
+                '@echo off',
+                'if "%4"=="--show-superproject-working-tree" (echo --show-superproject-working-tree& exit /b 0)',
+                "`"$real`" %*")
+        }
+        else {
+            $script = Join-Path $bin 'git'
+            Set-Content -LiteralPath $script -Encoding ascii -Value @(
+                '#!/bin/sh',
+                'if [ "$4" = "--show-superproject-working-tree" ]; then',
+                '  echo "--show-superproject-working-tree"',
+                '  exit 0',
+                'fi',
+                "exec `"$real`" `"`$@`"")
+            chmod +x $script
+        }
+
+        $savedPath = $env:PATH
+        $env:PATH = $bin + [IO.Path]::PathSeparator + $savedPath
+        try {
+            { Get-UpstreamCommit -UpstreamPath $script:CheckedUpstream } |
+                Should -Throw -ExpectedMessage '*submodule*'
+        }
+        finally { $env:PATH = $savedPath }
+    }
+
+    It 'leaves the git environment variables exactly as it found them' {
+        # Not housekeeping: an earlier draft cleared them with
+        # `[Environment]::SetEnvironmentVariable($name, $null)`, which leaves the variable SET and
+        # empty, and git reads an empty GIT_DIR as a repository path. That broke this function's own
+        # call and then every later git call in the session, including another test file's.
+        Get-UpstreamCommit -UpstreamPath $script:CheckedUpstream | Out-Null
+
+        foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE') {
+            [Environment]::GetEnvironmentVariable($name) | Should -BeNullOrEmpty
+            Test-Path -LiteralPath "Env:$name" | Should -BeFalse -Because "$name must be unset, not empty"
+        }
+        (git -C $script:Checked rev-parse HEAD).Trim() | Should -Match '^[0-9a-f]{40}$'
+    }
+
+    It 'restores a GIT_DIR that was set before the call' {
+        $saved = $env:GIT_DIR
+        $env:GIT_DIR = Join-Path $script:Outer '.git'
+        try {
+            Get-UpstreamCommit -UpstreamPath $script:CheckedUpstream | Out-Null
+            $env:GIT_DIR | Should -Be (Join-Path $script:Outer '.git')
+        }
+        finally { if ($null -eq $saved) { Remove-Item Env:GIT_DIR -ErrorAction SilentlyContinue } else { $env:GIT_DIR = $saved } }
+    }
+}

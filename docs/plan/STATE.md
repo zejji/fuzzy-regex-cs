@@ -22,9 +22,13 @@ still reproduced: **S61 item 7** is entry 18. Entry 17 is the owner's decision r
 `src/FuzzyRegex/obj/Release/net10.0/FuzzyRegex.sourcelink.json`. Release builds run with
 `$env:IntermediateOutputPath = 'obj/Release/net10.0-<slice>/'`. Killing it is not authorised.
 
-**Maintenance:** `check-ratchet.ps1:105` writes the upstream-commit line wrongly when there is no submodule;
-`run-controls.py` needs a `suite` mode; `_leak_free_fuzzy` starves a reversed row whose lookahead
-reads past the match end (S57b sitting 4).
+**Maintenance done on this commit:** the ratchet no longer takes the port's own HEAD for the
+upstream commit when `upstream/` is not checked out. `Get-UpstreamCommit` asks git three questions
+about the directory and reads the answers, not the exit codes, and the ratchet exits RED before it
+writes `docs/STATUS.md` or the baseline. Tool tests 155/155.
+
+**Maintenance still open:** `run-controls.py` needs a `suite` mode; `_leak_free_fuzzy` starves a
+reversed row whose lookahead reads past the match end (S57b sitting 4).
 
 **Owner, both from S73:** the `docs/demo/` reference layouts, and publishing (push `phase9-demo`,
 then Pages > Source = GitHub Actions).

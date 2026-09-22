@@ -1032,3 +1032,50 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   corrected, and the sentences claiming the merge happens "twenty lines earlier" than the guard - both
   are in `basic_match`, the merge in its match switch and the guard in its backtrack switch three
   thousand lines on - now say "on the way in".
+- **2026-09-22 (maintenance): the ratchet asks whether `upstream/` is a submodule checkout, not just
+  for its HEAD.** `git -C upstream rev-parse HEAD` walks up to the enclosing repository when
+  `upstream/` has not been initialised, so it answered THIS port's own commit and `docs/STATUS.md`
+  and `tests/parity-baseline.json` both named it as the upstream commit they measure against.
+  Measured in a scratch directory: the bare call returned the port's HEAD. `Get-UpstreamCommit` in
+  `PortTools.psm1` now requires `rev-parse --show-superproject-working-tree` to name a superproject
+  AND `rev-parse --show-prefix` to be empty, then requires HEAD to be 40 hex characters; the ratchet
+  exits RED with the `git submodule update --init` instruction before it writes anything.
+  **Compare git's answer, never two spellings of a path:** the first draft compared `--show-toplevel`
+  against the path it had asked about, and a blind pass reproduced three ways to break it - a
+  junction or symlink, which git resolves and `[IO.Path]::GetFullPath` does not (`/var` against
+  `/private/var` would have gone red on the macOS CI leg); a relative path, resolved against two
+  different current directories; and, separately, `rev-parse HEAD` in a repository with no commits,
+  which exits 128 and still prints the literal string `HEAD` for the caller to record as a commit.
+  **One question is never enough, because each is empty for a different reason:** `--show-prefix`
+  alone accepts a bare repository and a linked worktree placed at `upstream/`, and
+  `--show-superproject-working-tree` alone accepts an uninitialised `upstream/` inside a port that is
+  itself somebody's submodule, where git walks up and answers the port's commit again.
+  **And each check reads the answer, never the exit code:** a failing `rev-parse` here prints nothing
+  on stdout, or prints something that is not the shape of an answer, so an exit-code clause is a
+  second condition no layout reaches on its own - which is how a blind pass found the 40-hex clause
+  passing with itself deleted. The shape has to be checked properly, though: `rev-parse` ECHOES an
+  option it does not recognise to stdout and exits 0 (`git rev-parse --show-superproject-working-tre`
+  prints `--show-superproject-working-tre`, exit 0, git 2.55), so on a git older than 2.13.0, which
+  has no `--show-superproject-working-tree`, a non-empty answer would have meant nothing. The
+  superproject must therefore look like an absolute path. **A shape, not an existence check, because
+  the answer's decoding is not ours:** git answers in UTF-8 and PowerShell decodes native output
+  with the console code page, so at code page 850 a superproject at `pört` comes back with `ö` as
+  `U+251C U+00C2`, `Test-Path` says False, and a genuine submodule is refused - which the draft that
+  tested for a directory did. Only the leading characters are read, and those are ASCII. The test
+  for it sets `[Console]::OutputEncoding` to Latin-1 itself rather than relying on the machine's:
+  a blind pass showed that on a UTF-8 console, which is what the Linux and macOS CI legs have, the
+  answer decodes correctly and the case passes with either version of the check, pinning nothing.
+  Deleting or
+  weakening any one of the checks fails a named test: the superproject shape fails the linked
+  worktree and the stand-in old git, a non-empty-only version fails the stand-in old git, an
+  existence version fails the non-ASCII superproject, prefix-empty fails the uninitialised nested
+  `upstream/` and the submodule subdirectory, and 40-hex fails the submodule on an unborn branch
+  (`.scratch/mutate3.ps1`, five mutations, 2026-09-22).
+- **2026-09-22 (maintenance): clear an environment variable with `Remove-Item Env:X`, never
+  `[Environment]::SetEnvironmentVariable($name, $null)` from PowerShell.** The second leaves the
+  variable SET and empty (measured on pwsh 7.6.4: `Test-Path Env:GIT_DIR` is True afterwards), and
+  git reads an empty `GIT_DIR` as a repository path - `fatal: not a git repository: ''`. A draft of
+  `Get-UpstreamCommit` scrubbed the four `GIT_*` redirect variables that way, which broke its own
+  call and then every later git call in the process, including the whole of
+  `tools/tests/StatusStamp.Tests.ps1`, the file the runner reaches next. A test now asserts the
+  variables are absent, not empty, after the call.
