@@ -1189,3 +1189,11 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `full-fold-fuzzy-deletion` is keyed on an ablation flag, `PatternObject.ChargeUntouchedFoldings`,
   after S57c's anchor pin, rather than on a shape predicate: a flag that restores upstream's test at
   all six sites classifies exactly the rows the fix moved and nothing else.
+- 2026-09-23 (S61): a compiled pattern keeps one `MatchState` between calls (`MatchStateCache`,
+  upstream's `groups_storage`/`repeats_storage`/`stack_storage`, `_regex.c` :577-579), in the
+  one-slot `Interlocked.Exchange` shape of the built-in `Regex._runner`, because upstream's lock
+  (`acquire_state_lock`) has no counterpart here. This amends S52b's PERMANENT thread-safety rule
+  that nothing reachable from a pattern is mutable: `ObjectGraph._atomicallyShared` lists the cache
+  as the one exception, backed by the stress test (which fails when the slot is read without the
+  exchange) and by `MatchStateCacheTests` (a reused state equals a new one, field by field). A state
+  the cache built goes back to it on `Dispose`, so every call site keeps its `using`.

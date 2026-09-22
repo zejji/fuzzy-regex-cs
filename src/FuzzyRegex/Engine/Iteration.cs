@@ -146,7 +146,7 @@ internal static class Iteration
         MatchLimits limits
     )
     {
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
             input,
             start,
@@ -296,7 +296,7 @@ internal static class Iteration
         bool? oneUnitPerCharacter
     )
     {
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
             input,
             sliceStart,
@@ -379,7 +379,7 @@ internal static class Iteration
     {
         // pattern_scanner (:21122): "The MatchObject, and therefore repeated captures, will be
         // visible."
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
             input,
             start,
@@ -389,7 +389,7 @@ internal static class Iteration
             visibleCaptures: true,
             matchAll: false,
             limits,
-            pool
+            pool: pool
         );
 
         // Scan's loop, with the match yielded where Scan calls back.
@@ -480,7 +480,7 @@ internal static class Iteration
         // concurrent, timeout - so the slice is always the whole subject.
         //
         // "The MatchObject, and therefore repeated captures, will not be visible."
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
             input,
             0,

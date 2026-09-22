@@ -108,7 +108,7 @@ internal static class Substitution
         IReadOnlyList<object>? compiled =
             evaluator is null && !isLiteral && !isFormat ? regex.CompileReplacement(template!) : null;
 
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             pattern,
             input,
             start,

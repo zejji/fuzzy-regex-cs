@@ -140,11 +140,18 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>pattern</c>.</summary>
     internal readonly PatternObject Pattern;
 
+    /// <summary>
+    /// The cache that built this state and takes it back on <see cref="Dispose"/>, or <see langword="null"/>
+    /// for a state <see cref="Create"/> built. Has no counterpart upstream, whose <c>state_fini</c>
+    /// always hands its storage back to the pattern.
+    /// </summary>
+    internal readonly MatchStateCache? Cache;
+
     /// <summary>Upstream <c>text</c> and <c>string</c>, which are one object here.</summary>
-    internal readonly string Text;
+    internal string Text = string.Empty;
 
     /// <summary>Upstream <c>text_length</c>.</summary>
-    internal readonly int TextLength;
+    internal int TextLength;
 
     /// <summary>Upstream <c>slice_start</c>: where the searched slice starts.</summary>
     internal int SliceStart;
@@ -197,13 +204,13 @@ internal sealed class MatchState : IDisposable
     /// Upstream <c>groups</c>: one entry per group, indexed by group number minus one, and
     /// <c>true_group_count</c> long so a private group number reaches its own entry.
     /// </summary>
-    internal GroupData[] Groups = [];
+    internal readonly GroupData[] Groups;
 
     /// <summary>
     /// Upstream <c>repeats</c>: one entry per repeat in the pattern, indexed by the repeat index
     /// that a <c>GREEDY_REPEAT</c>-family node carries in <c>values[0]</c>.
     /// </summary>
-    internal RepeatData[] Repeats = [];
+    internal readonly RepeatData[] Repeats;
 
     /// <summary>Upstream <c>sstack</c>: the structure stack.</summary>
     internal readonly ByteStack Sstack;
@@ -530,7 +537,7 @@ internal sealed class MatchState : IDisposable
     /// over the subject, done once per matching operation, and it buys back the per-position walks
     /// in the repeat opcodes' backtrack arms that made a lazy scan quadratic.
     /// </remarks>
-    internal readonly bool OneUnitPerCharacter;
+    internal bool OneUnitPerCharacter;
 
     private CharacterIndex? _characterIndex;
 
@@ -547,15 +554,49 @@ internal sealed class MatchState : IDisposable
     /// <returns>The index.</returns>
     internal CharacterIndex GetCharacterIndex() => _characterIndex ??= new CharacterIndex(this);
 
-    private MatchState(PatternObject pattern, string text, ArrayPool<byte>? pool, bool? oneUnitPerCharacter)
+    /// <summary>
+    /// The allocating half of <c>state_init_2</c> (<c>upstream/src/_regex.c</c> line 18275): the
+    /// storage whose size depends on the pattern and not on the subject, which is what
+    /// <see cref="MatchStateCache"/> keeps from one call to the next.
+    /// </summary>
+    /// <param name="pattern">The compiled pattern.</param>
+    /// <param name="pool">Where the stacks rent their buffers; see <see cref="Create"/>.</param>
+    /// <param name="cache">The cache <see cref="Dispose"/> hands the state back to, if any.</param>
+    private MatchState(PatternObject pattern, ArrayPool<byte>? pool, MatchStateCache? cache = null)
     {
+        Cache = cache;
         Sstack = new ByteStack(pool);
         Bstack = new ByteStack(pool);
         Pstack = new ByteStack(pool);
         Pattern = pattern;
-        Text = text;
-        TextLength = text.Length;
-        OneUnitPerCharacter = oneUnitPerCharacter ?? text.AsSpan().IndexOfAnyInRange('\uD800', '\uDBFF') < 0;
+
+        // The capture groups (state_init_2, upstream/src/_regex.c:18327). Upstream caches the block
+        // on the pattern as 'groups_storage' and reuses it; MatchStateCache is that cache here.
+        // 'true_group_count' rather than 'public_group_count', because a branch-reset group's
+        // private number is larger than its public one and START_GROUP indexes by the private one.
+        //
+        // NOT PORTED, and both for the same reason: the fuzzy-guard allocation (:18515) and the
+        // group-call-guard allocation. Upstream's 'fuzzy_guards' is written in four places -
+        // allocated, memset, reset in 'reset_guards' (:3394) and freed - and read in NONE, exactly
+        // like 'group_call_guard_list', which S30 settled the same way. `grep -n fuzzy_guards
+        // upstream/src/_regex.c` on 2026-09-13 gives :508, :3394, :3395, :18310, :18515, :18517,
+        // :18519, :18565, :18568, :18646, :18724, :18725 - a declaration, two resets, and
+        // allocation and deallocation. Nothing consults a fuzzy guard to decide anything, so there
+        // is no behaviour to port. docs/PORTMAP.md's "deliberately not ported" table has both.
+        Groups = new GroupData[pattern.TrueGroupCount];
+        for (int g = 0; g < Groups.Length; g++)
+        {
+            Groups[g] = new GroupData();
+        }
+
+        // The repeats (state_init_2, upstream/src/_regex.c:18493-18505), which upstream caches on
+        // the pattern as 'repeats_storage' the same way. Nothing in 'dealloc_repeats' (:18630) is
+        // ported: it is three calls to free.
+        Repeats = new RepeatData[pattern.RepeatCount];
+        for (int r = 0; r < Repeats.Length; r++)
+        {
+            Repeats[r] = new RepeatData();
+        }
     }
 
     /// <summary>
@@ -581,6 +622,10 @@ internal sealed class MatchState : IDisposable
     /// out, or <see langword="null"/> to scan the subject for it. <see cref="Match.NextMatch"/>
     /// passes it on so that a walk does not rescan the whole subject at every step.
     /// </param>
+    /// <param name="cache">
+    /// The cache the state goes back to when it is disposed; only <see cref="MatchStateCache.Rent"/>
+    /// passes one.
+    /// </param>
     /// <returns>The state, ready to match.</returns>
     internal static MatchState Create(
         PatternObject pattern,
@@ -593,48 +638,109 @@ internal sealed class MatchState : IDisposable
         bool matchAll,
         MatchLimits limits,
         ArrayPool<byte>? pool = null,
-        bool? oneUnitPerCharacter = null
+        bool? oneUnitPerCharacter = null,
+        MatchStateCache? cache = null
     )
     {
-        // The capture groups (state_init_2, upstream/src/_regex.c:18327). Upstream caches the block
-        // on the pattern as 'groups_storage' and reuses it; on a garbage-collected heap that cache
-        // has nothing to port. 'true_group_count' rather than 'public_group_count', because a
-        // branch-reset group's private number is larger than its public one and START_GROUP indexes
-        // by the private one.
-        //
-        // NOT PORTED, and both for the same reason: the fuzzy-guard allocation (:18515) and the
-        // group-call-guard allocation. Upstream's 'fuzzy_guards' is written in four places -
-        // allocated, memset, reset in 'reset_guards' (:3394) and freed - and read in NONE, exactly
-        // like 'group_call_guard_list', which S30 settled the same way. `grep -n fuzzy_guards
-        // upstream/src/_regex.c` on 2026-09-13 gives :508, :3394, :3395, :18310, :18515, :18517,
-        // :18519, :18565, :18568, :18646, :18724, :18725 - a declaration, two resets, and
-        // allocation and deallocation. Nothing consults a fuzzy guard to decide anything, so there
-        // is no behaviour to port. docs/PORTMAP.md's "deliberately not ported" table has both.
-        var groups = new GroupData[pattern.TrueGroupCount];
-        for (int g = 0; g < groups.Length; g++)
+        var state = new MatchState(pattern, pool, cache);
+        state.Init(text, start, end, overlapped, partial, visibleCaptures, matchAll, limits, oneUnitPerCharacter);
+        return state;
+    }
+
+    /// <summary>
+    /// Port of <c>state_init</c> (<c>upstream/src/_regex.c</c> line 18598) and the half of
+    /// <c>state_init_2</c> (line 18275) that is not allocation, run on a new state by
+    /// <see cref="Create"/> and on a reused one by <see cref="MatchStateCache.Rent"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every field is assigned here, including the ones a new object already holds at their
+    /// default</b>, because a reused state holds whatever its last match left. The two paths must
+    /// give the same state, and <c>MatchStateCacheTests</c> compares them field by field over a wave
+    /// of patterns, so a field added to this class without a line here fails that test. The buffers
+    /// are the exception, and deliberately: a group's capture array, a guard list's spans and the
+    /// two change lists keep their capacity and lose only their count, exactly as upstream's
+    /// <c>clear_groups</c> (<c>:3369</c>) and <c>reset_guards</c> (<c>:3383</c>) keep theirs.
+    /// </remarks>
+    /// <param name="text">The subject.</param>
+    /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>
+    /// <param name="end">Upstream's <c>endpos</c>, before clamping.</param>
+    /// <param name="overlapped">Whether matches may overlap.</param>
+    /// <param name="partial">Whether a partial match is wanted.</param>
+    /// <param name="visibleCaptures">Whether the caller will read the capture lists.</param>
+    /// <param name="matchAll">Whether the match must cover the whole slice.</param>
+    /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
+    /// <param name="oneUnitPerCharacter">As for <see cref="Create"/>.</param>
+    internal void Init(
+        string text,
+        int start,
+        int end,
+        bool overlapped,
+        bool partial,
+        bool visibleCaptures,
+        bool matchAll,
+        MatchLimits limits,
+        bool? oneUnitPerCharacter
+    )
+    {
+        PatternObject pattern = Pattern;
+
+        Text = text;
+        TextLength = text.Length;
+        // The ushort form of the same search allocates nothing; the char form allocated 96 B on
+        // every call, even after tier-up, in Debug and Release (measured 2026-09-22, .NET 10).
+        // That 96 B was the whole of a warm IsMatch's allocation; AllocationTests pins the 0.
+        OneUnitPerCharacter =
+            oneUnitPerCharacter
+            ?? MemoryMarshal.Cast<char, ushort>(text.AsSpan()).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
+        _characterIndex = null;
+
+        // What a new state holds by default, and a reused one must be given back.
+        Sstack.Reset();
+        Bstack.Reset();
+        Pstack.Reset();
+        ClearGroups();
+        foreach (RepeatData repeat in Repeats)
         {
-            groups[g] = new GroupData();
+            repeat.BodyGuardList.Reset();
+            repeat.TailGuardList.Reset();
+            repeat.Count = 0;
+            repeat.Start = 0;
+            repeat.CaptureChange = 0;
         }
 
-        // The repeats (state_init_2, upstream/src/_regex.c:18493-18505). Like the groups, upstream
-        // caches the block on the pattern as 'repeats_storage' and reuses it; there is nothing to
-        // port in that cache on a garbage-collected heap, and nothing in 'dealloc_repeats'
-        // (:18630) either, which is three calls to free.
-        var repeats = new RepeatData[pattern.RepeatCount];
-        for (int r = 0; r < repeats.Length; r++)
-        {
-            repeats[r] = new RepeatData();
-        }
+        ActiveCalls.Clear();
+        OpenCalls.Clear();
+        SearchAnchor = 0;
+        MatchPos = 0;
+        BestMatchPos = 0;
+        BestTextPos = 0;
+        BestMatchGroups = null;
+        Array.Clear(BestFuzzyCounts);
+        BestFuzzyChanges.Clear();
+        BestTotalErrors = 0;
+        BestTotalCost = 0;
+        HitEnd = false;
+        HitEndMatchPos = 0;
+        MaxErrors = 0;
+        MaxCost = 0;
+        TotalErrors = 0;
+        TotalCost = 0;
+        FewestErrors = 0;
+        CaptureChange = 0;
+        ReqEnd = 0;
+        LastIndex = 0;
+        LastGroup = 0;
+        Iterations = 0;
+        TooFewErrors = false;
+        FoundMatch = false;
+        Array.Clear(FuzzyCounts);
+        FuzzyNode = null;
+        FuzzyChanges.Clear();
 
-        var state = new MatchState(pattern, text, pool, oneUnitPerCharacter)
-        {
-            VisibleCaptures = visibleCaptures,
-            MatchAll = matchAll,
-            ReqPos = -1,
-            IsFuzzy = pattern.IsFuzzy,
-            Groups = groups,
-            Repeats = repeats,
-        };
+        VisibleCaptures = visibleCaptures;
+        MatchAll = matchAll;
+        ReqPos = -1;
+        IsFuzzy = pattern.IsFuzzy;
 
         // Adjust boundaries.
         start = ClampIndex(start, text.Length);
@@ -645,83 +751,111 @@ internal sealed class MatchState : IDisposable
             end = start;
         }
 
-        state.Overlapped = overlapped;
-        state.DoSearchStart = pattern.DoSearchStart;
-        state.MinWidth = pattern.MinWidth;
-        state.Encoding = pattern.Encoding;
+        Overlapped = overlapped;
+        DoSearchStart = pattern.DoSearchStart;
+        MinWidth = pattern.MinWidth;
+        Encoding = pattern.Encoding;
 
         // Open start and closed end bounds, like in re module.
-        state.TextStart = 0;
-        state.TextEnd = end;
+        TextStart = 0;
+        TextEnd = end;
 
-        state.SliceStart = start;
-        state.SliceEnd = end;
-        state.InitialSliceStart = start;
-        state.InitialSliceEnd = end;
+        SliceStart = start;
+        SliceEnd = end;
+        InitialSliceStart = start;
+        InitialSliceEnd = end;
 
-        state.Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
+        Reverse = (pattern.Flags & RegexFlags.Reverse) != 0;
 
         if (partial)
         {
-            state.PartialSide = state.Reverse ? PartialLeft : PartialRight;
+            PartialSide = Reverse ? PartialLeft : PartialRight;
         }
         else
         {
-            state.PartialSide = PartialNone;
+            PartialSide = PartialNone;
         }
 
-        state.TextPos = state.Reverse ? state.SliceEnd : state.SliceStart;
+        TextPos = Reverse ? SliceEnd : SliceStart;
 
         // Point to the final newline and line separator if it's at the end of the string, otherwise
         // just -1.
-        state.FinalNewline = -1;
-        state.FinalLineSep = -1;
-        int finalPos = state.PrevPos(state.TextEnd);
+        FinalNewline = -1;
+        FinalLineSep = -1;
+        int finalPos = PrevPos(TextEnd);
         if (finalPos >= 0)
         {
-            uint ch = state.CharAt(finalPos);
+            uint ch = CharAt(finalPos);
             if (ch == 0x0A)
             {
                 // The string ends with LF.
-                state.FinalNewline = finalPos;
-                state.FinalLineSep = finalPos;
+                FinalNewline = finalPos;
+                FinalLineSep = finalPos;
 
                 // Does the string end with CR/LF?
-                finalPos = state.PrevPos(finalPos);
-                if (finalPos >= 0 && state.CharAt(finalPos) == 0x0D)
+                finalPos = PrevPos(finalPos);
+                if (finalPos >= 0 && CharAt(finalPos) == 0x0D)
                 {
-                    state.FinalLineSep = finalPos;
+                    FinalLineSep = finalPos;
                 }
             }
-            else if (Encodings.IsLineSep(state.Encoding, ch))
+            else if (Encodings.IsLineSep(Encoding, ch))
             {
                 // The string doesn't end with LF, but it could be another kind of line separator.
-                state.FinalLineSep = finalPos;
+                FinalLineSep = finalPos;
             }
         }
 
         // If the 'new' behaviour is enabled then split correctly on zero-width matches.
-        state.Version0 = (pattern.Flags & RegexFlags.Version1) == 0;
-        state.MustAdvance = false;
+        Version0 = (pattern.Flags & RegexFlags.Version1) == 0;
+        MustAdvance = false;
 
-        state.Timeout = limits.TimeoutTicks;
-        state.StartTime = limits.TimeoutTicks == NoTimeout ? 0 : Stopwatch.GetTimestamp();
-        state.Cancellation = limits.Cancellation;
+        Timeout = limits.TimeoutTicks;
+        StartTime = limits.TimeoutTicks == NoTimeout ? 0 : Stopwatch.GetTimestamp();
+        Cancellation = limits.Cancellation;
 
         // NOT PORTED: search_positions, which only search_start reads (Phase 7).
-
-        return state;
     }
 
     /// <summary>
     /// Upstream <c>state_fini</c> (<c>upstream/src/_regex.c</c> line 18662), reduced to returning
-    /// the stacks' rented buffers.
+    /// the stacks' rented buffers. A state <see cref="MatchStateCache.Rent"/> gave out goes back to
+    /// that cache instead, as upstream's <c>state_fini</c> hands its storage back to the pattern, so
+    /// a caller disposes a rented state exactly as it disposes a built one, and exactly once.
     /// </summary>
     public void Dispose()
     {
+        if (Cache is { } cache)
+        {
+            cache.Return(this);
+        }
+        else
+        {
+            ReturnBuffers();
+        }
+    }
+
+    private void ReturnBuffers()
+    {
+        // The state stays usable: a stack that has given its buffer back rents another on its
+        // next push, which is what lets MatchStateCache keep it.
         Sstack.Dispose();
         Bstack.Dispose();
         Pstack.Dispose();
+    }
+
+    /// <summary>
+    /// Lets go of everything this state holds that belongs to the call rather than the pattern, so
+    /// that a state kept by <see cref="MatchStateCache"/> does not keep the caller's subject or
+    /// cancellation token alive after the call has returned.
+    /// </summary>
+    internal void Release()
+    {
+        ReturnBuffers();
+        Text = string.Empty;
+        _characterIndex = null;
+        BestMatchGroups = null;
+        Cancellation = default;
     }
 
     /// <summary>

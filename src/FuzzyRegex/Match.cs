@@ -259,7 +259,7 @@ public sealed class Match : Group
     }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
-    public GroupCollection Groups => new(this, _groups.Length);
+    public GroupCollection Groups => new(this, _regex.GroupCount);
 
     /// <summary>
     /// Port of <c>match_get_group_by_index</c> (<c>upstream/src/_regex.c</c> line 18847) and the
@@ -270,9 +270,17 @@ public sealed class Match : Group
     /// <returns>The group.</returns>
     internal Group GroupAt(int number)
     {
+        string name = _regex.GroupNameFromNumber(number);
+
+        // An unsuccessful match holds no group data at all (see FuzzyRegex.NoMatch), and every one
+        // of its groups is absent.
+        if (_groups.Length == 0)
+        {
+            return new Group(_subject, 0, 0, success: false, name, []);
+        }
+
         // Capture group indexes are 1-based (excluding group 0, which is the entire matched string).
         Engine.GroupData group = _groups[number - 1];
-        string name = _regex.GroupNameFromNumber(number);
 
         if (group.Current < 0)
         {
@@ -566,7 +574,7 @@ public sealed class Match : Group
         var expanded = new StringBuilder(replacement.Length);
         foreach (object item in _regex.CompileReplacement(replacement))
         {
-            expanded.Append(Engine.Substitution.GetMatchReplacement(item, this, _groups.Length));
+            expanded.Append(Engine.Substitution.GetMatchReplacement(item, this, _regex.GroupCount));
         }
 
         return expanded.ToString();
@@ -617,7 +625,7 @@ public sealed class Match : Group
                 return this;
             }
 
-            return number <= _groups.Length ? GroupAt(number) : null;
+            return number <= _regex.GroupCount ? GroupAt(number) : null;
         }
 
         int named = _regex.GroupNumberFromName(argument);
