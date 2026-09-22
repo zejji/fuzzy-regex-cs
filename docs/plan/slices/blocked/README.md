@@ -11,5 +11,6 @@ A slice waiting on a precondition lives here until the precondition is met. Movi
 
 | Slice | Waiting on | Why |
 |---|---|---|
+| S81 | Phase 7 closing (S63), and it runs BEFORE S68 | It re-syncs the upstream pin, which moves the oracle baseline. Doing that during Phase 7 would shift the answers the optimisation slices are gated on not moving. It sorts after S68 but must run first, so take it out of here first and leave S68 until it has landed. |
 | S68 | Phase 7 closing (S63) | It writes `<remarks>` divergence notes onto public members in `src/`, and Phase 7 may still reshape them. |
 | S69 | The Phase 6 exit gate, the Phase 7 performance gate, and the owner's approval of every report text | It files the upstream reports and cuts the 1.0 release. The owner's rule of 2026-09-12 is that nothing is filed on mrab-regex until everything else in the plan is done. |
