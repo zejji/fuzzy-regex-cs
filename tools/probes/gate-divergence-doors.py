@@ -131,7 +131,7 @@ def describe(m) -> str:
         # exception, so `answer`'s `except` cannot see it and ONE such row takes the whole run with
         # it - which is what it did to S52's 37-row triage, dying inside row 32 of 37 after
         # completing 31, so rows 32 to 37 were never asked.
-        # Ledger entry 9; the same guard and the same reason as `record-oracle.py:1019`, keyed off
+        # Ledger entry 9; the same guard and the same reason as `record-oracle.py:1338`, keyed off
         # POSIX rather than off the spent error because nothing in the pattern or the subject
         # predicts one. The counts on the same match answer correctly and are kept.
         changes = ("unavailable upstream (POSIX)" if m.re.flags & POSIX_FLAG

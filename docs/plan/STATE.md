@@ -22,9 +22,7 @@ still reproduced: **S61 item 7** is entry 18. Entry 17 is the owner's decision r
 `src/FuzzyRegex/obj/Release/net10.0/FuzzyRegex.sourcelink.json`. Release builds run with
 `$env:IntermediateOutputPath = 'obj/Release/net10.0-<slice>/'`. Killing it is not authorised.
 
-**Maintenance:** three files cite the POSIX `fuzzy_changes` guard as `record-oracle.py:1019`, now
-`:1338` (`gate-divergence-doors.py:134`, `upstream-posix-fuzzy-changes-crash.py:33`, `LEDGER.md:1212`);
-`check-ratchet.ps1:105` writes the upstream-commit line wrongly when there is no submodule;
+**Maintenance:** `check-ratchet.ps1:105` writes the upstream-commit line wrongly when there is no submodule;
 `run-controls.py` needs a `suite` mode; `_leak_free_fuzzy` starves a reversed row whose lookahead
 reads past the match end (S57b sitting 4).
 

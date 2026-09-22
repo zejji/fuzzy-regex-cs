@@ -30,7 +30,7 @@ S52 sitting 15's notes carry it as Control A (the slice file is
 ``docs/plan/slices/S52-oracle-hardening.md`` while S52 is open, and moves under ``done/`` when it
 closes).
 
-Nothing rests on the wide statement: ``record-oracle.py:1019`` and ``gate-divergence-doors.py`` both
+Nothing rests on the wide statement: ``record-oracle.py:1338`` and ``gate-divergence-doors.py`` both
 guard on POSIX ALONE, which is conservative in the safe direction and cannot crash whatever the
 condition turns out to be.
 

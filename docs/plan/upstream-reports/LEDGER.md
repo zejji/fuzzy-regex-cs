@@ -1209,7 +1209,7 @@ entry must not claim one in an upstream report**: report the reproductions, whic
 the universal. Seen by removing the POSIX guard in `tools/probes/gate-divergence-doors.py`'s
 `describe` and running it over that rows file; S52 sitting 15's notes carry it as Control A.
 
-Nothing this port does rests on the universal: `record-oracle.py:1019` and
+Nothing this port does rests on the universal: `record-oracle.py:1338` and
 `gate-divergence-doors.py` both guard on POSIX ALONE, which is safe whatever the condition is.
 
 **S41 narrowed the faulting access, 2026-09-13, and it makes `match` affected too.** The crash is in
