@@ -51,7 +51,7 @@ internal sealed class MatchStateCache
     /// </returns>
     internal MatchState Rent(
         PatternObject pattern,
-        string text,
+        ReadOnlyMemory<char> text,
         int start,
         int end,
         bool overlapped,

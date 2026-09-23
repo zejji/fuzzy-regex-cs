@@ -52,4 +52,29 @@ public sealed class AllocationTests
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a count on a warm pattern has nothing it needs to build");
     }
+
+    [Test]
+    public void The_memory_overloads_read_a_megabyte_buffer_without_copying_it()
+    {
+        // The span overloads copy their input to a string, two bytes a character; these read the
+        // buffer where it is. A 1 MB slice of a larger array makes a copy impossible to miss.
+        char[] buffer = new char[(1 << 20) + 64];
+        buffer.AsSpan().Fill('a');
+        ReadOnlyMemory<char> slice = buffer.AsMemory(16, 1 << 20);
+        // One inside the slice, near its end, and one after it that must not be seen.
+        "cat".CopyTo(buffer.AsSpan(16 + (1 << 20) - 10));
+        "cat".CopyTo(buffer.AsSpan(buffer.Length - 20));
+        FuzzyRegex regex = new("cat");
+        _ = regex.IsMatch(slice);
+        _ = regex.Count(slice);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool found = regex.IsMatch(slice);
+        int count = regex.Count(slice);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        found.Should().BeTrue();
+        count.Should().Be(1);
+        allocated.Should().Be(0, "the engine reads the caller's buffer in place");
+    }
 }

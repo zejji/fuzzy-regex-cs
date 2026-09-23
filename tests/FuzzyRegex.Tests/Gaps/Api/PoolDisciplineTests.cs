@@ -132,7 +132,7 @@ public sealed class PoolDisciplineTests
 
         MatchState state = MatchState.Create(
             pattern.PatternObject,
-            "aaab",
+            "aaab".AsMemory(),
             0,
             4,
             overlapped: false,

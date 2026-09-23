@@ -147,8 +147,13 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal readonly MatchStateCache? Cache;
 
-    /// <summary>Upstream <c>text</c> and <c>string</c>, which are one object here.</summary>
-    internal string Text = string.Empty;
+    /// <summary>
+    /// Upstream <c>text</c> and <c>string</c>, which are one object here. A memory rather than a
+    /// <see cref="string"/> so that the <see cref="ReadOnlyMemory{T}"/> overloads of
+    /// <c>IsMatch</c> and <c>Count</c> match a caller's buffer without copying it (S61, option (a)
+    /// of <c>docs/plan/2026-09-19-span-threading-decision.md</c>).
+    /// </summary>
+    internal ReadOnlyMemory<char> Text;
 
     /// <summary>Upstream <c>text_length</c>.</summary>
     internal int TextLength;
@@ -629,7 +634,7 @@ internal sealed class MatchState : IDisposable
     /// <returns>The state, ready to match.</returns>
     internal static MatchState Create(
         PatternObject pattern,
-        string text,
+        ReadOnlyMemory<char> text,
         int start,
         int end,
         bool overlapped,
@@ -671,7 +676,7 @@ internal sealed class MatchState : IDisposable
     /// <param name="limits">The time budget and cancellation token bounding this operation.</param>
     /// <param name="oneUnitPerCharacter">As for <see cref="Create"/>.</param>
     internal void Init(
-        string text,
+        ReadOnlyMemory<char> text,
         int start,
         int end,
         bool overlapped,
@@ -691,7 +696,7 @@ internal sealed class MatchState : IDisposable
         // That 96 B was the whole of a warm IsMatch's allocation; AllocationTests pins the 0.
         OneUnitPerCharacter =
             oneUnitPerCharacter
-            ?? MemoryMarshal.Cast<char, ushort>(text.AsSpan()).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
+            ?? MemoryMarshal.Cast<char, ushort>(text.Span).IndexOfAnyInRange((ushort)0xD800, (ushort)0xDBFF) < 0;
         _characterIndex = null;
 
         // What a new state holds by default, and a reused one must be given back.
@@ -852,7 +857,7 @@ internal sealed class MatchState : IDisposable
     internal void Release()
     {
         ReturnBuffers();
-        Text = string.Empty;
+        Text = default;
         _characterIndex = null;
         BestMatchGroups = null;
         Cancellation = default;
@@ -868,10 +873,11 @@ internal sealed class MatchState : IDisposable
     /// <returns>The codepoint there.</returns>
     internal uint CharAt(int pos)
     {
-        char first = Text[pos];
-        if (char.IsHighSurrogate(first) && pos + 1 < TextEnd && char.IsLowSurrogate(Text[pos + 1]))
+        ReadOnlySpan<char> text = Text.Span;
+        char first = text[pos];
+        if (char.IsHighSurrogate(first) && pos + 1 < TextEnd && char.IsLowSurrogate(text[pos + 1]))
         {
-            return (uint)char.ConvertToUtf32(first, Text[pos + 1]);
+            return (uint)char.ConvertToUtf32(first, text[pos + 1]);
         }
 
         return first;
@@ -883,8 +889,13 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     /// <param name="pos">The position.</param>
     /// <returns>The next position.</returns>
-    internal int NextPos(int pos) =>
-        pos + 1 < TextEnd && char.IsHighSurrogate(Text[pos]) && char.IsLowSurrogate(Text[pos + 1]) ? pos + 2 : pos + 1;
+    internal int NextPos(int pos)
+    {
+        ReadOnlySpan<char> text = Text.Span;
+        return pos + 1 < TextEnd && char.IsHighSurrogate(text[pos]) && char.IsLowSurrogate(text[pos + 1])
+            ? pos + 2
+            : pos + 1;
+    }
 
     /// <summary>
     /// One codepoint back from <paramref name="pos"/>: upstream's <c>--text_pos</c> and
@@ -911,8 +922,13 @@ internal sealed class MatchState : IDisposable
     /// </remarks>
     /// <param name="pos">The position.</param>
     /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
-    internal int PrevPos(int pos) =>
-        pos >= 2 && char.IsLowSurrogate(Text[pos - 1]) && char.IsHighSurrogate(Text[pos - 2]) ? pos - 2 : pos - 1;
+    internal int PrevPos(int pos)
+    {
+        ReadOnlySpan<char> text = Text.Span;
+        return pos >= 2 && char.IsLowSurrogate(text[pos - 1]) && char.IsHighSurrogate(text[pos - 2])
+            ? pos - 2
+            : pos - 1;
+    }
 
     /// <summary>Upstream's <c>char_at(state-&gt;text, text_pos - 1)</c>, over whole codepoints.</summary>
     /// <param name="pos">The position to look back from, which must be greater than 0.</param>

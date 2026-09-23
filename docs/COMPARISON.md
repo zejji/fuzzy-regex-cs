@@ -84,7 +84,7 @@ itself has none:
 |---|---|---|
 | `new Regex(pattern, options)` | `new FuzzyRegex(pattern, options)` | `FuzzyRegexOptions` has its own bit values (upstream's `RegexFlag` values, not `RegexOptions`'s); nothing casts between the two enums. |
 | `new Regex(pattern, options, matchTimeout)` | `new FuzzyRegex(pattern, options, matchTimeout, namedLists)` | Every input-dependent method also takes its own `timeout` and `CancellationToken` - see "**A `CancellationToken` on every input-dependent method.**" and "**A per-call `timeout` on every input-dependent method**" below. |
-| `Regex.IsMatch(input)` | `FuzzyRegex.IsMatch(input)` | Same shape; also a `ReadOnlySpan<char>` overload. |
+| `Regex.IsMatch(input)` | `FuzzyRegex.IsMatch(input)` | Same shape; also a `ReadOnlySpan<char>` overload, which copies the span to a string where `Regex`'s does not, and a `ReadOnlyMemory<char>` one, which `Regex` lacks and which reads the buffer in place. `Count` has the same two. |
 | `Regex.Match(input)` | `FuzzyRegex.Match(input)` | Same meaning (search anywhere) - see "**`Match` means upstream's `search`...**" below for why this needed no rename. |
 | `regex.Match(input).Success` / `.Value` / `.Index` / `.Length` | `match.Success` / `.Value` / `.Index` / `.Length` | Same names, inherited from `Group`/`Capture` rather than declared on `Match`. No `Match.Span`; neither engine has one. |
 | `Regex.Matches(input)` | `FuzzyRegex.Matches(input)` | The built-in's `MatchCollection` is lazy (finds the next match as it is enumerated); this port's is eager - see "**A lazy walk times each STEP, where `Matches` times the whole scan.**" below. `EnumerateMatches` is the lazy one here. |

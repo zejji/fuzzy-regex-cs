@@ -64,7 +64,7 @@ public sealed class MatchStateCacheTests
 
         MatchState first = cache.Rent(
             regex.PatternObject,
-            dirty,
+            dirty.AsMemory(),
             0,
             dirty.Length,
             overlapped: false,
@@ -83,7 +83,7 @@ public sealed class MatchStateCacheTests
 
         MatchState reused = cache.Rent(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             1,
             subject.Length,
             overlapped: false,
@@ -94,7 +94,7 @@ public sealed class MatchStateCacheTests
         );
         using MatchState fresh = MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             1,
             subject.Length,
             overlapped: false,
@@ -128,7 +128,7 @@ public sealed class MatchStateCacheTests
         var cache = new MatchStateCache();
         MatchState first = cache.Rent(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,
@@ -143,7 +143,7 @@ public sealed class MatchStateCacheTests
 
         MatchState reused = cache.Rent(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,
@@ -154,7 +154,7 @@ public sealed class MatchStateCacheTests
         );
         using MatchState fresh = MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,
@@ -194,7 +194,7 @@ public sealed class MatchStateCacheTests
     private static MatchState Create(FuzzyRegex regex, string subject) =>
         MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,
@@ -254,6 +254,9 @@ public sealed class MatchStateCacheTests
                 break;
             case string:
                 field.SetValue(state, "scribbled");
+                break;
+            case ReadOnlyMemory<char>:
+                field.SetValue(state, "scribbled".AsMemory());
                 break;
             case Enum:
                 Array values = Enum.GetValues(field.FieldType);
@@ -353,6 +356,9 @@ public sealed class MatchStateCacheTests
                 break;
             case CancellationToken token:
                 lines.Add($"{path}={token.Equals(CancellationToken.None)}");
+                break;
+            case ReadOnlyMemory<char> text:
+                lines.Add($"{path}={text}");
                 break;
             case CharacterIndex:
                 // Each state builds its own, so the question is only whether one exists.

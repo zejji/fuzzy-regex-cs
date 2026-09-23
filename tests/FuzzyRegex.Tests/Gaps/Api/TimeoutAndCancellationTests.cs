@@ -123,6 +123,12 @@ public sealed class TimeoutAndCancellationTests
             case "CountSpan":
                 _ = pattern.Count(input.AsSpan(), timeout);
                 break;
+            case "IsMatchMemory":
+                _ = pattern.IsMatch(input.AsMemory(), timeout);
+                break;
+            case "CountMemory":
+                _ = pattern.Count(input.AsMemory(), timeout);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(method), method, "no such method in this test");
         }
@@ -194,6 +200,12 @@ public sealed class TimeoutAndCancellationTests
             case "CountSpan":
                 _ = pattern.Count(input.AsSpan(), cancellationToken: token);
                 break;
+            case "IsMatchMemory":
+                _ = pattern.IsMatch(input.AsMemory(), cancellationToken: token);
+                break;
+            case "CountMemory":
+                _ = pattern.Count(input.AsMemory(), cancellationToken: token);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(method), method, "no such method in this test");
         }
@@ -219,6 +231,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
+    [Arguments("IsMatchMemory")]
+    [Arguments("CountMemory")]
     public void A_per_call_timeout_fires_on_every_input_dependent_method(string method)
     {
         // The pattern itself has NO budget, so anything that fires here came from the call.
@@ -249,6 +263,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
+    [Arguments("IsMatchMemory")]
+    [Arguments("CountMemory")]
     public void Cancellation_stops_every_input_dependent_method(string method)
     {
         FuzzyRegex pattern = new(_slowPattern);

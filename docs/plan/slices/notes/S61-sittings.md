@@ -110,3 +110,55 @@ What is left is output: the `Match` and its group copies, and Replace's result s
 Walks: `EnumerateMatchesFirstTwo` 1.38 KB to 504 B; `MatchesToEnd` (33.46 MB) and
 `MatchesToEndDense` (3.38 MB) are unchanged, because their bytes are the `Match` objects.
 **Time gate open**: `--filter "*ManyInputs*"` on a quiet machine decides the time side.
+
+### Step D: span option (a), the memory overloads
+
+`MatchState.Text` is a `ReadOnlyMemory<char>` (option (a) of
+`docs/plan/2026-09-19-span-threading-decision.md`), and `IsMatch` and `Count` gained
+`ReadOnlyMemory<char>` overloads that read the caller's buffer where it lies. The span overloads
+still copy, and their remarks now say so. Everything returning a `Match` keeps its string, because
+`Capture.Value` needs one.
+
+`*SpanOverload*`, `--job short --inProcess`, over a megabyte:
+
+| Row | Allocated |
+|---|---|
+| StringMegabyte | 0 B |
+| SpanMegabyte | 2,098,060 B |
+| MemoryMegabyte | 0 B |
+| CountStringMegabyte | 3 B |
+| CountSpanMegabyte | 2,098,135 B |
+| CountMemoryMegabyte | 8 B |
+
+Controls, each run once and restored: the memory `IsMatch` routed through
+`IsMatch(input.ToString())`, and the memory `Count` through `input.ToString().AsMemory()`. Each
+made `The_memory_overloads_read_a_megabyte_buffer_without_copying_it` fail at 2,097,176 B.
+
+**Time gate open**: `CharAt` now reads through `Text.Span` on every path, so the deciding run is
+the full suite at `--job medium` on a quiet machine, with `*ManyInputs*` and `*SpanOverload*` read
+first.
+
+### Oracle after step D (2026-09-23 01:30)
+
+Green at seeds 7 and 4242; red at 20260923 on two rows. Both reproduce at 8dd746e, before any S61
+change, so neither is S61's. Each still needs minimising and pinning:
+
+- Row 5185 (partial-sliced): `(?:[[:digit:]]?(*SKIP)[^\d]|\s)([_])?\1\g<1>\b`, IgnoreCase, V0,
+  over `BB__` sliced to [0, 2), partial. Upstream gives (0, 2). The port gives (1, 1) both here and
+  at 8dd746e, cold and warm.
+- Row 3752 (interactions): Split with flags 0x400a. The oracle timed out. With no timeout, `Split`
+  ran for over 10 minutes on both builds (542 s and 229 s of CPU) and was still going. Upstream
+  returns 2 parts.
+
+### Blocker (01:50), cleared in sitting 2
+
+The step D commit's pre-commit inspection (`jb inspectcode`, PIDs 45996, 23976 and 14720, started
+01:04) stopped writing output at 01:05 and used no CPU. `dotnet build-server shutdown` did not free
+it. The driver rolled the step D change set back to a34d895 and saved it as
+`slice-rescue/S61-per-match-allocation-20260923-014852`.
+
+## Sitting 2 (2026-09-23)
+
+The rescue stash was applied unchanged. The inspection that hung in sitting 1 ran through in
+about 12 minutes. Ratchet GREEN at 6624 tests. Step D was committed as it was restored. The blind
+review is still owed on a34d895 and everything after it.

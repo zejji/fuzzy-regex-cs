@@ -1197,3 +1197,14 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   as the one exception, backed by the stress test (which fails when the slot is read without the
   exchange) and by `MatchStateCacheTests` (a reused state equals a new one, field by field). A state
   the cache built goes back to it on `Dispose`, so every call site keeps its `using`.
+- 2026-09-23 (S61): span option (a) is in, (b) stays declined, (c) is the span overloads' doc.
+  `MatchState.Text` is a `ReadOnlyMemory<char>`, and `IsMatch` and `Count` gained
+  `ReadOnlyMemory<char>` overloads that read the caller's buffer in place: 0 B and 8 B over a
+  megabyte `char[]`, against 2,098,060 B and 2,098,135 B for the span forms
+  (`*SpanOverload*`, `--job short --inProcess`). The span overloads still copy and say so in
+  their remarks; pinning the span with `unsafe` (option b) is not re-proposed without a user
+  asking. Only those two methods: everything returning a `Match` needs the subject as a string
+  for `Capture.Value`. The time gate is still open: `CharAt` now reads through `Text.Span`, on
+  every path, so the deciding run is the full suite at `--job medium` on a quiet machine, with
+  `*ManyInputs*` and `*SpanOverload*` read first. A `char[]` argument still binds to the span
+  overload under C# 14 (`MemoryOverloadTests` compiles it).

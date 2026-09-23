@@ -110,7 +110,7 @@ internal static class Substitution
 
         using var state = regex.StateCache.Rent(
             pattern,
-            input,
+            input.AsMemory(),
             start,
             end,
             overlapped: false,

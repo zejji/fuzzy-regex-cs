@@ -75,7 +75,7 @@ internal static class Iteration
         // does, so it is the scanner's argument that applies.
         Scan(
             regex,
-            input,
+            input.AsMemory(),
             start,
             end,
             overlapped,
@@ -107,7 +107,7 @@ internal static class Iteration
     /// </remarks>
     internal static int Count(
         FuzzyRegex regex,
-        string input,
+        ReadOnlyMemory<char> input,
         int start,
         int end,
         bool overlapped,
@@ -136,7 +136,7 @@ internal static class Iteration
     /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
     private static int Scan(
         FuzzyRegex regex,
-        string input,
+        ReadOnlyMemory<char> input,
         int start,
         int end,
         bool overlapped,
@@ -168,7 +168,7 @@ internal static class Iteration
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
-                throw limits.Cancelled(input, regex.Pattern);
+                throw limits.Cancelled(input.ToString(), regex.Pattern);
             }
 
             // scanner_search_or_match builds a match for PARTIAL exactly as it does for SUCCESS
@@ -298,7 +298,7 @@ internal static class Iteration
     {
         using var state = regex.StateCache.Rent(
             regex.PatternObject,
-            input,
+            input.AsMemory(),
             sliceStart,
             sliceEnd,
             overlapped,
@@ -381,7 +381,7 @@ internal static class Iteration
         // visible."
         using var state = regex.StateCache.Rent(
             regex.PatternObject,
-            input,
+            input.AsMemory(),
             start,
             end,
             overlapped,
@@ -482,7 +482,7 @@ internal static class Iteration
         // "The MatchObject, and therefore repeated captures, will not be visible."
         using var state = regex.StateCache.Rent(
             regex.PatternObject,
-            input,
+            input.AsMemory(),
             0,
             input.Length,
             overlapped: false,

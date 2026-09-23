@@ -5084,7 +5084,7 @@ internal static class Matcher
         // The chunk loop this replaced ran zero times when the bounds crossed; 'AsSpan' would throw.
         if (limit > textPos)
         {
-            int found = state.Text.AsSpan(textPos, limit - textPos).IndexOf(needle.AsSpan());
+            int found = state.Text.Span[textPos..limit].IndexOf(needle.AsSpan());
             if (found >= 0)
             {
                 return textPos + found;
@@ -5094,7 +5094,7 @@ internal static class Matcher
         if (state.PartialSide == MatchState.PartialRight)
         {
             int retry = limit - needle.Length;
-            if (retry > 0 && char.IsLowSurrogate(state.Text[retry]))
+            if (retry > 0 && char.IsLowSurrogate(state.Text.Span[retry]))
             {
                 --retry;
             }
