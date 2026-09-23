@@ -581,3 +581,12 @@ so the next sitting starts on the code:
   `TryMatch` and its helpers: stop turning FAILURE into SUCCESS, and add the `STRING*` jump.
 - Risk: the one S31 found. Upstream stops inside a branch where the reduction carried on, so
   partial matching is the area to hunt. Run `PartialMatchingTests` early and often.
+
+## 2026-09-23, 05:40 - the orchestrator's review request for 1cb7cc6
+
+The orchestrator asked, at 05:40, for a blind review of 1cb7cc6 before its 06:40 merge. That review
+already exists: the "03:35" section above, one pass, no defects, 360,448 cases against `regex`
+2026.9.10. `git log 232dee0..HEAD -- src/FuzzyRegex/Engine/Matcher.cs` lists only 8fed3de, whose
+eight lines are in the reverse zero-width scan and had their own pass ("05:35"). `SameCharIgn` is
+unchanged since the review, so it was not reviewed again: VERIFICATION.md allows one pass per
+unreviewed change. Nothing unreviewed is on the branch. Item 3 is next.

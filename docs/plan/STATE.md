@@ -14,8 +14,9 @@ rows 3752 and 5185 only, which diverge on the base commit 8dd746e too.
 
 ## Next
 
-The remaining items: 3, 6, 8-9, 11-14, 16 and 17, one sitting each, or deferred with a row in
-OPTIMISATION-NOTES.md. None is started.
+**Item 3 is next** (`try_match`'s string arms). Its map is in the notes file, "Item 3, mapped but
+not started"; start on the code, not on orientation. After it: 6, 8-9, 11-14, 16 and 17, one
+sitting each, or deferred with a row in OPTIMISATION-NOTES.md. None is started.
 
 ## Findings that need a slice
 
