@@ -532,3 +532,19 @@ failed before the fix (`(?r)\M (6, 2)`: want no match, found `(5, 0)`) and passe
 
 Suite 6651/6651, ratchet GREEN, baseline 6543. Oracle: seeds 7 and 4242 GREEN; 20260923 RED on
 rows 3752 and 5185 only, the two that diverge on the base commit 8dd746e.
+
+### Review
+
+Item 2's blind pass is now complete: the first reviewer's 149,292 cases found nothing, and the
+sweep above found one defect, reproduced and fixed in 8fed3de. **The fix itself has not had its
+blind pass.** It is eight lines in one method and never seen by a reviewer, so it owes one delta
+pass. This sitting could not dispatch one: there was no Agent tool, and a nested `claude -p`
+reviewer was refused approval. The brief is in `.scratch/review-delta.txt` (gitignored); its hunt
+list is a reverse scan now refusing a position inside the slice, a forward scan passing a
+`SliceEnd` that splits a pair, another arm answering outside the slice, and a lookbehind or
+partial slice reaching this path. The sweep covers every one of those shapes and shows 0
+differences, which is evidence but not the review.
+
+The orchestrator's second review item, 1cb7cc6's `SameCharIgn` fast path, was already done at
+232dee0 (no defects, 360,448 cases against upstream; the "03:35" section above). It was not run
+again.

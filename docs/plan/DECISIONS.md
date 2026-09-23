@@ -1200,3 +1200,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   most 32 pieces in all. Each piece is its own cached `IndexOf`, not one `SearchValues<string>`
   pass: three phrases of nine pieces ran at 171.7 ms, level with three one-phrase passes at
   159.7 ms, so the single pass waits for a long named list and a benchmark (SHORTCUT in the file).
+- 2026-09-23 (S60b item 2): `search_start` is kept. On a quiet machine RedactDigits ran 1.72x
+  faster and every other row stayed flat with identical allocations; the earlier 1.93x named-list
+  slowdown was builds running during the measurement. A reverse zero-width scan whose slice start
+  splits a surrogate pair gives up below `SliceStart`, as the matcher does, where upstream's
+  codepoint positions cannot reach that case at all.
