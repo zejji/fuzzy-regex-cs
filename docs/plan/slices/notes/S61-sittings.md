@@ -204,3 +204,9 @@ one-byte rise on a 30,000,000,000-byte baseline (slack 0) printed as 1.000000000
 1.00000000001 printed as 1.0000000000x. Neither changed a verdict. The cap is now 15, which is
 `Math.Round`'s own limit. Pinned by the Pester test "shows a one-byte rise on a very large
 baseline", which was red before the fix.
+
+**Fourth pass, over aa67e98: no defects found.** Tool tests 191/191. 200,000 random one-byte
+rises on baselines up to 1e12 bytes all printed as something other than 1. The first ratio that
+still prints as 1 is 1 + 2e-16, which needs a baseline of about 4.5e15 bytes per operation.
+S61 review summary for a34d895 to aa67e98: four passes, five findings raised, five reproduced,
+five fixed.

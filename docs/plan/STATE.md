@@ -4,14 +4,15 @@
 `docs/plan/slices/notes/S61-sittings.md`), on branch `slice/s61`. Landed so far: step A (one state
 per lazy walk), steps B and C (a warm pattern reuses one match state; a warm `IsMatch` allocates
 nothing), the allocation gate in `compare-benchmarks.ps1`, and step D (span option (a): `IsMatch`
-and `Count` take a `ReadOnlyMemory<char>` and read it in place). Ratchet GREEN at 6624 tests.
+and `Count` take a `ReadOnlyMemory<char>` and read it in place). Ratchet GREEN at 6625 tests.
+Every commit through aa67e98 has been blind-reviewed. The last pass found no defects; the review
+fixes are in the S61 notes.
 
 Ledger entry 18 (bytes per repetition of a capture group) was handed to S86 in writing.
 
 ## Next, in this order
 
-1. **Blind review** of a34d895 and cd0c3d1 (a125fd0 and earlier were reviewed clean).
-2. **Two oracle rows red at seed 20260923**, both reproduced at 8dd746e, before any S61 change, so
+1. **Two oracle rows red at seed 20260923**, both reproduced at 8dd746e, before any S61 change, so
    neither is S61's. They still need minimising and pinning: row 5185 (partial-sliced, a `(*SKIP)`
    pattern, upstream (0, 2), port (1, 1)) and row 3752 (interactions, `Split` with flags 0x400a
    runs for more than 10 minutes where upstream returns 2 parts). Details are in the S61 notes.
