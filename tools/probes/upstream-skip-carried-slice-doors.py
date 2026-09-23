@@ -106,10 +106,16 @@ FAMILY 3, rows 25854 and 38151: UPSTREAM'S OWN SCAN, TAKEN ONE MATCH AT A TIME, 
 
     Classified by `skip-carried-slice-on-a-scan-with-no-walk`.
 
+    Seed 20260923 row 3752 (S87) is a forward `split`, sound for row 25854's reason: both matches
+    in its walk are one codepoint wide. It has no `(*PRUNE)` control, because upstream's
+    `(*PRUNE)` and verb-free spellings never return (ledger entry 32), so its walk is the whole
+    judgement: (0, 1) then (3, 4), where upstream's split stops after the first.
+
 Measured 2026-09-15 against regex 2026.9.10. The recorder writes the `(*PRUNE)` control per row as
 `pruneOutcome` (S52), so a wave carries the first three lines of every block without this probe.
 """
 
+import multiprocessing
 import sys
 
 import regex
@@ -147,7 +153,17 @@ ROWS = [
         0xA, "a\r\na\U0001D518\U0001D518\U00010428\r\U00010428\U0001D518", "subf",
         "-{0[0]}{0[-1]}{0[-2]}", 0, {},
     ),
+    (
+        20260923, 3752, 3, "interactions",
+        r"(?b)\b\K(?:(?:\U0001D7EEa(?:[[:alpha:]]+?){s<=1:\W}){s<=1,i<=1,d<=1}(*SKIP)\S|\S)",
+        0x400A, "\U0001D7EE\r\n\U0001D518\U0001D518\U0001D518\rAa", "split", None, 0, {},
+    ),
 ]
+
+# Seconds before a line gives up. Row 3752's `(*PRUNE)` and verb-free spellings never return on
+# upstream: a rejected fuzzy section leaves `total_errors` stale and `do_best_fuzzy_match` re-finds
+# one match for ever (ledger entry 32). Each line runs in a child process so a hang is an answer.
+LINE_TIMEOUT = 10
 
 # Nothing about a family-2 row is listed here. The end upstream reports, and whether the `(?w)`
 # control can isolate anything on that row, are both DERIVED in the block below - the first from
@@ -222,6 +238,23 @@ def answer(generator, pattern, flags, subject, operation, template, count, lists
         return f"{type(e).__name__}: {e}"
 
 
+def _answer_into(queue, args) -> None:
+    queue.put(answer(*args))
+
+
+def bounded_answer(*args) -> str:
+    """`answer`, or `HANGS` if upstream has not returned within LINE_TIMEOUT seconds."""
+    queue = multiprocessing.Queue()
+    child = multiprocessing.Process(target=_answer_into, args=(queue, args))
+    child.start()
+    child.join(LINE_TIMEOUT)
+    if child.is_alive():
+        child.terminate()
+        child.join()
+        return f"HANGS (no answer in {LINE_TIMEOUT} s)"
+    return queue.get()
+
+
 def without_the_partial(generator, pattern, flags, subject, operation, lists) -> str:
     """The same call with no `partial=True`, which is family 1's whole control."""
     compiled = compile_row(generator, pattern, flags, lists)
@@ -282,9 +315,9 @@ if __name__ == "__main__":
         if lists:
             print("    lists             " + ascii(str(lists)))
         rest = (flags, subject, operation, template, count, lists)
-        print("    as drawn          " + ascii(answer(generator, pattern, *rest)))
-        print("    (*SKIP)->(*PRUNE) " + ascii(answer(generator, pattern.replace("(*SKIP)", "(*PRUNE)"), *rest)))
-        print("    verb deleted      " + ascii(answer(generator, pattern.replace("(*SKIP)", ""), *rest)))
+        print("    as drawn          " + ascii(bounded_answer(generator, pattern, *rest)))
+        print("    (*SKIP)->(*PRUNE) " + ascii(bounded_answer(generator, pattern.replace("(*SKIP)", "(*PRUNE)"), *rest)))
+        print("    verb deleted      " + ascii(bounded_answer(generator, pattern.replace("(*SKIP)", ""), *rest)))
 
         if family == 1:
             # The whole control: a partial call cannot answer a match the same engine denies when

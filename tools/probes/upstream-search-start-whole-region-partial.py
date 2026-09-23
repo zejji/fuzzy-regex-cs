@@ -37,6 +37,10 @@ CASES = [
     # astral or a line break.
     ('seed 7 row 6997', r'(?r)(?:[a-f](*PRUNE)\d|[[:digit:]])(?(?<![[:digit:]])[abz])(?:\p{Nd}(*SKIP)\s|\p{L})', '\U0001D518\U0001F600\n', 0x0),
     ('seed 20260915 row 7094', r'(?:[\p{L}\p{N}](*SKIP)\p{Nd}|\p{Ll})(\S)*?(?P<g2>\S?)(?:(?(2)(?=(?P>g2))\p{Nd}|.))', '\U00010400\U0001F3FB\U00010400', 0x8),
+    # S87 (2026-09-23): a 'partial-sliced' row, so the searched region is the slice [0, 2) and not
+    # the subject. The fifth field is (pos, endpos). Its generator is recorded prefilter-free, and
+    # the required-string prefilter changes none of the lines below (measured both ways).
+    ('seed 20260923 row 5185', r'(?:[[:digit:]]?(*SKIP)[^\d]|\s)([_])?\1\g<1>\b', 'BB__', 0x2, (0, 2)),
 ]
 
 
@@ -45,10 +49,12 @@ def show(m):
 
 
 print(f'regex {regex.__version__}')
-for label, pat, subject, flags in CASES:
+for label, pat, subject, flags, *region in CASES:
+    pos, endpos = region[0] if region else (0, len(subject))
     c = regex.compile(pat, flags, cache_pattern=False)
-    found = c.search(subject, partial=True)
-    print(f'\n== {label}  {pat!r} on {subject!r} (len {len(subject)}) flags 0x{flags:x}')
+    found = c.search(subject, pos, endpos, partial=True)
+    sliced = f' slice [{pos}, {endpos})' if region else ''
+    print(f'\n== {label}  {pat!r} on {subject!r} (len {len(subject)}){sliced} flags 0x{flags:x}')
     print(f'   search(partial=True)                {show(found)}')
     if found:
         start, end = found.span()
@@ -62,15 +68,16 @@ for label, pat, subject, flags in CASES:
     # row upstream does answer. No generator emits those spellings; the cases here are hand-copied.
     reversed_row = '(?r' in pat or bool(flags & 0x400)
     answered = 0
-    for bound in range(len(subject) + 1):
-        answer = c.match(subject, 0, bound, partial=True) if reversed_row else c.match(subject, bound, partial=True)
+    for bound in range(pos, endpos + 1):
+        answer = (c.match(subject, pos, bound, partial=True) if reversed_row
+                  else c.match(subject, bound, endpos, partial=True))
         if answer is not None:
             answered += 1
             label = f'endpos={bound}' if reversed_row else f'pos={bound}'
             print(f'   match({label}, partial=True)        {show(answer)}')
     if answered == 0:
-        print(f'   no match(..., partial=True) anywhere    ({"endpos" if reversed_row else "pos"} swept 0..{len(subject)})')
+        print(f'   no match(..., partial=True) anywhere    ({"endpos" if reversed_row else "pos"} swept {pos}..{endpos})')
     # And that the verb is what puts upstream on the prefilter's path.
     for replacement, name in (('', 'verb deleted'), ('(*PRUNE)', 'verb -> (*PRUNE)')):
         other = regex.compile(pat.replace('(*SKIP)', replacement), flags, cache_pattern=False)
-        print(f'   {name:20} search(partial)  {show(other.search(subject, partial=True))}')
+        print(f'   {name:20} search(partial)  {show(other.search(subject, pos, endpos, partial=True))}')

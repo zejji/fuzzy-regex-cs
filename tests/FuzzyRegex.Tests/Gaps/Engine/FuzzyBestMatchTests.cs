@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -966,8 +967,8 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyChanges.Insertions.Should().Equal(6, 8);
     }
 
-    // UPSTREAM HANGS ON ALL THREE (?b) PATTERNS BELOW; the port's answer is the zero-error match the
-    // `|2` branch gives. regex 2026.9.10 on 2026-09-23 (.scratch probe, 5 s limit per call):
+    // UPSTREAM HANGS ON BOTH (?b) PATTERNS BELOW; the port's answer is the zero-error match the
+    // `|2` branch gives, which upstream itself gives once the (?b) is removed. regex 2026.9.10 on 2026-09-23 (.scratch probe, 5 s limit per call):
     //   search('(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                        -> killed at 5 s
     //   search('(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')          -> killed at 5 s
     //   search('(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')              -> (0, 1) (0, 0, 0)
@@ -1042,11 +1043,43 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, 0, 0));
     }
 
+    // The snapshot END_FUZZY writes has to agree with the counts once the match is found. Driven
+    // through the engine directly because the public answers above do not show the snapshot: the
+    // walk's budgets often land on the right match even when it is stale.
+    [Test]
+    [Arguments(@"(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)", "2y")]
+    [Arguments(@"(?e)(?:(?:a(?:x+?){s<=1}){e<=2}|2)", "2y")]
+    [Arguments(@"(?:(?:a(?:x+?){s<=1}){e<=2}|2)", "2y")]
+    [Arguments(@"(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)", "2\n")]
+    [Arguments(@"(?e)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)", "2\n")]
+    [Arguments(@"(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)", "2\n")]
+    public void The_error_total_agrees_with_the_counts_after_a_match(string pattern, string subject)
+    {
+        var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(2));
+        MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject,
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: false,
+            regex.PatternLimits
+        );
+
+        int status = Matcher.DoMatch(state, search: true);
+
+        status.Should().Be(1);
+        state.TotalErrors.Should().Be(state.FuzzyCounts.Sum());
+    }
+
     // Oracle row 3752, generator `interactions`, seed 20260923. This test is for termination: the
-    // port did not finish. Upstream answers ['', '\r\n𝔘𝔘𝔘\rAa'] in 3 ms only because its `(*SKIP)`
-    // cuts its BESTMATCH walk short (ledger 5); without the `(*SKIP)` upstream hangs as well
-    // (regex 2026.9.10, 2026-09-23, killed at 5 s). The port's split is the one upstream's own
-    // search(s, 1) supports: the walk finds '𝔘' at 3 once the first match is taken.
+    // port did not finish. Upstream answers ['', '\r\n𝔘𝔘𝔘\rAa'] only because its `(*SKIP)` leaves
+    // a stale slice that ends the scan after one match (ledger 5); with `(*PRUNE)` in its place, or
+    // the verb deleted, upstream hangs as well. The expected parts are upstream's own scan taken
+    // one search at a time: (0, 1), then search(s, 1) gives (3, 4) with no errors, then nothing.
+    // Measured on regex 2026.9.10, 2026-09-23, tools/probes/upstream-skip-carried-slice-doors.py.
     [Test]
     public void Bestmatch_split_over_a_rejected_fuzzy_section_finishes()
     {
