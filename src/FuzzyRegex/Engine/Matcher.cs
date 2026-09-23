@@ -6620,6 +6620,23 @@ internal static class Matcher
                     totalCounts[FuzzyValue.Ins] = outerCounts[FuzzyValue.Ins] + state.FuzzyCounts[FuzzyValue.Ins];
                     totalCounts[FuzzyValue.Del] = outerCounts[FuzzyValue.Del] + state.FuzzyCounts[FuzzyValue.Del];
 
+                    // THIS PORT KEEPS THE OLD TOTALS, so that whatever undoes this arm puts them back:
+                    // the reject below, and the backtrack arm through the two extra bstack entries.
+                    // Upstream writes 'total_errors' and never restores it - not on the reject
+                    // (':12484-12495') and not when backtracking out (':15568') - and the walks read
+                    // it at the next success. A match that no longer passes through this section, the
+                    // other side of an alternation, then reports errors its counts do not have.
+                    // 'DoBestFuzzyMatch' scores it as no better than the last run, 'start_pos' does
+                    // not advance, and it HANGS, upstream as well as here:
+                    // '(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)' over '2y'. Recomputing the totals from the
+                    // counts on the way back is not enough: with nested sections the counts then
+                    // still hold the enclosing section's errors, and nothing resets the total when
+                    // that section is itself backtracked out of. Ledger entry 32, found 2026-09-23 by
+                    // the oracle at seed 20260923; pinned by 'Gaps.Engine.FuzzyBestMatchTests
+                    // .Bestmatch_does_not_read_a_stale_error_total_from_a_rejected_fuzzy_section'.
+                    long previousTotalErrors = state.TotalErrors;
+                    long previousTotalCost = state.TotalCost;
+
                     // Is the total number of errors OK?
                     state.TotalErrors = TotalErrors(totalCounts);
 
@@ -6646,6 +6663,9 @@ internal static class Matcher
                     // 'Gaps.Engine.FuzzyBestMatchTests.Bestmatch_bounds_the_cost_of_the_whole_match_not_of_one_section'.
                     if (state.TotalErrors > state.MaxErrors || state.TotalCost > state.MaxCost)
                     {
+                        state.TotalErrors = previousTotalErrors;
+                        state.TotalCost = previousTotalCost;
+
                         state.PushFuzzyCounts(state.Sstack, outerCounts);
                         state.Sstack.PushNode(outerNode);
 
@@ -6655,6 +6675,10 @@ internal static class Matcher
 
                     // Save the inner fuzzy info. The zero is the count of trailing insertions this
                     // section has been asked to try, which the backtrack arm raises one at a time.
+                    // The two totals are this port's, for the backtrack arm to put back - see the note
+                    // above 'previousTotalErrors'.
+                    state.Bstack.PushSize(previousTotalErrors);
+                    state.Bstack.PushSize(previousTotalCost);
                     state.PushFuzzyCounts(state.Bstack, state.FuzzyCounts);
                     state.Bstack.PushSize(0);
                     state.Bstack.PushNode(state.FuzzyNode);
@@ -6667,7 +6691,8 @@ internal static class Matcher
 
                     /* sstack: -
                      *
-                     * bstack: inner_counts insertions inner_node text_pos end_fuzzy_node END_FUZZY
+                     * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
+                     * end_fuzzy_node END_FUZZY
                      */
 
                     node = node.Next1.Node!;
@@ -9549,7 +9574,8 @@ internal static class Matcher
 
                     /* sstack: -
                      *
-                     * bstack: inner_counts insertions inner_node text_pos end_fuzzy_node
+                     * bstack: total_errors total_cost inner_counts insertions inner_node text_pos
+                     * end_fuzzy_node
                      */
 
                     if (
@@ -9561,6 +9587,10 @@ internal static class Matcher
                         // changes outlive its counts coming off the stack, and the trailing-insertion
                         // retry below goes on to ADD to them.
                         || !state.PopFuzzyCountsMerging(state.Bstack, innerCounts, out _)
+                        // This port's: the totals as they were before the forward arm wrote them.
+                        // Ledger entry 32; see the note above 'previousTotalErrors' there.
+                        || !state.Bstack.PopSize(out long previousTotalCost)
+                        || !state.Bstack.PopSize(out long previousTotalErrors)
                     )
                     {
                         return MatchStatus.Illegal;
@@ -9637,6 +9667,8 @@ internal static class Matcher
                             state.TextPos = Step(state, state.TextPos, endFuzzyReverse ? -1 : 1);
 
                             // Save the inner fuzzy info.
+                            state.Bstack.PushSize(previousTotalErrors);
+                            state.Bstack.PushSize(previousTotalCost);
                             state.PushFuzzyCounts(state.Bstack, innerCounts);
                             state.Bstack.PushSize(insertions + 1);
                             state.Bstack.PushNode(innerNode);
@@ -9644,8 +9676,8 @@ internal static class Matcher
                             state.Bstack.PushNode(node);
                             state.Bstack.PushUInt8((byte)Opcode.EndFuzzy);
 
-                            /* bstack: inner_counts insertions inner_node text_pos end_fuzzy_node
-                             * END_FUZZY
+                            /* bstack: total_errors total_cost inner_counts insertions inner_node
+                             * text_pos end_fuzzy_node END_FUZZY
                              */
 
                             ++state.FuzzyCounts[FuzzyValue.Ins];
@@ -9665,6 +9697,11 @@ internal static class Matcher
                     state.FuzzyCounts[FuzzyValue.Sub] -= innerCounts[FuzzyValue.Sub];
                     state.FuzzyCounts[FuzzyValue.Ins] -= innerCounts[FuzzyValue.Ins];
                     state.FuzzyCounts[FuzzyValue.Del] -= innerCounts[FuzzyValue.Del];
+
+                    // This port's two lines. Upstream subtracts the counts and leaves 'total_errors'
+                    // as the forward arm set it (':15568'); ledger entry 32.
+                    state.TotalErrors = previousTotalErrors;
+                    state.TotalCost = previousTotalCost;
 
                     // Save the outer fuzzy info.
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);

@@ -224,13 +224,19 @@ public sealed class FuzzyBestMatchTests
         // both numbers from the live counts whenever it is the one ranking.
         //
         // UPSTREAM ANSWERS (0, 2) WITH ONE SUBSTITUTION AND ONE DELETION, costing 3 + 1 = 4 under
-        // this equation; this port answers (1, 2) with two deletions, costing 2. regex 2026.7.19:
+        // this equation; this port answers (0, 1) with two deletions, costing 2. regex 2026.7.19,
+        // re-run on 2026.9.10 on 2026-09-23 with the same answer:
         //   regex.search(r'(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)', 'bb')
         //     -> span=(0, 2) fuzzy_counts=(1, 0, 1)
+        //
+        // Until S87 this port answered (1, 2), also two deletions costing 2. Both spans cost the same
+        // and use the same number of errors, so the owner's rule - cheapest, then fewest errors, then
+        // earliest - picks (0, 1). The walk that settles the tie was reading a stale error total
+        // (ledger entry 32) and lost the earlier span.
         Match m = new FuzzyRegex("(?b)((?:abc){e<=2,2i+1d+3s<=4}(?1)?)").Match("bb");
 
         m.Success.Should().BeTrue();
-        (m.Index, m.Index + m.Length).Should().Be((1, 2));
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
 
         // The unit-cost control: no cost walk, so upstream's answer, and it never hung.
@@ -958,5 +964,100 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 2, 0), "upstream answers no match at all");
         m.FuzzyChanges.Substitutions.Should().Equal(1);
         m.FuzzyChanges.Insertions.Should().Equal(6, 8);
+    }
+
+    // UPSTREAM HANGS ON ALL THREE (?b) PATTERNS BELOW; the port's answer is the zero-error match the
+    // `|2` branch gives. regex 2026.9.10 on 2026-09-23 (.scratch probe, 5 s limit per call):
+    //   search('(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                        -> killed at 5 s
+    //   search('(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')          -> killed at 5 s
+    //   search('(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')              -> (0, 1) (0, 0, 0)
+    //
+    // The cause is a stale error total. The fuzzy section's end sets the running total to two
+    // errors, finds that over budget and backtracks without putting the old total back. The walk
+    // then reads two errors off a match through `|2` whose counts are (0, 0, 0), scores it as no
+    // better than the last one, and re-finds it for ever. Ledger entry 32.
+    [Test]
+    public void Bestmatch_does_not_read_a_stale_error_total_from_a_rejected_fuzzy_section()
+    {
+        Match m = new FuzzyRegex(
+            @"(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        ).Match("2y");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+
+        Match constrained = new FuzzyRegex(
+            @"(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(2)
+        ).Match("2\n");
+
+        constrained.Success.Should().BeTrue();
+        (constrained.Index, constrained.Index + constrained.Length).Should().Be((0, 1));
+        constrained.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0));
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, test pins OUR answer. ENHANCEMATCH reads the same stale
+    // total: its second run finds the exact '2' at (0, 1), reads two errors off it, decides the fit
+    // has stopped improving and keeps the two-substitution first run. Deleting only the nested
+    // `{s<=1}` section, which is what makes the outer section's end reject, gives upstream's own
+    // (?e) the exact match. regex 2026.9.10 on 2026-09-23:
+    //   search('(?e)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                        -> (0, 2) (2, 0, 0)
+    //   search('(?e)(?:(?:a(?:x+?)){e<=2}|2)', '2y')                              -> (0, 1) (0, 0, 0)
+    //   search('(?e)(?:2|(?:a(?:x+?){s<=1}){e<=2})', '2y')                        -> (0, 1) (0, 0, 0)
+    // Ledger entry 32.
+    [Test]
+    public void Enhancematch_does_not_stop_improving_on_a_stale_error_total()
+    {
+        Match m = new FuzzyRegex(@"(?e)(?:(?:a(?:x+?){s<=1}){e<=2}|2)").Match("2y");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 0), "upstream answers (0, 2) with (2, 0, 0)");
+    }
+
+    // The same patterns with no ranking flag, and the constrained form under `(?e)`, never read a
+    // stale total, and must not move. regex 2026.9.10 on 2026-09-23:
+    //   search('(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                            -> (0, 2) (2, 0, 0)
+    //   search('(?e)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')          -> (0, 1) (0, 0, 0)
+    //   search('(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')              -> (0, 1) (0, 0, 0)
+    [Test]
+    [Arguments(@"(?:(?:a(?:x+?){s<=1}){e<=2}|2)", "2y", 2, 2)]
+    [Arguments(@"(?e)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)", "2\n", 1, 0)]
+    [Arguments(@"(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)", "2\n", 1, 0)]
+    public void The_stale_error_total_patterns_keep_their_answers_without_bestmatch(
+        string pattern,
+        string subject,
+        int end,
+        int substitutions
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, end));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(substitutions, 0, 0));
+    }
+
+    // Oracle row 3752, generator `interactions`, seed 20260923. This test is for termination: the
+    // port did not finish. Upstream answers ['', '\r\n𝔘𝔘𝔘\rAa'] in 3 ms only because its `(*SKIP)`
+    // cuts its BESTMATCH walk short (ledger 5); without the `(*SKIP)` upstream hangs as well
+    // (regex 2026.9.10, 2026-09-23, killed at 5 s). The port's split is the one upstream's own
+    // search(s, 1) supports: the walk finds '𝔘' at 3 once the first match is taken.
+    [Test]
+    public void Bestmatch_split_over_a_rejected_fuzzy_section_finishes()
+    {
+        var pattern = new FuzzyRegex(
+            "(?b)\\b\\K(?:(?:\U0001d7eea(?:[[:alpha:]]+?){s<=1:\\W}){s<=1,i<=1,d<=1}(*SKIP)\\S|\\S)",
+            FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.Multiline | FuzzyRegexOptions.FullCase,
+            TimeSpan.FromSeconds(2)
+        );
+
+        string?[] parts = pattern.Split("\U0001d7ee\r\n\U0001d518\U0001d518\U0001d518\rAa");
+
+        parts.Should().Equal("", "\r\n", "\U0001d518\U0001d518\rAa");
     }
 }
