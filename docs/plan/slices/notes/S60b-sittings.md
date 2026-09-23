@@ -428,3 +428,34 @@ Suite 6650/6650, ratchet GREEN. Permanent files: BacktrackingVerbTests 20/20, Pa
 54/54, ReverseMatchingTests 40/40. Oracle GREEN at 7 and 4242; 20260923 RED on 3752 and 5185 only,
 as on the base commit. AOT 6647 / 3 skipped; the first publish failed in `link.exe` with exit 1318
 and passed on the next run, unchanged. AOT smoke GREEN, 6.68 MB.
+
+## 2026-09-23, 03:35 - 1cb7cc6 reviewed and re-measured
+
+### Review
+
+One blind pass (Opus, the VERIFICATION.md brief, scope `git show 1cb7cc6`, the hunt list above):
+**No defects found.** It compared 11 IGNORECASE pattern forms over every ASCII pair against
+`regex` 2026.9.10 through the public API: 360,448 cases under `(?a)` and `(?u)`, 0 differences.
+Under `(?L)` the port refuses every case, as before the commit (LOCALE is not a public option,
+`docs/DIVERGENCES.md`). `CaseEncoding` has three values and the test covers all of them. Suite
+6650/6650. Nothing to reproduce, nothing fixed, no second pass needed.
+
+### Re-measure
+
+The profile's hot call is rarely reached on `FuzzyPhraseOne*` now that item 10's filter skips most
+start positions, so this used IGNORECASE patterns the filter does not accept. Stopwatch probe in
+`.scratch/sci/` (deleted): 200,000 characters of words drawn with `new Random(7)` from `the Quick
+brown FOX jumps over lazy dog Hay stacks needle Straw barn field`, one space after each; per
+pattern, one warm `Count`, then the median of 9. Release. "Before" is the same source with the
+guard changed to `if (ch1 == 0xFFFFFFFF && (ch1 | ch2) < 0x80 && encoding != CaseEncoding.Locale)`.
+Runs alternated. Not quiet: another session's MediumRun of `ManyInputs` was running (about one
+core), which alternation spreads over both sides but does not remove.
+
+| Pattern, `IgnoreCase` | Before | After |
+|---|---|---|
+| `(?:hay\w?stack){e<=2}`, 396 matches | 129.2 / 132.6 ms | 119.2 / 120.0 ms |
+| `qu\w+ck\s+b`, 378 matches | 6.3 / 6.0 ms | 5.0 / 5.2 ms |
+| `(\w{3}) \1`, 726 matches | 20.5 / 20.6 ms | 20.8 / 20.4 ms |
+
+About 9% and 17%, well outside the run-to-run spread. The backreference shows no change (not
+profiled, so why is not known). The fast path stays and the SYNC-DIVERGENCE row now carries these numbers.
