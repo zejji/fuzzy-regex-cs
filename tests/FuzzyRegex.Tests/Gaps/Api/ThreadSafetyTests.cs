@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names forty-six, and under the JIT this set is exactly those forty-six. A floor of
+        // The allowlist names forty-eight, and under the JIT this set is exactly those forty-eight. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names forty-six writable fields, so a near-empty answer means the "
+                "the allowlist names forty-eight writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -710,6 +710,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",
+            // S60b added FuzzyLiteralFilter, written once by Compile after node numbering. The
+            // filter itself is immutable; the per-search piece cache lives on the stack.
+            "PatternObject.FuzzyLiteralFilter",
             "PatternObject.GroupEndIndex",
             "PatternObject.GroupIndex",
             "PatternObject.HasSkipVerb",

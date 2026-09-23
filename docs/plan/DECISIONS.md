@@ -1212,3 +1212,19 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   is wrong when sections nest. The (?e) and BESTMATCH-tie answers that moved are upstream's defect
   (ledger 32), pinned permanently. Row 3752 is a carried-slice row (ledger 5), not a walk
   truncation: its other spellings hang upstream, so there is no prune outcome to compare.
+- 2026-09-23 (S60b item 10): the fuzzy prefilter covers one shape only, a pattern that is exactly
+  one fuzzy ASCII literal (`Engine/FuzzyLiteralFilter.cs`), and switches itself off at the first
+  non-ASCII character it would search. ASCII on both sides is what makes an ordinal
+  case-insensitive search a superset of the engine's fold; KELVIN SIGN, long s, `ß` and `ﬁ` are the
+  pinned counter-examples. `k` is the tightest of `e`, the per-kind sum and the cost equation.
+  Alternations and named lists get no filter yet.
+- 2026-09-23 (S60b item 10, extended): the fuzzy prefilter also covers a fuzzy section over an
+  alternation of ASCII literals or a named list, each literal cut into its own `k + 1` pieces, at
+  most 32 pieces in all. Each piece is its own cached `IndexOf`, not one `SearchValues<string>`
+  pass: three phrases of nine pieces ran at 171.7 ms, level with three one-phrase passes at
+  159.7 ms, so the single pass waits for a long named list and a benchmark (SHORTCUT in the file).
+- 2026-09-23 (S60b item 2): `search_start` is kept. On a quiet machine RedactDigits ran 1.72x
+  faster and every other row stayed flat with identical allocations; the earlier 1.93x named-list
+  slowdown was builds running during the measurement. A reverse zero-width scan whose slice start
+  splits a surrogate pair gives up below `SliceStart`, as the matcher does, where upstream's
+  codepoint positions cannot reach that case at all.
