@@ -272,6 +272,141 @@ public sealed class PoolDisciplineTests
         pool.DoubleReturns.Should().BeEmpty();
     }
 
+    [Test]
+    public void A_span_walk_abandoned_after_two_matches_returns_its_copy_when_the_foreach_breaks()
+    {
+        // S61 item 2: the walk holds its copy across MoveNext calls, so the foreach's Dispose is
+        // the only way back for it on an early exit.
+        var pool = new TrackingPool<char>();
+        (FuzzyRegex words, string subject) = AMegabyteOfWords();
+        int seen = 0;
+
+        foreach (ValueMatch match in words.EnumerateMatches(subject.AsSpan(), pool, null, CancellationToken.None))
+        {
+            match.Length.Should().Be(5);
+            pool.Outstanding.Should().Be(1, "mid-walk the copy is still in use");
+            if (++seen == 2)
+            {
+                break;
+            }
+        }
+
+        pool.Rented.Should().Be(1);
+        pool.Outstanding.Should().Be(0);
+        pool.DoubleReturns.Should().BeEmpty();
+        pool.ForeignReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    public void A_span_walk_returns_its_copy_as_soon_as_it_runs_out_of_matches()
+    {
+        // No Dispose here: a caller driving MoveNext by hand gets the buffer back from the last
+        // call, which is what makes a loop that never disposes harmless once it reaches the end.
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("cat");
+        ValueMatchEnumerator walk = regex.EnumerateMatches("a cat, a cat".AsSpan(), pool, null, CancellationToken.None);
+
+        walk.MoveNext().Should().BeTrue();
+        walk.MoveNext().Should().BeTrue();
+        walk.MoveNext().Should().BeFalse();
+
+        pool.Outstanding.Should().Be(0);
+        walk.MoveNext().Should().BeFalse("an ended walk stays ended");
+        walk.Dispose();
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    public void A_span_walk_that_times_out_returns_its_copy()
+    {
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new(@"(a|a)*\b\B");
+        string subject = new('a', 26);
+
+        Action call = () =>
+        {
+            ValueMatchEnumerator walk = regex.EnumerateMatches(
+                subject.AsSpan(),
+                pool,
+                TimeSpan.FromMilliseconds(50),
+                CancellationToken.None
+            );
+            _ = walk.MoveNext();
+        };
+
+        call.Should()
+            .Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>()
+            .Which.Input.Should()
+            .Be(subject, "the exception is built before the copy goes back");
+        pool.Rented.Should().Be(1);
+        pool.Outstanding.Should().Be(0);
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    public void A_span_walk_cancelled_between_matches_returns_its_copy()
+    {
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("cat");
+        using CancellationTokenSource source = new();
+
+        Action call = () =>
+        {
+            ValueMatchEnumerator walk = regex.EnumerateMatches("a cat, a cat".AsSpan(), pool, null, source.Token);
+            walk.MoveNext().Should().BeTrue();
+            source.Cancel();
+            _ = walk.MoveNext();
+        };
+
+        call.Should().Throw<OperationCanceledException>();
+        pool.Rented.Should().Be(1);
+        pool.Outstanding.Should().Be(0);
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    public void A_span_walk_with_a_token_already_cancelled_rents_nothing()
+    {
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("cat");
+        using CancellationTokenSource source = new();
+        source.Cancel();
+
+        Action call = () => _ = regex.EnumerateMatches("a cat".AsSpan(), pool, null, source.Token);
+
+        call.Should().Throw<OperationCanceledException>();
+        pool.Rented.Should().Be(0, "the token is read before the copy is made, as on the string walk");
+    }
+
+    [Test]
+    public void A_copy_of_a_span_walk_neither_hands_things_back_twice_nor_walks_on_a_state_lent_since()
+    {
+        // The enumerator is a struct, so `var copy = walk` shares the copy and the engine state.
+        // Handing the state back twice would put it in the cache while a later walk holds it, and
+        // two walks would then drive one state.
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("cat");
+        ValueMatchEnumerator walk = regex.EnumerateMatches("a cat, a cat".AsSpan(), pool, null, CancellationToken.None);
+        ValueMatchEnumerator copy = walk;
+        walk.MoveNext().Should().BeTrue();
+        walk.Dispose();
+
+        ValueMatchEnumerator later = regex.EnumerateMatches("cat cat cat".AsSpan(), pool, null, CancellationToken.None);
+        copy.MoveNext().Should().BeFalse("the state the copy knew has been handed back and lent again");
+        copy.Dispose();
+
+        int found = 0;
+        while (later.MoveNext())
+        {
+            later.Current.Index.Should().Be(4 * found);
+            found++;
+        }
+
+        found.Should().Be(3, "the copy left the later walk's state alone");
+        pool.Outstanding.Should().Be(0);
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
     /// <summary>Calls the span overload of <c>Count</c> or of <c>IsMatch</c> with a given pool.</summary>
     /// <param name="count">Whether to call <c>Count</c> rather than <c>IsMatch</c>.</param>
     /// <param name="regex">The pattern.</param>

@@ -80,9 +80,26 @@ finishes.
 a `char[]` or a pooled buffer costs no copy: `regex.Count(buffer.AsMemory(0, filled))`. The slice
 is the whole subject, so `^` and `\b` see the slice's edges and never the buffer's. The
 `ReadOnlySpan<char>` overloads copy the span into a buffer borrowed from `ArrayPool<char>.Shared`,
-because a span cannot be kept while the engine works. They allocate nothing once the pool is warm,
-but a long span still costs one pass to copy it. Every method that returns a `Match` takes a `string`,
+because a span cannot be kept while the engine works. Once the pool is warm the copy allocates
+nothing, but a long span still costs one pass to copy it. Every method that returns a `Match` takes a `string`,
 since `Value` is one.
+
+For the matches in a span, `EnumerateMatches(ReadOnlySpan<char>)` walks them the way `Regex`'s
+does: each is a `ValueMatch` holding only `Index` and `Length`, so a warm walk allocates nothing.
+Slice the text out yourself:
+
+```csharp
+ReadOnlySpan<char> text = buffer.AsSpan(0, filled);
+foreach (ValueMatch match in regex.EnumerateMatches(text))
+{
+    Process(text.Slice(match.Index, match.Length));
+}
+```
+
+The walk copies the span into a pooled buffer once, at the start, and a `foreach` hands it back
+however the loop ends. Driving the `ValueMatchEnumerator` by hand, call `MoveNext` and read
+`Current` as usual; the buffer goes back when `MoveNext` returns `false` or throws, or when you
+call `Dispose`.
 
 **Cut it up?**
 

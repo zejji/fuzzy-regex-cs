@@ -342,9 +342,12 @@ public sealed class MatchStateCacheTests
 
     // MatchState.Cache is left out: it says where the state came from, which is the one thing a
     // rented state and a new one are meant to differ in, and it is readonly, so no call can set it.
+    // MatchState.Lease is left out for the same reason: it counts hand-backs, so a rented state's
+    // is higher by design, and only ValueMatchEnumerator reads it.
     private static IOrderedEnumerable<FieldInfo> InstanceFields(Type type) =>
         type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Where(static field => field.FieldType != typeof(MatchStateCache))
+            .Where(static field => !string.Equals(field.Name, nameof(MatchState.Lease), StringComparison.Ordinal))
             .OrderBy(static field => field.Name, StringComparer.Ordinal);
 
     private static void Render(string path, object? value, List<string> lines)

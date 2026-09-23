@@ -101,4 +101,34 @@ public sealed class AllocationTests
         count.Should().Be(1);
         allocated.Should().Be(0, "the second call takes the buffer the first one gave back to the pool");
     }
+
+    [Test]
+    public void A_warm_span_walk_over_many_matches_allocates_nothing()
+    {
+        // The owner's gate for ValueMatchEnumerator (DECISIONS 2026-09-22): a measured gain. The
+        // string walk builds a Match per match; this one yields an index and a length, and borrows
+        // its copy and its state, so a warm walk to the end has nothing left to allocate.
+        string words = string.Concat(Enumerable.Repeat("word ", 20_000));
+        ReadOnlySpan<char> subject = words;
+        FuzzyRegex regex = new(@"\w+");
+        _ = Walk(regex, subject);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        int count = Walk(regex, subject);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        count.Should().Be(20_000);
+        allocated.Should().Be(0);
+
+        static int Walk(FuzzyRegex regex, ReadOnlySpan<char> subject)
+        {
+            int n = 0;
+            foreach (ValueMatch match in regex.EnumerateMatches(subject))
+            {
+                n += match.Length == 4 ? 1 : 0;
+            }
+
+            return n;
+        }
+    }
 }

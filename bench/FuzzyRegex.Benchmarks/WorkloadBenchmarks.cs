@@ -113,6 +113,24 @@ public class WorkloadBenchmarks
     public int EnumerateMatchesToEndDense() => _words.EnumerateMatches(Corpus.Dense).Count();
 
     /// <summary>
+    /// The span walk (S61) over the same hundred kilobytes: a <see cref="ValueMatch"/> per match
+    /// instead of a <see cref="Match"/>, and one pooled copy of the subject. The pair with
+    /// <see cref="EnumerateMatchesToEndDense"/> is the owner's gate for keeping it.
+    /// </summary>
+    /// <returns>How many there were.</returns>
+    [Benchmark]
+    public int EnumerateMatchesSpanToEndDense()
+    {
+        int count = 0;
+        foreach (ValueMatch match in _words.EnumerateMatches(Corpus.Dense.AsSpan()))
+        {
+            count += match.Length > 0 ? 1 : 0;
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// The eager walk read two matches deep. It still costs the whole megabyte, because
     /// <see cref="MatchCollection"/> is materialised before the caller sees an element; the pair
     /// with <see cref="EnumerateMatchesFirstTwo"/> is what laziness buys.

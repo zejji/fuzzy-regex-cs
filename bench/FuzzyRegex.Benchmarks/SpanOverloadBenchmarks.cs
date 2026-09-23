@@ -9,8 +9,9 @@ namespace Fuzzy.Text.RegularExpressions.Benchmarks;
 /// <remarks>
 /// <para>
 /// <c>FuzzyRegex.IsMatch(ReadOnlySpan&lt;char&gt;)</c> and <c>Count(ReadOnlySpan&lt;char&gt;)</c>
-/// both call <c>input.ToString()</c>, because the engine keeps the subject between steps and a span
-/// cannot be kept, so they spare the caller a conversion and not the allocation. S61 added the
+/// both copy the span, because the engine keeps the subject between steps and a span cannot be
+/// kept. Until S61 the copy was <c>input.ToString()</c>; since then it goes into a buffer rented
+/// from <c>ArrayPool&lt;char&gt;.Shared</c>, so it costs time and no allocation. S61 also added the
 /// <see cref="System.ReadOnlyMemory{T}"/> overloads, which <c>MatchState.Text</c> now holds and reads
 /// in place; the <c>Memory</c> rows are theirs.
 /// </para>

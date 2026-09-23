@@ -148,6 +148,14 @@ internal sealed class MatchState : IDisposable
     internal readonly MatchStateCache? Cache;
 
     /// <summary>
+    /// How many times this state has been disposed. A <see cref="ValueMatchEnumerator"/> notes it
+    /// when it rents the state and disposes only while it is unchanged, because a copy of that
+    /// struct shares the state and a second hand-back would give it to two callers at once. No
+    /// counterpart upstream.
+    /// </summary>
+    internal int Lease;
+
+    /// <summary>
     /// Upstream <c>text</c> and <c>string</c>, which are one object here. A memory rather than a
     /// <see cref="string"/> so that the <see cref="ReadOnlyMemory{T}"/> overloads of
     /// <c>IsMatch</c> and <c>Count</c> match a caller's buffer without copying it (S61, option (a)
@@ -835,6 +843,8 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     public void Dispose()
     {
+        Lease++;
+
         if (Cache is { } cache)
         {
             cache.Return(this);
