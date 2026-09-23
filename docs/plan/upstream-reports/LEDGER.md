@@ -2660,9 +2660,44 @@ rule per ordering.
 
 ## 18. A repeated capture group costs hundreds of bytes per repetition (upstream issue 554)
 
-**Status:** not filed; inherited here **and amplified**. Upstream issue 554 is open since
-2025-02-17 with no maintainer comment. **PARKED BY S50** - see the end of this entry for why, and
-what was ruled out before parking it.
+**Status:** not filed; inherited. Upstream issue 554 is open since 2025-02-17 with no maintainer
+comment. **The amplification is FIXED HERE (S86, 2026-09-24)**: this port now puts upstream's
+bytes on its backtracking stack, byte for byte, and reaches upstream's 6,000,000. What is left is
+upstream's own cost, which is the report. Whether the port should go further and hold O(1) state
+per repetition is the owner's decision (DECISIONS 2026-09-24).
+
+**Where upstream's bytes go, established to a line by S86.** `python
+tools/probes/upstream-repeat-bytes.py 1000` builds a `/Od /Zi` copy of the pinned source that
+counts every byte-stack push by call line, and runs `fullmatch` over `'ab' * 1000`:
+
+| Push, per repetition | `(?:ab)*` | `(ab)*` |
+|---|---|---|
+| BODY_END record, `_regex.c:12616`, and its opcode byte | 32 + 1 | 32 + 1 |
+| BODY_START: `push_code` index (`:12652`), `push_ssize` text_pos, opcode byte | 4 + 8 + 1 | 4 + 8 + 1 |
+| END_GROUP's `RE_GroupStateData`, `:12722` | - | 32 |
+| The group's two opcode bytes and two `push_bool`s | - | 4 |
+| **Total** | **46** | **82** |
+| Peak `state->bstack` for n = 1000 | 46,055 | 82,055 |
+
+That settles the puzzle S61 left: a reading of `END_GREEDY_REPEAT` said upstream also pushes a
+56-byte `MATCH_TAIL` record each time round, and it does not. `MATCH_TAIL` is pushed only when both
+the body and the tail could match, and under a full match the tail is the `SUCCESS` node, whose arm
+in `try_match` (`:7828`) fails short of the end of the slice. At 82 B, 6,000,000 repetitions need
+492 MB, under the 512 MB largest capacity the doubled-capacity check at `:2357` allows; 10,000,000
+need 820 MB, hence `MemoryError`.
+
+**Why this port cost more, and the fix.** Three differences, all this port's:
+
+1. Its `TryMatch` had no `SUCCESS` arm, so every repetition parked a 57-byte `MATCH_TAIL` record.
+2. It pushed the `RE_CODE` repeat index of BODY_START and TAIL_START as 8 bytes, where
+   `push_code` pushes 4.
+3. It pushed the group record as five 8-byte words, 40 bytes, where `RE_GroupStateData` is 32.
+
+S86 ported the `SUCCESS` arm and `push_code`/`pop_code`, and gave the group record upstream's
+widths. `fullmatch('(ab)*')` went from 151 to 82 B a repetition and `(?:ab)*` from 107 to 46,
+matching the table above to the byte (`Gaps/Engine/RepeatTests`). The arm fails only where the port's
+own `SUCCESS` opcode would, so no answer can change; the default oracle wave was green at three
+seeds after it.
 
 **Reproduction and bisection**, measured 2026-09-14, `fullmatch('(ab)*', 'ab' * n)`:
 
@@ -2693,28 +2728,26 @@ process - is 611 B/rep every time. Timings are not evidence here either; the fai
 between 3.4 s and 8.6 s. The 1GB bound is the one figure that is deterministic by construction,
 because it is a fixed constant rather than a measurement, and it is what the test asserts.
 
-**This port is worse than the thing it reproduces**, which is the useful finding: it gives up at
-4,000,000 where upstream still manages 6,000,000. The failure mode is better - a clear exception
-naming a documented 1GB bound rather than a `MemoryError` - but the bound arrives sooner.
+**Until S86 this port was worse than the thing it reproduces**: it gave up at 4,000,000 where
+upstream still manages 6,000,000. The failure mode is better - a clear exception naming a
+documented 1GB bound rather than a `MemoryError` - and since S86 the bound arrives where
+upstream's does.
 
-**Where the bytes go here**, from the stack of the failing run: `Matcher.BasicMatch`
-(`Matcher.cs:5406`) pushes one `MatchBodyTailStateData` block per repetition through
-`PushMatchBodyTailStateData` (`:2679`) into `ByteStack.PushSize` -> `PushBlock` -> `Grow`
-(`ByteStack.cs:290`), and nothing pops them while the repeat is still running.
-
-**Where they go upstream**, at the precision the evidence supports: **not established.** The shape
-is the same - a repeat body that captures must record enough to restore the group on backtracking -
-but no line has been identified in upstream's C and a report must say so. The `/Od /Zi` MSVC build
-S47c installed is the instrument that would settle it.
+**Where the bytes went here before S86**, from the stack of the failing run: `Matcher.BasicMatch`
+pushed one `MatchBodyTailStateData` block per repetition through `PushMatchBodyTailStateData` into
+`ByteStack.PushSize` -> `PushBlock` -> `Grow`, and nothing popped them while the repeat was still
+running. That block is difference 1 above.
 
 **Why it is a defect rather than a fact about backtracking.** `(ab)*` is deterministic: at every
 position either `ab` matches or the repeat ends, so there is nothing to backtrack into. An engine
 that recognised the body as having no alternative would need O(1) state per repetition, and stdlib
 `re` - which is not a sophisticated engine - reaches 10,000,000 where `regex` does not.
 
-**What the test asserts.** `FullMatch("(ab)*", "ab" * 4_000_000)` succeeds - upstream's own ceiling,
-not a byte figure that would vary by machine. The 1GB bound is a fixed constant, so the test is
-deterministic rather than a race against the machine.
+**What the tests assert.** `Gaps/UpstreamIssues/InheritedIssueTests` asserts that
+`FullMatch("(ab)*", "ab" * 6_000_000)` succeeds and that 10,000,000 fails at the 1GB bound, as
+upstream does. `Gaps/Engine/RepeatTests` asserts the stack's byte count at n = 1000 against the
+table above. Both are deterministic: the bound is a constant and the byte count does not depend on
+the machine.
 
 ## 19. `\m` before a fuzzy section does not match at position 0 (upstream issue 563) - FIXED HERE (S57c)
 

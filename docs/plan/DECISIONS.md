@@ -1288,3 +1288,17 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   per the owner's 2026-09-14 ruling. No new BESTMATCH/ENHANCEMATCH generator: the five `fuzzy-*`
   generators already put `(?b)` and `(?e)` on about 30% of their rows each. `fuzzy-overhang` joins
   the default wave.
+- 2026-09-24 (S86): `TryMatch` has a `SUCCESS` arm (`_regex.c:7828`) that fails under a full match
+  short of the slice end, with the SUCCESS opcode's own bounds rather than upstream's `text_start`.
+  Entering the SUCCESS node and failing there gives the same answer, but a repeat parks a 57-byte
+  `MATCH_TAIL` record each time round first. S60b's rewrite of `TryMatch` sends SUCCESS to the
+  default arm; whichever merges second keeps this arm, or ledger 18 returns and
+  `RepeatTests.A_full_match_of_a_repeat_leaves_upstreams_bytes_on_the_backtrack_stack` goes red.
+- 2026-09-24 (S86): byte-stack records use upstream's field widths: `RE_CODE` is 4 bytes
+  (`ByteStack.PushCode`), and the group record is 32 bytes. The width is behaviour here, because the
+  1GB bound turns bytes per repetition into the longest subject a repeat can match.
+- 2026-09-24 (S86): OPEN, for the owner. O(1) backtracking state per repetition for a repeat body
+  with no alternative (`(ab)*`), which stdlib `re` manages and upstream does not. Now at parity:
+  82 B a repetition for `(ab)*` and 46 for `(?:ab)*`, so `fullmatch` tops out between 6,000,000 and
+  10,000,000 repetitions, as upstream's does; stdlib `re` still matches at 10,000,000. It would be a
+  deliberate divergence from upstream in memory, not in answers. No code until the owner decides.
