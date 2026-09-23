@@ -286,6 +286,18 @@ internal static class Matcher
             return true;
         }
 
+        // sync-divergence: upstream always enumerates ch1's cases / two ASCII characters under the
+        // ASCII or Unicode encoding compare by the ASCII case rule / the enumeration was 10% of an
+        // IGNORECASE fuzzy search. It is the same answer: the Unicode encoding's extra cases of
+        // ASCII letters (KELVIN SIGN, LONG S) are not ASCII, and TurkicDefaults pairs I with i as
+        // the ASCII rule does. LOCALE falls through to AllCases, which refuses it.
+        // Re-aligning: if upstream's all_cases or the Turkic data changes, re-run SameCharIgnTests,
+        // which compares this against the enumeration over every ASCII pair.
+        if ((ch1 | ch2) < 0x80 && encoding != CaseEncoding.Locale)
+        {
+            return (ch1 ^ ch2) == 0x20 && (ch1 | 0x20) - 'a' <= 'z' - 'a';
+        }
+
         Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
         int count = Encodings.AllCases(encoding, ch1, cases);
 
