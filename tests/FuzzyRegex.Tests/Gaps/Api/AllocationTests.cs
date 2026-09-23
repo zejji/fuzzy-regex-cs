@@ -77,4 +77,28 @@ public sealed class AllocationTests
         count.Should().Be(1);
         allocated.Should().Be(0, "the engine reads the caller's buffer in place");
     }
+
+    [Test]
+    public void The_span_overloads_copy_a_megabyte_into_a_pooled_buffer_rather_than_a_new_string()
+    {
+        // A span cannot be kept, so these two still copy it, but into a buffer rented from
+        // ArrayPool<char>.Shared and returned when the call ends. Before, the copy was a string of
+        // two bytes a character: 2,097,176 B over this subject (owner's option (c), 2026-09-23).
+        char[] buffer = new char[1 << 20];
+        buffer.AsSpan().Fill('a');
+        "cat".CopyTo(buffer.AsSpan(buffer.Length - 10));
+        ReadOnlySpan<char> subject = buffer;
+        FuzzyRegex regex = new("cat");
+        _ = regex.IsMatch(subject);
+        _ = regex.Count(subject);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool found = regex.IsMatch(subject);
+        int count = regex.Count(subject);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        found.Should().BeTrue();
+        count.Should().Be(1);
+        allocated.Should().Be(0, "the second call takes the buffer the first one gave back to the pool");
+    }
 }

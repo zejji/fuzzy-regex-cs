@@ -79,8 +79,9 @@ finishes.
 `IsMatch` and `Count` also take a `ReadOnlyMemory<char>` and read it where it is, so a slice of
 a `char[]` or a pooled buffer costs no copy: `regex.Count(buffer.AsMemory(0, filled))`. The slice
 is the whole subject, so `^` and `\b` see the slice's edges and never the buffer's. The
-`ReadOnlySpan<char>` overloads copy the span to a string first, two bytes per character, because a
-span cannot be kept while the engine works. Every method that returns a `Match` takes a `string`,
+`ReadOnlySpan<char>` overloads copy the span into a buffer borrowed from `ArrayPool<char>.Shared`,
+because a span cannot be kept while the engine works. They allocate nothing once the pool is warm,
+but a long span still costs one pass to copy it. Every method that returns a `Match` takes a `string`,
 since `Value` is one.
 
 **Cut it up?**

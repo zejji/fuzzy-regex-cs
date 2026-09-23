@@ -34,7 +34,7 @@ public sealed class PoolDisciplineTests
     [Test]
     public void Growing_a_stack_returns_the_buffer_it_outgrew_and_never_the_same_one_twice()
     {
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         using var stack = new ByteStack(pool);
 
         // Enough pushes to force several growth steps: the first block allocates 256 and every
@@ -53,7 +53,7 @@ public sealed class PoolDisciplineTests
     [Test]
     public void Disposing_a_stack_returns_its_buffer_exactly_once()
     {
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         var stack = new ByteStack(pool);
 
         stack.PushBlock(new byte[1_000]);
@@ -66,7 +66,7 @@ public sealed class PoolDisciplineTests
     [Test]
     public void Disposing_a_stack_twice_does_not_return_its_buffer_twice()
     {
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         var stack = new ByteStack(pool);
 
         stack.PushBlock(new byte[1_000]);
@@ -84,7 +84,7 @@ public sealed class PoolDisciplineTests
     [Test]
     public void Disposing_a_stack_that_never_grew_returns_nothing()
     {
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         var stack = new ByteStack(pool);
 
         stack.Dispose();
@@ -96,7 +96,7 @@ public sealed class PoolDisciplineTests
     [Test]
     public void Resetting_a_stack_keeps_its_buffer_rather_than_returning_it()
     {
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         using var stack = new ByteStack(pool);
 
         stack.PushBlock(new byte[1_000]);
@@ -164,7 +164,7 @@ public sealed class PoolDisciplineTests
         // walk rented its stacks once per match. Holding one state across the walk rents them once:
         // a stack that grows rents again, so the bound is "a handful", not "one", and a walk of
         // two hundred matches sits far above it under the old shape.
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         (FuzzyRegex words, string subject) = AMegabyteOfWords();
 
         int matches = Iteration
@@ -184,7 +184,7 @@ public sealed class PoolDisciplineTests
         // The hazard S58 named: a state held across a yield return is a state an abandoned iterator
         // must still release. A foreach that breaks disposes its enumerator, and the enumerator's
         // Dispose runs the walk's `using`, which is what returns the stacks.
-        var pool = new TrackingPool();
+        var pool = new TrackingPool<byte>();
         (FuzzyRegex words, string subject) = AMegabyteOfWords();
 
         using (
@@ -212,6 +212,89 @@ public sealed class PoolDisciplineTests
         pool.Outstanding.Should().Be(0, "disposing the abandoned walk hands back every buffer it rented");
         pool.DoubleReturns.Should().BeEmpty();
         pool.ForeignReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public void A_span_call_returns_its_copy_of_the_subject_whether_it_matches_or_not(bool count)
+    {
+        // S61, the owner's option (c) of 2026-09-23: the span overloads of IsMatch and Count copy
+        // into a rented buffer, and every way out of the call has to give it back.
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("cat");
+
+        foreach (string subject in new[] { "a cat sat", "no match here", "" })
+        {
+            _ = CallWithSpan(count, regex, subject, pool, timeout: null, CancellationToken.None);
+        }
+
+        pool.Rented.Should().Be(3, "each call copies its span once");
+        pool.Outstanding.Should().Be(0);
+        pool.DoubleReturns.Should().BeEmpty();
+        pool.ForeignReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public void A_span_call_that_times_out_returns_its_copy_of_the_subject(bool count)
+    {
+        // The pattern and subject TimeoutAndCancellationTests uses: exponential, and no match.
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new(@"(a|a)*\b\B");
+        string subject = new('a', 26);
+
+        Action call = () =>
+            CallWithSpan(count, regex, subject, pool, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+        call.Should().Throw<System.Text.RegularExpressions.RegexMatchTimeoutException>();
+        pool.Rented.Should().Be(1);
+        pool.Outstanding.Should().Be(0, "a timeout leaves the call through the same finally as an answer");
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public void A_span_call_that_is_cancelled_returns_its_copy_of_the_subject(bool count)
+    {
+        var pool = new TrackingPool<char>();
+        FuzzyRegex regex = new("abcdefghij");
+        using CancellationTokenSource source = new();
+        source.Cancel();
+
+        Action call = () => CallWithSpan(count, regex, "z", pool, timeout: null, source.Token);
+
+        call.Should().Throw<OperationCanceledException>();
+        pool.Rented.Should().Be(1);
+        pool.Outstanding.Should().Be(0, "a cancelled call leaves through the same finally as an answer");
+        pool.DoubleReturns.Should().BeEmpty();
+    }
+
+    /// <summary>Calls the span overload of <c>Count</c> or of <c>IsMatch</c> with a given pool.</summary>
+    /// <param name="count">Whether to call <c>Count</c> rather than <c>IsMatch</c>.</param>
+    /// <param name="regex">The pattern.</param>
+    /// <param name="subject">The subject, handed over as a span.</param>
+    /// <param name="pool">The pool the call rents its copy from.</param>
+    /// <param name="timeout">The call's time budget.</param>
+    /// <param name="cancellationToken">The call's cancellation token.</param>
+    /// <returns>The count, or 1 or 0 for whether it matched.</returns>
+    private static int CallWithSpan(
+        bool count,
+        FuzzyRegex regex,
+        string subject,
+        ArrayPool<char> pool,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    )
+    {
+        if (count)
+        {
+            return regex.Count(subject.AsSpan(), pool, timeout, cancellationToken);
+        }
+
+        return regex.IsMatch(subject.AsSpan(), pool, timeout, cancellationToken) ? 1 : 0;
     }
 
     /// <summary>
@@ -243,10 +326,11 @@ public sealed class PoolDisciplineTests
     /// <see cref="object.Equals(object)"/>, so that comparer already is reference identity, which is
     /// the only notion of "the same buffer" a pool has.
     /// </remarks>
-    private sealed class TrackingPool : ArrayPool<byte>
+    /// <typeparam name="T">The element type: bytes for the stacks, characters for a span's copy.</typeparam>
+    private sealed class TrackingPool<T> : ArrayPool<T>
     {
-        private readonly HashSet<byte[]> _out = [];
-        private readonly HashSet<byte[]> _everSeen = [];
+        private readonly HashSet<T[]> _out = [];
+        private readonly HashSet<T[]> _everSeen = [];
         private readonly List<string> _doubleReturns = [];
         private readonly List<string> _foreignReturns = [];
         private readonly Lock _gate = new();
@@ -290,11 +374,11 @@ public sealed class PoolDisciplineTests
             }
         }
 
-        public override byte[] Rent(int minimumLength)
+        public override T[] Rent(int minimumLength)
         {
             // Allocated rather than pooled, deliberately: a pool that reused buffers could not tell
             // "returned twice" from "rented again", which is the distinction under test.
-            var buffer = new byte[Math.Max(minimumLength, 1)];
+            var buffer = new T[Math.Max(minimumLength, 1)];
 
             lock (_gate)
             {
@@ -306,7 +390,7 @@ public sealed class PoolDisciplineTests
             return buffer;
         }
 
-        public override void Return(byte[] array, bool clearArray = false)
+        public override void Return(T[] array, bool clearArray = false)
         {
             lock (_gate)
             {
