@@ -15,16 +15,17 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES AND
-    'fuzzy-overhang'. 'partial-sliced' joined the list in S33, 'verbs' in S34, 'timeout' in S52
-    sitting 14, 'fuzzy-anchored' in S57e and 'fuzzy-literal' and 'fuzzy-alternation' in S60b.
+    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
+    joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14, 'fuzzy-anchored' in
+    S57e, 'fuzzy-literal' and 'fuzzy-alternation' in S60b and 'fuzzy-overhang' in S89.
 
     'fuzzy-overhang' is 'fuzzy' with a full-folded backreference whose group ends part-way into
     a subject folding, such as (s) against the first half of the ß in 'sß'. S84's and S85's
     rules act only there, and the plain 'fuzzy' generator reaches that shape too rarely for their
-    controls to fire. S85 added it and left it off the default list: under BESTMATCH or
-    ENHANCEMATCH a few of its rows differ from upstream in a way no fold-fix ablation explains
-    (docs/plan/slices/notes/S85-sittings.md). It joins the list once a slice accounts for them.
+    controls to fire. S85 held it back over a few BESTMATCH rows no fold-fix ablation explained;
+    S89 showed they need upstream's doubled insertion guard (ledger entry 12) as well. At 2000
+    rows a seed it still draws two partial rows no ablation explains, handed to S90
+    (docs/plan/slices/S90-partial-fold-rows.md).
 
     'fuzzy-literal' is a bare fuzzy phrase in a longer noisy subject, the one shape the port's
     fuzzy prefilter (Engine/FuzzyLiteralFilter.cs) accepts. 'fuzzy' almost never draws it: a
@@ -272,7 +273,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,timeout',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,fuzzy-overhang,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

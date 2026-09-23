@@ -458,6 +458,50 @@ internal static class OracleComparer
     }
 
     /// <summary>
+    /// Puts a row's question to this port with upstream's doubled insertion guard restored, and one
+    /// or both S84 full-fold backreference repairs switched off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// S46 made END_FUZZY's backtrack arm count a section's errors once when it asks whether a
+    /// trailing insertion fits (<c>_regex.c:15516</c>, ledger entry 12). Upstream counts them twice,
+    /// which only bites under BESTMATCH, where the budget is the best match's own cost. Setting
+    /// <c>PatternObject.DoubleCountTrailingInsertions</c> restores that.
+    /// </para>
+    /// <para>
+    /// A full-folded backreference under BESTMATCH can need both upstream defects before the two
+    /// engines agree. S85's <c>(?b)(?fi)(f)(?:(?:\1)){e&lt;=3}</c> over 'fxf' is no match upstream:
+    /// the retry defect turns the one-insertion fit into a substitution and a trailing insertion,
+    /// and the doubled guard refuses that insertion once the budget has come down to two. This port
+    /// gives no match only with both switched off. The full-fold entries key on this.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <param name="withoutTheRetriedFoldSteps">Also set <c>PatternObject.SkipRetriedFoldSteps</c>.</param>
+    /// <param name="withoutTheGroupFoldLeftovers">Also set <c>PatternObject.SkipGroupFoldLeftovers</c>.</param>
+    /// <returns>What this port answers with upstream's rules, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheDoubledInsertionGuard(
+        OracleRow row,
+        bool withoutTheRetriedFoldSteps,
+        bool withoutTheGroupFoldLeftovers
+    )
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: compiled =>
+            {
+                compiled.PatternObject.DoubleCountTrailingInsertions = true;
+                compiled.PatternObject.SkipRetriedFoldSteps = withoutTheRetriedFoldSteps;
+                compiled.PatternObject.SkipGroupFoldLeftovers = withoutTheGroupFoldLeftovers;
+            }
+        );
+    }
+
+    /// <summary>
     /// Puts a row's question to this port with the S85 take-back switched off in the full-fold
     /// leftovers.
     /// </summary>

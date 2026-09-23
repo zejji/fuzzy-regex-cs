@@ -1788,6 +1788,20 @@ non-zero if upstream stops behaving this way. Pinned by
 **Status:** not filed. Nothing is filed until everything else in the plan is done (owner decision,
 2026-09-12); this entry is drafted here and re-verified against the then-current release first.
 
+**The smallest reproduction, found by S89 (2026-09-23, `regex` 2026.9.10), is an empty section**,
+which a report should lead with because it has no body to argue about:
+
+```python
+>>> regex.fullmatch(r'(?b)(?:){e<=3}', 'znz')
+None
+>>> regex.fullmatch(r'(?:){e<=3}', 'znz').fuzzy_changes
+([], [0, 1, 2], [])
+```
+
+Restoring the doubled term in this port (`PatternObject.DoubleCountTrailingInsertions`, an
+oracle-only switch) gives this port upstream's None, and it moves the other three rows S89 added to
+`bestmatch-loses-a-candidate` the same way.
+
 **THE HEADLINE SAID "TWO TRAILING INSERTIONS" UNTIL 2026-09-15 AND THAT IS NOT THE BOUNDARY (S52
 sitting 16).** One is enough when the fit spends another error as well, and the five sweep rows this
 entry gained that day include none that needs two. Measured on `regex` 2026.9.10, blocks 6 and 7 of

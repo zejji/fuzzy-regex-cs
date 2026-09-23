@@ -1260,3 +1260,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   ASCII-only first; a fold-aware form for non-ASCII text follows when time allows, with its own
   oracle generator and blind review. NuGet publishing is out of scope for now. Upstream reports
   keep waiting for filing time; the ledger in `docs/plan/upstream-reports/` stays current.
+- 2026-09-23 (S89): a BESTMATCH row that needs upstream's doubled insertion guard (ledger 12) AND a
+  fold defect (ledger 29 or 30) is pinned by an ablation arm on the fold entry that sets both
+  flags; a row that needs ledger 12 alone is added as a judged row to `bestmatch-loses-a-candidate`,
+  per the owner's 2026-09-14 ruling. No new BESTMATCH/ENHANCEMATCH generator: the five `fuzzy-*`
+  generators already put `(?b)` and `(?e)` on about 30% of their rows each. `fuzzy-overhang` joins
+  the default wave.

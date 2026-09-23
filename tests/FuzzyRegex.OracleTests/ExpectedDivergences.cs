@@ -142,7 +142,7 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The twenty-eight rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The thirty-two rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -313,6 +313,23 @@ internal static class ExpectedDivergences
     /// it read <c>agree 5970 expected 30 diverge 0</c>, this row being the difference. Pinned, it
     /// reads <c>agree 5969 expected 31 diverge 0</c>.
     /// </para>
+    /// <para>
+    /// <b>Rows 29 to 32 are S89's, and row 31 is the smallest reproduction this family has</b>:
+    /// <c>(?b)(?:){e&lt;=3}</c> against <c>znz</c>. The flagless engine matches the whole subject as
+    /// three insertions; under <c>(?b)</c> upstream finds nothing, because the second pass caps the
+    /// budget at three and the doubled guard counts each insertion twice. Row 29,
+    /// <c>(?b)(?e)(?fi)(?r)(?:fine){e&lt;=7}</c> over <c>oelFin becf</c>, is the row STATE recorded as
+    /// <c>fuzzy-literal</c> row 1611 at seed 20260923; the generator has changed since and no longer
+    /// draws it, so the row file is its provenance. Its flagless answer is (0, 11) at seven
+    /// insertions. Row 30 is the named-list form of row 31, reversed, with an empty list entry. Row
+    /// 32 is row 3821 of the 2000-row <c>fuzzy-literal,fuzzy-anchored</c> wave at the same seed
+    /// (drawn by <c>fuzzy-anchored</c>), a reversed <c>subf</c>: upstream replaces one
+    /// of the two emoji runs its flagless run replaces. On all four, restoring the doubled term in
+    /// <c>Matcher.cs</c> (<c>PatternObject.DoubleCountTrailingInsertions</c>) makes this port answer
+    /// what upstream does, and upstream's flagless answer is this port's to the code unit. Recorded
+    /// on 2026-09-23 as rows 3 to 6 of <c>python tools/record-oracle.py --rows
+    /// tools/probes/s89-bestmatch-rows.jsonl</c>.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -343,6 +360,10 @@ internal static class ExpectedDivergences
         {"generator": "fuzzy-anchored", "pattern": "(?b)(?i)\\m(a😀)(?:(?:\\1)){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "a😀😀b", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}, {"number": 1, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [5], "deletions": [3]}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "fuzzy-anchored", "pattern": "(?b)(?e)\\b(?:\\d+\\d\\s){e<=3}", "flags": 0, "namedLists": {}, "subject": "215x b", "operation": "fullmatch", "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 4, 5], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [3, 0, 0], "fuzzyChanges": {"substitutions": [3, 4, 5], "insertions": [], "deletions": []}}}
         {"generator": "fuzzy-anchored", "pattern": "(?b)(?e)(?fi)\\b(?:straße){e<=3:\\w}", "flags": 0, "namedLists": {}, "subject": "s‍RaSsSe𝟮", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 2, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [6, 8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "rows", "pattern": "(?b)(?e)(?fi)(?r)(?:fine){e<=7}", "flags": 0, "namedLists": {}, "subject": "oelFin becf", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 11, "captures": [[0, 11]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 7, 0], "fuzzyChanges": {"substitutions": [], "insertions": [11, 10, 8, 7, 3, 2, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "rows", "pattern": "(?b)(?r)(?:\\L<phrases>){e<=3}", "flags": 0, "namedLists": {"phrases": ["", "amber lantern"]}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 2, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "rows", "pattern": "(?b)(?:){e<=3}", "flags": 0, "namedLists": {}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0, 1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
+        {"generator": "rows", "pattern": "(?b)(?r)\\m(?:\ud83d\ude00\\d\ud83d\ude00){e:[a-z]}", "flags": 0, "namedLists": {}, "subject": "b\ud83d\ude00\ud83d\ude00", "operation": "subf", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<><>\ud83d\ude00", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>", "count": 2}}
         """;
 
     /// <summary>
@@ -1062,11 +1083,12 @@ internal static class ExpectedDivergences
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary>
-    /// The thirteen rows of <c>partial-retry-reversed-slice</c>, each copied out of
+    /// The fifteen rows of <c>partial-retry-reversed-slice</c>, each copied out of
     /// <c>TestResults/oracle/wave-&lt;seed&gt;.jsonl</c> rather than retyped - rows 1 to 4 on
-    /// 2026-09-13, rows 5 to 12 on 2026-09-15, row 13 on 2026-09-20. <b>The count said "five" until
-    /// S52's eighteenth sitting counted them</b>, having been left behind by sitting 8's six and
-    /// sitting 18's one.
+    /// 2026-09-13, rows 5 to 12 on 2026-09-15, rows 13 and 14 on 2026-09-20, row 15 on 2026-09-23.
+    /// <b>The count said "five" until S52's eighteenth sitting counted them</b>, having been left
+    /// behind by sitting 8's six and sitting 18's one, and it said "thirteen" through S57b's row 14
+    /// until S89 counted again.
     /// </summary>
     /// <remarks>
     /// Rows 101560 (seed 7), 96397 and 99556 (seed 20260913) of the gate, all on the
@@ -1152,6 +1174,7 @@ internal static class ExpectedDivergences
         {"generator": "interactions", "pattern": "(?r)\\b(?:\\p{Nd}(*SKIP)\\S|[a\\d])(?P<g1>\\p{Ll})?(?(?<!\\p{Ll})\\p{L}|[abz])", "flags": 10, "namedLists": {}, "subject": "a𐐨a\r\n𐐀", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": 1, "lastGroup": "g1", "partial": true}}
         {"generator": "interactions", "pattern": "(?r)^(?:[^a-f]{3,}(?P<g1>[a-f])(?P<g2>[[:digit:]])){s<=1,i<=1,d<=1}(?:[a-f](*SKIP)\\s|\\p{Nd})", "flags": 0, "namedLists": {}, "subject": "\r\n😀", "operation": "search", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": true, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r)^(?:.(*SKIP)[^\\d]|[a-f])😀(?(?=[^a])[^\\d]|\\p{ASCII})", "flags": 8, "namedLists": {}, "subject": "🏻😀𝔘‍‍😀😀", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 6, "captures": [[0, 6]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "partial", "pattern": "(?r)\\s+(?:[[:alpha:]]+?(*SKIP)\\p{L}|\\W)", "flags": 16650, "namedLists": {}, "subject": "A\ud835\udd18\ud835\udd18\ud835\udd18\ud835\udd18\r", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1236,6 +1259,15 @@ internal static class ExpectedDivergences
         // evidence only when the pattern reads nothing past the anchor. Measured 2026-09-20 on
         // regex 2026.9.10, tools/probes/s57b-anchor-sweep-reads-past-the-anchor.py.
         "match 0:(0,6)[(0,6)] last=-1/- partial",
+        // Row 15, S89's: row 4957 of the 300-row seed-99 default wave (`pwsh -File
+        // tools/run-oracle.ps1 -Seeds 99`). This entry's own printed shape again: upstream's
+        // `search` answers the zero-width partial at (0, 0), while its `(*PRUNE)` spelling, its
+        // verb-free spelling and its own `match(0, 5, partial=True)`, the highest endpos that
+        // matches, all answer the codepoint (0, 5) this port answers, UTF-16 (0, 9) on its astral
+        // subject. The pattern has no lookaround, so the anchor sweep reads nothing past the anchor
+        // and counts here. Measured 2026-09-23 on regex 2026.9.10,
+        // tools/probes/s89-partial-retry-reversed-row.py.
+        "match 0:(0,9)[(0,9)] last=-1/- partial",
     ];
 
     /// <summary>
@@ -2659,32 +2691,40 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
-    /// The four rows of <c>full-fold-backreference-leftovers</c>, rows 1 to 4 of what is recorded by
-    /// <c>python tools/record-oracle.py --rows tools/probes/s84-fold-backreference-rows.jsonl</c> on
-    /// 2026-09-22.
+    /// The five rows of <c>full-fold-backreference-leftovers</c>. Rows 1 to 4 are rows 1 to 4 of what
+    /// is recorded by <c>python tools/record-oracle.py --rows
+    /// tools/probes/s84-fold-backreference-rows.jsonl</c> on 2026-09-22; row 5 is row 2 of
+    /// <c>tools/probes/s89-bestmatch-rows.jsonl</c>, recorded the same way on 2026-09-23.
     /// </summary>
     /// <remarks>
-    /// The staleness alarm only; the entry is keyed on an ablation. No wave row at the three
-    /// default seeds reaches this repair, so all four are the defect minimised: a group of one
-    /// letter forward and reversed, charged as a substitution or an insertion, and a longer group.
+    /// The staleness alarm only; the entry is keyed on an ablation. Rows 1 to 4 are the defect
+    /// minimised: a group of one letter forward and reversed, charged as a substitution or an
+    /// insertion, and a longer group. Row 5 is <c>fuzzy-overhang</c> row 67 at seed 20260923, a
+    /// BESTMATCH row that also needs upstream's doubled insertion guard (ledger entry 12): with
+    /// both restored this port answers upstream's (0, 9) at two insertions and a deletion.
     /// </remarks>
     private const string _groupFoldLeftoverRows = """
         {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){i<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){e<=1}(s)", "flags": 0, "namedLists": {}, "subject": "ßs", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?fi)(as)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "asaß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?b)(?fi)(f)(?:\\d+a00(?:\\1)){e<=3}", "flags": 0, "namedLists": {}, "subject": "f767ax00\ufb02", "operation": "fullmatch", "codepointSpan": [0, 9], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 1], "fuzzyChanges": {"substitutions": [], "insertions": [5, 8], "deletions": [9]}}, "leakFreeFuzzy": [null], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [2, 1, 0], "fuzzyChanges": {"substitutions": [5, 7], "insertions": [8], "deletions": []}}}
         """;
 
     /// <summary>
-    /// The nine rows of <c>full-fold-backreference-retry</c>, rows 5 to 13 of what is recorded by
-    /// <c>python tools/record-oracle.py --rows tools/probes/s84-fold-backreference-rows.jsonl</c> on
-    /// 2026-09-22.
+    /// The ten rows of <c>full-fold-backreference-retry</c>. Rows 1 to 9 are rows 5 to 13 of what is
+    /// recorded by <c>python tools/record-oracle.py --rows
+    /// tools/probes/s84-fold-backreference-rows.jsonl</c> on 2026-09-22; row 10 is row 1 of
+    /// <c>tools/probes/s89-bestmatch-rows.jsonl</c>, recorded the same way on 2026-09-23.
     /// </summary>
     /// <remarks>
     /// The staleness alarm only; the entry is keyed on an ablation. Rows 1 to 6 are the wave rows
     /// the repair moved: seed 7 rows 6208, 6243, 6250 and 6471, seed 4242 row 6114 and seed
     /// 20260922 row 6591. Row 3 was <c>full-fold-fuzzy-deletion</c>'s until S84. Rows 7 to 9 are
     /// the defect minimised: an insertion forward and reversed, and S83's best-match deletion.
+    /// Row 10 is S85's BESTMATCH row minimised, which also needs upstream's doubled insertion
+    /// guard (ledger entry 12): the retry defect turns the one-insertion fit into a substitution
+    /// and a trailing insertion, and the doubled guard refuses that insertion.
     /// </remarks>
     private const string _groupFoldRetryRows = """
         {"generator": "rows", "pattern": "(?fi)(a😀)(?:b\\p{L}\\b(?:\\1)){1<=e<=2:[^t]}", "flags": 0, "namedLists": {}, "subject": "a😀b😀ﬆ", "operation": "split", "count": 3, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a😀b😀ﬆ"]}}
@@ -2696,6 +2736,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?fi)(ab)(?:\\1){e<=1}", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?rfi)(?:\\1){e<=1}(ab)", "flags": 0, "namedLists": {}, "subject": "abxab", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
         {"generator": "rows", "pattern": "(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}]}
+        {"generator": "rows", "pattern": "(?b)(?fi)(f)(?:(?:\\1)){e<=3}", "flags": 0, "namedLists": {}, "subject": "fxf", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [1], "insertions": [2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -3983,7 +4024,12 @@ internal static class ExpectedDivergences
                 + "where the pattern reads nothing past the anchor, which is a limit worth stating "
                 + "here because three rows of `search-start-partial` above rest on that instrument. "
                 + "Measured 2026-09-20 on regex 2026.9.10, "
-                + "tools/probes/s57b-anchor-sweep-reads-past-the-anchor.py.",
+                + "tools/probes/s57b-anchor-sweep-reads-past-the-anchor.py.\n"
+                + "ROW 15 IS S89'S, row 4957 of the seed-99 default wave, and it is the usual shape: "
+                + "`(*SKIP)` answers (0, 0), while `(*PRUNE)`, the verb deleted and upstream's own "
+                + "match(0, 5, partial=True) all answer the codepoint (0, 5) this port answers. It "
+                + "has no lookaround, so the sweep counts. Measured 2026-09-23 on regex 2026.9.10, "
+                + "tools/probes/s89-partial-retry-reversed-row.py.",
             PinnedBy: "PartialMatchingTests.A_reversed_skip_does_not_move_the_slice_end_the_partial_" + "pass_searches",
             Example: _partialRetryReversedRows,
             Applies: static (row, ours) =>
@@ -4706,7 +4752,14 @@ internal static class ExpectedDivergences
                 + "answers (0, 10) at one substitution and two insertions, and this port answers that, "
                 + "so the recorder files its `bestmatch-no-worse` self-contradiction. The control "
                 + "settles it the same way: restoring the doubled term takes the wave from "
-                + "`diverge 1` to `diverge 0`.",
+                + "`diverge 1` to `diverge 0`.\n"
+                + "ROWS 29 TO 32 ARE S89'S, and row 31 is the smallest reproduction yet: "
+                + "`(?b)(?:){e<=3}` over 'znz'. Upstream finds nothing; without `(?b)` it matches the "
+                + "whole subject as three insertions, and so does this port. The others are a "
+                + "reversed seven-insertion `fullmatch`, the named-list form of row 31, and a reversed "
+                + "`subf` that replaces one emoji run of two. On all four, setting "
+                + "`PatternObject.DoubleCountTrailingInsertions` makes this port answer what upstream "
+                + "does. Recorded 2026-09-23 from tools/probes/s89-bestmatch-rows.jsonl.",
             PinnedBy: "FuzzyBestMatchTests.Bestmatch_keeps_a_match_that_needs_two_trailing_"
                 + "insertions, .Bestmatch_admits_trailing_insertions_up_to_the_sections_own_budget, "
                 + ".Bestmatch_still_refuses_a_trailing_insertion_the_budget_cannot_afford, "
@@ -4714,8 +4767,11 @@ internal static class ExpectedDivergences
                 + "and, for the moved-insertion shape, .Bestmatch_reversed_records_the_insertion_"
                 + "where_its_own_flagless_answer_does, and for the worse-match shape, "
                 + ".Bestmatch_finds_the_two_error_match_upstream_settles_for_three_errors_over and "
-                + ".Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds",
-            // Twenty-eight rows rather than one, because each is a judged member of the family and the
+                + ".Bestmatch_keeps_the_folded_match_its_own_flagless_run_finds, and for S89's rows, "
+                + ".Bestmatch_keeps_a_match_that_is_all_trailing_insertions, "
+                + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
+                + ".Bestmatch_reversed_replaces_the_whole_emoji_run",
+            // Thirty-two rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
@@ -5972,13 +6028,28 @@ internal static class ExpectedDivergences
                 + "KEYED ON AN ABLATION, like `full-fold-fuzzy-deletion`: a row belongs here when "
                 + "`OracleComparer.RunWithoutTheGroupFoldLeftovers`, which sets "
                 + "`PatternObject.SkipGroupFoldLeftovers`, reproduces upstream's recorded answer "
-                + "exactly, AND this port's live answer is the one being judged. No wave row at the "
-                + "three default seeds reaches it. The control is "
+                + "exactly, AND this port's live answer is the one being judged. A second arm also "
+                + "sets `PatternObject.DoubleCountTrailingInsertions`, upstream's doubled insertion "
+                + "guard (ledger entry 12), for a BESTMATCH row that needs both: S89's row 5, "
+                + "`fuzzy-overhang` row 67 at seed 20260923, `(?b)(?fi)(f)(?:\\d+a00(?:\\1)){e<=3}` "
+                + "over 'f767ax00ﬂ'. Upstream answers (0, 9) at two insertions and a deletion; this "
+                + "port answers one substitution and one insertion, which is what upstream gives for "
+                + "the literal form `(?b)(?fi)(f)(?:\\d+a00f){e<=3}`. With both restored this port "
+                + "answers upstream's. The control is "
                 + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FullFoldBackreferenceLeftoversTests",
             Example: _groupFoldLeftoverRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheGroupFoldLeftovers(row))
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheDoubledInsertionGuard(
+                        row,
+                        withoutTheRetriedFoldSteps: false,
+                        withoutTheGroupFoldLeftovers: true
+                    )
+                )
         ),
         new(
             Id: "full-fold-backreference-retry",
@@ -6002,8 +6073,13 @@ internal static class ExpectedDivergences
                 + "`OracleComparer.RunWithoutTheRetriedFoldSteps`, which sets "
                 + "`PatternObject.SkipRetriedFoldSteps`, alone or together with "
                 + "`ChargeUntouchedFoldings`, `SkipGroupFoldLeftovers` or both, reproduces upstream's "
-                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
-                + "control is "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. Two "
+                + "more arms add `PatternObject.DoubleCountTrailingInsertions`, upstream's doubled "
+                + "insertion guard (ledger entry 12), for BESTMATCH rows that need both defects. S89's "
+                + "row 10 is one: `(?b)(?fi)(f)(?:(?:\\1)){e<=3}` over 'fxf'. Upstream finds nothing, "
+                + "and its literal form `(?b)(?fi)(f)(?:f){e<=3}` gives (0, 3) at one insertion, as "
+                + "this port does. The retry defect turns that fit into a substitution plus a trailing "
+                + "insertion, and the doubled guard refuses the insertion. The control is "
                 + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FullFoldBackreferenceLeftoversTests",
             Example: _groupFoldRetryRows,
@@ -6033,6 +6109,24 @@ internal static class ExpectedDivergences
                     OracleComparer.RunWithoutTheRetriedFoldSteps(
                         row,
                         withoutTheFoldFix: true,
+                        withoutTheGroupFoldLeftovers: true
+                    )
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheDoubledInsertionGuard(
+                        row,
+                        withoutTheRetriedFoldSteps: true,
+                        withoutTheGroupFoldLeftovers: false
+                    )
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithTheDoubledInsertionGuard(
+                        row,
+                        withoutTheRetriedFoldSteps: true,
                         withoutTheGroupFoldLeftovers: true
                     )
                 )

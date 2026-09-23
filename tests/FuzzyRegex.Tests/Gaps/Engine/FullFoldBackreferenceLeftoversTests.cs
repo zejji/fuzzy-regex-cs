@@ -211,4 +211,39 @@ public sealed class FullFoldBackreferenceLeftoversTests
         best.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
         best.FuzzyChanges.Deletions.Should().Equal(3);
     }
+
+    [Test]
+    public void A_best_match_keeps_the_one_insertion_fit_of_a_retried_reference()
+    {
+        // S85's BESTMATCH row minimised (S89). Upstream needs two defects to lose this: the retry
+        // defect above turns the one-insertion fit into a substitution and a trailing insertion,
+        // and ledger entry 12's doubled guard refuses that insertion once BESTMATCH has brought
+        // the budget down to two. This port answers no match only with both switched off.
+        // Literal form, V1 fullmatch('(?b)(?fi)(f)(?:f){e<=3}', 'fxf'): span=(0, 3) counts=(0, 1, 0)
+        //   changes=([], [1], [])
+        // V1 fullmatch('(?b)(?fi)(f)(?:(?:\1)){e<=3}', 'fxf'): None
+        Match m = new FuzzyRegex(@"(?b)(?fi)(f)(?:(?:\1)){e<=3}").FullMatch("fxf");
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 3));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 1, 0));
+        m.FuzzyChanges.Insertions.Should().Equal(1);
+    }
+
+    [Test]
+    public void A_best_match_ends_on_the_ligature_as_the_literal_form_does()
+    {
+        // `fuzzy-overhang` row 67 at seed 20260923 (S89). Here the leftovers defect joins ledger
+        // entry 12's doubled guard: with both switched off this port answers upstream's
+        // (0, 2, 1).
+        // Literal form, V1 fullmatch('(?b)(?fi)(f)(?:\d+a00f){e<=3}', 'f767ax00ﬂ'): span=(0, 9)
+        //   counts=(1, 1, 0) changes=([8], [5], [])
+        // V1 fullmatch('(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}', 'f767ax00ﬂ'): span=(0, 9)
+        //   counts=(0, 2, 1) changes=([], [5, 8], [9])
+        Match m = new FuzzyRegex(@"(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}").FullMatch("f767ax00ﬂ");
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 9));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 1, 0));
+        m.FuzzyChanges.Substitutions.Should().Equal(8);
+        m.FuzzyChanges.Insertions.Should().Equal(5);
+    }
 }

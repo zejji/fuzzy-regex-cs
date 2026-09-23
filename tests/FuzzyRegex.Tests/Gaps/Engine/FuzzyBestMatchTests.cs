@@ -967,6 +967,71 @@ public sealed class FuzzyBestMatchTests
         m.FuzzyChanges.Insertions.Should().Equal(6, 8);
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
+    // Ledger entry 12's plainest shape yet, found by S89 while minimising STATE finding 3: a fuzzy
+    // section with nothing in it, so every character is a trailing insertion. Upstream answers no
+    // match to both patterns below; without `(?b)` it answers (0, 3) at three insertions, which
+    // is this port's answer. Restoring the doubled term (`PatternObject.DoubleCountTrailingInsertions`)
+    // makes this port answer no match too. Recorded 2026-09-23 by `python tools/record-oracle.py
+    // --rows tools/probes/s89-bestmatch-rows.jsonl`, rows 4 and 5; classified as
+    // `bestmatch-loses-a-candidate`, rows 30 and 31.
+    [Test]
+    public void Bestmatch_keeps_a_match_that_is_all_trailing_insertions()
+    {
+        Match empty = new FuzzyRegex("(?b)(?:){e<=3}").FullMatch("znz");
+
+        empty.Success.Should().BeTrue();
+        (empty.Index, empty.Index + empty.Length).Should().Be((0, 3));
+        empty.FuzzyCounts.Should().Be(new FuzzyCounts(0, 3, 0), "upstream answers no match at all");
+        empty.FuzzyChanges.Insertions.Should().Equal(0, 1, 2);
+
+        // The same through a named list whose first phrase is empty, reversed, which is how the
+        // oracle first drew it.
+        Dictionary<string, IReadOnlyCollection<string>> lists = new(StringComparer.Ordinal)
+        {
+            ["phrases"] = ["", "amber lantern"],
+        };
+        Match listed = new FuzzyRegex(@"(?b)(?r)(?:\L<phrases>){e<=3}", FuzzyRegexOptions.None, lists).FullMatch("znz");
+
+        listed.Success.Should().BeTrue();
+        (listed.Index, listed.Index + listed.Length).Should().Be((0, 3));
+        listed.FuzzyCounts.Should().Be(new FuzzyCounts(0, 3, 0), "upstream answers no match at all");
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
+    // STATE finding 3's first row. Upstream answers no match under `(?b)(?r)`, and (0, 11) at seven
+    // insertions both without `(?b)` and without `(?r)`. This port answers (0, 11) at seven
+    // insertions, and answers no match once the doubled term of ledger entry 12 is restored. Recorded
+    // 2026-09-23, `tools/probes/s89-bestmatch-rows.jsonl` row 3; `bestmatch-loses-a-candidate` row 29.
+    [Test]
+    public void Bestmatch_reversed_keeps_the_seven_insertion_match()
+    {
+        Match m = new FuzzyRegex("(?b)(?e)(?fi)(?r)(?:fine){e<=7}").FullMatch("oelFin becf");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Index + m.Length).Should().Be((0, 11));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 7, 0), "upstream answers no match at all");
+    }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    //
+    // STATE finding 4, seed 20260923 row 3821 of a 2000-row `fuzzy-literal,fuzzy-anchored` wave.
+    // Upstream's `subf` gives '<><>😀': its first match is (0, 2) at a substitution and a deletion,
+    // because the doubled term refuses the trailing insertion the (0, 3) fit needs. That fit costs
+    // the same two errors (an insertion and a deletion) and covers the whole first run, so without
+    // it the second emoji is left over. Without `(?b)` upstream gives '<><>', which is this port's answer,
+    // and restoring the doubled term makes this port give '<><>😀'. Recorded 2026-09-23,
+    // `tools/probes/s89-bestmatch-rows.jsonl` row 6; `bestmatch-loses-a-candidate` row 32.
+    [Test]
+    public void Bestmatch_reversed_replaces_the_whole_emoji_run()
+    {
+        string result = new FuzzyRegex(@"(?b)(?r)\m(?:😀\d😀){e:[a-z]}").ReplaceFormat("b😀😀", "<>");
+
+        result.Should().Be("<><>", "upstream gives '<><>😀'");
+    }
+
     // UPSTREAM HANGS ON BOTH (?b) PATTERNS BELOW; the port's answer is the zero-error match the
     // `|2` branch gives, which upstream itself gives once the (?b) is removed. regex 2026.9.10 on 2026-09-23 (tools/probes/s87-stale-total-errors.py, 5 s limit per call):
     //   search('(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                        -> killed at 5 s
