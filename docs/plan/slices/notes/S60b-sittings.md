@@ -373,3 +373,58 @@ confirmed upstream gives None. By the reviewer's run the port gives (0, 3); I ha
 The second pass covered only the fix delta and returned "No defects found". It checked that 31
 and 32 branches, and named lists of 31 and 32 entries, build the same filter with the guard on and
 off. It also checked that 20,000 one-armed groups and 8000 `(?:gh)?` compile without overflow.
+
+## 2026-09-23, 03:00 - the ASCII fast path in `SameCharIgn` (orchestrator item 1)
+
+Landed in 1cb7cc6. **It is not yet reviewed.** This sitting had no Agent tool, and a nested
+`claude -p` reviewer needs approval that a non-interactive session cannot give. The brief is ready
+in `.scratch/review-brief.txt` (gitignored, so it may be gone; it is the VERIFICATION.md brief with
+the scope "commit 1cb7cc6", the deliberate Turkic and LOCALE behaviour, and the hunt list below).
+The next sitting reviews 1cb7cc6 before it builds anything else.
+
+Hunt list for that review: an ASCII pair where the fast path and the enumeration disagree; a caller
+passing a value that is not a codepoint; a caller that relied on LOCALE throwing through this path;
+an IGNORECASE answer that moved against upstream (KELVIN SIGN, LONG S, the four Turkic I's, under
+`(?i)`, `(?ai)`, `(?fi)` and `{e<=1}`); a test that still passes with the fast path wrong.
+
+What landed: two ASCII characters under the ASCII or Unicode encoding compare by the ASCII case
+rule. `SameCharIgnTests` checks it against the enumeration over 128 x 128 pairs and the eight
+combinations of the ASCII, LOCALE and UNICODE flags.
+
+### Controls
+
+In `Matcher.SameCharIgn`, 1 of 6 `SameCharIgnTests` fails for each.
+
+- Control A, the letter check dropped. Change
+  `return (ch1 ^ ch2) == 0x20 && (ch1 | 0x20) - 'a' <= 'z' - 'a';` to
+  `return (ch1 ^ ch2) == 0x20;`. First mismatch: `flags 0x0 U+0000 U+0020: True, want False`.
+- Control B, the LOCALE guard dropped. Change
+  `if ((ch1 | ch2) < 0x80 && encoding != CaseEncoding.Locale)` to `if ((ch1 | ch2) < 0x80)`.
+  First mismatch: `flags 0x4 U+0000 U+0001: False, want NotSupportedException`.
+
+The test is exhaustive, so there is no seed to vary.
+
+### Numbers
+
+ManyInputs `FuzzyPhraseOne*`, Release, `--inProcess`, run from `bench/FuzzyRegex.Benchmarks`,
+after then before, back to back. **Not quiet:** another session's MediumRun of ManyInputs and
+Workload (PID 3092) was running the whole time.
+
+| Row | Before | After | Allocated |
+|---|---|---|---|
+| FuzzyPhraseOneIsMatch | 63.32 ms | 66.62 ms | 87.18 MB both |
+| FuzzyPhraseOneMatch | 63.03 ms | 61.84 ms | 87.18 MB both |
+| FuzzyPhraseOneEnhanced | 65.86 ms | 64.25 ms | 90.4 MB both |
+
+Inside the error bars (1-2 ms). The 13.4% profile figure came from ce4ca5a, before item 10's
+filter began skipping most start positions on these rows, so the call may no longer be hot there
+(not measured). The item landed with its time gate open. The SYNC-DIVERGENCE row says: re-measure on a quiet
+machine, over an IGNORECASE workload the filter does not reach, and delete the fast path if it gains
+nothing.
+
+### Verification
+
+Suite 6650/6650, ratchet GREEN. Permanent files: BacktrackingVerbTests 20/20, PartialMatchingTests
+54/54, ReverseMatchingTests 40/40. Oracle GREEN at 7 and 4242; 20260923 RED on 3752 and 5185 only,
+as on the base commit. AOT 6647 / 3 skipped; the first publish failed in `link.exe` with exit 1318
+and passed on the next run, unchanged. AOT smoke GREEN, 6.68 MB.
