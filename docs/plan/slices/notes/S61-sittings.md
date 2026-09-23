@@ -197,3 +197,10 @@ at which the ratio no longer rounds to 1. Pinned by the Pester test "shows a fai
 rise however tight the floor is set", which was red before the fix. The reviewer's probe then
 printed every case correctly (1.00002x, 0.996x, 1.005x, 1.20x, 0.20x, 1.0002x). This delta
 changes tooling, so it gets one more pass.
+
+**Third pass, over 5c91f57.** 336,555 random ratios printed correctly, and NaN, the infinities, 0
+and negative ratios do not throw. Two findings, both reproduced, both from the 10-place cap: a
+one-byte rise on a 30,000,000,000-byte baseline (slack 0) printed as 1.0000000000x, and a floor of
+1.00000000001 printed as 1.0000000000x. Neither changed a verdict. The cap is now 15, which is
+`Math.Round`'s own limit. Pinned by the Pester test "shows a one-byte rise on a very large
+baseline", which was red before the fix.

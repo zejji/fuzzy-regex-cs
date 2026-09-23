@@ -108,10 +108,11 @@ $ErrorActionPreference = 'Stop'
 
 # The allocation floor defaults to 1.0001x, so a rise that fails the gate can be too small to see at
 # two decimal places: 5,000,000 to 5,002,000 bytes printed as 1.00x (S61 blind review). A ratio gets
-# the fewest places, at least two, at which it no longer rounds to 1.
+# the fewest places, at least two, at which it no longer rounds to 1. The cap is Math.Round's own
+# limit of 15, near the precision of a double around 1.
 function Get-RatioDigits([double]$Ratio) {
     $digits = 2
-    while ($digits -lt 10 -and $Ratio -ne 1 -and [math]::Round($Ratio, $digits) -eq 1) { $digits++ }
+    while ($digits -lt 15 -and $Ratio -ne 1 -and [math]::Round($Ratio, $digits) -eq 1) { $digits++ }
     $digits
 }
 

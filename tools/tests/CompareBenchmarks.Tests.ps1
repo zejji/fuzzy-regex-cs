@@ -207,6 +207,17 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         $report | Should -Match 'allocation 1\.00001x'
     }
 
+    It 'shows a one-byte rise on a very large baseline' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 30000000000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 30000000001
+
+        # S61 third review pass: a cap of ten places printed this 1 + 3.3e-11 rise as 1.0000000000x.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium -AllocationNoiseFloor 1 -AllocationSlackBytes 0 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match 'allocates more \(1\.00000000003x\)'
+    }
+
     It 'does not call an allocation drop a regression' {
         New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 20000
