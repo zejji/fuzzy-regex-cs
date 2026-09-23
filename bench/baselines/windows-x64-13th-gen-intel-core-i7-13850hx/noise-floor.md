@@ -272,6 +272,15 @@ is a gate decision rather than a measurement one, so it is left to **S63** (see 
 What this measurement establishes is the evidence S63 needs: an allocation threshold anywhere above
 about 1.0001 is justified by the machine, not forced by it.
 
+**Update, 2026-09-23 (S61).** The gate now takes that threshold: allocation no longer uses
+`-Threshold`, and any rise beyond the 1.0001 floor is RED, so the test above is inverted. S61 also
+found the one case the ratio floor cannot cover. Once S61 took the per-call state out, several
+ManyInputs rows fell to a few hundred bytes an operation, and there the harness's own variation is
+a large ratio: two `--job short --inProcess` runs of an unchanged tree read ValidateEmails at 517 B
+and then 582 B (1.13x), and FuzzyPhraseThreeAlternation at 4,656 B and then 3,984 B. So a move of
+up to `-AllocationSlackBytes` (1,024 B an operation) is also `same`. That figure came from a busy
+machine and the short job; S63 re-measures it on a quiet one.
+
 **Still not done:** scope item 1's second pair ("repeat the pair once after a reboot"). Rebooting
 this machine would kill the owner's driver, Stryker and night-shift processes, which is the owner's
 call and not a slice's. It stays on the slice.

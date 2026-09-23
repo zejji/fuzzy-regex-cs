@@ -123,6 +123,12 @@ public sealed class TimeoutAndCancellationTests
             case "CountSpan":
                 _ = pattern.Count(input.AsSpan(), timeout);
                 break;
+            case "IsMatchMemory":
+                _ = pattern.IsMatch(input.AsMemory(), timeout);
+                break;
+            case "CountMemory":
+                _ = pattern.Count(input.AsMemory(), timeout);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(method), method, "no such method in this test");
         }
@@ -194,6 +200,12 @@ public sealed class TimeoutAndCancellationTests
             case "CountSpan":
                 _ = pattern.Count(input.AsSpan(), cancellationToken: token);
                 break;
+            case "IsMatchMemory":
+                _ = pattern.IsMatch(input.AsMemory(), cancellationToken: token);
+                break;
+            case "CountMemory":
+                _ = pattern.Count(input.AsMemory(), cancellationToken: token);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(method), method, "no such method in this test");
         }
@@ -219,6 +231,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
+    [Arguments("IsMatchMemory")]
+    [Arguments("CountMemory")]
     public void A_per_call_timeout_fires_on_every_input_dependent_method(string method)
     {
         // The pattern itself has NO budget, so anything that fires here came from the call.
@@ -249,6 +263,8 @@ public sealed class TimeoutAndCancellationTests
     [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
     [Arguments("IsMatchSpan")]
     [Arguments("CountSpan")]
+    [Arguments("IsMatchMemory")]
+    [Arguments("CountMemory")]
     public void Cancellation_stops_every_input_dependent_method(string method)
     {
         FuzzyRegex pattern = new(_slowPattern);
@@ -290,6 +306,41 @@ public sealed class TimeoutAndCancellationTests
         Action call = () => pattern.Match(_slowSubject);
 
         call.Should().Throw<RegexMatchTimeoutException>();
+    }
+
+    [Test]
+    [Arguments(nameof(FuzzyRegex.EnumerateMatches))]
+    [Arguments(nameof(FuzzyRegex.EnumerateSplits))]
+    public void A_lazy_walk_does_not_charge_the_callers_time_between_steps_to_its_budget(string method)
+    {
+        // S61 moved the lazy walks onto one state for the whole walk, and a state carries one
+        // start time, so without a clock restart per step the caller's own work between two
+        // matches would time the walk out. The built-in Regex times each match of a lazy walk
+        // (tools/probes/bcl-lazy-walk-timeout.cs), and DIVERGENCES keeps this port there.
+        FuzzyRegex pattern = new(@"\w+");
+        TimeSpan budget = TimeSpan.FromMilliseconds(50);
+        IEnumerable<object?> walk = string.Equals(method, nameof(FuzzyRegex.EnumerateMatches), StringComparison.Ordinal)
+            ? pattern.EnumerateMatches("a b c d", timeout: budget)
+            : pattern.EnumerateSplits("a b c d", timeout: budget);
+
+        int steps = 0;
+        Action pull = () =>
+        {
+            foreach (object? _ in walk)
+            {
+                steps++;
+                long started = Stopwatch.GetTimestamp();
+                while (Stopwatch.GetElapsedTime(started) < budget * 3)
+                {
+                    Thread.SpinWait(1_000);
+                }
+            }
+        };
+
+        pull.Should().NotThrow();
+        steps
+            .Should()
+            .BeGreaterThan(3, "the walk has to spend several budgets' worth of caller time to prove anything");
     }
 
     [Test]

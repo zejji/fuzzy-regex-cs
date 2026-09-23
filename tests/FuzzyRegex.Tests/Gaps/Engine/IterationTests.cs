@@ -174,6 +174,11 @@ public sealed class IterationTests
                 ("(?r)a*", "aab", false),
                 ("(?r)..", "abcde", true),
                 (@"\b", "a b", false),
+                // Surrogate pairs, since S61 hands the first state's "one code unit per
+                // character" answer on to the next: a walk that assumed it would step half a pair.
+                (".{1,3}b", "\U0001F600\U0001F600b\U0001F600\U0001F600\U0001F600b", false),
+                (".+?b", "\U0001F600\U0001F600b\U0001F600\U0001F600\U0001F600b", false),
+                ("(?r)b.{1,3}", "b\U0001F600\U0001F600b\U0001F600\U0001F600\U0001F600", false),
             }
         )
         {

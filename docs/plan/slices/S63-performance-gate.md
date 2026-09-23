@@ -70,14 +70,13 @@ is fastest, since that is advice a user needs.
    it; `grep -rn -i 'ponytail:\|Phase 7' src/FuzzyRegex --include=*.cs` and the file must agree row
    for row when the slice closes. Rows that remain are deliberate, dated deferrals, and the file
    says so.
-7. **Decide whether allocation gets a threshold of its own.** `tools/compare-benchmarks.ps1` fails a
-   run on `-Threshold`, which is 1.25 for *both* axes; a floor can only excuse a ratio that is over
-   `-Threshold`, so `-AllocationNoiseFloor` at 1.0001 excuses nothing. The consequence, pinned as
-   a test in `tools/tests/CompareBenchmarks.Tests.ps1`: a benchmark allocating **1.20x** its
-   baseline is GREEN.
-   S58 measured the machine's allocation noise at 2.8e-5, so a tighter allocation threshold is
-   available on the evidence; whether the gate should use it is a gate decision, which is this
-   slice. Decide it either way, record the reason, and invert that test if the answer is yes.
+7. **Allocation's own threshold: taken by S61** (its scope item 5, 2026-09-23). Allocation no
+   longer uses `-Threshold`: any rise beyond `-AllocationNoiseFloor` (1.0001) and
+   `-AllocationSlackBytes` (1,024 B an operation, measured by S61 because a few-hundred-byte
+   benchmark moved 1.13x between two runs of an unchanged tree) is RED, and the 1.20x test is
+   inverted. What is left here: re-measure the slack with `--job medium` on a quiet machine, since
+   S61's number came from `--job short --inProcess` on a busy one, and change the default if the
+   quiet number differs.
 8. **Phase 7 close notes**: what moved and by how much per workload, what was declined and why, the
    negative results, the state of `SYNC-DIVERGENCE.md` (every row with its measured gain and its
    re-align instruction), the AOT binary size against the 6,972,928-byte baseline, and the refreshed

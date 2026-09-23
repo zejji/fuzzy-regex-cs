@@ -9,10 +9,10 @@ namespace Fuzzy.Text.RegularExpressions.Benchmarks;
 /// <remarks>
 /// <para>
 /// <c>FuzzyRegex.IsMatch(ReadOnlySpan&lt;char&gt;)</c> and <c>Count(ReadOnlySpan&lt;char&gt;)</c>
-/// both call <c>input.ToString()</c>, because the engine indexes a <see cref="string"/> throughout
-/// (<c>MatchState.Text</c>), so today they spare the caller a conversion and not the allocation.
-/// The <c>ponytail:</c> notes beside both say so. This suite is the number that decides whether
-/// threading a span through the engine is worth its cost, and it changes no engine code.
+/// both call <c>input.ToString()</c>, because the engine keeps the subject between steps and a span
+/// cannot be kept, so they spare the caller a conversion and not the allocation. S61 added the
+/// <see cref="System.ReadOnlyMemory{T}"/> overloads, which <c>MatchState.Text</c> now holds and reads
+/// in place; the <c>Memory</c> rows are theirs.
 /// </para>
 /// <para>
 /// <b>The pattern matches at index 0 on purpose.</b> The question is the cost of the copy, not the
@@ -28,6 +28,9 @@ public class SpanOverloadBenchmarks
 {
     /// <summary>Matches at index 0 of every corpus subject, so almost no engine work happens.</summary>
     private static readonly FuzzyRegex _atStart = new("the quick");
+
+    /// <summary>The megabyte subject as a caller's own buffer rather than a string.</summary>
+    private static readonly ReadOnlyMemory<char> _longBuffer = Corpus.Long.ToCharArray();
 
     /// <summary>The string overload on a nineteen-character subject.</summary>
     /// <returns>Whether it matched.</returns>
@@ -71,4 +74,17 @@ public class SpanOverloadBenchmarks
     /// <returns>How many matches there were.</returns>
     [Benchmark]
     public int CountSpanMegabyte() => _atStart.Count(Corpus.Long.AsSpan());
+
+    /// <summary>
+    /// The <see cref="System.ReadOnlyMemory{T}"/> overload (S61) on a megabyte held in a caller's
+    /// array, which the engine reads in place: the row that shows what the copy was.
+    /// </summary>
+    /// <returns>Whether it matched.</returns>
+    [Benchmark]
+    public bool MemoryMegabyte() => _atStart.IsMatch(_longBuffer);
+
+    /// <summary>The memory form of <see cref="CountStringMegabyte"/>.</summary>
+    /// <returns>How many matches there were.</returns>
+    [Benchmark]
+    public int CountMemoryMegabyte() => _atStart.Count(_longBuffer);
 }

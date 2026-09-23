@@ -231,6 +231,45 @@ public sealed class SearchStartTests
     }
 
     [Test]
+    public void A_reverse_zero_width_scan_stops_at_a_slice_start_that_splits_a_surrogate_pair()
+    {
+        // Upstream's reverse zero-width scans test a position, give up at 'slice_start', and only
+        // then step back one codepoint ('search_start_BOUNDARY_rev', upstream/src/_regex.c:7907-7913),
+        // so no answer starts below the slice. No Python call can reproduce the case, because a
+        // 'pos' cannot split a codepoint. In UTF-16 it can: the slice (3, 5) of "😀😁x😂\na" starts on
+        // the low half of 😁, and stepping back from 4 walks the whole pair to 2. The expectation is
+        // the slice contract, and it is what the engine answers with the prefilter off. Found by
+        // S60b item 2's sweep of every UTF-16 slice, prefilter on against off, 2026-09-23.
+        const string subject = "😀😁x😂\na";
+
+        using (new AssertionScope())
+        {
+            foreach (string source in new[] { @"(?r)\B", @"(?r)^", @"(?r)\b", @"(?r)\M" })
+            {
+                FuzzyRegex pattern = new(source);
+                FuzzyRegex unfiltered = new(source);
+                unfiltered.PatternObject.DoSearchStart = false;
+
+                for (int beginning = 0; beginning <= subject.Length; beginning++)
+                {
+                    for (int length = 0; beginning + length <= subject.Length; length++)
+                    {
+                        Match match = pattern.Match(subject, beginning, length);
+                        Match expected = unfiltered.Match(subject, beginning, length);
+
+                        (match.Success, match.Index, match.Length)
+                            .Should()
+                            .Be(
+                                (expected.Success, expected.Index, expected.Length),
+                                $"{source} ({beginning}, {length})"
+                            );
+                    }
+                }
+            }
+        }
+    }
+
+    [Test]
     public void The_prefilter_is_withheld_from_a_pattern_that_can_move_the_slice()
     {
         // NARROWING 3. '(*SKIP)' moves the slice under the matcher, so the prefilter is withheld

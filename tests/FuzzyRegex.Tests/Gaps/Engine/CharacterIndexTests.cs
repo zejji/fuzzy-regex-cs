@@ -85,7 +85,7 @@ public sealed class CharacterIndexTests
         var regex = new FuzzyRegex("x");
         return MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             beginning,
             end,
             overlapped: false,

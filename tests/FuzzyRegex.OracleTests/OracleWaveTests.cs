@@ -207,10 +207,10 @@ public sealed class OracleWaveTests
     public void The_lazy_walks_answer_exactly_what_the_eager_ones_do()
     {
         // S53b's `EnumerateMatches` and `EnumerateSplits` promise the same answer as `Matches` and
-        // `Split`, found as it is asked for. They cannot share an implementation, because the eager
-        // pair keeps ONE engine state across the whole walk and a lazy one cannot - a state owns
-        // rented buffers and an abandoned iterator would never return them - so the two really are
-        // two loops, and "the same answer" is a claim rather than a tautology.
+        // `Split`, found as it is asked for. Since S61 `Split` is `EnumerateSplits` drained, but
+        // `Matches` and `EnumerateMatches` are still two loops (`Iteration.FindAll` and
+        // `Iteration.Enumerate`), which differ in when the clock restarts, so for them "the same
+        // answer" is a claim rather than a tautology.
         //
         // Upstream is not consulted here, and does not need to be: the eager pair is already
         // compared against upstream by the wave run above, so an eager-lazy disagreement is a bug
@@ -272,6 +272,85 @@ public sealed class OracleWaveTests
                 Environment.NewLine,
                 disagreements.Count > 0 ? disagreements[0] : ""
             );
+    }
+
+    [Test]
+    public void A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does()
+    {
+        // S61 made a pattern keep its engine state between calls (`MatchStateCache`), so every
+        // call after the first starts from whatever the last one left: groups set, repeats
+        // counted, fuzzy errors charged, a backtrack stack full. The wave run above cannot see a
+        // leak, because it compiles each row afresh and asks it once. Here the same row is asked
+        // twice: once on a fresh pattern, and once on a pattern that first walked a different
+        // subject to the end. Any difference is state the reset left behind.
+        OracleWaveFile wave = OracleWave.Load();
+        wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
+
+        List<string> disagreements = [];
+        List<string> dirtyWalksThatThrew = [];
+        int compared = 0;
+        string previous = "";
+
+        foreach (OracleRow row in wave.Rows)
+        {
+            // Skipped for the reason the lazy-walk sweep skips them: upstream ran out of time or
+            // heap, so asking this engine twice costs two whole RowTimeouts for no information.
+            if (row.Expected is TimeoutOutcome or ResourceOutcome)
+            {
+                continue;
+            }
+
+            // The previous row's subject joined to this one's, so the walk usually finds matches
+            // and leaves groups and counters set, over text the row's own question does not see.
+            string dirt = previous + row.Subject;
+            previous = row.Subject;
+
+            IOracleOutcome? fresh = OracleComparer.Run(row);
+            IOracleOutcome? reused = OracleComparer.Run(
+                row,
+                OracleComparer.RowTimeout,
+                ablate: compiled => Dirty(compiled, dirt)
+            );
+            compared++;
+
+            string first = OracleWave.Describe(row, fresh);
+            string second = OracleWave.Describe(row, reused);
+
+            if (!string.Equals(first, second, StringComparison.Ordinal))
+            {
+                disagreements.Add(
+                    $"fresh:{Environment.NewLine}{first}{Environment.NewLine}reused:{Environment.NewLine}{second}"
+                );
+            }
+        }
+
+        compared.Should().BeGreaterThan(0, "a wave with every row skipped discriminates nothing");
+        disagreements
+            .Count.Should()
+            .Be(
+                0,
+                "a reused pattern answered differently on {0} of {1} rows ({2} dirtying walks threw). First:{3}{4}",
+                disagreements.Count,
+                compared,
+                dirtyWalksThatThrew.Count,
+                Environment.NewLine,
+                disagreements.Count > 0 ? disagreements[0] : ""
+            );
+
+        void Dirty(FuzzyRegex compiled, string dirt)
+        {
+            try
+            {
+                _ = compiled.Matches(dirt, timeout: TimeSpan.FromSeconds(2)).Count;
+            }
+            catch (Exception e)
+            {
+                // Whatever the walk throws, a timeout included, it has still used the cached state
+                // and put it back, which is all this call is for. The row's own answer is compared
+                // above; this one is only counted, for the report.
+                dirtyWalksThatThrew.Add(e.GetType().Name);
+            }
+        }
     }
 
     [Test]

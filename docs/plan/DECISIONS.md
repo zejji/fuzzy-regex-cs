@@ -1212,3 +1212,42 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   is wrong when sections nest. The (?e) and BESTMATCH-tie answers that moved are upstream's defect
   (ledger 32), pinned permanently. Row 3752 is a carried-slice row (ledger 5), not a walk
   truncation: its other spellings hang upstream, so there is no prune outcome to compare.
+- 2026-09-23 (S60b item 10): the fuzzy prefilter covers one shape only, a pattern that is exactly
+  one fuzzy ASCII literal (`Engine/FuzzyLiteralFilter.cs`), and switches itself off at the first
+  non-ASCII character it would search. ASCII on both sides is what makes an ordinal
+  case-insensitive search a superset of the engine's fold; KELVIN SIGN, long s, `ß` and `ﬁ` are the
+  pinned counter-examples. `k` is the tightest of `e`, the per-kind sum and the cost equation.
+  Alternations and named lists get no filter yet.
+- 2026-09-23 (S60b item 10, extended): the fuzzy prefilter also covers a fuzzy section over an
+  alternation of ASCII literals or a named list, each literal cut into its own `k + 1` pieces, at
+  most 32 pieces in all. Each piece is its own cached `IndexOf`, not one `SearchValues<string>`
+  pass: three phrases of nine pieces ran at 171.7 ms, level with three one-phrase passes at
+  159.7 ms, so the single pass waits for a long named list and a benchmark (SHORTCUT in the file).
+- 2026-09-23 (S60b item 2): `search_start` is kept. On a quiet machine RedactDigits ran 1.72x
+  faster and every other row stayed flat with identical allocations; the earlier 1.93x named-list
+  slowdown was builds running during the measurement. A reverse zero-width scan whose slice start
+  splits a surrogate pair gives up below `SliceStart`, as the matcher does, where upstream's
+  codepoint positions cannot reach that case at all.
+- 2026-09-23 (S61): a compiled pattern keeps one `MatchState` between calls (`MatchStateCache`,
+  upstream's `groups_storage`/`repeats_storage`/`stack_storage`, `_regex.c` :577-579), in the
+  one-slot `Interlocked.Exchange` shape of the built-in `Regex._runner`, because upstream's lock
+  (`acquire_state_lock`) has no counterpart here. This amends S52b's PERMANENT thread-safety rule
+  that nothing reachable from a pattern is mutable: `ObjectGraph._atomicallyShared` lists the cache
+  as the one exception, backed by the stress test (which fails when the slot is read without the
+  exchange) and by `MatchStateCacheTests` (a reused state equals a new one, field by field). A state
+  the cache built goes back to it on `Dispose`, so every call site keeps its `using`.
+- 2026-09-23 (S61): span option (a) is in, (b) stays declined, (c) is the span overloads' doc.
+  `MatchState.Text` is a `ReadOnlyMemory<char>`, and `IsMatch` and `Count` gained
+  `ReadOnlyMemory<char>` overloads that read the caller's buffer in place: 0 B and 8 B over a
+  megabyte `char[]`, against 2,098,060 B and 2,098,135 B for the span forms
+  (`*SpanOverload*`, `--job short --inProcess`). The span overloads still copy and say so in
+  their remarks; pinning the span with `unsafe` (option b) is not re-proposed without a user
+  asking. Only those two methods: everything returning a `Match` needs the subject as a string
+  for `Capture.Value`. The time gate is still open: `CharAt` now reads through `Text.Span`, on
+  every path, so the deciding run is the full suite at `--job medium` on a quiet machine, with
+  `*ManyInputs*` and `*SpanOverload*` read first. A `char[]` argument still binds to the span
+  overload under C# 14 (`MemoryOverloadTests` compiles it).
+- 2026-09-23 (S61): a negative control on `MatchState.Init` must remove a line `InitMatch` does not
+  repeat. `ClearGroups()` and `Array.Clear(FuzzyCounts)` in `Init` cannot change an answer, because
+  `InitMatch` redoes both before every attempt, so removing either fails no oracle test; `ReqPos = -1`
+  is the line only `Init` resets (47 of 6594 reuse rows fail at seed 7 without it).
