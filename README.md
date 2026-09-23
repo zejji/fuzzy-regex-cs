@@ -99,6 +99,12 @@ foreach (Match match in regex.EnumerateMatches("one two three", timeout: TimeSpa
 // three
 ```
 
+Given a `ReadOnlySpan<char>`, `EnumerateMatches` returns a `ValueMatchEnumerator` instead, the
+shape `Regex.EnumerateMatches` has. Each step yields a `ValueMatch` holding only `Index` and
+`Length`, and the walk builds no `Match` objects. It cannot be stored in a field of a class, used with LINQ
+or held across an `await`; see [`docs/GUIDE.md`](https://github.com/zejji/fuzzy-regex-cs/blob/main/docs/GUIDE.md)
+for when to choose it.
+
 ## Coming from Python `regex`
 
 | Python `regex` | FuzzyRegex |

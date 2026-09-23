@@ -1272,3 +1272,7 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-23 (S61): an S61 sitting cannot run its own time gates while another driver is running
   on the machine, and it has nothing else left to do. Relaunch S61 only after the orchestrator's
   quiet-machine run of `*SpanOverload*` and `*WorkloadBenchmarks.EnumerateMatches*ToEndDense*`.
+- 2026-09-23 (S61, closing): the quiet gates kept step D with the pooled span copy (`SpanMegabyte`
+  350.2 us to 161.7 us, every row at or below 1.13x) and the span walk (2.73 ms and 17 B against
+  the string walk's 3.03 ms and 3.0 MB). The benchmark baseline is re-recorded by the orchestrator
+  on merged main, not by the slice, so it measures the merged code.

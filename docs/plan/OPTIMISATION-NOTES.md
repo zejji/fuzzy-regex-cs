@@ -101,6 +101,27 @@ in the main checkout.
 Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
 contamination: builds ran during that measurement. Item 2 is kept.
 
+## Measured by S61's quiet-machine gates (2026-09-23)
+
+S61 implemented and deleted the three rows on the span copy, the per-step state of a lazy walk and
+the `Split`/`EnumerateSplits` duplication. The deciding runs, `--job medium --inProcess` on a quiet
+machine, 8dd746e (before S61) against the slice's code. Raw output is under
+`artifacts/bench/2026-09-23-night/s61gate-*` in the main checkout; the full table is in
+`docs/plan/slices/notes/S61-sittings.md`, sitting 8.
+
+| Row | Before | After | Bytes before | Bytes after |
+|---|---|---|---|---|
+| SpanMegabyte (`IsMatch` over a 1 MB span) | 350.2 us | 161.7 us | 2,099,232 | 1 |
+| CountSpanMegabyte | 1,368 us | 1,313 us | 2,099,271 | 9 |
+| CountStringMegabyte | 1,046 us | 1,154 us (1.10x, inside the floor) | 776 | 9 |
+| EnumerateMatchesToEndDense (100 KB string walk) | 71.1 ms | 3.03 ms | 20.8 MB | 3.0 MB |
+| EnumerateMatchesSpanToEndDense (new span walk) | - | 2.73 ms | - | 17 B |
+
+The `ReadOnlySpan<char>` overloads still copy the span, now into a buffer rented from
+`ArrayPool<char>`, because `MatchState.Text` is a `ReadOnlyMemory<char>`. Reading a span in place
+would need a `ref struct` state. It is worth reopening only if a benchmark shows the pooled copy
+costing time; today the copy allocates nothing and both span rows above are faster than before.
+
 ## From the Rust fuzzy-regex library (reviewed 2026-09-18)
 
 `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` has the full table. Two items adopted, both

@@ -476,3 +476,45 @@ Blocked, no code changed. The driver relaunched S61 three minutes after sitting 
 The machine was still busy: `tasklist` showed a 7 GB `dotnet.exe` (the size of a ReSharper
 inspection) and three `claude.exe` sessions. This is the slice's third checkpoint in a row, so
 the driver stops here. Relaunch S61 by hand once the quiet-machine run is possible.
+
+## Sitting 8 (2026-09-23, from 22:50)
+
+No code changed. The orchestrator ran the last gates and this sitting recorded them and closed
+the slice.
+
+### The quiet-machine gates
+
+The orchestrator ran them 22:34 to 22:48, on a quiet machine, `--job medium --inProcess`, 8dd746e
+(before S61) against 549158f (the slice's last commit). The raw output is
+`artifacts/bench/2026-09-23-night/s61gate-*` in the main checkout, and the table is copied from
+`.claude/driver/overnight-report-2026-09-24.md` there.
+
+| Row | Before | After | Ratio | Bytes before | Bytes after |
+|---|---|---|---|---|---|
+| StringShort | 134.1 ns | 95.0 ns | 0.71 | 912 | 0 |
+| SpanShort | 146.8 ns | 104.0 ns | 0.71 | 1,064 | 0 |
+| StringKilobyte | 159.8 ns | 115.5 ns | 0.72 | 912 | 0 |
+| SpanKilobyte | 241.4 ns | 142.7 ns | 0.59 | 3,096 | 0 |
+| StringMegabyte | 33.6 us | 31.9 us | 0.95 | 912 | 0 |
+| SpanMegabyte | 350.2 us | 161.7 us | 0.46 | 2,099,232 | 1 |
+| CountStringMegabyte | 1,046 us | 1,154 us | 1.10 | 776 | 9 |
+| CountSpanMegabyte | 1,368 us | 1,313 us | 0.96 | 2,099,271 | 9 |
+| MemoryMegabyte | - | 26.4 us | - | - | 0 |
+| CountMemoryMegabyte | - | 1,175 us | - | - | 9 |
+| EnumerateMatchesToEndDense | 71.1 ms | 3.03 ms | 0.04 | 20.8 MB | 3.0 MB |
+| EnumerateMatchesSpanToEndDense (new) | - | 2.73 ms | 0.90 of the string walk | - | 17 B |
+
+Verdicts, against S58's 1.13x time floor:
+
+- **Step D with the pooled span copy keeps.** Every row is at or below 1.13x. `SpanMegabyte`
+  went from 1.36x on the 06:46 to 07:16 run (before the pooled copy) to 0.46x. `CountStringMegabyte` at
+  1.10x is inside the floor; the next baseline should be watched on that row.
+- **The span walk keeps.** `EnumerateMatchesSpanToEndDense` takes 2.73 ms and 17 B where the
+  string walk over the same 100 KB takes 3.03 ms and 3.0 MB.
+- Steps A to C kept on that same morning run (sitting 5).
+
+### Handed over
+
+The benchmark baseline is not updated here. The orchestrator re-records the whole suite in process
+on merged main later on 2026-09-23 and commits it as maintenance, so the next slice ratchets
+against numbers measured on the merged code rather than on this branch.
