@@ -1,30 +1,31 @@
 # Current state
 
-**S61 in flight** (`docs/plan/slices/S61-per-match-allocation.md`, notes in
-`docs/plan/slices/notes/S61-sittings.md`), on branch `slice/s61`. Landed so far: step A (one state
-per lazy walk), steps B and C (a warm pattern reuses one match state; a warm `IsMatch` allocates
-nothing), the allocation gate in `compare-benchmarks.ps1`, and step D (span option (a): `IsMatch`
-and `Count` take a `ReadOnlyMemory<char>` and read it in place). Ratchet GREEN at 6625 tests.
-Every commit through aa67e98 has been blind-reviewed. The last pass found no defects; the review
-fixes are in the S61 notes.
-
-Ledger entry 18 (bytes per repetition of a capture group) was handed to S86 in writing.
+**S61 in flight, checkpoint** (`docs/plan/slices/S61-per-match-allocation.md`, notes in
+`docs/plan/slices/notes/S61-sittings.md`), on branch `slice/s61`. Steps A to D and the allocation
+gate are committed and blind-reviewed through 3d88f14. Ratchet GREEN at 6625 tests; AOT GREEN.
+Sitting 3 (2026-09-23, 02:57) stopped at the allowance hook's order.
 
 ## Next, in this order
 
-1. **Two oracle rows red at seed 20260923**, both reproduced at 8dd746e, before any S61 change, so
-   neither is S61's. They still need minimising and pinning: row 5185 (partial-sliced, a `(*SKIP)`
-   pattern, upstream (0, 2), port (1, 1)) and row 3752 (interactions, `Split` with flags 0x400a
-   runs for more than 10 minutes where upstream returns 2 parts). Details are in the S61 notes.
-2. **Time gates, on a quiet machine only**: `*WorkloadBenchmarks.*MatchesToEnd*`, `*ManyInputs*`
-   and `*SpanOverload*`, then the full suite at `--job medium`. Allocation has already decided each
-   step; time decides whether each one stays.
-3. The closing notes. AOT is already GREEN: suite 6622 succeeded and 0 failed, smoke binary
-   7,000,576 bytes (+27,648 bytes over 6,972,928).
+1. **Re-apply sitting 3's unrun work:** `git apply .scratch/s61-sitting3-wip.patch`. It holds
+   `OracleWaveTests.A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does` (the
+   "reset proven over a wave" item: each row asked fresh and again after the same pattern walked
+   other text), a corrected comment in the lazy-walk test, and a `sync-divergence:` marker plus
+   ledger row for `MatchStateCache`/`MatchState.Init` (`check-sync-divergence.ps1` was GREEN
+   with it). The new test has NOT been run: run it through `tools/run-oracle.ps1` at three seeds,
+   then prove it can fail (drop one line from `MatchState.Init`).
+2. **Read the time gates.** Launched detached at 02:59 on a quiet machine (CPU 1%), `--job medium`:
+   before (8dd746e, the `.scratch/base` worktree) under `artifacts/bench/2026-09-23-S61-gates-before`,
+   done; after (HEAD) under `artifacts/bench/2026-09-23-S61-gates-after`, then the rest of the suite
+   into the same folder. Filters `*ManyInputsBenchmarks*`, `*WorkloadBenchmarks.*MatchesToEnd*`,
+   `*SpanOverloadBenchmarks*`. Progress in `.scratch/bench-gates.log`. Compare with
+   `tools/compare-benchmarks.ps1 -UseExisting`; record time and bytes per step in the notes and
+   fill the time cell of the new SYNC-DIVERGENCE row.
+3. **Two oracle rows red at seed 20260923 are S87's**, planned on main in 0c2679c (row 3752 is a
+   hang upstream shares; row 5185 an already-judged family). S61 only records the hand-off.
+4. Closing notes, blind review of the sitting-3 delta, update the benchmark baseline, commit.
 
 ## Still pending from before S61
 
-**S60b is a checkpoint, not a landing.** Its next sitting starts with the benchmark triage after
-22:00, then re-runs the four negative controls, then its blind review (see its notes).
-
-S84 (a full-folded backreference that ends half-way through a folding) is queued.
+**S60b is a checkpoint, not a landing.** Its next sitting starts with the benchmark triage, then
+re-runs the four negative controls, then its blind review (see its notes).
