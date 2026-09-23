@@ -1195,3 +1195,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   case-insensitive search a superset of the engine's fold; KELVIN SIGN, long s, `ß` and `ﬁ` are the
   pinned counter-examples. `k` is the tightest of `e`, the per-kind sum and the cost equation.
   Alternations and named lists get no filter yet.
+- 2026-09-23 (S60b item 10, extended): the fuzzy prefilter also covers a fuzzy section over an
+  alternation of ASCII literals or a named list, each literal cut into its own `k + 1` pieces, at
+  most 32 pieces in all. Each piece is its own cached `IndexOf`, not one `SearchValues<string>`
+  pass: three phrases of nine pieces ran at 171.7 ms, level with three one-phrase passes at
+  159.7 ms, so the single pass waits for a long named list and a benchmark (SHORTCUT in the file).

@@ -16,16 +16,25 @@ import regex
 sys.stdout.reconfigure(encoding="utf-8")
 
 
+PHRASES = ["amber lantern works", "copper field studio", "violet stone archive"]
+
+
 def show(label, pattern, subject, flags=0, partial=False, pos=None, endpos=None):
     """Print one row's search answer: span, text and fuzzy counts."""
     kwargs = {}
+    if r"\L<phrases>" in pattern:
+        pattern = regex.compile(pattern, flags | regex.VERSION1, phrases=PHRASES)
     if pos is not None:
         kwargs["pos"] = pos
     if endpos is not None:
         kwargs["endpos"] = endpos
     if partial:
         kwargs["partial"] = True
-    m = regex.search(pattern, subject, flags | regex.VERSION1, **kwargs)
+    if isinstance(pattern, str):
+        m = regex.search(pattern, subject, flags | regex.VERSION1, **kwargs)
+    else:
+        m = pattern.search(subject, **kwargs)
+        pattern = pattern.pattern
     answer = "None" if m is None else f"span={m.span()} counts={m.fuzzy_counts} partial={m.partial}"
     print(f"{label:<34} {pattern!r:<44} {subject!r}")
     print(f"  search: {answer}")
@@ -67,3 +76,17 @@ show_all(
     r"(?i)(?:amber lantern works){e<=2}",
     "x amber lantern works yy AMBER LANTRN WORKS zz amberlantern work! qq amber",
 )
+
+print("\n=== alternations and named lists ===")
+THREE = r"(?i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}"
+show("the third branch, damaged", THREE, "note: VIOLXT STONE ARCHIVX here")
+show("no branch has a piece", THREE, "nothing of interest here at all")
+show("only a branch's last piece", THREE, "xx vioXet stXne archive")
+show("named list", r"(?i)(?:\L<phrases>){e<=2}", "the COPPER FIELD STUDXO")
+show("named list, no piece", r"(?i)(?:\L<phrases>){e<=2}", "nothing of interest here at all")
+show("common prefix", r"(?:amber lantern works|amber stone archive){e<=2}", "xx ambXr stone archXve")
+show("branch inside the literal", r"(?:amber (?:lantern|stone) works){e<=1}", "an ambXr stone works")
+show("reverse alternation", r"(?r)(?:amber lantern works|violet stone archive){e<=2}", "violet stone archive and amber lantrn works")
+show("fold in a branch", r"(?i)(?:oak stone field|kelvin works){e<=1}", "Kelvin wxrks")
+show("bestmatch across branches", r"(?b)(?i)(?:amber lantern works|violet stone archive){e<=2}", "amber lantxrn works and violet stone archive")
+show("pos inside a branch", THREE, "copper field studio, violet stone archive", pos=3)

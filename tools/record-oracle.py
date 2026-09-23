@@ -1744,6 +1744,7 @@ GENERATORS = (
     "fuzzy",
     "fuzzy-anchored",
     "fuzzy-literal",
+    "fuzzy-alternation",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -6165,52 +6166,120 @@ def _generate_fuzzy_literal(rng: random.Random, count: int):
                 mode = rng.choice(("ign", "fold"))
                 subject = noise() + fold_copy + noise()
 
-        pattern = "(?:" + literal + ")" + constraint
+        yield _fuzzy_literal_row(rng, i, "fuzzy-literal", literal, constraint, mode, subject, {})
 
-        # Drawn before any suppression, as in 'fuzzy', so the row stream does not reshuffle. Reverse
-        # is drawn more often than in 'fuzzy' because a full-folded literal under (?r) is a chain
-        # the filter must read back to front, and at 0.2 dropping that reversal changed one row in
-        # 2000 at seed 7 and none at seed 99.
-        reverse = rng.random() < 0.4
-        enhance = rng.random() < FUZZY_ENHANCE_PROBABILITY
-        bestmatch = rng.random() < FUZZY_BESTMATCH_PROBABILITY
-        if _has_weighted_cost(pattern):
-            enhance = False
-            bestmatch = False
 
-        if reverse:
-            pattern = "(?r)" + pattern
-        if mode == "ign":
-            pattern = "(?i)" + pattern
-        elif mode == "fold":
-            pattern = "(?fi)" + pattern
-        if enhance:
-            pattern = "(?e)" + pattern
-        if bestmatch:
-            pattern = "(?b)" + pattern
+def _generate_fuzzy_alternation(rng: random.Random, count: int):
+    """A fuzzy section over two or three literals, as `a|b|c`, as `\\L<phrases>`, or with the
+    alternation inside one literal: the filter cuts every literal into pieces of its own.
 
-        row = {
-            "generator": "fuzzy-literal",
-            "pattern": pattern,
-            "flags": 0,
-            "namedLists": {},
-            "subject": subject,
-            "operation": ALL_OPERATIONS[i % len(ALL_OPERATIONS)],
-        }
-        if row["operation"] in SUB_OPERATIONS:
-            row["template"] = "<>"
-        if row["operation"] in LIMIT_OPERATIONS:
-            row["count"] = rng.choice(SUB_COUNTS if row["operation"] in SUB_OPERATIONS else ITER_LIMITS)
-        if row["operation"] in OPERATIONS and rng.random() < 0.25:
-            row["partial"] = True
+    The words come from the same small pool, so branches often share a first or last word and
+    the compiler splits that text out of the alternation; the filter must put it back on every
+    branch. A copy of one branch, chosen at random, is planted in the subject, so a start bound
+    taken from the wrong branch's pieces, or from the first branch only, shows up as a skipped
+    match.
+    """
+    for i in range(count):
+        mode = rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
+        constraint = rng.choice(FUZZY_LITERAL_CONSTRAINTS)
+        form = rng.choice(("alternation", "named-list", "inner"))
+        named_lists = {}
+        if form == "inner":
+            head = rng.choice(FUZZY_LITERAL_WORDS)
+            tail = rng.choice(FUZZY_LITERAL_WORDS)
+            middles = rng.sample(FUZZY_LITERAL_WORDS, rng.randint(2, 3))
+            branches = [head + " " + middle + " " + tail for middle in middles]
+            body = head + " (?:" + "|".join(middles) + ") " + tail
+        else:
+            branches = [
+                " ".join(rng.choice(FUZZY_LITERAL_WORDS) for _ in range(rng.choices((1, 2, 3), weights=(1, 3, 3))[0]))
+                for _ in range(rng.randint(2, 3))
+            ]
+            if form == "named-list":
+                named_lists = {"phrases": branches}
+                body = r"\L<phrases>"
+            else:
+                body = "|".join(branches)
 
-        # A slice on a third of the rows that can take one, drawn by codepoint as S53b's are.
-        if row["operation"] in OPERATIONS + SUB_OPERATIONS and rng.random() < 0.33:
-            lo = rng.randrange(len(subject) + 1)
-            row["pos"] = lo
-            row["endpos"] = rng.randrange(lo, len(subject) + 1)
+        def noise() -> str:
+            return "".join(rng.choice(FUZZY_LITERAL_NOISE) for _ in range(rng.randrange(16)))
 
-        yield row
+        parts = [noise()]
+        for _ in range(rng.choices((0, 1, 2), weights=(1, 5, 2))[0]):
+            branch = rng.choice(branches)
+            copy = _fuzzy_recase(rng, branch) if mode != "plain" else branch
+            parts.append(_fuzzy_mutate(rng, copy, rng.randrange(5), FUZZY_LITERAL_NOISE))
+            parts.append(noise())
+        subject = "".join(parts)
+
+        if rng.random() < 0.2:
+            ascii_text, folded = rng.choice(FUZZY_LITERAL_FOLDS)
+            at = subject.lower().find(ascii_text)
+            if at >= 0:
+                subject = subject[:at] + folded + subject[at + len(ascii_text) :]
+
+        # The targeted fold shape, on one branch: its only untouched piece holds the fold.
+        if rng.random() < 0.2:
+            budget = rng.choice((1, 2))
+            fold_copy = _fuzzy_literal_fold_copy(rng, rng.choice(branches), budget)
+            if fold_copy is not None:
+                constraint = "{e<=" + str(budget) + "}"
+                mode = rng.choice(("ign", "fold"))
+                subject = noise() + fold_copy + noise()
+
+        yield _fuzzy_literal_row(rng, i, "fuzzy-alternation", body, constraint, mode, subject, named_lists)
+
+
+def _fuzzy_literal_row(
+    rng: random.Random, i: int, generator: str, body: str, constraint: str, mode: str, subject: str, named_lists: dict
+) -> dict:
+    """The row for a fuzzy section over `body`: its mode flags, an operation and a slice drawn."""
+    pattern = "(?:" + body + ")" + constraint
+
+    # Drawn before any suppression, as in 'fuzzy', so the row stream does not reshuffle. Reverse
+    # is drawn more often than in 'fuzzy' because a full-folded literal under (?r) is a chain
+    # the filter must read back to front, and at 0.2 dropping that reversal changed one row in
+    # 2000 at seed 7 and none at seed 99.
+    reverse = rng.random() < 0.4
+    enhance = rng.random() < FUZZY_ENHANCE_PROBABILITY
+    bestmatch = rng.random() < FUZZY_BESTMATCH_PROBABILITY
+    if _has_weighted_cost(pattern):
+        enhance = False
+        bestmatch = False
+
+    if reverse:
+        pattern = "(?r)" + pattern
+    if mode == "ign":
+        pattern = "(?i)" + pattern
+    elif mode == "fold":
+        pattern = "(?fi)" + pattern
+    if enhance:
+        pattern = "(?e)" + pattern
+    if bestmatch:
+        pattern = "(?b)" + pattern
+
+    row = {
+        "generator": generator,
+        "pattern": pattern,
+        "flags": 0,
+        "namedLists": named_lists,
+        "subject": subject,
+        "operation": ALL_OPERATIONS[i % len(ALL_OPERATIONS)],
+    }
+    if row["operation"] in SUB_OPERATIONS:
+        row["template"] = "<>"
+    if row["operation"] in LIMIT_OPERATIONS:
+        row["count"] = rng.choice(SUB_COUNTS if row["operation"] in SUB_OPERATIONS else ITER_LIMITS)
+    if row["operation"] in OPERATIONS and rng.random() < 0.25:
+        row["partial"] = True
+
+    # A slice on a third of the rows that can take one, drawn by codepoint as S53b's are.
+    if row["operation"] in OPERATIONS + SUB_OPERATIONS and rng.random() < 0.33:
+        lo = rng.randrange(len(subject) + 1)
+        row["pos"] = lo
+        row["endpos"] = rng.randrange(lo, len(subject) + 1)
+
+    return row
 
 
 # --------------------------------------------------------------------------------------------
@@ -6510,6 +6579,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "fuzzy-literal":
         yield from _generate_fuzzy_literal(rng, count)
+        return
+
+    if name == "fuzzy-alternation":
+        yield from _generate_fuzzy_alternation(rng, count)
         return
 
     if name == "posix":

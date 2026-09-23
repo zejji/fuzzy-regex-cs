@@ -17,12 +17,13 @@
 
     EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
     joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14, 'fuzzy-anchored' in
-    S57e and 'fuzzy-literal' in S60b.
+    S57e and 'fuzzy-literal' and 'fuzzy-alternation' in S60b.
 
     'fuzzy-literal' is a bare fuzzy phrase in a longer noisy subject, the one shape the port's
     fuzzy prefilter (Engine/FuzzyLiteralFilter.cs) accepts. 'fuzzy' almost never draws it: a
     filter refusing every subject changed one row in 4000 of 'fuzzy' and 'fuzzy-anchored' at seed 7
-    (2026-09-23).
+    (2026-09-23). 'fuzzy-alternation' is the same with two or three phrases, written as an
+    alternation, a named list, or an alternation inside one phrase.
 
     'fuzzy-anchored' is 'fuzzy' with a zero-width assertion in front of the whole pattern. S57c
     added it because its negative control could not be made to fire on any other generator: the
@@ -264,7 +265,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,timeout',
+    [string]$Generator = 'literals,literal-dot,anchors,classes,groups,quantifiers,boundaries,backrefs,case-folding,reverse,substitution,iteration,interactions,lookaround,conditionals,recursion,partial,partial-sliced,posix,verbs,fuzzy,fuzzy-anchored,fuzzy-literal,fuzzy-alternation,timeout',
     [string]$Seeds = "7,4242,$(Get-Date -Format 'yyyyMMdd')",
     [int]$Count = 300,
     [string]$Rows,

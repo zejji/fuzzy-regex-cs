@@ -41,18 +41,29 @@ public sealed class FuzzyLiteralPrefilterTests
         bool partial = false
     )
     {
-        Match match = new FuzzyRegex(pattern).Match(subject, beginning, length, partial);
+        FuzzyRegex regex = pattern.Contains(@"\L<phrases>", StringComparison.Ordinal)
+            ? new FuzzyRegex(
+                pattern,
+                FuzzyRegexOptions.None,
+                new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal) { ["phrases"] = _phrases }
+            )
+            : new FuzzyRegex(pattern);
+        Match match = regex.Match(subject, beginning, length, partial);
         return match.Success
             ? $"({match.Index},{match.Index + match.Length}) {match.FuzzyCounts.Substitutions},{match.FuzzyCounts.Insertions},{match.FuzzyCounts.Deletions}"
             : "None";
     }
+
+    private static readonly string[] _phrases = ["amber lantern works", "copper field studio", "violet stone archive"];
 
     private static PatternObject Build(string source) =>
         PatternObject.Compile(
             PatternCompiler.Compile(
                 source,
                 0,
-                new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal),
+                source.Contains(@"\L<phrases>", StringComparison.Ordinal)
+                    ? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { ["phrases"] = _phrases }
+                    : new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal),
                 PatternCompiler.DefaultVersion
             ),
             source
@@ -100,6 +111,58 @@ public sealed class FuzzyLiteralPrefilterTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
+    public void Every_branch_of_an_alternation_is_cut_into_pieces_of_its_own()
+    {
+        // A match is one branch with at most k edits, so it holds one of that branch's pieces.
+        FuzzyLiteralFilter? filter = Build(
+            "(?i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}"
+        ).FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter
+            .Pieces.Should()
+            .Equal("amber ", "lanter", "n works", "copper", " field", " studio", "violet", " stone ", "archive");
+        filter.Offsets.Should().Equal(0, 6, 12, 0, 6, 12, 0, 6, 13);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_named_list_is_an_alternation_to_the_filter()
+    {
+        // Upstream compiles '\L<name>' as a branch of its items, longest first.
+        FuzzyLiteralFilter? filter = Build(@"(?i)(?:\L<phrases>){e<=2}").FuzzyLiteralFilter;
+
+        filter.Should().NotBeNull();
+        filter
+            .Pieces.Should()
+            .Equal("violet", " stone ", "archive", "amber ", "lanter", "n works", "copper", " field", " studio");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void Text_the_branches_share_is_part_of_every_branch_s_literal()
+    {
+        // The optimiser moves a common prefix out of the branches, and a branch can sit inside the
+        // literal; either way each whole literal is cut, not the branch alone.
+        Build("(?:amber lantern works|amber stone archive){e<=2}")
+            .FuzzyLiteralFilter!.Pieces.Should()
+            .Equal("amber ", "lanter", "n works", "amber ", "stone ", "archive");
+        Build("(?:amber (?:lantern|stone) works){e<=1}")
+            .FuzzyLiteralFilter!.Pieces.Should()
+            .Equal("amber lan", "tern works", "amber st", "one works");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_reverse_alternation_reads_each_branch_back_into_its_own_order()
+    {
+        Build("(?fi)(?r)(?:stone fine|oak strasse){e<=1}")
+            .FuzzyLiteralFilter!.Pieces.Should()
+            .Equal("stone", " fine", "oak s", "trasse");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
     public void The_error_budget_is_the_tightest_of_the_total_the_per_kind_limits_and_the_cost_equation()
     {
         // e<=5 alone would give six pieces; the per-kind limits allow only 1 + 1 + 0.
@@ -120,8 +183,25 @@ public sealed class FuzzyLiteralPrefilterTests
     [Arguments("(?:abcdef[gh]ijkl){e<=1}")] // a set inside it
     [Arguments("(?:abcdefghijkl){e<=1:[a-z]}")] // an insertion class
     [Arguments("(?:abcdefghijkl)")] // not fuzzy
+    [Arguments("(?:amber lantern [^x]orks){e<=1}")] // a negated character is a class
+    [Arguments("(?:amber lantern works|ox){e<=2}")] // one branch too short to cut
+    [Arguments("(?:amber lantern works|abcdef[gh]ijkl){e<=1}")] // a set in one branch
+    [Arguments("(?:amber lantern works|){e<=1}")] // an empty branch matches anywhere
+    [Arguments("(?:(?:amber|lantern|works|stone|field)(?:amber|lantern|works|stone|field)){e<=1}")] // 50 pieces
     public void A_pattern_that_is_not_one_bounded_fuzzy_ascii_literal_gets_no_filter(string pattern)
     {
+        Build(pattern).FuzzyLiteralFilter.Should().BeNull();
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void Thousands_of_alternations_in_a_row_are_refused_without_walking_them_all()
+    {
+        // The walk recurses at each branch on a path. 8000 in a row overflowed the stack while the
+        // pattern compiled. Upstream compiles it: regex.compile(p, regex.VERSION1).search("xx" +
+        // "ab" * 8000 + "yy") is (1, 16002), regex 2026.9.10.
+        string pattern = "(?:" + string.Concat(Enumerable.Repeat("(?:ab|cd)", 8000)) + "){e<=1}";
+
         Build(pattern).FuzzyLiteralFilter.Should().BeNull();
     }
 
@@ -262,8 +342,61 @@ public sealed class FuzzyLiteralPrefilterTests
     [Arguments("(?r)(?:amber lantern works){e<=2}")]
     [Arguments("(?b)(?:amber lantern works){e<=2}")]
     [Arguments("(?e)(?:amber lantern works){e<=2}")]
+    [Arguments("(?r)(?:amber lantern works|violet stone archive){e<=2}")]
+    [Arguments("(?b)(?:amber lantern works|violet stone archive){e<=2}")]
+    [Arguments("(?e)(?:amber lantern works|violet stone archive){e<=2}")]
     public void Reverse_bestmatch_and_enhancematch_keep_the_filter(string pattern)
     {
         Build(pattern).FuzzyLiteralFilter.Should().NotBeNull();
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Alternations and named lists. Every branch has pieces of its own, and a subject is refused
+    // only when no branch has any piece in it.
+    // ---------------------------------------------------------------------------------------
+
+    private const string _three = "(?i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}";
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    // regex.search(r'(?V1i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}', 'note: VIOLXT STONE ARCHIVX here') -> span=(6, 26) counts=(2, 0, 0)
+    [Arguments(_three, "note: VIOLXT STONE ARCHIVX here", "(6,26) 2,0,0")]
+    // regex.search(r'(?V1i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}', 'nothing of interest here at all') -> None
+    [Arguments(_three, "nothing of interest here at all", "None")]
+    // regex.search(r'(?V1i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}', 'xx vioXet stXne archive') -> span=(3, 23) counts=(2, 0, 0)
+    [Arguments(_three, "xx vioXet stXne archive", "(3,23) 2,0,0")]
+    // regex.compile(r'(?V1i)(?:\L<phrases>){e<=2}', phrases=[...]).search('the COPPER FIELD STUDXO') -> span=(3, 23) counts=(1, 1, 0)
+    [Arguments(@"(?i)(?:\L<phrases>){e<=2}", "the COPPER FIELD STUDXO", "(3,23) 1,1,0")]
+    // regex.compile(r'(?V1i)(?:\L<phrases>){e<=2}', phrases=[...]).search('nothing of interest here at all') -> None
+    [Arguments(@"(?i)(?:\L<phrases>){e<=2}", "nothing of interest here at all", "None")]
+    // regex.search(r'(?V1)(?:amber lantern works|amber stone archive){e<=2}', 'xx ambXr stone archXve') -> span=(3, 22) counts=(2, 0, 0)
+    [Arguments("(?:amber lantern works|amber stone archive){e<=2}", "xx ambXr stone archXve", "(3,22) 2,0,0")]
+    // regex.search(r'(?V1)(?:amber (?:lantern|stone) works){e<=1}', 'an ambXr stone works') -> span=(3, 20) counts=(1, 0, 0)
+    [Arguments("(?:amber (?:lantern|stone) works){e<=1}", "an ambXr stone works", "(3,20) 1,0,0")]
+    // regex.search(r'(?V1r)(?:amber lantern works|violet stone archive){e<=2}', 'violet stone archive and amber lantrn works') -> span=(25, 43) counts=(1, 0, 1)
+    [Arguments(
+        "(?r)(?:amber lantern works|violet stone archive){e<=2}",
+        "violet stone archive and amber lantrn works",
+        "(25,43) 1,0,1"
+    )]
+    // regex.search(r'(?V1i)(?:oak stone field|kelvin works){e<=1}', 'Kelvin wxrks') -> span=(0, 12) counts=(1, 0, 0)
+    [Arguments("(?i)(?:oak stone field|kelvin works){e<=1}", "Kelvin wxrks", "(0,12) 1,0,0")]
+    // regex.search(r'(?V1bi)(?:amber lantern works|violet stone archive){e<=2}', 'amber lantxrn works and violet stone archive') -> span=(24, 44) counts=(0, 0, 0)
+    [Arguments(
+        "(?b)(?i)(?:amber lantern works|violet stone archive){e<=2}",
+        "amber lantxrn works and violet stone archive",
+        "(24,44) 0,0,0"
+    )]
+    public void An_alternation_or_named_list_answers_as_upstream_does(string pattern, string subject, string expected)
+    {
+        Search(pattern, subject).Should().Be(expected);
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void An_alternation_s_pieces_are_searched_from_the_search_position()
+    {
+        // regex.search(r'(?V1i)(?:amber lantern works|copper field studio|violet stone archive){e<=2}', 'copper field studio, violet stone archive', pos=3) -> span=(19, 41) counts=(0, 2, 0)
+        Search(_three, "copper field studio, violet stone archive", beginning: 3).Should().Be("(19,41) 0,2,0");
     }
 }

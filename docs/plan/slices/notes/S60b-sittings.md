@@ -261,3 +261,115 @@ the quoted spans. It found no behaviour defect. It ran 14,000 rows of its own th
 with 41 constraint forms, injected folds and every mode. Every divergence was a `(?b)`/`(?e)` row
 with a cost equation or `(?p)`, and each diverged identically with the filter nulled. No second
 pass: the only change after it was those three comment lines, checked directly above.
+
+## 2026-09-23, item 10 extended: alternations and named lists
+
+The orchestrator's next instruction: cover a fuzzy section whose body is an alternation of literals
+or a named list, the ManyInputs rows FuzzyPhraseThreeAlternation and FuzzyPhraseThreeNamedList.
+
+### What landed
+
+`FuzzyLiteralFilter.TryCreate` now reads the section's body as a set of literals, one per path
+through its branches. The pigeonhole argument holds for each literal on its own, so each is cut
+into its own `k + 1` pieces, and the start bound is the minimum over every piece of every literal.
+A subject is refused only when no piece of any literal occurs.
+
+- `(?:amber lantern works|copper field studio|violet stone archive){e<=2}` is 9 pieces;
+  `(?:\L<phrases>){e<=2}` over the same three is the same 9, since a named list compiles to a
+  branch.
+- The optimiser moves text the branches share out of the alternation: `amber lantern works|amber
+  stone archive` compiles to `amber ` then a branch. The walk hands each arm its own copy of what
+  it has read, so the shared text is on every literal. Under `(?r)` the shared part is a suffix,
+  and a single shared character is a CHARACTER node, not a STRING; both are accepted and pinned.
+- A negated or zero-width CHARACTER node is refused (`node.Match && node.Step != 0`), as is any
+  node that is not a string, a character or a branch: a set, an empty arm, a repeat.
+- At most 32 pieces in all (`MaxPieces`). One literal may have `k` up to 31; three may have 9.
+
+**One pass or one search per piece.** The orchestrator suggested searching all the branches'
+pieces in one `SearchValues<string>` pass. I kept one cached `IndexOf` per piece and raised the
+cap instead, and measured it: the three-phrase alternation, 9 pieces, runs at 171.7 ms, against
+159.7 ms for the three one-phrase passes (3 pieces each) it replaces. The cost is level with the
+per-phrase work, so a single pass has little to win at this size. It would matter for a named list
+of dozens of phrases; the `SHORTCUT:` comment on `MaxPieces` names that as the upgrade, behind a
+benchmark.
+
+### Numbers
+
+ManyInputs, `--inProcess`, run from `bench/`, one job at a time, before (HEAD 2a63273's
+`FuzzyLiteralFilter.cs`) and after back to back. Load: my processes only; no other benchmark or
+oracle job running. The Three rows use `--warmupCount 2 --iterationCount 8`.
+
+| Row | Before | After | Allocated before / after |
+|---|---|---|---|
+| FuzzyPhraseThreeAlternation | 6.798 s | 171.7 ms | 92.5 / 87.51 MB |
+| FuzzyPhraseThreeNamedList | 6.935 s | 168.0 ms | 92.5 / 87.52 MB |
+| FuzzyPhraseOneIsMatch | (item 10: 64.18 ms) | 61.38 ms | 87.18 MB both |
+| FuzzyPhraseOneMatch | (57.28 ms) | 57.65 ms | 87.18 MB both |
+| FuzzyPhraseOneEnhanced | (60.72 ms) | 60.16 ms | 90.4 MB both |
+| FuzzyPhraseThreeSeparatePasses | (164.93 ms) | 159.67 ms | 261.46 MB both |
+
+The usage-answers output is byte-identical before and after (FuzzyPhraseOneIsMatch 2038, the
+three Three rows 5107).
+
+### Oracle
+
+New generator `fuzzy-alternation`, in the default wave. It shares `fuzzy-literal`'s row builder
+(`_fuzzy_literal_row`, split out; `fuzzy-literal` seed 7, 2000 rows, is byte-identical before and
+after the split). Each row draws two or three phrases from the same small word list, so branches
+often share a first or last word, in one of three forms: `a|b|c`, `\L<phrases>`, or an alternation
+inside one phrase (`kelvin (?:kelvin|oak) fine`). Planted copies are of a branch chosen at random,
+and the targeted fold row folds one branch.
+
+- `fuzzy-literal` + `fuzzy-alternation`, 2000 rows each: seed 7 0 diverge, seed 99 0 diverge.
+- Default wave, three default seeds: 7 GREEN, 4242 GREEN, 20260923 RED on rows 3752 and 5185
+  only, as on the base commit.
+
+### Controls
+
+On `Engine/FuzzyLiteralFilter.cs`, generator `fuzzy-alternation`, 2000 rows, seed 7 then the fresh
+seed 99. Applied and reverted by string replacement (the tree held uncommitted work).
+
+- Control L, only the first literal. Change `foreach (List<uint> values in walk.Literals)` to
+  `foreach (List<uint> values in walk.Literals.Take(1))`. Result: 197 diverge, then 191.
+- Control N, the shared prefix dropped from the first arm. Change
+  `return Collect(node.Next1.Node, [.. values]) && Collect(node.Next2.Node, values);` to
+  `return Collect(node.Next1.Node, []) && Collect(node.Next2.Node, values);`. Result: 10, then 11.
+- Control O, a later literal's offsets taken as 0. Change `offsets.Add(offset);` to
+  `offsets.Add(pieces.Count >= pieceCount ? 0 : offset);`. Result: 17, then 22.
+- Control M, the character guard. Change `case Opcode.Character when node.Match && node.Step != 0:`
+  to `case Opcode.Character:`. The generator draws no negated character, so this one is for the
+  gap tests: `A_pattern_that_is_not_one_bounded_fuzzy_ascii_literal_gets_no_filter` with
+  `(?:amber lantern [^x]orks){e<=1}` fails, 1 of 57.
+
+### Verification
+
+Suite 6644/6644, ratchet GREEN. Native AOT 6641 passed / 3 skipped; AOT smoke GREEN. The
+oracle baseline and all four controls above were re-run after the review's fixes, with the same
+numbers.
+
+- Control P, the branch cap from the review. Remove `if (++_branches >= MaxPieces) { return
+  false; }`: `Thousands_of_alternations_in_a_row_are_refused_without_walking_them_all` crashes the
+  test host with a stack overflow (run before the fix went in).
+
+### Review
+
+Two blind passes, Opus, with the `docs/VERIFICATION.md` brief.
+
+The first pass raised two findings, and both reproduced.
+
+- `LiteralWalk.Collect` recursed once per branch on a path, so 8000 `(?:ab|cd)` in a row overflowed
+  the stack while the pattern compiled, a crash nothing can catch. Upstream compiles it:
+  `regex.compile(p, regex.VERSION1).search("xx" + "ab" * 8000 + "yy")` is (1, 16002). Fixed by
+  refusing at the 32nd two-way branch. Each such branch adds a path, so a walk that could succeed
+  (32 literals or fewer) never reaches it. Pinned by the new test, which crashed before the fix.
+- The named-list test used `BeEquivalentTo`, which the native-AOT convention test forbids. I had
+  run only the prefilter tests, not the whole suite. Now `Equal` in the compiler's order: longest
+  first, stable between the two 19-character phrases.
+
+It also reported one divergence the filter does not reach, recorded in STATE.md:
+`(?b)(?r)(?:\L<phrases>){e<=3}` with phrases `['', 'amber lantern']`, fullmatch 'znz'. I
+confirmed upstream gives None. By the reviewer's run the port gives (0, 3); I have not re-run it.
+
+The second pass covered only the fix delta and returned "No defects found". It checked that 31
+and 32 branches, and named lists of 31 and 32 entries, build the same filter with the guard on and
+off. It also checked that 20,000 one-armed groups and 8000 `(?:gh)?` compile without overflow.

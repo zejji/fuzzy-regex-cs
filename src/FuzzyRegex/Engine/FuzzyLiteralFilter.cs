@@ -4,9 +4,11 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 
 /// <summary>
 /// A reject-only search prefilter for a pattern that is one fuzzy literal, such as
-/// <c>(?:amber lantern works){e&lt;=2}</c>. <b>This port's own: upstream has no equivalent</b>, and
-/// under a fuzzy section it has no prefilter at all, because an error can delete any character a
-/// required-string search would look for. S60b item 10.
+/// <c>(?:amber lantern works){e&lt;=2}</c>, or one fuzzy alternation of literals, such as
+/// <c>(?:amber lantern works|copper field studio){e&lt;=2}</c> or <c>(?:\L&lt;phrases&gt;){e&lt;=2}</c>.
+/// <b>This port's own: upstream has no equivalent</b>, and under a fuzzy section it has no
+/// prefilter at all, because an error can delete any character a required-string search would
+/// look for. S60b item 10.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,6 +20,12 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// pattern"). A match starting at <c>p</c> reads at most <c>offset(j) + k</c> characters before its
 /// untouched piece <c>j</c>, so <c>p</c> is at least that piece's first occurrence from the search
 /// position minus both. A subject holding no piece at all holds no match.
+/// </para>
+/// <para>
+/// <b>An alternation is several literals.</b> A match of <c>(?:a|b){e&lt;=k}</c> is <c>a</c> or
+/// <c>b</c> with at most <c>k</c> errors, so it holds an untouched piece of the branch it matched.
+/// Each literal is cut into its own <c>k + 1</c> pieces, the start bound is the least over every
+/// piece of every literal, and a subject is refused only when no literal has a piece in it.
 /// </para>
 /// <para>
 /// <b>It only skips.</b> The engine makes every attempt it would have made at every position the
@@ -50,10 +58,13 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 internal sealed class FuzzyLiteralFilter
 {
     /// <summary>
-    /// The most pieces the filter searches for, so the per-search cache is a small fixed
-    /// <c>stackalloc</c>. It allows <c>k</c> up to 7.
+    /// The most pieces the filter searches for, over all its literals, so the per-search cache is a
+    /// small fixed <c>stackalloc</c>. One literal may have <c>k</c> up to 31; three may have 9.
     /// </summary>
-    internal const int MaxPieces = 8;
+    // SHORTCUT: each piece is its own IndexOf, cached between attempts. A long named list would want
+    // one SearchValues<string> pass over every piece instead, with a bound that no longer knows
+    // which piece it found; the ceiling is 32 pieces, the upgrade is that pass, behind a benchmark.
+    internal const int MaxPieces = 32;
 
     /// <summary>
     /// The shortest piece worth searching for. Shorter pieces occur almost everywhere, so the filter
@@ -113,7 +124,7 @@ internal sealed class FuzzyLiteralFilter
     /// <returns>The filter, or <see langword="null"/>.</returns>
     internal static FuzzyLiteralFilter? TryCreate(PatternObject pattern)
     {
-        // The shape: FUZZY -> one or more string nodes -> END_FUZZY -> SUCCESS, and nothing else.
+        // The shape: FUZZY -> string nodes and branches -> END_FUZZY -> SUCCESS, and nothing else.
         // A test node on FUZZY is an insertion class ('{e<=1:[a-z]}'); it only narrows, but the
         // shape is kept exact so the argument in the remarks is the whole argument.
         if (pattern.StartNode is not { Op: Opcode.Fuzzy } fuzzy || fuzzy.Next2.Node is not null)
@@ -121,78 +132,138 @@ internal sealed class FuzzyLiteralFilter
             return null;
         }
 
-        // Full case folding splits one literal into several nodes: '(?i)strasse' is STRING_FLD 'st',
-        // STRING_IGN 'ra', STRING_FLD 'ss', STRING_IGN 'e', so that 'ß' and U+FB06 can match. Over
-        // ASCII text every one of them compares a character at a time, so the chain is one literal.
-        // If any node ignores case the whole literal is searched ignoring case, which can only
-        // find more.
-        var values = new List<uint>();
-        bool ignoreCase = false;
-        bool? reverse = null;
-        Node? node = fuzzy.Next1.Node;
-        for (; node is not null && node.Op != Opcode.EndFuzzy; node = node.Next1.Node)
-        {
-            bool nodeIsReverse;
-            switch (node.Op)
-            {
-                case Opcode.String:
-                    nodeIsReverse = false;
-                    break;
-                case Opcode.StringIgn:
-                case Opcode.StringFld:
-                    ignoreCase = true;
-                    nodeIsReverse = false;
-                    break;
-                case Opcode.StringRev:
-                    nodeIsReverse = true;
-                    break;
-                case Opcode.StringIgnRev:
-                case Opcode.StringFldRev:
-                    ignoreCase = true;
-                    nodeIsReverse = true;
-                    break;
-                default:
-                    return null;
-            }
-
-            if (reverse is bool direction && direction != nodeIsReverse)
-            {
-                return null;
-            }
-
-            // A reverse chain is walked from the literal's end, though each node holds its own
-            // characters in reading order, so a reverse node goes in front of the ones before it.
-            reverse = nodeIsReverse;
-            values.InsertRange(nodeIsReverse ? 0 : values.Count, node.Values);
-        }
-
-        if (
-            node?.Next1.Node is not { Op: Opcode.Success }
-            || reverse is not bool isReverse
-            || values.Any(static c => c > 0x7F)
-        )
+        var walk = new LiteralWalk();
+        if (!walk.Collect(fuzzy.Next1.Node, []) || walk.Reverse is not bool isReverse)
         {
             return null;
         }
 
         long maxErrors = MostErrors(fuzzy.Values);
         int pieceCount = (int)Math.Min(maxErrors + 1, int.MaxValue);
-        if (maxErrors < 0 || pieceCount > MaxPieces || values.Count / pieceCount < MinPieceLength)
+        if (maxErrors < 0 || (long)pieceCount * walk.Literals.Count > MaxPieces)
         {
             return null;
         }
 
-        string text = string.Concat(values.Select(static c => (char)c));
-        var pieces = new string[pieceCount];
-        var offsets = new int[pieceCount];
-        for (int j = 0; j < pieceCount; j++)
+        var pieces = new List<string>();
+        var offsets = new List<int>();
+        foreach (List<uint> values in walk.Literals)
         {
-            offsets[j] = j * text.Length / pieceCount;
-            int end = (j + 1) * text.Length / pieceCount;
-            pieces[j] = text[offsets[j]..end];
+            if (values.Count / pieceCount < MinPieceLength || values.Any(static c => c > 0x7F))
+            {
+                return null;
+            }
+
+            string text = string.Concat(values.Select(static c => (char)c));
+            for (int j = 0; j < pieceCount; j++)
+            {
+                int offset = j * text.Length / pieceCount;
+                offsets.Add(offset);
+                pieces.Add(text[offset..((j + 1) * text.Length / pieceCount)]);
+            }
         }
 
-        return new FuzzyLiteralFilter(pieces, offsets, (int)maxErrors, ignoreCase, isReverse);
+        return new FuzzyLiteralFilter([.. pieces], [.. offsets], (int)maxErrors, walk.IgnoreCase, isReverse);
+    }
+
+    /// <summary>
+    /// Reads the body of a fuzzy section as the literals it can match: one for a string, one per
+    /// path through a branch. <c>(?:amber (?:lantern|stone) works)</c> is two literals, and so is
+    /// <c>(?:amber lantern works|amber stone archive)</c> after the optimiser has moved the common
+    /// <c>amber </c> out in front of the branch.
+    /// </summary>
+    private sealed class LiteralWalk
+    {
+        private int _branches;
+
+        /// <summary>The literals found so far, each as the characters it reads, in reading order.</summary>
+        internal List<List<uint>> Literals { get; } = [];
+
+        /// <summary>Whether any string node ignores case.</summary>
+        internal bool IgnoreCase { get; private set; }
+
+        /// <summary>Whether the string nodes are the reverse kind; unset until one is seen.</summary>
+        internal bool? Reverse { get; private set; }
+
+        /// <summary>
+        /// Walks from <paramref name="node"/> to <c>END_FUZZY</c>, adding a literal per path. Returns
+        /// <see langword="false"/> at anything but a string or a branch, at an end that is not
+        /// followed by <c>SUCCESS</c>, or once there are more literals than the filter has pieces.
+        /// </summary>
+        /// <param name="node">Where this path continues.</param>
+        /// <param name="values">The characters this path has read so far; the walk owns it.</param>
+        /// <returns>Whether the body is literals and nothing else.</returns>
+        internal bool Collect(Node? node, List<uint> values)
+        {
+            // Full case folding splits one literal into several nodes: '(?i)strasse' is STRING_FLD
+            // 'st', STRING_IGN 'ra', STRING_FLD 'ss', STRING_IGN 'e', so that 'ß' and U+FB06 can
+            // match. Over ASCII text every one of them compares a character at a time, so the chain
+            // is one literal. If any node ignores case every piece is searched ignoring case, which
+            // can only find more.
+            for (; node is not null && node.Op != Opcode.EndFuzzy; node = node.Next1.Node)
+            {
+                bool nodeIsReverse;
+                switch (node.Op)
+                {
+                    case Opcode.Branch when node.Next2.Node is not null:
+                        // Each branch adds a path, so a walk that ends with MaxPieces literals or fewer
+                        // passes fewer than MaxPieces of them. Refusing at that count bounds the
+                        // recursion: 8000 in a row overflowed the stack.
+                        if (++_branches >= MaxPieces)
+                        {
+                            return false;
+                        }
+
+                        // Both arms continue to the same END_FUZZY; each gets its own copy.
+                        return Collect(node.Next1.Node, [.. values]) && Collect(node.Next2.Node, values);
+                    case Opcode.Branch:
+                        continue;
+                    // One character is a CHARACTER node, not a STRING: the 'e' that '(?r)(?:stone
+                    // fine|oak strasse)' moves out as a common suffix. A negated one is a class, and
+                    // a zero-width one is a check that reads nothing.
+                    case Opcode.Character when node.Match && node.Step != 0:
+                    case Opcode.String:
+                        nodeIsReverse = false;
+                        break;
+                    case Opcode.CharacterIgn when node.Match && node.Step != 0:
+                    case Opcode.StringIgn:
+                    case Opcode.StringFld:
+                        IgnoreCase = true;
+                        nodeIsReverse = false;
+                        break;
+                    case Opcode.CharacterRev when node.Match && node.Step != 0:
+                    case Opcode.StringRev:
+                        nodeIsReverse = true;
+                        break;
+                    case Opcode.CharacterIgnRev when node.Match && node.Step != 0:
+                    case Opcode.StringIgnRev:
+                    case Opcode.StringFldRev:
+                        IgnoreCase = true;
+                        nodeIsReverse = true;
+                        break;
+                    default:
+                        return false;
+                }
+
+                if (Reverse is bool direction && direction != nodeIsReverse)
+                {
+                    return false;
+                }
+
+                // A reverse chain is walked from the literal's end, though each node holds its own
+                // characters in reading order, so a reverse node goes in front of the ones before it.
+                Reverse = nodeIsReverse;
+                values.InsertRange(nodeIsReverse ? 0 : values.Count, node.Values);
+            }
+
+            if (node?.Next1.Node is not { Op: Opcode.Success } || Literals.Count >= MaxPieces)
+            {
+                return false;
+            }
+
+            Literals.Add(values);
+            return true;
+        }
     }
 
     /// <summary>
