@@ -18,8 +18,9 @@ Green on `slice/s61`: suite 6768/6768, ratchet GREEN, oracle GREEN at three seed
 ## Next
 
 S61, all waiting on the orchestrator's quiet-machine run. **Do not relaunch S61 until that run
-exists**: sitting 6 (2026-09-23, 22:30) had no code to write and could not benchmark, because the
-S88 driver was running on the same machine until 05:50.
+exists**: sittings 6 and 7 (2026-09-23, 22:28 and 22:31) had no code to write and could not
+benchmark, because the S88 driver was running on the same machine until 05:50. Sitting 7 was the
+third checkpoint in a row, so the driver stops; relaunch by hand.
 
 1. `*SpanOverload*` against 8dd746e. If `SpanMegabyte` is still above 1.13x, take only the
    span-overload part of step D back out.

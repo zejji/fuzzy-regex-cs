@@ -469,3 +469,10 @@ against 8dd746e, the time half of the span walk's gate, and the baseline update.
 could not take that run itself: `tools/run-slices.ps1 -Slice s88 -StopBy 05:50` was running in
 another worktree, with a ReSharper inspection in progress, and this sitting's deadline was 03:12.
 Stopping another session's processes needs the owner. Checkpointed with the blocker in STATE.md.
+
+## Sitting 7 (2026-09-23, 22:31)
+
+Blocked, no code changed. The driver relaunched S61 three minutes after sitting 6's checkpoint.
+The machine was still busy: `tasklist` showed a 7 GB `dotnet.exe` (the size of a ReSharper
+inspection) and three `claude.exe` sessions. This is the slice's third checkpoint in a row, so
+the driver stops here. Relaunch S61 by hand once the quiet-machine run is possible.
