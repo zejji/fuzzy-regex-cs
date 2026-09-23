@@ -107,9 +107,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # The allocation floor defaults to 1.0001x, so a rise that fails the gate can be too small to see at
-# two decimal places: 5,000,000 to 5,002,000 bytes printed as 1.00x (S61 blind review). A ratio
-# near 1 gets four places.
-function Get-RatioDigits([double]$Ratio) { if ([math]::Abs($Ratio - 1) -lt 0.005) { 4 } else { 2 } }
+# two decimal places: 5,000,000 to 5,002,000 bytes printed as 1.00x (S61 blind review). A ratio gets
+# the fewest places, at least two, at which it no longer rounds to 1.
+function Get-RatioDigits([double]$Ratio) {
+    $digits = 2
+    while ($digits -lt 10 -and $Ratio -ne 1 -and [math]::Round($Ratio, $digits) -eq 1) { $digits++ }
+    $digits
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $benchDir = Join-Path $repoRoot 'bench'

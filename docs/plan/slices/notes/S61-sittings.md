@@ -184,3 +184,16 @@ memory kinds; the cached state holds no caller buffer after a call, cancelled ca
 timeouts and cancellation on both new overloads; `ArgumentNullException` unchanged on the string
 overloads; the gate's pass/fail on eight rise/drop/zero cases. The two fixes change public
 surface and tooling, so they get their own pass (VERIFICATION rule 4).
+
+**Second pass, over 3d958a2.** The attribute is clean. The reviewer read the bound overload out of
+the compiled IL for null, string, `string?`, `char[]`, `Memory`, `ReadOnlyMemory`, `ArraySegment`
+and method groups, under C# latest and C# 13, and every call bound as intended. `ArraySegment<char>`
+used to be a CS0121 error and now binds to the span overload. Under C# 12 the attribute is
+ignored, and `null` and `char[]` give CS0121: a compile error, never a wrong binding, and the
+library targets net10.0, whose default is C# 14. One finding, reproduced: with
+`-AllocationNoiseFloor 1.00001` a failing rise of 1.00002x still printed as 1.0000x, because four
+fixed places only moved the limit. `Get-RatioDigits` now takes the fewest places, at least two,
+at which the ratio no longer rounds to 1. Pinned by the Pester test "shows a failing allocation
+rise however tight the floor is set", which was red before the fix. The reviewer's probe then
+printed every case correctly (1.00002x, 0.996x, 1.005x, 1.20x, 0.20x, 1.0002x). This delta
+changes tooling, so it gets one more pass.

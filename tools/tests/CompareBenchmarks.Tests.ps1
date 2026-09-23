@@ -194,6 +194,19 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         $report | Should -Match 'allocation 1\.0001x'
     }
 
+    It 'shows a failing allocation rise however tight the floor is set' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 100002000
+
+        # S61 second review pass: four fixed places still printed 1.00002x as 1.0000x and "1x".
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium -AllocationNoiseFloor 1.00001 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match ' 1\.00002x'
+        $report | Should -Match 'allocates more \(1\.00002x\)'
+        $report | Should -Match 'allocation 1\.00001x'
+    }
+
     It 'does not call an allocation drop a regression' {
         New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 20000
