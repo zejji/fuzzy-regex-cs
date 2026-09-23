@@ -74,6 +74,14 @@ finishes.
 `Count` returns the number of matches without materialising any of them - cheaper than
 `Matches(...).Count` when the matches themselves are not needed.
 
+**Text that is not a string?**
+
+`IsMatch` and `Count` also take a `ReadOnlyMemory<char>` and read it where it is, so a slice of
+a `char[]` or a pooled buffer costs no copy: `regex.Count(buffer.AsMemory(0, filled))`. The slice
+is the whole subject, so `^` and `\b` see its edges, not the buffer's. The `ReadOnlySpan<char>`
+overloads copy the span to a string first, two bytes per character, because a span cannot be kept
+while the engine works. Every method that returns a `Match` takes a `string`, since `Value` is one.
+
 **Cut it up?**
 
 `Split` returns the whole `string?[]` at once; `EnumerateSplits` yields each piece lazily, the

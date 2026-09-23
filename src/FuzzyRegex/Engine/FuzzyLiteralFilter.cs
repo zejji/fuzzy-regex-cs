@@ -1,3 +1,4 @@
+using System.Text;
 using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Engine;
@@ -318,7 +319,7 @@ internal sealed class FuzzyLiteralFilter
     /// <paramref name="found"/>. Starts at the search's first position.
     /// </param>
     /// <returns>A position, <see cref="NoMatch"/> or <see cref="CannotTell"/>.</returns>
-    internal int NextStart(string text, int textPos, int sliceEnd, Span<int> found, ref int asciiEnd)
+    internal int NextStart(ReadOnlySpan<char> text, int textPos, int sliceEnd, Span<int> found, ref int asciiEnd)
     {
         long start = long.MaxValue;
         for (int j = 0; j < Pieces.Length; j++)
@@ -326,10 +327,7 @@ internal sealed class FuzzyLiteralFilter
             string piece = Pieces[j];
             if (found[j] < textPos)
             {
-                int at =
-                    textPos < sliceEnd
-                        ? text.AsSpan(textPos, sliceEnd - textPos).IndexOf(piece.AsSpan(), _comparison)
-                        : -1;
+                int at = textPos < sliceEnd ? text[textPos..sliceEnd].IndexOf(piece.AsSpan(), _comparison) : -1;
                 found[j] = at < 0 ? Absent : textPos + at;
             }
 
@@ -339,7 +337,9 @@ internal sealed class FuzzyLiteralFilter
             if (searched > asciiEnd)
             {
                 int from = Math.Max(asciiEnd, textPos);
-                if (text.AsSpan(from, searched - from).ContainsAnyExceptInRange('\0', '\x7F'))
+                // Ascii.IsValid, not ContainsAnyExceptInRange: that boxes its bounds, 96 B a
+                // call on .NET 10 (probe, 2026-09-23), and AllocationTests catch it.
+                if (!Ascii.IsValid(text[from..searched]))
                 {
                     return CannotTell;
                 }
@@ -364,15 +364,15 @@ internal sealed class FuzzyLiteralFilter
     /// <param name="sliceStart">The start of the slice.</param>
     /// <param name="textPos">Where the reverse search starts.</param>
     /// <returns>Whether the engine must search at all.</returns>
-    internal bool MayMatchBefore(string text, int sliceStart, int textPos)
+    internal bool MayMatchBefore(ReadOnlySpan<char> text, int sliceStart, int textPos)
     {
         if (textPos <= sliceStart)
         {
             return true;
         }
 
-        ReadOnlySpan<char> stretch = text.AsSpan(sliceStart, textPos - sliceStart);
-        if (stretch.ContainsAnyExceptInRange('\0', '\x7F'))
+        ReadOnlySpan<char> stretch = text[sliceStart..textPos];
+        if (!Ascii.IsValid(stretch))
         {
             return true;
         }

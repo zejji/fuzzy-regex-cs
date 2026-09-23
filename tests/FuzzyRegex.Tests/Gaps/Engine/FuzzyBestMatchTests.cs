@@ -1058,7 +1058,7 @@ public sealed class FuzzyBestMatchTests
         var regex = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(2));
         MatchState state = MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,

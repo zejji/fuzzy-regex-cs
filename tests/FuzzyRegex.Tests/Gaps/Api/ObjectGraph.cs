@@ -43,6 +43,23 @@ internal static class ObjectGraph
         typeof(CancellationTokenSource),
     ];
 
+    /// <summary>
+    /// Library types the walk records but does not open, because they are mutable on purpose and
+    /// safe by a different argument than immutability. Each entry needs its own stress test, and this
+    /// list must stay as short as the argument is rare.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RegularExpressions.Engine.MatchStateCache"/> (S61) is a single slot that every call takes with
+    /// <see cref="Interlocked.Exchange{T}(ref T, T)"/> and puts back, the shape of the built-in
+    /// <c>Regex._runner</c>, so no two threads ever hold the state inside it. Its proof is
+    /// <c>ThreadSafetyStressTests.Every_family_answers_the_same_under_real_parallelism</c>, which fails
+    /// when the slot is read without the exchange,
+    /// and <c>MatchStateCacheTests</c> proves that a reused state matches exactly as a new one does.
+    /// The field that holds it on <see cref="FuzzyRegex"/> is readonly, so the walk still checks
+    /// that nothing replaces the cache itself.
+    /// </remarks>
+    private static readonly Type[] _atomicallyShared = [typeof(RegularExpressions.Engine.MatchStateCache)];
+
     /// <summary>One field of one reachable object, or one element of one reachable array.</summary>
     /// <param name="Path">Where in the graph it sits, for a failure message.</param>
     /// <param name="Field">The field itself, or null for an array element.</param>
@@ -216,7 +233,8 @@ internal static class ObjectGraph
         || type == typeof(Guid)
         || type == typeof(IntPtr)
         || type == typeof(UIntPtr)
-        || _opaque.Any(opaque => opaque.IsAssignableFrom(type));
+        || _opaque.Any(opaque => opaque.IsAssignableFrom(type))
+        || Array.IndexOf(_atomicallyShared, type) >= 0;
 
     /// <summary>Renders a leaf value so two walks can be compared as text.</summary>
     /// <param name="value">The value.</param>

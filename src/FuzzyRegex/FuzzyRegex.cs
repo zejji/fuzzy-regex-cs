@@ -100,6 +100,13 @@ public sealed class FuzzyRegex
     private readonly string[] _groupNames;
     private readonly int[] _groupNumbers;
 
+    /// <summary>
+    /// The state a call reuses, so that a warm pattern builds nothing per call. The only thing
+    /// reachable from a compiled pattern that matching writes; see
+    /// <see cref="Engine.MatchStateCache"/> for why that is still safe to share.
+    /// </summary>
+    internal readonly Engine.MatchStateCache StateCache = new();
+
     /// <summary>Compiles a pattern with no options and no timeout.</summary>
     /// <param name="pattern">The pattern to compile.</param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
@@ -441,31 +448,42 @@ public sealed class FuzzyRegex
         int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        Run(
-            input,
-            beginning,
-            length,
-            partial: false,
-            search: true,
-            matchAll: false,
-            timeout,
-            cancellationToken
-        ).Success;
+    ) => Test(input, beginning, length, search: true, matchAll: false, timeout, cancellationToken);
 
     /// <summary>Whether the pattern matches anywhere in the subject.</summary>
     /// <param name="input">The subject to search.</param>
     /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
-    // ponytail: copies the span, because the engine indexes a string. Making it allocation-free
-    // means threading a ReadOnlySpan through MatchState and every try_match_*, which is a Phase 7
-    // question (the whole engine is string-based today), not a correctness one.
+    /// <remarks>
+    /// Copies the span to a string first, so a call allocates two bytes per character of
+    /// <paramref name="input"/>: the engine keeps the subject between steps, and a span cannot be
+    /// kept. The <see cref="IsMatch(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload
+    /// reads the caller's buffer in place.
+    /// </remarks>
     public bool IsMatch(
         ReadOnlySpan<char> input,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) => IsMatch(input.ToString(), timeout: timeout, cancellationToken: cancellationToken);
+
+    /// <summary>Whether the pattern matches anywhere in the subject, read in place.</summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
+    /// <returns><see langword="true"/> if the pattern matches.</returns>
+    /// <remarks>
+    /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
+    /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
+    /// </remarks>
+    // null converts to ReadOnlyMemory through char[]; the lower priority keeps IsMatch(null) on the
+    // string overload rather than ambiguous (MemoryOverloadTests).
+    [System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]
+    public bool IsMatch(
+        ReadOnlyMemory<char> input,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    ) => Test(input, 0, -1, search: true, matchAll: false, timeout, cancellationToken);
 
     /// <summary>
     /// Whether the pattern matches starting exactly at <paramref name="beginning"/>. Upstream
@@ -485,17 +503,7 @@ public sealed class FuzzyRegex
         int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        Run(
-            input,
-            beginning,
-            length,
-            partial: false,
-            search: false,
-            matchAll: false,
-            timeout,
-            cancellationToken
-        ).Success;
+    ) => Test(input, beginning, length, search: false, matchAll: false, timeout, cancellationToken);
 
     /// <summary>
     /// Whether the pattern matches the whole of the given part of the subject. Upstream
@@ -515,17 +523,7 @@ public sealed class FuzzyRegex
         int length = -1,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) =>
-        Run(
-            input,
-            beginning,
-            length,
-            partial: false,
-            search: false,
-            matchAll: true,
-            timeout,
-            cancellationToken
-        ).Success;
+    ) => Test(input, beginning, length, search: false, matchAll: true, timeout, cancellationToken);
 
     /// <summary>
     /// Runs one matching operation. Port of <c>pattern_search_or_match</c>
@@ -554,30 +552,155 @@ public sealed class FuzzyRegex
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
-        (int start, int end) = Limits(input, beginning, length);
+        return Execute(
+            input.AsMemory(),
+            input,
+            beginning,
+            length,
+            partial,
+            search,
+            matchAll,
+            // The Match object, and therefore repeated captures, will be visible.
+            visibleCaptures: true,
+            timeout,
+            static (regex, state, subject, status) => regex.NewMatch(state, subject, status),
+            cancellationToken
+        );
+    }
 
-        using var state = Engine.MatchState.Create(
+    /// <summary>
+    /// <see cref="Run(string, int, int, bool, bool, bool, TimeSpan?, CancellationToken)"/> for a
+    /// caller that wants only whether it matched, so it builds no <see cref="RegularExpressions.Match"/>. Not
+    /// upstream's: its <c>Pattern.search</c> always builds the match object, and a Python caller
+    /// asks <c>bool(m)</c> of it.
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="beginning">Upstream's <c>pos</c>.</param>
+    /// <param name="length">How much of the subject to consider, or <c>-1</c> for the rest.</param>
+    /// <param name="search">Whether to advance the start position (upstream's <c>search</c>).</param>
+    /// <param name="matchAll">Whether the match must cover the slice (upstream's <c>match_all</c>).</param>
+    /// <param name="timeout">The call's own time budget, or <see langword="null"/> for the pattern's.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <returns>Whether the pattern matched.</returns>
+    /// <remarks>
+    /// It passes <c>visibleCaptures: false</c>, which is safe because nothing in the engine reads
+    /// the flag: upstream stores <c>state-&gt;visible_captures</c> at <c>_regex.c:18314</c> and
+    /// never reads it (<c>grep -n visible_captures upstream/src/_regex.c</c>, 2026-09-22: every
+    /// other hit is the compile-time <c>args</c> field), and neither does this port.
+    /// </remarks>
+    private bool Test(
+        string input,
+        int beginning,
+        int length,
+        bool search,
+        bool matchAll,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        return Test(input.AsMemory(), beginning, length, search, matchAll, timeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// <see cref="Test(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/> over a
+    /// subject held as memory, which the engine reads in place.
+    /// </summary>
+    /// <param name="input">The subject.</param>
+    /// <param name="beginning">Upstream's <c>pos</c>.</param>
+    /// <param name="length">How much of the subject to consider, or <c>-1</c> for the rest.</param>
+    /// <param name="search">Whether to advance the start position (upstream's <c>search</c>).</param>
+    /// <param name="matchAll">Whether the match must cover the slice (upstream's <c>match_all</c>).</param>
+    /// <param name="timeout">The call's own time budget, or <see langword="null"/> for the pattern's.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <returns>Whether the pattern matched.</returns>
+    private bool Test(
+        ReadOnlyMemory<char> input,
+        int beginning,
+        int length,
+        bool search,
+        bool matchAll,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    ) =>
+        Execute(
+            input,
+            input,
+            beginning,
+            length,
+            partial: false,
+            search,
+            matchAll,
+            visibleCaptures: false,
+            timeout,
+            // What NewMatch reports as a successful match.
+            static (_, _, _, status) => status is Engine.MatchStatus.Success or Engine.MatchStatus.Partial,
+            cancellationToken
+        );
+
+    /// <summary>The body both overloads above share.</summary>
+    /// <typeparam name="TSubject">What <paramref name="result"/> is handed as the subject.</typeparam>
+    /// <typeparam name="TResult">What the caller builds from the finished state.</typeparam>
+    /// <param name="input">The subject, as the engine reads it.</param>
+    /// <param name="subject">
+    /// The subject as <paramref name="result"/> wants it: the <see cref="string"/> a
+    /// <see cref="RegularExpressions.Match"/> holds, or anything at all for a caller that builds none.
+    /// </param>
+    /// <param name="beginning">Upstream's <c>pos</c>.</param>
+    /// <param name="length">How much of the subject to consider, or <c>-1</c> for the rest.</param>
+    /// <param name="partial">Upstream's <c>partial</c>.</param>
+    /// <param name="search">Whether to advance the start position (upstream's <c>search</c>).</param>
+    /// <param name="matchAll">Whether the match must cover the slice (upstream's <c>match_all</c>).</param>
+    /// <param name="visibleCaptures">Upstream's <c>visible_captures</c>.</param>
+    /// <param name="timeout">The call's own time budget, or <see langword="null"/> for the pattern's.</param>
+    /// <param name="result">Builds the answer from the state, the subject and the status.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <returns>What <paramref name="result"/> built.</returns>
+    private TResult Execute<TSubject, TResult>(
+        ReadOnlyMemory<char> input,
+        TSubject subject,
+        int beginning,
+        int length,
+        bool partial,
+        bool search,
+        bool matchAll,
+        bool visibleCaptures,
+        TimeSpan? timeout,
+        Func<FuzzyRegex, Engine.MatchState, TSubject, int, TResult> result,
+        CancellationToken cancellationToken
+    )
+    {
+        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
+        (int start, int end) = Limits(input.Length, beginning, length);
+
+        Engine.MatchState state = StateCache.Rent(
             PatternObject,
             input,
             start,
             end,
             overlapped: false,
-            partial: partial,
-            // The Match object, and therefore repeated captures, will be visible.
-            visibleCaptures: true,
-            matchAll: matchAll,
+            partial,
+            visibleCaptures,
+            matchAll,
             limits
         );
 
-        int status = Engine.Matcher.DoMatch(state, search);
-
-        if (status == Engine.MatchStatus.Cancelled)
+        try
         {
-            throw limits.Cancelled(input, Pattern);
-        }
+            int status = Engine.Matcher.DoMatch(state, search);
 
-        return NewMatch(state, input, status);
+            if (status == Engine.MatchStatus.Cancelled)
+            {
+                throw limits.Cancelled(input.ToString(), Pattern);
+            }
+
+            return result(this, state, subject, status);
+        }
+        finally
+        {
+            StateCache.Return(state);
+        }
     }
 
     /// <summary>
@@ -668,7 +791,7 @@ public sealed class FuzzyRegex
     /// <c>endpos</c>, which <c>state_init</c> then clamps (<c>get_limits</c>,
     /// <c>upstream/src/_regex.c</c> line 21627).
     /// </summary>
-    /// <param name="input">The subject.</param>
+    /// <param name="inputLength">The subject's length.</param>
     /// <param name="beginning">Where in the subject to start, possibly negative.</param>
     /// <param name="length">How much of it to consider, or <c>-1</c> for the rest.</param>
     /// <returns>The resolved start and end.</returns>
@@ -684,9 +807,9 @@ public sealed class FuzzyRegex
     /// default of <c>PY_SSIZE_T_MAX</c> means once it is clamped.
     /// </para>
     /// </remarks>
-    private static (int Start, int End) Limits(string input, int beginning, int length)
+    private static (int Start, int End) Limits(int inputLength, int beginning, int length)
     {
-        beginning = Engine.MatchState.ClampIndex(beginning, input.Length);
+        beginning = Engine.MatchState.ClampIndex(beginning, inputLength);
 
         return (beginning, length < 0 || beginning > int.MaxValue - length ? int.MaxValue : beginning + length);
     }
@@ -730,7 +853,7 @@ public sealed class FuzzyRegex
             ArgumentNullException.ThrowIfNull(template);
         }
 
-        (int start, int end) = Limits(input, beginning, length);
+        (int start, int end) = Limits(input.Length, beginning, length);
 
         return Engine.Substitution.Subx(
             this,
@@ -811,7 +934,8 @@ public sealed class FuzzyRegex
                 )
                 : default,
             // Copied for the same reason the groups are: the state is reused by the next match.
-            fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null
+            fuzzyChanges: state.FuzzyChanges.Count > 0 ? [.. state.FuzzyChanges] : null,
+            oneUnitPerCharacter: state.OneUnitPerCharacter
         );
     }
 
@@ -824,29 +948,13 @@ public sealed class FuzzyRegex
     /// This surface returns an unsuccessful <see cref="RegularExpressions.Match"/> instead of null, which is the
     /// built-in <c>Regex</c>'s shape and the one S01 committed to. Its groups are the pattern's,
     /// all of them absent, so <c>Groups.Count</c> still reports what the pattern declares rather
-    /// than throwing. Its slice is the whole subject, which nothing reads: an unsuccessful match
-    /// ends the scan, so <see cref="Match.NextMatch"/> on one never searches again.
+    /// than throwing. It holds no group data to say so: since S61 an unsuccessful match reads every
+    /// group as absent, which saves a <see cref="Engine.GroupData"/> per group on every miss. Its
+    /// slice is the whole subject, which nothing reads: an unsuccessful match ends the scan, so
+    /// <see cref="Match.NextMatch"/> on one never searches again.
     /// </remarks>
-    internal Match NoMatch(string input)
-    {
-        var absent = new Engine.GroupData[_compiled.GroupCount];
-        for (int g = 0; g < absent.Length; g++)
-        {
-            absent[g] = new Engine.GroupData();
-        }
-
-        return new Match(
-            this,
-            input,
-            0,
-            0,
-            success: false,
-            absent,
-            sliceStart: 0,
-            sliceEnd: input.Length,
-            overlapped: false
-        );
-    }
+    internal Match NoMatch(string input) =>
+        new(this, input, 0, 0, success: false, [], sliceStart: 0, sliceEnd: input.Length, overlapped: false);
 
     /// <summary>
     /// Finds the first match anywhere in the given part of the subject. Upstream
@@ -1006,7 +1114,7 @@ public sealed class FuzzyRegex
         ArgumentNullException.ThrowIfNull(input);
 
         Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
-        (int start, int end) = Limits(input, beginning, length);
+        (int start, int end) = Limits(input.Length, beginning, length);
 
         return new MatchCollection(Engine.Iteration.FindAll(this, input, start, end, overlapped, partial, limits));
     }
@@ -1072,7 +1180,7 @@ public sealed class FuzzyRegex
         // does not run until then, and "the argument you passed was invalid" arriving at the
         // foreach instead of at the call is the classic deferred-execution trap.
         Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
-        (int start, int end) = Limits(input, beginning, length);
+        (int start, int end) = Limits(input.Length, beginning, length);
 
         return Engine.Iteration.Enumerate(this, input, start, end, overlapped, partial, limits);
     }
@@ -1103,9 +1211,9 @@ public sealed class FuzzyRegex
         ArgumentNullException.ThrowIfNull(input);
 
         Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
-        (int start, int end) = Limits(input, beginning, length);
+        (int start, int end) = Limits(input.Length, beginning, length);
 
-        return Engine.Iteration.Count(this, input, start, end, overlapped, limits);
+        return Engine.Iteration.Count(this, input.AsMemory(), start, end, overlapped, limits);
     }
 
     /// <summary>Counts the matches in the subject.</summary>
@@ -1114,17 +1222,39 @@ public sealed class FuzzyRegex
     /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
     /// <returns>The number of matches.</returns>
     /// <remarks>
-    /// <c>ponytail:</c> the span is copied to a string, because the engine indexes a
-    /// <see cref="string"/> throughout - <c>MatchState.Text</c> is one, as upstream's subject is a
-    /// Python <c>str</c>. So this overload spares the caller a conversion but still allocates.
-    /// Lift it by moving the engine onto <c>ReadOnlySpan&lt;char&gt;</c>, a Phase 7 question that
-    /// touches every opcode rather than this method.
+    /// Copies the span to a string first, so a call allocates two bytes per character of
+    /// <paramref name="input"/>: the engine keeps the subject between steps, and a span cannot be
+    /// kept. The <see cref="Count(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload
+    /// reads the caller's buffer in place.
     /// </remarks>
     public int Count(
         ReadOnlySpan<char> input,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
     ) => Count(input.ToString(), timeout: timeout, cancellationToken: cancellationToken);
+
+    /// <summary>Counts the matches in the subject, read in place.</summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
+    /// <returns>The number of matches.</returns>
+    /// <remarks>
+    /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
+    /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
+    /// </remarks>
+    // As for IsMatch(ReadOnlyMemory<char>): keeps Count(null) on the string overload.
+    [System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]
+    public int Count(
+        ReadOnlyMemory<char> input,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
+        (int start, int end) = Limits(input.Length, 0, -1);
+
+        return Engine.Iteration.Count(this, input, start, end, overlapped: false, limits);
+    }
 
     /// <summary>Replaces matches with an expanded replacement template.</summary>
     /// <param name="input">The subject to search.</param>

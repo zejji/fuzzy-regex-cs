@@ -1228,3 +1228,26 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   slowdown was builds running during the measurement. A reverse zero-width scan whose slice start
   splits a surrogate pair gives up below `SliceStart`, as the matcher does, where upstream's
   codepoint positions cannot reach that case at all.
+- 2026-09-23 (S61): a compiled pattern keeps one `MatchState` between calls (`MatchStateCache`,
+  upstream's `groups_storage`/`repeats_storage`/`stack_storage`, `_regex.c` :577-579), in the
+  one-slot `Interlocked.Exchange` shape of the built-in `Regex._runner`, because upstream's lock
+  (`acquire_state_lock`) has no counterpart here. This amends S52b's PERMANENT thread-safety rule
+  that nothing reachable from a pattern is mutable: `ObjectGraph._atomicallyShared` lists the cache
+  as the one exception, backed by the stress test (which fails when the slot is read without the
+  exchange) and by `MatchStateCacheTests` (a reused state equals a new one, field by field). A state
+  the cache built goes back to it on `Dispose`, so every call site keeps its `using`.
+- 2026-09-23 (S61): span option (a) is in, (b) stays declined, (c) is the span overloads' doc.
+  `MatchState.Text` is a `ReadOnlyMemory<char>`, and `IsMatch` and `Count` gained
+  `ReadOnlyMemory<char>` overloads that read the caller's buffer in place: 0 B and 8 B over a
+  megabyte `char[]`, against 2,098,060 B and 2,098,135 B for the span forms
+  (`*SpanOverload*`, `--job short --inProcess`). The span overloads still copy and say so in
+  their remarks; pinning the span with `unsafe` (option b) is not re-proposed without a user
+  asking. Only those two methods: everything returning a `Match` needs the subject as a string
+  for `Capture.Value`. The time gate is still open: `CharAt` now reads through `Text.Span`, on
+  every path, so the deciding run is the full suite at `--job medium` on a quiet machine, with
+  `*ManyInputs*` and `*SpanOverload*` read first. A `char[]` argument still binds to the span
+  overload under C# 14 (`MemoryOverloadTests` compiles it).
+- 2026-09-23 (S61): a negative control on `MatchState.Init` must remove a line `InitMatch` does not
+  repeat. `ClearGroups()` and `Array.Clear(FuzzyCounts)` in `Init` cannot change an answer, because
+  `InitMatch` redoes both before every attempt, so removing either fails no oracle test; `ReqPos = -1`
+  is the line only `Init` resets (47 of 6594 reuse rows fail at seed 7 without it).

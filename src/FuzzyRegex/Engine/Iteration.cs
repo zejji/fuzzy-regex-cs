@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Fuzzy.Text.RegularExpressions.Engine;
 
 /// <summary>
@@ -73,7 +75,7 @@ internal static class Iteration
         // does, so it is the scanner's argument that applies.
         Scan(
             regex,
-            input,
+            input.AsMemory(),
             start,
             end,
             overlapped,
@@ -105,7 +107,7 @@ internal static class Iteration
     /// </remarks>
     internal static int Count(
         FuzzyRegex regex,
-        string input,
+        ReadOnlyMemory<char> input,
         int start,
         int end,
         bool overlapped,
@@ -134,7 +136,7 @@ internal static class Iteration
     /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
     private static int Scan(
         FuzzyRegex regex,
-        string input,
+        ReadOnlyMemory<char> input,
         int start,
         int end,
         bool overlapped,
@@ -144,7 +146,7 @@ internal static class Iteration
         MatchLimits limits
     )
     {
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
             input,
             start,
@@ -166,7 +168,7 @@ internal static class Iteration
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
-                throw limits.Cancelled(input, regex.Pattern);
+                throw limits.Cancelled(input.ToString(), regex.Pattern);
             }
 
             // scanner_search_or_match builds a match for PARTIAL exactly as it does for SUCCESS
@@ -213,10 +215,12 @@ internal static class Iteration
     /// than the subject and cannot be guessed.
     /// </para>
     /// <para>
-    /// ponytail: one state per call, so walking a subject with <c>NextMatch</c> costs a vectorised
-    /// pass over it per match where <c>Matches</c> costs one in total. That is the cliff DECISIONS
-    /// 2026-09-01 describes, confined to the one entry point that cannot avoid it. Lift it by
-    /// giving this surface a scanner object that owns a state, if a caller ever wants a lazy walk.
+    /// A state per call used to cost a vectorised pass over the whole subject per match, looking
+    /// for a surrogate pair, which made a <c>NextMatch</c> walk to the end quadratic (DECISIONS
+    /// 2026-09-01; S58 measured the pass at 33.6 microseconds a step on 1 MB). Since S61 the match
+    /// carries the answer and <paramref name="oneUnitPerCharacter"/> hands it on, so a step costs
+    /// what a state costs and no more. The <see cref="CharacterIndex"/> a subject with a surrogate
+    /// pair needs is still rebuilt per step, and only if the pattern asks for it.
     /// </para>
     /// </remarks>
     /// <param name="regex">The pattern that produced the match.</param>
@@ -226,6 +230,10 @@ internal static class Iteration
     /// <param name="sliceStart">Where the slice it was found in starts.</param>
     /// <param name="sliceEnd">One past where that slice ends.</param>
     /// <param name="overlapped">Whether the scan it came from allowed matches to overlap.</param>
+    /// <param name="oneUnitPerCharacter">
+    /// What the state that found the match knew about the subject; see
+    /// <see cref="MatchState.Create"/>.
+    /// </param>
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
     /// The search ran out of time, against the PATTERN's budget. This is the one matching
@@ -243,7 +251,8 @@ internal static class Iteration
         int matchEnd,
         int sliceStart,
         int sliceEnd,
-        bool overlapped
+        bool overlapped,
+        bool oneUnitPerCharacter
     ) =>
         Step(
             regex,
@@ -253,7 +262,8 @@ internal static class Iteration
             overlapped,
             partial: false,
             regex.PatternLimits,
-            resumeAfter: (matchStart, matchEnd)
+            resumeAfter: (matchStart, matchEnd),
+            oneUnitPerCharacter
         );
 
     /// <summary>
@@ -272,6 +282,7 @@ internal static class Iteration
     /// The previous match's (start, end) in the subject, or <see langword="null"/> to start the
     /// walk.
     /// </param>
+    /// <param name="oneUnitPerCharacter">Passed to <see cref="MatchState.Create"/>.</param>
     /// <returns>The match, or an unsuccessful match if there is none.</returns>
     private static Match Step(
         FuzzyRegex regex,
@@ -281,12 +292,13 @@ internal static class Iteration
         bool overlapped,
         bool partial,
         MatchLimits limits,
-        (int Start, int End)? resumeAfter
+        (int Start, int End)? resumeAfter,
+        bool? oneUnitPerCharacter
     )
     {
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
-            input,
+            input.AsMemory(),
             sliceStart,
             sliceEnd,
             overlapped,
@@ -294,7 +306,8 @@ internal static class Iteration
             // The Match object, and therefore repeated captures, will be visible.
             visibleCaptures: true,
             matchAll: false,
-            limits
+            limits,
+            oneUnitPerCharacter: oneUnitPerCharacter
         );
 
         if (resumeAfter is { } previous)
@@ -330,22 +343,27 @@ internal static class Iteration
     /// <param name="overlapped">Whether matches may overlap.</param>
     /// <param name="partial">Whether the walk may end with a partial match.</param>
     /// <param name="limits">The time budget and cancellation token bounding each step.</param>
+    /// <param name="pool">Where the state's stacks rent from; see <see cref="MatchState.Create"/>.</param>
     /// <returns>The matches, leftmost first.</returns>
     /// <remarks>
     /// <para>
-    /// <c>ponytail:</c> <b>One <see cref="MatchState"/> per step, not one per walk</b> - the opposite of
-    /// <see cref="Scan"/>, and deliberately. A state owns rented buffers, so a state held across a
-    /// <c>yield return</c> is a state an abandoned iterator never returns; building one per step
-    /// keeps every rental inside a <c>using</c> that has already run by the time the caller sees
-    /// the match. The cost is the one DECISIONS 2026-09-01 measured for
-    /// <see cref="Match.NextMatch"/>: a vectorised pass over the subject per match, where
-    /// <see cref="Scan"/> pays one in total. See <c>docs/plan/OPTIMISATION-NOTES.md</c>.
+    /// <b>One <see cref="MatchState"/> for the whole walk</b>, exactly as <see cref="Scan"/> and
+    /// upstream's <c>Scanner_Type</c> keep one. S61 moved it here from one state per step, which
+    /// cost a vectorised pass over the subject per match and made a walk to the end quadratic (S54
+    /// measured 12,643 ms for a 1 MB walk that <see cref="FindAll"/> does in 111 ms). The state's
+    /// rented buffers are held across each <c>yield return</c> and handed back by the <c>using</c>,
+    /// which runs when the walk ends and also when the caller's <c>foreach</c> breaks, because
+    /// breaking disposes the enumerator. <c>PoolDisciplineTests</c> proves both halves against a
+    /// pool that counts every rental.
     /// </para>
     /// <para>
-    /// The same choice makes the time budget PER STEP rather than per walk, because a fresh state
-    /// starts a fresh clock. <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
-    /// times the whole scan, as upstream's one state does; this times each match. The
-    /// cancellation token behaves the same way either way.
+    /// <b>The time budget is still per step</b>, which is why the clock is restarted before each
+    /// match. A walk's time between two steps belongs to the caller, who may do anything with a
+    /// match before asking for the next, so a clock that ran across a <c>yield return</c> would
+    /// time out a walk for work it did not do. The built-in <c>Regex</c> draws the same line: its
+    /// lazy walks time each match (<c>tools/probes/bcl-lazy-walk-timeout.cs</c>). <see cref="FuzzyRegex.Matches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// times the whole scan, as upstream's one state does. The cancellation token behaves the same
+    /// way either way.
     /// </para>
     /// </remarks>
     internal static IEnumerable<Match> Enumerate(
@@ -355,32 +373,51 @@ internal static class Iteration
         int end,
         bool overlapped,
         bool partial,
-        MatchLimits limits
+        MatchLimits limits,
+        ArrayPool<byte>? pool = null
     )
     {
-        Match match = Step(regex, input, start, end, overlapped, partial, limits, resumeAfter: null);
+        // pattern_scanner (:21122): "The MatchObject, and therefore repeated captures, will be
+        // visible."
+        using var state = regex.StateCache.Rent(
+            regex.PatternObject,
+            input.AsMemory(),
+            start,
+            end,
+            overlapped,
+            partial: partial,
+            visibleCaptures: true,
+            matchAll: false,
+            limits,
+            pool: pool
+        );
 
-        while (match.Success)
+        // Scan's loop, with the match yielded where Scan calls back.
+        while (true)
         {
-            yield return match;
+            state.RestartClock();
 
-            // scanner_search_or_match ends the walk on the turn AFTER a partial (:20886), so a
-            // partial is yielded and is always the last thing yielded - the rule Scan runs.
-            if (match.PartialMatch)
+            int status = Matcher.DoMatch(state, search: true);
+            if (status == MatchStatus.Cancelled)
+            {
+                throw limits.Cancelled(input, regex.Pattern);
+            }
+
+            if (status is not (MatchStatus.Success or MatchStatus.Partial))
             {
                 yield break;
             }
 
-            match = Step(
-                regex,
-                input,
-                start,
-                end,
-                overlapped,
-                partial,
-                limits,
-                resumeAfter: (match.Index, match.Index + match.Length)
-            );
+            yield return regex.NewMatch(state, input, status);
+
+            // scanner_search_or_match ends the walk on the turn AFTER a partial (:20886), so a
+            // partial is yielded and is always the last thing yielded - the rule Scan runs.
+            if (status == MatchStatus.Partial)
+            {
+                yield break;
+            }
+
+            state.AdvancePastMatch();
         }
     }
 
@@ -397,7 +434,41 @@ internal static class Iteration
     /// The split ran out of time.
     /// </exception>
     /// <exception cref="OperationCanceledException">The caller's token was cancelled.</exception>
-    internal static string?[] Split(FuzzyRegex regex, string input, int maxSplits, MatchLimits limits)
+    /// <remarks>
+    /// <see cref="EnumerateSplits"/> drained, with the clock left running for the whole split, as
+    /// upstream's one state runs it. S61 made the two one loop: until then the lazy one walked a
+    /// state per step and could not share this one's.
+    /// </remarks>
+    internal static string?[] Split(FuzzyRegex regex, string input, int maxSplits, MatchLimits limits) =>
+        [.. EnumerateSplits(regex, input, maxSplits, limits, timeEachStep: false)];
+
+    /// <summary>
+    /// The pieces <see cref="Split"/> returns, produced one at a time. Upstream's
+    /// <c>splititer</c>, which is <c>pattern_split</c>'s loop behind a <c>Splitter_Type</c>
+    /// instead of a list.
+    /// </summary>
+    /// <param name="regex">Upstream's <c>self</c>: the pattern being split on.</param>
+    /// <param name="input">The subject.</param>
+    /// <param name="maxSplits">The most splits to make, or a negative number for no limit.</param>
+    /// <param name="limits">The time budget and cancellation token bounding each step.</param>
+    /// <param name="timeEachStep">
+    /// Whether the clock restarts before each match, which is what a lazy walk wants (see
+    /// <see cref="Enumerate"/>), or runs across the whole split, which is what <see cref="Split"/>
+    /// wants.
+    /// </param>
+    /// <returns>The pieces, with <see langword="null"/> for a group that took no part in a match.</returns>
+    /// <remarks>
+    /// One state for the whole walk, held across each <c>yield return</c> and released by the
+    /// <c>using</c> when the walk ends or the caller's <c>foreach</c> breaks - the same shape, for
+    /// the same reasons, as <see cref="Enumerate"/>.
+    /// </remarks>
+    internal static IEnumerable<string?> EnumerateSplits(
+        FuzzyRegex regex,
+        string input,
+        int maxSplits,
+        MatchLimits limits,
+        bool timeEachStep = true
+    )
     {
         // Upstream spells "no limit" as maxsplit=0 and reads a negative maxsplit as "no splits at
         // all" (regex.split(',', 'a,b,c', maxsplit=-1) is ['a,b,c'], measured 2026-09-01). This
@@ -409,9 +480,9 @@ internal static class Iteration
         // concurrent, timeout - so the slice is always the whole subject.
         //
         // "The MatchObject, and therefore repeated captures, will not be visible."
-        using var state = MatchState.Create(
+        using var state = regex.StateCache.Rent(
             regex.PatternObject,
-            input,
+            input.AsMemory(),
             0,
             input.Length,
             overlapped: false,
@@ -421,12 +492,18 @@ internal static class Iteration
             limits
         );
 
-        List<string?> list = [];
         int splitCount = 0;
         int lastPos = state.Reverse ? state.TextLength : 0;
 
+        // The count is tested before the engine runs, not after: one more match than the caller
+        // asked for is observable through a timeout or a cancellation.
         while (splitCount < maxSplit)
         {
+            if (timeEachStep)
+            {
+                state.RestartClock();
+            }
+
             int status = Matcher.DoMatch(state, search: true);
             if (status == MatchStatus.Cancelled)
             {
@@ -442,12 +519,12 @@ internal static class Iteration
             // Get segment before this match. A reverse split walks the subject backwards and
             // upstream does NOT reverse the list afterwards, unlike pattern_subx's join list:
             // verified 2026-09-01, regex.split('(?r)x', 'xaxbxc') is ['c', 'b', 'a', ''].
-            list.Add(state.Reverse ? input[state.MatchPos..lastPos] : input[lastPos..state.MatchPos]);
+            yield return state.Reverse ? input[state.MatchPos..lastPos] : input[lastPos..state.MatchPos];
 
             // Add groups (if any).
             for (int g = 1; g <= regex.GroupCount; g++)
             {
-                list.Add(GetGroup(state, input, g));
+                yield return GetGroup(state, input, g);
             }
 
             splitCount++;
@@ -459,93 +536,7 @@ internal static class Iteration
         }
 
         // Get segment following last match (even if empty).
-        list.Add(state.Reverse ? input[..lastPos] : input[lastPos..]);
-
-        return [.. list];
-    }
-
-    /// <summary>
-    /// The pieces <see cref="Split"/> returns, produced one at a time. Upstream's
-    /// <c>splititer</c>, which is <c>pattern_split</c>'s loop behind a <c>Splitter_Type</c>
-    /// instead of a list.
-    /// </summary>
-    /// <param name="regex">Upstream's <c>self</c>: the pattern being split on.</param>
-    /// <param name="input">The subject.</param>
-    /// <param name="maxSplits">The most splits to make, or a negative number for no limit.</param>
-    /// <param name="limits">The time budget and cancellation token bounding each step.</param>
-    /// <returns>The pieces, with <see langword="null"/> for a group that took no part in a match.</returns>
-    /// <remarks>
-    /// <para>
-    /// Written over <see cref="Enumerate"/> rather than over a state of its own, for the reason
-    /// <see cref="Enumerate"/> gives: a splitter holding a state across a <c>yield return</c> is a
-    /// splitter whose rented buffers an abandoned <c>foreach</c> never returns. So this is
-    /// <see cref="Split"/>'s loop with the state's <c>match_pos</c>/<c>text_pos</c> read off a
-    /// finished <see cref="Match"/> instead, which is the same pair - <c>pattern_new_match</c>
-    /// swaps the two for a reverse match (<c>:20795</c>) and this swaps them back.
-    /// </para>
-    /// <para>
-    /// The loop is spelled out a second time rather than shared with <see cref="Split"/>, and that
-    /// is the cost of the two state models sitting side by side. The test that stops them drifting
-    /// is sequence equality over the oracle's own <c>split</c> rows, not the reader's eye.
-    /// Phase 7 collapses the two if the per-step state goes.
-    /// </para>
-    /// </remarks>
-    internal static IEnumerable<string?> EnumerateSplits(
-        FuzzyRegex regex,
-        string input,
-        int maxSplits,
-        MatchLimits limits
-    )
-    {
-        // Upstream spells "no limit" as maxsplit=0 and reads a negative maxsplit as "no splits at
-        // all"; this surface spells no limit as -1. Split does the same inversion, in the same
-        // words, because it is the same rule and not a shared helper's worth of code.
-        int maxSplit = maxSplits < 0 ? int.MaxValue : maxSplits;
-
-        // Upstream takes no pos/endpos for split at all - its kwlist is string, maxsplit,
-        // concurrent, timeout - so the slice is always the whole subject.
-        bool reverse = (regex.PatternObject.Flags & Parsing.RegexFlags.Reverse) != 0;
-        int lastPos = reverse ? input.Length : 0;
-        int splitCount = 0;
-
-        // An explicit enumerator rather than a foreach with a guard inside it: a foreach would
-        // have pulled - and so matched - one more time before the count check could stop it, and
-        // that extra engine step is observable through a timeout or a cancellation.
-        using IEnumerator<Match> matches = Enumerate(
-                regex,
-                input,
-                0,
-                input.Length,
-                overlapped: false,
-                partial: false,
-                limits
-            )
-            .GetEnumerator();
-
-        while (splitCount < maxSplit && matches.MoveNext())
-        {
-            Match match = matches.Current;
-            int matchStart = match.Index;
-            int matchEnd = match.Index + match.Length;
-
-            // Get segment before this match. A reverse split walks the subject backwards and
-            // upstream does NOT reverse the list afterwards, unlike pattern_subx's join list:
-            // verified 2026-09-01, regex.split('(?r)x', 'xaxbxc') is ['c', 'b', 'a', ''].
-            yield return reverse ? input[matchEnd..lastPos] : input[lastPos..matchStart];
-
-            // Add groups (if any).
-            for (int g = 1; g <= regex.GroupCount; g++)
-            {
-                Group group = match.Groups[g];
-                yield return group.Success ? group.Value : null;
-            }
-
-            splitCount++;
-            lastPos = reverse ? matchStart : matchEnd;
-        }
-
-        // Get segment following last match (even if empty).
-        yield return reverse ? input[..lastPos] : input[lastPos..];
+        yield return state.Reverse ? input[..lastPos] : input[lastPos..];
     }
 
     /// <summary>

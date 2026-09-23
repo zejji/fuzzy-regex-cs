@@ -206,7 +206,7 @@ internal static class Attribution
     {
         using var state = MatchState.Create(
             regex.PatternObject,
-            subject,
+            subject.AsMemory(),
             0,
             subject.Length,
             overlapped: false,

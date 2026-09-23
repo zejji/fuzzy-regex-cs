@@ -134,6 +134,7 @@ public sealed class Match : Group
     private readonly int _sliceStart;
     private readonly int _sliceEnd;
     private readonly bool _overlapped;
+    private readonly bool _oneUnitPerCharacter;
     private readonly Engine.FuzzyChange[] _fuzzyChanges;
 
     /// <summary>
@@ -187,6 +188,12 @@ public sealed class Match : Group
     /// <param name="fuzzyChanges">
     /// Every error the match used, in the order it was used, already copied out of the state.
     /// </param>
+    /// <param name="oneUnitPerCharacter">
+    /// The state's <see cref="Engine.MatchState.OneUnitPerCharacter"/>, which <see cref="NextMatch"/>
+    /// hands to the next state instead of scanning the subject again. The default,
+    /// <see langword="false"/>, is always correct and only slower: the next state then converts
+    /// between characters and positions by table rather than by arithmetic.
+    /// </param>
     internal Match(
         FuzzyRegex regex,
         string subject,
@@ -201,7 +208,8 @@ public sealed class Match : Group
         int lastGroup = -1,
         bool partial = false,
         FuzzyCounts fuzzyCounts = default,
-        Engine.FuzzyChange[]? fuzzyChanges = null
+        Engine.FuzzyChange[]? fuzzyChanges = null,
+        bool oneUnitPerCharacter = false
     )
         : base(subject, start, end, success, "0")
     {
@@ -211,6 +219,7 @@ public sealed class Match : Group
         _sliceStart = sliceStart;
         _sliceEnd = sliceEnd;
         _overlapped = overlapped;
+        _oneUnitPerCharacter = oneUnitPerCharacter;
         _fuzzyChanges = fuzzyChanges ?? [];
         LastGroupNumber = lastIndex;
         PartialMatch = partial;
@@ -250,7 +259,7 @@ public sealed class Match : Group
     }
 
     /// <summary>The groups of the pattern, group 0 being the whole match.</summary>
-    public GroupCollection Groups => new(this, _groups.Length);
+    public GroupCollection Groups => new(this, _regex.GroupCount);
 
     /// <summary>
     /// Port of <c>match_get_group_by_index</c> (<c>upstream/src/_regex.c</c> line 18847) and the
@@ -261,9 +270,17 @@ public sealed class Match : Group
     /// <returns>The group.</returns>
     internal Group GroupAt(int number)
     {
+        string name = _regex.GroupNameFromNumber(number);
+
+        // An unsuccessful match holds no group data at all (see FuzzyRegex.NoMatch), and every one
+        // of its groups is absent.
+        if (_groups.Length == 0)
+        {
+            return new Group(_subject, 0, 0, success: false, name, []);
+        }
+
         // Capture group indexes are 1-based (excluding group 0, which is the entire matched string).
         Engine.GroupData group = _groups[number - 1];
-        string name = _regex.GroupNameFromNumber(number);
 
         if (group.Current < 0)
         {
@@ -508,7 +525,16 @@ public sealed class Match : Group
     /// <returns>The next match, or an unsuccessful match if there is none.</returns>
     public Match NextMatch() =>
         Success
-            ? Engine.Iteration.Next(_regex, _subject, _start, _end, _sliceStart, _sliceEnd, _overlapped)
+            ? Engine.Iteration.Next(
+                _regex,
+                _subject,
+                _start,
+                _end,
+                _sliceStart,
+                _sliceEnd,
+                _overlapped,
+                _oneUnitPerCharacter
+            )
             : _regex.NoMatch(_subject);
 
     /// <summary>
@@ -548,7 +574,7 @@ public sealed class Match : Group
         var expanded = new StringBuilder(replacement.Length);
         foreach (object item in _regex.CompileReplacement(replacement))
         {
-            expanded.Append(Engine.Substitution.GetMatchReplacement(item, this, _groups.Length));
+            expanded.Append(Engine.Substitution.GetMatchReplacement(item, this, _regex.GroupCount));
         }
 
         return expanded.ToString();
@@ -599,7 +625,7 @@ public sealed class Match : Group
                 return this;
             }
 
-            return number <= _groups.Length ? GroupAt(number) : null;
+            return number <= _regex.GroupCount ? GroupAt(number) : null;
         }
 
         int named = _regex.GroupNumberFromName(argument);
