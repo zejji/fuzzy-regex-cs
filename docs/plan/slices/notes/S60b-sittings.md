@@ -482,3 +482,53 @@ seed. B's oracle figure (seed 31) has still not been re-run at a fresh seed.
 
 The next sitting finishes this pass: that sweep, in chunks under 600 s, and the oracle at three
 seeds. Only then does it go on to the benchmark triage.
+
+## 2026-09-23, 05:15 - item 2 triaged, its review finished, one defect fixed
+
+### Benchmark triage: item 2 is kept
+
+Measured by the orchestrator on a quiet machine, 04:38-04:55: 95318dd (before) against 20be6aa
+(after), both with 6a3d761's `bench/`, `ManyInputs`, `--job medium --inProcess`, before and after
+alternated per row. Raw output in the main checkout:
+`artifacts/bench/2026-09-23-queue/item2-{before,after}-<row>.txt`.
+
+| Row | Before | After |
+|---|---|---|
+| FuzzyPhraseThreeNamedList | 6.582 s | 6.680 s (+1.5%, inside S58's 1.13 floor) |
+| RedactDigits | 106.8 ms | 62.14 ms (1.72x faster) |
+| ValidateEmails | 71.43 ms | 70.54 ms |
+| ParseLogLines | 67.96 ms | 68.62 ms |
+
+Allocated bytes are identical on every row. The earlier 1.93x slowdown on the named-list row was
+contamination from builds running during the measurement. Also recorded in
+`docs/plan/OPTIMISATION-NOTES.md`.
+
+### The sweep the first pass did not finish, and what it found
+
+This sitting had no Agent tool, so it ran the outstanding checks itself. Harness in
+`.scratch/sweep/` (scratch, not kept): each pattern compiled twice, the second with
+`PatternObject.DoSearchStart` cleared by reflection, which `MatchState` reads once per operation.
+61 pattern bodies (every dispatch arm, the zero-width tests, `\X`, surrogates, the case-fold
+traps) under 13 flag prefixes (`(?m)`, `(?r)`, `(?i)`, `(?fi)`, `(?w)`, `(?a)(?i)`, `(?V1)(?i)`
+and their combinations), over 7 subjects holding pairs, CRLF and Turkic I's. Every UTF-16
+`(beginning, length)`, mid-pair included, and six calls each: `Match`, `MatchAtStart`,
+`FullMatch`, `Matches`, overlapped and partial.
+
+**Result on 20be6aa's code: 605 of 1,623,960 cases differed**, all of one shape: a reverse
+zero-width start test (`^`, `\b`, `\B`, `\M`) with a `beginning` that splits a surrogate pair.
+Example: `(?r)\B` over `"😀😁x😂\na"`, slice (3, 5), gave `(2, 0)` with the prefilter on, a match
+outside the slice; off, no match. `SearchStartZeroWidth` stepped back with `PrevPos`, which walks
+the whole pair from 4 to 2. Upstream's `search_start_BOUNDARY_rev` (`:7907-7913`) cannot pass
+`slice_start` because its positions are codepoints.
+
+Fix: the scan gives up when a reverse step lands below `SliceStart`, which is where the matcher
+itself refuses to start. Pinned by
+`SearchStartTests.A_reverse_zero_width_scan_stops_at_a_slice_start_that_splits_a_surrogate_pair`,
+which compares every slice of that subject against the unfiltered engine for the four tests. It
+failed before the fix (`(?r)\M (6, 2)`: want no match, found `(5, 0)`) and passes after it.
+**After the fix: 0 of 1,623,960.**
+
+### Verification
+
+Suite 6651/6651, ratchet GREEN, baseline 6543. Oracle: seeds 7 and 4242 GREEN; 20260923 RED on
+rows 3752 and 5185 only, the two that diverge on the base commit 8dd746e.

@@ -87,6 +87,23 @@ claim is that `git diff -- src` is empty, so it recorded the row only. The next 
 allowed into `src/FuzzyRegex/FuzzyRegex.cs` adds the comment at `:444` and `:568`. S60 is the first
 such slice.
 
+## Measured by S60b's item 2 triage (2026-09-23)
+
+`search_start` (20be6aa) against its parent 95318dd, both built with 6a3d761's `bench/`.
+`ManyInputs`, `--job medium --inProcess`, before and after alternated per row, on a quiet machine
+from 04:38 to 04:55. Raw output: `artifacts/bench/2026-09-23-queue/item2-{before,after}-<row>.txt`
+in the main checkout.
+
+| Row | Before | After | Change |
+|---|---|---|---|
+| FuzzyPhraseThreeNamedList | 6.582 s | 6.680 s | +1.5%, inside S58's 1.13 noise floor |
+| RedactDigits | 106.8 ms | 62.14 ms | 1.72x faster |
+| ValidateEmails | 71.43 ms | 70.54 ms | flat |
+| ParseLogLines | 67.96 ms | 68.62 ms | flat |
+
+Allocated bytes are identical on every row. An earlier 1.93x slowdown on the named-list row was
+contamination: builds ran during that measurement. Item 2 is kept.
+
 ## From the Rust fuzzy-regex library (reviewed 2026-09-18)
 
 `docs/plan/2026-09-18-fuzzy-regex-rs-techniques.md` has the full table. Two items adopted, both

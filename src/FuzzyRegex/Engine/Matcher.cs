@@ -5404,6 +5404,14 @@ internal static class Matcher
             }
 
             pos = reverse ? state.PrevPos(pos) : state.NextPos(pos);
+
+            // In codepoints upstream's '--text_pos' cannot pass 'slice_start' (:7911-7913). In
+            // UTF-16 it can: a 'beginning' that splits a surrogate pair lets 'PrevPos' walk the
+            // whole pair and land one below 'SliceStart', where the matcher itself refuses to start.
+            if (reverse && pos < state.SliceStart)
+            {
+                return -1;
+            }
         }
     }
 
