@@ -217,4 +217,6 @@ five fixed.
 called `Enum.GetValues(Type)`, and IL3050 makes that an error under Native AOT. It now calls
 `Enum.GetValuesAsUnderlyingType` and converts back with `Enum.ToObject`. After the fix the AOT
 suite has 6625 tests, 6622 succeeded and 0 failed. `tools/run-aot-smoke.ps1` is GREEN at
-7,000,576 bytes, which is 27,648 bytes (+0.4%) over the 6,972,928 the slice names.
+7,000,576 bytes, which is 27,648 bytes (+0.4%) over the 6,972,928 the slice names. The 3 of 6625
+that did not succeed are skips (the write-once field audit cannot read BCL private fields under
+AOT). Blind pass over 20bc7d5: no defects found.
