@@ -124,7 +124,7 @@ likeliest to change an answer.
 
 ## Done when
 
-- [ ] `search_start`/`do_search_start` live, the underflow site handled explicitly and pinned.
+- [x] `search_start`/`do_search_start` live, the underflow site handled explicitly and pinned.
 - [ ] `try_match`'s test-node arm live, or deferred with a row and a comment.
 - [ ] The encoding arms wired whole, or deferred whole - never half.
 - [ ] Each of items 8-14, 16 and 17 either landed with its before/after numbers in the commit

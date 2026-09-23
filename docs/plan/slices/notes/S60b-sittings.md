@@ -561,3 +561,23 @@ sweep detects the defect. The new test fails on the reverted copy (`(?r)\M (6, 2
 HEAD. The forward scan cannot pass a split `SliceEnd`, because `TextEnd` equals it
 (`MatchState.cs:639-642`) and `NextPos` stops there. Build clean; suite 6651/6651. Item 2 is
 closed.
+
+### Item 3, mapped but not started
+
+Not started at 05:40: with the 06:39 deadline, an engine item could not get through its oracle
+wave, the three permanent files, a benchmark, a review and the four-minute inspection. The map,
+so the next sitting starts on the code:
+
+- Ours: `Matcher.TryMatch` (`Matcher.cs:2983`). Its remarks explain the reduction: FAILURE is
+  reported as SUCCESS, and only PARTIAL is propagated (S31).
+- Upstream: `try_match` (`_regex.c:7671-7860`). It is one `switch` over about 40 test opcodes,
+  each calling its `try_match_*` helper. The six `STRING*` arms return directly and, on success,
+  jump past the string by `next->match_next` / `next->match_step`. The `SUCCESS` arm checks
+  `match_all`.
+- `NextNode.MatchNext`/`MatchStep` already exist (`Node.cs`) and the optimiser fills them
+  (`Optimiser.cs`), so the graph is ready.
+- There are 12 callers. Each is already faithful: it returns on a negative status and treats
+  FAILURE as "do not enter" (for example `Matcher.cs:5752`, `:6424`). So the change is confined to
+  `TryMatch` and its helpers: stop turning FAILURE into SUCCESS, and add the `STRING*` jump.
+- Risk: the one S31 found. Upstream stops inside a branch where the reduction carried on, so
+  partial matching is the area to hunt. Run `PartialMatchingTests` early and often.
