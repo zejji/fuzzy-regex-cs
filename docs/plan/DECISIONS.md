@@ -1207,3 +1207,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   folding (row 81 of `fuzzy-overhang`, seed 20260923). `full-fold-backreference-retry` also accepts
   its ablation combined with the leftovers flag. The new `fuzzy-overhang` generator stays off the
   default wave until a slice explains its BESTMATCH/ENHANCEMATCH row (sitting notes).
+- 2026-09-23 (S87): END_FUZZY saves the old error total and cost, restores them on reject and
+  pushes them on the bstack for the backtrack arm, rather than recomputing from the counts, which
+  is wrong when sections nest. The (?e) and BESTMATCH-tie answers that moved are upstream's defect
+  (ledger 32), pinned permanently. Row 3752 is a carried-slice row (ledger 5), not a walk
+  truncation: its other spellings hang upstream, so there is no prune outcome to compare.

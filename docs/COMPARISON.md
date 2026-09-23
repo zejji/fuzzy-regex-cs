@@ -1139,6 +1139,26 @@ Upstream gives the match at 0 over `ß` alone, so a second character loses it. W
 `(?:sss){0d+1s+1i<=1:[x]}` over `ßß` is one deletion here and a `MemoryError` upstream. There is no
 option to restore the upstream answer.
 
+### A fuzzy section that is undone takes its error total with it
+
+A fuzzy match keeps a running total of its errors beside the count of each kind. When upstream
+gives up on a fuzzy section that went over its budget, it takes back the counts but not the total,
+so a later match through another branch carries errors it never made. A best-match search then
+never finds a match better than the last one, and finds the same match again for ever.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The first branch fails over budget; the second matches the 2 exactly.
+var either = new FuzzyRegex(@"(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)");
+Match m = either.Match("2y");
+Console.WriteLine(m.Value);   // 2 - upstream: never returns
+```
+
+Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two substitutions
+upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
+inner `{s<=1}` removed. There is no option to restore the upstream answer.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

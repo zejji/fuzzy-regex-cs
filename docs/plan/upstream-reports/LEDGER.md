@@ -3614,3 +3614,46 @@ of entry 29's refusal. Pinned by `Gaps/Engine/FullFoldDeletionAtFoldingBoundaryT
 `full-fold-leftover-take-back` in `ExpectedDivergences.cs`
 (`OracleComparer.RunWithoutTheLeftoverTakeBack`). No row of the default wave reaches it; the
 `fuzzy-overhang` generator gives 10, 6, 9 and 9 rows at seeds 7, 4242, 20260923 and 31337.
+
+## 32. An undone fuzzy section leaves its error total behind, and BESTMATCH loops for ever - FIXED HERE (S87)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-32-stale-total-errors.md`. Found
+2026-09-23 by S87, from oracle row 3752 at seed 20260923, a `split` this port could not finish.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-23 by
+`tools/probes/s87-stale-total-errors.py` (each line in a child process, 5 s limit):
+
+```
+search('(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                 -> HANGS
+search('(?b)(?:(?:a(?:x+?){s<=1:\\W}){s<=1,i<=1,d<=1}|2)', '2\n')  -> HANGS
+search('(?b)(?:(?:a(?:x+?)){e<=2}|2)', '2y')                       -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?e)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                 -> span=(0, 2) fuzzy_counts=(2, 0, 0)
+search('(?e)(?:(?:a(?:x+?)){e<=2}|2)', '2y')                       -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+search('(?e)(?:2|(?:a(?:x+?){s<=1}){e<=2})', '2y')                 -> span=(0, 1) fuzzy_counts=(0, 0, 0)
+```
+
+**Why upstream is wrong.** A search that never ends is wrong whatever the answer. The `(?e)` line
+is wrong on upstream's own terms. ENHANCEMATCH will "attempt to improve the fit (i.e. reduce the
+number of errors) of the match that it has found" (README.rst:590), and the README's own example
+moves the span to do it (`(?e)(dog){e<=1}` over 'cat and dog' gives 'dog', not ' dog', :600).
+Here the same engine finds the exact '2' once the inner section is removed or the branches are
+swapped, and neither change alters what the pattern matches.
+
+**Mechanism.** END_FUZZY adds the section's counts to the outer counts and writes
+`state->total_errors` (`_regex.c:12484`). Over budget, it pushes the outer counts and backtracks
+without restoring the total. The backtrack arm (`:15569-15571`) subtracts the inner counts and
+leaves the total too. So a match that later succeeds through `|2` reports two errors against
+counts of (0, 0, 0). `do_best_fuzzy_match` compares that total with the best so far (`:17653`);
+it is no better, so `start_pos` does not move and the walk re-finds the same match for ever.
+`do_enhanced_fuzzy_match` makes the same comparison (`:17939`) and stops improving instead.
+
+**This port.** The forward END_FUZZY arm restores the old totals when it rejects, and saves them
+on the backtrack stack so the backtrack arm can restore them too. Recomputing the total from the
+counts on the way back is not enough when sections nest. Pinned by
+`Gaps/Engine/FuzzyBestMatchTests.cs`: two hang tests with a 2 s timeout, the `(?e)` answer, the
+answers without either flag, a direct check that the total agrees with the counts after a match
+(red without the backtrack restore), and row 3752's `split`. One earlier answer moved: an
+equal-cost tie in `Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_snapshot` now goes
+to the earlier span, as the owner's ranking rule says it should. Row 3752 itself still differs
+from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
+(`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).

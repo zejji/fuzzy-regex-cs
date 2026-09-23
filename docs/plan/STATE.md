@@ -1,19 +1,17 @@
 # Current state
 
-**No slice in flight.** S85 landed on 2026-09-23: a fuzzy full-folded match can now stop part-way
-into a folding, each folded character it gives back costing one deletion, in the literal and
-backreference arms alike (ledger 31). Closing notes:
-`docs/plan/slices/done/S85-full-fold-deletion-at-a-folding-boundary.md`.
+**S87 in flight, checkpoint.** Fix, pins, ledger 32, DIVERGENCES and COMPARISON rows are
+committed and green. Left: the blind review (including the "upstream hangs" call), then move the
+slice to `done/` with its Review paragraph.
 
-Green: suite 6623/6623, ratchet GREEN, oracle GREEN at seeds 7 and 4242. Seed 20260923 is RED on
-two rows older than S85 (3752, a `(?b)\b\K` split that times out; 5185, a `(*SKIP)` partial
-slice), which the orchestrator is triaging separately.
+Green: ratchet GREEN, oracle GREEN at seeds 7, 4242, 20260922 and 20260923.
 
 ## New findings for the owner: need slices
 
 1. **BESTMATCH over a full-folded backreference.** `(?b)(?fi)(f)(?:(?:\1)){e<=3}` fullmatch 'fxf'
    is None upstream and (0, 3) I[1] here, upstream's answer for the literal form. No ablation
-   explains it. It keeps the `fuzzy-overhang` generator off the default wave. Details:
+   explains it. S87's fix does not explain row 67 of `fuzzy-overhang` at seed 20260923 either
+   (`(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}`). Both keep that generator off the default wave. Details:
    `docs/plan/slices/notes/S85-sittings.md`.
 2. `(?i)(x)(?:(?:\1){d<=2})+$` over 'xy' exhausts the port's 1 GB backtracking stack; upstream V1
    returns None. Found by S84's blind review; `docs/plan/slices/notes/S84-sittings.md`.

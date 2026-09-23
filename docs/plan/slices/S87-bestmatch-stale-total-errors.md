@@ -75,5 +75,47 @@ Re-record: `python tools/record-oracle.py --generator <default list> --count 300
 
 ## Done when
 
-Tests green and each seen red without the fix; ratchet green; oracle green at the four seeds; ledger,
-DIVERGENCES and the upstream draft written; slice moved to `done/`.
+- [x] Tests green and each seen red without the fix.
+- [x] Ratchet green.
+- [x] Oracle green at the four seeds.
+- [x] Ledger, DIVERGENCES and the upstream draft written.
+- [x] Slice moved to `done/`.
+
+## Closing notes (2026-09-23)
+
+**What landed.** The forward `EndFuzzy` arm now keeps the old `TotalErrors` and `TotalCost`
+before it overwrites them. It puts them back before backtracking on the over-budget path, and it
+pushes them on the bstack with the inner counts, so the backtrack arm pops and restores them.
+Item 3's suggested recompute in the backtrack arm is not enough when sections nest:
+the counts then still hold the enclosing section's errors, and nothing resets the total when that
+section is itself undone. `The_error_total_agrees_with_the_counts_after_a_match` drives
+`Matcher.DoMatch` directly and checks the total against the counts; the no-flag constrained case
+reports 2 against 0 without the backtrack restore, so that half of the fix is pinned separately
+from the hang tests.
+
+**`DoEnhancedFuzzyMatch`.** It reads the same field (upstream `:17939`) and stopped improving on
+the stale total. `(?e)(?:(?:a(?:x+?){s<=1}){e<=2}|2)` over '2y' now gives (0, 1) with no errors,
+where upstream gives (0, 2) with (2, 0, 0). Upstream's own answer moves to (0, 1) once the inner
+section is removed or the branches are swapped, and README.rst:590 says ENHANCEMATCH tries to
+reduce the errors, so this is upstream's defect and the port's answer is the documented one. The
+tie in `Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_snapshot` moved the same way.
+Neither change showed up as an oracle divergence at the four seeds.
+
+**Row 3752 went to `skip-carried-slice-on-a-scan-with-no-walk`, not
+`bestmatch-walk-truncated-by-a-skip`.** The evidence pointed to the carried-slice door (ledger 5):
+upstream's split stops after (0, 1), yet its own `search(s, 1)` finds (3, 4) with no errors, which
+is the port's answer. The (*SKIP) moves the slice start and the split keeps that state between
+matches. There is no walk truncation to point at: the (*PRUNE) and verb-free spellings hang
+upstream (entry 32), so no prune outcome exists to compare. The row's remarks say so.
+
+**Row 5185** joined the second arm of `search-start-partial`. Upstream reports the whole slice
+(0, 2) partial; its own `match(pos=1)`, its (*PRUNE) spelling and its verb-free spelling all give
+the port's (1, 2) partial. The probe now takes an optional slice.
+
+**Orchestrator question: fuzzy-overhang row 67 (seed 20260923).** Not explained by this fix.
+`(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}` fullmatch over 'f767ax00ﬂ' still gives upstream
+(0, 2, 1) against the port's (1, 1, 0). `fuzzy-overhang` stays off the default wave.
+
+**Probes.** `tools/probes/s87-stale-total-errors.py` prints every case of entry 32 with each line
+in a child process under a 5 s limit. `upstream-skip-carried-slice-doors.py` gained the same
+bounding (10 s), because row 3752's other spellings hang.
