@@ -665,6 +665,11 @@ internal sealed class MatchState : IDisposable
     /// are the exception, and deliberately: a group's capture array, a guard list's spans and the
     /// two change lists keep their capacity and lose only their count, exactly as upstream's
     /// <c>clear_groups</c> (<c>:3369</c>) and <c>reset_guards</c> (<c>:3383</c>) keep theirs.
+    /// <para>
+    /// sync-divergence: upstream builds a new <c>RE_State</c> each call and reuses only three
+    /// buffers; ours reuses the whole state, so this method resets what upstream never has to.
+    /// Re-aligning: a field upstream adds to <c>RE_State</c> gets a line here.
+    /// </para>
     /// </remarks>
     /// <param name="text">The subject.</param>
     /// <param name="start">Upstream's <c>pos</c>, before clamping.</param>

@@ -23,6 +23,13 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// returned its stack buffers to the pool (<see cref="MatchState.Release"/>). What it keeps is what
 /// upstream keeps: the group and repeat blocks, grown to the largest match seen so far.
 /// </para>
+/// <para>
+/// sync-divergence: upstream keeps three separate buffers on the pattern under its lock and
+/// rebuilds the state around them in <c>state_init_2</c> (<c>:18300</c>, <c>:18341</c>,
+/// <c>:18500</c>); ours keeps the whole state in a lock-free slot and <see cref="MatchState.Init"/>
+/// reassigns every field a call can dirty. Re-aligning: a field upstream adds to
+/// <c>RE_State</c> needs a line in <c>Init</c>, which <c>MatchStateCacheTests</c> catches.
+/// </para>
 /// </remarks>
 internal sealed class MatchStateCache
 {

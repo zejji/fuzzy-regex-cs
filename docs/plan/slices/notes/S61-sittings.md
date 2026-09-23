@@ -220,3 +220,120 @@ suite has 6625 tests, 6622 succeeded and 0 failed. `tools/run-aot-smoke.ps1` is 
 7,000,576 bytes, which is 27,648 bytes (+0.4%) over the 6,972,928 the slice names. The 3 of 6625
 that did not succeed are skips (the write-once field audit cannot read BCL private fields under
 AOT). Blind pass over 20bc7d5: no defects found.
+
+## Sitting 4 (2026-09-23, from 05:24)
+
+Sitting 3 left no notes of its own; its work is summarised here. It launched the time-gate runs
+and wrote the wave-scale reset test, which it saved as `.scratch/s61-sitting3-wip.patch` without
+running. This sitting re-applied the patch unchanged.
+
+### Time gates: the runs sitting 3 launched
+
+`--job medium`, one job at a time. Before is 8dd746e (the `.scratch/base` worktree), 02:59 to
+03:37, under `artifacts/bench/2026-09-23-S61-gates-before`. After is cc0c896's code (the same as
+3d88f14), 03:37 to 04:15, under `artifacts/bench/2026-09-23-S61-gates-after`. Filters
+`*ManyInputsBenchmarks*`, `*WorkloadBenchmarks.*MatchesToEnd*` and `*SpanOverloadBenchmarks*`.
+Sitting 3 was still working during the after run, so these times are a strong hint, **not the
+verdict**. The orchestrator's quiet-machine run after 06:40 decides. Bytes are exact either way.
+
+| Row | Before | After | Time ratio | Bytes before | Bytes after |
+|---|---|---|---|---|---|
+| ManyInputs.CaseFoldAccented | 324.7 ms | 283.1 ms | 0.87 | 91,200,000 | 0 |
+| ManyInputs.FuzzyPhraseOneEnhanced | 2,523.7 ms | 2,337.1 ms | 0.93 | 100,246,712 | 15,500,496 |
+| ManyInputs.FuzzyPhraseOneIsMatch | 2,425.6 ms | 2,376.5 ms | 0.98 | 96,872,864 | 0 |
+| ManyInputs.FuzzyPhraseOneMatch | 2,433.3 ms | 2,267.3 ms | 0.93 | 96,872,864 | 12,126,648 |
+| ManyInputs.FuzzyPhraseThreeAlternation | 6,950.4 ms | 6,719.7 ms | 0.97 | 96,988,752 | 0 |
+| ManyInputs.FuzzyPhraseThreeNamedList | 7,119.0 ms | 6,501.9 ms | 0.91 | 96,989,480 | 0 |
+| ManyInputs.FuzzyPhraseThreeSeparatePasses | 8,027.3 ms | 6,917.8 ms | 0.86 | 290,579,624 | 0 |
+| ManyInputs.ParseLogLines | 84.4 ms | 65.1 ms | 0.77 | 217,600,000 | 44,800,000 |
+| ManyInputs.RedactDigits | 78.0 ms | 66.0 ms | 0.85 | 122,438,152 | 32,838,152 |
+| ManyInputs.ValidateEmails | 86.1 ms | 58.5 ms | 0.68 | 188,710,960 | 0 |
+| Workload.EnumerateMatchesToEndDense | 87.2 ms | 2.8 ms | 0.03 | 21,796,464 | 3,017,968 |
+| Workload.MatchesToEnd | 58.6 ms | 59.2 ms | 1.01 | 35,083,854 | 35,082,956 |
+| Workload.MatchesToEndDense | 6.12 ms | 6.13 ms | 1.00 | 3,543,497 | 3,542,602 |
+| SpanOverload.StringShort | 177 ns | 82 ns | 0.46 | 912 | 0 |
+| SpanOverload.StringKilobyte | 171 ns | 125 ns | 0.73 | 912 | 0 |
+| SpanOverload.StringMegabyte | 34.9 us | 36.8 us | 1.06 | 912 | 0 |
+| SpanOverload.CountStringMegabyte | 1,142.6 us | 1,110.3 us | 0.97 | 768 | 0 |
+| SpanOverload.SpanShort | 182 ns | 97 ns | 0.53 | 1,064 | 152 |
+| SpanOverload.SpanKilobyte | 231 ns | 212 ns | 0.92 | 3,096 | 2,184 |
+| SpanOverload.SpanMegabyte | 411.9 us | 526.1 us | **1.28** | 2,098,463 | 2,097,483 |
+| SpanOverload.CountSpanMegabyte | 1,387.0 us | 1,641.0 us | **1.18** | 2,098,298 | 2,097,480 |
+
+`MemoryMegabyte` (30.1 us, 0 B) and `CountMemoryMegabyte` (1,087.7 us, 0 B) are new in step D and
+have no before row. Compare with `python .scratch/cmp_gates.py`, which reads both folders'
+`*-report-full-compressed.json`.
+
+The two rows over S58's 1.13x time floor both copy a megabyte span into a string, and that copy
+did not change: their bytes are the same before and after. `StringMegabyte`, which does the same
+engine work over the same text without the copy, is 1.06x. So the rise is most likely in the
+copy's garbage collection and not in `CharAt`, but a busy machine cannot tell the two apart. The
+after run's standard deviation on `SpanMegabyte` is 54 us, 10% of its mean.
+
+### How the orchestrator decides each open time gate
+
+Run both builds, 8dd746e and the merged S61, back to back on the quiet machine, `--job medium`,
+and read the time ratio after / before against S58's noise floor of 1.13x.
+
+- **Step A, one state per lazy walk** (da66f01). Filter `*WorkloadBenchmarks.*MatchesToEnd*`.
+  Keeps if `EnumerateMatchesToEndDense` is below 1.0x and `MatchesToEnd` and `MatchesToEndDense`
+  are at or below 1.13x.
+- **Steps B and C, predicates build no Match and the pattern keeps one state** (a125fd0). Filter
+  `*ManyInputsBenchmarks*`. Keeps if all ten rows are at or below 1.13x.
+- **Step D, span option (a)** (cd0c3d1, with 3d958a2's overload attribute). Filters
+  `*SpanOverloadBenchmarks*` and `*ManyInputsBenchmarks*`, and the rows above from
+  `*WorkloadBenchmarks.*MatchesToEnd*`. The owner's rule (DECISIONS 2026-09-22) is "flat within
+  S58's noise floor: land it; slower beyond the floor: do not land it; bring the owner the
+  numbers". Keeps if every row that exists in both runs is at or below 1.13x. If any row is above
+  1.13x, including `SpanMegabyte` or `CountSpanMegabyte`, step D is not landed: the orchestrator
+  brings the owner that table and the explanation above, and the owner decides.
+
+No step reverts cleanly on its own, because later commits build on each one. So a failed gate is
+recorded here with its numbers, and the next S61 sitting takes the step back out, rather than the
+orchestrator reverting a commit by hand.
+
+### The reset proven over a wave
+
+`OracleWaveTests.A_pattern_that_has_answered_before_answers_every_row_as_a_fresh_one_does` asks
+each row twice: on a fresh pattern, and on one that first ran `Matches` over the previous row's
+subject joined to this row's. Sitting 3's version caught `Exception` and discarded it, which
+ERP022 refuses; the walk's exception is now counted in the failure message instead.
+
+`tools/run-oracle.ps1`, default generators, 300 rows each, Release:
+
+- Seed 7: 31 of 31 tests pass, diverge 0 of 6680.
+- Seed 4242: 31 of 31 pass, diverge 0.
+- Seed 20260923: the new test passes. Two others fail, on rows that are not S61's.
+  `The_wave_agrees_with_upstream` diverges on 2 rows, 3752 and 5185, which sitting 1 showed at
+  8dd746e too. `The_lazy_walks_answer_exactly_what_the_eager_ones_do` fails on 3752 alone: eager
+  `Split` times out on its whole-scan clock where the lazy walk times each step. Both rows are
+  S87's (planned on main in 0c2679c).
+- Seed 99 (used only by the controls below) diverges on row 4957 (partial):
+  `(?r)\s+(?:[[:alpha:]]+?(*SKIP)\p{L}|\W)` over `A` + four U+1D518 + CR, flags 0x410a, V0,
+  partial search. Upstream gives (0, 0); the port gives (0, 9). The same wave replayed on
+  8dd746e (`.scratch/base`, `run-oracle.ps1 -SkipRecord`) gives the same divergence, so it is not
+  S61's. It looks like the family of row 5185 (partial, `(*SKIP)`) and has not been judged.
+
+Controls, each on the committed code with one line removed from `MatchState.Init`, run with
+`pwsh -File tools/run-oracle.ps1 -Seeds "7,99"` (300 rows per generator) and then restored:
+
+- `ReqPos = -1;` removed: the new test fails on 47 of 6594 rows at seed 7 and 41 of 6592 at seed
+  99. The wave test also fails (150 and 145 rows), because a new state's default of 0 is wrong
+  too, but the new test's failure is its own: it compares two runs that both lack the reset.
+- `Array.Clear(FuzzyCounts);` removed: no failure at either seed.
+- `ClearGroups();` removed: no failure at either seed.
+
+The last two cannot fail any test that asks a question, because `MatchState.InitMatch` (which
+upstream calls before every attempt) resets the groups and the fuzzy counts again. They are the
+belt-and-braces lines sitting 1 found; `MatchStateCacheTests` still checks them field by field.
+
+### What is left for S61
+
+1. **Time gates** (above), decided by the orchestrator's quiet-machine run.
+2. **`EnumerateMatches(ReadOnlySpan<char>)` returning a `ValueMatchEnumerator`**, signed off on
+   2026-09-22 and gated on a measured gain. Not started. It adds public API, so it needs
+   `tools/update-public-api.ps1`, the documents the slice file lists, and its own blind pass.
+3. Update the benchmark baseline (`tools/compare-benchmarks.ps1 -UpdateBaseline`) from the
+   quiet-machine run, then the closing notes and the move to `done/`.
+4. Hand rows 3752, 5185 and 4957 to S87 (4957 is new here).
+5. Ledger entry 18 is S86's, handed over in writing on 2026-09-23 (50d0aec).
