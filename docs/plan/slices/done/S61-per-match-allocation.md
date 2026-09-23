@@ -106,28 +106,77 @@ LINQ, no field and no `async`.
 
 ## Done when
 
-- [ ] Every decision this slice took carries its before-and-after numbers - time AND allocated
+- [x] Every decision this slice took carries its before-and-after numbers - time AND allocated
       bytes, on the full suite including `ManyInputsBenchmarks` - in the sitting notes.
-- [ ] If the span enumerator landed, every document the owner rule above lists names it, and
+- [x] If the span enumerator landed, every document the owner rule above lists names it, and
       `UserDocumentationCompletenessTests` is green.
 - [x] Both S58 decisions are recorded as signed off before any code is written; neither is guessed.
       (Owner, 2026-09-22, DECISIONS: span option (a) gated on the hot-path benchmark; lazy-walk
       steps 1 and 2; plus a BCL-shaped `ValueMatchEnumerator` beside the `IEnumerable` walk, gated
       on a measured gain. Replacing the `IEnumerable` walk with a `ref struct` is declined.)
-- [ ] The chosen span and lazy-walk shapes implemented, or a declined decision written up with its
+- [x] The chosen span and lazy-walk shapes implemented, or a declined decision written up with its
       measured cost and date.
-- [ ] Abandoned-iterator buffer return proven by the debug `ArrayPool` wrapper, not by inspection.
-- [ ] One state per walk, reset rather than reallocated; the reset path proven over a wave.
-- [ ] Allocation gate live in `compare-benchmarks.ps1`; baselines updated so the next slice ratchets
-      against the new number.
-- [ ] Measured before and after, time and bytes per workload, in the commit message; the
+- [x] Abandoned-iterator buffer return proven by the debug `ArrayPool` wrapper, not by inspection.
+- [x] One state per walk, reset rather than reallocated; the reset path proven over a wave.
+- [x] Allocation gate live in `compare-benchmarks.ps1`; baselines updated so the next slice ratchets
+      against the new number. (Gate live since a34d895. The baseline update is handed to the
+      orchestrator, who re-records the full suite on merged main; see the closing notes.)
+- [x] Measured before and after, time and bytes per workload, in the commit message; the
       OPTIMISATION-NOTES rows implemented are deleted with their comments, and anything deferred
       gains a `ponytail:`/`Phase 7` comment and a row.
-- [ ] Ledger entry 18 fixed - `FullMatch("(ab)*", "ab" * 4_000_000)` succeeds - and the entry's
-      status rewritten, or the entry handed to its own slice in writing.
-- [ ] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
+- [x] Ledger entry 18 fixed - `FullMatch("(ab)*", "ab" * 4_000_000)` succeeds - and the entry's
+      status rewritten, or the entry handed to its own slice in writing. (Handed to S86, 50d0aec.)
+- [x] Any structural divergence recorded in `docs/plan/SYNC-DIVERGENCE.md` with a
       `sync-divergence:` marker; `tools/check-sync-divergence.ps1` green.
-- [ ] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a rented buffer not returned
+- [x] Ratchet, oracle at three seeds and AOT green; blind review (hunt: a rented buffer not returned
       on an abandoned walk; state reset that leaves a group, repeat or fuzzy counter from the
       previous match; a `Span` copied back to a string to cross a `yield`; a timeout or cancellation
       check lost in the rewritten loop; `Split` and `EnumerateSplits` drifting apart), commit.
+
+## Closing notes (2026-09-23)
+
+Per-sitting detail, with every table and control, is in `notes/S61-sittings.md`.
+
+**What landed.**
+
+- Step A (da66f01): a lazy walk holds one `MatchState`, restarts its clock per step as the
+  built-in `Regex` does, and `Split` is `[.. EnumerateSplits]`. A `Match` carries
+  `OneUnitPerCharacter`, so `NextMatch` no longer rescans the subject.
+- Steps B and C (a125fd0): the predicates build no `Match`, and a pattern keeps one state between
+  calls in `MatchStateCache`, upstream's `groups_storage` cache in the shape of `Regex._runner`
+  (SYNC-DIVERGENCE row). A warm `IsMatch` or `Count` allocates nothing.
+- Step D (cd0c3d1, 1fa48a9): `MatchState.Text` is a `ReadOnlyMemory<char>`; `IsMatch` and `Count`
+  gained memory overloads, and their span overloads copy into a pooled buffer.
+- The span walk (05019f0): `EnumerateMatches(ReadOnlySpan<char>)` returns a `ValueMatchEnumerator`
+  of `ValueMatch` values, documented in the README, GUIDE and COMPARISON.
+- The allocation gate (a34d895): `compare-benchmarks.ps1` fails on any allocation rise beyond the
+  floor.
+
+**Numbers that decided it** (quiet machine, `--job medium`, before S61 against after): ManyInputs
+0.68x to 0.98x of before, `FuzzyPhraseOneIsMatch` 969 B a call to 0; `SpanMegabyte` 350.2 us and
+2.1 MB to 161.7 us and 1 B; the 100 KB string walk 71.1 ms and 20.8 MB to 3.03 ms and 3.0 MB, and
+the span walk 2.73 ms and 17 B.
+
+**Handed over.** The benchmark baseline: the orchestrator re-records the full suite in process on
+merged main and commits it as maintenance. Ledger entry 18: S86. Oracle rows 3752, 5185 (seed
+20260923) and 4957 (seed 99) reproduce before S61 and belong to S87.
+
+**Surprises.** The span walk still copies the span once, because `MatchState.Text` is a
+`ReadOnlyMemory<char>`; the sign-off's "no copy at all" is not reachable in this shape (DECISIONS).
+`ReadOnlySpan<char>.IndexOfAnyInRange` allocated 96 B per call even after tier-up; the same search
+over `MemoryMarshal.Cast<char, ushort>` does not. A non-fuzzy search over text outside the BMP
+still allocates in proportion to the text, which a later optimisation slice could look at.
+
+**For the next slice.** `CountStringMegabyte` measured 1.10x, inside the floor but the closest
+row to it; read it first when the new baseline lands.
+
+**Review.** Every code change had a blind pass, looped until clean. a34d895 to aa67e98: four passes,
+five findings raised, five reproduced, five fixed. 20bc7d5 (AOT test fix): clean. cc0c896 to
+865f612 (the wave reset test): clean. 1fa48a9 and 05019f0: three passes, three findings raised,
+three reproduced, three fixed (all GUIDE wording on when the walk allocates). The closing sitting
+changed only documents (this file, the notes, OPTIMISATION-NOTES, SYNC-DIVERGENCE, STATE, and one
+README paragraph naming the span walk, which the slice's documentation rule required and 05019f0
+missed). That paragraph had one blind pass: one finding raised, reproduced and fixed ("cannot be
+stored in a field" overstated the rule, since a `ref struct` may be a field of another; it now
+says "a field of a class"). `ReadmeSamples` and `UserDocumentationCompletenessTests` green. No
+divergence was judged, so no verifier ran.

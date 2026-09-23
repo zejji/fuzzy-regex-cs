@@ -1266,3 +1266,19 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   inside a section, because applying it there moved four oracle rows away from upstream's answers,
   and for a body with a capture group, where a pass that does not move can set a group a later
   pass tests.
+- 2026-09-23 (S61): the span walk `EnumerateMatches(ReadOnlySpan<char>)` copies the span once per
+  walk into a pooled buffer. The 2026-09-22 sign-off's "no copy of the subject at all" is not
+  reachable while `MatchState.Text` is a `ReadOnlyMemory<char>`; what the walk gives is no `Match`
+  objects and no allocation of its own; the search still allocates in `(?p)`, in fuzzy `(?b)` and
+  `(?e)`, and for non-fuzzy patterns over text outside the BMP. A copy of the `ref struct` shares the state, so `MatchState.Lease` counts hand-backs
+  and the enumerator acts only while the count is the one it saw.
+- 2026-09-23 (S61): a worktree that has never run the hook install fails every commit with
+  `.husky/_/husky.sh: No such file or directory`. Run `dotnet husky install` in it; never
+  `--no-verify`.
+- 2026-09-23 (S61): an S61 sitting cannot run its own time gates while another driver is running
+  on the machine, and it has nothing else left to do. Relaunch S61 only after the orchestrator's
+  quiet-machine run of `*SpanOverload*` and `*WorkloadBenchmarks.EnumerateMatches*ToEndDense*`.
+- 2026-09-23 (S61, closing): the quiet gates kept step D with the pooled span copy (`SpanMegabyte`
+  350.2 us to 161.7 us, every row at or below 1.13x) and the span walk (2.73 ms and 17 B against
+  the string walk's 3.03 ms and 3.0 MB). The benchmark baseline is re-recorded by the orchestrator
+  on merged main, not by the slice, so it measures the merged code.

@@ -41,6 +41,7 @@ Fuzzy.Text.RegularExpressions.FuzzyRegex.Count(string! input, int beginning = 0,
 Fuzzy.Text.RegularExpressions.FuzzyRegex.Count(System.ReadOnlyMemory<char> input, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> int
 Fuzzy.Text.RegularExpressions.FuzzyRegex.Count(System.ReadOnlySpan<char> input, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> int
 Fuzzy.Text.RegularExpressions.FuzzyRegex.EnumerateMatches(string! input, int beginning = 0, int length = -1, bool overlapped = false, bool partial = false, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IEnumerable<Fuzzy.Text.RegularExpressions.Match!>!
+Fuzzy.Text.RegularExpressions.FuzzyRegex.EnumerateMatches(System.ReadOnlySpan<char> input, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Fuzzy.Text.RegularExpressions.ValueMatchEnumerator
 Fuzzy.Text.RegularExpressions.FuzzyRegex.EnumerateSplits(string! input, int maxSplits = -1, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IEnumerable<string?>!
 Fuzzy.Text.RegularExpressions.FuzzyRegex.FullMatch(string! input, int beginning = 0, int length = -1, bool partial = false, System.TimeSpan? timeout = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Fuzzy.Text.RegularExpressions.Match!
 Fuzzy.Text.RegularExpressions.FuzzyRegex.FuzzyRegex(string! pattern, Fuzzy.Text.RegularExpressions.FuzzyRegexOptions options, System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyCollection<string!>!>! namedLists) -> void
@@ -122,6 +123,16 @@ Fuzzy.Text.RegularExpressions.MatchCollection.Count.get -> int
 Fuzzy.Text.RegularExpressions.MatchCollection.GetEnumerator() -> System.Collections.Generic.IEnumerator<Fuzzy.Text.RegularExpressions.Match!>!
 Fuzzy.Text.RegularExpressions.MatchCollection.this[int index].get -> Fuzzy.Text.RegularExpressions.Match!
 Fuzzy.Text.RegularExpressions.MatchEvaluator
+Fuzzy.Text.RegularExpressions.ValueMatch
+Fuzzy.Text.RegularExpressions.ValueMatch.Index.get -> int
+Fuzzy.Text.RegularExpressions.ValueMatch.Length.get -> int
+Fuzzy.Text.RegularExpressions.ValueMatch.ValueMatch() -> void
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator.Current.get -> Fuzzy.Text.RegularExpressions.ValueMatch
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator.Dispose() -> void
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator.GetEnumerator() -> Fuzzy.Text.RegularExpressions.ValueMatchEnumerator
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator.MoveNext() -> bool
+Fuzzy.Text.RegularExpressions.ValueMatchEnumerator.ValueMatchEnumerator() -> void
 override Fuzzy.Text.RegularExpressions.Capture.ToString() -> string!
 override Fuzzy.Text.RegularExpressions.FuzzyChanges.GetHashCode() -> int
 override Fuzzy.Text.RegularExpressions.FuzzyCounts.GetHashCode() -> int

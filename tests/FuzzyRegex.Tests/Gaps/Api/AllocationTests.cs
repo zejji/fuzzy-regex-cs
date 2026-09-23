@@ -77,4 +77,58 @@ public sealed class AllocationTests
         count.Should().Be(1);
         allocated.Should().Be(0, "the engine reads the caller's buffer in place");
     }
+
+    [Test]
+    public void The_span_overloads_copy_a_megabyte_into_a_pooled_buffer_rather_than_a_new_string()
+    {
+        // A span cannot be kept, so these two still copy it, but into a buffer rented from
+        // ArrayPool<char>.Shared and returned when the call ends. Before, the copy was a string of
+        // two bytes a character: 2,097,176 B over this subject (owner's option (c), 2026-09-23).
+        char[] buffer = new char[1 << 20];
+        buffer.AsSpan().Fill('a');
+        "cat".CopyTo(buffer.AsSpan(buffer.Length - 10));
+        ReadOnlySpan<char> subject = buffer;
+        FuzzyRegex regex = new("cat");
+        _ = regex.IsMatch(subject);
+        _ = regex.Count(subject);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool found = regex.IsMatch(subject);
+        int count = regex.Count(subject);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        found.Should().BeTrue();
+        count.Should().Be(1);
+        allocated.Should().Be(0, "the second call takes the buffer the first one gave back to the pool");
+    }
+
+    [Test]
+    public void A_warm_span_walk_over_many_matches_allocates_nothing()
+    {
+        // The owner's gate for ValueMatchEnumerator (DECISIONS 2026-09-22): a measured gain. The
+        // string walk builds a Match per match; this one yields an index and a length, and borrows
+        // its copy and its state, so a warm walk to the end has nothing left to allocate.
+        string words = string.Concat(Enumerable.Repeat("word ", 20_000));
+        ReadOnlySpan<char> subject = words;
+        FuzzyRegex regex = new(@"\w+");
+        _ = Walk(regex, subject);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        int count = Walk(regex, subject);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        count.Should().Be(20_000);
+        allocated.Should().Be(0);
+
+        static int Walk(FuzzyRegex regex, ReadOnlySpan<char> subject)
+        {
+            int n = 0;
+            foreach (ValueMatch match in regex.EnumerateMatches(subject))
+            {
+                n += match.Length == 4 ? 1 : 0;
+            }
+
+            return n;
+        }
+    }
 }

@@ -456,16 +456,58 @@ public sealed class FuzzyRegex
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
     /// <remarks>
-    /// Copies the span to a string first, so a call allocates two bytes per character of
-    /// <paramref name="input"/>: the engine keeps the subject between steps, and a span cannot be
-    /// kept. The <see cref="IsMatch(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload
-    /// reads the caller's buffer in place.
+    /// The engine keeps the subject between steps, and a span cannot be kept, so the call copies
+    /// the span into a buffer rented from <see cref="System.Buffers.ArrayPool{T}.Shared"/> and
+    /// returns it when it ends. Once the pool is warm the copy allocates nothing, but it still
+    /// reads every character of <paramref name="input"/> once. The
+    /// <see cref="IsMatch(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload reads
+    /// the caller's buffer in place.
     /// </remarks>
     public bool IsMatch(
         ReadOnlySpan<char> input,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => IsMatch(input.ToString(), timeout: timeout, cancellationToken: cancellationToken);
+    ) => IsMatch(input, System.Buffers.ArrayPool<char>.Shared, timeout, cancellationToken);
+
+    /// <summary>
+    /// <see cref="IsMatch(ReadOnlySpan{char}, TimeSpan?, CancellationToken)"/> with the pool it
+    /// rents its copy from, which <c>PoolDisciplineTests</c> replaces with one that tracks returns.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="pool">Where the copy of <paramref name="input"/> is rented from.</param>
+    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
+    /// <returns><see langword="true"/> if the pattern matches.</returns>
+    internal bool IsMatch(
+        ReadOnlySpan<char> input,
+        System.Buffers.ArrayPool<char> pool,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    )
+    {
+        char[] copy = pool.Rent(input.Length);
+
+        try
+        {
+            input.CopyTo(copy);
+
+            // MatchState.Release drops the subject before the cached state goes back, so nothing
+            // holds the copy once it is returned.
+            return Test(
+                new ReadOnlyMemory<char>(copy, 0, input.Length),
+                0,
+                -1,
+                search: true,
+                matchAll: false,
+                timeout,
+                cancellationToken
+            );
+        }
+        finally
+        {
+            pool.Return(copy);
+        }
+    }
 
     /// <summary>Whether the pattern matches anywhere in the subject, read in place.</summary>
     /// <param name="input">The subject to search.</param>
@@ -473,8 +515,8 @@ public sealed class FuzzyRegex
     /// <param name="cancellationToken">Stops the call when it is cancelled.</param>
     /// <returns><see langword="true"/> if the pattern matches.</returns>
     /// <remarks>
-    /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
-    /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
+    /// No copy of <paramref name="input"/> is made, so a long subject costs no memory of its own.
+    /// Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
     /// </remarks>
     // null converts to ReadOnlyMemory through char[]; the lower priority keeps IsMatch(null) on the
     // string overload rather than ambiguous (MemoryOverloadTests).
@@ -1156,10 +1198,8 @@ public sealed class FuzzyRegex
     /// end anyway.
     /// </para>
     /// <para>
-    /// <b>Two consequences of being lazy, both worth knowing before you pick it.</b> A step builds
-    /// its own engine state, so a walk costs one pass over the subject per match where
-    /// <c>Matches</c> costs one in total; and because each state starts its own clock,
-    /// <paramref name="timeout"/> bounds each step rather than the walk. A caller who needs the
+    /// <b>The clock restarts at every step</b>, because the time between two steps is the caller's,
+    /// so <paramref name="timeout"/> bounds each step rather than the walk. A caller who needs the
     /// whole walk bounded should time it themselves, or use <c>Matches</c>.
     /// </para>
     /// </remarks>
@@ -1183,6 +1223,63 @@ public sealed class FuzzyRegex
         (int start, int end) = Limits(input.Length, beginning, length);
 
         return Engine.Iteration.Enumerate(this, input, start, end, overlapped, partial, limits);
+    }
+
+    /// <summary>Finds the matches in a span one at a time, reporting only where each one lies.</summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="timeout">
+    /// How long ONE step may run, or <see langword="null"/> for the pattern's budget, as on the
+    /// <see cref="EnumerateMatches(string, int, int, bool, bool, TimeSpan?, CancellationToken)"/>
+    /// overload.
+    /// </param>
+    /// <param name="cancellationToken">Stops the walk when it is cancelled.</param>
+    /// <returns>The matches, leftmost first, found as they are asked for.</returns>
+    /// <exception cref="System.Text.RegularExpressions.RegexMatchTimeoutException">
+    /// A step ran out of time.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// Shaped after <c>Regex.EnumerateMatches(ReadOnlySpan&lt;char&gt;)</c>: each match is a
+    /// <see cref="ValueMatch"/>, its <see cref="ValueMatch.Index"/> and
+    /// <see cref="ValueMatch.Length"/> and nothing else, so a warm walk allocates no match objects.
+    /// Take the text with <c>input.Slice(match.Index, match.Length)</c>. For the groups, the
+    /// fuzzy counts or the matched text as a string, use the string overload.
+    /// </para>
+    /// <para>
+    /// The walk copies the span once, into a buffer rented from
+    /// <see cref="System.Buffers.ArrayPool{T}.Shared"/>, and returns it when the walk ends. Use it
+    /// in a <c>foreach</c>, which returns the buffer however the loop ends; see
+    /// <see cref="ValueMatchEnumerator"/>.
+    /// </para>
+    /// </remarks>
+    public ValueMatchEnumerator EnumerateMatches(
+        ReadOnlySpan<char> input,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default
+    ) => EnumerateMatches(input, System.Buffers.ArrayPool<char>.Shared, timeout, cancellationToken);
+
+    /// <summary>
+    /// <see cref="EnumerateMatches(ReadOnlySpan{char}, TimeSpan?, CancellationToken)"/> with the
+    /// pool it rents its copy from, which <c>PoolDisciplineTests</c> replaces with one that tracks
+    /// returns.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="pool">Where the copy of <paramref name="input"/> is rented from.</param>
+    /// <param name="timeout">How long one step may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the walk when it is cancelled.</param>
+    /// <returns>The matches, leftmost first, found as they are asked for.</returns>
+    internal ValueMatchEnumerator EnumerateMatches(
+        ReadOnlySpan<char> input,
+        System.Buffers.ArrayPool<char> pool,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    )
+    {
+        // Checked before anything is rented, so a bad argument leaves nothing to hand back.
+        Engine.MatchLimits limits = LimitsFor(timeout, cancellationToken);
+
+        return new ValueMatchEnumerator(this, input, limits, pool);
     }
 
     /// <summary>Counts the matches in the given part of the subject.</summary>
@@ -1222,16 +1319,49 @@ public sealed class FuzzyRegex
     /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
     /// <returns>The number of matches.</returns>
     /// <remarks>
-    /// Copies the span to a string first, so a call allocates two bytes per character of
-    /// <paramref name="input"/>: the engine keeps the subject between steps, and a span cannot be
-    /// kept. The <see cref="Count(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload
-    /// reads the caller's buffer in place.
+    /// The engine keeps the subject between steps, and a span cannot be kept, so the call copies
+    /// the span into a buffer rented from <see cref="System.Buffers.ArrayPool{T}.Shared"/> and
+    /// returns it when it ends. Once the pool is warm the copy allocates nothing, but it still
+    /// reads every character of <paramref name="input"/> once. The
+    /// <see cref="Count(ReadOnlyMemory{char}, TimeSpan?, CancellationToken)"/> overload reads the
+    /// caller's buffer in place.
     /// </remarks>
     public int Count(
         ReadOnlySpan<char> input,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default
-    ) => Count(input.ToString(), timeout: timeout, cancellationToken: cancellationToken);
+    ) => Count(input, System.Buffers.ArrayPool<char>.Shared, timeout, cancellationToken);
+
+    /// <summary>
+    /// <see cref="Count(ReadOnlySpan{char}, TimeSpan?, CancellationToken)"/> with the pool it
+    /// rents its copy from, which <c>PoolDisciplineTests</c> replaces with one that tracks returns.
+    /// </summary>
+    /// <param name="input">The subject to search.</param>
+    /// <param name="pool">Where the copy of <paramref name="input"/> is rented from.</param>
+    /// <param name="timeout">How long this call may run, or <see langword="null"/> for the pattern's budget.</param>
+    /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
+    /// <returns>The number of matches.</returns>
+    internal int Count(
+        ReadOnlySpan<char> input,
+        System.Buffers.ArrayPool<char> pool,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken
+    )
+    {
+        char[] copy = pool.Rent(input.Length);
+
+        try
+        {
+            input.CopyTo(copy);
+
+            // As in IsMatch: MatchState.Release drops the subject before the state is cached.
+            return Count(new ReadOnlyMemory<char>(copy, 0, input.Length), timeout, cancellationToken);
+        }
+        finally
+        {
+            pool.Return(copy);
+        }
+    }
 
     /// <summary>Counts the matches in the subject, read in place.</summary>
     /// <param name="input">The subject to search.</param>
@@ -1239,8 +1369,8 @@ public sealed class FuzzyRegex
     /// <param name="cancellationToken">Stops the scan when it is cancelled.</param>
     /// <returns>The number of matches.</returns>
     /// <remarks>
-    /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
-    /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
+    /// No copy of <paramref name="input"/> is made, so a long subject costs no memory of its own.
+    /// Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
     /// </remarks>
     // As for IsMatch(ReadOnlyMemory<char>): keeps Count(null) on the string overload.
     [System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]
