@@ -476,6 +476,9 @@ public sealed class FuzzyRegex
     /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
     /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
     /// </remarks>
+    // null converts to ReadOnlyMemory through char[]; the lower priority keeps IsMatch(null) on the
+    // string overload rather than ambiguous (MemoryOverloadTests).
+    [System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]
     public bool IsMatch(
         ReadOnlyMemory<char> input,
         TimeSpan? timeout = null,
@@ -1239,6 +1242,8 @@ public sealed class FuzzyRegex
     /// No copy of <paramref name="input"/> is made, so a warm call allocates nothing however long the
     /// subject is. Take a slice of a buffer with <c>buffer.AsMemory(start, length)</c>.
     /// </remarks>
+    // As for IsMatch(ReadOnlyMemory<char>): keeps Count(null) on the string overload.
+    [System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]
     public int Count(
         ReadOnlyMemory<char> input,
         TimeSpan? timeout = null,

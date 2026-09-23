@@ -106,6 +106,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# The allocation floor defaults to 1.0001x, so a rise that fails the gate can be too small to see at
+# two decimal places: 5,000,000 to 5,002,000 bytes printed as 1.00x (S61 blind review). A ratio
+# near 1 gets four places.
+function Get-RatioDigits([double]$Ratio) { if ([math]::Abs($Ratio - 1) -lt 0.005) { 4 } else { 2 } }
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $benchDir = Join-Path $repoRoot 'bench'
 $artifacts = Join-Path $repoRoot $ArtifactsPath
@@ -282,7 +287,7 @@ if ($baselineJob -ne 'unrecorded' -and $baselineJob -ne $thisJob) {
     Write-Host '  a real difference with a measurement-method one. Re-run with the baseline"s job.' -ForegroundColor Yellow
 }
 if ($NoiseFloor -gt 1 -or $AllocationNoiseFloor -gt 1 -or $AllocationSlackBytes -gt 0) {
-    Write-Host ("Floor:    time {0:N2}x, allocation {1:N2}x or {2} B - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor, $AllocationSlackBytes)
+    Write-Host ("Floor:    time {0:N2}x, allocation {1:N$(Get-RatioDigits $AllocationNoiseFloor)}x or {2} B - inside these a row reads 'same'." -f $NoiseFloor, $AllocationNoiseFloor, $AllocationSlackBytes)
 }
 $baselineContended = @(if ($baseline.PSObject.Properties['contended']) { $baseline.contended })
 if ($baselineContended.Count -gt 0) {
@@ -352,7 +357,7 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
     elseif ($allocLost) { '   lost' }
     elseif ($allocAppeared) { '    new' }
     elseif ($allocWithinFloor) { '   same' }
-    else { '{0,6:N2}x' -f $allocRatio }
+    else { "{0,6:N$(Get-RatioDigits $allocRatio)}x" -f $allocRatio }
 
     $timeCell = if ($withinFloor) { '  same' } else { '{0,5:N2}x' -f $ratio }
 
@@ -369,7 +374,7 @@ foreach ($name in $baseline.benchmarks.PSObject.Properties.Name) {
         $why =
         if ($allocLost) { 'allocation no longer measured (diagnoser lost?)' }
         elseif ($allocAppeared) { 'now allocates where the baseline did not' }
-        else { "allocates more ($([math]::Round($allocRatio, 2))x)" }
+        else { "allocates more ($([math]::Round($allocRatio, (Get-RatioDigits $allocRatio)))x)" }
         $regressions += "$short $why - $wasBytes -> $nowBytes bytes"
     }
 }

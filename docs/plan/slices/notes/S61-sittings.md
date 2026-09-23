@@ -160,5 +160,27 @@ it. The driver rolled the step D change set back to a34d895 and saved it as
 ## Sitting 2 (2026-09-23)
 
 The rescue stash was applied unchanged. The inspection that hung in sitting 1 ran through in
-about 12 minutes. Ratchet GREEN at 6624 tests. Step D was committed as it was restored. The blind
-review is still owed on a34d895 and everything after it.
+about 12 minutes. Ratchet GREEN at 6624 tests. Step D was committed as it was restored.
+
+### Blind review of a34d895 and cd0c3d1
+
+One Opus pass. Build clean, suite 6624/6624, tool tests 188/188. Two findings, both reproduced and
+fixed:
+
+1. `IsMatch(null!)` and `Count(null!)` became ambiguous (CS0121), because `null` converts to a
+   `ReadOnlyMemory<char>` through `char[]`. Nothing has shipped, so no existing code broke, but
+   the call used to compile and throw `ArgumentNullException`, as `Regex.IsMatch(null)` does.
+   Fixed with `[OverloadResolutionPriority(-1)]` on the two memory overloads. Pinned by
+   `MemoryOverloadTests.A_null_argument_still_binds_to_the_string_overload`, which failed to
+   compile before the fix.
+2. `compare-benchmarks.ps1` printed a failing allocation rise of 5,000,000 to 5,002,000 bytes as
+   1.00x in the row and "1x" in the reason, and printed the default 1.0001x floor as 1.00x.
+   Allocation ratios within 0.005 of 1 now print to four places. Pinned by the Pester test "shows
+   a failing allocation rise that is too small for two decimal places", which was red before the
+   fix.
+
+Checked clean by the reviewer: memory and string answers agree on 30 patterns x 9 subjects x 4
+memory kinds; the cached state holds no caller buffer after a call, cancelled calls included;
+timeouts and cancellation on both new overloads; `ArgumentNullException` unchanged on the string
+overloads; the gate's pass/fail on eight rise/drop/zero cases. The two fixes change public
+surface and tooling, so they get their own pass (VERIFICATION rule 4).

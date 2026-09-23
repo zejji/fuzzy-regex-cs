@@ -180,6 +180,20 @@ Describe 'compare-benchmarks.ps1 noise floor' {
         $report | Should -Match 'allocates more \(1\.2x\)'
     }
 
+    It 'shows a failing allocation rise that is too small for two decimal places' {
+        New-Baseline -Path $Baseline -MedianNs 100 -Bytes 5000000
+        New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 5002000
+
+        # S61 blind review: 2,000 B on 5 MB is past the default 1.0001x floor and the 1,024 B slack,
+        # so the run is RED, but at two places the row, the reason and the floor all read 1.00x.
+        $report = & pwsh -NoProfile -File $ScriptPath -UseExisting -ArtifactsPath $Relative `
+            -BaselinePath $Baseline -Job medium 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 1
+        $report | Should -Match ' 1\.0004x'
+        $report | Should -Match 'allocates more \(1\.0004x\)'
+        $report | Should -Match 'allocation 1\.0001x'
+    }
+
     It 'does not call an allocation drop a regression' {
         New-Baseline -Path $Baseline -MedianNs 100 -Bytes 100000
         New-Report -Path $Artifacts -MedianNs 100 -MinNs 99 -Bytes 20000

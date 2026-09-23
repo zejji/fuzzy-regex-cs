@@ -1,29 +1,29 @@
 # Current state
 
-**No slice in flight.** S83 landed on 2026-09-22: a fuzzy deletion that finishes a full-case-folded
-string or backreference now costs one edit (`Matcher.FoldingIsPartUsed`, ledger entry 28, oracle
-entry `full-fold-fuzzy-deletion`). Closing notes: `docs/plan/slices/done/S83-full-fold-fuzzy-deletion.md`.
+**S61 in flight** (`docs/plan/slices/S61-per-match-allocation.md`, notes in
+`docs/plan/slices/notes/S61-sittings.md`), on branch `slice/s61`. Landed so far: step A (one state
+per lazy walk), steps B and C (a warm pattern reuses one match state; a warm `IsMatch` allocates
+nothing), the allocation gate in `compare-benchmarks.ps1`, and step D (span option (a): `IsMatch`
+and `Count` take a `ReadOnlyMemory<char>` and read it in place). Ratchet GREEN at 6624 tests.
 
-Green: suite 6586/6586, ratchet GREEN, oracle GREEN at its three default seeds. Real data: 0 span
-differences from upstream V0 over the 300,000 usage-corpus phrase searches.
+Ledger entry 18 (bytes per repetition of a capture group) was handed to S86 in writing.
 
-## Still pending from before S83
+## Next, in this order
 
-**S60b is a checkpoint, not a landing** (`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`,
-notes in `docs/plan/slices/notes/S60b-sittings.md`). Its next sitting, in this order:
+1. **Blind review** of a34d895 and cd0c3d1 (a125fd0 and earlier were reviewed clean).
+2. **Two oracle rows red at seed 20260923**, both reproduced at 8dd746e, before any S61 change, so
+   neither is S61's. They still need minimising and pinning: row 5185 (partial-sliced, a `(*SKIP)`
+   pattern, upstream (0, 2), port (1, 1)) and row 3752 (interactions, `Split` with flags 0x400a
+   runs for more than 10 minutes where upstream returns 2 parts). Details are in the S61 notes.
+3. **Time gates, on a quiet machine only**: `*WorkloadBenchmarks.*MatchesToEnd*`, `*ManyInputs*`
+   and `*SpanOverload*`, then the full suite at `--job medium`. Allocation has already decided each
+   step; time decides whether each one stays.
+4. AOT tests and smoke test, with the binary size checked against 6,972,928 bytes. Then the closing
+   notes.
 
-1. **Triage the benchmarks, after 22:00**, when the owner is off the machine. Item 2's measurement
-   is outstanding, and the triage may revert item 2.
-2. **Re-run the four negative controls against the committed code**, plus one fresh seed each.
-3. **The blind review**, which has not run on S60b's code at all.
-4. Only then its remaining items: 3, 6, 8-14, 16 and 17, one sitting each.
+## Still pending from before S61
 
-Narrowing 3 - no prefilter for a pattern holding a `(*SKIP)` - rests on an argument, not a
-measurement; the S60b notes state the experiment that would settle it.
+**S60b is a checkpoint, not a landing.** Its next sitting starts with the benchmark triage after
+22:00, then re-runs the four negative controls, then its blind review (see its notes).
 
-## New finding for the owner: needs a slice
-
-S83's blind review found a second shared defect, reproduced: a full-folded backreference that ends
-half-way through a folding backtracks without trying a fuzzy edit. `(s)(?:\1){e<=1}` over 'sß' is
-None in upstream V1 and here; `s(?:s){e<=1}` finds (0, 2). Details in
-`docs/plan/slices/notes/S83-sittings.md`. No slice file exists for it yet.
+S84 (a full-folded backreference that ends half-way through a folding) is queued.

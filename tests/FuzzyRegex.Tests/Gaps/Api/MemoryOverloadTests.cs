@@ -51,4 +51,19 @@ public sealed class MemoryOverloadTests
         regex.IsMatch(subject).Should().BeTrue();
         regex.Count(subject).Should().Be(2);
     }
+
+    [Test]
+    public void A_null_argument_still_binds_to_the_string_overload()
+    {
+        // null converts to string and, through char[], to ReadOnlyMemory, so the memory overloads
+        // made these two calls ambiguous (CS0121; S61 blind review). Before them, null picked the
+        // string overload and threw, as System.Text.RegularExpressions.Regex.IsMatch(null) does.
+        FuzzyRegex regex = new("a+");
+
+        Action isMatch = () => regex.IsMatch(null!);
+        Action count = () => regex.Count(null!);
+
+        isMatch.Should().Throw<ArgumentNullException>().WithParameterName("input");
+        count.Should().Throw<ArgumentNullException>().WithParameterName("input");
+    }
 }
