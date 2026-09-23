@@ -361,6 +361,21 @@ internal sealed class PatternObject
     /// </remarks>
     internal bool SkipRetriedFoldSteps;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether END_FUZZY's backtrack arm counts the
+    /// section's errors twice when it decides whether a trailing insertion still fits the budget,
+    /// which is upstream's rule. The oracle sets it on a pattern it compiled for one call, to show
+    /// that the S46 fix is part of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream tests <c>total_errors(state-&gt;fuzzy_counts) + total_errors(inner_counts) &lt;
+    /// state-&gt;max_errors</c> (<c>upstream/src/_regex.c</c>:15516), but the forward arm has already
+    /// added the inner counts into <c>fuzzy_counts</c>. The budget is only finite under BESTMATCH,
+    /// so <c>(?b)(?:){e&lt;=3}</c> finds nothing in <c>znz</c> where the flagless engine finds three
+    /// insertions. Ledger entry 12; see <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool DoubleCountTrailingInsertions;
+
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
 

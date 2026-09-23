@@ -1282,3 +1282,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   350.2 us to 161.7 us, every row at or below 1.13x) and the span walk (2.73 ms and 17 B against
   the string walk's 3.03 ms and 3.0 MB). The benchmark baseline is re-recorded by the orchestrator
   on merged main, not by the slice, so it measures the merged code.
+- 2026-09-23 (S89): a BESTMATCH row that needs upstream's doubled insertion guard (ledger 12) AND a
+  fold defect (ledger 29 or 30) is pinned by an ablation arm on the fold entry that sets both
+  flags; a row that needs ledger 12 alone is added as a judged row to `bestmatch-loses-a-candidate`,
+  per the owner's 2026-09-14 ruling. No new BESTMATCH/ENHANCEMATCH generator: the five `fuzzy-*`
+  generators already put `(?b)` and `(?e)` on about 30% of their rows each. `fuzzy-overhang` joins
+  the default wave.

@@ -9715,6 +9715,8 @@ internal static class Matcher
                     // :9672, 'this_error_permitted' :9690, 'insertion_permitted' :9708), and
                     // 'insertion_permitted' on the line above already applies the section's own
                     // limits to 'inner_counts', so nothing is lost by dropping the second term.
+                    // 'PatternObject.DoubleCountTrailingInsertions' puts it back, for the oracle's
+                    // ablation only (S89).
                     //
                     // The double count is invisible wherever 'max_errors' is unbounded, which is
                     // plain fuzzy matching ('DoSimpleFuzzyMatch' sets it to 'long.MaxValue', as
@@ -9753,7 +9755,9 @@ internal static class Matcher
                     // constructed, it becomes a test here and this note goes.
                     if (
                         InsertionPermitted(state, innerNode!, innerCounts)
-                        && TotalErrors(state.FuzzyCounts) < state.MaxErrors
+                        && TotalErrors(state.FuzzyCounts)
+                            + (state.Pattern.DoubleCountTrailingInsertions ? TotalErrors(innerCounts) : 0)
+                            < state.MaxErrors
                         && TotalCost(state.FuzzyCounts, innerNode!) + innerNode!.Values[FuzzyValue.InsCost]
                             <= state.MaxCost
                         && FuzzyExtMatch(state, innerNode, state.TextPos)
