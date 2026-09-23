@@ -116,6 +116,21 @@ the port's (1, 2) partial. The probe now takes an optional slice.
 `(?b)(?fi)(f)(?:\d+a00(?:\1)){e<=3}` fullmatch over 'f767ax00ﬂ' still gives upstream
 (0, 2, 1) against the port's (1, 1, 0). `fuzzy-overhang` stays off the default wave.
 
+**The COMPARISON section.** The first closing sitting committed the DIVERGENCES row without a
+`docs/COMPARISON.md` section, so `Every_SHIPPED_divergence_is_named_in_the_comparison_page` went red
+and the driver rolled both commits back. A later sitting restored them and added the section.
+
+**Review.** One blind pass over `0c2679c..HEAD` (Opus, VERIFICATION.md brief). It built clean,
+ran 6635 of 6635 tests and got the oracle GREEN at seeds 7, 4242 and 20260923. It confirmed the
+upstream hang with the committed probe, found the bstack push and pop orders consistent, and ran
+65 extra rows: 20 hang variants (atomic, lookahead, `(?r)`, weighted costs, DEFINE calls,
+conditionals), all of which the port finished, and 44 `(?b)`/`(?e)`/`(?p)` rows with no stale
+total, all of which agree with upstream. Findings: one raised, one reproduced, one fixed. The
+provenance comment above `Bestmatch_does_not_read_a_stale_error_total_from_a_rejected_fuzzy_section`
+named a gitignored `.scratch` probe; it now names `tools/probes/s87-stale-total-errors.py`, which
+prints every line the comment quotes. No second pass was needed, because the fix was that one
+comment line.
+
 **Probes.** `tools/probes/s87-stale-total-errors.py` prints every case of entry 32 with each line
 in a child process under a 5 s limit. `upstream-skip-carried-slice-doors.py` gained the same
 bounding (10 s), because row 3752's other spellings hang.

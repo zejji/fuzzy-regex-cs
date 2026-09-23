@@ -968,7 +968,7 @@ public sealed class FuzzyBestMatchTests
     }
 
     // UPSTREAM HANGS ON BOTH (?b) PATTERNS BELOW; the port's answer is the zero-error match the
-    // `|2` branch gives, which upstream itself gives once the (?b) is removed. regex 2026.9.10 on 2026-09-23 (.scratch probe, 5 s limit per call):
+    // `|2` branch gives, which upstream itself gives once the (?b) is removed. regex 2026.9.10 on 2026-09-23 (tools/probes/s87-stale-total-errors.py, 5 s limit per call):
     //   search('(?b)(?:(?:a(?:x+?){s<=1}){e<=2}|2)', '2y')                        -> killed at 5 s
     //   search('(?b)(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')          -> killed at 5 s
     //   search('(?:(?:a(?:x+?){s<=1:\W}){s<=1,i<=1,d<=1}|2)', '2\n')              -> (0, 1) (0, 0, 0)

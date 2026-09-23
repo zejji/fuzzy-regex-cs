@@ -1,8 +1,10 @@
 # Current state
 
-**S87 in flight, checkpoint.** Fix, pins, ledger 32, DIVERGENCES and COMPARISON rows are
-committed and green. Left: the blind review (including the "upstream hangs" call), then move the
-slice to `done/` with its Review paragraph.
+**No slice in flight.** S87 landed on 2026-09-23. An undone fuzzy section now takes its error
+total with it, so a BESTMATCH search no longer loops for ever and ENHANCEMATCH keeps improving
+(ledger 32, a defect upstream has too). Seed 20260923's rows 3752 and 5185 are classified; row 67 of
+`fuzzy-overhang` is not explained by the fix (finding 1 below). The blind review passed after one
+provenance fix. Closing notes: `docs/plan/slices/done/S87-bestmatch-stale-total-errors.md`.
 
 Green: ratchet GREEN, oracle GREEN at seeds 7, 4242, 20260922 and 20260923.
 
