@@ -1251,3 +1251,12 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   repeat. `ClearGroups()` and `Array.Clear(FuzzyCounts)` in `Init` cannot change an answer, because
   `InitMatch` redoes both before every attempt, so removing either fails no oracle test; `ReqPos = -1`
   is the line only `Init` resets (47 of 6594 reuse rows fail at seed 7 without it).
+- 2026-09-23 (owner, on the overnight decisions document): S61 step D stays. The span overloads of
+  `IsMatch` and `Count` copy into a buffer rented from `ArrayPool<char>` instead of allocating a
+  string, and the quiet-machine gate is re-run; if SpanMegabyte is still above S58's 1.13x floor,
+  only the span-overload part of step D comes out. S63 gates on identical flags on both sides (V1,
+  IgnoreCase), drops only rows whose answers differ, lists each dropped row, and publishes
+  defaults-against-defaults beside the gate in `docs/COMPARISON.md`. The fuzzy prefilter ships
+  ASCII-only first; a fold-aware form for non-ASCII text follows when time allows, with its own
+  oracle generator and blind review. NuGet publishing is out of scope for now. Upstream reports
+  keep waiting for filing time; the ledger in `docs/plan/upstream-reports/` stays current.
