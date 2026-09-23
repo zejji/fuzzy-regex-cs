@@ -1282,3 +1282,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   350.2 us to 161.7 us, every row at or below 1.13x) and the span walk (2.73 ms and 17 B against
   the string walk's 3.03 ms and 3.0 MB). The benchmark baseline is re-recorded by the orchestrator
   on merged main, not by the slice, so it measures the merged code.
+- 2026-09-23 (S60b item 3): `try_match` answers for its one-character, zero-width and STRING arms,
+  identical to the S31 form on 325,952 swept slices. It landed without a time gate, which the
+  orchestrator runs on a quiet machine with the filters in the sittings notes. Any scan that can
+  refuse positions without returning to the matching loop must poll the `Iterations` gate, as
+  `SearchStart`'s retry loop now does.

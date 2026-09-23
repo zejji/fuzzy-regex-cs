@@ -590,3 +590,144 @@ already exists: the "03:35" section above, one pass, no defects, 360,448 cases a
 eight lines are in the reverse zero-width scan and had their own pass ("05:35"). `SameCharIgn` is
 unchanged since the review, so it was not reviewed again: VERIFICATION.md allows one pass per
 unreviewed change. Nothing unreviewed is on the branch. Item 3 is next.
+
+## 2026-09-23, 23:10 - item 3 landed: `try_match` answers for every arm it has
+
+### What changed
+
+`Matcher.TryMatch` now answers the way upstream's `try_match` (`_regex.c:7671-7860`) does. Before,
+it reported every FAILURE as SUCCESS and only passed PARTIAL on. Now:
+
+- The one-character tests (`MatchOne`) and the zero-width position assertions
+  (`TryMatchZeroWidth`) answer for themselves. On success the matcher resumes at
+  `next.MatchNext`, one character on when the test is the node itself (`MatchStep`), where upstream
+  adds `match_step`. The step is `Step`, so it walks a surrogate pair as one character.
+- The six STRING arms go through `TryMatchString`, which was `IsStringTestPartial`. Running out
+  of text gives PARTIAL or FAILURE, a mismatch gives FAILURE, and a success resumes past the
+  string (`match_step == 0 ? start_pos : text_pos`, `:7383` onwards). The two full-fold arms also
+  fail when the string ends part-way through a character's folding (`:7473`, `:7546`).
+- A fuzzy test still answers SUCCESS. The SUCCESS arm (`:7832`) stays in the default arm, because
+  upstream's checks `match_all` against `text_start` (DECISIONS, 2026-09-12).
+
+All 12 callers already treated FAILURE as "do not enter", so nothing outside `TryMatch` changed
+except one poll, below.
+
+### One regression, caught by the suite
+
+The first full-suite run had one red test,
+`OptimiserTrapsTests.A_timeout_fires_inside_a_long_scan_rather_than_only_between_matches`, and it
+passed when run alone. Cause: `\b\B` over a megabyte. `try_match` now refuses `\B` itself, so
+`SearchStart`'s retry loop walked the whole subject without returning to the matching loop, and
+nothing polled the clock after the first check. Alone, a cold JIT had spent the 1 ms before that
+first check, so the test passed by luck. Fixes:
+
+- `SearchStart`'s retry loop polls on the same `Iterations` gate as `SimpleStringSearch`.
+- The test makes one warm-up call first. With the warm-up and without the poll it fails every
+  time ("no exception was thrown"). With the poll it passes.
+
+### Correctness evidence: the differential sweep
+
+Harness in `.scratch/tm-sweep/` (gitignored, so rebuild it from this description). It is a console
+project referencing the library, built twice: once against the working tree and once against a
+worktree of the base commit 8730ce4. Patterns are every prefix in `""`, `(?i)`, `(?fi)`, `(?r)`,
+`(?ri)`, `(?rfi)`, `(?m)`, `(?s)`, `(?w)`, `(?V1)(?i)` and `(?b)` joined to each of these 64
+bodies:
+
+```
+abc|abd  (?:ab|ac)d  (?:ab|AC)x?  (?:ss|ß)x  (?:ab|cd)  (?:a|b)*c  (?:ab)*c  (?:ab)+?c
+(?:ab){2,3}  (?:[ab]c)*  (?:\w\d)+  (?:^a|b)  (?:\bab|c)  (?:.b|c)*  (?:\p{L}x)*  (ab)*
+(ab|cd)*e  (?:a|ab)(?:c|bcd)  (?:x|xy)*z  (?:a.)*abc  .*?abc  (?:ab)*ab  (?:İ|x)  (?:ﬃ|y)z
+(?:😀a|b)  (?:ab|cd){e<=1}  (?:(?:ab){e<=1}|cd)x  (a|b)*?b  (?:$|a)b?  (?:\Z|b)  (?:\B|a)c
+(?:[^a]b|a)+  (?:SS|x)*  (?:ab|a)*?c  (?:abc)?abd  (?:ab)?(?:abc)+  (?:xy|x)+y  (a)|(ab)
+(?:\d|\s)+  (?:\X|a)b  (?:(?=a)|b)a  (?:(?<=a)b|c)  (?:a{2}|b)+  (?:ff|ﬀ)i  (?:K|k)+
+(?:ab)*+c  (?>ab|a)b  (?:ab|ac)*?(?:ad|ae)  (?:x|(ab))*d  (?:\m|\M)a  (?:ss)*ß  (?:[a-c]|z)+?
+(?:i̇|x)  (?:ı|I)+  (?:ff|x)  (?:xs|y)  (?:fi|x)y?  (?:sx|s)  (?:abc|abd)+  (?:😀😀|x)+
+(?:😀x|😀)  (?:(ff)|(f))+  (?:ffi|ff)i?  (?:is|s)
+```
+
+The subjects are `abcabdacd`, `ABab ACac`, `xyxyzxz`, `ßssSSxﬃz`, `😀a😀b`, `aab\nab cd`,
+`İiIı x`, `ab1 c2 d`, `ffiﬀiKk`, the empty string, `cdeabe`, `xßyﬃ` and `😀😀x😀`. One row per
+UTF-16 `(beginning, length)` slice, mid-pair included. Each row records ten calls: `Match`,
+`MatchAtStart`, `FullMatch`, `Matches` and overlapped `Matches`, each with and without `partial`.
+It prints the span, the partial flag and every group.
+
+**Result: 325,952 rows, byte-identical between the base and the final code** (the final code
+includes the poll). The first, narrower generator (244,728 rows, without the last ten bodies and
+the last two subjects) was also identical. The generator is exhaustive, so there is no seed to
+vary.
+
+The AtEnd guard in END_GREEDY_REPEAT's body test, which comments called unreachable, is reached on
+786 rows both before and after. `(?:ab)*c` over `ab` with `partial` reaches it; regex 2026.9.10
+answers `(0, 2)` partial for search, match and fullmatch, and so does the port. That is now pinned
+by `PartialMatchingTests.A_repeat_body_and_tail_that_both_run_out_are_partial_over_the_repeat`.
+
+### Negative controls
+
+Each control is one edit in `Matcher.cs` and a count of rows that differ from the base output. C, D
+and E were run against the 325,952-row generator. A and B were run against the 244,728-row one and
+were not re-run on the wider generator. All five ran before the poll was added. The poll changes
+no answer without a timeout, and the final sweep matches base exactly.
+
+- Control A, one-char step dropped. In `TryMatch`, change
+  `nextPosition = new Position(next.MatchNext!, Step(state, textPos, next.MatchStep));` to
+  `nextPosition = new Position(next.MatchNext!, textPos);`. **16,852 rows differ.**
+- Control B, string end inverted. In `TryMatchString`, change
+  `end = next.MatchStep == 0 ? textPos : pos;` to `end = next.MatchStep != 0 ? textPos : pos;`.
+  **6,218 rows differ.**
+- Control C, forward fold tail off. Below `// The string ended part-way through a character's
+  folding (:7473).`, change `if (foldedPos < foldedLen)` to
+  `if (foldedPos < foldedLen && foldedLen > 99)`. **54 rows differ**, for example `(?i)(?:ff|x)`
+  over `ﬃ`.
+- Control D, reverse fold tail off. Below `// (:7546.)`, the same change. **84 rows differ**, for
+  example `(?ri)(?:SS|x)*`.
+- Control E, zero-width arm always fails. Change
+  `status = TryMatchZeroWidth(state, test, textPos);` to `status = MatchStatus.Failure;`.
+  **12,082 rows differ.**
+
+C fired only after the generator was widened with the fold bodies and subjects (the first run gave
+0). It is the thinnest of the five.
+
+### Bytes, not time
+
+S89 was running beside this sitting, so no time is claimed. `ManyInputs`, `--job short
+--inProcess --memory`, after then before (the base from the 8730ce4 worktree):
+
+| Row | Allocated before | Allocated after |
+|---|---|---|
+| RedactDigits | 32,838,650 B | 32,838,650 B |
+| ParseLogLines | 44,800,456 B | 44,800,498 B |
+| FuzzyPhraseThreeNamedList | 0 | 0 |
+
+ParseLogLines differs by 42 B in 44.8 MB. `TryMatch` allocates nothing, so that is likely
+measurement noise. A `--job dry` run showed differences of about 300 B each way, which is the
+first-call noise a dry job carries. The short-job means (busy machine, not evidence) were 145 ms
+before and 156 ms after on the named-list row, and within a few per cent elsewhere.
+
+**Filters for the orchestrator's quiet run:** `ManyInputs` rows `ValidateEmails`, `ParseLogLines`,
+`RedactDigits` and `FuzzyPhraseThreeNamedList`, which run through branches and repeats whose body
+or tail is a one-character, zero-width or string test, and `CountStringMegabyte` as the floor check.
+Item 3 is an optimisation, so if the gate shows no gain the answer is to revert `TryMatch` to the
+S31 form, not to keep it for fidelity: the sweep shows either form gives the same answers.
+
+### Verification
+
+Suite 6777/6777, ratchet GREEN. Permanent files: PartialMatchingTests 55/55, BacktrackingVerbTests
+20/20, ReverseMatchingTests 40/40. Oracle GREEN at all three default seeds. AOT 6774 passed, 3
+skipped; AOT smoke GREEN, 6.69 MB.
+
+### Review
+
+One blind pass (Opus, the VERIFICATION.md brief, scope the uncommitted diff, the hunt list above):
+**No defects found.** It wrote its own sweeps rather than reusing ours. The first had 70 new
+bodies (lookbehind strings, `\K`, conditionals, recursion, group calls, atomic and possessive
+groups, `\G`, single-character repeats before string tails, surrogates, and the folds `ß`, `ﬃ`,
+`ﬆ`, `ẞ`, `ǰ`, `ΐ`, `İ` and the Kelvin sign) under 10 prefixes: 300,560 rows, 0 differ from base.
+The second had 17 fuzzy bodies under 7 prefixes, `(?b)` and `(?e)` included: 31,031 rows, 0 differ.
+It also ran 8 patterns over 2^21 `a`s through every public entry point with a 1 ms timeout and
+a cancelled token: the same exception type as base every time. Suite 6777/6777, oracle GREEN at
+three seeds. Nothing to reproduce, nothing fixed, no second pass needed.
+
+It reported one thing outside this diff, and base behaves the same: `\b\B` over 2^21 `a`s with a
+1 ms timeout returns False after about 120 ms. The subject has no boundary, so
+`SearchStartZeroWidth` scans the whole of it, and that loop has no poll. It is in STATE.md as a
+finding.

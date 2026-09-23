@@ -1642,9 +1642,8 @@ public sealed class PartialMatchingTests
     /// one caller's guard describes - "the body came back partial, the repeat has had its minimum,
     /// and we are at the end of the slice" (<c>Matcher.cs:5796</c>). It does NOT reach it:
     /// a coverage run over this class alone, 2026-09-20, still reports <c>:5796</c> and
-    /// <c>:2067</c> at zero hits. That agrees with the comment already standing at the call site -
-    /// only <c>try_match</c>'s test-node arm, which Phase 7 restores, can answer PARTIAL there -
-    /// so the port answers this shape by another route and the guard stays as ported.
+    /// <c>:2067</c> at zero hits, so the port answers this shape by another route. S60b found a
+    /// shape that does reach the guard; the next test pins it.
     /// </para>
     /// <para>
     /// The trailing anchor is what makes the answer partial rather than complete: without it the
@@ -1674,6 +1673,37 @@ public sealed class PartialMatchingTests
 
         complete.PartialMatch.Should().BeFalse();
         (complete.Index, complete.Length).Should().Be((0, 6));
+    }
+
+    /// <summary>
+    /// A repeat whose body runs out of slice once it has had its minimum, followed by a tail that
+    /// runs out too: the answer is a partial over what the repeat consumed.
+    /// </summary>
+    /// <remarks>
+    /// This is the shape that reaches the <c>AtEnd</c> guard in <c>END_GREEDY_REPEAT</c>'s body test
+    /// (upstream <c>:12575</c>), which turns the body's partial into a refusal so that the tail is
+    /// asked. Found by S60b's sweep, which counted 786 slices reaching the guard both before and
+    /// after <c>try_match</c> was restored whole.
+    /// </remarks>
+    [Test]
+    public void A_repeat_body_and_tail_that_both_run_out_are_partial_over_the_repeat()
+    {
+        FuzzyRegex regex = new(@"(?:ab)*c");
+
+        // regex 2026.9.10, 2026-09-23: regex.search(r'(?:ab)*c', 'ab', partial=True),
+        // regex.match(...) and regex.fullmatch(...) all give span (0, 2), partial True.
+        Match[] answers =
+        [
+            regex.Match("ab", partial: true),
+            regex.MatchAtStart("ab", partial: true),
+            regex.FullMatch("ab", partial: true),
+        ];
+
+        foreach (Match m in answers)
+        {
+            m.PartialMatch.Should().BeTrue();
+            (m.Index, m.Length).Should().Be((0, 2));
+        }
     }
 
     /// <summary>

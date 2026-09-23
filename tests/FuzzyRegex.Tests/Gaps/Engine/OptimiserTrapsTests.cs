@@ -318,7 +318,14 @@ public sealed class OptimiserTrapsTests
         // chunk (Matcher.StringSearch), which is what keeps the promise for a subject large enough
         // to matter; this test keeps its own half of the contract by using a pattern with no
         // literal, so it still measures the position-by-position scan.
+        //
+        // S60b: the warm-up call comes first because a cold run can spend the whole budget on JIT
+        // before the first poll, and then the test passes on a scan that never polls again. That
+        // hid a real regression for one run: once 'try_match' answered '\B' itself, search_start's
+        // retry loop walked the megabyte without returning to the matching loop, and the test
+        // passed alone and failed only in the full suite.
         var pattern = new FuzzyRegex(@"\b\B");
+        _ = pattern.IsMatch(_long);
 
         Action act = () => pattern.IsMatch(_long, timeout: TimeSpan.FromMilliseconds(1));
 
