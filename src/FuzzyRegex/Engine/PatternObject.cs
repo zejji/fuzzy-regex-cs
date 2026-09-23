@@ -255,6 +255,13 @@ internal sealed class PatternObject
     /// </remarks>
     internal bool HasSkipVerb;
 
+    /// <summary>
+    /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or
+    /// <see langword="null"/>. <b>This port's own field</b> (S60b item 10); see
+    /// <see cref="Engine.FuzzyLiteralFilter"/>.
+    /// </summary>
+    internal FuzzyLiteralFilter? FuzzyLiteralFilter;
+
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
 
@@ -445,6 +452,9 @@ internal sealed class PatternObject
                 self.HasSkipVerb = true;
             }
         }
+
+        // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
+        self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
 
         return self;
     }

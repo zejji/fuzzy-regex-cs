@@ -1743,6 +1743,7 @@ GENERATORS = (
     "posix",
     "fuzzy",
     "fuzzy-anchored",
+    "fuzzy-literal",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -6060,6 +6061,159 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
 
 
 # --------------------------------------------------------------------------------------------
+# S60b item 10: the fuzzy-literal generator
+# --------------------------------------------------------------------------------------------
+#
+# The port screens start positions for a pattern that is exactly one fuzzy ASCII literal
+# (src/FuzzyRegex/Engine/FuzzyLiteralFilter.cs); upstream has no such filter, so every row here
+# asks whether the screen ever changes an answer. 'fuzzy' cannot ask that: its literals are at most
+# a few characters and its subjects at most eight, so a pattern the filter accepts is rare there and
+# a start worth skipping rarer still. Measured 2026-09-23: a filter that refused EVERY subject
+# changed one row in 4000 of 'fuzzy' plus 'fuzzy-anchored' at seed 7.
+#
+# So the literal is one to three words and sits in a longer subject, among noise, mutated by up to
+# four edits: a budget spent on the far side of a piece is what tests the start bound. Everything
+# else the filter reads is drawn too - each constraint form its budget comes from, the three case
+# modes, a fold the filter's ASCII search cannot see, reverse, BESTMATCH, ENHANCEMATCH, partial
+# matching and a pos/endpos slice.
+
+FUZZY_LITERAL_WORDS = ("amber", "lantern", "works", "stone", "field", "kelvin", "strasse", "fine", "oak")
+
+# One per way the filter derives its budget: the total, the per-kind sum when it is tighter, a
+# kind left at zero, the cost equation, and a bound so loose there are too few characters per piece.
+FUZZY_LITERAL_CONSTRAINTS = (
+    "{e<=1}",
+    "{e<=2}",
+    "{e<=3}",
+    "{e<=4}",
+    "{s<=1,i<=1}",
+    "{e<=5,i<=1,d<=1,s<=0}",
+    "{i<=2,d<=1}",
+    "{2i+2d+3s<=4}",
+    "{e<=7}",
+)
+
+FUZZY_LITERAL_NOISE = "abcdefiklnorstwxz  "
+
+# A character that is not ASCII but folds onto ASCII letters, keyed by what it replaces: KELVIN SIGN,
+# LONG S, SHARP S and the fi ligature. The filter must switch itself off at any of them.
+FUZZY_LITERAL_FOLDS = (("k", "K"), ("s", "ſ"), ("ss", "ß"), ("fi", "ﬁ"))
+
+
+def _fuzzy_literal_fold_copy(rng: random.Random, literal: str, budget: int) -> str | None:
+    """The literal with a fold in one piece and one substitution in every other piece, or None.
+
+    The filter cuts the literal into `budget + 1` pieces at `j * len // (budget + 1)`, as
+    FuzzyLiteralFilter.TryCreate does. A fold hides its piece from the filter's ASCII search, and
+    that only changes an answer when the hidden piece is the match's one untouched piece, so this
+    damages all the others. Random edits almost never line that up: with the ASCII check switched
+    off, the plain rows alone changed one answer in 2000 at seed 7 and none at seed 99.
+    """
+    count = budget + 1
+    bounds = [(j * len(literal) // count, (j + 1) * len(literal) // count) for j in range(count)]
+    ascii_text, folded = rng.choice(FUZZY_LITERAL_FOLDS)
+    homes = [
+        (j, at)
+        for j, (lo, hi) in enumerate(bounds)
+        for at in range(lo, hi - len(ascii_text) + 1)
+        if literal.startswith(ascii_text, at)
+    ]
+    if not homes:
+        return None
+    home, at = rng.choice(homes)
+
+    text = list(literal)
+    for j, (lo, hi) in enumerate(bounds):
+        if j != home:
+            spot = rng.randrange(lo, hi)
+            text[spot] = "x" if text[spot] != "x" else "z"
+    return "".join(text[:at]) + folded + "".join(text[at + len(ascii_text) :])
+
+
+def _generate_fuzzy_literal(rng: random.Random, count: int):
+    """A bare fuzzy literal in a longer noisy subject: the one shape the port's fuzzy prefilter takes."""
+    for i in range(count):
+        literal = " ".join(rng.choice(FUZZY_LITERAL_WORDS) for _ in range(rng.randint(1, 3)))
+        mode = rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
+        constraint = rng.choice(FUZZY_LITERAL_CONSTRAINTS)
+
+        def noise() -> str:
+            return "".join(rng.choice(FUZZY_LITERAL_NOISE) for _ in range(rng.randrange(16)))
+
+        # Zero, one or two planted copies, each mutated on its own, so a row can hold a near miss
+        # before the real match - the start the filter must not skip past.
+        parts = [noise()]
+        for _ in range(rng.choices((0, 1, 2), weights=(1, 5, 2))[0]):
+            copy = _fuzzy_recase(rng, literal) if mode != "plain" else literal
+            parts.append(_fuzzy_mutate(rng, copy, rng.randrange(5), FUZZY_LITERAL_NOISE))
+            parts.append(noise())
+        subject = "".join(parts)
+
+        if rng.random() < 0.2:
+            ascii_text, folded = rng.choice(FUZZY_LITERAL_FOLDS)
+            at = subject.lower().find(ascii_text)
+            if at >= 0:
+                subject = subject[:at] + folded + subject[at + len(ascii_text) :]
+
+        # A fifth of the rows are the targeted fold shape instead: a total budget of one or two,
+        # case-insensitive, and a copy whose only untouched piece holds the fold.
+        if rng.random() < 0.2:
+            budget = rng.choice((1, 2))
+            fold_copy = _fuzzy_literal_fold_copy(rng, literal, budget)
+            if fold_copy is not None:
+                constraint = "{e<=" + str(budget) + "}"
+                mode = rng.choice(("ign", "fold"))
+                subject = noise() + fold_copy + noise()
+
+        pattern = "(?:" + literal + ")" + constraint
+
+        # Drawn before any suppression, as in 'fuzzy', so the row stream does not reshuffle. Reverse
+        # is drawn more often than in 'fuzzy' because a full-folded literal under (?r) is a chain
+        # the filter must read back to front, and at 0.2 dropping that reversal changed one row in
+        # 2000 at seed 7 and none at seed 99.
+        reverse = rng.random() < 0.4
+        enhance = rng.random() < FUZZY_ENHANCE_PROBABILITY
+        bestmatch = rng.random() < FUZZY_BESTMATCH_PROBABILITY
+        if _has_weighted_cost(pattern):
+            enhance = False
+            bestmatch = False
+
+        if reverse:
+            pattern = "(?r)" + pattern
+        if mode == "ign":
+            pattern = "(?i)" + pattern
+        elif mode == "fold":
+            pattern = "(?fi)" + pattern
+        if enhance:
+            pattern = "(?e)" + pattern
+        if bestmatch:
+            pattern = "(?b)" + pattern
+
+        row = {
+            "generator": "fuzzy-literal",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": {},
+            "subject": subject,
+            "operation": ALL_OPERATIONS[i % len(ALL_OPERATIONS)],
+        }
+        if row["operation"] in SUB_OPERATIONS:
+            row["template"] = "<>"
+        if row["operation"] in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if row["operation"] in SUB_OPERATIONS else ITER_LIMITS)
+        if row["operation"] in OPERATIONS and rng.random() < 0.25:
+            row["partial"] = True
+
+        # A slice on a third of the rows that can take one, drawn by codepoint as S53b's are.
+        if row["operation"] in OPERATIONS + SUB_OPERATIONS and rng.random() < 0.33:
+            lo = rng.randrange(len(subject) + 1)
+            row["pos"] = lo
+            row["endpos"] = rng.randrange(lo, len(subject) + 1)
+
+        yield row
+
+
+# --------------------------------------------------------------------------------------------
 # The long-subject variants
 # --------------------------------------------------------------------------------------------
 #
@@ -6352,6 +6506,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "fuzzy-anchored":
         yield from _generate_fuzzy(rng, count, guarded=True)
+        return
+
+    if name == "fuzzy-literal":
+        yield from _generate_fuzzy_literal(rng, count)
         return
 
     if name == "posix":

@@ -1189,3 +1189,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `full-fold-fuzzy-deletion` is keyed on an ablation flag, `PatternObject.ChargeUntouchedFoldings`,
   after S57c's anchor pin, rather than on a shape predicate: a flag that restores upstream's test at
   all six sites classifies exactly the rows the fix moved and nothing else.
+- 2026-09-23 (S60b item 10): the fuzzy prefilter covers one shape only, a pattern that is exactly
+  one fuzzy ASCII literal (`Engine/FuzzyLiteralFilter.cs`), and switches itself off at the first
+  non-ASCII character it would search. ASCII on both sides is what makes an ordinal
+  case-insensitive search a superset of the engine's fold; KELVIN SIGN, long s, `ß` and `ﬁ` are the
+  pinned counter-examples. `k` is the tightest of `e`, the per-kind sum and the cost equation.
+  Alternations and named lists get no filter yet.

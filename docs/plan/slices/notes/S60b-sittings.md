@@ -144,3 +144,120 @@ Full suite 6577/6577. Ratchet GREEN, baseline updated to 6469 distinct passing t
 Differential oracle GREEN at its three default seeds. The three permanent files the slice names:
 `BacktrackingVerbTests` 20/20, `PartialMatchingTests` 54/54, `ReverseMatchingTests` 40/40.
 Native AOT: `tools/run-aot-tests.ps1` 6574 passed / 3 skipped, `tools/run-aot-smoke.ps1` PASSED.
+
+## Sitting of 2026-09-23 (night): item 10, the fuzzy literal filter
+
+The orchestrator put item 10 first and deferred item 2's triage ("do not revert it, do not build
+on its numbers"), so the list above is still outstanding except for item 10.
+
+### What landed
+
+`Engine/FuzzyLiteralFilter.cs` (new, marked NOT UPSTREAM'S, ledger row in SYNC-DIVERGENCE.md).
+It applies to a pattern that is exactly one fuzzy section over a literal, such as
+`(?:amber lantern){e<=2}`. With at most k edits, a match must contain one of k+1 equal pieces of
+the literal unchanged (Navarro's pigeonhole filter). The filter finds each piece's next
+occurrence and lets the search jump to the earliest start any of them allows
+(occurrence - piece offset - k), or refuses the subject when no piece occurs at all.
+
+- k is the tightest of `e`, the sum of the per-kind limits, and the cost equation divided by its
+  cheapest weight. No filter when k is unbounded or leaves pieces too short.
+- Search only; withheld under partial matching. Reverse searches use it only to refuse.
+- ASCII only: the first non-ASCII character in the stretch it would search switches it off for
+  the rest of the operation. An ordinal case-insensitive search is a superset of the engine's fold
+  only when both sides are ASCII (KELVIN SIGN, long s, `ß`, `ﬁ` are the pinned counter-examples).
+- The per-piece occurrences are cached on the stack of `BasicMatch`, so the shared filter object
+  stays immutable. `ThreadSafetyTests` lists the new field.
+
+### A real bug the new generator found
+
+Under `(?r)` with full case folding, the literal is split into a chain that the engine walks from
+the literal's end, while each node keeps its own characters in reading order. The first version
+concatenated the nodes in chain order and scrambled the pieces. `fuzzy-literal` seed 7 row 1468:
+`regex.search(r'(?fi)(?r)(?:stone fine){s<=1,i<=1}', 'xebaxsizdrfkSTone Fineoociokw r lo')` gives
+span (12, 23), counts (1, 1, 0); the port found nothing. Fixed by putting a reverse node in front of
+the ones before it; pinned by `A_reverse_chain_is_read_back_into_the_literal_s_own_order` and a
+row in the reverse theory, both red before the fix.
+
+### Numbers
+
+ManyInputs, `--inProcess`, run from `bench/`, one job at a time. Load: my processes only
+(VBCSCompiler and python idle). Allocation is deterministic; times are the gate.
+
+| Row | Before | After | Allocated before / after |
+|---|---|---|---|
+| FuzzyPhraseOneIsMatch | 2.424 s | 64.18 ms | 92.39 / 87.18 MB |
+| FuzzyPhraseOneMatch | 2.470 s | 57.28 ms | 92.39 / 87.18 MB |
+| FuzzyPhraseOneEnhanced | 2.497 s | 60.72 ms | 95.61 / 90.4 MB |
+| FuzzyPhraseThreeSeparatePasses | 7.438 s | 164.93 ms | 277.12 / 261.46 MB |
+| FuzzyPhraseThreeAlternation | 6.907 s | unchanged (7.24 s paired) | 92.5 / 92.5 MB |
+| FuzzyPhraseThreeNamedList | 7.383 s | unchanged (7.36 s paired) | 92.5 / 92.5 MB |
+
+The two Three rows are not covered by this shape and ran with `--warmupCount 2 --iterationCount 8`
+because BDN in-process refuses a 7 s op otherwise. The usage-answers mode printed identical output
+before and after (FuzzyPhraseOneIsMatch 2038, the Three rows 5107).
+
+### Oracle
+
+New generator `fuzzy-literal` in `tools/record-oracle.py`, in the default wave. The `fuzzy`
+generator almost never draws the filter's shape (control H below fired on 1 row in 4000), so
+this one does: 1-3 words from a small list, planted copies with up to 4 edits, 20% of rows with a
+fold substitution (Kelvin, long s, `ß`, `ﬁ`), 20% with a fold placed so it is the only defect in its
+piece, reverse at 0.4, BESTMATCH and ENHANCEMATCH, every operation, partial and pos/endpos.
+
+- Baseline (final code): `fuzzy-literal` 2000 rows, seed 7: 0 diverge; seed 99: 0 diverge.
+- Default wave, three default seeds: 7 GREEN, 4242 GREEN, 20260923 RED on rows 3752
+  (interactions, split) and 5185 (partial-sliced, search). Both diverge on the base commit
+  8dd746e too; left alone as instructed.
+
+### Controls, final re-run against the committed code
+
+All on `Engine/FuzzyLiteralFilter.cs` unless named, generator `fuzzy-literal`, 2000 rows, seed 7
+then the fresh seed 99.
+
+- Control E, the partial-matching guard. In `Matcher.cs` BasicMatch, change
+  `search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;`
+  to `search ? pattern.FuzzyLiteralFilter : null;`. Result: 9 diverge, then 5.
+- Control G, the start bound. In `NextStart`, change
+  `start = Math.Min(start, (long)found[j] - Offsets[j] - MaxErrors);` to
+  `start = Math.Min(start, (long)found[j] - Offsets[j]);`. Result: 46, then 72.
+- Control I, the ASCII check. In `NextStart`, change
+  `if (text.AsSpan(from, searched - from).ContainsAnyExceptInRange('\0', '\x7F'))` to
+  `if (text.AsSpan(from, searched - from).ContainsAnyExceptInRange('\0', '￿'))`.
+  Result: 31, then 30.
+- Control J, the reverse chain order. In `TryCreate`, change
+  `values.InsertRange(nodeIsReverse ? 0 : values.Count, node.Values);` to
+  `values.InsertRange(values.Count, node.Values);`. Result: 4, then 1. Thin even at reverse 0.4,
+  because a scrambled piece still matches often; the structural gap test is the deterministic pin.
+- Control H (measured mid-sitting, on `fuzzy` + `fuzzy-anchored`, 2000 each, seed 7): an early
+  `if (Pieces.Length > 0) { return NoMatch; }` in `NextStart` gave 1 diverge of 4000. That is the
+  reason `fuzzy-literal` exists.
+
+Gap-test controls A-F on `FuzzyLiteralPrefilterTests` are in the entry above this one.
+
+### New findings, not caused by the filter (both persist with the filter ablated)
+
+- `fuzzy-literal` seed 20260923, 2000 rows, row 1611: `(?b)(?e)(?fi)(?r)(?:fine){e<=7}`
+  fullmatch over 'oelFin becf'. Upstream gives no match; the port matches (0, 11) with counts
+  (0, 7, 0). A reverse BESTMATCH fullmatch engine divergence. Needs its own slice.
+- `fuzzy-anchored` seed 20260923, 2000 rows, row 5821: `(?b)(?r)\m(?:😀\d😀){e:[a-z]}` subf.
+  Same status.
+
+The default wave's 300-row `fuzzy-literal` slice does not reach either row, so the default oracle
+stays green on them.
+
+### Verification
+
+Suite 6620/6620, ratchet GREEN, baseline 6512 distinct ids. Native AOT 6617 passed / 3 skipped;
+AOT smoke GREEN.
+
+### Review
+
+One blind pass, Opus, with the `docs/VERIFICATION.md` brief. It raised one finding, and it
+reproduced: two test comments quoted `(?i)` calls whose answers hold only under `regex.VERSION1`,
+which the probe passes and the comments left out. Under V0, `(?i)` does not fold `ß` or `ﬁ`. The
+assertions were right, because the port defaults to V1. Fixed by writing `(?V1i)` in the two
+comments and stating V1 in the file's provenance note; both corrected calls re-run in Python give
+the quoted spans. It found no behaviour defect. It ran 14,000 rows of its own through the oracle,
+with 41 constraint forms, injected folds and every mode. Every divergence was a `(?b)`/`(?e)` row
+with a cost equation or `(?p)`, and each diverged identically with the filter nulled. No second
+pass: the only change after it was those three comment lines, checked directly above.

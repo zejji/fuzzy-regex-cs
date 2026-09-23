@@ -5843,6 +5843,15 @@ internal static class Matcher
 
         bool doSearchStart = state.DoSearchStart && searchStartAllowed;
 
+        // NOT UPSTREAM'S (S60b item 10): the fuzzy-literal prefilter, for searches only, and
+        // withheld from a partial match, which can be a prefix of the literal holding no whole
+        // piece. Its per-piece cache lives for this call, across every attempt. See FuzzyLiteralFilter.
+        FuzzyLiteralFilter? fuzzyFilter =
+            search && state.PartialSide == MatchState.PartialNone ? pattern.FuzzyLiteralFilter : null;
+        Span<int> fuzzyFilterFound = stackalloc int[FuzzyLiteralFilter.MaxPieces];
+        fuzzyFilterFound.Fill(FuzzyLiteralFilter.Unknown);
+        int fuzzyFilterAsciiEnd = state.TextPos;
+
         Node node;
         int status;
 
@@ -5922,6 +5931,45 @@ internal static class Matcher
             if (foundPos < 0)
             {
                 return prefilterCancelled ? MatchStatus.Cancelled : MatchStatus.Failure;
+            }
+        }
+
+        // NOT UPSTREAM'S (S60b item 10). A reverse search is only refused, once; a forward one
+        // starts each attempt at the earliest position the pieces leave. A subject the filter
+        // cannot read - not ASCII - switches it off for the rest of this call.
+        if (fuzzyFilter is not null)
+        {
+            if (fuzzyFilter.Reverse)
+            {
+                if (!fuzzyFilter.MayMatchBefore(state.Text, state.SliceStart, state.TextPos))
+                {
+                    return MatchStatus.Failure;
+                }
+
+                fuzzyFilter = null;
+            }
+            else
+            {
+                int next = fuzzyFilter.NextStart(
+                    state.Text,
+                    foundPos,
+                    state.SliceEnd,
+                    fuzzyFilterFound,
+                    ref fuzzyFilterAsciiEnd
+                );
+                if (next == FuzzyLiteralFilter.NoMatch)
+                {
+                    return MatchStatus.Failure;
+                }
+
+                if (next == FuzzyLiteralFilter.CannotTell)
+                {
+                    fuzzyFilter = null;
+                }
+                else
+                {
+                    foundPos = next;
+                }
             }
         }
 
