@@ -3657,3 +3657,55 @@ equal-cost tie in `Bestmatch_ranks_on_the_live_counts_rather_than_the_end_fuzzy_
 to the earlier span, as the owner's ranking rule says it should. Row 3752 itself still differs
 from upstream, for an unrelated reason: a `(*SKIP)` ends upstream's scan after one match
 (`skip-carried-slice-on-a-scan-with-no-walk`, ledger entry 5).
+
+## 33. A repeat of a fuzzy section that only deletes goes round until MemoryError - FIXED HERE (S88)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-33-fuzzy-empty-iteration.md`. Found
+2026-09-22 by S84's sittings, where `(?i)(x)(?:(?:\1){d<=2})+$` over `'xy'` under V1 overran this
+port's 1 GB backtracking limit (`docs/plan/slices/notes/S84-sittings.md`).
+
+**Reproduction**, `regex` 2026.9.10 under V1, measured 2026-09-23 by
+`tools/probes/s88-fuzzy-empty-iteration.py` (each line in a child process, 20 s limit):
+
+```
+search('(x)(?:(?:x){d<=2})+$', 'xy')           -> MemoryError
+search('(?:(?:x){d<=1})+y', 'y')               -> MemoryError
+search('(?r)y(?:(?:x){d<=1})+', 'y')           -> MemoryError
+search('(?:(?:x){d<=1}){3,}y', 'xy')           -> MemoryError
+search('(?:(?:x){d<=1})+', '')                 -> span=(0, 0) fuzzy_counts=(0, 0, 2)
+search('(?r)(?:(?:x){d<=1})+y', 'y')           -> span=(0, 1) fuzzy_counts=(0, 0, 2)
+search('(?:(?:x){d<=1}){1,3}y', 'y')           -> span=(0, 1) fuzzy_counts=(0, 0, 3)
+search('(?:(?:x){d<=1})+?y', 'y')              -> span=(0, 1) fuzzy_counts=(0, 0, 1)
+search('(?:(?:(?:x){d<=1})+y){e<=5}', 'y')     -> MemoryError
+```
+
+The same MemoryError comes under V0, under `(?e)` and under `(?b)`. Under V1 with IgnoreCase the
+backreference form `(?i)(x)(?:(?:\1){d<=2})+$` gives None only because of entry 28's quirk, which
+fails a full-folded reference that only deletes before a real character.
+
+**Why upstream is wrong.** A search that runs out of memory is wrong whatever the answer. Upstream
+already answers the same pattern when the repeat meets the end of the slice, the start of the slice
+when reversed, or a maximum, so a match plainly exists: `(?:(?:x){d<=1})+y` over `'y'` is the
+empty repeat followed by `y`.
+
+**Mechanism.** Every fuzzy edit does `++state->capture_change` (`_regex.c:10487`), and
+`is_repeat_guarded` returns FALSE under fuzzy matching (`:9596`). END_GREEDY_REPEAT (`:12552`)
+calls an iteration progress when `capture_change` moved or the text position did, so an
+iteration that deleted its way through the body counts as progress. Its one fuzzy exception
+turns that off only once the minimum is met at the end of the slice. Each entry to a fuzzy section
+starts its counts at zero, and END_FUZZY adds them to the outer counts without checking an outer
+limit, so a section inside the body has a fresh budget every time round. With no maximum the
+repeat takes another deleting iteration for ever, pushing backtrack entries as it goes.
+
+**This port.** END_GREEDY_REPEAT past its minimum, with no maximum and outside any fuzzy section,
+stops at an iteration that did not move through the text, as upstream stops at the slice end.
+Inside a section the rule does not apply, because the section's own budget usually ends the loop
+and upstream's answers there must stand: `(?:\d+a0b+?){d<=2}` over `'67a0bab'` is (0, 5) with two
+deletions. It is off for a body with a capture group too, because a pass that does not move can
+set a group a later pass tests, and upstream answers those: `(?:(?(1)c|z)|()(?:x){d<=1})*$` over
+`'c'` is (0, 1) with one deletion in both. Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`.
+Not fixed, both still looping here to the 1 GB limit as upstream does to MemoryError: a repeat
+inside a section whose inner section charges nothing to it, the last line above, and a body with
+a capture group, `(?:(?(1)c|z)|()(?:x){d<=1})+d` over `'cd'` (a `SHORTCUT:` in `Matcher.cs`). Also found and not investigated:
+`(?b)(?:(?:x){d<=1}){1,3}y` over `'y'` gives no answer in 20 s upstream, where the same search
+without `(?b)` answers at once.

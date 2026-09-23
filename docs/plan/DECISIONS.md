@@ -1260,3 +1260,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   ASCII-only first; a fold-aware form for non-ASCII text follows when time allows, with its own
   oracle generator and blind review. NuGet publishing is out of scope for now. Upstream reports
   keep waiting for filing time; the ledger in `docs/plan/upstream-reports/` stays current.
+- 2026-09-23 (S88): the 1 GB stack was upstream's MemoryError too, not a port-only bug as the slice
+  assumed, so it got ledger entry 33 and a DIVERGENCES row. An unbounded greedy repeat outside any
+  fuzzy section stops at an iteration that did not move, once past its minimum. The rule stays off
+  inside a section, because applying it there moved four oracle rows away from upstream's answers,
+  and for a body with a capture group, where a pass that does not move can set a group a later
+  pass tests.

@@ -1159,6 +1159,27 @@ Under `(?e)` the same pattern gives `2` with no errors here, and `2y` with two s
 upstream. Upstream agrees with this port once the stale total cannot arise, for instance with the
 inner `{s<=1}` removed. There is no option to restore the upstream answer.
 
+### A greedy repeat with no maximum stops at a fuzzy iteration that only deleted
+
+A fuzzy group inside a repeat can match by deleting its whole body, without moving through the
+text. Upstream counts each such pass as progress and, with no maximum, goes round until it runs out
+of memory. Here the repeat stops at the first such pass once it has its minimum, which is what
+upstream already does when the pass happens at the end of the text.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Two passes delete the x, then the y matches.
+var loop = new FuzzyRegex("(?:(?:x){d<=1})+y");
+Match m = loop.Match("y");
+Console.WriteLine(m.FuzzyCounts.Deletions);   // 2 - upstream: MemoryError
+```
+
+Upstream gives two deletions for `(?:(?:x){d<=1})+` over the empty string. A repeat with a maximum,
+such as `{1,3}`, keeps upstream's answer, and so does a repeat whose body holds a capture group,
+since a pass that sets a group can change what the next pass matches. There is no option to
+restore the upstream behaviour.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

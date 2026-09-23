@@ -6787,6 +6787,41 @@ internal static class Matcher
                         changed = !(
                             node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
                         );
+
+                        // NOT UPSTREAM (S88): a fuzzy edit bumps 'capture_change' (:10487), and the
+                        // repeat guards are off under fuzzy matching (:9596), so an iteration that
+                        // only deleted counts as progress. Outside any fuzzy section, its errors were
+                        // made by a section inside the body, which starts each iteration with a fresh
+                        // budget, so with no maximum upstream repeats it until MemoryError:
+                        // '(?:(?:x){d<=1})+y' over 'y'. Such a repeat past its minimum stops at an
+                        // iteration that did not move through the text. A bounded repeat keeps
+                        // upstream's answer ('{1,3}' there charges three deletions), and so does one
+                        // inside a section, whose budget ends the loop: '(?:\d+a0b+?){d<=2}'. So
+                        // does a body with a capture group, where an iteration that does not move
+                        // can set a group a later one tests: '(?:(?(1)c|z)|()(?:x){d<=1})*$'. A
+                        // group call puts 'capture_change' back when it returns, and upstream
+                        // loops on '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$' too, so a call
+                        // in the body does not turn the stop off.
+                        // SHORTCUT: inside a section whose budget the inner section never draws
+                        // on, '(?:(?:(?:x){d<=1})+y){e<=5}' over 'y', the loop still runs to the
+                        // 1 GB stack limit, as upstream's does to MemoryError, because END_FUZZY
+                        // adds the inner counts to the outer ones without checking the outer limit.
+                        // The upgrade path is to record which section charged each error of an
+                        // iteration, and stop it here when the enclosing section charged none.
+                        // SHORTCUT: a body with a capture group keeps upstream's rule whole, so
+                        // '(?:(?(1)c|z)|()(?:x){d<=1})+d' over 'cd' still loops to the limit.
+                        // The upgrade path is a count of group changes kept beside
+                        // 'capture_change', so an iteration that changed no group can stop.
+                        if (
+                            changed
+                            && ~node.Values[2] == 0
+                            && state.FuzzyNode is null
+                            && !pattern.RepeatInfoAt(index).BodyHasGroups
+                            && state.TextPos == rpData.Start
+                        )
+                        {
+                            changed = false;
+                        }
                     }
 
                     // Could the body or tail match?

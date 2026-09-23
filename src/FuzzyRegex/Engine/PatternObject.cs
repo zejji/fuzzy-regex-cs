@@ -49,6 +49,13 @@ internal sealed class RepeatInfo
     /// <see cref="NodeStatus.Tail"/> need position guards, plus <see cref="NodeStatus.Inner"/>.
     /// </summary>
     internal uint Status;
+
+    /// <summary>
+    /// NOT UPSTREAM (S88): the repeat's body holds a capture group, so an iteration that does not
+    /// move can still change what a later one matches. END_GREEDY_REPEAT's stop at an iteration
+    /// that only deleted is off for such a repeat.
+    /// </summary>
+    internal bool BodyHasGroups;
 }
 
 /// <summary>

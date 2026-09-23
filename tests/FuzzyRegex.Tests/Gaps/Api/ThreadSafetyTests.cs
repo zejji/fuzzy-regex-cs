@@ -759,5 +759,6 @@ public sealed class ThreadSafetyTests
             "CallRefInfo.Node",
             "CallRefInfo.Used",
             "RepeatInfo.Status",
+            "RepeatInfo.BodyHasGroups",
         };
 }

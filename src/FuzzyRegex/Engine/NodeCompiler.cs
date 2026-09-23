@@ -1536,6 +1536,7 @@ internal static class NodeCompiler
                 args.HasGroups |= subargs.HasGroups;
                 args.HasRepeats = true;
                 args.VisibleCaptureCount = subargs.VisibleCaptureCount;
+                args.Pattern.RepeatInfoAt(index).BodyHasGroups = subargs.HasGroups;
 
                 ++args.Code;
 
