@@ -1208,3 +1208,7 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   every path, so the deciding run is the full suite at `--job medium` on a quiet machine, with
   `*ManyInputs*` and `*SpanOverload*` read first. A `char[]` argument still binds to the span
   overload under C# 14 (`MemoryOverloadTests` compiles it).
+- 2026-09-23 (S61): a negative control on `MatchState.Init` must remove a line `InitMatch` does not
+  repeat. `ClearGroups()` and `Array.Clear(FuzzyCounts)` in `Init` cannot change an answer, because
+  `InitMatch` redoes both before every attempt, so removing either fails no oracle test; `ReqPos = -1`
+  is the line only `Init` resets (47 of 6594 reuse rows fail at seed 7 without it).

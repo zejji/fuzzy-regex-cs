@@ -327,6 +327,17 @@ The last two cannot fail any test that asks a question, because `MatchState.Init
 upstream calls before every attempt) resets the groups and the fuzzy counts again. They are the
 belt-and-braces lines sitting 1 found; `MatchStateCacheTests` still checks them field by field.
 
+### Blind review of cc0c896 to 865f612
+
+One Opus pass: **no defects found.** Build clean; oracle at seed 7 31 of 31 tests, diverge 0. The
+reviewer ran its own controls with `-SkipRecord` on the seed 7 wave: without `ReqPos = -1` the new
+test fails on 47 of 6594 rows, and without `MustAdvance = false` on 466 of 6594. Without
+`MaxErrors = 0` it still passes, because every best-match and enhance-match path sets `MaxErrors`
+first (`Matcher.cs:10390`, `:10527`, `:10878`, `:11276`). It checked every mutable field of
+`MatchState`, `GroupData`, `RepeatData` and `GuardList` against `Init`, confirmed the dirtying walk
+rents from the same instance's cache (`Iteration.cs:149`), and reproduced all 21 rows of the gate
+table from the JSON. Findings raised 0, reproduced 0, fixed 0; no second pass needed.
+
 ### What is left for S61
 
 1. **Time gates** (above), decided by the orchestrator's quiet-machine run.
