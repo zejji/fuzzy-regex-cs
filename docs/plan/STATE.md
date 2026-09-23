@@ -4,20 +4,18 @@
 in `docs/plan/slices/notes/S60b-sittings.md`). Landed so far: item 2 (`search_start`), item 10
 (the fuzzy literal filter) and the `SameCharIgn` ASCII fast path, each reviewed.
 
-Item 2 is triaged and kept: on a quiet machine RedactDigits ran 1.72x faster and every other row
-stayed flat (OPTIMISATION-NOTES.md). Finishing its review found and fixed one defect in 8fed3de:
-a reverse zero-width scan answered below a slice start that splits a surrogate pair.
+Item 2 is triaged, kept and closed: on a quiet machine RedactDigits ran 1.72x faster and every
+other row stayed flat (OPTIMISATION-NOTES.md). Its review found one defect, fixed in 8fed3de (a
+reverse zero-width scan answered below a slice start that splits a surrogate pair); the fix's own
+blind pass found no defects (notes file, "05:35").
 
 Green: suite 6651/6651, ratchet GREEN. Oracle GREEN at seeds 7 and 4242; seed 20260923 is RED on
 rows 3752 and 5185 only, which diverge on the base commit 8dd746e too.
 
-## Next, in this order
+## Next
 
-1. **One blind pass over 8fed3de's fix** (`Matcher.SearchStartZeroWidth`, eight lines). The brief
-   and hunt list are in the notes file, "2026-09-23, 05:15", Review. It needs a session that can
-   dispatch a reviewer.
-2. The remaining items: 3, 6, 8-9, 11-14, 16 and 17, one sitting each, or deferred with a row in
-   OPTIMISATION-NOTES.md. None is started.
+The remaining items: 3, 6, 8-9, 11-14, 16 and 17, one sitting each, or deferred with a row in
+OPTIMISATION-NOTES.md. None is started.
 
 ## Findings that need a slice
 

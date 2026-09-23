@@ -548,3 +548,16 @@ differences, which is evidence but not the review.
 The orchestrator's second review item, 1cb7cc6's `SameCharIgn` fast path, was already done at
 232dee0 (no defects, 360,448 cases against upstream; the "03:35" section above). It was not run
 again.
+
+## 2026-09-23, 05:35 - 8fed3de's fix reviewed
+
+One blind pass, the brief above, Opus. **No defects found.** The reviewer wrote its own sweep
+rather than reusing ours: 53 patterns under 10 flag sets (`\G`, `{e<=1}`, lookbehinds and
+`\p{Cs}` included), subjects holding lone high and low surrogates, slice starts on a lone low
+surrogate and pairs ending exactly at `SliceStart`, six calls per slice. On HEAD: 534,240 cases,
+0 differences with the prefilter on against off. On a copy with the fix removed: 763 differences,
+for example `(?r)^` over `"😀a😀\n😁"` at slice (1, 1) answering 0 with the prefilter on. So the
+sweep detects the defect. The new test fails on the reverted copy (`(?r)\M (6, 2)`) and passes on
+HEAD. The forward scan cannot pass a split `SliceEnd`, because `TextEnd` equals it
+(`MatchState.cs:639-642`) and `NextPos` stops there. Build clean; suite 6651/6651. Item 2 is
+closed.
