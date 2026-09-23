@@ -210,3 +210,11 @@ rises on baselines up to 1e12 bytes all printed as something other than 1. The f
 still prints as 1 is 1 + 2e-16, which needs a baseline of about 4.5e15 bytes per operation.
 S61 review summary for a34d895 to aa67e98: four passes, five findings raised, five reproduced,
 five fixed.
+
+### AOT
+
+`tools/run-aot-tests.ps1` first went RED. `MatchStateCacheTests.ScribbleField` (steps B and C)
+called `Enum.GetValues(Type)`, and IL3050 makes that an error under Native AOT. It now calls
+`Enum.GetValuesAsUnderlyingType` and converts back with `Enum.ToObject`. After the fix the AOT
+suite has 6625 tests, 6622 succeeded and 0 failed. `tools/run-aot-smoke.ps1` is GREEN at
+7,000,576 bytes, which is 27,648 bytes (+0.4%) over the 6,972,928 the slice names.

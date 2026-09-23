@@ -16,11 +16,11 @@ Ledger entry 18 (bytes per repetition of a capture group) was handed to S86 in w
    neither is S61's. They still need minimising and pinning: row 5185 (partial-sliced, a `(*SKIP)`
    pattern, upstream (0, 2), port (1, 1)) and row 3752 (interactions, `Split` with flags 0x400a
    runs for more than 10 minutes where upstream returns 2 parts). Details are in the S61 notes.
-3. **Time gates, on a quiet machine only**: `*WorkloadBenchmarks.*MatchesToEnd*`, `*ManyInputs*`
+2. **Time gates, on a quiet machine only**: `*WorkloadBenchmarks.*MatchesToEnd*`, `*ManyInputs*`
    and `*SpanOverload*`, then the full suite at `--job medium`. Allocation has already decided each
    step; time decides whether each one stays.
-4. AOT tests and smoke test, with the binary size checked against 6,972,928 bytes. Then the closing
-   notes.
+3. The closing notes. AOT is already GREEN: suite 6622 succeeded and 0 failed, smoke binary
+   7,000,576 bytes (+27,648 bytes over 6,972,928).
 
 ## Still pending from before S61
 

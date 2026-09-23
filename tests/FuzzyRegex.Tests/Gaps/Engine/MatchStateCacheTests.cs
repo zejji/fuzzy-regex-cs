@@ -259,9 +259,12 @@ public sealed class MatchStateCacheTests
                 field.SetValue(state, "scribbled".AsMemory());
                 break;
             case Enum:
-                Array values = Enum.GetValues(field.FieldType);
-                object last = values.GetValue(values.Length - 1)!;
-                field.SetValue(state, last.Equals(value) ? values.GetValue(0) : last);
+                // GetValuesAsUnderlyingType rather than GetValues(Type), which Native AOT cannot
+                // promise (IL3050, tools/run-aot-tests.ps1).
+                Array values = Enum.GetValuesAsUnderlyingType(field.FieldType);
+                object last = Enum.ToObject(field.FieldType, values.GetValue(values.Length - 1)!);
+                object first = Enum.ToObject(field.FieldType, values.GetValue(0)!);
+                field.SetValue(state, last.Equals(value) ? first : last);
                 break;
             case CancellationToken:
                 field.SetValue(state, new CancellationToken(canceled: true));
