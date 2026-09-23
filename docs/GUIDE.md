@@ -85,8 +85,11 @@ nothing, but a long span still costs one pass to copy it. Every method that retu
 since `Value` is one.
 
 For the matches in a span, `EnumerateMatches(ReadOnlySpan<char>)` walks them the way `Regex`'s
-does: each is a `ValueMatch` holding only `Index` and `Length`, so a warm walk allocates nothing.
-Slice the text out yourself:
+does: each is a `ValueMatch` holding only `Index` and `Length`, so the walk builds no `Match`
+objects. Once warm, the walk itself allocates nothing, but the search can: POSIX mode `(?p)`
+does, so do `(?b)` and `(?e)` on a fuzzy pattern, and so does a pattern without fuzzy
+constraints over text holding characters outside the Basic Multilingual Plane, such as emoji.
+`Count` and the string overloads pay the same. Slice the text out yourself:
 
 ```csharp
 ReadOnlySpan<char> text = buffer.AsSpan(0, filled);

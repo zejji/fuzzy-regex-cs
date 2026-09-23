@@ -1260,3 +1260,12 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   ASCII-only first; a fold-aware form for non-ASCII text follows when time allows, with its own
   oracle generator and blind review. NuGet publishing is out of scope for now. Upstream reports
   keep waiting for filing time; the ledger in `docs/plan/upstream-reports/` stays current.
+- 2026-09-23 (S61): the span walk `EnumerateMatches(ReadOnlySpan<char>)` copies the span once per
+  walk into a pooled buffer. The 2026-09-22 sign-off's "no copy of the subject at all" is not
+  reachable while `MatchState.Text` is a `ReadOnlyMemory<char>`; what the walk gives is no `Match`
+  objects and no allocation of its own; the search still allocates in `(?p)`, in fuzzy `(?b)` and
+  `(?e)`, and for non-fuzzy patterns over text outside the BMP. A copy of the `ref struct` shares the state, so `MatchState.Lease` counts hand-backs
+  and the enumerator acts only while the count is the one it saw.
+- 2026-09-23 (S61): a worktree that has never run the hook install fails every commit with
+  `.husky/_/husky.sh: No such file or directory`. Run `dotnet husky install` in it; never
+  `--no-verify`.

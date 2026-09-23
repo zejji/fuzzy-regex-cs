@@ -348,3 +348,116 @@ table from the JSON. Findings raised 0, reproduced 0, fixed 0; no second pass ne
    quiet-machine run, then the closing notes and the move to `done/`.
 4. Hand rows 3752, 5185 and 4957 to S87 (4957 is new here).
 5. Ledger entry 18 is S86's, handed over in writing on 2026-09-23 (50d0aec).
+
+## Sitting 5 (2026-09-23, from about 21:30)
+
+Worked to the owner's decisions of 2026-09-23 (DECISIONS, f8c7056), relayed by the orchestrator.
+
+### Time gates A to C
+
+The orchestrator's quiet run, 06:46 to 07:16 on 2026-09-23, reported steps A, B and C **KEEP**.
+Step D was flat or faster on every row except `SpanOverload.SpanMegabyte`, 1.36x (354 us to
+481 us), and `CountSpanMegabyte`, 1.09x. The owner chose option (c): keep step D and make the span
+overloads copy into a pooled buffer.
+
+### Step D, option (c): 1fa48a9
+
+The `ReadOnlySpan<char>` overloads of `IsMatch` and `Count` now rent a `char[]` from
+`ArrayPool<char>.Shared`, copy the span into it, run the memory path over it and return it in a
+`finally`. Internal overloads take the pool, so `PoolDisciplineTests` can pass its tracking pool
+(now `TrackingPool<T>`) and prove the return on a match, a miss, an empty subject, a timeout and a
+cancelled token.
+
+Bytes, from `--filter "*SpanOverload*" --job short --inProcess --memory` on a busy machine (so the
+times are not evidence):
+
+| Row | Before | After |
+|---|---|---|
+| SpanMegabyte | 2,098,060 B | 1 B |
+| CountSpanMegabyte | 2,098,135 B | 8 B |
+| SpanKilobyte | 2,184 B | 0 B |
+| SpanShort | 152 B | 0 B |
+
+`AllocationTests` pins a warm megabyte `IsMatch` plus `Count` at 0 B (4,194,352 B before).
+Control: in `IsMatch(ReadOnlySpan<char>, ArrayPool<char>, ...)`, replacing `pool.Return(copy);`
+with `_ = copy;` fails the three `IsMatch` cases of the new pool tests (3 failed, 11 passed).
+
+**The time gate for this is still open.** The orchestrator re-reads `*SpanOverload*` against
+8dd746e on a quiet machine; if `SpanMegabyte` is still above 1.13x, only the span-overload part of
+step D comes out.
+
+### Item 2: the span walk, 05019f0
+
+`FuzzyRegex.EnumerateMatches(ReadOnlySpan<char>, TimeSpan?, CancellationToken)` returns a
+`ValueMatchEnumerator` (a `ref struct`) of `ValueMatch` values, each holding `Index` and `Length`.
+It is the shape `Regex.EnumerateMatches(ReadOnlySpan<char>)` has. The loop is
+`Iteration.Enumerate`'s, one turn per `MoveNext`, over the pattern's cached state and a pooled copy
+of the span. Both go back when `MoveNext` returns `false` or throws, or on `Dispose`.
+
+The owner's sign-off said this shape walks a span "with no copy of the subject at all". That is
+not achievable while `MatchState.Text` is a `ReadOnlyMemory<char>`: the span still has to be
+copied, once per walk, into the pooled buffer. What the walk does achieve is no `Match` objects
+and no allocation of its own. The search can still allocate, the same amount as the span `Count`
+(review probes, below).
+
+A copy of the struct shares the state. `MatchState.Lease` counts hand-backs, and the enumerator
+acts only while the count is the one it saw, so disposing a copy a second time does nothing, and
+neither does stepping it after the state has been lent to another call. `MatchStateCacheTests`
+leaves `Lease` out of its field comparison, since a rented state's count is higher by design.
+
+Bytes, `--filter "*WorkloadBenchmarks.EnumerateMatches*ToEndDense*" --job short --inProcess
+--memory`, busy machine: `EnumerateMatchesToEndDense` 3,017,968 B, `EnumerateMatchesSpanToEndDense`
+16 B. The allocation half of the gate is met; the time half waits on the orchestrator's quiet run.
+`AllocationTests.A_warm_span_walk_over_many_matches_allocates_nothing` pins a warm 20,000-match
+walk at 0 B.
+
+Controls, each run against the affected test classes and then restored:
+
+- In `ValueMatchEnumerator.Dispose`, `_pool.Return(_copy!);` replaced with `_ = _pool;`: six tests
+  fail (the five new pool tests that reach `Dispose` and the allocation test).
+- In the same method, `if (_state is null || _state.Lease != _lease)` reduced to
+  `if (_state is null)`: the copied-enumerator test fails ("Expected found to be 3 ... but found
+  0").
+
+Also fixed: the string `EnumerateMatches` remarks said each step builds its own engine state,
+which step C ended.
+
+Ratchet GREEN at 6768/6768; oracle GREEN at three seeds; `run-aot-tests.ps1` 6765 passed, 3
+skipped; `run-aot-smoke.ps1` GREEN.
+
+### Blind review of 05019f0 (with the wording fixes after 1fa48a9's review)
+
+One Opus pass. Findings raised 1, reproduced 1, fixed 1: `docs/GUIDE.md` said a warm span walk
+allocates nothing, which is false for `(?b)`, `(?e)` and `(?p)` patterns (reproduced with the
+reviewer's probe, `.scratch/review-vme`: walk and span `Count` both 5,392 B, 7,152 B and 1,464 B).
+The GUIDE, the DECISIONS line and these notes now name the three modes. The reviewer found the
+code clean: 896 pattern and subject pairs (56 patterns, including reverse, empty matches,
+surrogates, fuzzy, `(?b)`, `(?e)`, `(?p)`, `\G` and lookbehind) matched `Matches` exactly, whole
+and sliced; no stale state or subject after a break, timeout, cancel, or a junk-filled pool buffer;
+the lease guard held; 4000 parallel walks and calls gave no wrong answers; overload binding is
+unchanged for strings and null. Full suite 6768/6768.
+
+Second pass, over the GUIDE fix only. Findings raised 2, reproduced 2, fixed 2, with
+`.scratch/review-vme2` (warm walk, `GC.GetAllocatedBytesForCurrentThread`):
+
+- Non-fuzzy patterns allocate over text holding a character outside the BMP, growing with length:
+  `\w+`, `cat`, `x` and `(\w)\1` over `"cat 😀 "` x 200 give 416 B, and 0 B over ASCII. Fuzzy
+  patterns give 0 B there. Not investigated; it is the engine's, since `Count` pays the same.
+- `(?b)` and `(?e)` allocate only on a fuzzy pattern (`(?b)\w+` and `(?e)cat` 0 B); `(?p)`
+  allocates on plain ones too (`(?p)\w+` 3,360 B over 560 characters).
+
+The GUIDE now says the walk allocates nothing of its own and names those three cases.
+
+Third pass, over that rewording: **no defects found.** Its probe (`.scratch/review-vme3`, 29
+patterns over four texts up to 1.2M characters) found the walk, `Count(string)` and
+`Count(span)` allocating identical bytes in every row, each named case allocating, and the
+qualifiers holding (`(?b)cat` 0 B, a fuzzy pattern over emoji text 0 B).
+
+Open observation, not a defect of this slice: a non-fuzzy search over text outside the BMP
+allocates in proportion to the text, and a fuzzy one does not. Worth a look in a later
+optimisation slice.
+
+### Worktree hooks
+
+The first commit here failed with `.husky/_/husky.sh: No such file or directory`: this worktree
+had never run the hook install. `dotnet husky install` fixed it.
