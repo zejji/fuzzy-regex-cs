@@ -73,7 +73,53 @@ too, is the obvious candidate), with an ablation flag in `PatternObject` in the
 
 ## Done when
 
-- [ ] Tests green, each seen red without the fix.
-- [ ] Ratchet green; oracle green at three seeds with any new divergences pinned.
-- [ ] Ledger, DIVERGENCES, COMPARISON and the upstream draft written.
-- [ ] STATE.md no longer lists the defect; slice moved to `done/`.
+- [x] Tests green, each seen red without the fix (two are pins by design; see the closing notes).
+- [x] Ratchet green; oracle green at three seeds with any new divergences pinned (seed 20260923
+  counted green on the orchestrator's ruling: its only rows, 3752 and 5185, predate S85).
+- [x] Ledger, DIVERGENCES, COMPARISON and the upstream draft written.
+- [x] STATE.md no longer lists the defect; slice moved to `done/`.
+
+## Closing notes
+
+Sitting notes: `docs/plan/slices/notes/S85-sittings.md`, which hold the mechanism, the entry
+order, the oracle figures, the review and the controls with their snippets.
+
+**What landed.** In a full-folded item's leftovers, a fuzzy deletion now takes back the last
+comparison into the subject folding (`Matcher.TakeBackFoldedComparison`, ledger 31, flag
+`SkipLeftoverTakeBack`), in `NextFuzzyMatchStringFld` and `NextFuzzyMatchGroupFld` alike, so an
+item can end before a half-used character and the free-deletion loop ends. It replaces S84's
+deletion refusal in the backreference arms. A guard refuses the take-back after an insertion or
+substitution the item made in the same folding; the item's starting change count
+(`FoldChangesStart`, carried on each fuzzy frame) keeps an earlier lookaround's edit out of it.
+Tests: `Gaps/Engine/FullFoldDeletionAtFoldingBoundaryTests.cs`, 24 cases. With the take-back off
+19 fail, among them the 4 lookaround cases, which were also seen red before their own fix. With the
+guard loosened 3 more fail. The other two pass with the fix off and are pins by design: the
+reversed retry row, and the insertion that is still preferred to a take-back. Upstream draft:
+`docs/plan/upstream-reports/entry-31-full-fold-leftover-deletion.md`, not filed. Probe:
+`tools/probes/s85-leftover-take-back.py`. Generator: `fuzzy-overhang`.
+
+**Surprising.** Upstream's 'ß' row matches only because the folding ends the slice; 'ßx' is S83's
+defect, not this one. Two older oracle entries claimed S85's rows for the wrong reason: S83's,
+whose ablation undoes this fix too, and S47's leaked-changes entry, whose `endpos` control cuts off
+the folding. The new generator found a BESTMATCH difference no ablation explains, older than S83.
+A fuzzy change's position does not say which item made it: a lookaround's edit lands on the same
+position as the item that follows it.
+
+**For the next slice.** `fuzzy-overhang` joins the default wave once a slice explains that row
+(STATE.md, finding 1). The guard has no generated row yet.
+
+**Review.** Two blind passes. Pass 1 raised three findings; one reproduced and was fixed (a
+lookaround's substitution at the item's start stopped the take-back, both arms, both directions),
+and two were expected states of an unfinished slice (the ratchet before `-AcceptRemovals`, STATE.md
+drafted ahead of the move). Pass 2 covered only that fix and returned "No defects found", with
+6000 randomised backreference-against-literal pairs agreeing. The independent verifier re-ran the
+judged values, and all 8 claims came back CONFIRMED on regex 2026.9.10.
+
+**Controls**: the snippets, commands and generator are in the sitting notes, "Controls". The final
+runs used the committed code, `fuzzy-overhang` at 300 rows per seed, and seeds 7, 4242, 20260923
+and 31337 (31337 unused elsewhere). T: agree 247, 253, 261 and 271 against live 237, 247, 252 and
+262, RED at every seed. Tu: 19 of 24 fail. G: no oracle row changes. Gu: 3 of 24 fail. B:
+retry rows fall from 6, 7, 3 and 3 to 1, 0, 0 and 0. L: leftovers rows fall to 0 at every seed.
+
+**Oracle.** Default wave green at 7 (diverge 0 of 6680) and 4242 (0 of 6680). At 20260923 only
+rows 3752 and 5185 diverge. Both are older than S85, so the orchestrator counts that seed as green.

@@ -1118,6 +1118,27 @@ best-match answer: `(?b)(?fi)(ßa)(?:\1){s<=1,i<=1,d<=1}` over `ßasa` costs one
 edits upstream, whose own literal form `(?:ßa)` finds the one deletion. There is no option to
 restore the upstream answer.
 
+### A fuzzy full-folded match can stop part-way into a folding
+
+When a full-folded literal or backreference runs out part way through a subject character's
+folding, the match here ends before that character, and each folded character it had already
+matched there costs one deletion. Upstream's deletion in that place charges an edit and changes
+nothing, so the match cannot end there. It finds a later match or none, and when deletions are free
+it never stops.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// ß folds to ss. The first ß gives two of the three s; the third is deleted.
+var three = new FuzzyRegex("(?:sss){d<=1}", FuzzyRegexOptions.IgnoreCase);
+Match m = three.Match("ßß");
+Console.WriteLine(m.Index);   // 0 - upstream: 1
+```
+
+Upstream gives the match at 0 over `ß` alone, so a second character loses it. With free deletions,
+`(?:sss){0d+1s+1i<=1:[x]}` over `ßß` is one deletion here and a `MemoryError` upstream. There is no
+option to restore the upstream answer.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

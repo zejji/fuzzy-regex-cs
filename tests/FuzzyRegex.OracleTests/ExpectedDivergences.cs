@@ -2683,6 +2683,29 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?bfi)(ßa)(?:\\1){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "ßasa", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [3], "insertions": [], "deletions": [4]}}]}
         """;
 
+    /// <summary>
+    /// The eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
+    /// <c>python tools/record-oracle.py --rows tools/probes/s85-leftover-take-back-rows.jsonl</c> on
+    /// 2026-09-23.
+    /// </summary>
+    /// <remarks>
+    /// The staleness alarm only; the entry is keyed on an ablation. No wave row at the three
+    /// default seeds reaches this repair, so all eight are the defect minimised: a string forward
+    /// and reversed, two comparisons into a three-letter folding, a deletion before the folding as
+    /// well as one into it, an earlier start, a backreference forward and reversed, and the
+    /// substitution that must not be taken back.
+    /// </remarks>
+    private const string _leftoverTakeBackRows = """
+        {"generator": "rows", "pattern": "(?fi)(?:sss){d<=1}", "flags": 0, "namedLists": {}, "subject": "ßß", "operation": "search", "codepointSpan": [1, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [2]}}]}
+        {"generator": "rows", "pattern": "(?rfi)(?:sss){d<=1}", "flags": 0, "namedLists": {}, "subject": "ßß", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [0]}}]}
+        {"generator": "rows", "pattern": "(?fi)(?:ff){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬃ", "operation": "search", "codepointSpan": [1, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}}]}
+        {"generator": "rows", "pattern": "(?fi)(?:fffx){d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃ", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(?:xfff){i<=1,d<=2}", "flags": 0, "namedLists": {}, "subject": "ﬀﬃfi", "operation": "search", "codepointSpan": [1, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [1], "deletions": [1]}}]}
+        {"generator": "rows", "pattern": "(?fi)(s)(?:\\1){d<=1}", "flags": 0, "namedLists": {}, "subject": "sß", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?rfi)(?:\\1){d<=1}(s)", "flags": 0, "namedLists": {}, "subject": "ßs", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "fSﬄ", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -5487,6 +5510,44 @@ internal static class ExpectedDivergences
                 && row.Expected is MatchOutcome
         ),
         new(
+            Id: "full-fold-leftover-take-back",
+            Reason: "THIS PORT ENDS A FUZZY FULL-FOLDED ITEM BEFORE A HALF-USED FOLDING BY CHARGING "
+                + "EACH COMPARISON INTO IT AS A DELETION, where upstream's deletion there deletes "
+                + "nothing. Ledger entry 31; fixed by S85 on 2026-09-23 under the owner's "
+                + "no-known-bugs rule, and recorded as a deliberate divergence in "
+                + "`docs/DIVERGENCES.md`.\n"
+                + "THE UPSTREAM DEFECT: when a STRING_FLD item's letters run out part way through a "
+                + "subject folding, the leftovers loop (upstream/src/_regex.c:14856, reversed "
+                + ":14962) offers the fuzzy machinery a deletion, and "
+                + "`next_fuzzy_match_string_fld` (:10590) only moves the pattern position, which is "
+                + "already at the end. The edit is charged and the folding is left as it was, so "
+                + "with deletions alone the item cannot end, and with free deletions it loops until "
+                + "MemoryError. S84 refuses the same deletion in REF_GROUP_FLD.\n"
+                + "THE MINIMAL CASE, measured 2026-09-23 on regex 2026.9.10: `(?fi)(?:sss){d<=1}` "
+                + "over 'ß' gives (0, 1) with one deletion, but over 'ßß' gives (1, 2): a second ß "
+                + "costs the match at 0. This port gives (0, 1) for both.\n"
+                + "KEYED ON AN ABLATION: a row belongs here when "
+                + "`OracleComparer.RunWithoutTheLeftoverTakeBack`, which sets "
+                + "`PatternObject.SkipLeftoverTakeBack`, reproduces upstream's recorded answer "
+                + "exactly, AND this port's live answer is the one being judged. The entry sits "
+                + "before two others that would claim its rows for the wrong reason. "
+                + "`full-fold-fuzzy-deletion`: S83's ablation undoes this fix as well, because the "
+                + "take-back runs inside the leftovers loop, whose condition is S83's "
+                + "`Matcher.FoldingIsPartUsed`, and upstream's test there never lets the loop stop at "
+                + "the start of the folding. This fix's own ablation leaves untouched foldings alone, "
+                + "so it cannot claim S83's rows. `fuzzy-changes-leaked-from-an-abandoned-attempt`: "
+                + "its control asks upstream again with `endpos` at the match end, which cuts off the "
+                + "folding this defect needs. On `(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}` over "
+                + "'fSﬄ' upstream's search and `match(s, 0)` both give deletion [1], but "
+                + "`match(s, 0, 2)` gives deletion [2], this port's answer, although nothing leaked "
+                + "(measured 2026-09-23). The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FullFoldDeletionAtFoldingBoundaryTests",
+            Example: _leftoverTakeBackRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheLeftoverTakeBack(row))
+        ),
+        new(
             Id: "fuzzy-changes-leaked-from-an-abandoned-attempt",
             Reason: "UPSTREAM IS WRONG AND THIS PORT DIVERGES ON PURPOSE - ledger entry 11 "
                 + "mechanism A, fixed here by S47 on 2026-09-14 under the owner's inherited-bug rule "
@@ -5918,12 +5979,15 @@ internal static class ExpectedDivergences
                 + "(0, 5) with one insertion. So does this port.\n"
                 + "THE WAVE ROWS each agree with upstream V1 once `(?:\\1)` is replaced by the group's "
                 + "text, measured by `python tools/probes/s84-full-fold-backreference.py`. Seed 7 row "
-                + "6250 needs S83's fold fix as well before the two engines differ.\n"
+                + "6250 needs S83's fold fix as well before the two engines differ. Rows of S85's "
+                + "`fuzzy-overhang` generator, whose group ends part-way into a subject folding, "
+                + "often need S84's leftovers loop off too.\n"
                 + "KEYED ON AN ABLATION: a row belongs here when "
                 + "`OracleComparer.RunWithoutTheRetriedFoldSteps`, which sets "
                 + "`PatternObject.SkipRetriedFoldSteps`, alone or together with "
-                + "`ChargeUntouchedFoldings`, reproduces upstream's recorded answer exactly, AND this "
-                + "port's live answer is the one being judged. The control is "
+                + "`ChargeUntouchedFoldings`, `SkipGroupFoldLeftovers` or both, reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. The "
+                + "control is "
                 + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
             PinnedBy: "FullFoldBackreferenceLeftoversTests",
             Example: _groupFoldRetryRows,
@@ -5937,6 +6001,24 @@ internal static class ExpectedDivergences
                     row,
                     ours,
                     OracleComparer.RunWithoutTheRetriedFoldSteps(row, withoutTheFoldFix: true)
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithoutTheRetriedFoldSteps(
+                        row,
+                        withoutTheFoldFix: false,
+                        withoutTheGroupFoldLeftovers: true
+                    )
+                )
+                || OnlyTheAblationExplainsIt(
+                    row,
+                    ours,
+                    OracleComparer.RunWithoutTheRetriedFoldSteps(
+                        row,
+                        withoutTheFoldFix: true,
+                        withoutTheGroupFoldLeftovers: true
+                    )
                 )
         ),
         new(

@@ -3530,7 +3530,7 @@ deletion only while the group has a folded character left, on the first try and 
 In the leftovers loop there is none, so a deletion would change nothing, and when deletions are
 free the loop would take it for ever, as upstream's literal loop does today:
 `regex.search(r'(?:sss){0d+1s+1i<=1:[x]}', 'ßß', regex.I | regex.V1)` raises MemoryError. That
-literal-arm defect is slice S85's. Pinned by
+literal-arm defect is entry 31, and S85 replaced this refusal with entry 31's take-back. Pinned by
 `Gaps/Engine/FullFoldBackreferenceLeftoversTests.cs` and by `full-fold-backreference-leftovers` in
 `ExpectedDivergences.cs` (`OracleComparer.RunWithoutTheGroupFoldLeftovers`). No row of the default
 wave at seeds 7, 4242 or 20260922 reaches it.
@@ -3572,3 +3572,45 @@ retry with the group used up, a state upstream never reaches. Pinned by the same
 `full-fold-backreference-retry` (`OracleComparer.RunWithoutTheRetriedFoldSteps`), which claims six
 rows of the default wave at three seeds. Each agrees with upstream once `(?:\1)` is replaced by the
 group's text; the probe prints both.
+
+## 31. A fuzzy deletion in a full-folded item's leftovers deletes nothing - FIXED HERE (S85)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-31-full-fold-leftover-deletion.md`.
+Found 2026-09-22 by S84 and its blind review.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-23 by
+`tools/probes/s85-leftover-take-back.py`:
+
+```
+V1 search('(?:sss){d<=1}', 'ß')                  -> span=(0, 1) fuzzy_counts=(0, 0, 1) fuzzy_changes=([], [], [1])
+V1 search('(?:sss){d<=1}', 'ßß')                 -> span=(1, 2) fuzzy_counts=(0, 0, 1) fuzzy_changes=([], [], [2])
+V1 search('(?r)(?:sss){d<=1}', 'ßß')             -> span=(0, 1) fuzzy_counts=(0, 0, 1) fuzzy_changes=([], [], [0])
+V1 search('(?:xfff){i<=1,d<=2}', 'ﬀﬃfi')         -> span=(1, 3) fuzzy_counts=(0, 1, 1) fuzzy_changes=([], [1], [1])
+V1 search('(?:sss){0d+1s+1i<=1:[x]}', 'ßß')      -> MemoryError
+V1 search('(s)(?:\\1){d<=1}', 'sß')              -> None
+V1 search('(s)(?:s){d<=1}', 'sß')                -> span=(0, 1) fuzzy_counts=(0, 0, 1) fuzzy_changes=([], [], [1])
+```
+
+All under `regex.I`. The reversed free-deletion case raises MemoryError too, and
+`(?r)(?:\1){d<=1}(s)` over 'ßs' gives None where its literal form gives (1, 2).
+
+**Why upstream is wrong.** The first 'ß' of 'ßß' gives the one-deletion match on its own, as the
+first line shows, and README.rst:590 says fuzzy search returns "the first match that meets the
+given constraints". A second character cannot make an earlier match stop meeting them. A search
+that never ends is wrong whatever the answer.
+
+**Mechanism.** When a `RE_OP_STRING_FLD` item's letters run out part-way through a subject
+folding, the leftovers loop (`_regex.c:14856`, reversed `:14962`) asks for an edit. A deletion
+there, `next_fuzzy_match_string_fld` at `:10590`, only moves `new_string_pos`, which is already at
+the end, so the edit is charged and the folding stays part-used. The first line matches only
+because the folding ends the slice (`:14824`), where the mismatch goes to the fuzzy arm before the
+leftovers. `RE_OP_REF_GROUP_FLD` has no leftovers loop and backtracks at `:14154`.
+
+**This port.** In the leftovers, a deletion takes back the last comparison into the folding
+(`Matcher.TakeBackFoldedComparison`, flag `SkipLeftoverTakeBack`), so the item ends before the
+character and each comparison given back costs one deletion. It is refused when an insertion or
+substitution was made in the same folding. The backreference arms take back the same way, in place
+of entry 29's refusal. Pinned by `Gaps/Engine/FullFoldDeletionAtFoldingBoundaryTests.cs` and by
+`full-fold-leftover-take-back` in `ExpectedDivergences.cs`
+(`OracleComparer.RunWithoutTheLeftoverTakeBack`). No row of the default wave reaches it; the
+`fuzzy-overhang` generator gives 10, 6, 9 and 9 rows at seeds 7, 4242, 20260923 and 31337.

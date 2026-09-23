@@ -365,6 +365,11 @@ public sealed class OracleWaveTests
                         entry.Id,
                         row.Number
                     );
+                // The Id first, so a row another entry claims names that entry in the failure.
+                ExpectedDivergences
+                    .For(row, ours)
+                    ?.Id.Should()
+                    .Be(entry.Id, "{0}: an entry must account for its own example row {1}", entry.Id, row.Number);
                 ExpectedDivergences
                     .For(row, ours)
                     .Should()
@@ -465,9 +470,10 @@ public sealed class OracleWaveTests
     [Arguments("full-fold-fuzzy-deletion")]
     [Arguments("full-fold-backreference-leftovers")]
     [Arguments("full-fold-backreference-retry")]
+    [Arguments("full-fold-leftover-take-back")]
     public void A_row_the_fold_fix_does_not_explain_is_not_accounted_for(string id)
     {
-        // The control for the three full-fold entries (S83, S84), built the same way as the anchor
+        // The control for the four full-fold entries (S83, S84, S85), built the same way as the anchor
         // pin's above: upstream's own answer is what this port gave before the fix, so accepting it
         // would classify a revert of the fix as the fix; and no match stands in for an unrelated
         // defect. Most of these rows' upstream answer IS no match, so for them the two cases

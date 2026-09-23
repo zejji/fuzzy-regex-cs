@@ -704,6 +704,9 @@ public sealed class ThreadSafetyTests
             // them, on a pattern compiled for that one call.
             "PatternObject.SkipGroupFoldLeftovers",
             "PatternObject.SkipRetriedFoldSteps",
+            // S85 added SkipLeftoverTakeBack, likewise set only by
+            // OracleComparer.RunWithoutTheLeftoverTakeBack.
+            "PatternObject.SkipLeftoverTakeBack",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

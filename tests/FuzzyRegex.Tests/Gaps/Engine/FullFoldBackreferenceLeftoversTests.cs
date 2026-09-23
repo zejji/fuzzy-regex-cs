@@ -88,17 +88,16 @@ public sealed class FullFoldBackreferenceLeftoversTests
     }
 
     [Test]
-    [Arguments(@"(?i)(s)(?:\1){0d+1s+1i<=1:[x]}", "sß")]
-    [Arguments(@"(?ri)(?:\1){0d+1s+1i<=1:[x]}(s)", "ßs")]
     [Arguments(@"(?i)(s)(?:\1){0d+1s<=1}x", "sßy")]
     [Arguments(@"(?ri)x(?:\1){0d+1s<=1}(s)", "yßs")]
     public void A_free_deletion_cannot_charge_the_rest_of_a_folding(string pattern, string subject)
     {
         // Once the group has run out there is no group character left to delete, so a deletion
-        // there would leave the folding as it was; when deletions cost nothing, taking it again and
-        // again never ends. The first two rows forbid the other edits with ':[x]'. In the last two
-        // the substitution is taken and the x fails, so the retry offers the deletion.
-        // V1 search(pattern, subject, I): None for all four. Upstream's literal arm has the endless
+        // there must not leave the folding as it was; when deletions cost nothing, taking it again
+        // and again would never end. The substitution is taken and the x fails, so the retry offers the
+        // deletion, and no alignment ends at an x. S85 moved the ':[x]' rows that used to be here
+        // to FullFoldDeletionAtFoldingBoundaryTests, where they match before the ß.
+        // V1 search(pattern, subject, I): None for both. Upstream's literal arm has the endless
         // loop: V1 search('(?:sss){0d+1s+1i<=1:[x]}', 'ßß', I) raises MemoryError.
         new FuzzyRegex(pattern)
             .Match(subject)

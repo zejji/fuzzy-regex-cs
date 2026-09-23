@@ -161,8 +161,8 @@ internal static class OracleComparer
     /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
-    /// <see cref="RunWithoutTheGroupFoldLeftovers"/> and <see cref="RunWithoutTheRetriedFoldSteps"/>
-    /// and by nothing else; the wave always passes
+    /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>
+    /// and <see cref="RunWithoutTheLeftoverTakeBack"/> and by nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -412,7 +412,7 @@ internal static class OracleComparer
 
     /// <summary>
     /// Puts a row's question to this port with the S84 retry steps switched off in the full-fold
-    /// backreference, and optionally the S83 fold fix too.
+    /// backreference, and optionally the S84 leftovers loop and the S83 fold fix too.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -426,13 +426,21 @@ internal static class OracleComparer
     /// Some rows need both repairs before this port and upstream differ: seed 7's
     /// <c>(?b)(?fi)(ßa)(?:(?:\1)\B0a😀){s&lt;=1,i&lt;=1,d&lt;=1}</c> over 'ßasa0a😀' reproduces
     /// upstream only with the S83 fix off as well, so <paramref name="withoutTheFoldFix"/> takes
-    /// both away.
+    /// both away. Others need both S84 repairs off: S85's <c>fuzzy-overhang</c> generator's seed
+    /// 4242 row <c>(?b)(?fi)(af)(?:a(?:\1)){e&lt;=2}</c> over 'afaTﬀb' is no match upstream, and
+    /// this port gives no match only with the leftovers loop off too, which
+    /// <paramref name="withoutTheGroupFoldLeftovers"/> adds.
     /// </para>
     /// </remarks>
     /// <param name="row">The row to run.</param>
     /// <param name="withoutTheFoldFix">Also set <c>PatternObject.ChargeUntouchedFoldings</c>.</param>
+    /// <param name="withoutTheGroupFoldLeftovers">Also set <c>PatternObject.SkipGroupFoldLeftovers</c>.</param>
     /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
-    internal static IOracleOutcome? RunWithoutTheRetriedFoldSteps(OracleRow row, bool withoutTheFoldFix)
+    internal static IOracleOutcome? RunWithoutTheRetriedFoldSteps(
+        OracleRow row,
+        bool withoutTheFoldFix,
+        bool withoutTheGroupFoldLeftovers = false
+    )
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -440,18 +448,40 @@ internal static class OracleComparer
             row,
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
-            ablate: withoutTheFoldFix ? _skipRetriedFoldStepsAndTheFoldFix : _skipRetriedFoldSteps
+            ablate: compiled =>
+            {
+                compiled.PatternObject.SkipRetriedFoldSteps = true;
+                compiled.PatternObject.ChargeUntouchedFoldings = withoutTheFoldFix;
+                compiled.PatternObject.SkipGroupFoldLeftovers = withoutTheGroupFoldLeftovers;
+            }
         );
     }
 
-    private static readonly Action<FuzzyRegex> _skipRetriedFoldSteps = static compiled =>
-        compiled.PatternObject.SkipRetriedFoldSteps = true;
-
-    private static readonly Action<FuzzyRegex> _skipRetriedFoldStepsAndTheFoldFix = static compiled =>
+    /// <summary>
+    /// Puts a row's question to this port with the S85 take-back switched off in the full-fold
+    /// leftovers.
+    /// </summary>
+    /// <remarks>
+    /// S85 lets a deletion in the leftovers of a full-folded string or backreference take back the
+    /// last comparison into a half-used subject folding, so the item can end before it. Upstream's
+    /// deletion there deletes nothing (<c>_regex.c:10590</c>, <c>:14856</c>), so
+    /// <c>(?fi)(?:sss){d&lt;=1}</c> over 'ßß' starts at 1 instead of 0. Setting
+    /// <c>PatternObject.SkipLeftoverTakeBack</c> restores that, and S84's refusal in the
+    /// backreference. The <c>full-fold-leftover-take-back</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers without the fix, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithoutTheLeftoverTakeBack(OracleRow row)
     {
-        compiled.PatternObject.SkipRetriedFoldSteps = true;
-        compiled.PatternObject.ChargeUntouchedFoldings = true;
-    };
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.SkipLeftoverTakeBack = true
+        );
+    }
 
     /// <summary>Diffs one row's recorded answer against this port's.</summary>
     /// <param name="row">The row, carrying upstream's answer.</param>

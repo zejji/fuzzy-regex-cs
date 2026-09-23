@@ -315,6 +315,23 @@ internal sealed class PatternObject
     internal bool SkipGroupFoldLeftovers;
 
     /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a fuzzy deletion in the leftovers loop of
+    /// a full-case-folded string deletes nothing, which is upstream's rule, rather than taking back
+    /// the last comparison into the part-used folding. The oracle sets it on a pattern it compiled
+    /// for one call, to show that the S85 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Under full case folding ß folds to ss, so <c>sss</c> over <c>ßß</c> stops half-way through
+    /// the second ß. Upstream's deletion there (<c>upstream/src/_regex.c</c>:10590, reached from
+    /// :14856) charges an edit and leaves the folding as it was, so with only deletions allowed
+    /// <c>(?i)(?:sss){d&lt;=1}</c> finds nothing at the first ß, and with free deletions it never
+    /// stops. For a group reference the flag restores S84's refusal instead, since upstream's
+    /// <c>REF_GROUP_FLD</c> has no leftovers loop at all. See <c>Matcher.TakeBackFoldedComparison</c>
+    /// and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool SkipLeftoverTakeBack;
+
+    /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
     /// group reference re-enters the comparison without first stepping past a folding the edit
     /// finished, which is upstream's rule. The oracle sets it on a pattern it compiled for one call,

@@ -1196,3 +1196,14 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   S83's row 6250 (seed 7) needs S83's fix and the retry fix together, so it moved to
   `full-fold-backreference-retry`, whose predicate accepts the retry ablation alone or both.
   The deletion-only case the S84 spec listed is a separate defect shared by the literal arm: S85.
+- 2026-09-23 (S85): a fuzzy deletion in a full-folded item's leftovers takes back the last
+  comparison into the subject folding (`Matcher.TakeBackFoldedComparison`, ledger 31), in the
+  literal and backreference arms alike, replacing S84's deletion refusal; it is refused when the
+  item made an insertion or substitution in the same folding. "The item made" is judged by the
+  change count at the item's start, carried on each fuzzy frame, because a lookaround's edit is
+  recorded at the same position. Its oracle entry
+  `full-fold-leftover-take-back` sits before S83's entry, whose ablation undoes this fix too, and
+  before `fuzzy-changes-leaked-from-an-abandoned-attempt`, whose `endpos` control cuts off the
+  folding (row 81 of `fuzzy-overhang`, seed 20260923). `full-fold-backreference-retry` also accepts
+  its ablation combined with the leftovers flag. The new `fuzzy-overhang` generator stays off the
+  default wave until a slice explains its BESTMATCH/ENHANCEMATCH row (sitting notes).

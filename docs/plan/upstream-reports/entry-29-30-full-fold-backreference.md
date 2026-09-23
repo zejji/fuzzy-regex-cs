@@ -54,6 +54,10 @@ Traceback (most recent call last):
 MemoryError
 ```
 
+Ledger entry 31 (`entry-31-full-fold-leftover-deletion.md`, S85, 2026-09-23) replaces this refusal.
+There the deletion takes back the last comparison into the subject folding, which fixes the
+literal loop too and finds the one-deletion matches the refusal gives up.
+
 ### 2. A retried edit compares a character it already used
 
 ```python

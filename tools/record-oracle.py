@@ -1743,6 +1743,7 @@ GENERATORS = (
     "posix",
     "fuzzy",
     "fuzzy-anchored",
+    "fuzzy-overhang",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -5520,6 +5521,16 @@ FUZZY_BACKREF_ATOM = r"(?:\1)"
 FUZZY_BACKREF_FOLD_ATOMS = ("ßa", "ﬆx", "aß", "ﬀo", "ßß")
 FUZZY_BACKREF_FOLD_PROBABILITY = 0.5
 
+# S85's 'fuzzy-overhang' generator: a full-folded reference whose group ends HALF-WAY THROUGH a
+# subject character's folding, the one shape S84's and S85's repairs decide. The group is plain
+# letters and the reference's share of the subject swaps its last letters (its first, reversed) for
+# a character whose folding starts (ends) with them and runs on: group 's' against 'ß', which folds
+# to ss, or 'ff' against 'ﬃ'. The default wave reaches S84's leftovers defect on no row, and its
+# retry defect on at most four rows of 6680 per seed (S84's closing notes). 'ab' has no such
+# character, so its rows keep the plain share and stand as the comparison.
+FUZZY_OVERHANG_GROUPS = ("s", "as", "sa", "f", "ff", "fa", "af", "fi", "st", "t", "ab")
+FUZZY_OVERHANG_CHARACTERS = "ßẞﬀﬁﬂﬃﬄﬅﬆ"
+
 # The zero-width assertions a fuzzy section may contain. They matter more here than anywhere else:
 # a zero-width item passes a step of 0 to `fuzzy_match_item` (upstream/src/_regex.c:10185), which
 # rules out deletion and substitution outright, so an insertion is the only error that can get past
@@ -5793,6 +5804,24 @@ def _fuzzy_atom_text(rng: random.Random, atom: str, alphabet: str) -> str:
     return _fuzzy_one_char_text(rng, atom, alphabet)
 
 
+def _fuzzy_overhang(rng: random.Random, group: str, reverse: bool) -> str:
+    """The group's text with its trailing letters (leading, reversed) folded into one character.
+
+    The character's folding starts with those letters and runs on, so a reference to the group
+    matches part of it and runs out. The group is plain letters, so its folding is itself. Where no
+    character fits, the text comes back unchanged.
+    """
+    options = []
+    for character in FUZZY_OVERHANG_CHARACTERS:
+        folding = character.casefold()
+        for k in range(1, min(len(group), len(folding) - 1) + 1):
+            if reverse and folding.endswith(group[:k]):
+                options.append(character + group[k:])
+            elif not reverse and folding.startswith(group[-k:]):
+                options.append(group[:-k] + character)
+    return rng.choice(options) if options else group
+
+
 def _fuzzy_recase(rng: random.Random, text: str) -> str:
     """The same text with some characters upper-cased, for a section compiled under (?i) or (?fi)."""
     return "".join(c.upper() if rng.random() < 0.5 else c for c in text)
@@ -5856,7 +5885,7 @@ def _fuzzy_mutate(rng: random.Random, subject: str, edits: int, alphabet: str) -
     return subject
 
 
-def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
+def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False, overhang: bool = False):
     """One fuzzy section, S38's one-character and zero-width items plus S39's multi-character ones.
 
     The subject is built to match the section exactly and then mutated by zero to three edits, so a
@@ -5886,6 +5915,11 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
     every row then opens with a zero-width assertion in front of everything else, which is the one
     shape the S57c anchor-pin rule decides. See FUZZY_ANCHOR_GUARDS for why it is a generator of
     its own rather than a probability inside this one.
+
+    S85 reuses it for a third, 'fuzzy-overhang', by passing `overhang`: every row is `(?fi)` with a
+    backreference as the section's last atom (first, reversed), and the reference's share of the
+    subject ends inside a folding. See FUZZY_OVERHANG_GROUPS. Each change short-circuits a draw
+    only when `overhang` is set, so 'fuzzy' and 'fuzzy-anchored' rows are unchanged at every seed.
     """
     for i in range(count):
         # A TRAP FOR WHOEVER ADDS A FOURTH BAND, left as a comment because S42 walked into it and
@@ -5900,7 +5934,7 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
         # belongs with a band change and not on its own. See STATE.md: applying it uncovered a real
         # ENHANCEMATCH defect that S42 was not the slice to fix.
         alphabet = FUZZY_SUBJECT_ALPHABETS[i % len(FUZZY_SUBJECT_ALPHABETS)]
-        mode = rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
+        mode = "fold" if overhang else rng.choices(FUZZY_CASE_MODES, weights=FUZZY_CASE_MODE_WEIGHTS)[0]
 
         atom_count = rng.choices(FUZZY_SECTION_ATOMS, weights=FUZZY_SECTION_ATOM_WEIGHTS)[0]
 
@@ -5924,7 +5958,10 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
         # the reference has to match is a multi-character run and the REF_GROUP arms get real work.
         reverse = rng.random() < 0.2
         backref_text = ""
-        if rng.random() < FUZZY_BACKREF_PROBABILITY:
+        if overhang:
+            backref_text = rng.choice(FUZZY_OVERHANG_GROUPS)
+            atoms[0 if reverse else len(atoms) - 1] = FUZZY_BACKREF_ATOM
+        elif rng.random() < FUZZY_BACKREF_PROBABILITY:
             if mode == "fold" and rng.random() < FUZZY_BACKREF_FOLD_PROBABILITY:
                 backref_text = rng.choice(FUZZY_BACKREF_FOLD_ATOMS)
             else:
@@ -5935,12 +5972,20 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
             atoms[rng.randrange(len(atoms))] = FUZZY_BACKREF_ATOM
 
         # `\1` stands for the captured text, so that is what its share of an exact subject is.
-        exact = _fuzzy_exact_subject(
-            rng,
-            [backref_text if atom == FUZZY_BACKREF_ATOM else atom for atom in atoms],
-            alphabet,
-            mode,
-        )
+        if overhang:
+            # The share is not recased: ß upper-cases to SS, which would fold one letter at a time.
+            share = _fuzzy_overhang(rng, backref_text, reverse)
+            exact = "".join(
+                share if atom == FUZZY_BACKREF_ATOM else _fuzzy_recase(rng, _fuzzy_atom_text(rng, atom, alphabet))
+                for atom in atoms
+            )
+        else:
+            exact = _fuzzy_exact_subject(
+                rng,
+                [backref_text if atom == FUZZY_BACKREF_ATOM else atom for atom in atoms],
+                alphabet,
+                mode,
+            )
 
         # An edit under (?fi) has to be able to land a multi-character fold as well as take one
         # away, so the characters it draws from include the ones whose folding is longer than one.
@@ -6041,7 +6086,7 @@ def _generate_fuzzy(rng: random.Random, count: int, guarded: bool = False):
             pattern = "(?b)" + pattern
 
         row = {
-            "generator": "fuzzy-anchored" if guarded else "fuzzy",
+            "generator": "fuzzy-anchored" if guarded else "fuzzy-overhang" if overhang else "fuzzy",
             "pattern": pattern,
             "flags": flags,
             "namedLists": {},
@@ -6352,6 +6397,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "fuzzy-anchored":
         yield from _generate_fuzzy(rng, count, guarded=True)
+        return
+
+    if name == "fuzzy-overhang":
+        yield from _generate_fuzzy(rng, count, overhang=True)
         return
 
     if name == "posix":

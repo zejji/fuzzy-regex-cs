@@ -15,9 +15,16 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES. 'partial-sliced'
-    joined the list in S33, 'verbs' in S34, 'timeout' in S52 sitting 14 and 'fuzzy-anchored' in
-    S57e.
+    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES AND
+    'fuzzy-overhang'. 'partial-sliced' joined the list in S33, 'verbs' in S34, 'timeout' in S52
+    sitting 14 and 'fuzzy-anchored' in S57e.
+
+    'fuzzy-overhang' is 'fuzzy' with a full-folded backreference whose group ends part-way into
+    a subject folding, such as (s) against the first half of the ß in 'sß'. S84's and S85's
+    rules act only there, and the plain 'fuzzy' generator reaches that shape too rarely for their
+    controls to fire. S85 added it and left it off the default list: under BESTMATCH or
+    ENHANCEMATCH a few of its rows differ from upstream in a way no fold-fix ablation explains
+    (docs/plan/slices/notes/S85-sittings.md). It joins the list once a slice accounts for them.
 
     'fuzzy-anchored' is 'fuzzy' with a zero-width assertion in front of the whole pattern. S57c
     added it because its negative control could not be made to fire on any other generator: the

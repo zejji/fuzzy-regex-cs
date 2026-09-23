@@ -84,6 +84,19 @@ internal struct FuzzyData
     /// it is left to delete. See <c>Matcher.NextFuzzyMatchGroupFld</c>.
     /// </summary>
     internal int GfoldedLen;
+
+    /// <summary>
+    /// NOT UPSTREAM (S85): whether a full-case-folded string's values have all been used, so a
+    /// deletion has none left to delete. See <c>Matcher.TakeBackFoldedComparison</c>.
+    /// </summary>
+    internal bool ValuesRanOut;
+
+    /// <summary>
+    /// NOT UPSTREAM (S85): how many fuzzy changes were recorded when the full-folded item began,
+    /// so a deletion can tell the item's own edits from ones made before it. See
+    /// <c>Matcher.TakeBackFoldedComparison</c>.
+    /// </summary>
+    internal int FoldChangesStart;
 }
 
 /// <summary>
@@ -4236,6 +4249,13 @@ internal static class Matcher
         {
             case FuzzyValue.Del:
                 // Could a character at text_pos have been deleted?
+                // NOT UPSTREAM (S85): once the values have run out there is none left to delete,
+                // which is the leftovers loop at :14856. See TakeBackFoldedComparison.
+                if (data.ValuesRanOut && !state.Pattern.SkipLeftoverTakeBack)
+                {
+                    return TakeBackFoldedComparison(state, ref data);
+                }
+
                 data.NewStringPos += data.Step;
 
                 return MatchStatus.Success;
@@ -4346,6 +4366,62 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// NOT UPSTREAM (S85): a deletion in the leftovers loop of <c>STRING_FLD</c>, <c>REF_GROUP_FLD</c>
+    /// or their reversed forms, which takes back the last comparison into the part-used folding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The loop runs when the item has run out part way through a subject character's folding
+    /// (<c>upstream/src/_regex.c</c>:14856). Upstream's deletion there moves only the item's
+    /// position, past its end, so it charges an edit and leaves the folding as it was. With only
+    /// deletions allowed the item can then never end: <c>(?i)(?:sss){d&lt;=1}</c> matches
+    /// <c>ß</c> but not the first ß of <c>ßß</c>, and with free deletions the loop never stops.
+    /// </para>
+    /// <para>
+    /// Here the item character last compared against the folding counts as deleted instead, and the
+    /// folding steps back by one. Repeated, the folding returns to its start, where
+    /// <see cref="FoldingIsPartUsed"/> is false, and the item ends before that subject character,
+    /// which <c>text_pos</c> never left. Each call moves the folding, so the loop always ends.
+    /// </para>
+    /// <para>
+    /// That is only true if every step into this folding was a comparison or a deletion. An
+    /// insertion or substitution also moved the folding and was charged for a character that would
+    /// now fall outside the match, so after one the deletion is refused and the engine backtracks
+    /// to another path. Every edit the item made inside the folding is recorded at the current
+    /// <c>text_pos</c>, because <c>text_pos</c> moves only when a folding is used up. An edit made
+    /// before the item can be recorded there too: <c>(?=(?:x){s&lt;=1})</c> substitutes the
+    /// character the item then starts on. So only the changes the item recorded
+    /// (<see cref="FuzzyData.FoldChangesStart"/> onwards) at the current <c>text_pos</c> count.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="data">The attempt; its <c>NewFoldedPos</c> steps back on success.</param>
+    /// <returns>A <see cref="MatchStatus"/>.</returns>
+    private static int TakeBackFoldedComparison(MatchState state, ref FuzzyData data)
+    {
+        bool partUsed = data.Step > 0 ? data.NewFoldedPos > 0 : data.NewFoldedPos < data.FoldedLen;
+
+        if (!partUsed)
+        {
+            return MatchStatus.Failure;
+        }
+
+        List<FuzzyChange> changes = state.FuzzyChanges;
+
+        for (int i = changes.Count - 1; i >= data.FoldChangesStart && changes[i].Pos == state.TextPos; i--)
+        {
+            if (changes[i].Type != FuzzyValue.Del)
+            {
+                return MatchStatus.Failure;
+            }
+        }
+
+        data.NewFoldedPos -= data.Step;
+
+        return MatchStatus.Success;
+    }
+
+    /// <summary>
     /// Upstream <c>fuzzy_match_string_fld</c> (line 10635): a first try at fuzzing a string whose
     /// subject side is being full-case-folded.
     /// </summary>
@@ -4356,6 +4432,7 @@ internal static class Matcher
     /// <param name="foldedPos">How far into the subject character's folding it had got.</param>
     /// <param name="foldedLen">The length of that folding.</param>
     /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int FuzzyMatchStringFld(
         MatchState state,
@@ -4364,7 +4441,8 @@ internal static class Matcher
         ref int stringPos,
         ref int foldedPos,
         int foldedLen,
-        sbyte step
+        sbyte step,
+        int foldChangesStart
     )
     {
         long[] fuzzyCounts = state.FuzzyCounts;
@@ -4379,6 +4457,8 @@ internal static class Matcher
         data.NewFoldedPos = foldedPos;
         data.FoldedLen = foldedLen;
         data.Step = step;
+        data.ValuesRanOut = step > 0 ? stringPos >= node.Values.Count : stringPos <= 0;
+        data.FoldChangesStart = foldChangesStart;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
@@ -4403,6 +4483,8 @@ internal static class Matcher
             return MatchStatus.Failure;
         }
 
+        // NOT UPSTREAM (S85): fold_changes_start, below upstream's frame.
+        state.Bstack.PushSize(foldChangesStart);
         state.Bstack.PushNode(node);
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(stringPos);
@@ -4412,7 +4494,7 @@ internal static class Matcher
         state.Bstack.PushUInt8((byte)data.FuzzyType);
         state.Bstack.PushUInt8((byte)node.Op);
 
-        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+        /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
@@ -4433,6 +4515,7 @@ internal static class Matcher
     /// <param name="node">On success, where matching carries on.</param>
     /// <param name="stringPos">Receives how far into the node's values the retry got to.</param>
     /// <param name="foldedPos">Receives how far into the folding the retry got to.</param>
+    /// <param name="foldChangesStart">Receives how many fuzzy changes were recorded when the item began.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int RetryFuzzyMatchStringFld(
         MatchState state,
@@ -4440,14 +4523,15 @@ internal static class Matcher
         bool search,
         ref Node node,
         ref int stringPos,
-        ref int foldedPos
+        ref int foldedPos,
+        ref int foldChangesStart
     )
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
         state.UnrecordFuzzy();
 
-        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type */
+        /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type */
 
         if (
             !state.Bstack.PopUInt8(out byte poppedType)
@@ -4457,6 +4541,7 @@ internal static class Matcher
             || !state.Bstack.PopSize(out long poppedStringPos)
             || !state.Bstack.PopInt8(out sbyte step)
             || !state.Bstack.PopNode(state.Pattern, out Node? newNode)
+            || !state.Bstack.PopSize(out long poppedFoldChangesStart)
         )
         {
             return MatchStatus.Illegal;
@@ -4464,6 +4549,7 @@ internal static class Matcher
 
         state.TextPos = (int)poppedTextPos;
         stringPos = (int)poppedStringPos;
+        foldChangesStart = (int)poppedFoldChangesStart;
 
         int currFoldedPos = (int)poppedFoldedPos;
 
@@ -4473,6 +4559,8 @@ internal static class Matcher
         data.Step = step;
         data.NewStringPos = stringPos;
         data.NewFoldedPos = currFoldedPos;
+        data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
+        data.FoldChangesStart = foldChangesStart;
 
         --fuzzyCounts[data.FuzzyType];
 
@@ -4500,6 +4588,7 @@ internal static class Matcher
             return MatchStatus.Failure;
         }
 
+        state.Bstack.PushSize(foldChangesStart);
         state.Bstack.PushNode(newNode);
         state.Bstack.PushInt8(data.Step);
         state.Bstack.PushSize(stringPos);
@@ -4511,7 +4600,7 @@ internal static class Matcher
 
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
-        /* bstack: node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+        /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
@@ -4639,10 +4728,13 @@ internal static class Matcher
                 // NOT UPSTREAM (S84): only if the group has a character left. The leftovers loops
                 // in REF_GROUP_FLD and its reversed twin call here after the group has run out, and
                 // a deletion there changes nothing, so free deletions would repeat it for ever.
-                // Upstream's literal leftovers loop does (:14856).
+                // Upstream's literal leftovers loop does (:14856). S85: the deletion takes back the
+                // last comparison into the subject's folding instead; see TakeBackFoldedComparison.
                 if (data.Step > 0 ? data.NewGfoldedPos >= data.GfoldedLen : data.NewGfoldedPos <= 0)
                 {
-                    return MatchStatus.Failure;
+                    return state.Pattern.SkipLeftoverTakeBack
+                        ? MatchStatus.Failure
+                        : TakeBackFoldedComparison(state, ref data);
                 }
 
                 data.NewGfoldedPos += data.Step;
@@ -4709,6 +4801,7 @@ internal static class Matcher
     /// <param name="gfoldedPos">How far into the group character's folding the comparison had got.</param>
     /// <param name="gfoldedLen">The length of that folding.</param>
     /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    /// <param name="foldChangesStart">How many fuzzy changes were recorded when the item began.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int FuzzyMatchGroupFld(
         MatchState state,
@@ -4719,7 +4812,8 @@ internal static class Matcher
         int groupPos,
         ref int gfoldedPos,
         int gfoldedLen,
-        sbyte step
+        sbyte step,
+        int foldChangesStart
     )
     {
         long[] fuzzyCounts = state.FuzzyCounts;
@@ -4735,6 +4829,7 @@ internal static class Matcher
         data.NewGfoldedPos = gfoldedPos;
         data.GfoldedLen = gfoldedLen;
         data.Step = step;
+        data.FoldChangesStart = foldChangesStart;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
@@ -4759,6 +4854,8 @@ internal static class Matcher
             return MatchStatus.Failure;
         }
 
+        // NOT UPSTREAM (S85): fold_changes_start, below upstream's frame.
+        state.Bstack.PushSize(foldChangesStart);
         state.Bstack.PushNode(node);
         state.Bstack.PushInt8(step);
         state.Bstack.PushSize(gfoldedPos);
@@ -4770,7 +4867,7 @@ internal static class Matcher
         state.Bstack.PushUInt8((byte)data.FuzzyType);
         state.Bstack.PushUInt8((byte)node.Op);
 
-        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+        /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type op
          */
 
@@ -4794,6 +4891,7 @@ internal static class Matcher
     /// <param name="foldedPos">Receives how far into the subject's folding the retry got to.</param>
     /// <param name="groupPos">Receives the restored position in the referenced capture.</param>
     /// <param name="gfoldedPos">Receives how far into the group's folding the retry got to.</param>
+    /// <param name="foldChangesStart">Receives how many fuzzy changes were recorded when the item began.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
     private static int RetryFuzzyMatchGroupFld(
         MatchState state,
@@ -4802,14 +4900,15 @@ internal static class Matcher
         ref Node node,
         ref int foldedPos,
         ref int groupPos,
-        ref int gfoldedPos
+        ref int gfoldedPos,
+        ref int foldChangesStart
     )
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
         state.UnrecordFuzzy();
 
-        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+        /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type
          */
 
@@ -4823,12 +4922,14 @@ internal static class Matcher
             || !state.Bstack.PopSize(out long poppedGfoldedPos)
             || !state.Bstack.PopInt8(out sbyte step)
             || !state.Bstack.PopNode(state.Pattern, out Node? newNode)
+            || !state.Bstack.PopSize(out long poppedFoldChangesStart)
         )
         {
             return MatchStatus.Illegal;
         }
 
         state.TextPos = (int)poppedTextPos;
+        foldChangesStart = (int)poppedFoldChangesStart;
 
         int newFoldedPos = (int)poppedFoldedPos;
         int newGroupPos = (int)poppedGroupPos;
@@ -4842,6 +4943,7 @@ internal static class Matcher
         data.NewFoldedPos = newFoldedPos;
         data.NewGfoldedPos = newGfoldedPos;
         data.GfoldedLen = gfoldedLen;
+        data.FoldChangesStart = foldChangesStart;
 
         --fuzzyCounts[data.FuzzyType];
 
@@ -4878,6 +4980,7 @@ internal static class Matcher
             return MatchStatus.Failure;
         }
 
+        state.Bstack.PushSize(foldChangesStart);
         state.Bstack.PushNode(newNode);
         state.Bstack.PushInt8(data.Step);
         state.Bstack.PushSize(newGfoldedPos);
@@ -4891,7 +4994,7 @@ internal static class Matcher
 
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
-        /* bstack: node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
+        /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type op
          */
 
@@ -5829,6 +5932,11 @@ internal static class Matcher
         // negative. C# needs them definitely assigned, and 0 is the value those arms write.
         int foldedPos = 0;
         int gfoldedPos = 0;
+
+        // NOT UPSTREAM (S85): how many fuzzy changes were recorded when the current full-folded
+        // STRING_FLD or REF_GROUP_FLD item began, kept across a retry the way 'foldedPos' is. See
+        // TakeBackFoldedComparison.
+        int foldChangesStart = 0;
         Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
         Span<uint> gfolded = stackalloc uint[UnicodeTables.MaxFolded];
 
@@ -8014,6 +8122,7 @@ internal static class Matcher
                         foldedLen = 0;
                         gfoldedPos = 0;
                         gfoldedLen = 0;
+                        foldChangesStart = state.FuzzyChanges.Count;
                     }
                     else
                     {
@@ -8091,7 +8200,8 @@ internal static class Matcher
                                 stringPos,
                                 ref gfoldedPos,
                                 gfoldedLen,
-                                -1
+                                -1,
+                                foldChangesStart
                             );
 
                             if (status < 0)
@@ -8136,7 +8246,8 @@ internal static class Matcher
                                 stringPos,
                                 ref gfoldedPos,
                                 gfoldedLen,
-                                -1
+                                -1,
+                                foldChangesStart
                             );
 
                             if (status < 0)
@@ -8194,6 +8305,7 @@ internal static class Matcher
                         foldedLen = 0;
                         gfoldedPos = 0;
                         gfoldedLen = 0;
+                        foldChangesStart = state.FuzzyChanges.Count;
                     }
                     else
                     {
@@ -8275,7 +8387,8 @@ internal static class Matcher
                                 stringPos,
                                 ref gfoldedPos,
                                 gfoldedLen,
-                                1
+                                1,
+                                foldChangesStart
                             );
 
                             if (status < 0)
@@ -8325,7 +8438,8 @@ internal static class Matcher
                                 stringPos,
                                 ref gfoldedPos,
                                 gfoldedLen,
-                                1
+                                1,
+                                foldChangesStart
                             );
 
                             if (status < 0)
@@ -8541,6 +8655,7 @@ internal static class Matcher
                             stringPos = 0;
                             foldedPos = 0;
                             foldedLen = 0;
+                            foldChangesStart = state.FuzzyChanges.Count;
                         }
                         else
                         {
@@ -8600,7 +8715,8 @@ internal static class Matcher
                                     ref stringPos,
                                     ref foldedPos,
                                     foldedLen,
-                                    1
+                                    1,
+                                    foldChangesStart
                                 );
 
                                 if (status < 0)
@@ -8642,7 +8758,8 @@ internal static class Matcher
                                     ref stringPos,
                                     ref foldedPos,
                                     foldedLen,
-                                    1
+                                    1,
+                                    foldChangesStart
                                 );
 
                                 if (status < 0)
@@ -8906,6 +9023,7 @@ internal static class Matcher
                             stringPos = length;
                             foldedPos = 0;
                             foldedLen = 0;
+                            foldChangesStart = state.FuzzyChanges.Count;
                         }
                         else
                         {
@@ -8969,7 +9087,8 @@ internal static class Matcher
                                     ref stringPos,
                                     ref foldedPos,
                                     foldedLen,
-                                    -1
+                                    -1,
+                                    foldChangesStart
                                 );
 
                                 if (status < 0)
@@ -9009,7 +9128,8 @@ internal static class Matcher
                                     ref stringPos,
                                     ref foldedPos,
                                     foldedLen,
-                                    -1
+                                    -1,
+                                    foldChangesStart
                                 );
 
                                 if (status < 0)
@@ -9224,7 +9344,8 @@ internal static class Matcher
                         ref node,
                         ref foldedPos,
                         ref stringPos,
-                        ref gfoldedPos
+                        ref gfoldedPos,
+                        ref foldChangesStart
                     );
 
                     if (status < 0)
@@ -9242,7 +9363,15 @@ internal static class Matcher
                 // Upstream :17361-17376.
                 case Opcode.StringFld:
                 case Opcode.StringFldRev:
-                    status = RetryFuzzyMatchStringFld(state, op, search, ref node, ref stringPos, ref foldedPos);
+                    status = RetryFuzzyMatchStringFld(
+                        state,
+                        op,
+                        search,
+                        ref node,
+                        ref stringPos,
+                        ref foldedPos,
+                        ref foldChangesStart
+                    );
 
                     if (status < 0)
                     {

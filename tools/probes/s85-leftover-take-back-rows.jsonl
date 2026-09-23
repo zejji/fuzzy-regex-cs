@@ -1,0 +1,8 @@
+{"pattern":"(?fi)(?:sss){d<=1}","flags":0,"subject":"ßß","operation":"search"}
+{"pattern":"(?rfi)(?:sss){d<=1}","flags":0,"subject":"ßß","operation":"search"}
+{"pattern":"(?fi)(?:ff){d<=2}","flags":0,"subject":"ﬃ","operation":"search"}
+{"pattern":"(?fi)(?:fffx){d<=2}","flags":0,"subject":"ﬀﬃ","operation":"search"}
+{"pattern":"(?fi)(?:xfff){i<=1,d<=2}","flags":0,"subject":"ﬀﬃfi","operation":"search"}
+{"pattern":"(?fi)(s)(?:\\1){d<=1}","flags":0,"subject":"sß","operation":"search"}
+{"pattern":"(?rfi)(?:\\1){d<=1}(s)","flags":0,"subject":"ßs","operation":"search"}
+{"pattern":"(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}","flags":0,"subject":"fSﬄ","operation":"search"}
