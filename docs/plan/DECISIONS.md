@@ -1269,3 +1269,6 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-23 (S61): a worktree that has never run the hook install fails every commit with
   `.husky/_/husky.sh: No such file or directory`. Run `dotnet husky install` in it; never
   `--no-verify`.
+- 2026-09-23 (S61): an S61 sitting cannot run its own time gates while another driver is running
+  on the machine, and it has nothing else left to do. Relaunch S61 only after the orchestrator's
+  quiet-machine run of `*SpanOverload*` and `*WorkloadBenchmarks.EnumerateMatches*ToEndDense*`.

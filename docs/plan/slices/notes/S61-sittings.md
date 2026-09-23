@@ -461,3 +461,11 @@ optimisation slice.
 
 The first commit here failed with `.husky/_/husky.sh: No such file or directory`: this worktree
 had never run the hook install. `dotnet husky install` fixed it.
+
+## Sitting 6 (2026-09-23, 22:28)
+
+Blocked, no code changed. Everything left needs the quiet-machine run: the `*SpanOverload*` gate
+against 8dd746e, the time half of the span walk's gate, and the baseline update. This sitting
+could not take that run itself: `tools/run-slices.ps1 -Slice s88 -StopBy 05:50` was running in
+another worktree, with a ReSharper inspection in progress, and this sitting's deadline was 03:12.
+Stopping another session's processes needs the owner. Checkpointed with the blocker in STATE.md.
