@@ -780,7 +780,7 @@ Match m = FuzzyRegex.FullMatch("a\u0131", "aI", FuzzyRegexOptions.IgnoreCase);
 Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı', I) matches
 ```
 
-### The search prefilters answer the slow path's answer, not upstream's
+### This port's search prefilters never change the slow path's answer
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several
 pattern families. A prefilter is a cheap scan that picks the next position worth trying, so that the
