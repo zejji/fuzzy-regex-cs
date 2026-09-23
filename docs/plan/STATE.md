@@ -13,8 +13,11 @@ rows 3752 and 5185 only, which diverge on the base commit 8dd746e too.
 
 ## Next, in this order
 
-1. Item 2's benchmark triage, still deferred. Do not build on its numbers.
-2. The remaining items: 3, 6, 8-9, 11-14, 16 and 17, one sitting each.
+1. **Finish item 2's blind review** (20be6aa). It is half done: no defects in 149,292 on/off
+   cases. Still to run: the exhaustive UTF-16 start and slice sweep, in chunks under 600 s, and
+   the oracle at three seeds. Notes file, "2026-09-23, 04:00". Controls A-D are re-run.
+2. Item 2's benchmark triage. Do not build on its numbers until then.
+3. The remaining items: 3, 6, 8-9, 11-14, 16 and 17, one sitting each.
 
 ## Findings that need a slice
 

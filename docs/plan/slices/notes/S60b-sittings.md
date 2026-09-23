@@ -459,3 +459,26 @@ core), which alternation spreads over both sides but does not remove.
 
 About 9% and 17%, well outside the run-to-run spread. The backreference shows no change (not
 profiled, so why is not known). The fast path stays and the SYNC-DIVERGENCE row now carries these numbers.
+
+## 2026-09-23, 04:00 - item 2's controls re-run, and its review half done
+
+**Controls**, re-run against the code at 232dee0 using the exact snippets in sitting 1's notes, with
+the whole suite each time (6650 tests): A 5 red, B 0 red, C 0 red, D 12 red. These are sitting 1's
+figures, now reproduced on committed code. Only A and D fired, and both are suite controls with no
+seed. B's oracle figure (seed 31) has still not been re-run at a fresh seed.
+
+**Blind review of 20be6aa**, one pass (Opus, the VERIFICATION.md brief, the slice's hunt list):
+**no defects found so far, but the pass stopped early** because the allowance hook hit 93%.
+- It built HEAD and a copy with `searchStartAllowed` forced false. It traced `SearchStart` to
+  confirm it runs, then ran 149,292 generated cases through both builds. Each case asked six
+  questions: finditer, overlapped, partial, search, match and fullmatch. It covered every dispatch
+  arm, `(?r)`, the zero-width tests, `(?w)` and `\X`, surrogates, case-fold traps, and `pos`/`endpos`.
+  Prefilter on and off differed on 0 of those cases.
+- Both builds differ from `regex` 2026.9.10 on the same 18,513 rows. The ones it sampled are the
+  pinned reversed-partial divergence, for example `(?r)a` over `abcab` from pos 1. Those rows are
+  not SearchStart's, but they were not checked one by one.
+- **Not done:** an exhaustive sweep of every UTF-16 start and slice (mid-pair starts included)
+  under `(?m)`, `(?r)` and `(?i)`, which hit the 600 s limit; and `tools/run-oracle.ps1`.
+
+The next sitting finishes this pass: that sweep, in chunks under 600 s, and the oracle at three
+seeds. Only then does it go on to the benchmark triage.
