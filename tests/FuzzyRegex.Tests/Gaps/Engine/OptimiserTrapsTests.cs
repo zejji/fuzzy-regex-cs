@@ -398,6 +398,50 @@ public sealed class OptimiserTrapsTests
     }
 
     [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every position")]
+    public void An_alternation_of_literals_searches_for_all_of_them_at_once()
+    {
+        // A single literal is found with one vectorised search; an alternation of literals had
+        // none, so every position ran each alternative in turn. Over the four megabytes below
+        // this port took about 120 ms and upstream 162 ms; S60b item 14 searches for every
+        // alternative's first literal at once and lets the engine pick the branch. The budget is
+        // several times what the old scan needed and far more than the search takes.
+        // regex 2026.9.10: search(<this pattern>, <this subject>) -> (4194346, 4194352)
+        var pattern = new FuzzyRegex("amber|basil|cedar|delta|ember|flint|grove|heron|needle");
+        string subject = Pad("a needle in a haystack.", 4 * _megabyte);
+        _ = pattern.IsMatch("warm-up");
+
+        Action act = () => pattern.Match(subject, timeout: TimeSpan.FromMilliseconds(25));
+
+        act.Should().NotThrow();
+        Match found = pattern.Match(subject);
+        (found.Index, found.Length).Should().Be((4_194_346, 6));
+
+        // regex 2026.9.10, finditer, spans as (start, end): cat|dog over 'hotdog catalog' gives
+        // (3, 6) and (7, 10); (cat|dog)s over 'dogcats' gives (3, 7) with group 1 'cat'; x|yz
+        // over 'yyzx' gives (1, 3) and (3, 4); abc|bcd over 'abcd' gives (0, 3).
+        Spans("cat|dog", "hotdog catalog").Should().Equal((3, 3), (7, 3));
+        Spans("(cat|dog)s", "dogcats").Should().Equal((3, 4));
+        new FuzzyRegex("(cat|dog)s").Match("dogcats").Groups[1].Value.Should().Be("cat");
+        Spans("x|yz", "yyzx").Should().Equal((1, 2), (3, 1));
+        Spans("abc|bcd", "abcd").Should().Equal((0, 3));
+
+        // regex 2026.9.10: search('cat|dog', 'cat dog', pos=1) -> (4, 7); endpos=3 over 'xcatx' ->
+        // None, since the literal must end inside the slice; partial=True over 'xca' -> (1, 3),
+        // a partial match the literal search alone would not find.
+        new FuzzyRegex("cat|dog")
+            .Match("cat dog", 1)
+            .Index.Should()
+            .Be(4);
+        new FuzzyRegex("cat|dog").Match("xcatx", 0, 3).Success.Should().BeFalse();
+        Match partial = new FuzzyRegex("cat|dog").Match("xca", partial: true);
+        (partial.Success, partial.Index, partial.Length, partial.PartialMatch).Should().Be((true, 1, 2, true));
+
+        static List<(int, int)> Spans(string pattern, string subject) =>
+            [.. new FuzzyRegex(pattern).Matches(subject).Select(static match => (match.Index, match.Length))];
+    }
+
+    [Test]
     [Property("Upstream", "none - gap test")]
     public void The_two_ranking_modes_improve_on_the_plain_fuzzy_answer()
     {

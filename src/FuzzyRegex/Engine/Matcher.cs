@@ -1,3 +1,4 @@
+using System.Buffers;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -6049,6 +6050,14 @@ internal static class Matcher
         fuzzyFilterFound.Fill(FuzzyLiteralFilter.Unknown);
         int fuzzyFilterAsciiEnd = state.TextPos;
 
+        // NOT UPSTREAM'S (S60b item 14): the literals a pattern opening with an alternation can
+        // start with. Withheld from a partial match, which can end part way through a literal, and
+        // from a pattern with '(*SKIP)', which every start-position jump leaves alone (HasSkipVerb).
+        SearchValues<string>? leadingStrings =
+            search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb
+                ? pattern.LeadingStrings
+                : null;
+
         Node node;
         int status;
 
@@ -6168,6 +6177,20 @@ internal static class Matcher
                     foundPos = next;
                 }
             }
+        }
+
+        // NOT UPSTREAM'S (S60b item 14). Every match starts with one of the literals and ends
+        // inside the slice, so the next attempt starts at the earliest one that fits. One sweep
+        // with no poll, for the reasons StringSearch gives.
+        if (leadingStrings is not null && foundPos <= state.SliceEnd)
+        {
+            int at = state.Text.Span[foundPos..state.SliceEnd].IndexOfAny(leadingStrings);
+            if (at < 0)
+            {
+                return MatchStatus.Failure;
+            }
+
+            foundPos += at;
         }
 
         if (search)

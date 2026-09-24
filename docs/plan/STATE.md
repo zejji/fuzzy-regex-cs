@@ -1,15 +1,15 @@
 # Current state
 
-**S60b is in flight** (slice file and `docs/plan/slices/notes/S60b-sittings.md`). Items 2, 3, 10
-and 17 and the `SameCharIgn` fast path are landed and reviewed; item 6 is closed as never ported.
+**S60b is in flight** (slice file and `docs/plan/slices/notes/S60b-sittings.md`). Items 2, 3, 10,
+14 and 17 and the `SameCharIgn` fast path are landed and reviewed; item 6 is closed as never ported.
 Items 3 and 17 wait for the orchestrator's quiet run (filters in the notes' "23:10" and
-"2026-09-24, 00:50" sections). Open: 8, 9, 11-14 and 16; the notes end with a one-sitting plan.
+"2026-09-24, 00:50" sections). Open: 8, 9, 11-13, 16; plan at the end of the "00:50" section.
 
 **S89 is in flight**: the unjudged `(?b)`/`(?e)`/`(*SKIP)` oracle rows.
 ## Next
 1. The orchestrator's quiet-machine benchmark baseline (read `CountStringMegabyte` first: 1.10x on
    the gate, the row closest to the floor), then the time gates for items 3 and 17.
-2. S60b items 9+14, 16, 11, 12, 13, 8.
+2. S60b items 9, 16, 11, 12, 13, 8.
 
 ## Findings that need a slice
 

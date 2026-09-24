@@ -1,3 +1,4 @@
+using System.Buffers;
 using Fuzzy.Text.RegularExpressions.Parsing;
 using Fuzzy.Text.RegularExpressions.Unicode;
 
@@ -276,6 +277,13 @@ internal sealed class PatternObject
     /// </summary>
     internal Node? LeadingRepeat;
 
+    /// <summary>
+    /// The literals a search attempt can start with when the pattern opens with an alternation
+    /// whose every branch opens with one, or <see langword="null"/>. <b>This port's own field</b>
+    /// (S60b item 14); see <see cref="FindLeadingStrings"/>.
+    /// </summary>
+    internal SearchValues<string>? LeadingStrings;
+
     /// <summary>Upstream <c>is_fuzzy</c>.</summary>
     internal bool IsFuzzy;
 
@@ -520,8 +528,96 @@ internal sealed class PatternObject
 
         self.LeadingRepeat = FindLeadingRepeat(self);
 
+        self.LeadingStrings = FindLeadingStrings(self);
+
         return self;
     }
+
+    /// <summary>
+    /// Finds <see cref="LeadingStrings"/>. Not upstream code: upstream has no fast search for a
+    /// pattern that opens with a branch, so it tries every position (S60b item 14).
+    /// sync-divergence: the search loop jumps to the earliest of these literals before each attempt.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A match of <c>cat|dog</c> starts where <c>cat</c> or <c>dog</c> does, so no attempt anywhere
+    /// else can succeed, and the engine still chooses the branch. The walk follows each branch to
+    /// its first node, looking through capture groups, which record where they open and do not read
+    /// text, and nested branches. Every path must reach a case-sensitive forward literal. Anything
+    /// else, such as an empty branch, a class, a lookaround or an anchor, gives
+    /// <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// A literal holding a surrogate code point on its own is refused. A search for a lone low
+    /// surrogate could stop in the middle of a pair, a position the engine never starts at.
+    /// </para>
+    /// <para>
+    /// Not fuzzy, where an error can delete the literal, and not reversed. Partial matches and
+    /// <c>(*SKIP)</c> are refused at the call site in <c>Matcher.BasicMatch</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern.</param>
+    /// <returns>The literals, or <see langword="null"/>.</returns>
+    private static SearchValues<string>? FindLeadingStrings(PatternObject pattern)
+    {
+        if (pattern.IsFuzzy || (pattern.Flags & RegexFlags.Reverse) != 0)
+        {
+            return null;
+        }
+
+        var strings = new List<string>();
+        int branches = 0;
+
+        return Collect(pattern.StartNode) && branches > 0
+            ? SearchValues.Create([.. strings], StringComparison.Ordinal)
+            : null;
+
+        bool Collect(Node? node)
+        {
+            while (true)
+            {
+                switch (node?.Op)
+                {
+                    case Opcode.Branch when node.Next2.Node is not null:
+                        // The count bounds the recursion, which only a branch nested first in a
+                        // branch takes.
+                        if (++branches > _maxLeadingBranches || !Collect(node.Next1.Node))
+                        {
+                            return false;
+                        }
+
+                        node = node.Next2.Node;
+                        continue;
+                    case Opcode.Branch:
+                    case Opcode.StartGroup:
+                    // The zero-width first-set check the compiler puts in front of a branch
+                    // (ParseFunctions.CheckFirstset) reads nothing; it can only refuse a position.
+                    case Opcode.Character
+                    or Opcode.Range
+                    or Opcode.SetDiff
+                    or Opcode.SetInter
+                    or Opcode.SetSymDiff
+                    or Opcode.SetUnion when node.Step == 0:
+                        node = node.Next1.Node;
+                        continue;
+                    case Opcode.Character when node.Match && node.Step != 0:
+                    case Opcode.String:
+                        if (node.Values.Exists(static c => c is >= 0xD800 and <= 0xDFFF))
+                        {
+                            return false;
+                        }
+
+                        strings.Add(string.Concat(node.Values.Select(static c => char.ConvertFromUtf32((int)c))));
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        }
+    }
+
+    /// <summary>The most branches <see cref="FindLeadingStrings"/> walks before giving up.</summary>
+    private const int _maxLeadingBranches = 1000;
 
     /// <summary>
     /// Finds <see cref="LeadingRepeat"/>. Upstream takes the start node when it is a

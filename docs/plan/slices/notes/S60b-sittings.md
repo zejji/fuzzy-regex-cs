@@ -895,3 +895,145 @@ it once for both. Items 11 and 16 both reject start positions before an attempt,
 call sites. To finish in one sitting, take them in the order 9+14, 16, 11, 12, 13, 8, sweep each,
 and leave the quiet-machine timings to the orchestrator as items 3 and 17 did. An item whose
 quiet-run gain is nil is reverted, not kept.
+
+## 2026-09-24, 01:40 - item 14 landed: an alternation of literals searched at once
+
+### What it is
+
+A single required literal is found with one vectorised `IndexOf`. A pattern that opens with an
+alternation had nothing: `search_start` turns the fast search off for a branch, and the zero-width
+first-set check the compiler puts in front of the branch screens one character. So `cat|dog` tried
+every position that holds a `c` or a `d`, and an alternation of many words tried nearly every
+position.
+
+`PatternObject.FindLeadingStrings` walks from the start node through capture groups, nested
+branches and the first-set check, and collects each branch's first literal. If every path ends in
+a case-sensitive `String` or `Character` node, the literals become one `SearchValues<string>`
+(Ordinal) at compile time. Before each search attempt `Matcher.BasicMatch` jumps to the earliest
+of them in the rest of the slice, or fails when there is none. The engine still picks the branch.
+
+Shapes the compiler already covers get nothing new: branches that share a prefix are split, so
+`abc|abd` starts with a `String`, and single characters become a set, so `a|b` has no leading
+strings.
+
+Guards, and why:
+
+- Search only, not partial: a partial match can end part way through a literal (control A).
+- A literal holding a surrogate code unit is refused: a search for a lone low surrogate can stop
+  inside a pair, where the engine never starts (control B). An astral literal such as `😀a` is a
+  code point above 0xFFFF and is kept.
+- No `(*SKIP)`, not fuzzy, not reversed: every start-position jump in the port leaves these alone.
+  Controls C and D show no row that needs the fuzzy or SKIP guard; a fuzzy section opens with a
+  `FUZZY` node, which the walk refuses anyway.
+- Case-folded literals are refused. `(?i)zebra|yak` is unchanged (23.3 ms before and after).
+
+`SearchValues` rather than item 10's one cached `IndexOf` per literal: that cache lives in one
+`basic_match` call, so a literal absent from the text would be rescanned on every match.
+
+### Timings
+
+Stopwatch probe `.scratch/ds/` against the base worktree's `.scratch/ds-base/`, Release, both with
+`<TieredCompilation>false</TieredCompilation>`, one megabyte of random English words, median of five
+`Matches(...).Count`, another session running (2026-09-24):
+
+| Pattern | Before | After |
+|---|---|---|
+| `straße\|café` | 14.88 ms | 0.12 ms |
+| `alpha\|bravo\|charlie\|delta\|echo` | 23.89 ms | 0.12 ms |
+| `zebra\|yak` | 14.08 ms | 0.12 ms |
+| `(?:zebra\|yak)\d` | 13.58 ms | 0.11 ms |
+| `(zebra\|yak)` | 14.16 ms | 0.12 ms |
+| `cat\w+\|dog\d` | 15.23 ms | 1.31 ms |
+| eight-word `amber\|basil\|...` | 33.06 ms | 0.11 ms |
+| `quick\|lazy\|woods` | 19.15 ms | 9.57 ms |
+| `fox\|dog` (28,926 matches) | 17.13 ms | 3.66 ms |
+| `(?:zebra\|yak\|)x` (14,570 matches) | 3.90 ms | 3.10 ms |
+| `(?i)zebra\|yak` (not covered) | 23.32 ms | 23.46 ms |
+
+Tiering matters here. With tiered compilation on, the first 100 ms or so of
+`SearchValues<string>.IndexOfAny` calls run tier-0 code at 300 to 500 ns a call against 8 to 13 ns
+warm, and the first probes showed false regressions on dense hits for that reason. A short-lived
+process that matches a dense alternation a few thousand times pays that start-up cost.
+
+regex 2026.9.10 takes 162 ms for the four-megabyte search in the new test
+`OptimiserTrapsTests.An_alternation_of_literals_searches_for_all_of_them_at_once`, which failed on
+the base code with `RegexMatchTimeoutException` at its 25 ms budget.
+
+### Correctness evidence: the differential sweep
+
+Harness `.scratch/ls-sweep/` (gitignored), `python run.py <base|new> <label>`, built against this
+tree and against the base worktree at 1182e76. Prefixes `""`, `(?i)`, `(?s)`, `(?m)`, `(?r)`,
+`(?p)`, `(?b)`, `(?e)`, `(?w)`, `(?V1)`, `(?f)`, joined to each of these bodies:
+
+```
+ab|cd  ab|bc  abc|bcd  ab|b  a|bc  x|yz  ab|cd|  ab|cd|e  (ab|cd)  (ab)|(cd)  (?:ab|cd)e
+(ab|cd)\1  (ab|cd)(?1)  (?:ab|cd)(?=c)  (?:ab|cd)(?!d)  (?<=a)(?:bc|cd)  (?:ab|cd)\b
+\b(?:ab|cd)  (?:ab|cd)$  (?:ab|cd)\Z  \G(?:ab|cd)  (?:ab|cd)\G  (?:ab|cd)\Kx
+(?:ab|cd)(*SKIP)x  (?:ab|cd)(*PRUNE)x  (?:ab|cd)(*COMMIT)x  (?:ab|cd)(*FAIL)|d
+(?:ab|cd)x{e<=1}  (?:ab|cd){e<=1}  (?:ab|cd)*  (?:ab|cd)+  (?:ab|cd)?x  (?>ab|abc)d
+(?:ab|abc)d  (?:foo|)bar  (?:a(?:b|c)|d)e  ((?:ab|cd))x  (?:ab|cd)|x+  a+|bc  [ab]c|de
+😀a|b😀  😀|x  \ud83d|a  \ude00|x  \ude00a|yz  (?:ß|ss)x  (ab|cd)(?(1)x|y)  (?:ab|cd)(?r:c)
+(?:ab|cd)\X  (?:aa|ab)*?b  (?:ba|ab)+b  (?:a|ab)(?:c|bcd)  (?|(ab)|(cd))x  (?P<n>ab|cd)(?P=n)
+(?:abc|bcd|cde|def)  (?:x|xy|xyz)z  (?:ab|cd)[^x]  (?:ab|cd).  (?:ab|cd)^x
+```
+
+Subjects `abcd`, `xcdab`, `bcdabc`, `abab cdcd`, the empty string, `a`, `yyzx`, `fobarbar`,
+`abde cde`, `😀ab😀`, `ßssx sx`, `abcdcx`, `aabab`, `abx cdx` and `"😀a"`, one row per
+UTF-16 `(beginning, length)` slice. Each row records `Match`, `MatchAtStart`, `FullMatch`,
+`Matches` and overlapped `Matches`, each with and without `partial`, plus `Split` and `Replace`.
+
+**Result: 246,917 rows, identical between base and the final code.** The generator is exhaustive,
+so there is no seed to vary.
+
+### Negative controls
+
+One edit each, then reverted; the count is rows that differ from base on the final generator.
+
+- Control A, partial guard off. In `Matcher.BasicMatch`, change
+  `search && state.PartialSide == MatchState.PartialNone && !pattern.HasSkipVerb` to
+  `search && !pattern.HasSkipVerb`. **121,401 rows differ.**
+- Control B, surrogate guard off. In `PatternObject.FindLeadingStrings`, change
+  `if (node.Values.Exists(static c => c is >= 0xD800 and <= 0xDFFF))` to append `&& false`, and
+  replace `char.ConvertFromUtf32((int)c)` with
+  `c <= 0xFFFF ? ((char)c).ToString() : char.ConvertFromUtf32((int)c)` so that a lone surrogate
+  converts. **45 rows differ**, all `\ude00a|yz`, under nine prefixes.
+- Control C, fuzzy guard off. Delete `pattern.IsFuzzy ||` from the first line of
+  `FindLeadingStrings`. **0 rows.**
+- Control D, SKIP guard off. Change the condition in control A to
+  `search && state.PartialSide == MatchState.PartialNone`. **0 rows.**
+- Control E, walk accepts anything. In `FindLeadingStrings`, change `default: return false;` to
+  `default: return true;`. **4,959 rows differ**, among them `ab|cd|`, `(?i)(?:ab|cd)|x+` and
+  `(?i)ab|b`.
+
+### Verification
+
+Suite 6780/6780, ratchet GREEN (baseline 6671 to 6672 distinct ids), after adding
+`PatternObject.LeadingStrings` to the `ThreadSafetyTests` allowlist. Permanent files:
+BacktrackingVerbTests 20/20, PartialMatchingTests 55/55, ReverseMatchingTests 40/40. Oracle GREEN
+at all three default seeds. AOT smoke GREEN, 6.84 MB. AOT tests 6780, 0 failed, on two runs; the
+first run, made while the AOT smoke was publishing beside it, exited 2 and its failing test was not
+captured. A re-run under the same load was green. That is the second such unexplained exit on this
+slice (see item 17's notes). `tools/check-sync-divergence.ps1` GREEN.
+
+Item 14 had no `ponytail:` comment and no OPTIMISATION-NOTES row to delete.
+
+**Filters for the orchestrator's quiet run:** no `ManyInputs` row opens with an alternation of
+case-sensitive literals, so none should move. The gain is pinned by the new timing test.
+
+### Review
+
+One blind pass (Opus, the VERIFICATION.md brief): **no defects found**, so no second pass. It
+compiled each pattern twice and nulled `LeadingStrings` on one copy by reflection, which isolates
+the jump. A targeted sweep of 75 patterns over 19 subjects (32,150 rows, 25 patterns jumping) and a
+random fuzz at seeds 1, 2 and 3 (814, 2,205 and 2,162 jumping patterns) gave 0 differences. It
+covered empty branches, anchors, `\K`, `\G`, lookarounds, verbs, atomic groups, recursion,
+conditionals, scoped `(?i:...)`, full folds, `(?r)`, `(?V1)`, `(?w)`, astral literals, lone
+surrogates in the subject, every slice, overlapped and partial matching, `Split` and `Replace`.
+Suite 6780/6780, oracle tests 34/34, Release build 0 warnings. Its comparison with Python differed
+on 1,275 rows with the jump on and off alike, so none come from this change. I sorted them
+(`.scratch/ls-review/cmp2.py`): 519 are `Replace` rows given Python's `<$0>` syntax; the rest are
+slice labels (UTF-16 against code points), a compile error labelled differently where both
+engines refuse `(?:ab(*COMMIT)x|cd)` and `(?:ab(*ACCEPT)|cd)x`, and 508 `(?r)` partial rows
+where regex 2026.9.10 gives None (`.scratch/revp.py`), which is ledger entry 24, the upstream
+reverse-partial bug the port fixes on purpose. Probes in `.scratch/ls-review/` and
+`.scratch/ls-fuzz/`.

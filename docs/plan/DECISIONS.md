@@ -1300,3 +1300,9 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   fuzzy and reversed patterns; identical on 400,411 swept slices. Not for a lazy repeat: `(*SKIP)`
   or `(*PRUNE)` can stop its failed attempt before it has tried every end position. A top-level alternation of `.*` branches is not
   anchored: no benchmark row has that shape.
+- 2026-09-24 (S60b item 14): an alternation of literals at the start is searched with one
+  `SearchValues<string>` built at compile time, not with one cached `IndexOf` per literal as item 10
+  does, because that cache would reset on every `basic_match` call and rescan an absent literal on
+  every match. Case-sensitive forward literals only; off for partial matching, `(*SKIP)`, fuzzy and
+  reversed patterns, and a literal holding a surrogate code unit. Case-folded alternations stay
+  uncovered: `(?i)zebra|yak` is unchanged.
