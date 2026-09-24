@@ -1236,3 +1236,9 @@ anchor, the `(*PRUNE)` and verb-deleted answers, and the port's rendered answer 
 that the embedded rows equal the probe file and that the two arrays line up (30 entries each), and
 ran the oracle suite, 34 of 34 including `Every_expected_divergence_still_diverges`. It returned
 "No defects found." No code changed after either, so no second pass.
+
+### Item 9's owed AOT run
+
+At 46314d8 (item 9's code unchanged since 4e8f887): `tools/run-aot-tests.ps1` GREEN, 6782 tests,
+6779 passed, 3 skipped by design, 0 failed. `tools/run-aot-smoke.ps1` GREEN, 7,244,800 bytes
+(6.91 MB), up from 6.84 MB after item 14 and 6,972,928 bytes at S60.

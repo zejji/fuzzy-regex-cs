@@ -11,7 +11,7 @@ into `search-start-partial` and the generator is on the default oracle list (not
 1. The orchestrator's quiet-machine benchmark baseline (read `CountStringMegabyte` first: 1.10x on
    the gate, the row closest to the floor), then the time gates for items 3 and 17.
 2. S60b: items 16, 11, 12, 13, 8, in that order. `(?i)` named lists are not indexed.
-   Item 9 still owes an AOT run (`tools/run-aot-tests.ps1` stalled on a starved machine).
+   Item 9's AOT run is done: tests and smoke GREEN, 6.91 MB.
 
 ## Findings that need a slice
 1. BESTMATCH over a full-folded backreference and the other unjudged `(?b)`/`(?e)`/`(*SKIP)` rows
