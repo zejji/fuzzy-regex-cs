@@ -3,14 +3,14 @@
 **S60b is in flight** (slice file and `docs/plan/slices/notes/S60b-sittings.md`). Items 2, 3, 9,
 10, 14 and 17 and the `SameCharIgn` fast path are landed and reviewed; item 6 is closed as never
 ported. Items 3 and 17 wait for the orchestrator's quiet run (filters in the notes' "23:10" and
-"2026-09-24, 00:50" sections). Open: 8, 11-13, 16, and the three `long-alternation` rows below.
+"2026-09-24, 00:50" sections). Open: 8, 11-13, 16. The three `long-alternation` rows are judged
+into `search-start-partial` and the generator is on the default oracle list (notes, "03:15").
 
 **S89 is in flight**: the unjudged `(?b)`/`(?e)`/`(*SKIP)` oracle rows.
 ## Next
 1. The orchestrator's quiet-machine benchmark baseline (read `CountStringMegabyte` first: 1.10x on
    the gate, the row closest to the floor), then the time gates for items 3 and 17.
-2. S60b: judge the three `long-alternation` oracle rows (notes, "02:45" section) so the generator
-   joins the default list; then items 16, 11, 12, 13, 8. `(?i)` named lists are not indexed.
+2. S60b: items 16, 11, 12, 13, 8, in that order. `(?i)` named lists are not indexed.
    Item 9 still owes an AOT run (`tools/run-aot-tests.ps1` stalled on a starved machine).
 
 ## Findings that need a slice

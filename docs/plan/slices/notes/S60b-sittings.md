@@ -1204,3 +1204,35 @@ directly, 2,597,284 times over 1,751 indexed runs at every start index, text pos
 end, and compared each answer with a plain scan of the old merged lists. It also compared 900
 patterns (388 indexed) with the index on and off. It found 0 differences and 9 MB for the
 32,000-alternative build, and returned "No defects found."
+
+## 2026-09-24, 03:15 - the three `long-alternation` rows judged; the generator joins the default list
+
+The wave was re-run at 2,000 rows and gave the same three rows: seed 4242 row 1441 and seed
+20260924 rows 377 and 1065. `python tools/probes/gate-divergence-doors.py 4242 20260924` and
+`python tools/probes/upstream-partial-anchor-reachability.py
+tools/probes/s60b-long-alternation-partial-search-rows.jsonl` put the family's questions to each.
+
+| Row | Upstream | Port (codepoints) | Upstream's span in its own grid | `(*PRUNE)` | Verb deleted |
+|---|---|---|---|---|---|
+| 1441 | (0, 4) partial | (3, 4) partial | no | (3, 4) partial | (3, 4) complete |
+| 377 | (2, 6) partial | (5, 6) partial | no | (5, 6) partial | (5, 6) partial |
+| 1065 | (5, 11) partial | (10, 11) partial | no | (10, 11) partial | (10, 11) partial |
+
+On each, the port's span is in the grid and is the first anchor that answers. That is the
+standard rows 14 to 27 of `search-start-partial`'s second arm were judged by, so the three became
+its rows 28 to 30. Row 377's upstream span starts at 2, not 0, at the first character that
+can start a member (the subject is `x b😀😀a`), so like row 16 it is not the whole searched region.
+
+After the edit: `pwsh -File tools/run-oracle.ps1 -Generator long-alternation -Count 2000` GREEN at
+seeds 7, 4242 and 20260924 (expected 2, 3 and 4, diverge 0), and the default wave, now with
+`long-alternation`, GREEN at all three seeds.
+
+### Verifier and review
+
+The verifier (Opus, fresh) re-ran every claim with its own script against regex 2026.9.10: for each
+row, upstream's search answer, its absence from the grid, the port's span as the first answering
+anchor, the `(*PRUNE)` and verb-deleted answers, and the port's rendered answer through
+`run-oracle.ps1 -Rows`. 18 of 18 CONFIRMED. One blind review pass (Opus) re-ran both waves, checked
+that the embedded rows equal the probe file and that the two arrays line up (30 entries each), and
+ran the oracle suite, 34 of 34 including `Every_expected_divergence_still_diverges`. It returned
+"No defects found." No code changed after either, so no second pass.

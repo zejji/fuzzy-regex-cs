@@ -1313,3 +1313,6 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   First units alone left `\b\L<w>\b` at 269 ms a megabyte; pairs took it to 54 ms. Case-insensitive
   tests are not indexed. The `long-alternation` oracle generator stays off the default list until
   its three `(*SKIP)` partial rows, none of which the index causes, are judged.
+- 2026-09-24 (S60b): the three `long-alternation` rows (seed 4242 row 1441, seed 20260924 rows
+  377 and 1065) are `search-start-partial` rows 28 to 30, judged by the reachability grid and the
+  `(*PRUNE)` door, and `long-alternation` is on `run-oracle.ps1`'s default list.
