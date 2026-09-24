@@ -1306,3 +1306,10 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   every match. Case-sensitive forward literals only; off for partial matching, `(*SKIP)`, fuzzy and
   reversed patterns, and a literal holding a surrogate code unit. Case-folded alternations stay
   uncovered: `(?i)zebra|yak` is unchanged.
+- 2026-09-24 (S60b item 9): a run of eight or more alternatives (an alternation or a named list)
+  is indexed by each alternative's first one or two UTF-16 code units and the branch walk jumps
+  over the ones that cannot start here, instead of the spec's per-list trie or
+  `SearchValues<string>`, which would have replaced upstream's branch walk with a second matcher.
+  First units alone left `\b\L<w>\b` at 269 ms a megabyte; pairs took it to 54 ms. Case-insensitive
+  tests are not indexed. The `long-alternation` oracle generator stays off the default list until
+  its three `(*SKIP)` partial rows, none of which the index causes, are judged.

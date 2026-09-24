@@ -1746,6 +1746,7 @@ GENERATORS = (
     "fuzzy-overhang",
     "fuzzy-literal",
     "fuzzy-alternation",
+    "long-alternation",
     "literals-long",
     "quantifiers-long",
     "partial-long",
@@ -6275,6 +6276,71 @@ def _generate_fuzzy_alternation(rng: random.Random, count: int):
         yield _fuzzy_literal_row(rng, i, "fuzzy-alternation", body, constraint, mode, subject, named_lists)
 
 
+# S60b item 9 indexes a run of at least eight alternatives by their first one or two code units
+# (Engine/BranchChain.cs). Every other generator draws two to four, so none reaches it. Members
+# are short and drawn from a small alphabet, so many share a first unit or a first pair; the
+# astral character puts a surrogate pair into the index. No lone surrogate: the consumer's JSON
+# reader refuses one ("missing low surrogate"), so the S60b sweep covered those instead.
+LONG_ALTERNATION_ALPHABET = ("a", "a", "b", "b", "c", "x", "y", "ß", "\U0001F600")
+LONG_ALTERNATION_TEMPLATES = (
+    "{}",
+    "{}",
+    "(?:{})+",
+    "\\b(?:{})\\b",
+    "(?:{})$",
+    "(?:{})b",
+    "({})\\1",
+    "(?:{})(*SKIP)b|c",
+    "(?>{})b",
+    "(?:{})*?$",
+    "(?:{}){{e<=1}}",
+    "x(?:{})|y",
+    "(?=(?:{}))..",
+    "(?:[^a]|{})",
+)
+LONG_ALTERNATION_FLAGS = ("", "", "", "(?i)", "(?r)", "(?fi)", "(?V1)", "(?w)")
+
+
+def _generate_long_alternation(rng: random.Random, count: int):
+    """An alternation or named list of eight to fourteen short members, in one of a few settings.
+
+    The subject is drawn from the members' alphabet, so most positions start some member and many
+    start several that share a first code unit.
+    """
+    for i in range(count):
+        members = [
+            "".join(rng.choice(LONG_ALTERNATION_ALPHABET) for _ in range(rng.choices((0, 1, 2, 3), weights=(1, 4, 6, 4))[0]))
+            for _ in range(rng.randint(8, 14))
+        ]
+        named_lists = {}
+        if rng.random() < 0.5:
+            named_lists = {"words": members}
+            alternation = r"\L<words>"
+        else:
+            alternation = "|".join(re.escape(member) for member in members)
+        pattern = rng.choice(LONG_ALTERNATION_FLAGS) + rng.choice(LONG_ALTERNATION_TEMPLATES).format(alternation)
+        subject = "".join(rng.choice(LONG_ALTERNATION_ALPHABET + (" ",)) for _ in range(rng.randrange(13)))
+        row = {
+            "generator": "long-alternation",
+            "pattern": pattern,
+            "flags": 0,
+            "namedLists": named_lists,
+            "subject": subject,
+            "operation": ALL_OPERATIONS[i % len(ALL_OPERATIONS)],
+        }
+        if row["operation"] in SUB_OPERATIONS:
+            row["template"] = "<>"
+        if row["operation"] in LIMIT_OPERATIONS:
+            row["count"] = rng.choice(SUB_COUNTS if row["operation"] in SUB_OPERATIONS else ITER_LIMITS)
+        if row["operation"] in OPERATIONS and rng.random() < 0.25:
+            row["partial"] = True
+        if row["operation"] in OPERATIONS + SUB_OPERATIONS and rng.random() < 0.33:
+            lo = rng.randrange(len(subject) + 1)
+            row["pos"] = lo
+            row["endpos"] = rng.randrange(lo, len(subject) + 1)
+        yield row
+
+
 def _fuzzy_literal_row(
     rng: random.Random, i: int, generator: str, body: str, constraint: str, mode: str, subject: str, named_lists: dict
 ) -> dict:
@@ -6632,6 +6698,10 @@ def _generate(name: str, rng: random.Random, count: int):
 
     if name == "fuzzy-alternation":
         yield from _generate_fuzzy_alternation(rng, count)
+        return
+
+    if name == "long-alternation":
+        yield from _generate_long_alternation(rng, count)
         return
 
     if name == "posix":

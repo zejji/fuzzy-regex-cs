@@ -530,6 +530,9 @@ internal sealed class PatternObject
 
         self.LeadingStrings = FindLeadingStrings(self);
 
+        // NOT UPSTREAM'S (S60b item 9): index the long runs of branches by first character.
+        BranchChain.Build(self.NodeList);
+
         return self;
     }
 

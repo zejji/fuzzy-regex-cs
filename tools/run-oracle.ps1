@@ -15,8 +15,8 @@
 .PARAMETER Generator
     Comma-separated generator names. See tools/record-oracle.py for what each emits.
 
-    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES AND
-    'fuzzy-overhang'. 'partial-sliced' joined the list in S33, 'verbs' in S34, 'timeout' in S52
+    EVERY GENERATOR IS ON THE DEFAULT LIST EXCEPT THE FOUR LONG-SUBJECT ONES,
+    'fuzzy-overhang' AND 'long-alternation'. 'partial-sliced' joined the list in S33, 'verbs' in S34, 'timeout' in S52
     sitting 14, 'fuzzy-anchored' in S57e and 'fuzzy-literal' and 'fuzzy-alternation' in S60b.
 
     'fuzzy-overhang' is 'fuzzy' with a full-folded backreference whose group ends part-way into
@@ -31,6 +31,15 @@
     filter refusing every subject changed one row in 4000 of 'fuzzy' and 'fuzzy-anchored' at seed 7
     (2026-09-23). 'fuzzy-alternation' is the same with two or three phrases, written as an
     alternation, a named list, or an alternation inside one phrase.
+
+    'long-alternation' is an alternation or named list of eight to fourteen short members, the
+    runs S60b item 9 indexes (Engine/BranchChain.cs); every other generator draws two to four.
+    At 2000 rows it gave 0, 1 and 2 divergences at seeds 7, 4242 and 20260924 (2026-09-24): rows
+    1441, 377 and 1065. All three are partial searches with (*SKIP) where upstream's search
+    reports a partial its own match denies (searchOnlyPartial). Two are case-insensitive, which
+    the index skips, and 377 diverges the same with the index turned off, so they belong to the
+    search-start family in ExpectedDivergences.cs, not to item 9. It joins the default list once
+    a slice has judged them.
 
     'fuzzy-anchored' is 'fuzzy' with a zero-width assertion in front of the whole pattern. S57c
     added it because its negative control could not be made to fire on any other generator: the

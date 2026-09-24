@@ -101,6 +101,15 @@ internal sealed class Node
     /// </summary>
     internal bool Match;
 
+    /// <summary>
+    /// The indexed run of branches this <c>BRANCH</c> node belongs to, or <see langword="null"/>.
+    /// Not an upstream field (S60b item 9); set once by <see cref="BranchChain.Build"/>.
+    /// </summary>
+    internal BranchChain? Chain;
+
+    /// <summary>This node's place in <see cref="Chain"/>.</summary>
+    internal int ChainIndex;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

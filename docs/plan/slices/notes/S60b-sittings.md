@@ -1037,3 +1037,170 @@ engines refuse `(?:ab(*COMMIT)x|cd)` and `(?:ab(*ACCEPT)|cd)x`, and 508 `(?r)` p
 where regex 2026.9.10 gives None (`.scratch/revp.py`), which is ledger entry 24, the upstream
 reverse-partial bug the port fixes on purpose. Probes in `.scratch/ls-review/` and
 `.scratch/ls-fuzz/`.
+
+## 2026-09-24, 02:45 - item 9 landed: long alternations and named lists indexed by first code units
+
+An alternation of n members compiles to n - 1 chained 2-way `BRANCH` nodes, and a named list is
+one of them. Upstream's `BRANCH` arm (`_regex.c:12079`) calls `try_match` on each alternative in
+turn, so a list of a thousand words costs a thousand tests at every position the list is tried.
+The slice spec suggested a per-list `SearchValues<string>` or trie. A trie would have to replace
+the branch walk and keep its order, captures and backtracking, which is a second matcher; the
+index below keeps upstream's walk and only skips the steps that cannot succeed.
+
+`Engine/BranchChain.cs` indexes each run of at least eight alternatives (`MinAlternatives`), when
+at most half of them have no key. An alternative's key is the first one or two UTF-16 code units
+of its test node, when that test is a non-fuzzy forward case-sensitive `STRING`, or a `CHARACTER`
+with `Match` set. On entering a chained branch node with `TextPos < SliceEnd`, the matcher jumps
+to the first alternative from there that can start with the text's next units, or to the run's
+tail. It uses the second unit only when that unit is inside the slice too. Why that is sound:
+`TryMatchOne` and `TryMatchString` fail on a mismatch inside the slice, and a failed `try_match`
+pushes nothing, so a skipped alternative is one upstream would have tried and dropped.
+
+First-unit keys alone were not enough. About forty of the thousand members share each first
+letter, and `\b\L<w>\b` over a megabyte went from 1,840 ms to only 269 ms. Keying on pairs took
+it to 54 ms.
+
+### Timings
+
+`.scratch/ds` list mode: a megabyte of words, Release, tiering off, 1,000 members.
+
+| Pattern | Before | First unit | Two units | regex 2026.9.10 |
+|---|---|---|---|---|
+| `\L<w>` | 135.9 ms | 25.2 ms | 10.6 ms | 3,523 ms |
+| `\b\L<w>\b` | 1,840 ms | 269 ms | 54.0 ms | 1,030 ms |
+| ` \L<w>` | 1,852 ms | 226 ms | 18.9 ms | 1,000 ms |
+| `\w+ \L<w>` | 6,282 ms | 825 ms | 167.6 ms | - |
+| `(?i)\L<w>` | 9,275 ms | not indexed | 9,426 ms | 4,637 ms |
+
+Ten members, against 1182e76 (before item 14, which also helps `\L<w>` at the top level):
+`\b\L<w>\b` 31.9 to 25.2 ms, ` \L<w>` 24.5 to 12.3 ms, `\w+ \L<w>` 195 to 140 ms. No short run
+got slower.
+
+Case-insensitive lists are the obvious next step and are not done: a folded key needs every
+case variant of the first code point, and full folding (`ß` against `ss`) breaks the "one test,
+one first unit" rule. Upstream is twice as fast as this port on `(?i)\L<w>`.
+
+### The timing test
+
+`A_long_named_list_tries_only_the_members_that_can_start_here` searches a megabyte for
+`\b\L<words>\b` with 1,001 members inside a 500 ms budget. It times out without the index (Build
+call commented out, run alone). Run alone it takes 80 ms; inside the full suite it took 700 ms,
+because the rest of the suite runs alongside it, so it is `[NotInParallel]`, which brought it back
+to 79 ms in the suite. The ten-member list beside it pins upstream's answers for one- and two-unit
+members, a shared first unit, an astral first character, `(*SKIP)`, an anchor, and a partial match
+whose second unit is past the slice.
+
+### Sweep and controls
+
+`.scratch/ls-sweep/Program.cs`, rewritten for item 9: 41 bodies, runs of eight or more
+alternatives and two named lists (`l` holds 16 members including the empty string, `😀x`, lone
+`\ud83d` and `\ude00`, `ß` and `ss`; `p` holds nine members sharing `a`), under 11 flag prefixes,
+over every slice of 23 subjects, each slice asked `Match`, `MatchAtStart`, `FullMatch`, `Matches`
+and overlapped `Matches` with and without partial, plus `Split` and `Replace`. Base is the
+worktree `.claude/worktrees/base-8dd746e` at 1182e76. **214,291 rows, 0 differ.**
+
+The sweep is exhaustive, so there is no seed to vary. Controls, applied one at a time by
+`.scratch/ctl9.py <letter>`, which edits the file, runs the sweep and restores it:
+
+- A, in `Matcher.BasicMatch`: `if (node.Chain is { } chain && state.TextPos < state.SliceEnd)`
+  to `... && state.TextPos < state.Text.Length)`. **0 rows.** No row reaches a branch past the
+  slice end, so this guard and the index bound agree on every row swept.
+- B, in `BranchChain.Skip`: `if (textPos + 1 < sliceEnd)` to `if (textPos + 1 < text.Length)`.
+  **2,295 rows.**
+- C, in `BranchChain.Prefix`: `!(test.Op == Opcode.String ||` to
+  `!(test.Op is Opcode.String or Opcode.StringIgn or Opcode.StringFld ||`. **230 rows.**
+- D, in `Prefix`: `(test.Op == Opcode.Character && test.Match)` to `test.Op == Opcode.Character`.
+  **3,132 rows.**
+- E, in `Skip`: `int next = Next(_unkeyed, from);` to `int next = int.MaxValue;`, so no unkeyed
+  alternative is tried. **15,980 rows.** (Before the review fix, when every list repeated the
+  unkeyed ones, the same fault was `=> [.. keyed.Concat(unkeyed).Order()]` to
+  `=> [.. keyed.Order()]` in `Index` and gave 7,157.)
+- F, in `Prefix`: `test is null\n            || (test.Status & NodeStatus.Fuzzy) != 0` to
+  `test is null`. **3,108 rows.**
+- G, in `Skip`: `if (_byFirstOnly.TryGetValue(first, out int[]? only))` to
+  `if (from < 0 && _byFirstOnly.TryGetValue(first, out int[]? only))`, so a one-unit member is
+  never tried when the next two units are in the slice. **3,683 rows.**
+
+Every number above is from the final code, after the review fix: A 0, B 2,295, C 230, D 3,132,
+E 15,980, F 3,108, G 3,683, and the unfaulted sweep 0 of 214,291.
+
+C and D found nothing on the first generator, which had no uppercase subject and no negated
+single-character alternative; the numbers above are after adding `ABcd AB`, `SSx ßX`, `xYZab`,
+`cabd` and three bodies.
+
+### The oracle wave
+
+The spec asks for an oracle wave over list-heavy patterns, and every existing generator draws
+two to four alternatives, below the threshold. New generator `long-alternation` in
+`tools/record-oracle.py`: eight to fourteen members of up to three characters from
+`a b c x y ß 😀`, as an alternation or a named list, in one of 14 settings under 8 flag prefixes,
+with partial matching and slices. It has no lone surrogate: the consumer's JSON reader refuses one
+("Cannot read incomplete UTF-16 JSON text as string with missing low surrogate"), so the sweep
+covers those.
+
+At 2,000 rows: seed 7 agree 1,998, expected 2, diverge 0; seed 4242 one divergence and seed
+20260924 two. The first run of seed 20260924 was misread as one; the blind review counted two.
+All three are `search` with `partial=True` and `(*SKIP)` and carry `searchOnlyPartial` true.
+Rows 1441 and 1065 are case-insensitive, which the index does not touch, and row 377 diverges
+the same with the Build call commented out:
+
+- seed 20260924 row 377: `(?:ac|yb|yb|ß|yy|yx|😀y|aab|cb|y|a|cb|ba)(*SKIP)b|c` over
+  `'x b😀😀a'`: upstream partial (2, 6) code points, port partial (7, 1) UTF-16, which is
+  upstream's own `pruneOutcome`.
+- seed 4242 row 1441: `(?i)(?:\L<words>)(*SKIP)b|c` over `'ß 😀b'`, words
+  `['', 'a', 'b', 'baa', 'by', 'b😀', 'cbx', 'xa', 'xa', 'ßy', '😀x', '😀y']`: upstream partial
+  (0, 4) code points, port partial (4, 1).
+- seed 20260924 row 1065: `(?i)(?:bx|b|c😀|😀a|😀ß|a|xb|cx)(*SKIP)b|c` over `'yabbßbayßx😀'`
+  sliced at UTF-16 [5, 12): upstream partial (5, 11) code points, port partial (10, 2).
+
+They look like the search-start family in `ExpectedDivergences.cs` (upstream's search reports a
+partial its own match denies), but that family is judged row by row, and a judged divergence
+needs the amendment-16 evidence and a verifier. So `long-alternation` stays off the default list,
+like `fuzzy-overhang`, with the three rows named in `tools/run-oracle.ps1`'s help. Judging them is
+open work for S60b.
+
+### Verification
+
+Suite 6781/6781, ratchet GREEN (baseline 6672 to 6673 distinct ids) after adding `Node.Chain` and
+`Node.ChainIndex` to the `ThreadSafetyTests` allowlist. BacktrackingVerbTests, PartialMatchingTests
+and ReverseMatchingTests pass inside that run. Oracle GREEN at all three default seeds.
+`tools/check-sync-divergence.ps1` GREEN with the new row. AOT: not run to the end.
+`tools/run-aot-tests.ps1` started at 02:26 on a machine with under 1 GB free, and its compiler
+(csc, PID 44916) sat at 64 CPU seconds from then on. It was left running, not killed. The AOT
+suite is still owed for item 9.
+
+Item 9 had no `ponytail:` comment and no OPTIMISATION-NOTES row of its own to delete.
+
+**Filters for the orchestrator's quiet run:** no `ManyInputs` row uses a named list or eight
+alternatives, so none should move. The gain is pinned by the timing test.
+
+### Review
+
+One blind pass (Opus) over item 9's whole diff. It compared every answer with the index on and
+off: 14,300 generated patterns, 6,063 of them indexed, 0 differences. It raised two findings, and
+both reproduced.
+
+1. **Quadratic memory.** `Index` copied the unkeyed alternatives into every key's list, and a
+   pair's list also copied its first unit's one-unit list. With half of n alternatives unkeyed and
+   the rest on distinct first units, that is about n^2/4 entries per dictionary. The reviewer's
+   probe measured a 494 MB build at 16,000 alternatives and 1,966 MB at 32,000. Reproduced with a
+   new test, `An_indexed_alternation_with_many_unkeyed_members_builds_in_linear_space`: 8,000
+   alternatives, the build asked to stay under 8 MB, and it allocated 131,338,720 bytes. Fixed.
+   Each list now holds only its own keyed alternatives, and `Skip` takes the nearest entry from up
+   to three lists (the pair or first-unit list, the one-unit list, the unkeyed list). The test
+   passes. The probe now gives 4 MB at 16,000 and 9 MB at 32,000, and whole-pattern compile went
+   from 8.3 s to 2.9 s at 32,000. The cost is one more lookup per chained branch. `.scratch/ds`
+   list mode at 1,000 members, on the same loaded machine: `\L<w>` 10.6 to 11.1 ms,
+   `\b\L<w>\b` 54 to 58 ms, ` \L<w>` 18.9 to 20.7 ms, `\w+ \L<w>` 168 to 180 ms. That is
+   still 17 to 30 times faster than before item 9. The sweep and controls above were re-run after
+   the fix.
+2. **Wrong count in `tools/run-oracle.ps1`'s help.** Seed 20260924 gives two divergences, not
+   one; the second, row 1065, is case-insensitive and so not indexed. Fixed in the help text and
+   in the oracle section above.
+
+The fix changed `BranchChain.Skip` and `Index`, so a second blind pass (Opus, same brief,
+told not to run the suite because memory was short) reviewed that delta only. It called `Skip`
+directly, 2,597,284 times over 1,751 indexed runs at every start index, text position and slice
+end, and compared each answer with a plain scan of the old merged lists. It also compared 900
+patterns (388 indexed) with the index on and off. It found 0 differences and 9 MB for the
+32,000-alternative build, and returned "No defects found."

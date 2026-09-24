@@ -745,6 +745,10 @@ public sealed class ThreadSafetyTests
             "PatternObject.VisibleCaptureCount",
             // Node and NextNode: the opcode graph. Nodes are emitted before their successors exist,
             // so the links are patched up afterwards - upstream's own two-pass shape.
+            // S60b added Chain and ChainIndex, written once by BranchChain.Build during Compile.
+            // The chain's arrays and frozen dictionaries are never written after it is built.
+            "Node.Chain",
+            "Node.ChainIndex",
             "Node.Index",
             "Node.Match",
             "Node.Op",

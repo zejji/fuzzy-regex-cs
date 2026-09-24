@@ -6621,6 +6621,18 @@ internal static class Matcher
                 }
                 case Opcode.Branch: // 2-way branch.
                 {
+                    // NOT UPSTREAM'S (S60b item 9): in a long run of branches, go straight to the
+                    // first alternative that can start with the character here. The ones passed
+                    // over would fail try_match and push nothing (BranchChain).
+                    if (node.Chain is { } chain && state.TextPos < state.SliceEnd)
+                    {
+                        node = chain.Skip(node.ChainIndex, state.Text.Span, state.TextPos, state.SliceEnd);
+                        if (node.Chain != chain)
+                        {
+                            break;
+                        }
+                    }
+
                     status = TryMatch(state, node.Next1, state.TextPos, out Position nextPosition);
                     if (status < 0)
                     {

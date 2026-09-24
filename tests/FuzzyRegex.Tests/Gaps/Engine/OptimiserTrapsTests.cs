@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Engine;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -439,6 +440,112 @@ public sealed class OptimiserTrapsTests
 
         static List<(int, int)> Spans(string pattern, string subject) =>
             [.. new FuzzyRegex(pattern).Matches(subject).Select(static match => (match.Index, match.Length))];
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24, the answers; upstream tries every member")]
+    [NotInParallel]
+    public void A_long_named_list_tries_only_the_members_that_can_start_here()
+    {
+        // A named list compiles to one alternative per member, and every attempt used to try each
+        // alternative's first character in turn: a thousand members cost a thousand tests at every
+        // word boundary. S60b item 9 jumps straight to the members that start with the text's
+        // next one or two code units. Over the megabyte below this port took about 1,840 ms before
+        // and 80 ms after, and upstream 1,099 ms. The test runs on its own because the rest of the
+        // suite, running alongside, made the same search take 700 ms. The members come from a small LCG so the Python probe can
+        // rebuild them.
+        // regex 2026.9.10: search(r'\b\L<words>\b', <this subject>, words=<these members>) ->
+        // (1048610, 1048616)
+        List<string> members = [.. Enumerable.Range(0, 1000).Select(Member), "needle"];
+        var words = new Dictionary<string, IReadOnlyCollection<string>> { ["words"] = members };
+        var pattern = new FuzzyRegex(@"\b\L<words>\b", FuzzyRegexOptions.None, words);
+        string subject = Pad("a needle in a haystack.", _megabyte);
+        _ = pattern.IsMatch("warm-up");
+
+        Func<Match> act = () => pattern.Match(subject, timeout: TimeSpan.FromMilliseconds(500));
+
+        Match found = act.Should().NotThrow().Subject;
+        (found.Index, found.Length).Should().Be((1_048_610, 6));
+
+        // Ten members, enough to be indexed (BranchChain.MinAlternatives): one and two code units
+        // long, several sharing a first unit, and one with an astral first character. Upstream's
+        // answers, from regex 2026.9.10 finditer with w=['ab', 'abc', 'b', 'xyz', 'ac', 'cab',
+        // 'a', 'ba', '\U0001F600x', 'bb'], as (start, end) spans in code points: \L<w> over
+        // 'abcab xyz' gives (0, 3), (3, 5) and (6, 9). \L<w>c over 'abcc' gives (0, 4).
+        // (?:\L<w>)+?$ over 'abcab' gives (0, 5). x|\L<w>|y over 'yxab' gives (0, 1), (1, 2) and
+        // (2, 4). \L<w>(*SKIP)d|b over 'abcd abd' gives (0, 4) and (5, 8). \L<w> over
+        // '\U0001F600x\U0001F600ba' gives (0, 2) and (3, 5). \L<w>$ over 'zab' gives (1, 3). With
+        // partial=True, \L<w> over 'abcab xy' gives (0, 3), (3, 5) and the partial match (6, 8),
+        // whose second code unit is past the slice.
+        Spans(@"\L<w>", "abcab xyz").Should().Equal((0, 3), (3, 2), (6, 3));
+        Spans(@"\L<w>c", "abcc").Should().Equal((0, 4));
+        Spans(@"(?:\L<w>)+?$", "abcab").Should().Equal((0, 5));
+        Spans(@"x|\L<w>|y", "yxab").Should().Equal((0, 1), (1, 1), (2, 2));
+        Spans(@"\L<w>(*SKIP)d|b", "abcd abd").Should().Equal((0, 4), (5, 3));
+        Spans(@"\L<w>", "\U0001F600x\U0001F600ba").Should().Equal((0, 3), (5, 2));
+        Spans(@"\L<w>$", "zab").Should().Equal((1, 2));
+        Spans(@"\L<w>", "abcab xy", partial: true).Should().Equal((0, 3), (3, 2), (6, 2));
+
+        static string Member(int index)
+        {
+            uint state = unchecked(((uint)index * 2654435761u) + 1);
+            char[] letters = new char[5 + (index % 4)];
+            for (int i = 0; i < letters.Length; i++)
+            {
+                state = unchecked((state * 1103515245u) + 12345u);
+                letters[i] = (char)('a' + ((state >> 16) % 26));
+            }
+
+            return new string(letters);
+        }
+
+        static List<(int, int)> Spans(string pattern, string subject, bool partial = false)
+        {
+            var small = new Dictionary<string, IReadOnlyCollection<string>>
+            {
+                ["w"] = ["ab", "abc", "b", "xyz", "ac", "cab", "a", "ba", "\U0001F600x", "bb"],
+            };
+            return
+            [
+                .. new FuzzyRegex(pattern, FuzzyRegexOptions.None, small)
+                    .Matches(subject, 0, subject.Length, overlapped: false, partial)
+                    .Select(static match => (match.Index, match.Length)),
+            ];
+        }
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    [NotInParallel]
+    public void An_indexed_alternation_with_many_unkeyed_members_builds_in_linear_space()
+    {
+        // Half of these 8,000 alternatives start with a character set, which the index cannot key,
+        // and the other half each start with a different character. The first version of
+        // BranchChain copied the unkeyed half into every key's list: 4,000 keys times 4,000
+        // entries, three times over, about 128 MB for this pattern and 2 GB at 32,000 alternatives
+        // (S60b item 9 review). Built once more on its own here, the index should cost a few
+        // entries per alternative.
+        string pattern = string.Join(
+            "|",
+            Enumerable
+                .Range(0, 8000)
+                .Select(static i => i % 2 == 0 ? $"{(char)(0x4E00 + i)}q" : $"[{(char)(0x4E00 + i)}z]q")
+        );
+        List<Node> nodes = new FuzzyRegex(pattern).PatternObject.NodeList;
+        nodes.Count(static node => node.Chain is not null).Should().Be(7999);
+        foreach (Node node in nodes)
+        {
+            node.Chain = null;
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        BranchChain.Build(nodes);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        allocated.Should().BeLessThan(8 * _megabyte);
+        var regex = new FuzzyRegex(pattern);
+        regex.Match($"x{(char)(0x4E00 + 7999)}q").Index.Should().Be(1);
+        regex.Match($"x{(char)(0x4E00 + 7998)}zq").Index.Should().Be(2);
     }
 
     [Test]
