@@ -28,8 +28,6 @@ are not repeated here.
 | `Engine/MatchState.cs:641`, `Engine/Node.cs:56` | `search_positions` and node search offsets | Only the prefilters read/write them; not ported. |
 | `Engine/Optimiser.cs:508` | The match loop consulting the optimiser's markings | Markings are made so the graph has upstream's shape. |
 | `Engine/PatternObject.cs:187` | `ReqFlags` naming a case-insensitive or reverse opcode | Read by `Compile` since before S60, but the opcode it names is still only searched for by the locator arms S60 did not port - see the first row. |
-| `Unicode/Encodings.cs:166` | `same_char_ign_turkic` inside `string_search_fld` | Locator family. |
-| `Unicode/Encodings.cs:177` | The `*_has_property_ign` encoding-table slot | Nothing reaches the slot even now that `search_start` is ported: its `PROPERTY_IGN` arm goes through `MatchesMany`, which writes the collapse out itself. See the PORTMAP row. |
 
 ## API-level and allocation (this port's own ceilings)
 

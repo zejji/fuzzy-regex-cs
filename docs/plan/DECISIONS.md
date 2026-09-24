@@ -1287,3 +1287,16 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   orchestrator runs on a quiet machine with the filters in the sittings notes. Any scan that can
   refuse positions without returning to the matching loop must poll the `Iterations` gate, as
   `SearchStart`'s retry loop now does.
+- 2026-09-23 (S60b item 6): the two encoding arms are never ported, rather than deferred. The
+  `*_has_property_ign` slot does not collapse a cased property under ASCII, and
+  `same_char_ign_turkic` folds the dotless i with 'i' only inside `string_search_fld`; regex
+  2026.9.10 still shows both (`regex.search(r'(?ai)\p{Ll}', 'A')` None against `match` (0, 1);
+  `regex.match('(?fi)fi', 'fı')` (0, 2) against `(?fi)(f)i` None). Porting either would port a known
+  upstream bug (owner rule 2026-09-12), so S22's pins in `CaseInsensitiveMatchingTests.cs` are
+  permanent, and a later `string_search_fld` compares with `SameCharIgn`.
+- 2026-09-24 (S60b item 17): PCRE2's leading `.*` auto-anchoring is already upstream's FAILURE-arm
+  skip (`_regex.c:15719`) for a bare leading repeat. The port adds only a look past the capture
+  groups in front of a greedy repeat, guarded on no referenced group and no group call, and off for
+  fuzzy and reversed patterns; identical on 400,411 swept slices. Not for a lazy repeat: `(*SKIP)`
+  or `(*PRUNE)` can stop its failed attempt before it has tried every end position. A top-level alternation of `.*` branches is not
+  anchored: no benchmark row has that shape.

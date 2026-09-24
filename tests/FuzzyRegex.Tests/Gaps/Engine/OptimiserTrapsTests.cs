@@ -338,6 +338,66 @@ public sealed class OptimiserTrapsTests
     }
 
     [Test]
+    [Property("Upstream", "regex 2026.9.10, the answers only; upstream is quadratic here")]
+    public void A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one()
+    {
+        // When a search attempt that starts with a single-character repeat fails, upstream moves
+        // the next attempt past every character the repeat matched (the FAILURE arm, :15719). An
+        // attempt starting inside that run can only try a subset of the paths the failed one
+        // tried. Upstream looks only at the start node, so the same repeat inside a capture group
+        // gets no skip and the search is quadratic. regex 2026.9.10, 2026-09-23, over 'a' * n:
+        //
+        //   n       (?s).*a\d    (?s)(.*)a\d
+        //   2,000   0.20 ms      75.84 ms
+        //   4,000   0.09 ms      301.63 ms
+        //   8,000   0.18 ms      1,239.38 ms
+        //
+        // This port looked the same (2,643 ms at n = 8,000) until S60b item 17 looked through the
+        // group. The one-second budget is several hundred times what the skip needs.
+        var pattern = new FuzzyRegex(@"(?s)(.*)a\d");
+        string subject = new('a', 8_000);
+        _ = pattern.IsMatch("warm-up");
+
+        Action act = () => pattern.IsMatch(subject, timeout: TimeSpan.FromSeconds(1));
+
+        act.Should().NotThrow();
+        pattern.IsMatch(subject).Should().BeFalse();
+
+        // regex 2026.9.10: search(r'(?s)(.*)a\d', 'xa1ya2') -> (0, 6), group 1 (0, 4)
+        Match greedy = pattern.Match("xa1ya2");
+        (greedy.Index, greedy.Length, greedy.Groups[1].Index, greedy.Groups[1].Length).Should().Be((0, 6, 0, 4));
+
+        // regex 2026.9.10: finditer(r'(\d+)x', '123 45x') -> one match (4, 7), group 1 (4, 6)
+        Match digits = new FuzzyRegex(@"(\d+)x").Match("123 45x");
+        (digits.Index, digits.Length, digits.Groups[1].Index, digits.Groups[1].Length).Should().Be((4, 3, 4, 2));
+
+        // regex 2026.9.10: search(r'(a*)b', 'aaac aab') -> (5, 8), group 1 (5, 7)
+        Match run = new FuzzyRegex("(a*)b").Match("aaac aab");
+        (run.Index, run.Length, run.Groups[1].Index, run.Groups[1].Length).Should().Be((5, 3, 5, 2));
+    }
+
+    [Test]
+    [Property("Upstream", "regex 2026.9.10, 2026-09-24")]
+    public void A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped()
+    {
+        // The skip is sound only when the failed attempt tried every end position of the run. A
+        // greedy repeat does; a lazy one can be cut short by a verb, so the look-through stops at
+        // greedy repeats. Upstream skips for the bare lazy repeat but not the grouped one:
+        // finditer(r'a*?(*SKIP)', 'aaab') gives (0, 0), (4, 4), and the grouped form below gives
+        // every position.
+        // regex 2026.9.10: search(r'(?i)(a*?)(*SKIP)b', 'aab') -> (2, 3)
+        Match skip = new FuzzyRegex(@"(?i)(a*?)(*SKIP)b").Match("aab");
+        (skip.Success, skip.Index, skip.Length).Should().Be((true, 2, 1));
+
+        // regex 2026.9.10: finditer(r'(a*?)(*SKIP)', 'aaab') -> (0, 0), (1, 1), (2, 2), (3, 3), (4, 4)
+        new FuzzyRegex(@"(a*?)(*SKIP)")
+            .Matches("aaab")
+            .Select(static match => match.Index)
+            .Should()
+            .Equal(0, 1, 2, 3, 4);
+    }
+
+    [Test]
     [Property("Upstream", "none - gap test")]
     public void The_two_ranking_modes_improve_on_the_plain_fuzzy_answer()
     {

@@ -731,3 +731,167 @@ It reported one thing outside this diff, and base behaves the same: `\b\B` over 
 1 ms timeout returns False after about 120 ms. The subject has no boundary, so
 `SearchStartZeroWidth` scans the whole of it, and that loop has no poll. It is in STATE.md as a
 finding.
+
+## 2026-09-24, 00:50 - item 6 closed as never ported; item 17 landed
+
+### Item 6: neither encoding arm is ported, ever
+
+Both arms reproduce a known upstream bug, so porting them would add a bug the port does not have.
+Evidence from regex 2026.9.10 (`.scratch/item6.py`, 2026-09-23):
+
+- `same_char_ign_turkic`: `(?fi)fi` over `fı` matches `(0, 2)`, but `(?fi)(f)i` and `(?fi)i` give
+  None. The first answer comes from the Turkic comparison in `string_search_fld`; the other two
+  come from the matcher's own fold, and they disagree.
+- `*_has_property_ign` under ASCII: `(?ai)\p{Ll}*` over `KsKK` matches `(0, 0)` for both match and
+  search, but `(?ai)\p{Ll}+` gives `(0, 2)` for match and `(1, 2)` for search, and `(?ai)\p{Ll}`
+  over `A` gives `(0, 1)` for match and None for search. The search-start sweep and the matcher
+  answer differently.
+
+S22's three pins of these inconsistencies are now permanent under the owner rule of 2026-09-12. The
+comments in `Encodings.cs` and `Matcher.cs` say so, PORTMAP rows 131, 260 and 263 say "Never
+ported", the two OPTIMISATION-NOTES rows are gone, and DECISIONS has the 2026-09-23 entry. A later
+`string_search_fld` must compare with `SameCharIgn`. S22's three self-inconsistencies have no
+upstream-report ledger entry; that is in STATE.md as a finding.
+
+### Item 17: what it became
+
+The item asks for PCRE2's leading `.*` auto-anchoring. Upstream already has most of it: after a
+failed attempt, the FAILURE arm of `basic_match` (`_regex.c:15719`) skips the run of characters a
+leading single-character repeat matched. Under DOTALL that run is the rest of the subject, so
+`(?s).*a\d` is linear. But the arm tests `start_node` itself, and a capture group in front makes
+the start node a `START_GROUP`. So `(?s)(.*)a\d` retries from every position, in upstream and in
+the port:
+
+| Characters | regex 2026.9.10 | Port before | Port after |
+|---|---|---|---|
+| 2,000 | 75.8 ms | 175.8 ms | 1.10 ms |
+| 4,000 | 301.6 ms | 706 ms | 2.20 ms |
+| 8,000 | 1,239 ms | 2,643 ms | 4.30 ms |
+| 16,000 | | 10,388 ms | 8.83 ms |
+
+Stopwatch, Release, one warm-up call, over `'a' * n`, with another session running (probe
+`.scratch/ds/`; upstream from `.scratch/lr.py`). `(?:.*)` and `(?>.*)` were already fast in both.
+
+`PatternObject.FindLeadingRepeat` now looks through the capture groups in front of a greedy repeat,
+and the FAILURE arm uses the result (`PatternObject.LeadingRepeat`). The skip is sound when the
+failed attempt tried every end position in the run, because an attempt starting inside the run can
+only reach those same end positions. A greedy repeat tries them all. A lazy one need not: the
+blind review found that `(*SKIP)`, `(*PRUNE)` or a partial run-out can stop it short, so the lazy
+repeat is not looked through. A group round the repeat changes only what the group holds, so the
+look-through is also guarded on nothing reading it: no referenced group (backreference or
+`(?(n)...)`), no group call. It is off for fuzzy and reversed patterns. The fuzzy guard is the slice's own; control C below
+shows no row that needs it. Ledgered in SYNC-DIVERGENCE.
+
+Not done: a top-level alternation whose every branch starts with `.*`, which PCRE2 also anchors.
+The start node there is a branch, and no benchmark row has that shape.
+
+### Correctness evidence: the differential sweep
+
+Harness in `.scratch/lr-sweep/` (gitignored). A console project built against this tree and
+against a worktree of the base commit 52ba79b. Patterns are every prefix in `""`, `(?i)`, `(?s)`,
+`(?m)`, `(?r)`, `(?p)`, `(?b)`, `(?e)`, `(?w)`, `(?V1)` and `(?fi)` joined to each of these 93
+bodies:
+
+```
+(a*)b  (a+)b  (a*?)b  (a+?)b  (a{2,})b  (a{0,2})b  (a*)  (a+)  (a*)$  (a*)\b  ((a*))b
+(?<n>a*)b  ((a*)b)c  (a*b)c  (a*)(b)  (.*)b  (.*?)b  (.*)ab  (.+)b$  (\w*)\d  (\d+)x
+([ab]*)c  ([^b]*)b  (\s*)\w  (a*)(?=b)  (a*)(?!a)  (a*)(?<=a)b  (a*)\Gb  \G(a*)b  (a*)\Kb
+(a*)(*SKIP)b  (a*)(*PRUNE)b  (a*)(*COMMIT)b  (a*)(*FAIL)|b  (a*)b|c  (a*)b|(a*)c
+(a*)(?:b|ab)  (a*)a  (a*)aa  (a*)(a)  (a*+)b  (?>(a*))b  (a*)b(?1)  (a*)\1b  (a*)(?(1)b|c)
+(a*)b{e<=1}  (?:(a*)b){e<=1}  (😀*)x  (ß*)s  (a*)\B  (a*)^b  (a*)\Z  (a*)(?:)  ()a*b  (a)*b
+(?:a*)b  a*b  (?:(a*))b  (a*)b(a*)  (x*)y*z  (a|b*)c  (a*)(?r:b)  (a*)\X  (a{0,3})b
+(a{1,2})c  (a{0,1})b  (a{2})b  (.{0,2})x  (\d{0,2})x  (a{0,2}?)b  ((a{0,2}))b  (a{1,3})a
+([ab]{0,2})c  (\s{0,1})\w  (a{0,2})b{e<=1}  (a{0,2})\1b  (\w+) \1  (a*)b\1  ((a*))\2b
+(?<n>a*)(?P=n)b  (a+)\1  (\d*)x\1  (a*?)(*SKIP)b  (a*?)(*SKIP)  (a*?)(*PRUNE)b
+(a{0,2}?)(*SKIP)b  (a*?)\G  (a*?)\B  (a*?)(?<=aa)b  a*?(*SKIP)b  (a*)(*SKIP)  (a+?)(*PRUNE)
+```
+
+The subjects are `aaab`, `aaac aab`, `aabab`, `baaa`, `aaaa`, `abab\nab`, the empty string, `a`,
+`123 45x`, `  ab`, `😀😀x`, `ßssx`, `aAaB`, `xyyz xz`, `aaa\nb`, `aaaab ab` and `12x 123x`. One row
+per UTF-16 `(beginning, length)` slice. Each row records ten calls: `Match`, `MatchAtStart`,
+`FullMatch`, `Matches` and overlapped `Matches`, each with and without `partial`, with the span,
+the partial flag and every group.
+
+**Result: 400,411 rows, byte-identical between the base and the final code.** 11 patterns fail to
+compile in both. Narrower generators of 211,431, 325,611 and 356,411 rows were identical on the
+code before the review's fix too; the last ten bodies were added from the review's finding and
+catch it (control D). The generator is exhaustive, so there is no seed to vary.
+
+### Negative controls
+
+Each control is one edit, and a count of rows that differ from base. All four were re-run against
+the final code and the final 400,411-row generator.
+
+- Control A, reference guard off. In `PatternObject.FindLeadingRepeat`, change
+  `&& !pattern.GroupInfoList.Exists(static group => group.Referenced);` to
+  `&& !pattern.GroupInfoList.Exists(static group => group.Referenced && false);`. **2,420 rows
+  differ**, over five bodies: `(a*)\1b`, `(a{0,2})\1b`, `((a*))\2b` and `(?<n>a*)(?P=n)b` at 576
+  rows each, and `(a*)b\1` at 116. On the first generator it was 386 rows, all `(a*)\1b`. The
+  conditional `(a*)(?(1)b|c)` gives no row, because group 1 is always set once the pattern starts.
+- Control B, skip at the maximum. In `Matcher.BasicMatch`, FAILURE arm, change
+  `if (skipCount < leadingRepeat.Values[2])` to `if (skipCount <= leadingRepeat.Values[2])`.
+  **452 rows differ**, over six bounded bodies (`(a{0,2})b`, `((a{0,2}))b`, `(a{0,1})b`,
+  `(a{0,3})b`, `(.{0,2})x`, `([ab]{0,2})c`), and only under `(?i)` and `(?fi)`. Before the
+  review's fix it was 504, the extra 52 from the lazy `(a{0,2}?)b`.
+  Why the other prefixes give no row was not traced; a search-start prefilter that moves past the
+  run is the likely reason. On the first generator it was 22 rows over one body, which is why the
+  bounded bodies were added.
+- Control C, fuzzy guard off. In `FindLeadingRepeat`, delete the `!pattern.IsFuzzy` line and its
+  `&&`. **0 rows differ.** The guard is caution, not a proven need.
+- Control D, lazy look-through back. In `FindLeadingRepeat`, change
+  `return node.Op == Opcode.GreedyRepeatOne ? node : null;` to
+  `return node.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne ? node : null;`. **4,344 rows
+  differ**, over seven bodies: `(a*?)(*SKIP)` 1,552, `(a*?)\G` and `(a*?)\B` 924 each,
+  `(a*?)(*SKIP)b`, `(a*?)(*PRUNE)b` and `(a{0,2}?)(*SKIP)b` 288 each, `(a*?)(?<=aa)b` 80.
+
+### Verification
+
+After the review's fix: suite 6779/6779, ratchet GREEN (baseline 6668 to 6671 distinct ids). The
+first suite run failed
+`ThreadSafetyTests.Every_field_reachable_from_a_compiled_pattern_is_write_once_or_allowlisted` on
+the new field; `LeadingRepeat` is now on its allowlist with the writer named. Permanent files:
+PartialMatchingTests 55/55, BacktrackingVerbTests 20/20, ReverseMatchingTests 40/40. Oracle GREEN
+at all three default seeds (7, 4242, 20260924; 0 diverge). AOT 6779 tests, 0 failed, on three
+runs; one earlier run after the fix exited 2 and the failing test's name was not captured, and it
+did not come back in three re-runs on a machine another session was loading. AOT smoke GREEN,
+6.69 MB. `tools/check-sync-divergence.ps1` GREEN.
+
+**Filters for the orchestrator's quiet run:** none of the `ManyInputs` rows opens with a capture
+group round a single-character repeat, so no existing row should move. Run `ValidateEmails`,
+`ParseLogLines` and `RedactDigits` as a no-regression check on the one extra null test per failed
+attempt. The gain itself is asymptotic and pinned by
+`OptimiserTrapsTests.A_leading_repeat_inside_a_capture_group_is_skipped_like_a_bare_one`.
+
+### Review
+
+Two blind passes (Opus, the VERIFICATION.md brief).
+
+**First pass, the whole diff: one finding, reproduced, fixed.** The look-through reached lazy
+repeats too, and that changed answers: `(?i)(a*?)(*SKIP)b` over `aab` gave None where base and
+regex 2026.9.10 give (2, 3), and `(a*?)(*SKIP)` over `aaab` gave two empty matches where both give
+five. Its own sweep of 225,438 rows differed on 40 patterns, every one a lazy leading repeat inside
+a group. I reproduced it with `.scratch/lazy.py` against upstream and the reviewer's harness, wrote
+the failing test `A_lazy_leading_repeat_inside_a_capture_group_is_not_skipped`, and restricted the
+look-through to greedy repeats. The reviewer's sweep is then identical to base, and control D
+above catches the old code. The item 6 claims checked out against upstream.
+
+**Second pass, the fix only: no defects found.** Its sweep of 96 greedy-focused bodies under 8
+prefixes over 39 subjects, verbs, `\K`, `\G`, lookbehinds, bounds, folds and surrogates included,
+gave 672,808 rows and 0 differences. It removed the lazy guard and saw the new test fail, then put
+it back. Suite 6779/6779; Release build with analyzers, 0 warnings.
+
+It reported one bug outside this change, which base has too and I reproduced: `(?i).{0,2}x` (and
+`(.{0,2})x`) over `"😀x😀😀x"` with a slice that cuts a surrogate pair throws
+`IndexOutOfRangeException` from `MatchState.CharAt` at beginning 1, length 1, and `FullMatch` and
+`Matches` never end at beginning 4 or 6. Repro `.scratch/rv2/Program.cs`. It is in STATE.md.
+
+### The rest of S60b in one sitting
+
+Open: items 8, 9, 11, 12, 13, 14 and 16, each independent of the others. What worked for items 3
+and 17: a failing timing test first, then the change, then a base-vs-new sweep built from
+`.scratch/lr-sweep/Program.cs` with the item's bodies swapped in, then two or three controls
+re-run on the final code. Items 9 and 14 use the same `SearchValues<string>` machinery, so build
+it once for both. Items 11 and 16 both reject start positions before an attempt, at the same two
+call sites. To finish in one sitting, take them in the order 9+14, 16, 11, 12, 13, 8, sweep each,
+and leave the quiet-machine timings to the orchestrator as items 3 and 17 did. An item whose
+quiet-run gain is nil is reverted, not kept.

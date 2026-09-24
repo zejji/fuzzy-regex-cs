@@ -718,6 +718,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
             "PatternObject.IsFuzzy",
+            // S60b added LeadingRepeat, written once by Compile after FuzzyLiteralFilter. It points
+            // at a node of the compiled graph and matching only reads it.
+            "PatternObject.LeadingRepeat",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
             "PatternObject.NamedListIndexes",

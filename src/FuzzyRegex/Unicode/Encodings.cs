@@ -186,8 +186,12 @@ internal static class Encodings
     // I/i?" - is NOT ported as a predicate. Its only two readers here were the two fold functions
     // above, where it made them pass those four through unchanged; <see cref="TurkicDefaults"/>
     // replaces that with the default mapping and is keyed on the same four codepoints. Upstream's
-    // other reader, <c>same_char_ign_turkic</c> inside <c>string_search_fld</c>, is a Phase 7
-    // deferral (see <c>Engine.Matcher</c>'s remarks); a slice restoring it restores this too.
+    // other reader, <c>same_char_ign_turkic</c> inside <c>string_search_fld</c>, is not ported
+    // either, and will not be when <c>string_search_fld</c> is: it folds the dotless i with 'i'
+    // where the rest of upstream does not, so <c>regex.match('(?fi)fi', 'fı')</c> spans (0, 2) and
+    // <c>regex.match('(?fi)(f)i', 'fı')</c> is None (regex 2026.9.10, 2026-09-23). A ported
+    // <c>string_search_fld</c> compares with the matcher's own fold. S60b item 6; DECISIONS
+    // 2026-09-23.
 
     /// <summary>Upstream <c>RE_PROP_GC_LU</c> (<c>upstream/src/_regex.c</c> line 66).</summary>
     /// <remarks>
@@ -195,9 +199,12 @@ internal static class Encodings
     /// <c>_regex.c</c>, not in <c>_regex_unicode.h</c> that
     /// <c>tools/transliterate-unicode.py</c> reads. Their one reader is
     /// <c>Matcher.MatchesPropertyIgn</c>. The <c>*_has_property_ign</c> encoding-table slot they
-    /// also belong to is NOT ported: the matcher never reaches it - only
-    /// <c>matches_PROPERTY_IGN</c> does - and its one other caller, <c>search_start</c>, is the
-    /// Phase 7 deferral.
+    /// also belong to is NOT ported, and S60b decided it never will be. Upstream reaches it from
+    /// <c>match_many_PROPERTY_IGN</c>, which its repeat counter and <c>search_start</c> both use,
+    /// and under the ASCII encoding it does not collapse a cased property the way
+    /// <c>matches_PROPERTY_IGN</c> does. So <c>regex.match(r'(?ai)\p{Ll}', 'A')</c> spans (0, 1)
+    /// while <c>regex.search</c> of the same pair is None (regex 2026.9.10, 2026-09-23). This
+    /// port's <c>MatchMany</c> calls <c>MatchesPropertyIgn</c> on every path instead.
     /// </remarks>
     internal const uint PropGcLu = (UnicodeTables.PropGc << 16) | UnicodeTables.PropLu;
 

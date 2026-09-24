@@ -236,8 +236,9 @@ internal static class Seam
 /// already-folded values. In each, this port finds a match upstream's own search misses (or, for
 /// the first, the other way round). All three are pinned as known differences in
 /// <c>tests/FuzzyRegex.Tests/Gaps/Engine/CaseInsensitiveMatchingTests.cs</c>, with the
-/// <c>regex.match</c> output beside them; DECISIONS 2026-08-31 has the reasoning. <b>A Phase 7
-/// slice restoring any of the three is expected to change those tests, and should.</b>
+/// <c>regex.match</c> output beside them; DECISIONS 2026-08-31 has the reasoning. Under the owner's
+/// rule of 2026-09-12 those pins are permanent: the first two predicates are not ported (S60b item
+/// 6, DECISIONS 2026-09-23), and a later port of the retreat fast path must keep them green.
 /// </para>
 /// </remarks>
 internal static class Matcher
@@ -418,10 +419,10 @@ internal static class Matcher
     /// regex.search(r'(?ai)x?\p{Ll}', 'A') -> (0, 1)     # the prefilter no longer applies
     /// </code>
     /// <para>
-    /// The prefilter is <c>search_start</c>, which this port defers to Phase 7, so our
-    /// <c>search</c> agrees with upstream's <c>match</c> here and not with upstream's
-    /// <c>search</c>. That is the deferral showing through rather than a difference in this
-    /// predicate; DECISIONS 2026-08-31 records it and the gap tests pin both halves.
+    /// The prefilter is <c>search_start</c>. This port's (<see cref="SearchStart"/>, S60b) sweeps
+    /// with this predicate rather than the slot, so our <c>search</c> agrees with upstream's
+    /// <c>match</c> here and not with upstream's <c>search</c>. DECISIONS 2026-08-31 and
+    /// 2026-09-23 record it, and the gap tests pin both halves.
     /// </para>
     /// </remarks>
     /// <param name="encoding">The pattern's encoding.</param>
@@ -5612,8 +5613,8 @@ internal static class Matcher
     /// encoding where its matcher's does, so <c>regex.search(r'(?ai)\p{Ll}', 'A')</c> is None and
     /// <c>regex.match</c> of the same is (0, 1). <see cref="MatchMany"/> asks
     /// <see cref="MatchesOne"/>, which is what this port's matcher asks, so the prefilter cannot
-    /// disagree with the matcher it is screening for. That leaves the deferred encoding slot
-    /// deferred - <c>Unicode/Encodings.cs</c> - and it is why porting this arm does not reopen the
+    /// disagree with the matcher it is screening for. That is why the encoding slot is never ported
+    /// (<c>Unicode/Encodings.cs</c>, S60b item 6), and why porting this arm does not reopen the
     /// three differences S22 measured.
     /// </para>
     /// <para>
@@ -10157,15 +10158,18 @@ internal static class Matcher
                         return MatchStatus.Failure;
                     }
 
-                    // Skip over any repeated leading characters.
-                    if (startNode.Op is Opcode.GreedyRepeatOne or Opcode.LazyRepeatOne)
+                    // Skip over any repeated leading characters. sync-divergence: upstream tests
+                    // 'start_node' itself; LeadingRepeat is that node, or (S60b item 17) the
+                    // greedy repeat behind the capture groups that open in front of it. See
+                    // FindLeadingRepeat.
+                    if (pattern.LeadingRepeat is Node leadingRepeat)
                     {
                         // How many characters did the repeat actually match?
                         long skipCount = CountOne(
                             state,
-                            startNode.Next2.Node!,
+                            leadingRepeat.Next2.Node!,
                             state.TextPos,
-                            startNode.Values[2],
+                            leadingRepeat.Values[2],
                             out bool _,
                             out int skipEnd
                         );
@@ -10173,9 +10177,9 @@ internal static class Matcher
                         // If it's fewer than the maximum then skip over those characters. Upstream's
                         // 'state->text_pos += (Py_ssize_t)count * pattern_step' is the position
                         // CountOne walked to: the pattern step and the repeated node's direction
-                        // agree here, because the repeat is the pattern's own start node, and
+                        // agree here, because the repeat is where the pattern starts, and
                         // CountOne throws for a reverse node in any case (S23).
-                        if (skipCount < startNode.Values[2])
+                        if (skipCount < leadingRepeat.Values[2])
                         {
                             state.TextPos = skipEnd;
                         }

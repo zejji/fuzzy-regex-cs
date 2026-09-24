@@ -126,9 +126,11 @@ likeliest to change an answer.
 
 - [x] `search_start`/`do_search_start` live, the underflow site handled explicitly and pinned.
 - [x] `try_match`'s test-node arm live, or deferred with a row and a comment.
-- [ ] The encoding arms wired whole, or deferred whole - never half.
+- [x] The encoding arms wired whole, or deferred whole - never half. (Neither is ported, ever:
+      both reproduce a known upstream bug. DECISIONS 2026-09-23.)
 - [ ] Each of items 8-14, 16 and 17 either landed with its before/after numbers in the commit
       message, or recorded as measured-and-rejected with the numbers that rejected it.
+      (Done: 10, 17. Open: 8, 9, 11-14, 16.)
 - [ ] Every landed item's `ponytail:` comment and `OPTIMISATION-NOTES.md` row deleted in the same
       commit; every still-deferred item still carries both.
 - [ ] Oracle GREEN at three seeds and the three permanent files green, unchanged, on every sitting
