@@ -58,6 +58,18 @@ The reversed direction and a full-folded backreference fail the same way:
 under `regex.I | regex.V0`. `tools/probes/s83-full-fold-fuzzy-deletion.py` in the reporter's
 repository prints every case above under both versions.
 
+A ligature in the pattern reaches it too, with no foldable pair in the subject:
+
+```python
+>>> regex.match(r'(?fi)(?:ﬆxba){d<=1}', 'STba')
+None
+>>> regex.match(r'(?fi)(?:stxba){d<=1}', 'STba')
+<regex.Match object; span=(0, 4), match='STba', fuzzy_counts=(0, 0, 1)>
+```
+
+`ﬆ` is the st ligature, which full folding makes equal to `st`. Measured 2026-09-24 by
+`tools/probes/s89-partial-fold-rows.py`.
+
 ### Cause
 
 Under full case folding, a literal that holds a pair one character can fold to (fi, ff, st, ss)

@@ -2762,6 +2762,22 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?fi)(f)(?:b(?:\\1)){e<=3,1i+1d+2s<=3}", "flags": 0, "namedLists": {}, "subject": "fSﬄ", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [1]}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [1], "insertions": [], "deletions": [2]}}]}
         """;
 
+    /// <summary>
+    /// The three rows of <c>full-fold-fix-behind-an-innermost-count</c>, copied from the fuzzy wave
+    /// as <c>tools/run-oracle.ps1</c> recorded it on 2026-09-24 with regex 2026.9.10: rows 3874
+    /// and 9010 at seed 20260923, and row 8938 at seed 4242.
+    /// </summary>
+    /// <remarks>
+    /// One row per fold repair the composition has been seen behind: the first needs S83's fold
+    /// fix or S84's retry repair switched off, the second S84's retry repair, the third S84's
+    /// leftovers loop.
+    /// </remarks>
+    private const string _foldFixBehindAnInnermostCountRows = """
+        {"generator": "fuzzy-anchored", "pattern": "(?e)(?fi)\\m(ﬆx)(?:(?:\\1)(?:𝟮.){s<=1}){1i+1d+1s<=1}", "flags": 0, "namedLists": {}, "subject": "ﬆxST𝟮a", "operation": "match", "partial": true, "codepointSpan": [0, 6], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [4], "insertions": [], "deletions": []}}]}
+        {"generator": "fuzzy-overhang", "pattern": "(?fi)(st)(?:[^a](?:a(?:\\1)){2i+1d+1s<=2}){e<=2}", "flags": 0, "namedLists": {}, "subject": "stat", "operation": "match", "partial": true, "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        {"generator": "fuzzy-overhang", "pattern": "(?fi)(?r)(?:\\A(?:(?:\\1)a){e<=2,s<=1}[^a]){e<=3,1i+1d+2s<=3:[a-f]}(f)", "flags": 0, "namedLists": {}, "subject": "ﬀAf", "operation": "match", "partial": true, "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [2], "insertions": [], "deletions": []}}]}
+        """;
+
     private static readonly ExpectedDivergence[] _entries =
     [
         new(
@@ -6132,6 +6148,79 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
+            Id: "full-fold-fix-behind-an-innermost-count",
+            Reason: "TWO DELIBERATE DIVERGENCES ON ONE PARTIAL MATCH: a full-fold repair (ledger "
+                + "entry 28, 29 or 30) and upstream's innermost-section count (ledger entry 11 "
+                + "mechanism B). Judged by S90 on 2026-09-24 on regex 2026.9.10. Neither entry "
+                + "alone accounts for the row, because each compares this port's live answer with "
+                + "upstream's, and here the two differ by both at once.\n"
+                + "HOW IT WAS TAKEN APART. Seed 20260923 row 9010 is "
+                + "`(?fi)(st)(?:[^a](?:a(?:\\1)){2i+1d+1s<=2}){e<=2}` matched partially over "
+                + "'stat'. Upstream answers a partial (0, 4) with one substitution at 2. This port "
+                + "answers a complete (0, 4) with deletions at 2 and 4, which is what upstream "
+                + "itself gives with `ast` in place of `a(?:\\1)`, or with `(?i)` in place of "
+                + "`(?fi)` (`python tools/probes/s89-partial-fold-rows.py`). With S84's retry "
+                + "repair switched off "
+                + "(`PatternObject.SkipRetriedFoldSteps`) this port answers substitutions at 2 and "
+                + "3, and upstream's single substitution is the first of those, truncated to the "
+                + "count of the innermost section still open: mechanism B exactly. Without "
+                + "`partial` both the ablated port and upstream find no match. Seed 20260923 row "
+                + "3874 comes apart the same way under S83's fold fix or S84's retry repair, and "
+                + "seed 4242 row 8938 under S84's leftovers loop "
+                + "(`PatternObject.SkipGroupFoldLeftovers`).\n"
+                + "MECHANISM B NEEDS NO FOLDING. `(?:x(?:ab){s<=1}){s<=1}` over 'yc', partial: "
+                + "upstream reports one substitution at 0, this port two, at 0 and 1. That row "
+                + "belongs to `fuzzy-counts-of-a-partial-are-the-innermost-sections`.\n"
+                + "KEYED ON AN ABLATION AND A PREDICATE: a row belongs here when one of the fold "
+                + "ablations that `full-fold-fuzzy-deletion`, `full-fold-backreference-leftovers` "
+                + "and `full-fold-backreference-retry` use gives an answer that "
+                + "`fuzzy-counts-of-a-partial-are-the-innermost-sections` would accept, AND this "
+                + "port's live answer is the one being judged. The control is "
+                + "`A_row_the_fold_fix_does_not_explain_is_not_accounted_for`.",
+            PinnedBy: "FullFoldFuzzyDeletionTests, FullFoldBackreferenceLeftoversTests and "
+                + "Gaps.Engine.FuzzyMatchingTests.The_reported_changes_agree_with_the_counts_on_"
+                + "every_shape_that_used_to_contradict_them",
+            Example: _foldFixBehindAnInnermostCountRows,
+            Applies: static (row, ours) =>
+                row.Partial
+                && (
+                    TheAblationAndTheInnermostCountExplainIt(row, ours, OracleComparer.RunWithoutTheFoldFix(row))
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheGroupFoldLeftovers(row)
+                    )
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheRetriedFoldSteps(row, withoutTheFoldFix: false)
+                    )
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheRetriedFoldSteps(row, withoutTheFoldFix: true)
+                    )
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheRetriedFoldSteps(
+                            row,
+                            withoutTheFoldFix: false,
+                            withoutTheGroupFoldLeftovers: true
+                        )
+                    )
+                    || TheAblationAndTheInnermostCountExplainIt(
+                        row,
+                        ours,
+                        OracleComparer.RunWithoutTheRetriedFoldSteps(
+                            row,
+                            withoutTheFoldFix: true,
+                            withoutTheGroupFoldLeftovers: true
+                        )
+                    )
+                )
+        ),
+        new(
             Id: "boundary-at-the-end-of-the-text",
             Reason: "Deliberate divergence, slice S57d, 2026-09-21 (upstream issue 589, ledger "
                 + "entry 21; docs/DIVERGENCES.md). Where a word or grapheme boundary is decided at "
@@ -6632,6 +6721,29 @@ internal static class ExpectedDivergences
     private static bool OnlyTheAblationExplainsIt(OracleRow row, IOracleOutcome ours, IOracleOutcome? ablated) =>
         ablated is not null
         && OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
+        && OracleComparer.Run(row) is { } live
+        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether one ablated run leaves only ledger entry 11 mechanism B between the two engines.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="OnlyTheAblationExplainsIt"/> with its exact agreement relaxed to
+    /// <see cref="UpstreamCountedOnlyTheInnermostSection"/>, for S90's composed rows: with the fix
+    /// switched off, upstream's counts must be the innermost section's truncation of this port's
+    /// script, and the live answer must be the one being judged.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <param name="ablated">This port's answer with the fix switched off.</param>
+    /// <returns><see langword="true"/> if the fix and the innermost count explain the divergence.</returns>
+    private static bool TheAblationAndTheInnermostCountExplainIt(
+        OracleRow row,
+        IOracleOutcome ours,
+        IOracleOutcome? ablated
+    ) =>
+        ablated is not null
+        && UpstreamCountedOnlyTheInnermostSection(row, ablated)
         && OracleComparer.Run(row) is { } live
         && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
 

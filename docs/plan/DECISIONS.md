@@ -1302,3 +1302,8 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   82 B a repetition for `(ab)*` and 46 for `(?:ab)*`, so `fullmatch` tops out between 6,000,000 and
   10,000,000 repetitions, as upstream's does; stdlib `re` still matches at 10,000,000. It would be a
   deliberate divergence from upstream in memory, not in answers. No code until the owner decides.
+- 2026-09-24 (S90): when no single oracle entry claims a row, try composing two port-right
+  divergences before calling it new. S90's three partial rows were a fold repair (ledger 28, 29 or
+  30) plus ledger 11 mechanism B. The entry `full-fold-fix-behind-an-innermost-count` runs each
+  fold ablation and hands the result to `UpstreamCountedOnlyTheInnermostSection`, not to exact
+  agreement. Mechanism B needs no folding: `(?:x(?:ab){s<=1}){s<=1}` over 'yc', partial.

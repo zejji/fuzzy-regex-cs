@@ -1,11 +1,9 @@
 # Current state
-
-**S86 is done** (`docs/plan/slices/done/S86-repeated-capture-group-bytes.md`). A repeat now puts
-upstream's bytes on the backtracking stack, 82 B a repetition for `fullmatch('(ab)*')` (was 151),
-so `(ab)*` over `'ab' * 6_000_000` matches as upstream does. Ledger entry 18's amplification is
-fixed; upstream's own cost remains the report.
-
-**S89 and S61 are done**; closing notes in `docs/plan/slices/done/`.
+**S90 is done** (`docs/plan/slices/done/S90-partial-fold-rows.md`). The three partial rows over a
+full-folded ligature are port-right. Each is a fold repair (ledger 28, 29 or 30) stacked on ledger
+11 mechanism B, and a new oracle entry, `full-fold-fix-behind-an-innermost-count`, claims them. No
+engine change. The fuzzy and default waves both give diverge 0 at all three seeds. S86, S89 and
+S61 are done too; closing notes in `docs/plan/slices/done/`.
 
 **S60b is in flight** (`docs/plan/slices/S60b-search-start-and-the-researched-prefilters.md`, notes
 in `docs/plan/slices/notes/S60b-sittings.md`). Its item 3 rewrote `TryMatch` and sends SUCCESS to
@@ -17,7 +15,6 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 1. The orchestrator re-records the full benchmark baseline in process on merged main. S86 asks for
    `*WorkloadBenchmarks*` on the quiet gate: its one hot-path change is a compare in `TryMatch`.
 2. S60b item 3 and onwards.
-3. **S90**: three partial rows over a full-folded ligature (`docs/plan/slices/S90-partial-fold-rows.md`).
 
 ## Waiting on the owner
 
