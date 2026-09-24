@@ -1242,3 +1242,23 @@ ran the oracle suite, 34 of 34 including `Every_expected_divergence_still_diverg
 At 46314d8 (item 9's code unchanged since 4e8f887): `tools/run-aot-tests.ps1` GREEN, 6782 tests,
 6779 passed, 3 skipped by design, 0 failed. `tools/run-aot-smoke.ps1` GREEN, 7,244,800 bytes
 (6.91 MB), up from 6.84 MB after item 14 and 6,972,928 bytes at S60.
+
+### Item 16, mapped for the next sitting (not started: under an hour was left)
+
+- The site. `SearchStart` (`Matcher.cs:5676`) sends the `Character`, `Range`, `Property` and
+  `Set*` test arms (about `:5758-5781`) to `MatchMany` (`:5500`), which walks one position at a
+  time through `state.NextPos`/`PrevPos` and asks `MatchesMany` at each. That loop is what a
+  `SearchValues<char>` or bitmap scan replaces, forward and case-sensitive first. Astral
+  characters and the `_REV` arms need their own answer (a scan over UTF-16 units must not stop
+  inside a surrogate pair). Keep the per-position loop as the fallback.
+- Build once, at compile time, beside `StartTest` (`PatternObject.cs:87`, set at
+  `NodeCompiler.cs:165`) and beside item 14's `FindLeadingStrings` (`PatternObject.cs:564`).
+  A set qualifies when every member is a BMP code unit and it can be listed; negated and property
+  sets need the bitmap form or stay on the loop.
+- Gate. `HasSkipVerb` gates the other jumps at `Matcher.cs:5348`, `:6039` and `:6057`. The
+  `SearchStart` arms already run under `searchStartAllowed`, so check whether the new scan
+  inherits that gate or needs its own.
+- No `ponytail:` comment or OPTIMISATION-NOTES row names item 16. The row for the rest of
+  `SearchStart` is `OPTIMISATION-NOTES.md:24`.
+- Evidence to reuse: `.scratch/lr-sweep` and `.scratch/ls-sweep` for the base-vs-new sweep, and
+  `.claude/worktrees/base-8dd746e` as base (move it to 0a8f73d first).
