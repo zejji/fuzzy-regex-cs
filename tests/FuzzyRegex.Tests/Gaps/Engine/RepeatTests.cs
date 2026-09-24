@@ -341,5 +341,36 @@ public sealed class RepeatTests
             .And.NotContain(Opcode.GreedyRepeatOne, "sequence_matches_one refuses a fuzzy body");
     }
 
+    [Test]
+    [Arguments("(ab)*", 82_055)]
+    [Arguments("(?:ab)*", 46_055)]
+    public void A_full_match_of_a_repeat_leaves_upstreams_bytes_on_the_backtrack_stack(string pattern, int bytes)
+    {
+        // Ledger entry 18. Upstream's figure is the peak of state->bstack for
+        // fullmatch(pattern, 'ab' * 1000), read from an instrumented /Od build of regex 2026.9.10
+        // by `python tools/probes/upstream-repeat-bytes.py 1000` (2026-09-24). Per repetition
+        // END_GREEDY_REPEAT pushes BODY_END (32 + 1 B) and BODY_START (4 + 8 + 1 B), and the group
+        // adds its END_GROUP record (32 B) and four flag bytes: 46 and 82 B a repetition. It pushes
+        // no MATCH_TAIL record, because try_match's SUCCESS arm (_regex.c:7828) fails the tail
+        // short of the end of a full match. Before S86 this port pushed that record, and pushed
+        // every RE_CODE and the group record's two indexes 8 bytes wide: 107 and 151 B.
+        FuzzyRegex regex = new(pattern);
+        string subject = string.Concat(Enumerable.Repeat("ab", 1_000));
+        using MatchState state = MatchState.Create(
+            regex.PatternObject,
+            subject.AsMemory(),
+            0,
+            subject.Length,
+            overlapped: false,
+            partial: false,
+            visibleCaptures: true,
+            matchAll: true,
+            regex.PatternLimits
+        );
+
+        Matcher.DoMatch(state, search: false).Should().Be(MatchStatus.Success);
+        state.Bstack.Count.Should().Be(bytes);
+    }
+
     private static readonly Dictionary<string, IReadOnlyList<string>> _noNamedLists = new(StringComparer.Ordinal);
 }

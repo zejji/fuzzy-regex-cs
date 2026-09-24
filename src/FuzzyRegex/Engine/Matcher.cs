@@ -2708,10 +2708,11 @@ internal static class Matcher
     /// Upstream's <c>ByteStack_push_block(..., &amp;data_g, sizeof(data_g))</c>, field by field.
     /// </summary>
     /// <remarks>
-    /// Upstream pushes the struct's bytes, padding and all; this pushes the five fields as five
-    /// 8-byte words. The stack is internal to the engine and the only requirement on it is that the
-    /// pop is the mirror image of the push, so the difference is 8 bytes of stack per group entry
-    /// and nothing else.
+    /// Upstream pushes the struct's bytes: three 8-byte fields and two 4-byte <c>RE_CODE</c>s, 32
+    /// bytes with no padding (lines 416-422). This pushes the same widths field by field. S86 made
+    /// them match: five 8-byte words cost a capturing repeat 8 bytes more per iteration than
+    /// upstream, enough on their own to fail <c>fullmatch('(ab)*', 'ab' * 6_000_000)</c> at the 1GB
+    /// bound upstream passes under (ledger entry 18).
     /// </remarks>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
@@ -2720,8 +2721,8 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         stack.PushSize(data.Current);
         stack.PushSize(data.CaptureChange);
-        stack.PushSize(data.PrivateIndex);
-        stack.PushSize(data.PublicIndex);
+        stack.PushCode((uint)data.PrivateIndex);
+        stack.PushCode((uint)data.PublicIndex);
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
@@ -2733,8 +2734,8 @@ internal static class Matcher
         data = default;
 
         if (
-            !stack.PopSize(out long publicIndex)
-            || !stack.PopSize(out long privateIndex)
+            !stack.PopCode(out uint publicIndex)
+            || !stack.PopCode(out uint privateIndex)
             || !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long current)
             || !stack.PopSize(out long textPos)
@@ -2993,6 +2994,17 @@ internal static class Matcher
     /// <see cref="TryMatchOne"/> and its siblings answer <c>PARTIAL</c> only when
     /// <c>partial_side</c> is set, which no ordinary match sets.
     /// </para>
+    /// <para>
+    /// <b>S86 restored the <c>SUCCESS</c> arm (<c>:7828</c>), because a wasted tail is not free in a
+    /// repeat.</b> When <c>END_GREEDY_REPEAT</c> finds that both the body and the tail could match,
+    /// it pushes a <c>MATCH_TAIL</c> record (57 B here) before it re-enters the body, and nothing
+    /// pops it while the repeat runs. Under a full match the tail is the <c>SUCCESS</c> node, which
+    /// upstream refuses short of the end, so <c>fullmatch('(ab)*', 'ab' * n)</c> costs upstream
+    /// 82 B a repetition and cost this port 151 (ledger entry 18). The arm fails exactly where the
+    /// <c>SUCCESS</c> opcode in <see cref="BasicMatch"/> would, bounds and all: upstream's own arm
+    /// tests reversed matches against <c>text_start</c> where its opcode tests
+    /// <c>slice_start</c>, which is the narrowed-slice bug DECISIONS 2026-09-12 records.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="next">The exit to test.</param>
@@ -3013,6 +3025,13 @@ internal static class Matcher
         if (IsStringTest(test.Op))
         {
             return IsStringTestPartial(state, test, textPos) ? MatchStatus.Partial : MatchStatus.Success;
+        }
+
+        if (test.Op == Opcode.Success)
+        {
+            // We want to match all of the slice (:7829).
+            bool shortOfTheEnd = state.Reverse ? textPos != state.SliceStart : textPos != state.SliceEnd;
+            return state.MatchAll && shortOfTheEnd ? MatchStatus.Failure : MatchStatus.Success;
         }
 
         if (!IsOneCharacterTest(test.Op))
@@ -6928,7 +6947,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -6946,7 +6965,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7080,7 +7099,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7095,7 +7114,7 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -7499,7 +7518,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -7514,7 +7533,7 @@ internal static class Matcher
                         // Only the tail could match.
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7879,7 +7898,7 @@ internal static class Matcher
                         }
 
                         // Record backtracking info in case the tail fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -7894,7 +7913,7 @@ internal static class Matcher
                         // Only the body could match.
 
                         // Record backtracking info in case the body fails to match.
-                        state.Bstack.PushSize(index);
+                        state.Bstack.PushCode((uint)index);
                         state.Bstack.PushSize(state.TextPos);
                         state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -9970,7 +9989,7 @@ internal static class Matcher
                 {
                     /* bstack: index text_pos */
 
-                    if (!state.Bstack.PopSize(out long bodyTextPos) || !state.Bstack.PopSize(out long bodyIndex))
+                    if (!state.Bstack.PopSize(out long bodyTextPos) || !state.Bstack.PopCode(out uint bodyIndex))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10632,7 +10651,7 @@ internal static class Matcher
                     rpData.CaptureChange = dataMbt.CaptureChange;
 
                     // Record backtracking info in case the body fails to match.
-                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.BodyStart);
 
@@ -10661,7 +10680,7 @@ internal static class Matcher
                     rpData.CaptureChange = dataMbt.CaptureChange;
 
                     // Record backtracking info in case the tail fails to match.
-                    state.Bstack.PushSize(dataMbt.Index);
+                    state.Bstack.PushCode((uint)dataMbt.Index);
                     state.Bstack.PushSize(dataMbt.TextPos);
                     state.Bstack.PushUInt8((byte)Opcode.TailStart);
 
@@ -10676,7 +10695,7 @@ internal static class Matcher
                 {
                     /* bstack: index text_pos */
 
-                    if (!state.Bstack.PopSize(out long tailTextPos) || !state.Bstack.PopSize(out long tailIndex))
+                    if (!state.Bstack.PopSize(out long tailTextPos) || !state.Bstack.PopCode(out uint tailIndex))
                     {
                         return MatchStatus.Illegal;
                     }

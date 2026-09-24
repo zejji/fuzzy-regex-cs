@@ -247,6 +247,23 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
         return PopBlock(MemoryMarshal.AsBytes(new Span<long>(ref item)));
     }
 
+    /// <summary>
+    /// Upstream <c>push_code</c> (line 2463). An <c>RE_CODE</c> is 32 bits, so this is 4 bytes where
+    /// <see cref="PushSize"/> is 8; a repeat pushes one per iteration, which is why the width
+    /// matters (ledger entry 18).
+    /// </summary>
+    /// <param name="item">The value to push.</param>
+    internal void PushCode(uint item) => PushBlock(MemoryMarshal.AsBytes(new ReadOnlySpan<uint>(in item)));
+
+    /// <summary>Upstream <c>pop_code</c> (line 2635).</summary>
+    /// <param name="item">Receives the value.</param>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool PopCode(out uint item)
+    {
+        item = 0;
+        return PopBlock(MemoryMarshal.AsBytes(new Span<uint>(ref item)));
+    }
+
     /// <summary>Upstream <c>drop_ssize</c> (line 2785).</summary>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     internal bool DropSize() => DropBlock(sizeof(long));

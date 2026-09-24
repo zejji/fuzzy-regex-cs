@@ -118,50 +118,30 @@ public sealed class InheritedIssueTests
         //   6,000,000   ok (98 B/rep)  ok (161 B/rep)      (not reached)
         //   10,000,000  ok (92 B/rep)  MemoryError         (not reached)
         //
-        // All three columns exclude the subject string: each probe builds it before it starts
-        // measuring, so these are engine allocations per repetition rather than totals. Only the
-        // port's FIRST row is quotable - the engine rents its backtracking buffer from a
-        // process-wide pool, so a later call in the same process may reuse it and appear to
-        // allocate half as much. Ledger entry 18 has the detail.
+        // All three columns exclude the subject string. Ledger entry 18 has the detail.
         //
-        // Where the bytes go, from the stack of the run that proved this: Matcher.BasicMatch ->
-        // PushMatchBodyTailStateData -> ByteStack.PushSize -> PushBlock -> Grow. One
-        // MatchBodyTailStateData block per repetition, never popped while the repeat is running.
+        // FIXED TO PARITY BY S86 (2026-09-24). The backtracking stack's bytes are what count,
+        // because the 1GB bound is tested against the DOUBLED capacity (_regex.c:2357), so the
+        // largest usable stack is 512MB. An instrumented build of upstream
+        // (`python tools/probes/upstream-repeat-bytes.py`) puts 82 B a repetition on it for this
+        // pattern: 82 * 6,000,000 = 492MB fits, 82 * 10,000,000 does not. This port pushed 151 B,
+        // for two reasons: its try_match had no SUCCESS arm, so every repetition parked a 57-byte
+        // MATCH_TAIL record upstream never pushes, and it pushed each RE_CODE 8 bytes wide where
+        // upstream pushes 4. RepeatTests pins the byte count itself; this test pins what it buys.
         //
-        // PARKED BY S50, and this test pins the ceiling this port actually reaches rather than the
-        // one S49 asked for. The bar S49 wrote was upstream's own n=6,000,000; meeting it needs the
-        // per-repetition cost roughly halved, and that is an engine optimisation with a
-        // memory-for-throughput trade-off, which Phase 7 owns behind benchmarks. What S50 checked
-        // before parking it (.scratch probes re-run 2026-09-14, and the numbers are in the closing
-        // notes) is that neither of the two cheap answers is the right one:
-        //
-        //   - The capture group is where the cost is. `(?:ab)*` reaches n=4,000,000 and fails at
-        //     6,000,000; `(ab)*` fails at 4,000,000. Atomic `(?>(ab)*)` and possessive `(ab)*+`
-        //     both still fail at 4,000,000, so the blocks are pushed inside the group either way.
-        //   - Raising or reshaping the bound would be a patch on the symptom. The 1GB limit is
-        //     tested against the DOUBLED capacity (ByteStack.Grow), so the largest usable stack is
-        //     just under 512MB - but that is upstream's own check, ported faithfully
-        //     (_regex.c:2357), and upstream reaches 6,000,000 under the same cap because its
-        //     per-repetition cost is lower. Clamping the capacity would make this test pass while
-        //     leaving the actual defect untouched.
-        //
-        // The failure MODE is already better than upstream's, which is what issue 554 reports: a
-        // clear exception naming a documented bound, where upstream raises MemoryError at
-        // n=10,000,000 and stdlib `re` still succeeds there. So what is left is a performance gap,
-        // not a wrong answer, and STATE.md carries it as a named blocker.
+        // Whether a body with no alternative should cost O(1) per repetition, as stdlib `re`
+        // manages, is a divergence from upstream and the owner's call (DECISIONS 2026-09-24).
         var repeated = new FuzzyRegex("(ab)*", FuzzyRegexOptions.None, TimeSpan.FromMinutes(2));
 
-        // The size this port does manage. 4,000,000 chars of subject, so not free, but ~2s.
-        string reached = string.Concat(Enumerable.Repeat("ab", 2_000_000));
+        // Upstream's own ceiling, reached.
+        string reached = string.Concat(Enumerable.Repeat("ab", 6_000_000));
         Match m = repeated.FullMatch(reached);
 
         m.Success.Should().BeTrue();
         m.Length.Should().Be(reached.Length);
 
-        // And the size it does not, failing at the documented bound rather than dying. This is the
-        // line that goes green when Phase 7 halves the per-repetition cost, and it must then be
-        // rewritten to upstream's 6,000,000 rather than deleted.
-        string beyond = string.Concat(Enumerable.Repeat("ab", 4_000_000));
+        // And where upstream raises MemoryError, this port fails at the same documented bound.
+        string beyond = string.Concat(Enumerable.Repeat("ab", 10_000_000));
 
         Assert
             .Throws<InvalidOperationException>(() => repeated.FullMatch(beyond))
