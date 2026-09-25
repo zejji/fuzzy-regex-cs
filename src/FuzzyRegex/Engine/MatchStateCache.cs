@@ -13,15 +13,15 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// <b>One slot, taken and put back with <see cref="Interlocked.Exchange{T}(ref T, T)"/></b>, which
 /// is the shape of the built-in <c>Regex._runner</c>. A call that finds the slot empty, because
 /// another thread holds the state, builds its own and offers it back
-/// afterwards; whichever state arrives last is the one kept, and the other is left to the
-/// collector. So two threads never share a state, and the slot is the only field any call writes.
+/// afterwards; whichever state arrives last is the one kept, and the other gives its buffers back
+/// to the pool and is left to the collector. So two threads never share a state, and the slot is the only field any call writes.
 /// Upstream guards its storage with the pattern's lock instead (<c>acquire_state_lock</c>,
 /// <c>:20847</c>), which this port does not have.
 /// </para>
 /// <para>
-/// A state that comes back has already let go of the call's subject and cancellation token and
-/// returned its stack buffers to the pool (<see cref="MatchState.Release"/>). What it keeps is what
-/// upstream keeps: the group and repeat blocks, grown to the largest match seen so far.
+/// A state that comes back has already let go of the call's subject and cancellation token
+/// (<see cref="MatchState.Release"/>). What it keeps is what upstream keeps: the group and repeat
+/// blocks, grown to the largest match seen so far, and its stack buffers up to 64 KB each.
 /// </para>
 /// <para>
 /// sync-divergence: upstream keeps three separate buffers on the pattern under its lock and
@@ -117,6 +117,9 @@ internal sealed class MatchStateCache
     internal void Return(MatchState state)
     {
         state.Release();
-        Volatile.Write(ref _state, state);
+
+        // A state already in the slot came back from a call that ran alongside this one. It is
+        // dropped, so its kept buffers go back to the pool rather than to the collector.
+        Interlocked.Exchange(ref _state, state)?.ReturnBuffers();
     }
 }

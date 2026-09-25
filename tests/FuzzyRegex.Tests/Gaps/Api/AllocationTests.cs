@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
@@ -9,7 +11,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Api;
 /// </summary>
 /// <remarks>
 /// The count is <see cref="GC.GetAllocatedBytesForCurrentThread"/>, which counts only this thread's
-/// allocations, so tests running in parallel on other threads do not disturb it. "Warm" means the
+/// allocations, so tests running in parallel on other threads do not disturb it; <see cref="AllocatedBy"/>
+/// works around the one way they can. "Warm" means the
 /// pattern has already run once on the same kind of subject: the first call builds the state the
 /// pattern then keeps, as upstream does with its <c>groups_storage</c>, <c>repeats_storage</c> and
 /// <c>stack_storage</c> (<c>upstream/src/_regex.c</c> :577-579).
@@ -26,10 +29,9 @@ public sealed class AllocationTests
     {
         FuzzyRegex regex = new(pattern, options);
         bool expected = regex.IsMatch(subject);
+        bool actual = false;
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool actual = regex.IsMatch(subject);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = AllocatedBy(() => actual = regex.IsMatch(subject));
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a predicate on a warm pattern has nothing it needs to build");
@@ -44,13 +46,51 @@ public sealed class AllocationTests
         // the only thing it could allocate, and the pattern's cache already holds one.
         FuzzyRegex regex = new(pattern, options);
         int expected = regex.Count(subject);
+        int actual = 0;
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        int actual = regex.Count(subject);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = AllocatedBy(() => actual = regex.Count(subject));
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a count on a warm pattern has nothing it needs to build");
+    }
+
+    [Test]
+    [Arguments(@"(\w+)@(\w+)\.com", "write to someone@example.com today")]
+    [Arguments("(?:amber lantern works){e<=2}", "the Amber Lantern Wroks are shut")]
+    public void A_warm_call_allocates_nothing_after_another_thread_has_emptied_the_shared_pool(
+        string pattern,
+        string subject
+    )
+    {
+        // The flake of 2026-09-25: under the parallel native-AOT run a warm call now and then
+        // allocated 280 B, a byte[256]. A warm state gave its three stack buffers back to
+        // ArrayPool<byte>.Shared after every call, which keeps one array of a size per thread and
+        // leaves the rest where any thread can take them; this does the taking on purpose. It
+        // allocated 560 B here before the state kept its buffers, as upstream's state_fini keeps
+        // the stack's storage on the pattern (upstream/src/_regex.c :18684).
+        FuzzyRegex regex = new(pattern, FuzzyRegexOptions.IgnoreCase);
+        bool expected = regex.IsMatch(subject);
+        Thread other = new(static () =>
+        {
+            List<byte[]> held = [];
+            for (int i = 0; i < 200; i++)
+            {
+                foreach (int size in (int[])[16, 32, 64, 128, 256, 512, 1024])
+                {
+                    held.Add(System.Buffers.ArrayPool<byte>.Shared.Rent(size));
+                }
+            }
+
+            GC.KeepAlive(held);
+        });
+        other.Start();
+        other.Join();
+        bool actual = false;
+
+        long allocated = AllocatedBy(() => actual = regex.IsMatch(subject));
+
+        actual.Should().Be(expected);
+        allocated.Should().Be(0, "a warm pattern keeps what its state needs, whatever other threads rent");
     }
 
     [Test]
@@ -67,11 +107,14 @@ public sealed class AllocationTests
         FuzzyRegex regex = new("cat");
         _ = regex.IsMatch(slice);
         _ = regex.Count(slice);
+        bool found = false;
+        int count = 0;
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool found = regex.IsMatch(slice);
-        int count = regex.Count(slice);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = AllocatedBy(() =>
+        {
+            found = regex.IsMatch(slice);
+            count = regex.Count(slice);
+        });
 
         found.Should().BeTrue();
         count.Should().Be(1);
@@ -87,15 +130,17 @@ public sealed class AllocationTests
         char[] buffer = new char[1 << 20];
         buffer.AsSpan().Fill('a');
         "cat".CopyTo(buffer.AsSpan(buffer.Length - 10));
-        ReadOnlySpan<char> subject = buffer;
         FuzzyRegex regex = new("cat");
-        _ = regex.IsMatch(subject);
-        _ = regex.Count(subject);
+        _ = regex.IsMatch(buffer.AsSpan());
+        _ = regex.Count(buffer.AsSpan());
+        bool found = false;
+        int count = 0;
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool found = regex.IsMatch(subject);
-        int count = regex.Count(subject);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = AllocatedBy(() =>
+        {
+            found = regex.IsMatch(buffer.AsSpan());
+            count = regex.Count(buffer.AsSpan());
+        });
 
         found.Should().BeTrue();
         count.Should().Be(1);
@@ -109,13 +154,11 @@ public sealed class AllocationTests
         // string walk builds a Match per match; this one yields an index and a length, and borrows
         // its copy and its state, so a warm walk to the end has nothing left to allocate.
         string words = string.Concat(Enumerable.Repeat("word ", 20_000));
-        ReadOnlySpan<char> subject = words;
         FuzzyRegex regex = new(@"\w+");
-        _ = Walk(regex, subject);
+        _ = Walk(regex, words);
+        int count = 0;
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        int count = Walk(regex, subject);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        long allocated = AllocatedBy(() => count = Walk(regex, words));
 
         count.Should().Be(20_000);
         allocated.Should().Be(0);
@@ -130,5 +173,87 @@ public sealed class AllocationTests
 
             return n;
         }
+    }
+
+    [Test]
+    public void A_background_collection_that_pauses_the_measured_call_is_not_counted_as_its_allocation()
+    {
+        // The flake of 2026-09-25, on demand. A warm span walk under the parallel native-AOT run
+        // counted 6,904-8,304 B now and then, in 5 full runs of 20. This thread takes a
+        // fresh allocation context just after a background collection has started, and the call
+        // below allocates nothing while it waits for that collection's closing pause, which
+        // empties the context without taking its unused part off the count (see AllocatedBy).
+        // Measured without the repeat it counted 8,112 B, about one allocation quantum, every time.
+        if (GCSettings.LatencyMode == GCLatencyMode.Batch)
+        {
+            TUnit.Core.Skip.Test("background collections are turned off in this process");
+        }
+
+        // Enough live objects that marking them outlasts everything up to the measured call.
+        object[] graph = new object[500_000];
+        for (int i = 0; i < graph.Length; i++)
+        {
+            graph[i] = new byte[16];
+        }
+
+#pragma warning disable S1215 // Starting a background collection at a known moment is the test.
+        GC.Collect(); // A blocking collection first, so no background one is still running.
+        GC.Collect(2, GCCollectionMode.Forced, blocking: false);
+#pragma warning restore S1215
+        TimeSpan started = GC.GetTotalPauseDuration();
+        graph[0] = new object(); // The fresh context, nearly all of it unused.
+        bool first = true;
+
+        long allocated = AllocatedBy(() =>
+        {
+            if (first)
+            {
+                first = false;
+                long giveUp = Stopwatch.GetTimestamp() + Stopwatch.Frequency;
+                while (GC.GetTotalPauseDuration() == started && Stopwatch.GetTimestamp() < giveUp)
+                {
+                    // Allocates nothing; waits at most a second for the next pause.
+                }
+            }
+        });
+
+        GC.KeepAlive(graph);
+        allocated.Should().Be(0, "the call allocated nothing; only a collection paused it");
+    }
+
+    /// <summary>
+    /// The bytes <paramref name="call"/> allocates on this thread, from a run of it that no garbage
+    /// collection paused.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GC.GetAllocatedBytesForCurrentThread"/> counts a thread's allocation context as
+    /// allocated when the thread takes it, and a collection that retires the context takes the unused
+    /// part back off (<c>fix_allocation_context</c>, dotnet/runtime v10.0.12
+    /// <c>src/coreclr/gc/gc.cpp</c> :8029-8031). The pause that ends a background collection's marking
+    /// retires every thread's context through <c>void_allocation</c> (:8053, called at :39486), which
+    /// skips that step, so a thread that allocated nothing is charged whatever its context had left,
+    /// up to about 8 KB. It happens under JIT and native AOT alike. Only a pause can cause it, and the
+    /// collector adds a pause to <see cref="GC.GetTotalPauseDuration"/> before it lets the threads go
+    /// (:46874-46876), so a run that saw no pause is exact. A run that saw one is repeated; a call
+    /// that allocates shows it in the repeat too.
+    /// </remarks>
+    /// <param name="call">The call to measure. It may run more than once.</param>
+    /// <returns>The bytes allocated.</returns>
+    private static long AllocatedBy(Action call)
+    {
+        long allocated = 0;
+        for (int run = 0; run < 10; run++)
+        {
+            TimeSpan paused = GC.GetTotalPauseDuration();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            call();
+            allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (GC.GetTotalPauseDuration() == paused)
+            {
+                break;
+            }
+        }
+
+        return allocated;
     }
 }

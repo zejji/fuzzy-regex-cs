@@ -898,7 +898,10 @@ internal sealed class MatchState : IDisposable
         }
     }
 
-    private void ReturnBuffers()
+    /// <summary>Upstream's limit on the stack storage a pattern keeps between calls, 64 KB.</summary>
+    private const int _cachedStackLimit = 0x10000;
+
+    internal void ReturnBuffers()
     {
         // The state stays usable: a stack that has given its buffer back rents another on its
         // next push, which is what lets MatchStateCache keep it.
@@ -914,7 +917,14 @@ internal sealed class MatchState : IDisposable
     /// </summary>
     internal void Release()
     {
-        ReturnBuffers();
+        // The stacks keep their buffers, as upstream's state_fini keeps the stack's storage on the
+        // pattern up to 64 KB (upstream/src/_regex.c :18684-18700). Giving them back to
+        // ArrayPool<byte>.Shared after every call made a warm call allocate whenever another thread
+        // had taken them from the pool's shared stacks in between: 280 B at a time in the parallel
+        // native-AOT run, and deterministically in AllocationTests (2026-09-25).
+        Sstack.KeepUpTo(_cachedStackLimit);
+        Bstack.KeepUpTo(_cachedStackLimit);
+        Pstack.KeepUpTo(_cachedStackLimit);
         Text = default;
         _characterIndex = null;
         BestMatchGroups = null;
