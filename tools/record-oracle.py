@@ -6753,7 +6753,7 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
             for row in _generate(name, random.Random(f"{seed}:{name}"), count)
         ]
 
-    recorded = [_record_row_and_its_control_answers(regex, row) for row in unrecorded]
+    recorded = _record_supervised(unrecorded)
 
     header = {
         "kind": "header",
@@ -6769,6 +6769,118 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
         "rowCount": len(recorded),
     }
     return header, recorded
+
+
+# --------------------------------------------------------------------------------------------
+# Crash supervision
+# --------------------------------------------------------------------------------------------
+#
+# UPSTREAM CAN KILL THE INTERPRETER, and a killed recorder used to write no wave at all: one row
+# out of fifty thousand took the whole seed with it, and the 2026-09-24 scheduled sweep died on its
+# first seed with nothing to say but "the recorder failed". The row was ledger entry 5's carried
+# slice reaching an uninitialised `RE_Position new_position` in `basic_match` (`_regex.c:11820`),
+# whose garbage `text_pos` gcc -O1 and above turn into a read about 4 GB past the subject. MSVC's
+# build happens to leave a small value there, so the same row answers - wrongly - on Windows.
+#
+# So the rows are recorded by a WORKER PROCESS that writes each finished row as it goes, and this
+# side supervises it. When the worker dies the row it died on is the one after the last it wrote;
+# that row is re-run ALONE in a fresh worker to learn whether it crashes by itself, recorded as
+# `crashed` either way, and a new worker carries on from the row after it. The wave is the same
+# bytes as an in-process recording whenever nothing crashes, which `--verify-determinism` checks.
+#
+# The pattern is the fork server's and libFuzzer's `-fork` mode: the tested code runs in a process
+# the harness can lose. One worker per wave, not one per row - a process per row measured about
+# 250 ms each on Windows, which is 3.5 hours a seed.
+#
+# A crashed row is never compared: it has no answer. The consumer counts and lists it, and the MSan
+# screen (tools/screen-undefined.py) is what decides whether it is a known defect or a new one.
+
+# TEST-ONLY FAULT INJECTION for `_supervisor_failures`. A worker that meets a row whose pattern is
+# this variable's value faults itself - after at least one other row, if the second is set.
+_FAULT_PATTERN_ENV = "ORACLE_SELF_CHECK_FAULT_PATTERN"
+_FAULT_AFTER_OTHERS_ENV = "ORACLE_SELF_CHECK_FAULT_AFTER_OTHERS"
+
+
+def _died(returncode: int) -> bool:
+    """Whether a worker's exit status means the interpreter was killed rather than exited.
+
+    Measured 2026-09-25, CPython 3.12 and 3.14: a POSIX signal is a negative returncode; on Windows
+    an access violation is 0xC0000005 and `abort()` 0xC0000409 (NTSTATUS codes, all 0xC0000000 and
+    up), and a C-runtime `raise(SIGSEGV)` - what `faulthandler._sigsegv()` does there - exits 3. A
+    SystemExit, the way this recorder refuses a row, exits 1, and nothing here exits 3 by choice.
+    """
+    if returncode < 0:
+        return True
+    return os.name == "nt" and (returncode == 3 or returncode >= 0xC0000000)
+
+
+def _run_worker(inputs: Path, start: int, output: Path) -> tuple[int, str]:
+    process = subprocess.run(
+        [sys.executable, "-X", "faulthandler", str(Path(__file__).resolve()),
+         "--worker-rows", str(inputs), "--worker-start", str(start), "--worker-output", str(output)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+    return process.returncode, process.stderr
+
+
+def _finished_rows(output: Path) -> list[dict]:
+    # Only complete lines: a worker killed part-way through writing one has not finished that row.
+    if not output.exists():
+        return []
+    text = output.read_text(encoding="ascii")
+    return [json.loads(line) for line in text.split("\n")[:-1] if line]
+
+
+def _record_supervised(rows: list[dict]) -> list[dict]:
+    recorded: list[dict] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        inputs = Path(tmp) / "rows.jsonl"
+        inputs.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="ascii", newline="")
+        output = Path(tmp) / "recorded.jsonl"
+        while len(recorded) < len(rows):
+            output.unlink(missing_ok=True)
+            returncode, stderr = _run_worker(inputs, len(recorded), output)
+            recorded.extend(_finished_rows(output))
+            if returncode == 0:
+                continue
+            if not _died(returncode):
+                # A refused row or a harness bug: the worker's own message, and the run stops.
+                raise SystemExit(stderr.strip() or f"the recording worker exited {returncode}")
+
+            index = len(recorded)
+            row = rows[index]
+            alone_inputs = Path(tmp) / "alone.jsonl"
+            alone_inputs.write_text(json.dumps(row) + "\n", encoding="ascii", newline="")
+            alone_code, alone_stderr = _run_worker(alone_inputs, 0, Path(tmp) / "alone-out.jsonl")
+            if alone_code != 0 and not _died(alone_code):
+                raise SystemExit(alone_stderr.strip() or f"the recording worker exited {alone_code}")
+            reproduced = _died(alone_code)
+
+            print(f"UPSTREAM CRASHED on row {index + 1} ({row.get('generator')}, "
+                  f"{row.get('operation')}), exit {returncode:#x}; "
+                  f"{'crashes again alone' if reproduced else 'does NOT crash alone'} - "
+                  "recorded as `crashed`, never compared", file=sys.stderr)
+            print("  pattern " + json.dumps(row.get("pattern")) + "  subject "
+                  + json.dumps(row.get("subject")), file=sys.stderr)
+            recorded.append({**row, "outcome": {
+                "kind": "crashed", "exitCode": returncode, "reproducedAlone": reproduced}})
+    return recorded
+
+
+def _worker(inputs: Path, start: int, output: Path) -> int:
+    import regex
+
+    rows = [json.loads(line) for line in inputs.read_text(encoding="ascii").splitlines()]
+    fault = os.environ.get(_FAULT_PATTERN_ENV)
+    after_others = os.environ.get(_FAULT_AFTER_OTHERS_ENV) == "1"
+    with open(output, "w", encoding="ascii", newline="") as f:
+        for index in range(start, len(rows)):
+            row = rows[index]
+            if fault is not None and row.get("pattern") == fault and (not after_others or index > start):
+                import faulthandler
+                faulthandler._sigsegv()
+            f.write(json.dumps(_record_row_and_its_control_answers(regex, row)) + "\n")
+            f.flush()
+    return 0
 
 
 # --------------------------------------------------------------------------------------------
@@ -7067,6 +7179,8 @@ def _self_check() -> int:
     if "captures-are-the-texts-of-spans" not in lying:
         failures.append("the captures check no longer fires on a capture text that is not its span")
 
+    failures.extend(_supervisor_failures())
+
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
     if failures:
@@ -7074,9 +7188,74 @@ def _self_check() -> int:
 
     print(
         "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation, "
-        "slice-round-trip and metamorphic-checker guards all fire"
+        "slice-round-trip, metamorphic-checker and crash-supervisor guards all fire"
     )
     return 0
+
+
+def _supervisor_failures() -> list[str]:
+    """The crash supervisor must turn a row that kills the interpreter into a `crashed` row.
+
+    A REAL CRASH, NOT A RAISED EXCEPTION: `faulthandler._sigsegv()` faults the process the way
+    upstream's C engine does (SIGSEGV on Linux, 0xC0000005 on Windows), so the guard exercises the
+    same exit path as the 2026-09-24 CI failure rather than a Python-level imitation of it.
+    """
+    failures = []
+    fault = "(?#the self-check fault row)"
+    rows = [
+        {"pattern": "a", "subject": "xa", "operation": "search"},
+        {"pattern": fault, "subject": "x", "operation": "search"},
+        {"pattern": "b", "subject": "xb", "operation": "search"},
+    ]
+
+    def supervised(extra_env: dict[str, str], cases: list[dict]) -> list[dict]:
+        saved = {key: os.environ.get(key) for key in extra_env}
+        os.environ.update(extra_env)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "rows.jsonl"
+                path.write_text("".join(json.dumps(r) + "\n" for r in cases), encoding="ascii")
+                return record([], 0, 0, path)[1]
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    # A row that crashes wherever it runs: recorded as `crashed`, confirmed alone, and the rows
+    # either side of it still recorded - in order, none lost, none duplicated.
+    got = supervised({_FAULT_PATTERN_ENV: fault}, rows)
+    if [r["pattern"] for r in got] != [r["pattern"] for r in rows]:
+        failures.append(f"a crash lost or reordered rows: {[r['pattern'] for r in got]}")
+    else:
+        crashed = got[1]["outcome"]
+        if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not True:
+            failures.append(f"a row that crashes alone was recorded as {crashed}")
+        for survivor in (got[0], got[2]):
+            if survivor["outcome"].get("kind") != "match":
+                failures.append(f"a row beside a crash was recorded as {survivor['outcome']}")
+
+    # A row that crashes only after other rows ran in the same process: still `crashed`, because
+    # the answer it gives alone is not the answer it gave in the wave, and nothing says which of
+    # the two a garbage read produced - but marked as not reproducing alone.
+    got = supervised({_FAULT_PATTERN_ENV: fault, _FAULT_AFTER_OTHERS_ENV: "1"}, rows)
+    crashed = got[1]["outcome"] if len(got) == 3 else {}
+    if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not False:
+        failures.append(f"a row that crashes only after others was recorded as {crashed}")
+
+    # A HARNESS REFUSAL IS NOT A CRASH. A worker that exits through SystemExit - here the
+    # substitution with no template the first guard above refuses - must still stop the run with
+    # its own message, or a supervisor would launder every harness bug into a `crashed` row.
+    try:
+        supervised({}, [{"pattern": "a", "subject": "a", "operation": "sub"}])
+    except SystemExit as e:
+        if "needs a 'template'" not in str(e):
+            failures.append(f"a refused row stopped the supervised run with the wrong message: {e}")
+    else:
+        failures.append("a refused row inside a supervised run was recorded instead of stopping it")
+
+    return failures
 
 
 # --------------------------------------------------------------------------------------------
@@ -7096,7 +7275,14 @@ def main(argv=None) -> int:
                         help="record one seed twice in fresh interpreters and require identical bytes")
     parser.add_argument("--self-check", action="store_true",
                         help="require the recorder's four guards to fire")
+    # The crash supervisor's worker half - see `_record_supervised`. Not for use by hand.
+    parser.add_argument("--worker-rows", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-start", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-output", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.worker_rows is not None:
+        return _worker(args.worker_rows, args.worker_start, args.worker_output)
 
     if args.verify_determinism:
         return _verify_determinism()
