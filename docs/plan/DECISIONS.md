@@ -1341,9 +1341,24 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   now show red until judged into `bestmatch-loses-a-candidate`, per the owner's 2026-09-14 ruling.
 - 2026-09-25: **a fresh Turkic `sub`/`split` row over the dotless i is classified by a recorded
   control, not by hand.** The recorder asks upstream the row again with U+0131 made U+0138 (kra),
-  which has no case partner and no folding, so nothing is left for upstream's `T` rows to act on
-  (`dotlessFreeOutcome`). `turkic-default-folding-without-spans` takes the row when this port's
+  which matches like it under the default tables (neither is in CaseFolding.txt), so nothing is
+  left for upstream's `T` rows to act on (`dotlessFreeOutcome`). It refuses a row where the two
+  letters could differ another way: a property upstream answers differently for them (U+0131
+  upper-cases to I, so `\p{CWU}` does), a codepoint escape, a non-ASCII range, LOCALE. `turkic-default-folding-without-spans` takes the row when this port's
   answer is that twin swapped back. It checks the right answer, not only that a Turkic letter is
   involved, so S52's fabricated-failure row stays red. It classifies all 18 dotless-only rows that
   had been judged by hand. U+0130 has no stand-in (the only capital with a full folding and no
   simple one), so those rows stay hand-judged.
+- 2026-09-25 (owner: resolve every possible bug before optimising; research outside upstream):
+  **under ASCII|IGNORECASE a cased property means the 52 ASCII letters** (ledger entry 34).
+  Upstream gave three answers to one question: `match` also accepted non-ASCII letters, `search`
+  refused 'a', and the set form gave the ASCII letters. The rule is corroborated by Perl 5.42
+  (`/ai`), PCRE2 10.47 without UCP under CASELESS and Python's `re` documentation, and UTS #18
+  allows it under either reading. `Matcher.MatchesPropertyIgn` clamps the character to the
+  encoding before the case collapse. Recorded as `ascii-ignorecase-cased-property`.
+- 2026-09-25: **the dotless-i control refuses every row where the two letters could differ another
+  way** (blind review): a property upstream answers differently for them, an escape naming any
+  non-ASCII codepoint, a class range with a non-ASCII endpoint, LOCALE. The review's 18 breaking
+  rows record no twin; all 18 hand-judged dotless rows still classify.
+- 2026-09-25: **GUIDE.md's span-walk sample runs.** S61 left it as a fragment, so
+  `check-doc-examples.ps1`, a CI gate, failed on unpushed main; it would have gone red on push.

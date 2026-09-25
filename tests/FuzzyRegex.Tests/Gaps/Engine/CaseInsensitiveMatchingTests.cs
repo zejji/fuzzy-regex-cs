@@ -74,10 +74,10 @@ public sealed class CaseInsensitiveMatchingTests
     [Arguments(@"(?ai)\p{Nd}", "\uFF19", false)]
     // A caseless letter is not Cased, so the Uppercase/Lowercase collapse does not sweep it in.
     // U+118C0 WARANG CITI SMALL LETTER NGAA is cased; U+110C0 SHARADA SIGN JIHVAMULIYA is not.
-    // upstream: regex.match(r'(?ai)\p{Ll}', '\U000118c0').span() == (0, 1)
-    [Arguments(@"(?ai)\p{Ll}", "\U000118C0", true)]
-    // upstream: regex.match(r'(?ai)\p{Ll}', '\U000110c0') is None
-    [Arguments(@"(?ai)\p{Ll}", "\U000110C0", false)]
+    // upstream: regex.match(r'(?i)\p{Ll}', '\U000118c0').span() == (0, 1)
+    [Arguments(@"(?i)\p{Ll}", "\U000118C0", true)]
+    // upstream: regex.match(r'(?i)\p{Ll}', '\U000110c0') is None
+    [Arguments(@"(?i)\p{Ll}", "\U000110C0", false)]
     // The same property under a *_REPEAT_ONE, so the count runs through count_one's bulk-stepper
     // path rather than the dispatch switch. Upstream's bulk stepper calls a different function
     // (match_many_PROPERTY_IGN -> the encoding table's has_property_ign, which does not collapse
@@ -96,6 +96,52 @@ public sealed class CaseInsensitiveMatchingTests
     // upstream: regex.match(r'(?ai)(?u:\p{Lu})', 'a').span() == (0, 1)
     [Arguments(@"(?ai)(?u:\p{Lu})", "a", true)]
     public void A_cased_property_under_ignore_case_collapses_into_is_it_a_cased_letter(
+        string pattern,
+        string subject,
+        bool expected
+    ) => FuzzyRegex.MatchAtStart(subject, pattern).Success.Should().Be(expected);
+
+    /// <summary>
+    /// <b>A known difference from upstream's matcher.</b> Under ASCII|IGNORECASE a cased property
+    /// means the 52 ASCII letters, so no character above U+007F matches it.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's matcher runs the case collapse on the raw character, so its <c>match</c>
+    /// accepts É, é, ĸ, the Kelvin sign and U+118C0 below, although the case-sensitive
+    /// <c>(?a)\p{Lu}</c> refuses every one of them and no case variant of any is ASCII. Upstream's
+    /// own set form, <c>(?ai)[\p{Lu}x]</c>, and its search screen refuse them. The rule is what
+    /// Perl 5.42 answers for <c>[[:upper:]]</c> under <c>/ai</c>, PCRE2 10.47 without UCP under
+    /// CASELESS, and Python's re documents for <c>[A-Z]</c> under ASCII|IGNORECASE ("only letters
+    /// 'a' to 'z' and 'A' to 'Z' are matched"). Measured 2026-09-25; ledger entry 34.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Whether this port matches.</param>
+    [Test]
+    // upstream: regex.match(r'(?ai)\p{Ll}', '\U000118c0').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Ll}", "\U000118C0", false)]
+    // upstream: regex.match(r'(?ai)\p{Lu}', '\xc9').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Lu}", "\u00C9", false)]
+    // upstream: regex.match(r'(?ai)\p{Lu}', '\xe9').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Lu}", "\u00E9", false)]
+    // upstream: regex.match(r'(?ai)\p{Ll}', '\u0138').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Ll}", "\u0138", false)]
+    // upstream: regex.match(r'(?ai)\p{Lu}', '\u212a').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Lu}", "\u212A", false)]
+    // upstream: regex.match(r'(?ai)[[:upper:]]', '\xe9').span() == (0, 1)
+    [Arguments(@"(?ai)[[:upper:]]", "\u00E9", false)]
+    // upstream: regex.match(r'(?ai)\p{Lower}', '\xc9').span() == (0, 1)
+    [Arguments(@"(?ai)\p{Lower}", "\u00C9", false)]
+    // The ASCII letters still collapse, both ways.
+    [Arguments(@"(?ai)\p{Lu}", "a", true)]
+    [Arguments(@"(?ai)[[:lower:]]", "A", true)]
+    // A scoped Unicode encoding lifts the clamp, and the set form agrees with the bare one.
+    // upstream: regex.match(r'(?ai)(?u:\p{Lu})', '\xe9').span() == (0, 1)
+    [Arguments(@"(?ai)(?u:\p{Lu})", "\u00E9", true)]
+    // upstream: regex.match(r'(?ai)[\p{Lu}x]', '\xc9') is None
+    [Arguments(@"(?ai)[\p{Lu}x]", "\u00C9", false)]
+    [Arguments(@"(?ai)[\p{Lu}x]", "a", true)]
+    public void A_cased_property_under_ascii_and_ignore_case_matches_only_ascii_letters(
         string pattern,
         string subject,
         bool expected

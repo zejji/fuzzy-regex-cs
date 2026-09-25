@@ -920,12 +920,14 @@ public sealed class OracleWaveTests
         """;
 
     /// <summary>
-    /// <c>\p{Lu}</c> under ASCII and IGNORECASE over the dotless i: the engines differ there with no
-    /// Turkic letter at all (the same row over kra diverges too), so the dotless i is not the whole
-    /// difference.
+    /// <c>[\w&amp;&amp;[^a-z]]</c> under V1 and IGNORECASE over 'I\u0131i': upstream's Turkic `T` rows make the
+    /// dotted capital a case variant of the plain i, which is not in [a-z], so upstream replaces the i
+    /// as well. Swapping the dotless i for kra leaves that in place, so the dotless i is not the
+    /// whole difference and the arm must refuse the row. (Until 2026-09-25 this was an ASCII|IGNORECASE
+    /// row, which diverged only through ledger entry 34's defect in this port, since fixed.)
     /// </summary>
     private const string _dotlessRowToRefuse = """
-        {"generator": "rows", "pattern": "\\p{Lu}", "flags": 130, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u0131", "count": 0}, "scanMatches": [], "dotlessFreeOutcome": {"kind": "sub", "text": "\u0138", "count": 0}}
+        {"generator": "rows", "pattern": "[\\w&&[^a-z]]", "flags": 258, "namedLists": {}, "subject": "I\u0131i", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "Ixx", "count": 2}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}], "dotlessFreeOutcome": {"kind": "sub", "text": "Ixx", "count": 2}}
         """;
 
     [Test]

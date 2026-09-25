@@ -781,6 +781,21 @@ Match m = FuzzyRegex.FullMatch("a\u0131", "aI", FuzzyRegexOptions.IgnoreCase);
 Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı', I) matches
 ```
 
+### A case-insensitive cased property under ASCII means the 52 ASCII letters
+
+With both `(?a)` and `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}`, `\p{Lower}`, `[[:upper:]]`
+and `[[:lower:]]` match `a` to `z` and `A` to `Z`, and nothing else. Upstream answers this three
+ways: its `match` also accepts letters such as `É`, its `search` misses the lowercase `a`, and its
+set form `[\p{Lu}x]` gives the ASCII letters. Perl, PCRE2 and Python's `re` documentation all give
+the ASCII letters. Wrap the property in `(?u:...)` for the Unicode answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success);  // False - upstream's regex.match matches
+Console.WriteLine(FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success);              // True - upstream's regex.search is None
+```
+
 ### This port's search prefilters never change the slow path's answer
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several

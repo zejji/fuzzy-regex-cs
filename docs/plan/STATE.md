@@ -18,6 +18,14 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Waiting on the owner
 
+- Case-insensitive properties (found 2026-09-25): a bare `\p{...}` and the same property inside a
+  set follow different rules under IGNORECASE, upstream and here alike. Bare `\p{Lu}`, `\p{Ll}`,
+  `\p{Lt}` mean any cased letter (Perl's and PCRE2's rule), so `(?i)\p{Lu}` matches U+0138 and
+  `(?i)\p{Lt}` matches 'a'; inside a set the property is closed under case (UTS #18 RL1.5's
+  optional rule), so `(?i)[\p{Lu}x]` refuses U+0138 and `(?i)[\p{Lt}x]` refuses 'a'. UTS #18
+  lets an implementation choose, provided it declares which. Options and a recommendation are in
+  the 2026-09-25 session report; no code until decided.
+
 - O(1) backtracking state per repetition for a body with no alternative (DECISIONS 2026-09-24,
   OPEN). A divergence from upstream in memory only; no code until decided.
 
@@ -29,12 +37,6 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
    takes all 18 such hand-judged rows on its own. A row holding the dotted capital U+0130 still
    needs its row added to `turkic-default-folding-without-spans` by hand: no letter can stand in for
    it (7 of the 25 listed rows).
-3. NEW, not judged: under ASCII|IGNORECASE the case properties answer differently on both engines,
-   and neither looks right. Over 'aAéÉĸ' upstream's `\p{Lu}`, `\p{Ll}`, `[[:upper:]]`
-   and `[[:lower:]]` match only the one ASCII letter of their own case, although its `[A-Z]` matches
-   'aA' under the same flags; this port matches non-ASCII letters there although with ASCII alone
-   it keeps them out. Found by the 2026-09-25 dotless-i grid (112 rows of 6,468, no Turkic letter
-   involved). Needs research against the docs and a second engine before either is called right.
 
 Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
 `Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under

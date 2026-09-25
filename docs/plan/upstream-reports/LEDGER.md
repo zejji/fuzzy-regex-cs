@@ -3949,3 +3949,54 @@ upstream's own one-iteration twin finds it. Without a flag, three deletions is t
 greedy repeat reaches, and both engines agree. BESTMATCH never returns once the bound is above one;
 ENHANCEMATCH returns the first fit, the shape of entry 25. Pinned by
 `FuzzyEmptyIterationTests.Bestmatch_and_enhancematch_over_a_bounded_repeat_of_deletions_find_the_one_deletion_fit`.
+
+---
+
+## 34. A case-insensitive cased property under ASCII matches non-ASCII letters, and its search misses ASCII ones - FIXED HERE (2026-09-25)
+
+**Status:** not filed, per the owner's rule. Found 2026-09-25 by the dotless-i grid behind the
+Turkic control (112 of 6,468 rows diverged with no Turkic letter involved).
+
+**Reproduction**, `regex` 2026.9.10:
+
+```python
+>>> [m.group() for m in regex.finditer(r'(?ai)\p{Lu}', 'aA\xe9\xc9ĸ')]
+['A']                                   # search: misses 'a'
+>>> [bool(regex.match(r'(?ai)\p{Lu}', c)) for c in 'aA\xe9\xc9ĸ']
+[True, True, True, True, True]          # match: accepts every letter, ASCII or not
+>>> [bool(regex.match(r'(?ai)[\p{Lu}x]', c)) for c in 'aA\xe9\xc9ĸ']
+[True, True, False, False, False]       # the set form: the ASCII letters
+```
+
+Three answers to one question. `(?a)\p{Lu}` refuses É, é and ĸ, and none of them has an ASCII case
+variant, so a case-insensitive `(?ai)\p{Lu}` cannot accept them; and 'a' has the ASCII capital 'A'
+as a case variant, so it must accept 'a'.
+
+**Where it comes from.** `matches_PROPERTY_IGN` (`_regex.c:2937`) has an ASCII arm (`:2972`) that
+runs the Lu/Ll/Lt and Uppercase/Lowercase collapse on the raw character, with no ASCII clamp. The
+search screen and the repeat bulk stepper call the encoding table's `ascii_has_property_ign`
+(`:832`), which clamps and never collapses (its "the property is case-insensitive" comment is on a
+plain `ascii_has_property` call). The set form checks each case variant through the clamped
+`ascii_has_property`, which is the right rule.
+
+**Corroborated outside upstream (2026-09-25).** Over 'aAéÉĸ':
+
+| Engine | Construct | Answer |
+|---|---|---|
+| Perl 5.42.3 | `[[:upper:]]` and `[[:lower:]]` under `/ai` | a, A |
+| PCRE2 10.47, no UCP | `[[:upper:]]` and `[[:lower:]]` under CASELESS | a, A |
+| Python `re` docs | `[A-Z]` under ASCII and IGNORECASE | "only letters 'a' to 'z' and 'A' to 'Z' are matched" |
+
+UTS #18 (revision 25) RL1.5 leaves case closure of classes to the implementation; under either the
+closure reading or Perl's cased-letter reading the answer here is the ASCII letters. Upstream's
+literals and ranges under ASCII|IGNORECASE (`k`, `[a-z]`, `(k)\1` against U+212A, U+017F, U+0130,
+U+0131) agree with CPython `re` on all 98 rows tried, so only the cased properties are affected.
+
+**This port.** It had copied the matcher's arm, so it matched É under `(?ai)\p{Lu}`.
+`Matcher.MatchesPropertyIgn` now clamps the character to the encoding first
+(`Encodings.ClampToEncoding`), and every path uses that one predicate, so `match` and `search` both
+answer the ASCII letters. **Proposed fix upstream:** clamp in the ASCII arm of
+`matches_PROPERTY_IGN`, and collapse in `ascii_has_property_ign`.
+
+**Tests.** `Gaps/Engine/CaseInsensitiveMatchingTests.A_cased_property_under_ascii_and_ignore_case_matches_only_ascii_letters`;
+the oracle pin is `ascii-ignorecase-cased-property`.

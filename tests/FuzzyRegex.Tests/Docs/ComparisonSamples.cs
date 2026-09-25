@@ -306,6 +306,14 @@ public sealed class ComparisonSamples
         m.Success.Should().BeFalse();
     }
 
+    /// <summary>"A case-insensitive cased property under ASCII means the 52 ASCII letters".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_under_ascii_means_the_ascii_letters()
+    {
+        FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success.Should().BeFalse();
+        FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success.Should().BeTrue();
+    }
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()

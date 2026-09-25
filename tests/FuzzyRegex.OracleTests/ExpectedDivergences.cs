@@ -2646,6 +2646,31 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchInnermostTrailingOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The rows of <c>ascii-ignorecase-cased-property</c>, recorded 2026-09-25 on regex 2026.9.10.
+    /// </summary>
+    private const string _asciiIgnoreCaseCasedPropertyRows = """
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "\u00c9", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Ll}", "flags": 0, "namedLists": {}, "subject": "\u0138", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "aA\u00e9\u00c9\u0138", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
+        """;
+
+    /// <summary>This port's judged answer to each row of <see cref="_asciiIgnoreCaseCasedPropertyRows"/>.</summary>
+    private static readonly string[] _asciiIgnoreCaseCasedPropertyOurs =
+    [
+        "no match",
+        "no match",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "matches 2 | match 0:(0,1)[(0,1)] last=-1/- || match 0:(1,1)[(1,1)] last=-1/-",
+    ];
+
+    /// <summary><see cref="_asciiIgnoreCaseCasedPropertyRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _asciiIgnoreCaseCasedProperty = OracleWave
+        .ParseRows(_asciiIgnoreCaseCasedPropertyRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _asciiIgnoreCaseCasedPropertyOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
     /// <summary><see cref="_atomicLeakedChangeRows"/> by its question.</summary>
     private static readonly HashSet<string> _atomicLeakedChange = OracleWave
         .ParseRows(_atomicLeakedChangeRows)
@@ -4156,6 +4181,35 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
+            Id: "ascii-ignorecase-cased-property",
+            Reason: "UPSTREAM CONTRADICTS ITSELF AND THIS PORT DIVERGES ON PURPOSE - ledger entry 34. "
+                + "Under ASCII|IGNORECASE a cased property (`\\p{Lu}`, `\\p{Ll}`, `\\p{Lt}`, "
+                + "`\\p{Upper}`, `\\p{Lower}`, `[[:upper:]]`, `[[:lower:]]`) means the 52 ASCII "
+                + "letters. Upstream answers it three ways: its matcher's ASCII arm of "
+                + "matches_PROPERTY_IGN (upstream/src/_regex.c:2972) runs the case collapse on the "
+                + "raw character, so `match` accepts \u00c9, \u00e9, \u0138 and U+118C0, which the "
+                + "case-sensitive `(?a)\\p{Lu}` refuses and no case variant of which is ASCII; its "
+                + "search screen and bulk stepper call ascii_has_property_ign (:832), which never "
+                + "collapses, so `search` refuses 'a'; and its set form `(?ai)[\\p{Lu}x]` answers "
+                + "the ASCII letters exactly. This port answers the set form's rule everywhere.\n"
+                + "CORROBORATED OUTSIDE UPSTREAM, 2026-09-25: Perl 5.42 answers `[[:upper:]]` and "
+                + "`[[:lower:]]` under /ai with exactly 'aA' over 'aA\u00e9\u00c9\u0138'; PCRE2 10.47 "
+                + "without UCP under CASELESS the same; and Python's re documents for [A-Z] under "
+                + "ASCII|IGNORECASE that \"only letters 'a' to 'z' and 'A' to 'Z' are matched\". "
+                + "UTS #18 RL1.5 leaves case closure of classes to the implementation, and both "
+                + "readings give the ASCII letters here.\n"
+                + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the oracle's generators keep the "
+                + "ASCII flag off property rows, so a wave does not draw this, and the rows keep "
+                + "the recheck asking upstream about it.",
+            PinnedBy: "CaseInsensitiveMatchingTests.A_cased_property_under_ascii_and_ignore_case_matches_"
+                + "only_ascii_letters and .A_cased_ascii_property_is_found_by_our_search_where_"
+                + "upstreams_screen_refuses_it",
+            Example: _asciiIgnoreCaseCasedPropertyRows,
+            Applies: static (row, ours) =>
+                _asciiIgnoreCaseCasedProperty.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
             Id: "bounded-lazy-repeat-partial",
             Reason: "Port right, judged in docs/plan/2026-09-12-divergence-research.md and pinned "
                 + "with its evidence in PartialMatchingTests: a bounded LAZY repeat that has "
@@ -5640,10 +5694,13 @@ internal static class ExpectedDivergences
                 + "SINCE 2026-09-25 A SECOND ARM TAKES A ROW NO ONE HAS LISTED, and only one kind: "
                 + "a `sub`, `subf` or `split` over the dotless i, where this port's answer is exactly "
                 + "upstream's answer to the same row with every U+0131 made U+0138 (kra), swapped "
-                + "back. The recorder asks that as `dotlessFreeOutcome`. Kra is what the dotless i "
-                + "is under the default tables: lowercase, same block, no case partner, no folding "
-                + "(CaseFolding.txt 16.0), and this port answers 6,468 grid rows identically with "
-                + "either letter. It asks what the RIGHT answer is rather than whether the divergence "
+                + "back. The recorder asks that as `dotlessFreeOutcome`. Under the default tables the "
+                + "two letters MATCH alike: both lowercase, same block, neither in CaseFolding.txt 16.0, "
+                + "and this port answers 6,468 grid rows identically with either. They are not the "
+                + "same letter everywhere - U+0131 upper-cases to I, so `\\p{CWU}` tells them apart - "
+                + "and the recorder refuses a row wherever the difference could show: a property "
+                + "upstream answers differently for the two, a codepoint escape, a non-ASCII class "
+                + "range, LOCALE. It asks what the RIGHT answer is rather than whether the divergence "
                 + "touches a Turkic letter, so the fabricated failure above stays red. Not for "
                 + "U+0130, which no letter can stand in for (the only capital with a full folding "
                 + "and no simple one, lowercasing to a plain i): those rows are still listed by hand. "
@@ -7064,12 +7121,15 @@ internal static class ExpectedDivergences
     /// <remarks>
     /// <para>
     /// The control <c>turkic-default-folding-without-spans</c> was judged by, row by row, recorded
-    /// by the recorder as <see cref="OracleRow.DotlessFree"/>. Kra (U+0138) is what the dotless i
-    /// (U+0131) is under the DEFAULT case tables: a lowercase letter in the same block, with no case
-    /// partner and no folding. So upstream's answer to the swapped row is its answer with nothing
-    /// for its Turkic `T` rows to act on, and this port treats the two letters identically
-    /// (6,468 grid rows, 2026-09-25). When this port's answer is upstream's swapped answer with
-    /// the swap undone, the dotless i is the whole difference between the engines.
+    /// by the recorder as <see cref="OracleRow.DotlessFree"/>. Kra (U+0138) and the dotless i
+    /// (U+0131) MATCH alike under the DEFAULT case tables: both lowercase, same block, neither in
+    /// CaseFolding.txt. So upstream's answer to the swapped row is its answer with nothing for its
+    /// Turkic `T` rows to act on, and this port treats the two letters identically (6,468 grid
+    /// rows, 2026-09-25). They are not the same letter everywhere: U+0131 upper-cases to I, so a
+    /// case-mapping property such as <c>\p{CWU}</c> separates them, and an escape or a class range
+    /// can name one without the other. The recorder records no twin for such a row (the blind
+    /// review's doors, 2026-09-25). When this port's answer is upstream's swapped answer with the
+    /// swap undone, the dotless i is the whole difference between the engines.
     /// </para>
     /// <para>
     /// WHY THIS IS SAFE WHERE S52'S SCAN-BASED DRAFT WAS NOT. That draft asked only whether the

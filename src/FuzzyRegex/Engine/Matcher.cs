@@ -437,6 +437,16 @@ internal static class Matcher
         uint property = node.Values[0];
         uint prop = property >> 16;
 
+        // DIVERGES FROM UPSTREAM, deliberately: under ASCII the character is clamped BEFORE the
+        // collapse below. Upstream's ASCII arm of matches_PROPERTY_IGN (:2972) runs the collapse
+        // on the raw character, so `regex.match(r'(?ai)\p{Lu}', '\xc9')` matches, although the
+        // case-sensitive `(?a)\p{Lu}` refuses both 'É' and 'é' and upstream's own search screen
+        // (ascii_has_property_ign, :832) refuses it too. Under ASCII|IGNORECASE a cased property
+        // means the 52 ASCII letters: so Perl 5.42 answers for `[[:upper:]]` under /ai, PCRE2
+        // 10.47 without UCP under CASELESS, and Python's re documents the same rule for [A-Z]
+        // under ASCII|IGNORECASE (measured 2026-09-25; ledger entry 34).
+        ch = Encodings.ClampToEncoding(NodeEncoding(encoding, node), ch);
+
         // Upstream's Unicode and ASCII arms are the same three tests; only the fall-through
         // differs, and Encodings.HasProperty is where that difference already lives.
         if (property is Encodings.PropGcLu or Encodings.PropGcLl or Encodings.PropGcLt)
