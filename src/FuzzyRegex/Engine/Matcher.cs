@@ -2544,7 +2544,6 @@ internal static class Matcher
         stack.PushSize(repeatData.CaptureChange);
         if (fuzzy)
         {
-            stack.PushSize(repeatData.GroupChange);
             stack.PushSize(repeatData.SectionEdits);
         }
     }
@@ -2556,9 +2555,8 @@ internal static class Matcher
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy)
     {
-        long groupChange = 0;
         long sectionEdits = 0;
-        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        if (fuzzy && !stack.PopSize(out sectionEdits))
         {
             return false;
         }
@@ -2575,7 +2573,6 @@ internal static class Matcher
         }
 
         repeatData.CaptureChange = captureChange;
-        repeatData.GroupChange = groupChange;
         repeatData.SectionEdits = sectionEdits;
         repeatData.Start = (int)start;
         repeatData.Count = count;
@@ -2773,7 +2770,6 @@ internal static class Matcher
     /// <param name="Start">Where this iteration of the body started.</param>
     /// <param name="CaptureChange">The repeat's capture-change counter before this iteration.</param>
     /// <param name="Index">The repeat index.</param>
-    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct BodyEndStateData(
@@ -2781,7 +2777,6 @@ internal static class Matcher
         int Start,
         long CaptureChange,
         int Index,
-        long GroupChange,
         long SectionEdits
     );
 
@@ -2795,7 +2790,6 @@ internal static class Matcher
     /// <param name="CaptureChange">The enclosing repeat's capture-change counter.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">Where the repeat was entered.</param>
-    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct RepeatStateData(
@@ -2804,7 +2798,6 @@ internal static class Matcher
         long CaptureChange,
         int Index,
         int TextPos,
-        long GroupChange,
         long SectionEdits
     );
 
@@ -2819,7 +2812,6 @@ internal static class Matcher
     /// <param name="CaptureChange">The repeat's capture-change counter to restore first.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">The position the loser is being tried at, for its own guard.</param>
-    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct MatchBodyTailStateData(
@@ -2829,7 +2821,6 @@ internal static class Matcher
         long CaptureChange,
         int Index,
         int TextPos,
-        long GroupChange,
         long SectionEdits
     );
 
@@ -2857,7 +2848,6 @@ internal static class Matcher
         stack.PushSize(data.Index);
         if (fuzzy)
         {
-            stack.PushSize(data.GroupChange);
             stack.PushSize(data.SectionEdits);
         }
     }
@@ -2870,9 +2860,8 @@ internal static class Matcher
     private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data, bool fuzzy)
     {
         data = default;
-        long groupChange = 0;
         long sectionEdits = 0;
-        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        if (fuzzy && !stack.PopSize(out sectionEdits))
         {
             return false;
         }
@@ -2887,7 +2876,7 @@ internal static class Matcher
             return false;
         }
 
-        data = new BodyEndStateData(count, (int)start, captureChange, (int)index, groupChange, sectionEdits);
+        data = new BodyEndStateData(count, (int)start, captureChange, (int)index, sectionEdits);
         return true;
     }
 
@@ -2904,7 +2893,6 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         if (fuzzy)
         {
-            stack.PushSize(data.GroupChange);
             stack.PushSize(data.SectionEdits);
         }
     }
@@ -2917,9 +2905,8 @@ internal static class Matcher
     private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data, bool fuzzy)
     {
         data = default;
-        long groupChange = 0;
         long sectionEdits = 0;
-        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        if (fuzzy && !stack.PopSize(out sectionEdits))
         {
             return false;
         }
@@ -2935,15 +2922,7 @@ internal static class Matcher
             return false;
         }
 
-        data = new RepeatStateData(
-            count,
-            (int)start,
-            captureChange,
-            (int)index,
-            (int)textPos,
-            groupChange,
-            sectionEdits
-        );
+        data = new RepeatStateData(count, (int)start, captureChange, (int)index, (int)textPos, sectionEdits);
         return true;
     }
 
@@ -2962,7 +2941,6 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         if (fuzzy)
         {
-            stack.PushSize(data.GroupChange);
             stack.PushSize(data.SectionEdits);
         }
     }
@@ -2982,9 +2960,8 @@ internal static class Matcher
     {
         data = default;
 
-        long groupChange = 0;
         long sectionEdits = 0;
-        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        if (fuzzy && !stack.PopSize(out sectionEdits))
         {
             return false;
         }
@@ -3009,7 +2986,6 @@ internal static class Matcher
             captureChange,
             (int)index,
             (int)textPos,
-            groupChange,
             sectionEdits
         );
         return true;
@@ -3975,7 +3951,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -4068,7 +4044,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, FuzzyChangePos(state, in data));
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -4160,7 +4136,7 @@ internal static class Matcher
         state.RecordFuzzy(FuzzyValue.Ins, Step(state, state.TextPos, (sbyte)-step));
 
         ++state.FuzzyCounts[FuzzyValue.Ins];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         node = currNode!;
@@ -4244,7 +4220,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -4336,7 +4312,7 @@ internal static class Matcher
         /* bstack: node step string_pos text_pos fuzzy_type op */
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -4625,7 +4601,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -4730,7 +4706,7 @@ internal static class Matcher
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -5002,7 +4978,7 @@ internal static class Matcher
         state.RecordFuzzy(data.FuzzyType, state.TextPos);
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -5128,7 +5104,7 @@ internal static class Matcher
          */
 
         ++fuzzyCounts[data.FuzzyType];
-        ++state.CaptureChange;
+        state.CaptureChange += MatchState.FuzzyEditChange;
         state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
@@ -6735,7 +6711,6 @@ internal static class Matcher
                         if (pattern.GroupInfoAt(privateIndex).Referenced && !SameSpanAsGroup(group, span))
                         {
                             ++state.CaptureChange;
-                            ++state.GroupChange;
                         }
 
                         state.SaveCapture(privateIndex, publicIndex, span);
@@ -6927,16 +6902,18 @@ internal static class Matcher
                         // charged to it, because END_FUZZY adds them without checking the outer
                         // limit - which is what made '(?:(?:(?:x){d<=1})+y){e<=5}' loop.
                         // A bounded repeat keeps upstream's answer ('{1,3}' charges three
-                        // deletions). Both counters only count up, so an edit or a group change that
-                        // was later backtracked still counts, which can only leave upstream's loop in
-                        // place, never stop an iteration upstream would take. A group call puts
-                        // 'capture_change' back when it returns, and upstream loops on
-                        // '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$' too.
+                        // deletions). The group half is the low half of 'capture_change' (see
+                        // 'MatchState.FuzzyEditChange'), so it comes back with every save and
+                        // restore upstream makes: a group call that sets a capture and puts it back
+                        // on return, '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$', stops as S88
+                        // stopped it. The section half only counts up, so an edit later backtracked
+                        // still counts, which can only leave upstream's loop in place.
                         if (
                             changed
                             && ~node.Values[2] == 0
                             && state.TextPos == rpData.Start
-                            && state.GroupChange == rpData.GroupChange
+                            && MatchState.GroupChanges(state.CaptureChange)
+                                == MatchState.GroupChanges(rpData.CaptureChange)
                             && state.EditsChargedBy(state.FuzzyNode) == rpData.SectionEdits
                         )
                         {
@@ -7023,7 +7000,6 @@ internal static class Matcher
                             rpData.Start,
                             rpData.CaptureChange,
                             index,
-                            rpData.GroupChange,
                             rpData.SectionEdits
                         ),
                         state.IsFuzzy
@@ -7048,7 +7024,6 @@ internal static class Matcher
                                     state.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    state.GroupChange,
                                     state.EditsChargedBy(state.FuzzyNode)
                                 ),
                                 state.IsFuzzy
@@ -7066,8 +7041,6 @@ internal static class Matcher
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
-
-                        rpData.GroupChange = state.GroupChange;
 
                         rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
                         rpData.Start = state.TextPos;
@@ -7190,7 +7163,6 @@ internal static class Matcher
                             rpData.Start,
                             rpData.CaptureChange,
                             index,
-                            rpData.GroupChange,
                             rpData.SectionEdits
                         ),
                         state.IsFuzzy
@@ -7215,7 +7187,6 @@ internal static class Matcher
                                     state.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    state.GroupChange,
                                     state.EditsChargedBy(state.FuzzyNode)
                                 ),
                                 state.IsFuzzy
@@ -7248,8 +7219,6 @@ internal static class Matcher
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
-
-                        rpData.GroupChange = state.GroupChange;
 
                         rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
                         rpData.Start = state.TextPos;
@@ -7558,7 +7527,6 @@ internal static class Matcher
                             rpData.CaptureChange,
                             index,
                             state.TextPos,
-                            rpData.GroupChange,
                             rpData.SectionEdits
                         ),
                         state.IsFuzzy
@@ -7571,7 +7539,6 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.GroupChange = state.GroupChange;
                     rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
 
                     // Could the body or tail match?
@@ -7652,7 +7619,6 @@ internal static class Matcher
                                     rpData.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    rpData.GroupChange,
                                     rpData.SectionEdits
                                 ),
                                 state.IsFuzzy
@@ -7958,7 +7924,6 @@ internal static class Matcher
                             rpData.CaptureChange,
                             index,
                             state.TextPos,
-                            rpData.GroupChange,
                             rpData.SectionEdits
                         ),
                         state.IsFuzzy
@@ -7971,7 +7936,6 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.GroupChange = state.GroupChange;
                     rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
 
                     // Could the body or tail match?
@@ -8046,7 +8010,6 @@ internal static class Matcher
                                     rpData.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    rpData.GroupChange,
                                     rpData.SectionEdits
                                 ),
                                 state.IsFuzzy
@@ -10142,7 +10105,6 @@ internal static class Matcher
                     rpData.Count = dataBe.Count;
                     rpData.Start = dataBe.Start;
                     rpData.CaptureChange = dataBe.CaptureChange;
-                    rpData.GroupChange = dataBe.GroupChange;
                     rpData.SectionEdits = dataBe.SectionEdits;
                     break;
                 }
@@ -10379,7 +10341,6 @@ internal static class Matcher
                     rpData.Count = dataR.Count;
                     rpData.Start = dataR.Start;
                     rpData.CaptureChange = dataR.CaptureChange;
-                    rpData.GroupChange = dataR.GroupChange;
                     rpData.SectionEdits = dataR.SectionEdits;
                     break;
                 }
@@ -10819,7 +10780,6 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
-                    rpData.GroupChange = dataMbt.GroupChange;
                     rpData.SectionEdits = dataMbt.SectionEdits;
 
                     // Record backtracking info in case the body fails to match.
@@ -10857,7 +10817,6 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
-                    rpData.GroupChange = dataMbt.GroupChange;
                     rpData.SectionEdits = dataMbt.SectionEdits;
 
                     // Record backtracking info in case the tail fails to match.

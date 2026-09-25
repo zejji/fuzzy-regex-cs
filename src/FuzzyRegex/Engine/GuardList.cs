@@ -356,9 +356,6 @@ internal sealed class RepeatData
     /// <summary>Upstream <c>capture_change</c>: the state's counter when this iteration started.</summary>
     internal long CaptureChange;
 
-    /// <summary>NOT UPSTREAM: the state's <c>GroupChange</c> when this iteration started (ledger 33).</summary>
-    internal long GroupChange;
-
     /// <summary>
     /// NOT UPSTREAM: the edits the enclosing fuzzy section had charged when this iteration started
     /// (ledger 33). See <c>MatchState.EditsChargedBy</c>.

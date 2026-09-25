@@ -172,6 +172,34 @@ public sealed class FuzzyEmptyIterationTests
     }
 
     [Test]
+    public void A_group_call_that_sets_and_restores_a_capture_does_not_keep_the_repeat_going()
+    {
+        // V1 search on each: MemoryError. A group call puts every capture it set, and
+        // `capture_change`, back when it returns, so an iteration through `(?1)` changes nothing a
+        // later one can see and the repeat stops. The 2026-09-25 blind review found the first
+        // version of the ledger-33 counter did not go back with the call, and all three ran to the
+        // 1 GB limit where S88's rule had answered them. These are S88's answers.
+        foreach (
+            (string pattern, string subject, (int, int)? span, int[] deletions) in new[]
+            {
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$", "c", ((int, int)?)(1, 0), new[] { 1 }),
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})+d", "cd", (1, 1), new[] { 1, 2 }),
+                (@"(?(DEFINE)(()))(?:(?1)(?:x){d<=1})+\2d", "d", null, []),
+            }
+        )
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout).Match(subject);
+
+            m.Success.Should().Be(span is not null, pattern);
+            if (span is { } expected)
+            {
+                (m.Index, m.Length).Should().Be(expected, pattern);
+                m.FuzzyChanges.Deletions.Should().Equal(deletions, pattern);
+            }
+        }
+    }
+
+    [Test]
     public void A_bounded_repeat_keeps_upstreams_answer()
     {
         // V1 search(r'(?:(?:x){d<=1}){1,3}y', 'y'): span=(0, 1) counts=(0, 0, 3)

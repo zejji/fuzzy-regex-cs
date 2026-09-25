@@ -449,15 +449,23 @@ internal sealed class MatchState : IDisposable
     internal long CaptureChange;
 
     /// <summary>
-    /// NOT UPSTREAM (ledger 33): how many times a referenced group's span has changed. The part of
-    /// <see cref="CaptureChange"/> that is not a fuzzy edit, counted up and never restored, which is
-    /// why it can only make the empty-iteration stop in END_GREEDY_REPEAT more cautious.
+    /// NOT UPSTREAM (ledger 33): what a fuzzy edit adds to <see cref="CaptureChange"/>, where
+    /// upstream adds 1. A referenced group's span change still adds 1, so the low 32 bits count
+    /// group changes alone and come back with every save and restore upstream already makes -
+    /// a group call's return included. Only ever compared for equality, as upstream compares it.
+    /// A match cannot make 2^32 group changes: each pushes a backtrack entry, and the stack stops
+    /// at 1 GB.
     /// </summary>
-    internal long GroupChange;
+    internal const long FuzzyEditChange = 1L << 32;
+
+    /// <summary>The group-change half of a <see cref="CaptureChange"/> value.</summary>
+    /// <param name="captureChange">A <see cref="CaptureChange"/> value.</param>
+    /// <returns>Its low 32 bits.</returns>
+    internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
     /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
-    /// node index. Counted up and never restored, like <see cref="GroupChange"/>. Allocated only
+    /// node index. Counted up and never restored. Allocated only
     /// for a fuzzy pattern.
     /// </summary>
     internal readonly long[]? SectionEdits;
@@ -754,7 +762,6 @@ internal sealed class MatchState : IDisposable
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
-            repeat.GroupChange = 0;
             repeat.SectionEdits = 0;
         }
 
@@ -777,7 +784,6 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
-        GroupChange = 0;
         if (SectionEdits is not null)
         {
             Array.Clear(SectionEdits);
