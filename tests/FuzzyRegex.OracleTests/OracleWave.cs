@@ -445,6 +445,35 @@ internal static class OracleWave
         return summary;
     }
 
+    /// <summary>Where the consumer exports every expected divergence's example rows for <c>record-oracle.py --recheck</c>.</summary>
+    public static string ExpectedExamplesPath =>
+        Path.Combine(Path.GetDirectoryName(ReportPath)!, "expected-examples.jsonl");
+
+    /// <summary>
+    /// Every example row of every entry, one JSON object per line: the entry's id and the row as the
+    /// entry stores it, upstream's answer included. <c>record-oracle.py --recheck</c> asks upstream
+    /// each row's question again and fails if it no longer gives that answer, which is what stops a
+    /// fixed upstream bug staying "expected" for ever.
+    /// </summary>
+    /// <param name="entries">The entries.</param>
+    /// <returns>The JSONL text.</returns>
+    public static string RenderExpectedExamples(IEnumerable<ExpectedDivergence> entries) =>
+        string.Concat(
+            entries.SelectMany(static entry =>
+                entry
+                    .Example.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(line => "{\"entry\": " + JsonSerializer.Serialize(entry.Id) + ", \"row\": " + line + "}\n")
+            )
+        );
+
+    /// <summary>Writes <see cref="RenderExpectedExamples"/> to <see cref="ExpectedExamplesPath"/>.</summary>
+    /// <param name="entries">The entries.</param>
+    public static void WriteExpectedExamples(IEnumerable<ExpectedDivergence> entries)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ExpectedExamplesPath)!);
+        File.WriteAllText(ExpectedExamplesPath, RenderExpectedExamples(entries));
+    }
+
     /// <summary>Where the consumer lists the rows tools/screen-undefined.py should screen.</summary>
     public static string ScreenCandidatesPath =>
         Path.Combine(Path.GetDirectoryName(ReportPath)!, "screen-candidates.txt");

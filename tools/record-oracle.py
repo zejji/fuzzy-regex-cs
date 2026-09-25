@@ -6905,6 +6905,74 @@ def _worker(inputs: Path, start: int, output: Path) -> int:
 
 
 # --------------------------------------------------------------------------------------------
+# Re-checking known-divergence examples against the live upstream
+# --------------------------------------------------------------------------------------------
+#
+# EVERY ExpectedDivergences ENTRY CARRIES AN EXAMPLE ROW WITH UPSTREAM'S ANSWER FROZEN INTO IT.
+# `Every_expected_divergence_still_diverges` re-asks the PORT on each; nothing re-asked UPSTREAM,
+# so if a later release fixed the bug an entry describes, the stored answer would go on showing
+# the bug and every check would stay green. That is the known-failure problem pytest's
+# `xfail(strict=True)` and rustc's `known-bug` tests solve by re-checking on every run rather than
+# on a version bump, and it is solved the same way here: run-oracle.ps1 hands this recorder the
+# consumer's export of every example (`--recheck`), and any answer upstream no longer gives fails
+# the run and says what to do. 260 rows, about 20 seconds; all 260 reproduced byte for byte on
+# 2026-09-25.
+
+# What a recorded row reads as its QUESTION - everything else on it is an answer. Complete by
+# `_recheck_failures`: every generator's rows, stripped to these and recorded again, come back
+# identical. `oracle` is not here because it is derived from `generator`.
+ROW_INPUT_KEYS = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "template",
+                  "count", "partial", "pos", "endpos", "timeout", "codepointSlice")
+
+
+def _question_of(row: dict) -> dict:
+    return {key: row[key] for key in ROW_INPUT_KEYS if key in row}
+
+
+def _answer_changes(stored: dict, fresh: dict) -> list[str]:
+    # Only the answers the stored row HAS: an example recorded before a field existed (S44 found
+    # three without `anchoredScan`) is not stale for lacking it.
+    return sorted(key for key in stored if key not in ROW_INPUT_KEYS and fresh.get(key) != stored[key])
+
+
+def recheck(path: Path) -> int:
+    """Re-records every exported example and fails if upstream no longer gives its stored answer."""
+    import regex
+
+    _check_version(regex.__version__)
+    exported = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not exported:
+        raise SystemExit(f"{path} holds no examples; the consumer's export did not run")
+    fresh = _record_supervised([_question_of(e["row"]) for e in exported])
+
+    stale = []
+    for entry, again in zip(exported, fresh):
+        changes = _answer_changes(entry["row"], again)
+        if changes:
+            stale.append((entry, again, changes))
+
+    commit = _upstream_commit()
+    if stale:
+        for entry, again, changes in stale:
+            print(f"UPSTREAM CHANGED ITS ANSWER on an example of {entry['entry']} "
+                  f"(upstream {commit[:12]}), in {', '.join(changes)}", file=sys.stderr)
+            print("  pattern " + json.dumps(entry["row"]["pattern"]) + "  subject "
+                  + json.dumps(entry["row"]["subject"]), file=sys.stderr)
+            for key in changes:
+                print(f"  {key}\n    stored {json.dumps(entry['row'].get(key))[:300]}\n"
+                      f"    now    {json.dumps(again.get(key))[:300]}", file=sys.stderr)
+        print("  Re-judge before trusting any wave: if upstream fixed the bug, delete the entry, keep "
+              "its PinnedBy test as a regression test and update the ledger entry; if the shape "
+              "moved, re-minimise and replace the Example with the row recorded now. See "
+              ".claude/skills/sync-upstream/SKILL.md.", file=sys.stderr)
+        return 1
+
+    print(f"recheck: all {len(exported)} known-divergence examples still get their stored answer "
+          f"from upstream {commit[:12]}")
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
 # Determinism
 # --------------------------------------------------------------------------------------------
 
@@ -7201,6 +7269,7 @@ def _self_check() -> int:
         failures.append("the captures check no longer fires on a capture text that is not its span")
 
     failures.extend(_supervisor_failures())
+    failures.extend(_recheck_failures())
 
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
@@ -7212,6 +7281,42 @@ def _self_check() -> int:
         "slice-round-trip, metamorphic-checker and crash-supervisor guards all fire"
     )
     return 0
+
+
+def _recheck_failures() -> list[str]:
+    """`--recheck` must ask the stored question again and notice a changed answer.
+
+    Two ways it could be silently wrong, and both happened by hand on 2026-09-25 before this
+    existed: a re-record that drops one of a row's inputs asks a DIFFERENT question (a hand-rolled
+    check dropped `codepointSlice` and reported four false changes), and one that keeps a stale
+    answer field in the row it re-records can never see that field change.
+    """
+    failures = []
+    import regex
+
+    # ROW_INPUT_KEYS IS COMPLETE: every generator's rows, stripped to their inputs and recorded
+    # again, come back identical. A missing input changes the question and so, in general, the row.
+    for name in GENERATORS:
+        for original in (_record_row_and_its_control_answers(regex, r)
+                         for r in _generate(name, random.Random(f"recheck:{name}"), 6)):
+            again = _record_row_and_its_control_answers(regex, _question_of(original))
+            if again != original:
+                changed = sorted(k for k in set(original) | set(again) if original.get(k) != again.get(k))
+                failures.append(f"a {name} row stripped to ROW_INPUT_KEYS records differently: {changed}")
+                break
+
+    # A CHANGED ANSWER IS REPORTED: a stored example whose answer upstream no longer gives.
+    stored = _record_row_and_its_control_answers(regex, {
+        "generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "xa",
+        "operation": "search"})
+    tampered = {**stored, "outcome": {"kind": "nomatch"}}
+    changes = _answer_changes(tampered, _record_row_and_its_control_answers(regex, _question_of(tampered)))
+    if changes != ["outcome"]:
+        failures.append(f"a stored answer upstream no longer gives was reported as {changes}")
+    if _answer_changes(stored, _record_row_and_its_control_answers(regex, _question_of(stored))):
+        failures.append("a stored answer upstream still gives was reported as changed")
+
+    return failures
 
 
 def _supervisor_failures() -> list[str]:
@@ -7300,6 +7405,9 @@ def main(argv=None) -> int:
                         help="record one seed twice in fresh interpreters and require identical bytes")
     parser.add_argument("--self-check", action="store_true",
                         help="require the recorder's four guards to fire")
+    parser.add_argument("--recheck", type=Path, default=None,
+                        help="re-record the consumer's exported known-divergence examples and fail "
+                             "if upstream no longer gives their stored answers")
     # The crash supervisor's worker half - see `_record_supervised`. Not for use by hand.
     parser.add_argument("--worker-rows", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--worker-start", type=int, default=0, help=argparse.SUPPRESS)
@@ -7308,6 +7416,9 @@ def main(argv=None) -> int:
 
     if args.worker_rows is not None:
         return _worker(args.worker_rows, args.worker_start, args.worker_output)
+
+    if args.recheck is not None:
+        return recheck(args.recheck)
 
     if args.verify_determinism:
         return _verify_determinism()

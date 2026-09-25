@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
@@ -435,6 +436,10 @@ public sealed class OracleWaveTests
         // without removing the entry, the row stops diverging and this goes red - which is what
         // Chromium's TestExpectations lacks and pytest's xfail_strict has.
         ExpectedDivergences.All.Should().NotBeEmpty();
+
+        // The other direction, and the one this test cannot check itself: upstream's half of each
+        // example is re-asked by `record-oracle.py --recheck`, which run-oracle.ps1 runs on this file.
+        OracleWave.WriteExpectedExamples(ExpectedDivergences.All);
 
         foreach (ExpectedDivergence entry in ExpectedDivergences.All)
         {
@@ -1272,6 +1277,27 @@ public sealed class OracleWaveTests
         );
 
         run.ScreenCandidates.Should().Equal(2, 3);
+    }
+
+    [Test]
+    public void Every_example_row_is_exported_with_its_entry_for_the_recorder_to_ask_upstream_again()
+    {
+        // `record-oracle.py --recheck` reads this: one line per example row, carrying the entry's
+        // id beside the row exactly as the entry stores it, answers and all - the stored answer is
+        // what is checked against upstream's answer now.
+        string exported = OracleWave.RenderExpectedExamples(ExpectedDivergences.All);
+
+        string[] lines = exported.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int rows = ExpectedDivergences.All.Sum(static entry => OracleWave.ParseRows(entry.Example).Count);
+        lines.Should().HaveCount(rows, "every example row of every entry, and nothing else");
+
+        using var first = JsonDocument.Parse(lines[0]);
+        ExpectedDivergence entry = ExpectedDivergences.All[0];
+        first.RootElement.GetProperty("entry").GetString().Should().Be(entry.Id);
+        OracleWave
+            .ParseRows(first.RootElement.GetProperty("row").GetRawText())[0]
+            .Should()
+            .BeEquivalentTo(OracleWave.ParseRows(entry.Example)[0]);
     }
 
     [Test]

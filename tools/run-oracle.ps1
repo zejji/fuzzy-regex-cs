@@ -317,6 +317,8 @@ $runs = @(
 )
 
 $failed = @()
+$recheckDone = $false
+$recheckFailed = $false
 
 foreach ($seed in $runs) {
     if ($seed -ge 0) {
@@ -363,6 +365,22 @@ foreach ($seed in $runs) {
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
         --configuration $Configuration
     $consumerExit = $LASTEXITCODE
+
+    # Upstream's half of every known-divergence example, asked again: the consumer exported them,
+    # and an answer upstream no longer gives means a bug an entry describes may have been fixed. The
+    # examples do not depend on the wave, so once per invocation is enough.
+    $examples = Join-Path $repoRoot 'TestResults/oracle/expected-examples.jsonl'
+    if (-not $recheckDone -and (Test-Path -LiteralPath $examples)) {
+        Write-Host ''
+        Write-Host "Re-asking upstream every known-divergence example..." -ForegroundColor Cyan
+        python (Join-Path $PSScriptRoot 'record-oracle.py') --recheck $examples
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Oracle: RED - upstream no longer gives a stored example answer; see the message above.' -ForegroundColor Red
+            $recheckFailed = $true
+        }
+        $recheckDone = $true
+    }
+    if ($recheckFailed) { $consumerExit = 1 }
 
     # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
     # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
