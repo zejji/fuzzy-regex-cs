@@ -448,6 +448,28 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>capture_change</c>.</summary>
     internal long CaptureChange;
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger 33): what a fuzzy edit adds to <see cref="CaptureChange"/>, where
+    /// upstream adds 1. A referenced group's span change still adds 1, so the low 32 bits count
+    /// group changes alone and come back with every save and restore upstream already makes -
+    /// a group call's return included. Only ever compared for equality, as upstream compares it.
+    /// A match cannot make 2^32 group changes: each pushes a backtrack entry, and the stack stops
+    /// at 1 GB.
+    /// </summary>
+    internal const long FuzzyEditChange = 1L << 32;
+
+    /// <summary>The group-change half of a <see cref="CaptureChange"/> value.</summary>
+    /// <param name="captureChange">A <see cref="CaptureChange"/> value.</param>
+    /// <returns>Its low 32 bits.</returns>
+    internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
+    /// node index. Counted up and never restored. Allocated only
+    /// for a fuzzy pattern.
+    /// </summary>
+    internal readonly long[]? SectionEdits;
+
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
 
@@ -610,6 +632,22 @@ internal sealed class MatchState : IDisposable
         {
             Repeats[r] = new RepeatData();
         }
+
+        SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+    }
+
+    /// <summary>The edits <paramref name="section"/> has charged so far, or 0 outside any section.</summary>
+    /// <param name="section">A FUZZY node, or <see langword="null"/> outside any section.</param>
+    /// <returns>The count from <see cref="SectionEdits"/>.</returns>
+    internal long EditsChargedBy(Node? section) => section is null ? 0 : SectionEdits![section.Index];
+
+    /// <summary>Counts one fuzzy edit against the section currently open, for <see cref="EditsChargedBy"/>.</summary>
+    internal void CountSectionEdit()
+    {
+        if (FuzzyNode is not null)
+        {
+            ++SectionEdits![FuzzyNode.Index];
+        }
     }
 
     /// <summary>
@@ -724,6 +762,7 @@ internal sealed class MatchState : IDisposable
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
+            repeat.SectionEdits = 0;
         }
 
         ActiveCalls.Clear();
@@ -745,6 +784,10 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
+        if (SectionEdits is not null)
+        {
+            Array.Clear(SectionEdits);
+        }
         ReqEnd = 0;
         LastIndex = 0;
         LastGroup = 0;

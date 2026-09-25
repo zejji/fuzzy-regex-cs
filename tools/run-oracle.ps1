@@ -381,12 +381,11 @@ foreach ($seed in $runs) {
         }
         $recheckDone = $true
     }
-    if ($recheckFailed) { $consumerExit = 1 }
-
     # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
     # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
     # again only if it did, so a wave with nothing to screen costs nothing extra.
     $candidates = Join-Path $repoRoot 'TestResults/oracle/screen-candidates.txt'
+    $screenFailed = $false
     if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidates) -and (Get-Item -LiteralPath $candidates).Length -gt 0) {
         Write-Host ''
         Write-Host 'Screening the unsettled rows under MemorySanitizer...' -ForegroundColor Cyan
@@ -395,7 +394,7 @@ foreach ($seed in $runs) {
         if ($LASTEXITCODE -ne 0) {
             # Most often the upstream-commit gate: its message above says what to run.
             Write-Host "Oracle: RED - the MSan screen failed (exit $LASTEXITCODE); see its message above." -ForegroundColor Red
-            $consumerExit = 1
+            $screenFailed = $true
         }
         elseif ((Get-FileHash -LiteralPath $wavePath).Hash -ne $before) {
             Write-Host ''
@@ -415,7 +414,9 @@ foreach ($seed in $runs) {
         Write-Host "No report at $reportPath - the consumer did not get as far as the wave." -ForegroundColor Yellow
     }
 
-    if ($consumerExit -ne 0) {
+    # Three verdicts, kept apart until here: a consumer re-run after the screen must not overwrite a
+    # failed recheck or a failed screen (found by the 2026-09-25 blind review).
+    if ($consumerExit -ne 0 -or $recheckFailed -or $screenFailed) {
         $failed += $seed
     }
 

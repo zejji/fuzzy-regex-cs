@@ -682,4 +682,37 @@ public sealed class CaseFoldingTests
             .Success.Should()
             .BeFalse();
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, which cannot compile these patterns; this test pins OUR answer.
+    [Test]
+    public void A_reversed_full_fold_after_a_lookahead_compiles_and_matches()
+    {
+        // Ledger entry 6 with a lookahead in the anchor's place: seed 335764881 row 27110 of the
+        // 2026-09-24 sweep, and its minimal form. Upstream raises `IndexError` from
+        // `_regex_core.py:4035` on both while compiling. The forward twin compiles upstream and gives
+        // (1, 4) over 'xßaß', and every spelling of the drawn row upstream can compile finds nothing.
+        const FuzzyRegexOptions caseless = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase;
+
+        foreach (string pattern in new[] { "(?r)(?=ß)ßaß", "(?=ß)ßaß" })
+        {
+            Match m = new FuzzyRegex(pattern, caseless).Match("xßaß");
+
+            m.Success.Should().BeTrue(pattern);
+            (m.Index, m.Length).Should().Be((1, 3), pattern);
+        }
+
+        // The full fold of the literal, which is what makes it this entry's shape at all.
+        new FuzzyRegex("(?r)(?=s)ßaß", caseless)
+            .Match("ssass")
+            .Length.Should()
+            .Be(5);
+
+        new FuzzyRegex(
+            "(?r)(?:(?=(" + char.ConvertFromUtf32(0x1F600) + "|aa))ß|ß)aß",
+            caseless | FuzzyRegexOptions.Multiline
+        )
+            .Matches("aa" + char.ConvertFromUtf32(0x1F600) + char.ConvertFromUtf32(0x1F600) + "ß")
+            .Should()
+            .BeEmpty();
+    }
 }

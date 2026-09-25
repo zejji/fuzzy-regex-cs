@@ -224,6 +224,17 @@ public sealed class MatchStateCacheTests
                 continue;
             }
 
+            // MatchState.SectionEdits is null exactly when the pattern is not fuzzy, and it is
+            // readonly, so no call can set it. For a fuzzy pattern it is an array, which the long[]
+            // rule below scribbles, and this test's fuzzy case then checks a reused state clears it.
+            if (
+                string.Equals(field.Name, nameof(MatchState.SectionEdits), StringComparison.Ordinal)
+                && field.GetValue(state) is null
+            )
+            {
+                continue;
+            }
+
             var before = new List<string>();
             Render(field.Name, field.GetValue(state), before);
 

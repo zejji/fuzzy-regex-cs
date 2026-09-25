@@ -23,8 +23,20 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Findings that need a slice
 
-1. Ledger 33's residuals loop to the 1 GB limit, as upstream does: `(?:(?:(?:x){d<=1})+y){e<=5}`
-   over 'y', and a body with a group, `(?:(?(1)c|z)|()(?:x){d<=1})+d` over 'cd' (`SHORTCUT:`s).
-2. Upstream `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1)
+1. Upstream `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1)
    with one deletion. Not investigated (ledger 33).
-3. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
+2. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
+3. CANDIDATE INHERITED BUG, ledger 2's family (2026-09-25 triage, not yet researched or blind-
+   reviewed). A lazy repeat before a one-character tail reports a partial that cannot complete:
+   `regex.match(r'(?r)ab??', 'c', partial=True)` is (0, 1) partial on both engines, where
+   upstream's greedy `(?r)ab?`, its repeat-free `(?r)a` and its forward mirror `b??a` are all None.
+   The port carries upstream's guard as-is at `Matcher.IsTailPartial` (`CharacterRev` arm, and
+   likely the forward `Character` arm, which S31 pinned on `([^a-f]{3,}?)x` over '__AAb').
+4. `(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)` over 'zzzz': upstream (0, 4) with four
+   substitutions, the port (0, 0) with one deletion. Predates ledger 33's change (the 2026-09-25
+   engine review measured it at b265dc3 too). Not triaged.
+5. Classifier coverage, from the same triage. `turkic-default-folding` claims only rows with spans
+   (`TurkicLettersCovered` has no arm for `sub`/`split`), so every fresh seed that draws a Turkic-I
+   substitution needs its row added to the row-keyed `-without-spans` sibling (seven on
+   2026-09-25). And `full-fold-backreference-leftovers`' doubled-guard arm claims rows with no
+   backreference, e.g. `(?b)(\p{L}){i,d}c` over '\nc', so it is wider than its name.

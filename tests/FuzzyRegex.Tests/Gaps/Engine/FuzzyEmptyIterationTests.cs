@@ -20,9 +20,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// <c>(?:(?:x){d&lt;=1})+</c> over the empty string is (0, 0) with deletions at [0, 1]. The minimum
 /// is written out as copies of the body, so <c>+</c> is one body and then a loop whose first
 /// iteration counts, which is why that is two deletions and not one. A bounded repeat is unchanged:
-/// upstream finishes it and the port gives the same answer. So is a body with a capture group,
-/// where a pass that does not move can set a group the next pass tests. Every expected value comes from
-/// <c>regex</c> 2026.9.10, measured on 2026-09-23 and quoted beside its assertion.
+/// upstream finishes it and the port gives the same answer. So is an iteration that leaves anything a
+/// later one could see - a referenced group whose span it changed, or an edit charged to the section
+/// around the repeat, whose budget then ends the loop as upstream's does. Every expected value comes
+/// from <c>regex</c> 2026.9.10, measured on 2026-09-23 and 2026-09-25 and quoted beside its assertion.
 /// </para>
 /// </remarks>
 public sealed class FuzzyEmptyIterationTests
@@ -117,6 +118,84 @@ public sealed class FuzzyEmptyIterationTests
             (m.Index, m.Length).Should().Be((0, 1));
             m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
             m.FuzzyChanges.Deletions.Should().Equal(0);
+        }
+    }
+
+    [Test]
+    public void A_repeat_inside_a_section_stops_when_the_section_charged_the_iteration_nothing()
+    {
+        // V1 search(r'(?:(?:(?:x){d<=1})+y){e<=5}', 'y'): MemoryError, and this port ran to its 1 GB
+        // backtracking limit until 2026-09-25. END_FUZZY adds the inner section's deletions to the
+        // outer counts without checking the outer limit, so the outer budget never ends the loop.
+        // V1 search(r'(?:(?:(?:x){d<=1})+){e<=5}', ''): span=(0, 0) counts=(0, 0, 2) changes=([], [],
+        // [0, 1]), upstream's own stop at the end of the slice, and the answer this gives before 'y'.
+        Match m = new FuzzyRegex(@"(?:(?:(?:x){d<=1})+y){e<=5}", FuzzyRegexOptions.None, _timeout).Match("y");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 2));
+        m.FuzzyChanges.Deletions.Should().Equal(0, 1);
+    }
+
+    [Test]
+    public void A_repeat_inside_a_section_that_charges_it_keeps_upstreams_answer()
+    {
+        // V1 search(r'(?:(?:a(?:x){d<=1})+y){d<=9}', 'y'): span=(0, 1) counts=(0, 0, 8) changes=([],
+        // [], [0, 1, 2, 3, 4, 5, 6, 7]). Each iteration deletes an 'a' from the enclosing section's own
+        // budget, so the budget ends the loop and the stop must not: this is the half that keeps it
+        // off. The budget is 9 because at 5 upstream's budget ends the loop at 4 deletions, which is
+        // also where a wrongly applied stop would end it - `+` is one copy of the body and a loop.
+        Match m = new FuzzyRegex(@"(?:(?:a(?:x){d<=1})+y){d<=9}", FuzzyRegexOptions.None, _timeout).Match("y");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 1));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 8));
+        m.FuzzyChanges.Deletions.Should().Equal(0, 1, 2, 3, 4, 5, 6, 7);
+    }
+
+    [Test]
+    public void An_iteration_that_sets_a_capture_to_the_span_it_already_had_stops_the_repeat()
+    {
+        // V1 search(r'(?:(?(1)c|z)|()(?:x){d<=1})+d', 'cd'): MemoryError, and this port ran to its
+        // 1 GB limit until 2026-09-25. At 1 the first pass moves group 1 to (1, 1), which a later pass
+        // could test, so it goes on; the next pass sets it to (1, 1) again and deletes, which changes
+        // nothing a later pass can see, so the repeat stops there and 'd' matches. Its end-of-slice
+        // form, V1 search(r'(?:(?(1)c|z)|()(?:x){d<=1})+', 'c'), is span=(0, 1) with one deletion.
+        // The three deletions are at 0, 1 and 1, and a deletion is reported past the ones before it
+        // (ledger entry 26's "raw" form), so the list reads 0, 2, 3.
+        Match m = new FuzzyRegex(@"(?:(?(1)c|z)|()(?:x){d<=1})+d", FuzzyRegexOptions.None, _timeout).Match("cd");
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((0, 2));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
+        m.FuzzyChanges.Deletions.Should().Equal(0, 2, 3);
+    }
+
+    [Test]
+    public void A_group_call_that_sets_and_restores_a_capture_does_not_keep_the_repeat_going()
+    {
+        // V1 search on each: MemoryError. A group call puts every capture it set, and
+        // `capture_change`, back when it returns, so an iteration through `(?1)` changes nothing a
+        // later one can see and the repeat stops. The 2026-09-25 blind review found the first
+        // version of the ledger-33 counter did not go back with the call, and all three ran to the
+        // 1 GB limit where S88's rule had answered them. These are S88's answers.
+        foreach (
+            (string pattern, string subject, (int, int)? span, int[] deletions) in new[]
+            {
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$", "c", ((int, int)?)(1, 0), new[] { 1 }),
+                (@"(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})+d", "cd", (1, 1), new[] { 1, 2 }),
+                (@"(?(DEFINE)(()))(?:(?1)(?:x){d<=1})+\2d", "d", null, []),
+            }
+        )
+        {
+            Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout).Match(subject);
+
+            m.Success.Should().Be(span is not null, pattern);
+            if (span is { } expected)
+            {
+                (m.Index, m.Length).Should().Be(expected, pattern);
+                m.FuzzyChanges.Deletions.Should().Equal(deletions, pattern);
+            }
         }
     }
 

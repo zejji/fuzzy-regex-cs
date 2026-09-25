@@ -23,7 +23,7 @@ recording time, and 15.2 GB where the plain build needs 1.4 GB on the same gener
 
 How
 ---
-In the image tools/msan/Dockerfile builds: CPython 3.12 with MSan, and upstream's extension
+In the image tools/msan/Dockerfile builds: CPython 3.14 with MSan, and upstream's extension
 compiled from THIS checkout's submodule on every run, so the screen always tests the pinned code.
 The candidate rows are re-recorded through record-oracle.py's crash supervisor, each tagged on
 stderr, so every MSan report is tied to its row and a row that crashes does not take the rest.
@@ -64,7 +64,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = REPO_ROOT / "tools" / "msan" / "known-undefined.json"
 CANDIDATES = REPO_ROOT / "TestResults" / "oracle" / "screen-candidates.txt"
-IMAGE = "fuzzyregex-msan:cpython-3.12.11"
+IMAGE = "fuzzyregex-msan:cpython-3.14.7"
 
 # The worker's row tag, written to its stderr before each row when ORACLE_TAG_ROWS is set - see
 # `_worker` in record-oracle.py. The key is the row's `_screenKey`, which this script assigns.
@@ -116,6 +116,9 @@ def parse_reports(log: str) -> dict[str, list[str]]:
                     break
                 if _HEAP_ORIGIN.search(lines[scan]):
                     for later in lines[scan + 1:]:
+                        # This report's stack only: the next report or row starts another one.
+                        if _WARNING.search(later) or _TAG.match(later) or _SUMMARY.search(later):
+                            break
                         frame = _FRAME.match(later)
                         if frame and "_regex" in frame.group(2):
                             origin = f"heap allocation in {frame.group(1)}"
@@ -192,6 +195,9 @@ def _host_path(path: Path) -> str:
 def screen_rows(rows: list[dict]) -> dict[str, list[str]]:
     """Records `rows` under MSan in the image and returns the findings keyed by `_screenKey`."""
     _ensure_image()
+    # Under the checkout rather than the system temp directory, because Docker Desktop shares the
+    # user's drive and not always %TEMP%; created here, because a fresh checkout has no TestResults.
+    (REPO_ROOT / "TestResults").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=REPO_ROOT / "TestResults") as tmp:
         work = Path(tmp)
         (work / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows),
@@ -329,6 +335,26 @@ def _self_check() -> int:
     }
     if got != expected:
         failures.append(f"parse_reports gave {got}, expected {expected}")
+
+    # A heap origin with no upstream frame is "outside upstream", and never borrows a frame from
+    # the next report down the log - found by the 2026-09-25 blind review, which gave row 1 the
+    # function of row 2's report.
+    borrowed = parse_reports("\n".join([
+        "@@SCREEN 1",
+        "==45==WARNING: MemorySanitizer: use-of-uninitialized-value",
+        "    #0 0x7ff in some_c_function /usr/lib/libc.so:1:1",
+        "  Uninitialized value was created by a heap allocation",
+        "    #0 0x7ff in malloc /llvm/msan_interceptors.cpp:1",
+        "    #1 0x7ff in PyMem_RawMalloc /cpython/Objects/obmalloc.c:1:1",
+        "@@SCREEN 2",
+        "==45==WARNING: MemorySanitizer: use-of-uninitialized-value",
+        "    #0 0x7ff in basic_match /src/upstream/src/_regex.c:13876:54",
+        "  Uninitialized value was created by a heap allocation",
+        "    #0 0x7ff in malloc /llvm/msan_interceptors.cpp:1",
+        "    #1 0x7ff in re_alloc /src/upstream/src/_regex.c:700:5",
+    ]))
+    if borrowed.get("1") != ["heap allocation outside upstream"]:
+        failures.append(f"a heap origin borrowed a frame from a later report: {borrowed}")
 
     registry = {"defects": [{"origin": "new_position in basic_match", "ledger": "ledger 5"}]}
     if attribute(["new_position in basic_match"], registry) != "ledger 5":

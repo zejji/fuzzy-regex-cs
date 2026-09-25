@@ -888,6 +888,17 @@ public sealed class PartialMatchingTests
         );
         pruned.PartialMatch.Should().BeTrue();
         (pruned.Index, pruned.Length).Should().Be((0, 1));
+
+        // The smallest row of this shape, minimised on 2026-09-25 from seed 335764881 rows 32325
+        // and 32703 of the 2026-09-24 sweep. Upstream answers (0, 0); its `(*PRUNE)` spelling, its
+        // verb-free spelling and its own `match(0, 1, partial=True)` all answer (0, 1).
+        foreach (string verb in new[] { "(*SKIP)", "(*PRUNE)", "" })
+        {
+            Match m = new FuzzyRegex("(?r)x(?:a" + verb + "b|c)").Match("bx", partial: true);
+
+            m.PartialMatch.Should().BeTrue(verb);
+            (m.Index, m.Length).Should().Be((0, 1), verb);
+        }
     }
 
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
