@@ -1111,6 +1111,41 @@ public sealed class PartialMatchingTests
             .BeFalse();
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void A_skip_in_the_first_pass_does_not_move_where_the_partial_pass_starts_or_ends()
+    {
+        // The seed-11 `partial-long` rows 8508 and 8556 (2026-09-25), minimised: the same carried
+        // bound as the two tests above, costing the START of the partial here. Upstream's first,
+        // non-partial pass reaches the verb and moves the slice bound; its partial pass then
+        // searches from the moved bound. Measured 2026-09-25 on regex 2026.9.10:
+        //
+        //   search('A(*SKIP)b', 'QQA', partial=True)        (3, 3)   upstream
+        //   ... spelt (*PRUNE), which moves no bound         (2, 3)   upstream, this port
+        //   match at 2                                       (2, 3)   upstream
+        //   PCRE2 10.47, PCRE2_PARTIAL_SOFT                  (2, 3)
+        //
+        //   search('(?r)(?:a(*SKIP)\W|Z)(a)', '.aab', partial=True)   (0, 0)            upstream
+        //   ... spelt (*PRUNE)                                       (0, 2), g1 (1, 2) upstream
+        //   match with endpos 2, the highest that matches            (0, 2), g1 (1, 2) upstream
+        //
+        // A forward search owes the leftmost start that can still complete ('A' at 2 then 'b'), and
+        // a reversed one the rightmost end.
+        foreach (string verb in new[] { "(*SKIP)", "(*PRUNE)" })
+        {
+            Match forward = new FuzzyRegex("A" + verb + "b").Match("QQA", partial: true);
+
+            forward.PartialMatch.Should().BeTrue(verb);
+            (forward.Index, forward.Length).Should().Be((2, 1), verb);
+
+            Match reversed = new FuzzyRegex(@"(?r)(?:a" + verb + @"\W|Z)(a)").Match(".aab", partial: true);
+
+            reversed.PartialMatch.Should().BeTrue(verb);
+            (reversed.Index, reversed.Length).Should().Be((0, 2), verb);
+            (reversed.Groups[1].Index, reversed.Groups[1].Length).Should().Be((1, 1), verb);
+        }
+    }
+
     [Test]
     public void A_forward_skip_does_not_cost_the_partial_its_start()
     {

@@ -1229,6 +1229,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "(?r)x(?:a(*SKIP)b|c)", "flags": 0, "namedLists": {}, "subject": "bx", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r)([^\\p{L}])(?:.{2,2}(*SKIP)\\D|\\p{Nd})(?(1)[[:alpha:]]|\\p{Ll})", "flags": 16394, "namedLists": {}, "subject": "aaa  \r", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r).(?:(*SKIP).|a)", "flags": 0, "namedLists": {}, "subject": " \n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "(?r)(?:a(*SKIP)\\W|Z)(a)", "flags": 0, "namedLists": {}, "subject": ".aab", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1336,6 +1337,12 @@ internal static class ExpectedDivergences
         // 2026-09-25 against upstream's (*PRUNE) spelling, its verb-free spelling and its highest anchored match: seed 593876053 row 32433; the minimal form of C3.
         "match 0:(0,3)[(0,3)] 1:unset last=-1/- partial",
         "match 0:(0,1)[(0,1)] last=-1/- partial",
+        // Minimised from row 8556, `(?r)\B(?:[a](*SKIP)\W|\p{Lu})([a\d])` of the seed-11
+        // `partial,partial-sliced,partial-long` wave at 3000 rows, whose long subject is not kept
+        // here. Upstream's own `(*PRUNE)` spelling and its anchored match at endpos 2, the highest
+        // that matches, answer this port's span; a reversed search owes the highest anchor that
+        // matches. Measured 2026-09-25 on regex 2026.9.10.
+        "match 0:(0,2)[(0,2)] 1:(1,1)[(1,1)] last=1/- partial",
     ];
 
     /// <summary>
@@ -1386,6 +1393,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "a(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "partial": true, "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP).|[abz])(?P<g1>[a])*?\\1", "flags": 0, "namedLists": {}, "subject": "\naa ", "operation": "search", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "oracle": "prefilter-free", "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP)|a).", "flags": 0, "namedLists": {}, "subject": "\n ", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "A(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "QQA", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1468,6 +1476,12 @@ internal static class ExpectedDivergences
         "match 0:(1,1)[(1,1)] last=-1/- partial",
         "match 0:(1,2)[(1,2)] 1:unset last=-1/- partial",
         "match 0:(1,1)[(1,1)] last=-1/- partial",
+        // Minimised from row 8508, `A(?:[\p{L}||\p{N}]{0}(*SKIP)[\p{L}\p{N}]|[\p{L}||\p{N}])A$` of
+        // the seed-11 `partial,partial-sliced,partial-long` wave at 3000 rows, whose long subject
+        // is not kept here. Upstream's own `(*PRUNE)` spelling and its anchored match at 2 answer
+        // this port's span; PCRE2 10.47 answers the same partial (2, 3), with and without its start
+        // optimisations. Measured 2026-09-25 on regex 2026.9.10.
+        "match 0:(2,1)[(2,1)] last=-1/- partial",
     ];
 
     /// <summary>

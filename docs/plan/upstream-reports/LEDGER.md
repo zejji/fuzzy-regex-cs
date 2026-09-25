@@ -564,6 +564,22 @@ classified by `ExpectedDivergences.partial-retry-carried-slice-forward`. The rev
 same door is `ExpectedDivergences.partial-retry-reversed-slice`, found by S40b. Re-runnable:
 `python tools/probes/upstream-skip-carried-slice-forward.py`.
 
+**The smallest reproduction of this door yet (2026-09-25, regex 2026.9.10),** minimised from two
+rows of a seed-11 partial-matching wave. The moved bound costs the START of the partial, in both
+directions:
+
+```python
+>>> regex.search('A(*SKIP)b', 'QQA', partial=True).span()        # (*PRUNE): (2, 3)
+(3, 3)
+>>> regex.search(r'(?r)(?:a(*SKIP)\W|Z)(a)', '.aab', partial=True).span()   # (*PRUNE): (0, 2)
+(0, 0)
+```
+
+Upstream's own `match('QQA', 2, partial=True)` is (2, 3), and PCRE2 10.47 answers the same partial
+(2, 3) with and without its start optimisations. Upstream's own `match('.aab', 0, 2, partial=True)` is
+(0, 2), the highest end that matches. Pinned by
+`PartialMatchingTests.A_skip_in_the_first_pass_does_not_move_where_the_partial_pass_starts_or_ends`.
+
 **A SIXTH DOOR, added by S48 on 2026-09-14, and it is the first one this port SHARED** - every door
 above it was already fixed here when it was written up, and this one was not. It is neither a scan
 nor a two-pass partial: the stale slice crosses from one CANDIDATE of a single `(?b)` match to the

@@ -30,11 +30,6 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
    2026-09-25). Left as it is on purpose: S52's blind review showed that reading the recorded scan
    instead classifies a real defect (`(?i)\w` over 'xı'), and the owner's 2026-09-14 ruling
    is that such pins widen only by judged rows. The cost is a red sweep until someone adds the row.
-3. Two `partial-long` `(*SKIP)` partials at seed 11 (`-Generator partial,partial-sliced,
-   partial-long -Count 3000`), present before and after the 2026-09-25 work and not judged: row
-   8508 `A(?:[\p{L}||\p{N}]{0}(*SKIP)[\p{L}\p{N}]|[\p{L}||\p{N}])A$` (upstream (4969,0) partial,
-   port (4968,1) partial) and row 8556 `(?r)\B(?:[a](*SKIP)\W|\p{Lu})([a\d])` (upstream (0,0),
-   port (0,2)). Likely ledger 5's slice family. The same wave's other ten are port timeouts.
 
 Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
 `Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
