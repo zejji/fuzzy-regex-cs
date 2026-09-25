@@ -23,7 +23,7 @@ recording time, and 15.2 GB where the plain build needs 1.4 GB on the same gener
 
 How
 ---
-In the image tools/msan/Dockerfile builds: CPython 3.12 with MSan, and upstream's extension
+In the image tools/msan/Dockerfile builds: CPython 3.14 with MSan, and upstream's extension
 compiled from THIS checkout's submodule on every run, so the screen always tests the pinned code.
 The candidate rows are re-recorded through record-oracle.py's crash supervisor, each tagged on
 stderr, so every MSan report is tied to its row and a row that crashes does not take the rest.
@@ -64,7 +64,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = REPO_ROOT / "tools" / "msan" / "known-undefined.json"
 CANDIDATES = REPO_ROOT / "TestResults" / "oracle" / "screen-candidates.txt"
-IMAGE = "fuzzyregex-msan:cpython-3.12.11"
+IMAGE = "fuzzyregex-msan:cpython-3.14.7"
 
 # The worker's row tag, written to its stderr before each row when ORACLE_TAG_ROWS is set - see
 # `_worker` in record-oracle.py. The key is the row's `_screenKey`, which this script assigns.
@@ -192,6 +192,9 @@ def _host_path(path: Path) -> str:
 def screen_rows(rows: list[dict]) -> dict[str, list[str]]:
     """Records `rows` under MSan in the image and returns the findings keyed by `_screenKey`."""
     _ensure_image()
+    # Under the checkout rather than the system temp directory, because Docker Desktop shares the
+    # user's drive and not always %TEMP%; created here, because a fresh checkout has no TestResults.
+    (REPO_ROOT / "TestResults").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=REPO_ROOT / "TestResults") as tmp:
         work = Path(tmp)
         (work / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows),
