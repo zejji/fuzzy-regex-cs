@@ -114,6 +114,13 @@ internal sealed class Info
     internal List<(RegexBase Call, bool Reverse, bool Fuzzy)> GroupCalls { get; } = [];
 
     /// <summary>
+    /// Whether the parser has built a group call. Not in upstream: <see cref="GroupCalls"/> is only
+    /// filled in by <c>FixGroups</c>, and <see cref="PatternCompiler"/> needs the answer before it,
+    /// to know whether a call could carry a fuzzy budget into a section that allows no errors.
+    /// </summary>
+    internal bool HasGroupCall { get; set; }
+
+    /// <summary>
     /// Negative alias to real group number, for a named group nested inside itself. Upstream
     /// <c>info.private_groups</c>.
     /// </summary>

@@ -174,6 +174,20 @@ internal abstract class RegexBase
     internal virtual bool ContainsGroup() => false;
 
     /// <summary>
+    /// Whether the node holds a fuzzy section that allows at least one error. Not in upstream,
+    /// whose parser never builds a section that allows none; see <see cref="Fuzzy.IsExact"/>.
+    /// </summary>
+    /// <returns><see langword="true"/> if it does.</returns>
+    internal virtual bool AllowsFuzzyErrors() => false;
+
+    /// <summary>
+    /// Replaces each fuzzy section that allows no errors, and that is not inside a fuzzy section,
+    /// with its subpattern. Not in upstream; see <see cref="Fuzzy.IsExact"/>.
+    /// </summary>
+    /// <returns>The node without those sections.</returns>
+    internal virtual RegexBase ElideExactFuzzy() => this;
+
+    /// <summary>
     /// The set of nodes that can start a match here, with <see langword="null"/> standing for
     /// "this node can match nothing, so look at what follows". Upstream <c>get_firstset</c>.
     /// </summary>
@@ -1157,6 +1171,16 @@ internal sealed class Atomic : RegexBase
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
 
     /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
+
+    /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
 
     /// <inheritdoc />
@@ -1307,6 +1331,16 @@ internal class Branch : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Branches.Exists(static b => b.ContainsGroup());
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Branches.Exists(static b => b.AllowsFuzzyErrors());
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Branches = [.. Branches.Select(static b => b.ElideExactFuzzy())];
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -1755,6 +1789,7 @@ internal sealed class CallGroup : RegexBase
         _info = info;
         _groupText = group;
         _position = position;
+        info.HasGroupCall = true;
     }
 
     /// <summary>The group number, resolved by <see cref="FixGroups"/>. Upstream <c>group</c>.</summary>
@@ -2140,6 +2175,17 @@ internal sealed class Conditional : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => YesItem.AllowsFuzzyErrors() || NoItem.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        YesItem = YesItem.ElideExactFuzzy();
+        NoItem = NoItem.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -2554,6 +2600,20 @@ internal sealed class Sequence : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Items.Exists(static s => s.ContainsGroup());
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Items.Exists(static s => s.AllowsFuzzyErrors());
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        for (int i = 0; i < Items.Count; i++)
+        {
+            Items[i] = Items[i].ElideExactFuzzy();
+        }
+
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)
@@ -3608,6 +3668,16 @@ internal sealed class Group : RegexBase
     internal override bool ContainsGroup() => true;
 
     /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
+
+    /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) => Subpattern.GetFirstset(reverse);
 
     /// <inheritdoc />
@@ -3718,6 +3788,16 @@ internal sealed class LookAround : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse) =>
@@ -3863,6 +3943,19 @@ internal sealed class LookAroundConditional : RegexBase
     /// <inheritdoc />
     internal override bool ContainsGroup() =>
         Subpattern.ContainsGroup() || YesItem.ContainsGroup() || NoItem.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() =>
+        Subpattern.AllowsFuzzyErrors() || YesItem.AllowsFuzzyErrors() || NoItem.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        YesItem = YesItem.ElideExactFuzzy();
+        NoItem = NoItem.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -4045,6 +4138,9 @@ internal sealed class Fuzzy : RegexBase
         Subpattern = subpattern;
         Constraints = constraints;
 
+        // Read before the defaults below are filled in: the test is on the constraints as written.
+        IsExact = !constraints.IsActuallyFuzzy();
+
         // If an error type is mentioned in the cost equation, then its maximum defaults to
         // unlimited.
         if (constraints.Cost is not null)
@@ -4098,6 +4194,23 @@ internal sealed class Fuzzy : RegexBase
     /// <summary>The error budget. Upstream <c>constraints</c>.</summary>
     internal FuzzyConstraints Constraints { get; }
 
+    /// <summary>
+    /// Whether the constraints, as written, allow no errors: <c>{e&lt;=0}</c>, <c>{e&lt;1}</c> or
+    /// <c>{s&lt;=0,i&lt;=0,d&lt;=0}</c>. Not in upstream, whose parser drops such a constraint
+    /// (<c>is_actually_fuzzy</c>, <c>upstream/regex/_regex_core.py:548-556</c>).
+    /// </summary>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM. Dropping the constraint is harmless only where no error could reach
+    /// the section anyway. Beside another fuzzy section it changes the answer, and only for these
+    /// spellings: <c>{d&lt;=0}</c> is the same zero budget and upstream keeps its node. So
+    /// <c>(?:(?:ab){s&lt;=1,d&lt;=1}){e&lt;=0}</c> matches 'x' upstream with two errors, and
+    /// <c>(?:c(?:ab){e&lt;=0}){e&lt;=1}</c> matches 'cax' with 'x' for 'b'. The parser here keeps
+    /// the section and <see cref="ElideExactFuzzy"/> removes it only where no error can reach it,
+    /// which leaves the compiled code of every pattern upstream answers correctly unchanged.
+    /// Ledger entry 39; <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool IsExact { get; }
+
     /// <inheritdoc />
     /// <remarks>Everything inside a fuzzy section is fuzzy, whatever the caller said.</remarks>
     internal override void FixGroups(string pattern, bool reverse, bool fuzzy) =>
@@ -4122,6 +4235,18 @@ internal sealed class Fuzzy : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => !IsExact || Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// An exact section is removed only when nothing inside it may make an error, since it caps
+    /// those errors at zero. One inside another section is never reached, because a section that
+    /// is kept is returned whole: it keeps that section's budget off its subpattern.
+    /// </remarks>
+    internal override RegexBase ElideExactFuzzy() =>
+        IsExact && !Subpattern.AllowsFuzzyErrors() ? Subpattern.ElideExactFuzzy() : this;
 
     /// <inheritdoc />
     internal override bool IsEmpty() => Subpattern.IsEmpty();
@@ -4372,6 +4497,16 @@ internal class GreedyRepeat : RegexBase
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();
+
+    /// <inheritdoc />
+    internal override bool AllowsFuzzyErrors() => Subpattern.AllowsFuzzyErrors();
+
+    /// <inheritdoc />
+    internal override RegexBase ElideExactFuzzy()
+    {
+        Subpattern = Subpattern.ElideExactFuzzy();
+        return this;
+    }
 
     /// <inheritdoc />
     internal override HashSet<RegexBase?> GetFirstset(bool reverse)

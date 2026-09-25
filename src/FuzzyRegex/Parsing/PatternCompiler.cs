@@ -195,6 +195,15 @@ internal static class PatternCompiler
             throw new FuzzyRegexParseException("unbalanced parenthesis", pattern, source.Pos);
         }
 
+        // Not in upstream: remove the sections that allow no errors where no error can reach them,
+        // which gives the tree upstream's parser builds (Fuzzy.IsExact). A group call can carry a
+        // budget into a group that sits outside every section, so a pattern that has one and allows
+        // errors anywhere keeps them all, as `{d<=0}` does in upstream.
+        if (!(info.HasGroupCall && parsed.AllowsFuzzyErrors()))
+        {
+            parsed = parsed.ElideExactFuzzy();
+        }
+
         // Check the global flags for conflicts.
         int version = (info.Flags & RegexFlags.AllVersions) != 0 ? info.Flags & RegexFlags.AllVersions : defaultVersion;
         if (version is not (0 or RegexFlags.Version0 or RegexFlags.Version1))

@@ -380,6 +380,15 @@ internal static class ParseFunctions
                                     ApplyConstraint(source, info, constraints, caseFlags, savedPos, sequence);
                                     sequence.Add(null);
                                 }
+                                else if (sequence.Count > 0 && sequence[^1] is not null)
+                                {
+                                    // DIVERGES FROM UPSTREAM, which drops a constraint that allows no
+                                    // errors here, so it no longer limits a fuzzy section beside it
+                                    // (Fuzzy.IsExact). Upstream checks nothing before dropping it, so
+                                    // with nothing to apply it to it is still ignored, and no marker
+                                    // is added: `a{e<=0}*` and `{e<=0}` parse as they do upstream.
+                                    ApplyConstraint(source, info, constraints, caseFlags, savedPos, sequence);
+                                }
                             }
                             else
                             {
