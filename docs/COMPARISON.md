@@ -833,6 +833,33 @@ Console.WriteLine(FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success);  //
 Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success);     // False - upstream matches
 ```
 
+### A case-insensitive set matches each member first, then combines them
+
+Under `(?i)` each member of a set matches case-insensitively on its own, and only then does the set
+union, intersect or subtract the answers. Perl's extended sets and .NET's set subtraction work this
+way. Upstream tests every case variant of the character against the case-sensitive set instead, so
+the answer changed with how the set was written: `(?i)[\p{Greek}x]` matched the micro sign where
+`(?i)\p{Greek}` refused it, and `(?i)[x[\w--\p{Lu}]]` matched 'a' although `\p{Lu}` under `(?i)`
+covers every cased letter.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00B5", @"(?i)[\p{Greek}x]").Success);  // False - upstream matches
+Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)[x[\w--\p{Lu}]]").Success);    // False - upstream matches
+```
+
+### An encoding named by positional flags inside a group replaces the one in force
+
+`(?a:(?u)\w)` matches 'é', as `(?a:(?u:\w))` does. Upstream keeps both encodings after `(?u)` and
+ASCII wins. Python's `re` rejects the positional spelling inside a group, so it has no answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // True - upstream refuses
+```
+
 ### This port's search prefilters never change the slow path's answer
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several

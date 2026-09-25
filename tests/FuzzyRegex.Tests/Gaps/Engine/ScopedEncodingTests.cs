@@ -100,4 +100,62 @@ public sealed class ScopedEncodingTests
     [Arguments(@"(?a:(?u:\w))", "\u00E9")]
     public void The_scoped_encoding_controls_still_match(string pattern, string subject) =>
         FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeTrue(pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// An encoding named by positional flags inside a group replaces the one in force, as the
+    /// scoped spelling of the same thing does.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>parse_positional_flags</c> ORs the new flags in, so <c>(?a:(?u)\w)</c> held
+    /// ASCII and UNICODE both, ASCII won, and it refused 'é' where <c>(?a:(?u:\w))</c> matches
+    /// (regex 2026.9.10, 2026-09-25). CPython's re refuses the positional spelling outright
+    /// ("global flags not at the start of the expression"), so it cannot corroborate either way;
+    /// the scoped spelling is the one both document. Upstream also answered by whether the group
+    /// captures: <c>(?a)(?:(?u)\w)</c> matched 'é' and <c>(?a)((?u)\w)</c> refused it.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Whether it matches.</param>
+    [Test]
+    [Arguments(@"(?a:(?u)\w)", "\u00E9", true)]
+    [Arguments(@"(?u:(?a)\w)", "\u00E9", false)]
+    [Arguments(@"(?a:x(?u)\w)", "x\u00E9", true)]
+    [Arguments(@"(?a)((?u)\w)", "\u00E9", true)]
+    [Arguments(@"(?a)(?:(?u)\w)", "\u00E9", true)]
+    [Arguments(@"(?a:(?u)\w)\w", "\u00E9\u00E9", true)]
+    [Arguments(@"((?a)\w)", "\u00E9", false)]
+    public void Positional_encoding_flags_replace_the_encoding_in_force(
+        string pattern,
+        string subject,
+        bool expected
+    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected, pattern);
+
+    /// <summary>
+    /// A clash between positional encoding flags after a conditional is rejected, as it is after
+    /// any other group.
+    /// </summary>
+    /// <remarks>
+    /// A conditional restores the flags when it closes, so what follows it is back at the top
+    /// level, where a second encoding clashes with the first. Upstream raises for all five
+    /// spellings (regex 2026.9.10, V1, 2026-09-25). The positional-flags fix first counted a
+    /// lookaround conditional as still open after it closed, so this port accepted the three
+    /// lookaround spellings (the blind review of the fix, 2026-09-25).
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    [Test]
+    [Arguments(@"(?u)(?:x|y)(?a)z")]
+    [Arguments(@"(?u)(x)(?(1)x|y)(?a)z")]
+    [Arguments(@"(?u)(?(?=x)x|y)(?a)z")]
+    [Arguments(@"(?u)(?(?!q)x|y)(?a)z")]
+    [Arguments(@"(?u)(?(?<=q)x|y)(?a)z")]
+    public void A_clash_of_encodings_after_a_conditional_is_rejected(string pattern)
+    {
+        Action compile = () => _ = new FuzzyRegex(pattern);
+
+        compile
+            .Should()
+            .Throw<FuzzyRegexParseException>()
+            .WithMessage("ASCII, LOCALE and UNICODE flags are mutually incompatible");
+    }
 }

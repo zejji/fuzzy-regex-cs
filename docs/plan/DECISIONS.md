@@ -1372,3 +1372,11 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   complement. UTS #18 RL1.5 leaves the closure choice to the implementation, provided it is
   declared; DIVERGENCES.md and COMPARISON.md declare it. This settles the owner question STATE.md
   raised earlier the same day, on the owner's instruction to resolve ambiguities by research.
+- 2026-09-25 (ledger entry 35 E to G, from the blind review of its fix): **a case-insensitive set
+  matches each member first, then combines them.** A property member asks the case-insensitive
+  property of the character itself and a nested set recurses case-insensitively, as Perl 5.42's
+  extended sets and .NET 10's set subtraction answer. It moves one judged row's control:
+  `[a\p{ASCII}]` no longer reaches U+212A or U+017F, so `turkic-default-folding-read-by-a-lookaround`
+  keeps its row with 30 agreeing grid cells instead of 36. A set's full-folding expansions follow
+  the same rule (F, upstream's under V1 too), and an encoding named by positional flags
+  inside a group replaces the one in force (G; at the top level a clash still raises).

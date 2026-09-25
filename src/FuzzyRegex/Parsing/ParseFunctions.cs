@@ -996,6 +996,7 @@ internal static class ParseFunctions
         source.Pos = savedPos;
         int group = info.OpenGroup();
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1005,6 +1006,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1053,6 +1055,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseLookaround(Source source, Info info, bool behind, bool positive)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1062,6 +1065,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1106,6 +1110,10 @@ internal static class ParseFunctions
         RegexBase yesBranch;
         RegexBase noBranch;
         string group;
+
+        // Counted here, not with savedFlags: the lookaround spellings above return without
+        // reaching the finally below.
+        info.FlagScopeDepth++;
         try
         {
             group = ParseName(source, allowNumeric: true);
@@ -1118,6 +1126,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1138,6 +1147,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseLookaroundConditional(Source source, Info info, bool behind, bool positive)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1147,6 +1157,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1165,6 +1176,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseAtomic(Source source, Info info)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -1174,6 +1186,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 
@@ -1620,6 +1633,7 @@ internal static class ParseFunctions
     internal static RegexBase ParseSubpattern(Source source, Info info, int flagsOn, int flagsOff)
     {
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         info.Flags = (info.Flags | flagsOn) & ~flagsOff;
 
         // Ensure that there aren't multiple encoding flags set: a scope that names an encoding
@@ -1643,6 +1657,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
     }
@@ -1704,6 +1719,17 @@ internal static class ParseFunctions
     internal static void ParsePositionalFlags(Source source, Info info, int flagsOn, int flagsOff)
     {
         info.Flags = (info.Flags | flagsOn) & ~flagsOff;
+
+        // DIVERGES FROM UPSTREAM, deliberately, for the reason ParseSubpattern gives: inside a
+        // group, a flag that names an encoding replaces the one in force. Upstream ORs it in, so
+        // `(?a:(?u)\w)` held ASCII and UNICODE both, ASCII won, and it refused '\xe9' where
+        // `(?a:(?u:\w))` matches (the blind review of ledger 35, 2026-09-25). Outside every group
+        // the OR stays, so a clash with the pattern's own encoding still reaches the "mutually
+        // incompatible" check, as upstream's does; inside one, the group's close discards it.
+        if (info.FlagScopeDepth > 0 && (flagsOn & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
+        {
+            info.Flags = (info.Flags & ~RegexFlags.AllEncodings) | flagsOn;
+        }
         source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
     }
 
@@ -3180,6 +3206,7 @@ internal static class ParseFunctions
         int group = info.OpenGroup(name);
         source.Expect(">");
         int savedFlags = info.Flags;
+        info.FlagScopeDepth++;
         RegexBase subpattern;
         try
         {
@@ -3189,6 +3216,7 @@ internal static class ParseFunctions
         finally
         {
             info.Flags = savedFlags;
+            info.FlagScopeDepth--;
             source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
         }
 

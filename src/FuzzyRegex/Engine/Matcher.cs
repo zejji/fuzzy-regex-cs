@@ -628,25 +628,48 @@ internal static class Matcher
     /// <remarks>
     /// <para>
     /// The case set is computed once by <see cref="MatchesSetIgn"/> and threaded down, so a nested
-    /// set is tested against each case of the subject character rather than re-folding at every
-    /// level. That is upstream's shape, <c>case_count</c> and <c>cases</c> and all.
+    /// set is not re-folded at every level. That is upstream's shape, <c>case_count</c> and
+    /// <c>cases</c> and all.
     /// </para>
     /// <para>
-    /// Three deliberate differences from <see cref="MatchesMember"/>, all upstream's:
-    /// <c>ANY_ALL</c> has no arm and falls to the default; the default answers
-    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>; and
-    /// the <c>PROPERTY</c> arm calls the encoding's plain <c>has_property</c> without the
-    /// <c>ENCODING_KIND(member)</c> switch, so a scoped <c>(?a:...)</c> inside a
-    /// case-insensitive set is not honoured here. The nested <c>SET_*</c> arms likewise recurse
-    /// into the case-*sensitive* <c>in_set_*</c> with one case at a time.
+    /// Two deliberate differences from <see cref="MatchesMember"/>, both upstream's:
+    /// <c>ANY_ALL</c> has no arm and falls to the default, and the default answers
+    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM, deliberately: each member answers case-insensitively on its own,
+    /// and only then does the enclosing set combine the answers. A character, range or string
+    /// matches if any case of the subject does; a property asks <see cref="HasPropertyIgn"/> of the
+    /// subject itself, as a bare property does; a nested set recurses into the case-insensitive
+    /// <c>in_set_*_ign</c>. Upstream tests every case against the property and recurses into the
+    /// case-SENSITIVE <c>in_set_*</c> one case at a time, so nesting a member changed its answer:
+    /// <c>(?i)[\p{Lu}]</c> refused U+0345 and <c>(?i)[[\p{Lu}]x]</c> matched it, and
+    /// <c>(?i)[\p{Greek}x]</c> matched U+00B5 where <c>(?i)\p{Greek}</c> refused it (regex
+    /// 2026.9.10, V1). Perl 5.42's <c>(?[ ... ])</c> and .NET 10's set subtraction answer
+    /// member-first under <c>/i</c>, as here (measured 2026-09-25).
     /// </para>
     /// </remarks>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="member">The member node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
-    /// <returns><see langword="true"/> if any case of the character matches the member.</returns>
-    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, ReadOnlySpan<uint> cases)
+    /// <returns><see langword="true"/> if the character matches the member, ignoring case.</returns>
+    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, uint ch, ReadOnlySpan<uint> cases)
     {
+        switch (member.Op)
+        {
+            case Opcode.Property:
+                return HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], ch);
+            case Opcode.SetDiff:
+                return InSetDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetInter:
+                return InSetInterIgn(encoding, member, ch, cases);
+            case Opcode.SetSymDiff:
+                return InSetSymDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetUnion:
+                return InSetUnionIgn(encoding, member, ch, cases);
+        }
+
         for (int i = 0; i < cases.Length; i++)
         {
             switch (member.Op)
@@ -658,45 +681,8 @@ internal static class Matcher
                     }
 
                     break;
-                case Opcode.Property:
-                    // The member's own encoding and the bare property's case rule: see
-                    // HasPropertyIgn. Upstream used neither (matches_member_ign, :3085).
-                    if (HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
                 case Opcode.Range:
                     if (InRange(member.Values[0], member.Values[1], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetDiff:
-                    if (InSetDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetInter:
-                    if (InSetInter(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetSymDiff:
-                    if (InSetSymDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetUnion:
-                    if (InSetUnion(encoding, member, cases[i]))
                     {
                         return true;
                     }
@@ -721,13 +707,14 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3177).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in the difference, ignoring case.</returns>
-    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
-        if (MatchesMemberIgn(encoding, member!, cases) != member!.Match)
+        if (MatchesMemberIgn(encoding, member!, ch, cases) != member!.Match)
         {
             return false;
         }
@@ -736,7 +723,7 @@ internal static class Matcher
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return false;
             }
@@ -750,15 +737,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_inter_ign</c> (<c>upstream/src/_regex.c</c> line 3218).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in every member, ignoring case.</returns>
-    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) != member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) != member.Match)
             {
                 return false;
             }
@@ -772,16 +760,17 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_sym_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3257).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in an odd number of members.</returns>
-    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
         bool result = false;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 result = !result;
             }
@@ -795,15 +784,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_union_ign</c> (<c>upstream/src/_regex.c</c> line 3295).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in any member, ignoring case.</returns>
-    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return true;
             }
@@ -827,10 +817,10 @@ internal static class Matcher
 
         return node.Op switch
         {
-            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, cases),
-            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, cases),
-            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, cases),
-            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, cases),
+            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, ch, cases),
+            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, ch, cases),
+            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, ch, cases),
+            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, ch, cases),
             _ => false,
         };
     }

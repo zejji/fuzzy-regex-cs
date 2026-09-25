@@ -4061,7 +4061,51 @@ long s inside a scoped `(?a:...)` under IGNORECASE, which is the next defect: a 
 literal, range or set folds with the pattern's encoding rather than its scope's
 (`(?i)(?a:k)` matches the Kelvin sign here and upstream, and CPython refuses). STATE.md holds it.
 
-**Proposed fix upstream:** the same four changes.
+**Three more, from the blind review of this fix (2026-09-25).** Each measured on regex 2026.9.10.
+
+**E. A set member answers by the case closure of the set, not on its own.** Fix C gave a property
+member the cased-letter rule but still asked it of every case variant of the character, and nested
+sets still recursed into the case-SENSITIVE `in_set_*` one variant at a time, as upstream does. So
+nesting or naming a member changed what it matched:
+
+| Pattern (V1) | Subject | Upstream | Perl 5.42 `/i` |
+|---|---|---|---|
+| `(?i)[\p{Lu}]` / `(?i)[[\p{Lu}]x]` | U+0345 | None / match | no / no |
+| `(?i)\p{Greek}` / `(?i)[\p{Greek}x]` | U+00B5 | None / match | no / no |
+| `(?i)[x[\w--\p{Lu}]]` | 'a' | match | no (`(?[ \w - \p{Lu} ])`) |
+| `(?i)[\p{ASCII}]` / `(?i)[a\p{ASCII}]` | U+212A | None / match | no / no |
+
+Perl's extended sets and .NET 10's set subtraction answer member-first: each member matches
+case-insensitively, then the set operation combines the answers. The port now does the same
+(`Matcher.MatchesMemberIgn`). The last row is also the mechanism of the lookaround row judged in
+`turkic-default-folding-read-by-a-lookaround`; the port had agreed with upstream on the Kelvin sign and long s
+there and now refuses them, as the bare property does.
+
+**F. A set's full-folding expansions ignored C and D.** `SetBase._handle_case_folding` picks the
+expansions (`ss` for `\xdf`) with the case-sensitive `matches`, so after C and D the port's
+`(?i)[\P{Lu}x]` refused 's' and matched `\xdf` and `ss`, while `(?i)\P{Lu}` refused all three. Upstream
+answers the same under V1, the version that turns FULLCASE on with IGNORECASE: its set form matches
+`\xdf` and `ss` and its bare form refuses both. (A first draft of this entry said upstream agreed;
+that probe ran under Python's default V0, where FULLCASE is off. The second blind review caught it.)
+Expansions now follow the member-first rule, and `max_width` with them.
+
+**G. Positional flags keep both encodings.** `parse_positional_flags` ORs the new flags in, so
+`(?a:(?u)\w)` holds ASCII and UNICODE, ASCII wins, and it refuses `\xe9` where `(?a:(?u:\w))`
+matches. Upstream even disagrees with itself on whether the group captures: `(?a)(?:(?u)\w)` matches `\xe9`
+and `(?a)((?u)\w)` refuses it. CPython rejects the positional spelling ("global flags not at the
+start"). Inside a group a
+positional encoding now replaces the one in force; at the top level the OR stays, so `x|(?a)y` with
+`UNICODE` still raises "mutually incompatible", as upstream does.
+
+After E the 1,056-question probe above gives one answer for every question, the 60 Kelvin-sign and
+long-s cells included: those were set spellings reaching a partner, not the scoped-literal defect,
+which a separate grid measures (S91).
+
+The oracle's dotless-i control also regressed with this fix: its property gate ORed ASCII into rows
+already flagged UNICODE, upstream raised, and every such row lost its control. Fixed in
+`tools/record-oracle.py`.
+
+**Proposed fix upstream:** the same changes, A to G.
 
 **Tests.** `Gaps/Engine/ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it`,
 `CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does` and

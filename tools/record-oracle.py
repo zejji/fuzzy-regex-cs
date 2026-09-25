@@ -562,9 +562,9 @@ def _with_dotless_i_as_kra(regex, row: dict) -> dict | None:
         # Every encoding the token could be read under, not only the row's: a scoped `(?u:...)` in
         # an ASCII row reads the property with the Unicode tables (the blind review, 2026-09-25).
         for extra in (0, regex.IGNORECASE):
-            for encoding in (regex.ASCII, 0):
+            for encoding in (regex.ASCII, regex.UNICODE):
                 try:
-                    token_flags = ((flags & ~regex.ASCII) | encoding | extra) & ~_LOCALE_FLAG
+                    token_flags = (flags & ~(regex.ASCII | regex.UNICODE | _LOCALE_FLAG)) | encoding | extra
                     answers = {bool(regex.fullmatch(single, letter, token_flags)) for letter in (_DOTLESS_I, _KRA)}
                 except Exception:
                     return None

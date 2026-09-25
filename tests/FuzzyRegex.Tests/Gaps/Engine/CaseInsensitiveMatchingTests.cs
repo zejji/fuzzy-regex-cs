@@ -528,4 +528,72 @@ public sealed class CaseInsensitiveMatchingTests
     [Arguments(@"(?i)[\p{Upper=No}x]", "a", false)]
     public void A_no_value_of_a_cased_property_is_its_complement(string pattern, string subject, bool expected) =>
         FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected, pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// Under IGNORECASE each member of a set matches case-insensitively first, and only then do
+    /// the set's operations combine the answers, so nesting a member or naming it in an operation
+    /// never changes what it matches.
+    /// </summary>
+    /// <remarks>
+    /// Perl 5.42's <c>(?[ ... ])</c> and .NET 10's <c>[...-[...]]</c> both answer this way under
+    /// <c>/i</c> (measured 2026-09-25): <c>[\w--\p{Lu}]</c> refuses every letter, as
+    /// <c>\p{Lu}</c> matches every cased letter, and it matches U+0345, a mark and no letter.
+    /// Upstream instead tests each case variant of the character against the case-sensitive set,
+    /// so the answer turned on how the set was written. Upstream, regex 2026.9.10, V1:
+    /// <code>
+    /// (?i)[\p{Lu}]      U+0345 None       (?i)[[\p{Lu}]x]   U+0345 match
+    /// (?i)\p{Greek}     U+00B5 None       (?i)[\p{Greek}x]  U+00B5 match
+    /// (?i)[\w--\p{Lu}]  U+0138 match      (?i)\p{Lu}        U+0138 match
+    /// </code>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Whether it matches.</param>
+    [Test]
+    [Arguments(@"(?i)[\p{Lu}x]", "\u0345", false)]
+    [Arguments(@"(?i)[[\p{Lu}]x]", "\u0345", false)]
+    [Arguments(@"(?i)[\p{Greek}x]", "\u00B5", false)]
+    [Arguments(@"(?i)[[\p{Greek}]x]", "\u0345", false)]
+    [Arguments(@"(?i)[\w--\p{Lu}]", "\u0138", false)]
+    [Arguments(@"(?i)[\w--\p{Lu}]", "a", false)]
+    [Arguments(@"(?i)[\w--\p{Lu}]", "\u0345", true)]
+    [Arguments(@"(?i)[\p{L}--\p{Lu}]", "a", false)]
+    [Arguments(@"(?i)[[A-Z]--[a-z]]", "A", false)]
+    [Arguments(@"(?i)[[a-z]&&[K]]", "\u212A", true)]
+    [Arguments(@"(?i)[[a-z]--[k]]", "\u212A", false)]
+    [Arguments(@"(?i)[x[\w--\p{Lu}]]", "a", false)]
+    [Arguments(@"(?i)[x[\w--\p{Lu}]]", "\u0345", true)]
+    [Arguments(@"(?i)[x[[a-z]&&[K]]]", "\u212A", true)]
+    [Arguments(@"(?i)[x[[a-z]&&[K]]]", "a", false)]
+    public void Set_members_match_case_insensitively_before_the_set_combines_them(
+        string pattern,
+        string subject,
+        bool expected
+    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected, pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// A set's full case-folding expansions (<c>ss</c> for <c>ß</c>) follow the same rule as its
+    /// single characters: a member that refuses 's' case-insensitively cannot let <c>ß</c> or
+    /// <c>ss</c> through.
+    /// </summary>
+    /// <remarks>
+    /// The expansions are chosen when the set is parsed. Ledger 35 changed how a cased property
+    /// answers under IGNORECASE at match time but left that choice asking the case-sensitive
+    /// property, so <c>(?i)[\P{Lu}x]</c> refused 's' and matched <c>ß</c> and <c>ss</c>, while
+    /// <c>(?i)\P{Lu}</c> refused all three (found by the blind review of ledger 35, 2026-09-25).
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    [Test]
+    [Arguments(@"(?i)[\P{Lu}x]", "\u00DF")]
+    [Arguments(@"(?i)[\P{Lu}x]", "ss")]
+    [Arguments(@"(?i)[\p{Upper=No}x]", "ss")]
+    [Arguments(@"(?i)[\p{L}--\p{Lt}]", "ss")]
+    [Arguments(@"(?i)[\w--\p{Lu}]", "\u00DF")]
+    public void A_set_expands_to_a_full_folding_only_when_its_members_accept_the_folded_letters(
+        string pattern,
+        string subject
+    ) => FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeFalse(pattern);
 }

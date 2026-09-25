@@ -332,6 +332,19 @@ public sealed class ComparisonSamples
         FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success.Should().BeFalse();
     }
 
+    /// <summary>"A case-insensitive set matches each member first, then combines them".</summary>
+    [Test]
+    public void A_case_insensitive_set_matches_each_member_first_then_combines_them()
+    {
+        FuzzyRegex.FullMatch("\u00B5", @"(?i)[\p{Greek}x]").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("a", @"(?i)[x[\w--\p{Lu}]]").Success.Should().BeFalse();
+    }
+
+    /// <summary>"An encoding named by positional flags inside a group replaces the one in force".</summary>
+    [Test]
+    public void An_encoding_named_by_positional_flags_inside_a_group_replaces_the_one_in_force() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success.Should().BeTrue();
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()

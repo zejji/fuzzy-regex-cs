@@ -24,14 +24,12 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Findings that need a slice
 
-0. **FIRST, before optimisation (owner rule 2026-09-25): a case-insensitive literal, range or set
-   inside a scoped encoding folds with the PATTERN's encoding, not the scope's.** `(?i)(?a:k)`,
-   `(?a:(?i:k))` and `(?i)(?a:[a-z])` match the Kelvin sign U+212A, and `(?i)(?a:s)` matches U+017F,
-   here and upstream; CPython's re refuses them, and `(?ai)(?u:k)` is the reverse. Only property
-   nodes carry an encoding today (`NodeStatus.EncodingKind`), so the fix carries it on CHARACTER_IGN,
-   STRING_IGN, RANGE_IGN and SET_*_IGN too and uses it wherever those fold: the matcher, string
-   search, fuzzy matching, full folding, and every prefilter. Ledger entry 35 names it; the
-   consistency grid behind it is 60 of 1,056 questions, all this shape.
+0. **FIRST, before optimisation (owner rule 2026-09-25): S91, scoped encodings everywhere**
+   (`docs/plan/slices/S91-scoped-encoding-everywhere.md`). Only property nodes and `\b` carry the
+   scope's encoding; case-insensitive literals, ranges, sets, backreferences, named lists, `\m`/`\M`,
+   `(?w)` boundaries and line separators, `\X` and FULLCASE use the pattern's. A scoped-vs-global
+   grid of 40,672 rows finds upstream contradicting itself on 2,207; CPython `re` and Perl `(?aa:)`
+   treat a scoped encoding exactly as the global one.
 0b. **The native-AOT allocation tests are flaky**: `AllocationTests` (S61) fail about one full
    native run in three (4 of 12, 2026-09-25) with 280 B and no GC in the window, in different tests
    (`A_warm_IsMatch_...`, `A_warm_Count_...`, and 7,744 B across two GCs in the span walk). Every test

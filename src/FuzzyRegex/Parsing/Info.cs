@@ -49,6 +49,13 @@ internal sealed class Info
     /// <summary>The flags in force at the current point in the parse. Upstream <c>info.flags</c>.</summary>
     internal int Flags { get; set; }
 
+    /// <summary>
+    /// How many groups that restore <see cref="Flags"/> when they close enclose the current point.
+    /// Not upstream state: positional flags use it to tell a clash that the group's close will
+    /// discard from one that reaches the whole pattern.
+    /// </summary>
+    internal int FlagScopeDepth { get; set; }
+
     /// <summary>The global flags accumulated so far. Upstream <c>info.global_flags</c>.</summary>
     internal int GlobalFlags { get; set; }
 

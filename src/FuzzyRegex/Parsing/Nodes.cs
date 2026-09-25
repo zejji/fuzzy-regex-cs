@@ -107,6 +107,34 @@ internal abstract class RegexBase
         throw new NotSupportedException($"{GetType().Name} has no matches; upstream would raise AttributeError");
 
     /// <summary>
+    /// Whether a character matches this set member under IGNORECASE, by the rule the matcher's
+    /// <c>MatchesMemberIgn</c> applies: each member answers case-insensitively on its own, and a
+    /// set then combines the answers. Not an upstream method; see <c>SetBase.HandleCaseFolding</c>.
+    /// </summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if it matches, ignoring case.</returns>
+    internal virtual bool MatchesIgnoringCase(int ch) => Matches(ch);
+
+    /// <summary>Whether any case of a character passes a test, under the Unicode case tables.</summary>
+    /// <param name="ch">The codepoint.</param>
+    /// <param name="test">The case-sensitive test.</param>
+    /// <returns><see langword="true"/> if some case of <paramref name="ch"/> passes.</returns>
+    private protected static bool AnyCase(int ch, Func<int, bool> test)
+    {
+        Span<uint> cases = stackalloc uint[Unicode.UnicodeTables.MaxCases];
+        int count = Unicode.Encodings.AllCases(Unicode.CaseEncoding.Unicode, (uint)ch, cases);
+        foreach (uint c in cases[..count])
+        {
+            if (test((int)c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Upstream's <c>_key</c> rendered as a string, with the class <i>name</i> in place of the
     /// class <i>object</i>, so that the two places a set of nodes becomes an ordered list can be
     /// sorted identically here and in the corpus recorder.
@@ -558,6 +586,14 @@ internal sealed class Property : RegexBase
     internal override bool Matches(int ch) => Unicode.RegexModule.HasPropertyValue(Value, (uint)ch) == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) =>
+        Engine.Matcher.HasPropertyIgn(
+            Encoding == RegexFlags.AsciiEncoding ? Unicode.CaseEncoding.Ascii : Unicode.CaseEncoding.Unicode,
+            Value,
+            (uint)ch
+        ) == Positive;
+
+    /// <inheritdoc />
     internal override long MaxWidth() => 1;
 
     /// <inheritdoc />
@@ -714,6 +750,9 @@ internal sealed class Range : RegexBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => (Lower <= ch && ch <= Upper) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => AnyCase(ch, c => Lower <= c && c <= Upper) == Positive;
 
     /// <inheritdoc />
     internal override long MaxWidth() => 1;
@@ -1814,6 +1853,9 @@ internal sealed class Character : RegexBase
     internal override bool Matches(int ch) => ch == Value == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => AnyCase(ch, c => c == Value) == Positive;
+
+    /// <inheritdoc />
     internal override long MaxWidth() => Folded.Length;
 
     /// <inheritdoc />
@@ -2809,7 +2851,8 @@ internal abstract class SetBase(
         // Get the folded characters in the set.
         HashSet<string> seen = [];
         long widest = 0;
-        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        // The same test as HandleCaseFolding's, so the width covers exactly its expansions.
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(MatchesIgnoringCase))
         {
             int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
             if (seen.Add(string.Join(',', folded)))
@@ -2892,7 +2935,12 @@ internal abstract class SetBase(
         // calls this list `items`, which the primary constructor's parameter now owns.
         List<RegexBase> expansions = [];
         HashSet<string> seen = [];
-        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(Matches))
+        // DIVERGES FROM UPSTREAM, deliberately: upstream asks the case-SENSITIVE `matches`, so a
+        // set whose members refuse 's' case-insensitively still expanded to "ss" when it held the
+        // letter itself: (?i)[\P{Lu}x] refused 's' and matched '\xdf' and "ss", where (?i)\P{Lu}
+        // refuses all three (the blind review of ledger 35, 2026-09-25). A set matches an
+        // expansion exactly when it matches the letter case-insensitively.
+        foreach (int ch in Unicode.RegexModule.GetExpandOnFolding().Where(MatchesIgnoringCase))
         {
             int[] folded = Unicode.RegexModule.FoldCase(RegexFlags.FullCaseFolding, [ch]);
             if (seen.Add(string.Join(',', folded)))
@@ -3003,6 +3051,10 @@ internal sealed class SetDiff : SetBase
     internal override bool Matches(int ch) => (Items[0].Matches(ch) && !Items[1].Matches(ch)) == Positive;
 
     /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) =>
+        (Items[0].MatchesIgnoringCase(ch) && !Items[1].MatchesIgnoringCase(ch)) == Positive;
+
+    /// <inheritdoc />
     private protected override SetBase Recreate(
         Info info,
         IReadOnlyList<RegexBase> items,
@@ -3078,6 +3130,9 @@ internal sealed class SetInter : SetBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => Items.TrueForAll(i => i.Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => Items.TrueForAll(i => i.MatchesIgnoringCase(ch)) == Positive;
 
     /// <inheritdoc />
     private protected override SetBase Recreate(
@@ -3160,6 +3215,18 @@ internal sealed class SetSymDiff : SetBase
         foreach (RegexBase i in Items)
         {
             m = m != i.Matches(ch);
+        }
+
+        return m == Positive;
+    }
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch)
+    {
+        bool m = false;
+        foreach (RegexBase i in Items)
+        {
+            m = m != i.MatchesIgnoringCase(ch);
         }
 
         return m == Positive;
@@ -3264,6 +3331,9 @@ internal sealed class SetUnion : SetBase
 
     /// <inheritdoc />
     internal override bool Matches(int ch) => Items.Exists(i => i.Matches(ch)) == Positive;
+
+    /// <inheritdoc />
+    internal override bool MatchesIgnoringCase(int ch) => Items.Exists(i => i.MatchesIgnoringCase(ch)) == Positive;
 
     /// <inheritdoc />
     private protected override SetBase Recreate(

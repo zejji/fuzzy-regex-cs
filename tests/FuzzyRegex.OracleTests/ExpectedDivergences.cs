@@ -5901,6 +5901,12 @@ internal static class ExpectedDivergences
                 + "outer one makes upstream agree with this port (1 and 1). The judgement did not "
                 + "move - it is the `T` rows either way - but the construct did, and the "
                 + "one-line set control above is what replaced the guess.\n"
+                + "SINCE 2026-09-25 THIS PORT REFUSES THE `C` ROWS TOO: a property member of a "
+                + "case-insensitive set now asks the property of the character itself, as the bare "
+                + "property does and as Perl 5.42 answers every spelling, so no spelling reaches any "
+                + "of the four and the 36 agreeing cells above are now 30. The judgement of THIS row "
+                + "does not move: the port's answer here is unchanged, and upstream's still comes "
+                + "from reaching U+0131 through `I`.\n"
                 + "Measured 2026-09-15 on regex 2026.9.10, "
                 + "`python tools/probes/upstream-turkic-without-spans.py`, in the two sections "
                 + "headed `seed 20260915 row 88716` and `the MECHANISM of the lookaround row`.\n"
@@ -5909,8 +5915,8 @@ internal static class ExpectedDivergences
                 + "read - that absence is the entry's reason for existing - so this entry is "
                 + "narrower than its siblings by one guard, and it widens only by judging another "
                 + "row with the probe.",
-            PinnedBy: "Gaps.Engine.CaseFoldingTests.A_set_union_reaches_the_case_partners_of_its_"
-                + "members_but_not_through_a_Turkic_row",
+            PinnedBy: "Gaps.Engine.CaseFoldingTests.A_set_holding_an_ascii_property_reaches_no_partner_"
+                + "whatever_its_member_count",
             Example: _turkicLookaroundRows,
             Applies: static (row, ours) =>
                 _turkicLookaround.TryGetValue(Question(row), out string? judged)
