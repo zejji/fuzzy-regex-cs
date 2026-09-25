@@ -209,4 +209,35 @@ public sealed class FuzzyEmptyIterationTests
         (m.Index, m.Length).Should().Be((0, 1));
         m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 3));
     }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void Bestmatch_and_enhancematch_over_a_bounded_repeat_of_deletions_find_the_one_deletion_fit()
+    {
+        // Over 'y' every iteration of the repeat has to delete its 'x', so the cheapest fit is one
+        // iteration and one deletion. Upstream's own one-iteration twin finds it; with the repeat
+        // bounded at two or three it does not. Measured 2026-09-25 on regex 2026.9.10, search over
+        // 'y':
+        //
+        //   (?b)(?:(?:x){d<=1}){1,3}y   TimeoutError at 10 s (ledger entry 33: the repeat goes
+        //   (?b)(?:(?:x){d<=1}){1,2}y   TimeoutError           round on deletions for ever)
+        //   (?b)(?:(?:x){d<=1}){1}y     (0, 1) counts=(0, 0, 1)
+        //   (?e)(?:(?:x){d<=1}){1,3}y   (0, 1) counts=(0, 0, 3)   <- keeps the first fit (entry 25)
+        //   (?:(?:x){d<=1}){1,3}y       (0, 1) counts=(0, 0, 3)   <- first match, both engines
+        //
+        // BESTMATCH is documented to find the best match and ENHANCEMATCH to improve the fit, and a
+        // fit of one error exists; this port answers it for both.
+        foreach (string flag in new[] { "(?b)", "(?e)" })
+        {
+            foreach (string bound in new[] { "{1,3}", "{1,2}" })
+            {
+                string pattern = flag + "(?:(?:x){d<=1})" + bound + "y";
+                Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _timeout).Match("y");
+
+                m.Success.Should().BeTrue(pattern);
+                (m.Index, m.Length).Should().Be((0, 1), pattern);
+                m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1), pattern);
+            }
+        }
+    }
 }

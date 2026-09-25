@@ -3915,6 +3915,21 @@ to MemoryError. **Both answer since 2026-09-25:**
   end-of-slice stop gives for `(?:(?:(?:x){d<=1})+){e<=5}` over `''`;
 - `(?:(?(1)c|z)|()(?:x){d<=1})+d` over `'cd'` is (0, 2) with three deletions.
 
-Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`. Also found and not investigated:
-`(?b)(?:(?:x){d<=1}){1,3}y` over `'y'` gives no answer in 20 s upstream, where the same search
-without `(?b)` answers at once.
+Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`.
+
+**A bounded repeat loops too, under BESTMATCH (measured 2026-09-25, regex 2026.9.10).** Over
+`'y'`, search:
+
+| Pattern | Upstream | This port |
+|---|---|---|
+| `(?b)(?:(?:x){d<=1}){1,3}y` | `TimeoutError` at 10 s | (0, 1), one deletion |
+| `(?b)(?:(?:x){d<=1}){1,2}y` | `TimeoutError` at 10 s | (0, 1), one deletion |
+| `(?b)(?:(?:x){d<=1}){1}y` | (0, 1), one deletion | (0, 1), one deletion |
+| `(?e)(?:(?:x){d<=1}){1,3}y` | (0, 1), three deletions | (0, 1), one deletion |
+| `(?:(?:x){d<=1}){1,3}y` | (0, 1), three deletions | (0, 1), three deletions |
+
+Every iteration has to delete its `x`, so one iteration at one deletion is the cheapest fit, and
+upstream's own one-iteration twin finds it. Without a flag, three deletions is the first match the
+greedy repeat reaches, and both engines agree. BESTMATCH never returns once the bound is above one;
+ENHANCEMATCH returns the first fit, the shape of entry 25. Pinned by
+`FuzzyEmptyIterationTests.Bestmatch_and_enhancematch_over_a_bounded_repeat_of_deletions_find_the_one_deletion_fit`.
