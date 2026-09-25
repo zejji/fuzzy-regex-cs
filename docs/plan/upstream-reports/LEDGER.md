@@ -159,6 +159,47 @@ than on a position the pattern could actually have consumed.
 though #546 was in the same lazy-quantifier neighbourhood: both of those were partials that were
 *missed*, and this is a partial that is reported where none exists.
 
+**A second door, the `CHARACTER` tail's guard itself (added 2026-09-25).** The four `CHARACTER`
+arms guard one step ahead of the repeat, `pos + 1 >= text_end` (`:16546`, `:16583`) and
+`pos - 1 <= text_start` (`:16621`, `:16659`), before anything checks that the repeat can take that
+step. So a partial is reported when the repeat's item refuses the last character, with no maximum
+involved:
+
+```python
+>>> regex.match(r'(?r)ab??', 'c', partial=True)
+<regex.Match object; span=(0, 1), match='c', partial=True>
+>>> regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)
+<regex.Match object; span=(0, 5), match='__AAb', partial=True>
+>>> regex.match(r'(?r)ab?', 'c', partial=True), regex.match(r'b??a', 'c', partial=True)
+(None, None)
+```
+
+No continuation of 'c' on the left makes `(?r)ab??` match: an anchored reversed match of it must
+end the text with `a`, or with `ab`, and the text ends with 'c' whatever is added before it. The
+greedy twin and the forward mirror both answer None.
+
+**Measured over a grid, three sources against each other.** 48,960 rows (`match` and `fullmatch`,
+forward and reversed, six lazy quantifiers, three items, one- and two-character tails, with and
+without IGNORECASE, every subject of up to three characters from `acxb`), `regex` 2026.9.10:
+
+- the README's definition, evaluated exactly by trying every continuation of up to five characters
+  with CPython's own `re`, which shares no code with `regex`;
+- PCRE2 10.47 under `PCRE2_ANCHORED | PCRE2_PARTIAL_SOFT` on every forward row: it agrees with the
+  definition on every row but the 288 with an empty subject, where it declines to report a partial
+  at all (a documented PCRE2 choice, not this family);
+- upstream's greedy twin of every disputed row, which reports nothing on every one.
+
+Upstream answers 3,756 rows with a partial the definition says cannot complete, and misses none.
+Its `STRING` arms report such partials too (`a??xy` over 'xx'); this port never ported those arms
+and already answered the definition on every string-tail row.
+
+**This port (S31, reversed 2026-09-25).** S31 copied the `CHARACTER` guard as upstream spells it,
+on the strength of `([^a-f]{3,}?)x` over '__AAb' (seed 7 row 581), which pinned upstream's phantom
+partial. `Matcher.IsTailPartial` now guards where the repeat stands for every tail, and this port
+answers the definition on all 48,960 rows. The oracle's three default seeds stay green.
+**Proposed fix upstream:** the same - guard at `pos`, and let the extension loop's own tail test
+report the partial at the end of the text.
+
 ---
 
 ## 3. A reversed search reports a partial that the same pattern's `match` and `fullmatch` deny
@@ -522,6 +563,22 @@ control this family has not had before.
 classified by `ExpectedDivergences.partial-retry-carried-slice-forward`. The reversed twin of this
 same door is `ExpectedDivergences.partial-retry-reversed-slice`, found by S40b. Re-runnable:
 `python tools/probes/upstream-skip-carried-slice-forward.py`.
+
+**The smallest reproduction of this door yet (2026-09-25, regex 2026.9.10),** minimised from two
+rows of a seed-11 partial-matching wave. The moved bound costs the START of the partial, in both
+directions:
+
+```python
+>>> regex.search('A(*SKIP)b', 'QQA', partial=True).span()        # (*PRUNE): (2, 3)
+(3, 3)
+>>> regex.search(r'(?r)(?:a(*SKIP)\W|Z)(a)', '.aab', partial=True).span()   # (*PRUNE): (0, 2)
+(0, 0)
+```
+
+Upstream's own `match('QQA', 2, partial=True)` is (2, 3), and PCRE2 10.47 answers the same partial
+(2, 3) with and without its start optimisations. Upstream's own `match('.aab', 0, 2, partial=True)` is
+(0, 2), the highest end that matches. Pinned by
+`PartialMatchingTests.A_skip_in_the_first_pass_does_not_move_where_the_partial_pass_starts_or_ends`.
 
 **A SIXTH DOOR, added by S48 on 2026-09-14, and it is the first one this port SHARED** - every door
 above it was already fixed here when it was written up, and this one was not. It is neither a scan
@@ -3874,6 +3931,355 @@ to MemoryError. **Both answer since 2026-09-25:**
   end-of-slice stop gives for `(?:(?:(?:x){d<=1})+){e<=5}` over `''`;
 - `(?:(?(1)c|z)|()(?:x){d<=1})+d` over `'cd'` is (0, 2) with three deletions.
 
-Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`. Also found and not investigated:
-`(?b)(?:(?:x){d<=1}){1,3}y` over `'y'` gives no answer in 20 s upstream, where the same search
-without `(?b)` answers at once.
+Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`.
+
+**A bounded repeat loops too, under BESTMATCH (measured 2026-09-25, regex 2026.9.10).** Over
+`'y'`, search:
+
+| Pattern | Upstream | This port |
+|---|---|---|
+| `(?b)(?:(?:x){d<=1}){1,3}y` | `TimeoutError` at 10 s | (0, 1), one deletion |
+| `(?b)(?:(?:x){d<=1}){1,2}y` | `TimeoutError` at 10 s | (0, 1), one deletion |
+| `(?b)(?:(?:x){d<=1}){1}y` | (0, 1), one deletion | (0, 1), one deletion |
+| `(?e)(?:(?:x){d<=1}){1,3}y` | (0, 1), three deletions | (0, 1), one deletion |
+| `(?:(?:x){d<=1}){1,3}y` | (0, 1), three deletions | (0, 1), three deletions |
+
+Every iteration has to delete its `x`, so one iteration at one deletion is the cheapest fit, and
+upstream's own one-iteration twin finds it. Without a flag, three deletions is the first match the
+greedy repeat reaches, and both engines agree. BESTMATCH never returns once the bound is above one;
+ENHANCEMATCH returns the first fit, the shape of entry 25. Pinned by
+`FuzzyEmptyIterationTests.Bestmatch_and_enhancematch_over_a_bounded_repeat_of_deletions_find_the_one_deletion_fit`.
+
+---
+
+## 34. A case-insensitive cased property under ASCII matches non-ASCII letters, and its search misses ASCII ones - FIXED HERE (2026-09-25)
+
+**Status:** not filed, per the owner's rule. Found 2026-09-25 by the dotless-i grid behind the
+Turkic control (112 of 6,468 rows diverged with no Turkic letter involved).
+
+**Reproduction**, `regex` 2026.9.10:
+
+```python
+>>> [m.group() for m in regex.finditer(r'(?ai)\p{Lu}', 'aA\xe9\xc9ĸ')]
+['A']                                   # search: misses 'a'
+>>> [bool(regex.match(r'(?ai)\p{Lu}', c)) for c in 'aA\xe9\xc9ĸ']
+[True, True, True, True, True]          # match: accepts every letter, ASCII or not
+>>> [bool(regex.match(r'(?ai)[\p{Lu}x]', c)) for c in 'aA\xe9\xc9ĸ']
+[True, True, False, False, False]       # the set form: the ASCII letters
+```
+
+Three answers to one question. `(?a)\p{Lu}` refuses É, é and ĸ, and none of them has an ASCII case
+variant, so a case-insensitive `(?ai)\p{Lu}` cannot accept them; and 'a' has the ASCII capital 'A'
+as a case variant, so it must accept 'a'.
+
+**Where it comes from.** `matches_PROPERTY_IGN` (`_regex.c:2937`) has an ASCII arm (`:2972`) that
+runs the Lu/Ll/Lt and Uppercase/Lowercase collapse on the raw character, with no ASCII clamp. The
+search screen and the repeat bulk stepper call the encoding table's `ascii_has_property_ign`
+(`:832`), which clamps and never collapses (its "the property is case-insensitive" comment is on a
+plain `ascii_has_property` call). The set form checks each case variant through the clamped
+`ascii_has_property`, which is the right rule.
+
+**Corroborated outside upstream (2026-09-25).** Over 'aAéÉĸ':
+
+| Engine | Construct | Answer |
+|---|---|---|
+| Perl 5.42.3 | `[[:upper:]]` and `[[:lower:]]` under `/ai` | a, A |
+| PCRE2 10.47, no UCP | `[[:upper:]]` and `[[:lower:]]` under CASELESS | a, A |
+| Python `re` docs | `[A-Z]` under ASCII and IGNORECASE | "only letters 'a' to 'z' and 'A' to 'Z' are matched" |
+
+Perl and PCRE2 speak only for the POSIX forms: both treat `\p{...}` as always-Unicode, whatever
+`/a` or UCP says (Perl's `\p{Lu}` under `/ai` answers a, A, é, É and ĸ; the blind review,
+2026-09-25). For `\p{...}` the rule rests on this module's own design instead: ASCII applies to a
+property (`ascii_has_property`, `:822`, and `(?a)\p{Lu}` refuses É), and the README calls a POSIX
+class "an alternative form of `\p{...}`". UTS #18 (revision 25) RL1.5 leaves case closure of classes
+to the implementation; under either the closure reading or Perl's cased-letter reading the answer
+here is the ASCII letters. Upstream's
+literals and ranges under ASCII|IGNORECASE (`k`, `[a-z]`, `(k)\1` against U+212A, U+017F, U+0130,
+U+0131) agree with CPython `re` on all 98 rows tried, so only the cased properties are affected.
+
+**This port.** It had copied the matcher's arm, so it matched É under `(?ai)\p{Lu}`.
+`Matcher.MatchesPropertyIgn` now clamps the character to the encoding first
+(`Encodings.ClampToEncoding`). Bare properties and set members share that predicate since ledger
+entry 35, so `match`, `search` and the set form all answer the ASCII letters. **Proposed fix upstream:** clamp in the ASCII arm of
+`matches_PROPERTY_IGN`, and collapse in `ascii_has_property_ign`.
+
+**Tests.** `Gaps/Engine/CaseInsensitiveMatchingTests.A_cased_property_under_ascii_and_ignore_case_matches_only_ascii_letters`;
+the oracle pin is `ascii-ignorecase-cased-property`.
+
+---
+
+## 35. Scoped encodings are lost, a POSIX class ignores its scope, and a case-insensitive property answers by its spelling - FIXED HERE (2026-09-25)
+
+**Status:** not filed, per the owner's rule. Found by the blind review of ledger entry 34's fix.
+Four defects, each measured on `regex` 2026.9.10 and answered the same way by this port until the
+fix:
+
+**A. An inner scope wipes an outer encoding.** `parse_subpattern` (`_regex_core.py:1172`) resets the
+encoding when ANY encoding flag is in force, where its comment means "when the new scope names
+one", so an inner scope that names none drops an outer `(?a:`:
+
+```python
+>>> regex.fullmatch(r'(?a:(?s:\w))', '\xe9'), re.fullmatch(r'(?a:(?s:\w))', '\xe9')
+(<regex.Match object; span=(0, 1), match='é'>, None)
+```
+
+CPython's `re` documents scoped `(?a:...)` and refuses. So does `(?a:\w)` upstream.
+
+**B. A POSIX class ignores its scope.** `parse_posix_class` (`:1679`) passes no encoding to
+`lookup_property`, where `parse_property` passes the scope's: `(?a:[[:alpha:]])` matches é while
+`(?a:\p{L})` refuses it, although the README calls a POSIX class "an alternative form of `\p{...}`".
+Perl 5.42 refuses `(?a:[[:alpha:]])` over é.
+
+**C. A case-insensitive property answers by its spelling.** A bare `\p{Lu}`, `\p{Ll}`, `\p{Lt}`,
+`\p{Upper}` or `\p{Lower}` under IGNORECASE means any cased letter (`matches_PROPERTY_IGN`,
+`:2937`); the same property as a set member checks each case variant against the plain property
+instead (`matches_member_ign`, `:3085`), ignoring the member's own encoding too. Upstream:
+
+| Pattern | Subject | Answer |
+|---|---|---|
+| `(?i)\p{Lu}` | U+0138 | match |
+| `(?i)[\p{Lu}x]` | U+0138 | None |
+| `(?i)\p{Lt}` | 'a' | match |
+| `(?i)x?\p{Lt}`, `(?i)y*\p{Lt}`, `(?i)[\p{Lt}x]` | 'a' | None |
+| `(?i)(?a:[[:upper:]])` | 'é' | match |
+
+Which rule is right is the implementation's choice (UTS #18 RL1.5 asks only that it be stated), but
+one pattern cannot have two. Perl 5.42 and .NET 10's `Regex` both give the bare property and the set
+the cased-letter answer over a, A, é, É, U+0138, U+01C5 and the Kelvin sign.
+
+**D. `\p{Upper=No}` under IGNORECASE is `\p{Upper}`.** The collapse at `:2981` tests only the
+property, not the value asked for: `regex.fullmatch(r'(?i)\p{Upper=No}', 'a')` matches. `\P{Upper}`
+is the complement, and Perl answers `\p{Upper=N}` and `\p{Lowercase=No}` under `/i` as the
+complement too.
+
+**This port.** A: `ParseSubpattern` tests the new flags. B: `ParsePosixClass` passes the scope's
+encoding. C: bare properties and set members share `Matcher.HasPropertyIgn`, the cased-letter rule
+under the member's own encoding. D: the value 0 of Uppercase or Lowercase is the complement. Over
+1,056 spellings-of-one-question (bare, set, alternation, `x?`, groups, `{1}`, double negation,
+`(?r)`) under eight scopes, the port now gives one answer everywhere except the Kelvin sign and
+long s inside a scoped `(?a:...)` under IGNORECASE, which is the next defect: a case-insensitive
+literal, range or set folds with the pattern's encoding rather than its scope's
+(`(?i)(?a:k)` matches the Kelvin sign here and upstream, and CPython refuses). STATE.md holds it.
+
+**Three more, from the blind review of this fix (2026-09-25).** Each measured on regex 2026.9.10.
+
+**E. A set member answers by the case closure of the set, not on its own.** Fix C gave a property
+member the cased-letter rule but still asked it of every case variant of the character, and nested
+sets still recursed into the case-SENSITIVE `in_set_*` one variant at a time, as upstream does. So
+nesting or naming a member changed what it matched:
+
+| Pattern (V1) | Subject | Upstream | Perl 5.42 `/i` |
+|---|---|---|---|
+| `(?i)[\p{Lu}]` / `(?i)[[\p{Lu}]x]` | U+0345 | None / match | no / no |
+| `(?i)\p{Greek}` / `(?i)[\p{Greek}x]` | U+00B5 | None / match | no / no |
+| `(?i)[x[\w--\p{Lu}]]` | 'a' | match | no (`(?[ \w - \p{Lu} ])`) |
+| `(?i)[\p{ASCII}]` / `(?i)[a\p{ASCII}]` | U+212A | None / match | no / no |
+
+Perl's extended sets and .NET 10's set subtraction answer member-first: each member matches
+case-insensitively, then the set operation combines the answers. The port now does the same
+(`Matcher.MatchesMemberIgn`). The last row is also the mechanism of the lookaround row judged in
+`turkic-default-folding-read-by-a-lookaround`; the port had agreed with upstream on the Kelvin sign and long s
+there and now refuses them, as the bare property does.
+
+**F. A set's full-folding expansions ignored C and D.** `SetBase._handle_case_folding` picks the
+expansions (`ss` for `\xdf`) with the case-sensitive `matches`, so after C and D the port's
+`(?i)[\P{Lu}x]` refused 's' and matched `\xdf` and `ss`, while `(?i)\P{Lu}` refused all three. Upstream
+answers the same under V1, the version that turns FULLCASE on with IGNORECASE: its set form matches
+`\xdf` and `ss` and its bare form refuses both. (A first draft of this entry said upstream agreed;
+that probe ran under Python's default V0, where FULLCASE is off. The second blind review caught it.)
+Expansions now follow the member-first rule, and `max_width` with them.
+
+**G. Positional flags keep both encodings.** `parse_positional_flags` ORs the new flags in, so
+`(?a:(?u)\w)` holds ASCII and UNICODE, ASCII wins, and it refuses `\xe9` where `(?a:(?u:\w))`
+matches. Upstream even disagrees with itself on whether the group captures: `(?a)(?:(?u)\w)` matches `\xe9`
+and `(?a)((?u)\w)` refuses it. CPython rejects the positional spelling ("global flags not at the
+start"). Inside a group a
+positional encoding now replaces the one in force; at the top level the OR stays, so `x|(?a)y` with
+`UNICODE` still raises "mutually incompatible", as upstream does.
+
+After E the 1,056-question probe above gives one answer for every question, the 60 Kelvin-sign and
+long-s cells included: those were set spellings reaching a partner, not the scoped-literal defect,
+which a separate grid measures (S91).
+
+The oracle's dotless-i control also regressed with this fix: its property gate ORed ASCII into rows
+already flagged UNICODE, upstream raised, and every such row lost its control. Fixed in
+`tools/record-oracle.py`.
+
+**Proposed fix upstream:** the same changes, A to G.
+
+**Tests.** `Gaps/Engine/ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it`,
+`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does` and
+`.A_no_value_of_a_cased_property_is_its_complement`; the oracle pin is
+`scoped-encoding-and-case-insensitive-property-rules`.
+
+---
+
+## 36. A scoped `(?a:...)` or `(?u:...)` reaches only properties and `\b` - FIXED HERE (S91)
+
+**Status:** not filed, per the owner's rule. Found 2026-09-25: what entry 35's consistency probe
+left over was a case-insensitive literal inside `(?a:...)` folding with the pattern's encoding.
+S91 measured the whole family.
+
+**Reproduction**, `regex` 2026.9.10 and CPython 3.14.7 `re`, measured 2026-09-26. Each row gives
+upstream's answer to the scoped spelling and to the same encoding set for the whole pattern:
+
+| Scoped | Global twin | Subject | Upstream, scoped / global | `re`, scoped |
+|---|---|---|---|---|
+| `(?i)(?a:k)` | `(?ai)k` | U+212A | (0, 1) / None | None |
+| `(?ai)(?u:k)` | `(?iu)k` | U+212A | None / (0, 1) | (0, 1) |
+| `(?i)(?a:s)` | `(?ai)s` | U+017F | (0, 1) / None | None |
+| `(?i)(?a:[a-z])` | `(?ai)[a-z]` | U+212A | (0, 1) / None | None |
+| `(?i)(?a:(k)\1)` | `(?ai)(k)\1` | 'k' U+212A | (0, 2) / None | None |
+| `(?a:\mx)` | `(?a)\mx` | 'éx' | None / (1, 2) | no `\m` |
+| `(?w)(?a:.)` | `(?aw).` | U+2028 | None / (0, 1) | no `(?w)` |
+| `(?a:\X)` | `(?a)\X` | 'e' U+0301 | (0, 2) / (0, 1) | no `\X` |
+| `(?V1)(?a)(?i:\xdf)` | `(?V1)(?ai)\xdf` | 'ss' | (0, 2) / None | no full folding |
+| `(?aif)(?u:x\|\xdf)` | `(?uif)x\|\xdf` | 'ss' | None / (0, 2) | no full folding |
+
+**Why upstream is wrong.** The README lists `ASCII (?a)` and `UNICODE (?u)` among the scoped flags
+(README.rst:31), with no exception for any construct. CPython's documentation says a scoped
+`(?a:...)` "switches to ASCII-only matching ... only in effect for the narrow inline group", and
+3.14.7 answers every row it can spell exactly as the global form. Perl 5.42.3 does the same with
+`(?aa:...)`: `(?i)(?aa:k)`, `(?aa:(?i:k))` and `(?i)(?aa:[a-z])` refuse U+212A as `(?aai)k` does,
+and `(?aai)(?u:k)` accepts it. Upstream also disagrees with itself: over S91's grid of 40,672
+scoped/global pairs (42 atoms, 16 form pairs, 31 subjects, V0 and V1) the two spellings answer
+differently on 2,207.
+
+**Mechanism.** Only a property node and the `\b` family carry an encoding in their status word
+(`ENCODING_KIND`, `_regex.c:167`). Everything else reads the pattern's: a case-insensitive
+character, string, range, set or backreference folds through `state->encoding`; a named list is
+folded at compile time with the pattern's flags (`_fold_case`, `_regex_core.py:354`, called from
+`_main.py:612`); `\m` and `\M` carry an encoding in the code word that the matcher never reads;
+and the `(?w)` boundary and line-separator forms and `\X` use the pattern's tables. The firstset
+and the required string are folded with the pattern's encoding too.
+
+**This port.** Each node that depends on the encoding now carries the one it was parsed under,
+resolved once when the node is built (`Node.Encoding`). Characters, strings, ranges, sets,
+backreferences and named lists carry it in their case flags, and only when the node ignores case
+and the scope's encoding differs from the pattern's (`RegexFlags.CaseFlagsCombination`). So a
+pattern with no scoped encoding compiles to exactly upstream's code, which `CompileParityTests`
+checks, and two nodes that differ only in encoding are never merged, packed or hoisted as one.
+The zero-width, dot, line and grapheme nodes hold it as a value of their own. A required string
+whose folding would need the scope's encoding is not offered, and a firstset never folds members
+of two encodings with one. The port's disagreements on the grid went from 1,596 to 0.
+
+The first blind review found two forms still answering differently, fixed in 5522bc3. A set merged
+from an alternation inside `(?u:...)` chose its full-fold expansions with the pattern's encoding,
+so `(?aif)(?u:x|\xdf)` refused 'ss' (154 of the review's 14,300 pairs). A fuzzy constraint outside
+a scoped backreference folded the subject with its own encoding, so `(?aif)(ss)(?u:\1){i<=1:[t]}`
+refused 'ss' U+FB05 's'. Both now use the node's encoding. The second review found nothing
+further. The oracle is GREEN at seeds 7, 4242 and 20260925 (agree 7462, 7475 and 7484 of 7580,
+diverge 0, recheck 326 of 326).
+
+**Recorded, not defects.**
+
+- A fuzzy constraint written outside a scoped backreference tests an inserted character with its
+  own encoding, not the reference's. `(?V0)(?ai)(s)(?u:\1){i<=1:[k]}` refuses 's' U+212A 's',
+  and the same constraint written inside the scope, `(?V0)(?ai)(s)(?u:(?:\1){i<=1:[k]})`, accepts
+  it. There is no global twin to compare with, because the constraint and the reference sit in
+  different encodings, and a constraint is a set like any other, so its own scope decides. A
+  character substituted inside the reference is different: it is part of the reference's
+  folding, so it folds with the reference's encoding (5522bc3). Under full folding the constraint
+  sees the reference's folded characters, so an inserted character there is folded the
+  reference's way too.
+- A scoped `(?u:[...])` holding U+00DF in an `(?a)` pattern compiles one 'ss' alternative where
+  the global form compiles three. The answers are equal on every grid row; only the code differs.
+
+**Proposed fix upstream:** give every encoding-dependent node the encoding of its scope, as
+properties already have, and read it wherever the node folds or classifies.
+
+**Tests.** `Gaps/Engine/ScopedEncodingTests.A_case_insensitive_node_folds_with_its_scopes_encoding`,
+`.A_partial_string_folds_with_its_scopes_encoding`,
+`.Word_line_and_grapheme_rules_follow_the_scopes_encoding`,
+`.Nodes_that_differ_only_in_encoding_are_not_merged` and
+`.The_compiled_pattern_folds_with_a_scoped_encoding_or_declines`; and
+`Gaps/Engine/ScopedEncodingGridTests`, which compares each scoped spelling with its global twin.
+
+---
+
+## 37. A scoped `(?i:...)` loses full case folding in the required-string search
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-37-scoped-ignorecase-required-string.md`,
+for the owner to approve. Found 2026-09-26 by the oracle sweep. This port does not share it.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26 by
+`tools/probes/upstream-scoped-ignorecase-required-string.py`:
+
+```
+search('(?V1)(?i:ss)', '\xdf')      -> None
+search('(?V1)(?i:ss)x', '\xdfx')    -> None
+search('(?V1)(?i:fi)', '\ufb01')    -> None
+search('(?V0)(?f)(?i:ss)', '\xdf')  -> None
+search('(?V1)(?i)ss', '\xdf')       -> span=(0, 1)
+search('(?V1)(?i:ss)|q', '\xdf')    -> span=(0, 1)
+search('(?V1)(?i:s)s', '\xdf')      -> None
+```
+
+**Why upstream is wrong.** `(?i)` and `(?f)` are scoped flags (README.rst:31), and version 1 folds
+fully under IGNORECASE (:74, :516); FULLCASE "affects how the IGNORECASE flag works" (:81). Nothing
+there says a scope loses full folding, and upstream's own matcher does not lose it: `(?i:ss)|q`,
+which has no required string, matches U+00DF. Perl 5.42.3 gives (0, 1) for `(?i:ss)` over U+00DF,
+(0, 2) for `(?i:ss)x` over U+00DF 'x', (0, 1) for `(?i:fi)` over U+FB01, and no match for
+`(?i:s)s`, where one half of the folding is case-sensitive. CPython's `re` folds simply, so it
+cannot judge.
+
+**Mechanism.** `_get_required_string` (`_main.py:602`) takes IGNORECASE and FULLCASE from the
+literal's own case flags. `_regex.compile` receives them as `req_flags`, and `pattern_new`
+(`_regex.c:26125-26128`) removes FULLCASE whenever the pattern's global flags lack IGNORECASE, as
+they do when the only IGNORECASE is scoped. The prefilter then looks for 'ss' with simple folding,
+never finds U+00DF, and refuses the subject before the matcher runs.
+
+**Proposed fix upstream:** decide FULLCASE from the literal's case flags alone.
+
+**This port.** It answers as Perl does, because its locator searches only for a case-sensitive
+string and leaves folded literals to the matcher. A later slice that ports the folded arms must
+take FULLCASE from the literal's case flags. No upstream issue covers it; the closest, #175
+and #76, are different defects. Pinned by
+`Gaps/Engine/RequiredStringPrefilterTests.A_scoped_ignorecase_required_string_keeps_full_case_folding`.
+
+---
+
+## 38. A lazy repeat before a full-folded literal misses matches
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-38-lazy-repeat-full-fold-tail.md`,
+for the owner to approve. Found 2026-09-26 by the oracle sweep. This port does not share it.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26 by
+`tools/probes/upstream-lazy-repeat-full-fold-tail.py`:
+
+```
+search('(?V1)(?i)[^k]??ss', '\xe9\u1e9eS')      -> span=(1, 2)
+search('(?V1)(?i)[^k]??ss', 'ass')              -> span=(1, 3)
+match('(?V1)(?i)[^k]??ss', 'ass')               -> None
+search('(?V1)(?i)a{0,2}?ss', 'aass')            -> None
+search('(?V1)(?i)(?:a{0,2}?ss|q)', 'aass')      -> span=(2, 4)
+search('(?V1)(?i)[^k]??fi', '\xe9\ufb01')       -> span=(1, 2)
+search('(?V0)(?fi)[^k]??ss', 'ass')             -> span=(1, 3)
+search('(?r)(?V1)(?i)ss[^k]??', 'ssa')          -> span=(0, 2)
+search('(?V1)(?i)[^k]?ss', 'ass')               -> span=(0, 3)
+search('(?V0)(?i)[^k]??ss', 'ass')              -> span=(0, 3)
+```
+
+**Why upstream is wrong.** A lazy repeat may take one character, and 'a' followed by 'ss' is a
+match at 0 on any reading; the greedy form and the simple-folding form both find it. CPython's
+`re` gives (0, 3) for `(?i)[^k]??ss` over 'ass' and (0, 4) for `(?i)a{0,2}?ss` over 'aass'. Perl
+5.42.3 gives those, and (0, 2) over U+00E9 U+1E9E 'S' and over U+00E9 U+FB01. It is not a search
+prefilter: `match` refuses the whole subject.
+
+**Mechanism.** When the lazy repeat takes one more character, the LAZY_REPEAT_ONE backtrack arm
+looks ahead for the literal that follows. Its STRING arm calls
+`string_search(state, test, pos + 1, limit + length, ...)` (`_regex.c:16709`). Its STRING_FLD arm
+clamps `limit` to the slice end (`:16752`) and calls
+`string_search_fld(state, test, pos + 1, limit, ...)` (`:16764`), without the length, and
+`string_search_fld` treats `limit` as the end of the text it may read (`:6674`). `limit` is the
+last position the repeat may reach, so a literal that starts there is never read to its end. The
+reversed twin is at `:16808` and `:16819`.
+
+**Proposed fix upstream:** let the STRING_FLD arms read past `limit` by the literal's extent, as
+the STRING arms do, still clamped to the slice end.
+
+**This port.** It answers as `re` and Perl do, because it ports only the default arm of that
+switch, which tries the tail at each position in turn; the string arms are not ported. A later
+slice that ports them must pass the literal's extent. No upstream issue covers it; #227 (2016) is
+the same family but a different defect, and fixed. Pinned by
+`Gaps/Engine/RepeatTests.A_lazy_repeat_finds_a_full_folded_literal_at_its_maximum`.

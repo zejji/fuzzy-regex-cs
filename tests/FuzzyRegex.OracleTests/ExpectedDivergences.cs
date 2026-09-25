@@ -142,7 +142,7 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The thirty-two rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The thirty-four rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -330,6 +330,26 @@ internal static class ExpectedDivergences
     /// on 2026-09-23 as rows 3 to 6 of <c>python tools/record-oracle.py --rows
     /// tools/probes/s89-bestmatch-rows.jsonl</c>.
     /// </para>
+    /// <para>
+    /// Row 33, <c>(?b)(\p{L}){i,d}c</c> as a partial fullmatch over '\nc', came from triaging the
+    /// 2026-09-24 scheduled sweep, where <c>full-fold-backreference-leftovers</c>' doubled-guard arm
+    /// claimed it with no backreference in it (see <see cref="TheDoubledGuardAloneExplainsIt"/>).
+    /// Upstream answers a partial (0, 2) with one insertion, and without
+    /// partial it answers no match; its own flagless and <c>(?e)</c> answers are the complete (0, 2)
+    /// with one insertion and one deletion, this port's answer. Setting
+    /// <c>PatternObject.DoubleCountTrailingInsertions</c> alone makes this port answer upstream's
+    /// partial. Measured 2026-09-25 on regex 2026.9.10 with <c>python tools/record-oracle.py --rows</c>
+    /// on the one row, and the ablation by the consumer.
+    /// </para>
+    /// <para>
+    /// Row 34 is <c>fuzzy</c> row 6043 at seed 20260925, the same leak drawn by the default wave:
+    /// <c>(?b)(?e)(?fi)(?:[ab]+\s(?:0ßa){e&lt;=2,s&lt;=1}){1&lt;=e&lt;=2}</c> fullmatched against
+    /// 'BAa 0SsTA'. Full folding lets ß meet 'Ss' but there is no backreference, and before the
+    /// narrowing a full-fold arm claimed it. Upstream answers no match; its own <c>(?e)(?fi)</c> and
+    /// <c>(?fi)</c> twins answer (0, 9) with a substitution at 7 and a trailing insertion at 8, the
+    /// recorded <c>bestmatchFreeOutcome</c>, and the recorder flags <c>bestmatch-no-worse</c>. This
+    /// port answers that fit to the position. Measured 2026-09-25 on regex 2026.9.10.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -364,6 +384,8 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?b)(?r)(?:\\L<phrases>){e<=3}", "flags": 0, "namedLists": {"phrases": ["", "amber lantern"]}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 2, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "rows", "pattern": "(?b)(?:){e<=3}", "flags": 0, "namedLists": {}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0, 1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "rows", "pattern": "(?b)(?r)\\m(?:\ud83d\ude00\\d\ud83d\ude00){e:[a-z]}", "flags": 0, "namedLists": {}, "subject": "b\ud83d\ude00\ud83d\ude00", "operation": "subf", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<><>\ud83d\ude00", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>", "count": 2}}
+        {"generator": "rows", "pattern": "(?b)(\\p{L}){i,d}c", "flags": 0, "namedLists": {}, "subject": "\nc", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": [0]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?e)(?fi)(?:[ab]+\\s(?:0\u00dfa){e<=2,s<=1}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "BAa 0SsTA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [7], "insertions": [8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -804,7 +826,6 @@ internal static class ExpectedDivergences
         {"generator": "verbs", "pattern": "^(?P<g1>[A-Z]*(?<=(*SKIP)[[:alpha:]])S)", "flags": 16386, "namedLists": {}, "subject": "ııSSßßﬀ", "operation": "split", "count": 1, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 4]}], "pruneOutcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}}
         {"generator": "verbs", "pattern": "(?r)(?>[A-Z]++(*SKIP)[[:alpha:]])(?:[[:alpha:]](*PRUNE)){2,3}", "flags": 10, "namedLists": {}, "subject": "ıAııa ﬀ", "operation": "sub", "template": "]😀]", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b\\K([A-Z])(?:([^\\p{L}]+)(\\p{L}*?)(?:([a\\d])){s<=1}){1<=e<=2:[a-z]}", "flags": 2, "namedLists": {}, "subject": "ııa", "operation": "sub", "template": "\\\\", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\\ııa", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 4, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}, "codepointSpan": [0, 0]}]}
-        {"generator": "conditionals", "pattern": "(?(?=(?:ß|\\p{Lu}){3,})\\p{Lu}{1,3}?|a[A-Z])$", "flags": 16394, "namedLists": {}, "subject": "asßıS", "operation": "subf", "template": "{0[-1]}{0[0]}", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "asßıSßıS", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 5]}]}
         {"generator": "verbs", "pattern": "(?r)(?:\\S+(*PRUNE)ﬁ|ı)[A-Z]", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁıı", "operation": "subf", "template": "{{", "count": 3, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "ﬁﬁ{", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}
         {"generator": "verbs", "pattern": "(?r)^(?>[A-Z]{2,4}(*PRUNE)\\p{Lu})", "flags": 16394, "namedLists": {}, "subject": "ııaaA", "operation": "sub", "template": ">\\101>", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": ">A>", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": ">A>", "count": 1}}
         {"generator": "rows", "pattern": "(?r)(?(?=[\\p{ASCII}&&\\p{L}])[\\w\\s]|\\p{Ll})(?(?=.)[\\p{ASCII}&&\\p{L}])(?(?=[a-f])[^a-f]|[\\p{L}||\\p{N}])\\b", "flags": 16642, "namedLists": {}, "subject": "\r\u0131\u0131 \ufb01\ufb01", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" \ufb01\ufb01", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}]}
@@ -845,6 +866,10 @@ internal static class ExpectedDivergences
     /// U+0131 by an editing tool, and the entry then matched nothing at all while every clause of it
     /// looked right. Found while writing this array.
     /// </remarks>
+    // A 25th row, `conditionals` `(?(?=(?:\u00df|\p{Lu}){3,})\p{Lu}{1,3}?|a[A-Z])$` as a sub over
+    // 'as\u00df\u0131S', left on 2026-09-25: its alternation compiles to a set, and ledger entry 35
+    // gave a set member the bare property's cased-letter rule, under which U+0131 is a cased letter
+    // without any Turkic row. Both engines now answer the same, so it is no longer a divergence.
     private static readonly string[] _turkicWithoutSpansOurs =
     [
         "sub 0 '\\u0131'",
@@ -859,7 +884,6 @@ internal static class ExpectedDivergences
         "split 1 '\\u0131\\u0131SS\\u00df\\u00df\\ufb00'",
         "sub 0 '\\u0131A\\u0131\\u0131a \\ufb00'",
         "sub 0 '\\u0131\\u0131a'",
-        "sub 0 'as\\u00df\\u0131S'",
         "sub 0 '\\ufb01\\ufb01\\u0131\\u0131'",
         "sub 0 '\\u0131\\u0131aaA'",
         // Rows 16 to 18 are S57f's, rows 74120, 76484 and 116428 of the 6000-row date-seed gate.
@@ -1207,6 +1231,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "(?r)x(?:a(*SKIP)b|c)", "flags": 0, "namedLists": {}, "subject": "bx", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r)([^\\p{L}])(?:.{2,2}(*SKIP)\\D|\\p{Nd})(?(1)[[:alpha:]]|\\p{Ll})", "flags": 16394, "namedLists": {}, "subject": "aaa  \r", "operation": "search", "partial": true, "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial", "pattern": "(?r).(?:(*SKIP).|a)", "flags": 0, "namedLists": {}, "subject": " \n", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "(?r)(?:a(*SKIP)\\W|Z)(a)", "flags": 0, "namedLists": {}, "subject": ".aab", "operation": "search", "partial": true, "codepointSpan": [0, 0], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1314,6 +1339,12 @@ internal static class ExpectedDivergences
         // 2026-09-25 against upstream's (*PRUNE) spelling, its verb-free spelling and its highest anchored match: seed 593876053 row 32433; the minimal form of C3.
         "match 0:(0,3)[(0,3)] 1:unset last=-1/- partial",
         "match 0:(0,1)[(0,1)] last=-1/- partial",
+        // Minimised from row 8556, `(?r)\B(?:[a](*SKIP)\W|\p{Lu})([a\d])` of the seed-11
+        // `partial,partial-sliced,partial-long` wave at 3000 rows, whose long subject is not kept
+        // here. Upstream's own `(*PRUNE)` spelling and its anchored match at endpos 2, the highest
+        // that matches, answer this port's span; a reversed search owes the highest anchor that
+        // matches. Measured 2026-09-25 on regex 2026.9.10.
+        "match 0:(0,2)[(0,2)] 1:(1,1)[(1,1)] last=1/- partial",
     ];
 
     /// <summary>
@@ -1364,6 +1395,7 @@ internal static class ExpectedDivergences
         {"generator": "partial", "pattern": "a(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "xa", "operation": "search", "partial": true, "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP).|[abz])(?P<g1>[a])*?\\1", "flags": 0, "namedLists": {}, "subject": "\naa ", "operation": "search", "partial": true, "pos": 0, "endpos": 3, "codepointSlice": [0, 3], "oracle": "prefilter-free", "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 2, "captures": [[1, 2]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         {"generator": "partial-sliced", "pattern": "(?:.(*SKIP)|a).", "flags": 0, "namedLists": {}, "subject": "\n ", "operation": "search", "partial": true, "pos": 0, "endpos": 2, "codepointSlice": [0, 2], "oracle": "prefilter-free", "codepointSpan": [2, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 0, "captures": [[2, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
+        {"generator": "rows", "pattern": "A(*SKIP)b", "flags": 0, "namedLists": {}, "subject": "QQA", "operation": "search", "partial": true, "codepointSpan": [3, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 3, "length": 0, "captures": [[3, 0]]}], "lastIndex": -1, "lastGroup": null, "partial": true}, "searchOnlyPartial": false, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": true}}
         """;
 
     /// <summary>
@@ -1446,6 +1478,12 @@ internal static class ExpectedDivergences
         "match 0:(1,1)[(1,1)] last=-1/- partial",
         "match 0:(1,2)[(1,2)] 1:unset last=-1/- partial",
         "match 0:(1,1)[(1,1)] last=-1/- partial",
+        // Minimised from row 8508, `A(?:[\p{L}||\p{N}]{0}(*SKIP)[\p{L}\p{N}]|[\p{L}||\p{N}])A$` of
+        // the seed-11 `partial,partial-sliced,partial-long` wave at 3000 rows, whose long subject
+        // is not kept here. Upstream's own `(*PRUNE)` spelling and its anchored match at 2 answer
+        // this port's span; PCRE2 10.47 answers the same partial (2, 3), with and without its start
+        // optimisations. Measured 2026-09-25 on regex 2026.9.10.
+        "match 0:(2,1)[(2,1)] last=-1/- partial",
     ];
 
     /// <summary>
@@ -1934,6 +1972,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 12, "captures": [[0, 12]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "codepointSpan": [0, 9]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 11, "captures": [[0, 11]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "codepointSpan": [0, 8]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 4]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 6, "captures": [[5, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [11], "insertions": [], "deletions": []}, "codepointSpan": [3, 8]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [10], "insertions": [], "deletions": []}, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [9], "insertions": [], "deletions": []}, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [7], "insertions": [], "deletions": [2]}, "codepointSpan": [0, 4]}]}}
         {"generator": "interactions", "pattern": "(?e)^(?:\\s(\\d)[[:alpha:]]){e<=2,s<=1}(?P<g4>(?:(\\p{Nd})(?P<g3>[\\p{L}||\\p{N}])){s<=1,i<=1,d<=1}(?P>g4)?)$", "flags": 264, "namedLists": {}, "subject": "00AA\n ", "operation": "sub", "template": "\\g<g4>\ud83d\ude00\\4\\g<0>", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "A\n \ud83d\ude00\n00AA\n ", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)^(?P<g>(?:ab){s<=1,i<=1,d<=1}(?P>g)?)$", "flags": 8, "namedLists": {}, "subject": "b\n ", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 3, "captures": [[2, 1], [0, 3]]}], "lastIndex": 1, "lastGroup": "g", "partial": false, "fuzzyCounts": [2, 1, 2], "fuzzyChanges": {"substitutions": [0, 2], "insertions": [1], "deletions": [2, 4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 1, 2], "fuzzyChanges": {"substitutions": [0, 2], "insertions": [1], "deletions": [2, 4]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)", "flags": 0, "namedLists": {}, "subject": "zzzz", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [4, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2, 3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [4, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2, 3], "insertions": [], "deletions": []}}]}
         """;
 
     /// <summary>
@@ -1977,6 +2016,12 @@ internal static class ExpectedDivergences
         // 2026-09-25 against upstream's own tighter fit of the same span, (0, 1) with one deletion on the minimal row: seed 500905607 row 25852; the minimal form of A3.
         "sub 1 'A\\ud83d\\ude00A00AA\\u000a '",
         "match 0:(0,1)[(0,1)] 1:(0,1)[(0,1)] last=1/g fuzzy=(0,0,1)[s:][i:][d:0]",
+        // Found 2026-09-25 by the blind review of ledger 33's engine change, not drawn by a wave, and
+        // older than that change. Upstream keeps the first branch's four substitutions although its
+        // own once-only twin `(?e)(?:(?:abcd){s<=4}|(?:x){d<=1})`, its lazy twin `...)+?)` and its
+        // `{1,3}` twin all improve to deletions, and the only fits the second branch has are
+        // zero-width ones spending one deletion per iteration. See FuzzyEnhanceMatchTests.
+        "match 0:(0,0)[(0,0)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
     ];
 
     /// <summary>
@@ -2601,6 +2646,61 @@ internal static class ExpectedDivergences
     private static readonly Dictionary<string, string> _bestmatchInnermostTrailing = OracleWave
         .ParseRows(_bestmatchInnermostTrailingRows)
         .Select(static (row, i) => (Key: Question(row), Ours: _bestmatchInnermostTrailingOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rows of <c>ascii-ignorecase-cased-property</c>, recorded 2026-09-25 on regex 2026.9.10.
+    /// </summary>
+    private const string _asciiIgnoreCaseCasedPropertyRows = """
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "\u00c9", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Ll}", "flags": 0, "namedLists": {}, "subject": "\u0138", "operation": "match", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?ai)\\p{Lu}", "flags": 0, "namedLists": {}, "subject": "aA\u00e9\u00c9\u0138", "operation": "finditer", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
+        """;
+
+    /// <summary>This port's judged answer to each row of <see cref="_asciiIgnoreCaseCasedPropertyRows"/>.</summary>
+    private static readonly string[] _asciiIgnoreCaseCasedPropertyOurs =
+    [
+        "no match",
+        "no match",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "matches 2 | match 0:(0,1)[(0,1)] last=-1/- || match 0:(1,1)[(1,1)] last=-1/-",
+    ];
+
+    /// <summary><see cref="_asciiIgnoreCaseCasedPropertyRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _asciiIgnoreCaseCasedProperty = OracleWave
+        .ParseRows(_asciiIgnoreCaseCasedPropertyRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _asciiIgnoreCaseCasedPropertyOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rows of <c>scoped-encoding-and-case-insensitive-property-rules</c>, recorded 2026-09-25 on
+    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each.
+    /// </summary>
+    private const string _scopedEncodingPropertyRulesRows = """
+        {"generator": "rows", "pattern": "(?a:(?s:\\w))", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?a:[[:alpha:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?i)[\\p{Lu}x]", "flags": 0, "namedLists": {}, "subject": "\u0138", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?i)x?\\p{Lt}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?i)\\p{Upper=No}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?i)(?a:[[:upper:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>This port's judged answer to each row of <see cref="_scopedEncodingPropertyRulesRows"/>.</summary>
+    private static readonly string[] _scopedEncodingPropertyRulesOurs =
+    [
+        "no match",
+        "no match",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "no match",
+        "no match",
+    ];
+
+    /// <summary><see cref="_scopedEncodingPropertyRulesRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _scopedEncodingPropertyRules = OracleWave
+        .ParseRows(_scopedEncodingPropertyRulesRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _scopedEncodingPropertyRulesOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
     /// <summary><see cref="_atomicLeakedChangeRows"/> by its question.</summary>
@@ -4113,6 +4213,61 @@ internal static class ExpectedDivergences
                 )
         ),
         new(
+            Id: "scoped-encoding-and-case-insensitive-property-rules",
+            Reason: "UPSTREAM IS WRONG IN FOUR PLACES AND THIS PORT DIVERGES ON PURPOSE - ledger entry 35. "
+                + "(A) An inner scope that names no encoding drops an outer `(?a:`: upstream's "
+                + "parse_subpattern resets the encoding whenever any encoding flag is in force "
+                + "(_regex_core.py:1172), so `(?a:(?s:\\w))` matches '\u00e9'; CPython's re, which "
+                + "documents scoped `(?a:...)`, refuses it. (B) A POSIX class ignores its scope "
+                + "(parse_posix_class passes no encoding, :1679), so `(?a:[[:alpha:]])` matches "
+                + "'\u00e9' where upstream's own `(?a:\\p{L})` refuses it. (C) A case-insensitive "
+                + "cased property answers by its spelling: bare it means any cased letter, as a set "
+                + "member it is closed under case instead and ignores the member's encoding, so "
+                + "`(?i)[\\p{Lu}x]` refuses U+0138 and `(?i)x?\\p{Lt}` refuses 'a' although the bare "
+                + "forms match; Perl 5.42 and .NET 10's Regex give the bare and the set form the "
+                + "cased-letter answer, which this port now gives everywhere. (D) `(?i)\\p{Upper=No}` "
+                + "answers as `\\p{Upper}` because the collapse ignores the value (:2981); Perl gives "
+                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10.\n"
+                + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the generators rarely draw scoped "
+                + "encodings or `=No` values, and the rows keep the recheck asking upstream.",
+            PinnedBy: "ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it, "
+                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does "
+                + "and .A_no_value_of_a_cased_property_is_its_complement",
+            Example: _scopedEncodingPropertyRulesRows,
+            Applies: static (row, ours) =>
+                _scopedEncodingPropertyRules.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
+            Id: "ascii-ignorecase-cased-property",
+            Reason: "UPSTREAM CONTRADICTS ITSELF AND THIS PORT DIVERGES ON PURPOSE - ledger entry 34. "
+                + "Under ASCII|IGNORECASE a cased property (`\\p{Lu}`, `\\p{Ll}`, `\\p{Lt}`, "
+                + "`\\p{Upper}`, `\\p{Lower}`, `[[:upper:]]`, `[[:lower:]]`) means the 52 ASCII "
+                + "letters. Upstream answers it three ways: its matcher's ASCII arm of "
+                + "matches_PROPERTY_IGN (upstream/src/_regex.c:2972) runs the case collapse on the "
+                + "raw character, so `match` accepts \u00c9, \u00e9, \u0138 and U+118C0, which the "
+                + "case-sensitive `(?a)\\p{Lu}` refuses and no case variant of which is ASCII; its "
+                + "search screen and bulk stepper call ascii_has_property_ign (:832), which never "
+                + "collapses, so `search` refuses 'a'; and its set form `(?ai)[\\p{Lu}x]` answers "
+                + "the ASCII letters exactly. This port answers the set form's rule everywhere.\n"
+                + "CORROBORATED OUTSIDE UPSTREAM, 2026-09-25: Perl 5.42 answers `[[:upper:]]` and "
+                + "`[[:lower:]]` under /ai with exactly 'aA' over 'aA\u00e9\u00c9\u0138'; PCRE2 10.47 "
+                + "without UCP under CASELESS the same; and Python's re documents for [A-Z] under "
+                + "ASCII|IGNORECASE that \"only letters 'a' to 'z' and 'A' to 'Z' are matched\". "
+                + "UTS #18 RL1.5 leaves case closure of classes to the implementation, and both "
+                + "readings give the ASCII letters here.\n"
+                + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the oracle's generators keep the "
+                + "ASCII flag off property rows, so a wave does not draw this, and the rows keep "
+                + "the recheck asking upstream about it.",
+            PinnedBy: "CaseInsensitiveMatchingTests.A_cased_property_under_ascii_and_ignore_case_matches_"
+                + "only_ascii_letters and .A_cased_ascii_property_is_found_by_our_search_where_"
+                + "upstreams_screen_refuses_it",
+            Example: _asciiIgnoreCaseCasedPropertyRows,
+            Applies: static (row, ours) =>
+                _asciiIgnoreCaseCasedProperty.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+        ),
+        new(
             Id: "bounded-lazy-repeat-partial",
             Reason: "Port right, judged in docs/plan/2026-09-12-divergence-research.md and pinned "
                 + "with its evidence in PartialMatchingTests: a bounded LAZY repeat that has "
@@ -4965,7 +5120,7 @@ internal static class ExpectedDivergences
                 + ".Bestmatch_keeps_a_match_that_is_all_trailing_insertions, "
                 + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
                 + ".Bestmatch_reversed_replaces_the_whole_emoji_run",
-            // Thirty-two rows rather than one, because each is a judged member of the family and the
+            // Thirty-four rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
@@ -5593,16 +5748,35 @@ internal static class ExpectedDivergences
                 + "THE RECORDED `scanMatches` IS STILL THE EVIDENCE and the second half of `Applies`: "
                 + "upstream's own `finditer` over the row, recorded by the recorder because the "
                 + "answer has no spans, so a listed row whose scan stops touching a Turkic letter "
-                + "stops being classified rather than silently staying pinned.",
+                + "stops being classified rather than silently staying pinned.\n"
+                + "SINCE 2026-09-25 A SECOND ARM TAKES A ROW NO ONE HAS LISTED, and only one kind: "
+                + "a `sub`, `subf` or `split` over the dotless i, where this port's answer is exactly "
+                + "upstream's answer to the same row with every U+0131 made U+0138 (kra), swapped "
+                + "back. The recorder asks that as `dotlessFreeOutcome`. Under the default tables the "
+                + "two letters MATCH alike: both lowercase, same block, neither in CaseFolding.txt 16.0, "
+                + "and this port answers 6,468 grid rows identically with either. They are not the "
+                + "same letter everywhere - U+0131 upper-cases to I, so `\\p{CWU}` tells them apart - "
+                + "and the recorder refuses a row wherever the difference could show: a property "
+                + "upstream answers differently for the two, a codepoint escape, a non-ASCII class "
+                + "range, LOCALE. It asks what the RIGHT answer is rather than whether the divergence "
+                + "touches a Turkic letter, so the fabricated failure above stays red. Not for "
+                + "U+0130, which no letter can stand in for (the only capital with a full folding "
+                + "and no simple one, lowercasing to a plain i): those rows are still listed by hand. "
+                + "See TheDotlessIAloneExplainsIt.",
             PinnedBy: "Gaps.Engine.CaseFoldingTests.An_answer_that_carries_no_span_diverges_on_the_"
                 + "dotless_small_as_well and .A_range_spanning_the_plain_I_does_not_reach_the_"
                 + "dotless_small, plus the whole 25-cell grid the entry above names",
             Example: _turkicWithoutSpansRows,
             Applies: static (row, ours) =>
-                _turkicWithoutSpans.TryGetValue(Question(row), out string? judged)
-                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
-                && row.ScanMatches is { } scan
-                && TurkicLettersCovered(row.Subject, scan).Any()
+                (
+                    _turkicWithoutSpans.TryGetValue(Question(row), out string? judged)
+                    && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                    && row.ScanMatches is { } scan
+                    && TurkicLettersCovered(row.Subject, scan).Any()
+                )
+                // ...or upstream's own answer with the dotless i swapped for a letter no `T` row
+                // touches is this port's, character for character. See TheDotlessIAloneExplainsIt.
+                || TheDotlessIAloneExplainsIt(row, ours)
         ),
         new(
             Id: "turkic-default-folding-from-the-pattern-side",
@@ -5727,6 +5901,12 @@ internal static class ExpectedDivergences
                 + "outer one makes upstream agree with this port (1 and 1). The judgement did not "
                 + "move - it is the `T` rows either way - but the construct did, and the "
                 + "one-line set control above is what replaced the guess.\n"
+                + "SINCE 2026-09-25 THIS PORT REFUSES THE `C` ROWS TOO: a property member of a "
+                + "case-insensitive set now asks the property of the character itself, as the bare "
+                + "property does and as Perl 5.42 answers every spelling, so no spelling reaches any "
+                + "of the four and the 36 agreeing cells above are now 30. The judgement of THIS row "
+                + "does not move: the port's answer here is unchanged, and upstream's still comes "
+                + "from reaching U+0131 through `I`.\n"
                 + "Measured 2026-09-15 on regex 2026.9.10, "
                 + "`python tools/probes/upstream-turkic-without-spans.py`, in the two sections "
                 + "headed `seed 20260915 row 88716` and `the MECHANISM of the lookaround row`.\n"
@@ -5735,8 +5915,8 @@ internal static class ExpectedDivergences
                 + "read - that absence is the entry's reason for existing - so this entry is "
                 + "narrower than its siblings by one guard, and it widens only by judging another "
                 + "row with the probe.",
-            PinnedBy: "Gaps.Engine.CaseFoldingTests.A_set_union_reaches_the_case_partners_of_its_"
-                + "members_but_not_through_a_Turkic_row",
+            PinnedBy: "Gaps.Engine.CaseFoldingTests.A_set_holding_an_ascii_property_reaches_no_partner_"
+                + "whatever_its_member_count",
             Example: _turkicLookaroundRows,
             Applies: static (row, ours) =>
                 _turkicLookaround.TryGetValue(Question(row), out string? judged)
@@ -6276,14 +6456,16 @@ internal static class ExpectedDivergences
             Example: _groupFoldLeftoverRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheGroupFoldLeftovers(row))
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
+                || (
+                    OnlyTheAblationExplainsIt(
                         row,
-                        withoutTheRetriedFoldSteps: false,
-                        withoutTheGroupFoldLeftovers: true
-                    )
+                        ours,
+                        OracleComparer.RunWithTheDoubledInsertionGuard(
+                            row,
+                            withoutTheRetriedFoldSteps: false,
+                            withoutTheGroupFoldLeftovers: true
+                        )
+                    ) && !TheDoubledGuardAloneExplainsIt(row, ours)
                 )
         ),
         new(
@@ -6347,23 +6529,27 @@ internal static class ExpectedDivergences
                         withoutTheGroupFoldLeftovers: true
                     )
                 )
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
-                        row,
-                        withoutTheRetriedFoldSteps: true,
-                        withoutTheGroupFoldLeftovers: false
-                    )
-                )
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
-                        row,
-                        withoutTheRetriedFoldSteps: true,
-                        withoutTheGroupFoldLeftovers: true
-                    )
+                || (
+                    (
+                        OnlyTheAblationExplainsIt(
+                            row,
+                            ours,
+                            OracleComparer.RunWithTheDoubledInsertionGuard(
+                                row,
+                                withoutTheRetriedFoldSteps: true,
+                                withoutTheGroupFoldLeftovers: false
+                            )
+                        )
+                        || OnlyTheAblationExplainsIt(
+                            row,
+                            ours,
+                            OracleComparer.RunWithTheDoubledInsertionGuard(
+                                row,
+                                withoutTheRetriedFoldSteps: true,
+                                withoutTheGroupFoldLeftovers: true
+                            )
+                        )
+                    ) && !TheDoubledGuardAloneExplainsIt(row, ours)
                 )
         ),
         new(
@@ -6866,6 +7052,33 @@ internal static class ExpectedDivergences
     }
 
     /// <summary>
+    /// Whether the answer being judged is what this port really answers now, the second run every
+    /// ablation entry makes.
+    /// </summary>
+    /// <remarks>
+    /// A timeout is never that answer. Where upstream answered, this port running out of time is a
+    /// divergence (<see cref="OracleComparer.Compare"/> says why), and a live re-run that times out
+    /// again describes itself exactly as the wave's timeout did - so without this check, an ablated
+    /// run that happened to finish in time classified a timeout. Measured 2026-09-25 on the seed-11
+    /// <c>partial-long</c> wave: rows 6398 and 7144, with no full folding in either pattern, were
+    /// tallied <c>full-fold-leftover-take-back</c> and <c>full-fold-backreference-retry</c>.
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if a live run gives the same answer and it is not a timeout.</returns>
+    internal static bool IsTheLiveAnswer(OracleRow row, IOracleOutcome ours) =>
+        !(
+            ours is ErrorOutcome { WhileMatching: true } error
+            && string.Equals(
+                error.Exception,
+                nameof(System.Text.RegularExpressions.RegexMatchTimeoutException),
+                StringComparison.Ordinal
+            )
+        )
+        && OracleComparer.Run(row) is { } live
+        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+
+    /// <summary>
     /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
     /// </summary>
     /// <remarks>
@@ -6895,8 +7108,7 @@ internal static class ExpectedDivergences
             return false;
         }
 
-        return OracleComparer.Run(row) is { } pinned
-            && string.Equals(pinned.Describe(), ours.Describe(), StringComparison.Ordinal);
+        return IsTheLiveAnswer(row, ours);
     }
 
     /// <summary>
@@ -6921,8 +7133,7 @@ internal static class ExpectedDivergences
             return false;
         }
 
-        return OracleComparer.Run(row) is { } live
-            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+        return IsTheLiveAnswer(row, ours);
     }
 
     /// <summary>
@@ -6940,8 +7151,79 @@ internal static class ExpectedDivergences
     private static bool OnlyTheAblationExplainsIt(OracleRow row, IOracleOutcome ours, IOracleOutcome? ablated) =>
         ablated is not null
         && OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
-        && OracleComparer.Run(row) is { } live
-        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+        && IsTheLiveAnswer(row, ours);
+
+    /// <summary>
+    /// Whether upstream's doubled insertion guard ALONE, with every full-fold repair left on,
+    /// reproduces upstream's answer.
+    /// </summary>
+    /// <remarks>
+    /// The full-fold entries' doubled-guard arms switch a fold repair off as well, and on a row with
+    /// no full-folded backreference that switch does nothing, so without this test those arms
+    /// claimed plain ledger entry 12 rows under a full-fold name: `(?b)(\p{L}){i,d}c` as a partial
+    /// fullmatch over '\nc' was tallied `full-fold-backreference-leftovers` (2026-09-25). Such a row
+    /// belongs to <c>bestmatch-loses-a-candidate</c>, which is keyed on judged rows.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the doubled guard alone explains the divergence.</returns>
+    private static bool TheDoubledGuardAloneExplainsIt(OracleRow row, IOracleOutcome ours) =>
+        OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithTheDoubledInsertionGuard(
+                row,
+                withoutTheRetriedFoldSteps: false,
+                withoutTheGroupFoldLeftovers: false
+            )
+        );
+
+    /// <summary>
+    /// Whether a span-less answer is exactly upstream's answer to the same row with the dotless i
+    /// swapped for kra, swapped back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The control <c>turkic-default-folding-without-spans</c> was judged by, row by row, recorded
+    /// by the recorder as <see cref="OracleRow.DotlessFree"/>. Kra (U+0138) and the dotless i
+    /// (U+0131) MATCH alike under the DEFAULT case tables: both lowercase, same block, neither in
+    /// CaseFolding.txt. So upstream's answer to the swapped row is its answer with nothing for its
+    /// Turkic `T` rows to act on, and this port treats the two letters identically (6,468 grid
+    /// rows, 2026-09-25). They are not the same letter everywhere: U+0131 upper-cases to I, so a
+    /// case-mapping property such as <c>\p{CWU}</c> separates them, and an escape or a class range
+    /// can name one without the other. The recorder records no twin for such a row (the blind
+    /// review's doors, 2026-09-25). When this port's answer is upstream's swapped answer with the
+    /// swap undone, the dotless i is the whole difference between the engines.
+    /// </para>
+    /// <para>
+    /// WHY THIS IS SAFE WHERE S52'S SCAN-BASED DRAFT WAS NOT. That draft asked only whether the
+    /// divergence touched a Turkic letter, so a fabricated total failure on <c>(?i)\w</c> over
+    /// 'xı' was tallied EXPECTED. This asks what the right answer is and requires this port to
+    /// give it exactly: a port with a defect on the dotless i answers something else and stays red.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer and its dotless-free twin.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the swapped-back twin is this port's answer.</returns>
+    internal static bool TheDotlessIAloneExplainsIt(OracleRow row, IOracleOutcome ours) =>
+        row.DotlessFree is { } free
+        && WithKraAsTheDotlessI(free) is { } swappedBack
+        && ours is SubOutcome or SplitOutcome
+        && string.Equals(ours.Describe(), swappedBack.Describe(), StringComparison.Ordinal);
+
+    /// <summary>A span-less answer with every U+0138 turned back into U+0131, or null for any other answer.</summary>
+    /// <param name="outcome">Upstream's answer to the swapped row.</param>
+    /// <returns>The answer in the original row's letters.</returns>
+    private static IOracleOutcome? WithKraAsTheDotlessI(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            SubOutcome sub => sub with { Text = sub.Text.Replace('ĸ', 'ı') },
+            SplitOutcome split => split with
+            {
+                Parts = [.. split.Parts.Select(static part => part?.Replace('ĸ', 'ı'))],
+            },
+            _ => null,
+        };
 
     /// <summary>
     /// Whether one ablated run leaves only ledger entry 11 mechanism B between the two engines.
@@ -6960,11 +7242,7 @@ internal static class ExpectedDivergences
         OracleRow row,
         IOracleOutcome ours,
         IOracleOutcome? ablated
-    ) =>
-        ablated is not null
-        && UpstreamCountedOnlyTheInnermostSection(row, ablated)
-        && OracleComparer.Run(row) is { } live
-        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+    ) => ablated is not null && UpstreamCountedOnlyTheInnermostSection(row, ablated) && IsTheLiveAnswer(row, ours);
 
     /// <summary>
     /// Whether the row's pattern runs right to left, by either of the two ways it can say so.

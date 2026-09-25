@@ -44,10 +44,25 @@ internal sealed class Info
             );
         InlineLocale = false;
         Kwargs = kwargs;
+        OuterEncodings = Flags & RegexFlags.AllEncodings;
     }
 
     /// <summary>The flags in force at the current point in the parse. Upstream <c>info.flags</c>.</summary>
     internal int Flags { get; set; }
+
+    /// <summary>
+    /// How many groups that restore <see cref="Flags"/> when they close enclose the current point.
+    /// Not upstream state: positional flags use it to tell a clash that the group's close will
+    /// discard from one that reaches the whole pattern.
+    /// </summary>
+    internal int FlagScopeDepth { get; set; }
+
+    /// <summary>
+    /// The encoding flags in force outside every group. Not upstream state (S91): an encoding named
+    /// there reaches the whole pattern, because outside a group encodings accumulate and a clash is
+    /// rejected, so a node parsed under exactly these encodings needs no encoding of its own.
+    /// </summary>
+    internal int OuterEncodings { get; set; }
 
     /// <summary>The global flags accumulated so far. Upstream <c>info.global_flags</c>.</summary>
     internal int GlobalFlags { get; set; }

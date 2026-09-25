@@ -53,6 +53,7 @@ import json
 import os
 import random
 import re
+import unicodedata
 import subprocess
 import sys
 import tempfile
@@ -468,6 +469,117 @@ def _with_prune_instead_of_skip(row: dict, pattern: str, flags: int) -> dict | N
     return {**row, "pattern": pattern.replace(_SKIP_VERB, _PRUNE_VERB)} if _SKIP_VERB in pattern else None
 
 
+_DOTLESS_I = "ı"
+_DOTTED_I = "İ"
+_KRA = "ĸ"
+
+
+def _row_texts(row: dict) -> list[str]:
+    """Every text a row puts to the engine: pattern, subject, template, and named-list keys and entries."""
+    texts = [row["pattern"], row["subject"], row.get("template") or ""]
+    for name, entries in (row.get("namedLists") or {}).items():
+        texts.append(name)
+        texts.extend(entries)
+    return texts
+
+
+# A pattern or template escape that NAMES a codepoint - `\u0131`, `\x{138}`, `\N{...}`, an octal
+# escape - can say the dotless i or kra without the literal the swap replaces. Each is decoded, and
+# one naming any non-ASCII codepoint, or one that will not decode, refuses the row: `\x41` is an A.
+_CODEPOINT_ESCAPE = re.compile(
+    r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2})|x\{([0-9a-fA-F]+)\}|N\{([^}]*)\}|(0[0-7]{0,2}|[1-7][0-7]{2})|([uUxN]))"
+)
+
+
+def _names_dotless_or_kra(text: str) -> bool:
+    """Whether a codepoint escape in ``text`` names a non-ASCII codepoint, or cannot be decoded."""
+    for m in _CODEPOINT_ESCAPE.finditer(text):
+        hex4, hex8, hex2, hexn, name, octal, bare = m.groups()
+        if bare is not None:
+            return True
+        try:
+            if name is not None:
+                codepoint = ord(unicodedata.lookup(name))
+            elif octal is not None:
+                codepoint = int(octal, 8)
+            else:
+                codepoint = int(hex4 or hex8 or hex2 or hexn, 16)
+        except (KeyError, ValueError):
+            return True
+        # Any non-ASCII codepoint, not only the two letters: escaped endpoints put a range running
+        # from U+0130 to U+0137 round one letter and not the other (the blind review, 2026-09-25).
+        if codepoint > 0x7F:
+            return True
+    return False
+
+# A class range with a non-ASCII endpoint, where swapping one letter for the other can move a
+# character in or out of the range: `[a-\u0131]` holds U+0131 and not U+0138.
+_NON_ASCII_RANGE = re.compile(r"[^\x00-\x7f]-|-[^\x00-\x7f]")
+
+# Every property the pattern names, as a pattern of its own: `\p{...}`, `\P{...}`, `\pL`, and the
+# POSIX `[:name:]` forms. Each is asked of upstream for both letters before the swap is trusted.
+_PROPERTY_TOKEN = re.compile(r"\\[pP](?:\{[^}]*\}|[A-Za-z])|\[:\^?[A-Za-z_]+:\]")
+
+_LOCALE_FLAG = 0x4
+
+
+def _with_dotless_i_as_kra(regex, row: dict) -> dict | None:
+    """The same row with every U+0131 made U+0138, or ``None`` where the swap would not be clean.
+
+    THE CONTROL `turkic-default-folding-without-spans` WAS JUDGED BY HAND ON EVERY ROW, and this is
+    the same control recorded instead. Upstream's default tables carry CaseFolding.txt's two `T`
+    rows (ledger entry 7), so its dotless i (U+0131) pairs with I under case-insensitive matching.
+    Kra (U+0138) is a lowercase letter in the same block with no entry in CaseFolding.txt 16.0, so
+    under the DEFAULT tables the two letters match the same way: this port answers 6,468 grid rows
+    (search, sub, split, finditer; V0 and V1; IGNORECASE with and without FULLCASE, ASCII and
+    MULTILINE) identically with either letter, up to the swap (measured 2026-09-25).
+
+    THEY ARE NOT THE SAME LETTER EVERYWHERE, and the row is refused wherever the difference could
+    show (the 2026-09-25 blind review found each door): U+0131 upper-cases to I and U+0138 does
+    not, so a case-mapping property such as `\\p{CWU}` or `\\p{CWCM}` tells them apart; an escape
+    can name either codepoint without the literal the swap replaces; a class range can hold one and
+    not the other; and LOCALE reads a different table. Each property the pattern names is asked of
+    upstream for both letters, with and without IGNORECASE, and any disagreement refuses the row.
+
+    NOT FOR U+0130. The dotted capital is the only capital letter in CaseFolding.txt with a full
+    folding and no simple one, and its lowercase is a plain `i`, so no letter can stand in for it.
+    A row holding one records no key, and stays judged by hand. Nor where U+0138 is already in the
+    row, where the swap could not be undone.
+    """
+    texts = _row_texts(row)
+    if not any(_DOTLESS_I in t for t in texts) or any(_DOTTED_I in t or _KRA in t for t in texts):
+        return None
+    flags = int(row.get("flags", 0))
+    pattern = row["pattern"]
+    if flags & _LOCALE_FLAG or "(?L" in pattern:
+        return None
+    if _names_dotless_or_kra(pattern) or _names_dotless_or_kra(row.get("template") or ""):
+        return None
+    if _NON_ASCII_RANGE.search(pattern):
+        return None
+    for token in set(_PROPERTY_TOKEN.findall(pattern)):
+        single = f"[{token}]" if token.startswith("[:") else token
+        # Every encoding the token could be read under, not only the row's: a scoped `(?u:...)` in
+        # an ASCII row reads the property with the Unicode tables (the blind review, 2026-09-25).
+        for extra in (0, regex.IGNORECASE):
+            for encoding in (regex.ASCII, regex.UNICODE):
+                try:
+                    token_flags = (flags & ~(regex.ASCII | regex.UNICODE | _LOCALE_FLAG)) | encoding | extra
+                    answers = {bool(regex.fullmatch(single, letter, token_flags)) for letter in (_DOTLESS_I, _KRA)}
+                except Exception:
+                    return None
+                if len(answers) != 1:
+                    return None
+
+    def swap(text):
+        return text.replace(_DOTLESS_I, _KRA) if isinstance(text, str) else text
+
+    swapped = {key: swap(value) for key, value in row.items()}
+    if row.get("namedLists"):
+        swapped["namedLists"] = {swap(n): [swap(e) for e in entries] for n, entries in row["namedLists"].items()}
+    return swapped
+
+
 # Each control's recorded key, and how to take its construct away. Every one is A SECOND FACT
 # ABOUT UPSTREAM, never compared against anything, exactly as `searchOnlyPartial` and
 # `anchoredScan` are: only the consumer's `ExpectedDivergences` reads them.
@@ -793,6 +905,14 @@ def _record_row_and_its_control_answers(regex, row: dict) -> dict:
             recorded[key] = free
 
     violations += _control_violations(recorded)
+
+    # Recorded AFTER the invariants and outside `_CONTROLS`, because the swap changes the question:
+    # a twin that answers where the row faulted is not the row contradicting itself.
+    swapped = _with_dotless_i_as_kra(regex, row)
+    if swapped is not None:
+        free = _record_row(regex, swapped)["outcome"]
+        if free["kind"] in _ANSWERED:
+            recorded["dotlessFreeOutcome"] = free
     if violations:
         # Sorted and de-duplicated: a scan whose every match breaks one invariant is ONE candidate
         # to triage, not forty, and the field is a set of ids by contract. The detail a triage needs
@@ -7276,6 +7396,31 @@ def _self_check() -> int:
     })
     if "no-fault-where-a-twin-answers" not in real_twin:
         failures.append("a substitution twin that DID replace no longer counts as an answer")
+
+    # The dotless-i twin swaps every text the row puts to the engine, named lists included, and
+    # refuses a row it could not swap back: one holding U+0130, which kra cannot stand in for, or
+    # one already holding kra.
+    dotless = {"generator": "rows", "pattern": "\u0131\\L<w>", "flags": 2, "namedLists": {"w\u0131": ["\u0131"]},
+               "subject": "a\u0131", "operation": "sub", "template": "\u0131"}
+    swapped = _with_dotless_i_as_kra(regex, dotless)
+    if swapped is None or any(_DOTLESS_I in text for text in _row_texts(swapped)):
+        failures.append(f"the dotless-i twin left a dotless i behind: {swapped}")
+    for blocker in (_DOTTED_I, _KRA):
+        if _with_dotless_i_as_kra(regex, {**dotless, "subject": "a\u0131" + blocker}) is not None:
+            failures.append(f"the dotless-i twin swapped a row holding {blocker!a}")
+    if _with_dotless_i_as_kra(regex, {**dotless, "pattern": "a", "subject": "a", "template": "x", "namedLists": {}}) is not None:
+        failures.append("the dotless-i twin was recorded for a row with no dotless i")
+    # ...and refuses every door the 2026-09-25 blind review found, where the two letters are not the
+    # same question: a case-mapping property, a codepoint escape, a non-ASCII range, LOCALE.
+    for door in ({"pattern": r"\p{CWU}"}, {"pattern": r"(?i)\p{CWCM}"}, {"pattern": r"\u0131"},
+                 {"pattern": r"\N{LATIN SMALL LETTER DOTLESS I}"}, {"pattern": "[a-\u0131]"},
+                 {"pattern": "[\u0131-z]"}, {"template": r"\x{131}"}, {"template": r"\461"}, {"pattern": r"\U00000138"}, {"pattern": r"[\u0130-\u0137]"}, {"pattern": r"(?u:\p{CWU})", "flags": 130}, {"flags": 4}):
+        if _with_dotless_i_as_kra(regex, {**dotless, **door}) is not None:
+            failures.append(f"the dotless-i twin swapped a row it cannot swap cleanly: {door!a}")
+    if _with_dotless_i_as_kra(regex, {**dotless, "pattern": "(?i)\\p{Lu}\u0131[[:alpha:]]"}) is None:
+        failures.append("the dotless-i twin refused a property both letters answer the same way")
+    if _with_dotless_i_as_kra(regex, {**dotless, "template": r"\x41\101"}) is None:
+        failures.append("the dotless-i twin refused a template whose escapes name only an A")
 
     # POSIX BUYS LENGTH WITH ERRORS, so its cost limb needs the same SPAN and not merely the same
     # start - `(?p)(?:abc){e<=2}` over 'abxxyc' is (0, 4) at a cost of 2 where the flagless engine's

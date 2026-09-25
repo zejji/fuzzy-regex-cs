@@ -214,6 +214,17 @@ internal static class Encodings
     private const uint _unassignedCodepoint = 0x10FFFF;
 
     /// <summary>
+    /// The codepoint a property lookup reads under an encoding: under ASCII, anything above
+    /// <c>RE_ASCII_MAX</c> reads as <c>UNASSIGNED_CODEPOINT</c>, as upstream's
+    /// <c>ascii_has_property</c> (<c>upstream/src/_regex.c</c> line 822) does.
+    /// </summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns>The codepoint to look up.</returns>
+    internal static uint ClampToEncoding(CaseEncoding encoding, uint ch) =>
+        encoding == CaseEncoding.Ascii && ch > _asciiMax ? _unassignedCodepoint : ch;
+
+    /// <summary>
     /// Upstream <c>ascii_has_property</c> (<c>upstream/src/_regex.c</c> line 822): the ASCII
     /// encoding's whole property story is that everything above <c>RE_ASCII_MAX</c> is answered as
     /// though it were unassigned, and the Unicode table answers the rest.
@@ -223,7 +234,7 @@ internal static class Encodings
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> if the codepoint has that value.</returns>
     internal static bool HasProperty(CaseEncoding encoding, uint property, uint ch) =>
-        HasProperty(property, encoding == CaseEncoding.Ascii && ch > _asciiMax ? _unassignedCodepoint : ch);
+        HasProperty(property, ClampToEncoding(encoding, ch));
 
     /// <summary>
     /// Upstream <c>unicode_has_property</c> (<c>upstream/src/_regex.c</c> line 1362): whether a

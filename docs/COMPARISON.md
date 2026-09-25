@@ -781,6 +781,101 @@ Match m = FuzzyRegex.FullMatch("a\u0131", "aI", FuzzyRegexOptions.IgnoreCase);
 Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı', I) matches
 ```
 
+### A case-insensitive cased property under ASCII means the 52 ASCII letters
+
+With both `(?a)` and `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}`, `\p{Lower}`, `[[:upper:]]`
+and `[[:lower:]]` match `a` to `z` and `A` to `Z`, and nothing else. Upstream answers this three
+ways: its `match` also accepts letters such as `É`, its `search` misses the lowercase `a`, and its
+set form `[\p{Lu}x]` gives the ASCII letters. Perl and PCRE2 give the ASCII letters for
+`[[:upper:]]` and `[[:lower:]]`, and Python's `re` documents the same rule for `[A-Z]`. Wrap the
+property in `(?u:...)` for the Unicode answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success);  // False - upstream's regex.match matches
+Console.WriteLine(FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success);              // True - upstream's regex.search is None
+```
+
+### A scope that names no encoding keeps the one around it
+
+`(?a:(?s:\w))` refuses 'é' here, as Python's `re` does; upstream's inner `(?s:` drops the outer
+`(?a:` and matches it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?s:\w))").Success);  // False - upstream matches
+```
+
+### A POSIX class takes the scope's encoding
+
+`(?a:[[:alpha:]])` refuses 'é', exactly as `(?a:\p{L})` does. Upstream reads a POSIX class with the
+pattern's tables whatever scope it sits in.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success);  // False - upstream matches
+```
+
+### A case-insensitive cased property answers the same bare and in a set
+
+Under `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}` and `\p{Lower}` mean "any cased letter"
+wherever they appear, which is what Perl and .NET's `Regex` do. Upstream uses that rule for a bare
+property and a different one inside a set, so wrapping a property in brackets changed its answer.
+`\p{Upper=No}` is the complement of `\p{Upper}`.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success);  // True - upstream's set form refuses
+Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success);     // False - upstream matches
+```
+
+### A case-insensitive set matches each member first, then combines them
+
+Under `(?i)` each member of a set matches case-insensitively on its own, and only then does the set
+union, intersect or subtract the answers. Perl's extended sets and .NET's set subtraction work this
+way. Upstream tests every case variant of the character against the case-sensitive set instead, so
+the answer changed with how the set was written: `(?i)[\p{Greek}x]` matched the micro sign where
+`(?i)\p{Greek}` refused it, and `(?i)[x[\w--\p{Lu}]]` matched 'a' although `\p{Lu}` under `(?i)`
+covers every cased letter.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00B5", @"(?i)[\p{Greek}x]").Success);  // False - upstream matches
+Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)[x[\w--\p{Lu}]]").Success);    // False - upstream matches
+```
+
+### An encoding named by positional flags inside a group replaces the one in force
+
+`(?a:(?u)\w)` matches 'é', as `(?a:(?u:\w))` does. Upstream keeps both encodings after `(?u)` and
+ASCII wins. Python's `re` rejects the positional spelling inside a group, so it has no answer.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // True - upstream refuses
+```
+
+### A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern
+
+`(?i)(?a:k)` means exactly what `(?ai)k` means, for every construct whose answer depends on the
+encoding: case-insensitive letters, ranges, sets, backreferences and named lists, fuzzy matching,
+`\m` and `\M`, the `(?w)` word and line rules, `\X`, and full case folding. So under ASCII rules the
+Kelvin sign U+212A is not a 'k', whether ASCII is set for the whole pattern or only for a group.
+Python's `re` and Perl answer this way. Upstream applies a scoped encoding only to `\p{...}`
+properties and `\b`, and reads the pattern's encoding everywhere else.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u212A", "(?i)(?a:k)").Success);   // False - upstream matches
+Console.WriteLine(FuzzyRegex.FullMatch("\u212A", "(?ai)(?u:k)").Success);  // True - upstream refuses
+```
+
 ### This port's search prefilters never change the slow path's answer
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several
@@ -1180,6 +1275,37 @@ Upstream gives two deletions for `(?:(?:x){d<=1})+` over the empty string. A rep
 such as `{1,3}`, keeps upstream's answer, and so does a repeat whose body holds a capture group,
 since a pass that sets a group can change what the next pass matches. There is no option to
 restore the upstream behaviour.
+
+### A literal under a scoped `(?i:...)` is found in text that holds only its full case folding
+
+Version 1 folds case fully under `(?i)`, so `ss` matches 'ß', and it does so whether `(?i)` covers
+the whole pattern or only a group. Upstream first searches the subject for a string every match
+must contain, and when the only `(?i)` is scoped it searches for that string with simple folding,
+so it never finds 'ß' and reports no match. Its matcher alone gives the right answer: `(?i:ss)|q`,
+which has no such string, matches. Perl agrees with this port.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.Match("\u00DF", "(?i:ss)").Success);  // True - upstream: no match
+```
+
+### A lazy repeat finds a full-folded literal that starts at the repeat's last position
+
+A lazy repeat such as `[^k]??` first tries to match nothing, then one character. Under `(?i)` in
+version 1 the literal after it is matched with full folding, and upstream, looking ahead for that
+literal, stops reading at the last position the repeat can reach. A literal that starts there is
+never read to its end, so the match at the start of the text is lost and the search reports a later
+one or none at all. Upstream finds the match in version 0, which folds simply, and with a greedy
+repeat. Python's `re` and Perl agree with this port.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("ass", "(?i)[^k]??ss");
+Console.WriteLine(m.Index);                                           // 0 - upstream: 1
+Console.WriteLine(FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success);  // True - upstream: no match
+```
 
 ### Inherited upstream bugs are fixed here
 

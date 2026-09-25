@@ -224,6 +224,10 @@ internal static class NodeCompiler
             Match = (flags & NodeFlags.Positive) != 0,
             Status = flags << NodeStatus.Shift,
             Step = step,
+
+            // From the code word, before anything can set HasGroups or HasRepeats, which share
+            // the encoding's two status bits.
+            Encoding = Matcher.NodeEncoding(pattern.Encoding, flags << NodeStatus.Shift),
         };
 
         // Record the new node.

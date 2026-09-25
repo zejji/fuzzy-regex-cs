@@ -86,6 +86,12 @@ internal struct FuzzyData
     internal int GfoldedLen;
 
     /// <summary>
+    /// NOT UPSTREAM (S91): the encoding the group reference folds the subject with, which the fuzzy
+    /// constraint's test must see the same folding in. See <c>Matcher.FuzzyExtMatchGroupFld</c>.
+    /// </summary>
+    internal CaseEncoding FoldEncoding;
+
+    /// <summary>
     /// NOT UPSTREAM (S85): whether a full-case-folded string's values have all been used, so a
     /// deletion has none left to delete. See <c>Matcher.TakeBackFoldedComparison</c>.
     /// </summary>
@@ -383,8 +389,14 @@ internal static class Matcher
     /// <param name="encoding">The pattern's encoding.</param>
     /// <param name="node">The node.</param>
     /// <returns>The encoding to answer this node's property lookups in.</returns>
-    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, Node node) =>
-        NodeStatus.EncodingKind(node) switch
+    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, Node node) => NodeEncoding(encoding, node.Status);
+
+    /// <summary><see cref="NodeEncoding(CaseEncoding, Node)"/> of a status word.</summary>
+    /// <param name="encoding">The pattern's encoding.</param>
+    /// <param name="status">The node's status word.</param>
+    /// <returns>The encoding the node answers in.</returns>
+    internal static CaseEncoding NodeEncoding(CaseEncoding encoding, uint status) =>
+        NodeStatus.EncodingKind(status) switch
         {
             NodeStatus.AsciiEncoding => CaseEncoding.Ascii,
             NodeStatus.UnicodeEncoding => CaseEncoding.Unicode,
@@ -432,13 +444,48 @@ internal static class Matcher
     /// <param name="node">The <c>PROPERTY_IGN</c> node.</param>
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
-    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch)
+    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch) =>
+        HasPropertyIgn(NodeEncoding(encoding, node), node.Values[0], ch);
+
+    /// <summary>
+    /// Whether a codepoint has a property, ignoring case, under an encoding: the one predicate a
+    /// bare <c>\p{...}</c> and the same property inside a set both answer through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Under IGNORECASE <c>\p{Lu}</c>, <c>\p{Ll}</c> and <c>\p{Lt}</c> mean any cased letter, and
+    /// <c>\p{Uppercase}</c> and <c>\p{Lowercase}</c> mean Cased. That is upstream's bare-property
+    /// rule and the rule Perl 5.42 and .NET 10's <c>Regex</c> apply to a bare property and a set
+    /// alike (measured 2026-09-25). UTS #18 RL1.5 lets an implementation choose, provided it says.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM in two places, deliberately. Upstream's set members check each case
+    /// variant with the plain property instead (<c>matches_member_ign</c>, <c>:3085</c>), so
+    /// <c>(?i)\p{Lu}</c> matched U+0138 and <c>(?i)[\p{Lu}x]</c> did not, and a rewrite that
+    /// turned an alternation into a set changed the answer (<c>(?i)\p{Lt}|z</c> refused 'a' where
+    /// <c>(?i)\p{Lt}</c> matched it). And upstream collapses Uppercase and Lowercase whatever the
+    /// value asked for (<c>:2981</c>), so <c>(?i)\p{Upper=No}</c> answered as <c>\p{Upper}</c>;
+    /// here the value 0, "No", is the complement, as <c>\P{Upper}</c> is and as Perl answers.
+    /// </para>
+    /// </remarks>
+    /// <param name="encoding">The encoding that applies to the node or member.</param>
+    /// <param name="property">The packed property code.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
+    internal static bool HasPropertyIgn(CaseEncoding encoding, uint property, uint ch)
     {
-        uint property = node.Values[0];
         uint prop = property >> 16;
 
-        // Upstream's Unicode and ASCII arms are the same three tests; only the fall-through
-        // differs, and Encodings.HasProperty is where that difference already lives.
+        // DIVERGES FROM UPSTREAM, deliberately: under ASCII the character is clamped BEFORE the
+        // collapse below. Upstream's ASCII arm of matches_PROPERTY_IGN (:2972) runs the collapse
+        // on the raw character, so `regex.match(r'(?ai)\p{Lu}', '\xc9')` matches, although the
+        // case-sensitive `(?a)\p{Lu}` refuses both 'É' and 'é' and upstream's own search screen
+        // (ascii_has_property_ign, :832) refuses it too. Under ASCII|IGNORECASE a cased property
+        // means the 52 ASCII letters: so Perl 5.42 answers for `[[:upper:]]` under /ai, PCRE2
+        // 10.47 without UCP under CASELESS, and Python's re documents the same rule for [A-Z]
+        // under ASCII|IGNORECASE (measured 2026-09-25; ledger entry 34).
+        ch = Encodings.ClampToEncoding(encoding, ch);
+
         if (property is Encodings.PropGcLu or Encodings.PropGcLl or Encodings.PropGcLt)
         {
             uint value = UnicodeTables.GetGeneralCategory(ch);
@@ -448,11 +495,13 @@ internal static class Matcher
 
         if (prop is UnicodeTables.PropUppercase or UnicodeTables.PropLowercase)
         {
-            return UnicodeTables.GetCased(ch) != 0;
+            bool cased = UnicodeTables.GetCased(ch) != 0;
+
+            return (property & 0xFFFF) != 0 ? cased : !cased;
         }
 
         // The property is case-insensitive.
-        return Encodings.HasProperty(NodeEncoding(encoding, node), property, ch);
+        return Encodings.HasProperty(encoding, property, ch);
     }
 
     /// <summary>Upstream <c>matches_member</c> (line 3025).</summary>
@@ -591,25 +640,48 @@ internal static class Matcher
     /// <remarks>
     /// <para>
     /// The case set is computed once by <see cref="MatchesSetIgn"/> and threaded down, so a nested
-    /// set is tested against each case of the subject character rather than re-folding at every
-    /// level. That is upstream's shape, <c>case_count</c> and <c>cases</c> and all.
+    /// set is not re-folded at every level. That is upstream's shape, <c>case_count</c> and
+    /// <c>cases</c> and all.
     /// </para>
     /// <para>
-    /// Three deliberate differences from <see cref="MatchesMember"/>, all upstream's:
-    /// <c>ANY_ALL</c> has no arm and falls to the default; the default answers
-    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>; and
-    /// the <c>PROPERTY</c> arm calls the encoding's plain <c>has_property</c> without the
-    /// <c>ENCODING_KIND(member)</c> switch, so a scoped <c>(?a:...)</c> inside a
-    /// case-insensitive set is not honoured here. The nested <c>SET_*</c> arms likewise recurse
-    /// into the case-*sensitive* <c>in_set_*</c> with one case at a time.
+    /// Two deliberate differences from <see cref="MatchesMember"/>, both upstream's:
+    /// <c>ANY_ALL</c> has no arm and falls to the default, and the default answers
+    /// <see langword="true"/> where the case-sensitive version answers <see langword="false"/>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM, deliberately: each member answers case-insensitively on its own,
+    /// and only then does the enclosing set combine the answers. A character, range or string
+    /// matches if any case of the subject does; a property asks <see cref="HasPropertyIgn"/> of the
+    /// subject itself, as a bare property does; a nested set recurses into the case-insensitive
+    /// <c>in_set_*_ign</c>. Upstream tests every case against the property and recurses into the
+    /// case-SENSITIVE <c>in_set_*</c> one case at a time, so nesting a member changed its answer:
+    /// <c>(?i)[\p{Lu}]</c> refused U+0345 and <c>(?i)[[\p{Lu}]x]</c> matched it, and
+    /// <c>(?i)[\p{Greek}x]</c> matched U+00B5 where <c>(?i)\p{Greek}</c> refused it (regex
+    /// 2026.9.10, V1). Perl 5.42's <c>(?[ ... ])</c> and .NET 10's set subtraction answer
+    /// member-first under <c>/i</c>, as here (measured 2026-09-25).
     /// </para>
     /// </remarks>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="member">The member node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
-    /// <returns><see langword="true"/> if any case of the character matches the member.</returns>
-    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, ReadOnlySpan<uint> cases)
+    /// <returns><see langword="true"/> if the character matches the member, ignoring case.</returns>
+    internal static bool MatchesMemberIgn(CaseEncoding encoding, Node member, uint ch, ReadOnlySpan<uint> cases)
     {
+        switch (member.Op)
+        {
+            case Opcode.Property:
+                return HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], ch);
+            case Opcode.SetDiff:
+                return InSetDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetInter:
+                return InSetInterIgn(encoding, member, ch, cases);
+            case Opcode.SetSymDiff:
+                return InSetSymDiffIgn(encoding, member, ch, cases);
+            case Opcode.SetUnion:
+                return InSetUnionIgn(encoding, member, ch, cases);
+        }
+
         for (int i = 0; i < cases.Length; i++)
         {
             switch (member.Op)
@@ -621,43 +693,8 @@ internal static class Matcher
                     }
 
                     break;
-                case Opcode.Property:
-                    if (Encodings.HasProperty(encoding, member.Values[0], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
                 case Opcode.Range:
                     if (InRange(member.Values[0], member.Values[1], cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetDiff:
-                    if (InSetDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetInter:
-                    if (InSetInter(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetSymDiff:
-                    if (InSetSymDiff(encoding, member, cases[i]))
-                    {
-                        return true;
-                    }
-
-                    break;
-                case Opcode.SetUnion:
-                    if (InSetUnion(encoding, member, cases[i]))
                     {
                         return true;
                     }
@@ -682,13 +719,14 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3177).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in the difference, ignoring case.</returns>
-    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
-        if (MatchesMemberIgn(encoding, member!, cases) != member!.Match)
+        if (MatchesMemberIgn(encoding, member!, ch, cases) != member!.Match)
         {
             return false;
         }
@@ -697,7 +735,7 @@ internal static class Matcher
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return false;
             }
@@ -711,15 +749,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_inter_ign</c> (<c>upstream/src/_regex.c</c> line 3218).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in every member, ignoring case.</returns>
-    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetInterIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) != member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) != member.Match)
             {
                 return false;
             }
@@ -733,16 +772,17 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_sym_diff_ign</c> (<c>upstream/src/_regex.c</c> line 3257).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in an odd number of members.</returns>
-    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetSymDiffIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
         bool result = false;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 result = !result;
             }
@@ -756,15 +796,16 @@ internal static class Matcher
     /// <summary>Upstream <c>in_set_union_ign</c> (<c>upstream/src/_regex.c</c> line 3295).</summary>
     /// <param name="encoding">The encoding in force.</param>
     /// <param name="node">The set node.</param>
+    /// <param name="ch">The subject character.</param>
     /// <param name="cases">The cases of the subject character.</param>
     /// <returns><see langword="true"/> if the character is in any member, ignoring case.</returns>
-    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, ReadOnlySpan<uint> cases)
+    internal static bool InSetUnionIgn(CaseEncoding encoding, Node node, uint ch, ReadOnlySpan<uint> cases)
     {
         Node? member = node.Next2.Node;
 
         while (member is not null)
         {
-            if (MatchesMemberIgn(encoding, member, cases) == member.Match)
+            if (MatchesMemberIgn(encoding, member, ch, cases) == member.Match)
             {
                 return true;
             }
@@ -788,10 +829,10 @@ internal static class Matcher
 
         return node.Op switch
         {
-            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, cases),
-            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, cases),
-            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, cases),
-            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, cases),
+            Opcode.SetDiffIgn or Opcode.SetDiffIgnRev => InSetDiffIgn(encoding, node, ch, cases),
+            Opcode.SetInterIgn or Opcode.SetInterIgnRev => InSetInterIgn(encoding, node, ch, cases),
+            Opcode.SetSymDiffIgn or Opcode.SetSymDiffIgnRev => InSetSymDiffIgn(encoding, node, ch, cases),
+            Opcode.SetUnionIgn or Opcode.SetUnionIgnRev => InSetUnionIgn(encoding, node, ch, cases),
             _ => false,
         };
     }
@@ -875,8 +916,8 @@ internal static class Matcher
         {
             Opcode.Any or Opcode.AnyRev => MatchesAny(ch),
             Opcode.AnyAll or Opcode.AnyAllRev => true,
-            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(state.Encoding, ch),
-            _ => MatchesOne(state.Encoding, node, ch) == node.Match,
+            Opcode.AnyU or Opcode.AnyURev => MatchesAnyU(node.Encoding, ch),
+            _ => MatchesOne(node.Encoding, node, ch) == node.Match,
         };
     }
 
@@ -1097,9 +1138,10 @@ internal static class Matcher
     /// <see cref="Encodings"/>.
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding, whose line separators apply.</param>
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a line starts there.</returns>
-    internal static bool AtLineStart(MatchState state, int textPos)
+    internal static bool AtLineStart(MatchState state, CaseEncoding encoding, int textPos)
     {
         if (textPos <= state.TextStart)
         {
@@ -1119,16 +1161,17 @@ internal static class Matcher
             return state.CharAt(textPos) != 0x0A;
         }
 
-        return Encodings.IsLineSep(state.Encoding, ch);
+        return Encodings.IsLineSep(encoding, ch);
     }
 
     /// <summary>
     /// Upstream <c>ascii_at_line_end</c> / <c>unicode_at_line_end</c> (lines 919 and 1963).
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding, whose line separators apply.</param>
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a line ends there.</returns>
-    internal static bool AtLineEnd(MatchState state, int textPos)
+    internal static bool AtLineEnd(MatchState state, CaseEncoding encoding, int textPos)
     {
         if (textPos >= state.TextEnd)
         {
@@ -1148,7 +1191,7 @@ internal static class Matcher
             return state.CharBefore(textPos) != 0x0D;
         }
 
-        return Encodings.IsLineSep(state.Encoding, ch);
+        return Encodings.IsLineSep(encoding, ch);
     }
 
     /// <summary>
@@ -1783,16 +1826,17 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_ANY_U</c> (line 6978).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchAnyU(MatchState state, int textPos)
+    internal static int TryMatchAnyU(MatchState state, Node node, int textPos)
     {
         if (textPos >= state.TextEnd)
         {
             return state.PartialSide == MatchState.PartialRight ? MatchStatus.Partial : MatchStatus.Failure;
         }
 
-        return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(state.Encoding, state.CharAt(textPos)));
+        return MatchStatus.From(textPos < state.SliceEnd && MatchesAnyU(node.Encoding, state.CharAt(textPos)));
     }
 
     /// <summary>Upstream <c>try_match_ANY_REV</c> (line 6962).</summary>
@@ -1825,16 +1869,17 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_ANY_U_REV</c> (line 6995).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchAnyURev(MatchState state, int textPos)
+    internal static int TryMatchAnyURev(MatchState state, Node node, int textPos)
     {
         if (RanOutOnTheLeft(state, textPos))
         {
             return MatchStatus.Partial;
         }
 
-        return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(state.Encoding, state.CharBefore(textPos)));
+        return MatchStatus.From(textPos > state.SliceStart && MatchesAnyU(node.Encoding, state.CharBefore(textPos)));
     }
 
     /// <summary>
@@ -1893,7 +1938,7 @@ internal static class Matcher
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
-        return MatchStatus.From(AtBoundary(state, NodeEncoding(state.Encoding, node), textPos) == node.Match);
+        return MatchStatus.From(AtBoundary(state, node.Encoding, textPos) == node.Match);
     }
 
     /// <summary>
@@ -1915,7 +1960,7 @@ internal static class Matcher
 
         return MatchStatus.From(
             (
-                state.Encoding == CaseEncoding.Ascii
+                node.Encoding == CaseEncoding.Ascii
                     ? AtBoundary(state, CaseEncoding.Ascii, textPos)
                     : AtDefaultBoundary(state, textPos)
             ) == node.Match
@@ -1924,14 +1969,15 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_DEFAULT_END_OF_WORD</c> (line 7094).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchDefaultEndOfWord(MatchState state, int textPos)
+    internal static int TryMatchDefaultEndOfWord(MatchState state, Node node, int textPos)
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
         return MatchStatus.From(
-            state.Encoding == CaseEncoding.Ascii
+            node.Encoding == CaseEncoding.Ascii
                 ? AtWordEnd(state, CaseEncoding.Ascii, textPos)
                 : AtDefaultWordStartOrEnd(state, textPos, false)
         );
@@ -1939,39 +1985,49 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_DEFAULT_START_OF_WORD</c> (line 7101).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchDefaultStartOfWord(MatchState state, int textPos)
+    internal static int TryMatchDefaultStartOfWord(MatchState state, Node node, int textPos)
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
         return MatchStatus.From(
-            state.Encoding == CaseEncoding.Ascii
+            node.Encoding == CaseEncoding.Ascii
                 ? AtWordStart(state, CaseEncoding.Ascii, textPos)
                 : AtDefaultWordStartOrEnd(state, textPos, true)
         );
     }
 
     /// <summary>Upstream <c>try_match_END_OF_WORD</c> (line 7141).</summary>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately (S91): the node's own encoding decides, as it does for
+    /// <c>\b</c>. Upstream compiles <c>\M</c>'s encoding into the code word and then reads the
+    /// pattern's, so <c>(?a:x\M)</c> refused 'x\xe9' where <c>(?a)x\M</c> matches it (regex
+    /// 2026.9.10, 2026-09-25).
+    /// </remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfWord(MatchState state, int textPos)
+    internal static int TryMatchEndOfWord(MatchState state, Node node, int textPos)
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
-        return MatchStatus.From(AtWordEnd(state, state.Encoding, textPos));
+        return MatchStatus.From(AtWordEnd(state, node.Encoding, textPos));
     }
 
     /// <summary>Upstream <c>try_match_START_OF_WORD</c> (line 7376).</summary>
+    /// <remarks>The node's own encoding decides; see <see cref="TryMatchEndOfWord"/>.</remarks>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfWord(MatchState state, int textPos)
+    internal static int TryMatchStartOfWord(MatchState state, Node node, int textPos)
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
-        return MatchStatus.From(AtWordStart(state, state.Encoding, textPos));
+        return MatchStatus.From(AtWordStart(state, node.Encoding, textPos));
     }
 
     /// <summary>
@@ -1980,13 +2036,14 @@ internal static class Matcher
     /// 1348), which answers <see langword="true"/> everywhere.
     /// </summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchGraphemeBoundary(MatchState state, int textPos)
+    internal static int TryMatchGraphemeBoundary(MatchState state, Node node, int textPos)
     {
         NoteBoundaryAtTruncationPoint(state, textPos);
 
-        return MatchStatus.From(state.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
+        return MatchStatus.From(node.Encoding == CaseEncoding.Ascii || AtGraphemeBoundary(state, textPos));
     }
 
     /// <summary>Upstream <c>try_match_END_OF_LINE</c> (line 7108).</summary>
@@ -2020,10 +2077,11 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_END_OF_LINE_U</c> (line 7115).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfLineU(MatchState state, int textPos) =>
-        MatchStatus.From(AtLineEnd(state, textPos));
+    internal static int TryMatchEndOfLineU(MatchState state, Node node, int textPos) =>
+        MatchStatus.From(AtLineEnd(state, node.Encoding, textPos));
 
     /// <summary>Upstream <c>try_match_END_OF_STRING</c> (line 7121).</summary>
     /// <param name="state">The match state.</param>
@@ -2041,10 +2099,30 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_END_OF_STRING_LINE_U</c> (line 7134).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchEndOfStringLineU(MatchState state, int textPos) =>
-        MatchStatus.From(textPos >= state.TextEnd || textPos == state.FinalLineSep);
+    internal static int TryMatchEndOfStringLineU(MatchState state, Node node, int textPos) =>
+        MatchStatus.From(textPos >= state.TextEnd || textPos == FinalLineSep(state, node.Encoding));
+
+    /// <summary>
+    /// <see cref="MatchState.FinalLineSep"/> under an encoding that may not be the pattern's (S91).
+    /// Only the arm for a final separator other than LF depends on the encoding.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="encoding">The node's encoding.</param>
+    /// <returns>Where the final line separator starts, or -1.</returns>
+    private static int FinalLineSep(MatchState state, CaseEncoding encoding)
+    {
+        if (encoding == state.Encoding || state.FinalNewline >= 0)
+        {
+            return state.FinalLineSep;
+        }
+
+        int finalPos = state.PrevPos(state.TextEnd);
+
+        return finalPos >= 0 && Encodings.IsLineSep(encoding, state.CharAt(finalPos)) ? finalPos : -1;
+    }
 
     /// <summary>Upstream <c>try_match_START_OF_LINE</c> (line 7358).</summary>
     /// <param name="state">The match state.</param>
@@ -2055,10 +2133,11 @@ internal static class Matcher
 
     /// <summary>Upstream <c>try_match_START_OF_LINE_U</c> (line 7365).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="node">The node, whose encoding says which characters separate lines.</param>
     /// <param name="textPos">The position.</param>
     /// <returns>A <see cref="MatchStatus"/>.</returns>
-    internal static int TryMatchStartOfLineU(MatchState state, int textPos) =>
-        MatchStatus.From(AtLineStart(state, textPos));
+    internal static int TryMatchStartOfLineU(MatchState state, Node node, int textPos) =>
+        MatchStatus.From(AtLineStart(state, node.Encoding, textPos));
 
     /// <summary>Upstream <c>try_match_START_OF_STRING</c> (line 7371).</summary>
     /// <param name="state">The match state.</param>
@@ -2082,19 +2161,19 @@ internal static class Matcher
         {
             Opcode.Boundary => TryMatchBoundary(state, node, textPos),
             Opcode.DefaultBoundary => TryMatchDefaultBoundary(state, node, textPos),
-            Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, textPos),
-            Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, textPos),
+            Opcode.DefaultEndOfWord => TryMatchDefaultEndOfWord(state, node, textPos),
+            Opcode.DefaultStartOfWord => TryMatchDefaultStartOfWord(state, node, textPos),
             Opcode.EndOfLine => TryMatchEndOfLine(state, textPos),
-            Opcode.EndOfLineU => TryMatchEndOfLineU(state, textPos),
+            Opcode.EndOfLineU => TryMatchEndOfLineU(state, node, textPos),
             Opcode.EndOfString => TryMatchEndOfString(state, textPos),
             Opcode.EndOfStringLine => TryMatchEndOfStringLine(state, textPos),
-            Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, textPos),
-            Opcode.EndOfWord => TryMatchEndOfWord(state, textPos),
-            Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, textPos),
+            Opcode.EndOfStringLineU => TryMatchEndOfStringLineU(state, node, textPos),
+            Opcode.EndOfWord => TryMatchEndOfWord(state, node, textPos),
+            Opcode.GraphemeBoundary => TryMatchGraphemeBoundary(state, node, textPos),
             Opcode.SearchAnchor => MatchStatus.From(textPos == state.SearchAnchor),
             Opcode.StartOfLine => TryMatchStartOfLine(state, textPos),
-            Opcode.StartOfLineU => TryMatchStartOfLineU(state, textPos),
-            Opcode.StartOfWord => TryMatchStartOfWord(state, textPos),
+            Opcode.StartOfLineU => TryMatchStartOfLineU(state, node, textPos),
+            Opcode.StartOfWord => TryMatchStartOfWord(state, node, textPos),
             _ => TryMatchStartOfString(state, textPos),
         };
 
@@ -2172,7 +2251,7 @@ internal static class Matcher
         }
 
         return MatchStatus.From(
-            textPos < state.SliceEnd && MatchesOne(state.Encoding, node, state.CharAt(textPos)) == node.Match
+            textPos < state.SliceEnd && MatchesOne(node.Encoding, node, state.CharAt(textPos)) == node.Match
         );
     }
 
@@ -2194,7 +2273,7 @@ internal static class Matcher
         }
 
         return MatchStatus.From(
-            textPos > state.SliceStart && MatchesOne(state.Encoding, node, state.CharBefore(textPos)) == node.Match
+            textPos > state.SliceStart && MatchesOne(node.Encoding, node, state.CharBefore(textPos)) == node.Match
         );
     }
 
@@ -2217,10 +2296,10 @@ internal static class Matcher
         {
             Opcode.Any => TryMatchAny(state, textPos),
             Opcode.AnyAll => TryMatchAnyAll(state, textPos),
-            Opcode.AnyU => TryMatchAnyU(state, textPos),
+            Opcode.AnyU => TryMatchAnyU(state, node, textPos),
             Opcode.AnyRev => TryMatchAnyRev(state, textPos),
             Opcode.AnyAllRev => TryMatchAnyAllRev(state, textPos),
-            Opcode.AnyURev => TryMatchAnyURev(state, textPos),
+            Opcode.AnyURev => TryMatchAnyURev(state, node, textPos),
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.PropertyRev
@@ -3179,7 +3258,7 @@ internal static class Matcher
                         return state.PartialSide == MatchState.PartialRight;
                     }
 
-                    if (!SameStringChar(state, test.Op, state.CharAt(pos), test.Values[sPos]))
+                    if (!SameStringChar(test, state.CharAt(pos), test.Values[sPos]))
                     {
                         return false;
                     }
@@ -3197,7 +3276,7 @@ internal static class Matcher
                         return RanOutOnTheLeft(state, pos);
                     }
 
-                    if (!SameStringChar(state, test.Op, state.CharBefore(pos), test.Values[length - sPos - 1]))
+                    if (!SameStringChar(test, state.CharBefore(pos), test.Values[length - sPos - 1]))
                     {
                         return false;
                     }
@@ -3216,11 +3295,11 @@ internal static class Matcher
                             return state.PartialSide == MatchState.PartialRight;
                         }
 
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+                        foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharAt(pos), folded);
                         foldedPos = 0;
                     }
 
-                    if (!SameCharIgn(state.Encoding, test.Values[sPos], folded[foldedPos]))
+                    if (!SameCharIgn(test.Encoding, test.Values[sPos], folded[foldedPos]))
                     {
                         return false;
                     }
@@ -3246,11 +3325,11 @@ internal static class Matcher
                             return RanOutOnTheLeft(state, pos);
                         }
 
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(pos), folded);
+                        foldedLen = Encodings.FullCaseFold(test.Encoding, state.CharBefore(pos), folded);
                         foldedPos = 0;
                     }
 
-                    if (!SameCharIgn(state.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
+                    if (!SameCharIgn(test.Encoding, test.Values[length - sPos - 1], folded[foldedLen - foldedPos - 1]))
                     {
                         return false;
                     }
@@ -3274,13 +3353,14 @@ internal static class Matcher
     /// <c>try_match_STRING_IGN</c> (<c>upstream/src/_regex.c:7405</c> against <c>:7583</c>) and
     /// between their two reversed twins (<c>:7655</c> against <c>:7622</c>).
     /// </summary>
-    /// <param name="state">The match state.</param>
-    /// <param name="op">The string opcode.</param>
+    /// <param name="test">The string node.</param>
     /// <param name="ch">The character from the subject.</param>
     /// <param name="value">The character from the pattern.</param>
     /// <returns><see langword="true"/> if they match.</returns>
-    private static bool SameStringChar(MatchState state, Opcode op, uint ch, uint value) =>
-        op is Opcode.StringIgn or Opcode.StringIgnRev ? SameCharIgn(state.Encoding, ch, value) : SameChar(ch, value);
+    private static bool SameStringChar(Node test, uint ch, uint value) =>
+        test.Op is Opcode.StringIgn or Opcode.StringIgnRev
+            ? SameCharIgn(test.Encoding, ch, value)
+            : SameChar(ch, value);
 
     /// <summary>
     /// Whether a <c>LAZY_REPEAT_ONE</c> backtrack has run out of text for its tail before it can
@@ -3303,10 +3383,17 @@ internal static class Matcher
     /// has run out, where a narrowed slice ends the repeat by its own <c>limit</c> - and the two are
     /// the same number anyway, because <c>text_end</c> IS the slice end. Backwards the reversed arms
     /// go through <see cref="RanOutOnTheLeft"/>, which asks <c>slice_start</c> rather than
-    /// upstream's always-zero <c>text_start</c>. A character tail is about to test the character one
-    /// step on, so it guards a step further out than a string tail, which guards at
-    /// <paramref name="pos"/> itself; upstream's <c>pos + 1</c> and <c>pos - 1</c> are codepoint
-    /// steps, hence <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
+    /// upstream's always-zero <c>text_start</c>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM for a character tail, deliberately: it guards at
+    /// <paramref name="pos"/>, as a string tail does, where upstream's four <c>CHARACTER</c> arms
+    /// guard one step further out (<c>pos + 1 &gt;= text_end</c>, <c>pos - 1 &lt;= text_start</c>).
+    /// That step is the repetition the arm has not tried yet, so upstream answers a partial when the
+    /// repeat cannot take it at all - the item refuses the last character, or the repeat is at its
+    /// maximum - and no continuation of the text can complete the match: `(?r)ab??` over 'c' and
+    /// `([^a-f]{3,}?)x` over '__AAb' (ledger entry 2). When the repeat CAN take it, the loop below
+    /// does, and the tail's own test at the end of the text answers the partial.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -3316,12 +3403,14 @@ internal static class Matcher
     private static bool IsTailPartial(MatchState state, Node test, int pos) =>
         test.Op switch
         {
-            Opcode.Character or Opcode.CharacterIgn => state.NextPos(pos) >= state.TextEnd
+            Opcode.Character or Opcode.CharacterIgn or Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos
+                >= state.TextEnd
                 && state.PartialSide == MatchState.PartialRight,
-            Opcode.CharacterRev or Opcode.CharacterIgnRev => RanOutOnTheLeft(state, state.PrevPos(pos)),
-            Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos >= state.TextEnd
-                && state.PartialSide == MatchState.PartialRight,
-            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.StringRev
+            or Opcode.StringIgnRev
+            or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
             _ => false,
         };
 
@@ -3740,14 +3829,14 @@ internal static class Matcher
             or Opcode.SetInterIgn
             or Opcode.SetSymDiffIgn
             or Opcode.SetUnionIgn => pos < state.SliceEnd
-                && MatchesOne(state.Encoding, testNode, state.CharAt(pos)) == testNode.Match,
+                && MatchesOne(testNode.Encoding, testNode, state.CharAt(pos)) == testNode.Match,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.PropertyRev
             or Opcode.PropertyIgnRev
             or Opcode.RangeRev
             or Opcode.RangeIgnRev => pos > state.SliceStart
-                && MatchesOne(state.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
+                && MatchesOne(testNode.Encoding, testNode, state.CharBefore(pos)) == testNode.Match,
             _ => true,
         };
     }
@@ -4744,9 +4833,15 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
+    /// <param name="foldEncoding">The encoding the group reference folds the subject with.</param>
     /// <param name="foldedPos">The position in the folding the error would touch.</param>
     /// <returns><see langword="true"/> if the constraint allows it.</returns>
-    private static bool FuzzyExtMatchGroupFld(MatchState state, Node? fuzzyNode, int foldedPos)
+    private static bool FuzzyExtMatchGroupFld(
+        MatchState state,
+        Node? fuzzyNode,
+        CaseEncoding foldEncoding,
+        int foldedPos
+    )
     {
         Node? testNode = fuzzyNode?.Next2.Node;
 
@@ -4771,7 +4866,7 @@ internal static class Matcher
             or Opcode.SetInter
             or Opcode.SetSymDiff
             or Opcode.SetUnion => state.TextPos < state.SliceEnd
-                && MatchesOne(state.Encoding, testNode, FoldedCharAt(state, state.TextPos, foldedPos))
+                && MatchesOne(testNode.Encoding, testNode, FoldedCharAt(state, foldEncoding, state.TextPos, foldedPos))
                     == testNode.Match,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
@@ -4780,9 +4875,9 @@ internal static class Matcher
             or Opcode.RangeRev
             or Opcode.RangeIgnRev => state.TextPos > state.SliceStart
                 && MatchesOne(
-                    state.Encoding,
+                    testNode.Encoding,
                     testNode,
-                    FoldedCharAt(state, state.PrevPos(state.TextPos), foldedPos - 1)
+                    FoldedCharAt(state, foldEncoding, state.PrevPos(state.TextPos), foldedPos - 1)
                 ) == testNode.Match,
             _ => true,
         };
@@ -4790,14 +4885,20 @@ internal static class Matcher
 
     /// <summary>Upstream <c>folded_char_at</c> (line 10014).</summary>
     /// <param name="state">The match state.</param>
+    /// <param name="encoding">
+    /// The encoding to fold with: the group reference's, whose folding the error is in (S91). The
+    /// constraint's test can sit outside the reference's scope, as in
+    /// <c>(?aif)(ss)(?u:\1){i&lt;=1:[t]}</c>, so its own encoding is the wrong one; folding with it
+    /// refused 'ss\ufb05s', which <c>(?uif)(ss)(?:\1){i&lt;=1:[t]}</c> matches.
+    /// </param>
     /// <param name="pos">The subject position whose character is folded.</param>
     /// <param name="foldedPos">Which character of the folding to return.</param>
     /// <returns>That character.</returns>
-    private static uint FoldedCharAt(MatchState state, int pos, int foldedPos)
+    private static uint FoldedCharAt(MatchState state, CaseEncoding encoding, int pos, int foldedPos)
     {
         Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
 
-        _ = Encodings.FullCaseFold(state.Encoding, state.CharAt(pos), folded);
+        _ = Encodings.FullCaseFold(encoding, state.CharAt(pos), folded);
 
         return folded[foldedPos];
     }
@@ -4855,7 +4956,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4872,7 +4973,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4934,6 +5035,7 @@ internal static class Matcher
         data.GfoldedLen = gfoldedLen;
         data.Step = step;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = node.Encoding;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
@@ -5049,6 +5151,7 @@ internal static class Matcher
         data.NewGfoldedPos = newGfoldedPos;
         data.GfoldedLen = gfoldedLen;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
         --fuzzyCounts[data.FuzzyType];
 
@@ -6391,7 +6494,7 @@ internal static class Matcher
 
                     break;
                 case Opcode.AnyU: // Any character except a line separator.
-                    status = TryMatchAnyU(state, state.TextPos);
+                    status = TryMatchAnyU(state, node, state.TextPos);
                     if (status < 0)
                     {
                         return status;
@@ -6433,7 +6536,7 @@ internal static class Matcher
                     {
                         Opcode.AnyRev => TryMatchAnyRev(state, state.TextPos),
                         Opcode.AnyAllRev => TryMatchAnyAllRev(state, state.TextPos),
-                        _ => TryMatchAnyURev(state, state.TextPos),
+                        _ => TryMatchAnyURev(state, node, state.TextPos),
                     };
 
                     if (status < 0)
@@ -7359,7 +7462,7 @@ internal static class Matcher
 
                     if (
                         state.TextPos < state.SliceEnd
-                        && MatchesOne(state.Encoding, node, state.CharAt(state.TextPos)) == node.Match
+                        && MatchesOne(node.Encoding, node, state.CharAt(state.TextPos)) == node.Match
                     )
                     {
                         state.TextPos = Step(state, state.TextPos, node.Step);
@@ -7410,7 +7513,7 @@ internal static class Matcher
 
                     if (
                         state.TextPos > state.SliceStart
-                        && MatchesOne(state.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
+                        && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
                     )
                     {
                         state.TextPos = Step(state, state.TextPos, node.Step);
@@ -8331,7 +8434,7 @@ internal static class Matcher
 
                         if (
                             state.TextPos > state.SliceStart
-                            && SameCharIgn(state.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
+                            && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
                         )
                         {
                             stringPos = state.PrevPos(stringPos);
@@ -8397,13 +8500,13 @@ internal static class Matcher
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
                         // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+                        foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
 
                         // NOT UPSTREAM (S84): the mirror of REF_GROUP_FLD's two retry repairs below;
                         // STRING_FLD_REV takes the subject's step here (:14907).
                         gfoldedLen =
                             stringPos > span.Start
-                                ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded)
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded)
                                 : 0;
 
                         if (!state.Pattern.SkipRetriedFoldSteps)
@@ -8437,7 +8540,7 @@ internal static class Matcher
 
                             foldedLen =
                                 state.TextPos > state.SliceStart
-                                    ? Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded)
+                                    ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
                                     : 0;
 
                             foldedPos = foldedLen;
@@ -8446,14 +8549,11 @@ internal static class Matcher
                         // Case-fold at current position in group.
                         if (gfoldedPos <= 0)
                         {
-                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(stringPos), gfolded);
+                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(stringPos), gfolded);
                             gfoldedPos = gfoldedLen;
                         }
 
-                        if (
-                            foldedPos > 0
-                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1])
-                        )
+                        if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
                         {
                             --foldedPos;
                             --gfoldedPos;
@@ -8580,13 +8680,13 @@ internal static class Matcher
                     {
                         // Only S39's RetryFuzzyMatchGroupFld leaves 'stringPos' non-negative on the
                         // way in, so that is the one thing that reaches this arm.
-                        foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+                        foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
 
                         // NOT UPSTREAM (S84): the leftovers loop below pushes a retry with the group
                         // used up, where upstream reads the character after it.
                         gfoldedLen =
                             stringPos < span.End
-                                ? Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded)
+                                ? Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded)
                                 : 0;
 
                         // NOT UPSTREAM (S84): upstream re-enters the loop without the two steps that
@@ -8624,7 +8724,7 @@ internal static class Matcher
 
                             foldedLen =
                                 state.TextPos < state.SliceEnd
-                                    ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                    ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
                                     : 0;
 
                             foldedPos = 0;
@@ -8633,14 +8733,11 @@ internal static class Matcher
                         // Case-fold at current position in group.
                         if (gfoldedPos >= gfoldedLen)
                         {
-                            gfoldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(stringPos), gfolded);
+                            gfoldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(stringPos), gfolded);
                             gfoldedPos = 0;
                         }
 
-                        if (
-                            foldedPos < foldedLen
-                            && SameCharIgn(state.Encoding, gfolded[gfoldedPos], folded[foldedPos])
-                        )
+                        if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
                         {
                             ++foldedPos;
                             ++gfoldedPos;
@@ -8771,7 +8868,7 @@ internal static class Matcher
 
                         if (
                             state.TextPos < state.SliceEnd
-                            && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
+                            && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
                         )
                         {
                             stringPos = state.NextPos(stringPos);
@@ -8929,7 +9026,7 @@ internal static class Matcher
                         else
                         {
                             // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded);
+                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded);
 
                             if (foldedPos >= foldedLen)
                             {
@@ -8956,7 +9053,7 @@ internal static class Matcher
 
                                 foldedLen =
                                     state.TextPos < state.SliceEnd
-                                        ? Encodings.FullCaseFold(state.Encoding, state.CharAt(state.TextPos), folded)
+                                        ? Encodings.FullCaseFold(node.Encoding, state.CharAt(state.TextPos), folded)
                                         : 0;
 
                                 foldedPos = 0;
@@ -8964,7 +9061,7 @@ internal static class Matcher
 
                             if (
                                 foldedPos < foldedLen
-                                && SameCharIgn(state.Encoding, node.Values[stringPos], folded[foldedPos])
+                                && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
                             )
                             {
                                 ++stringPos;
@@ -9091,7 +9188,7 @@ internal static class Matcher
 
                             if (
                                 state.TextPos < state.SliceEnd
-                                && SameCharIgn(state.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
+                                && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
                                 ++stringPos;
@@ -9225,7 +9322,7 @@ internal static class Matcher
                             if (
                                 state.TextPos > state.SliceStart
                                 && SameCharIgn(
-                                    state.Encoding,
+                                    node.Encoding,
                                     state.CharBefore(state.TextPos),
                                     node.Values[stringPos - 1]
                                 )
@@ -9297,7 +9394,7 @@ internal static class Matcher
                         else
                         {
                             // Only Phase 5's fuzzy retry reaches this arm.
-                            foldedLen = Encodings.FullCaseFold(state.Encoding, state.CharBefore(state.TextPos), folded);
+                            foldedLen = Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded);
 
                             if (foldedPos <= 0)
                             {
@@ -9324,11 +9421,7 @@ internal static class Matcher
 
                                 foldedLen =
                                     state.TextPos > state.SliceStart
-                                        ? Encodings.FullCaseFold(
-                                            state.Encoding,
-                                            state.CharBefore(state.TextPos),
-                                            folded
-                                        )
+                                        ? Encodings.FullCaseFold(node.Encoding, state.CharBefore(state.TextPos), folded)
                                         : 0;
 
                                 foldedPos = foldedLen;
@@ -9336,7 +9429,7 @@ internal static class Matcher
 
                             if (
                                 foldedPos > 0
-                                && SameCharIgn(state.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
+                                && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
                             )
                             {
                                 --stringPos;
@@ -10584,11 +10677,8 @@ internal static class Matcher
                         // loop, before it tries to extend the repeat at all (:16546, :16583,
                         // :16621, :16659 for the four CHARACTER tails; :16699, :16754, :16809,
                         // :16868, :16925, :16982 for the six STRING ones), and the default arm has
-                        // no such check. The gap is only visible when the repeat CANNOT extend: for
-                        // `regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)` upstream answers
-                        // a partial at (0,5) from here, while this port asked MatchOne first, was
-                        // refused by the 'b', broke out of the loop and reported no match at all.
-                        // Found by the S31 oracle wave, seed 7, row 581.
+                        // no such check. Not for a CHARACTER tail as upstream spells it, which
+                        // answers a partial the repeat cannot reach - see IsTailPartial.
                         if (IsTailPartial(state, test, pos))
                         {
                             return MatchStatus.Partial;

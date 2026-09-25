@@ -251,7 +251,7 @@ internal static class PatternCompiler
             HashSet<string> values = new(kwargs[name], StringComparer.Ordinal);
             IReadOnlySet<string> items =
                 caseFlags != 0
-                    ? new HashSet<string>(values.Select(v => FoldCase(info, v)), StringComparer.Ordinal)
+                    ? new HashSet<string>(values.Select(v => FoldCase(info, caseFlags, v)), StringComparer.Ordinal)
                     : values;
             namedListsBuilt[name] = values;
             namedListIndexes[index] = items;
@@ -331,9 +331,22 @@ internal static class PatternCompiler
     /// forced <see cref="RegexFlags.Unicode"/> on by the time the named lists are built. It is kept
     /// because a future caller earlier in the pipeline would need it.
     /// </remarks>
-    private static string FoldCase(Info info, string value)
+    /// <param name="info">The parse state.</param>
+    /// <param name="caseFlags">
+    /// The list's case flags. When they carry a scoped encoding (S91) the list folds with it, as
+    /// its members match with it: upstream folds with the pattern's flags, so a list used inside
+    /// <c>(?i)(?a:...)</c> was folded by the Unicode rules.
+    /// </param>
+    /// <param name="value">The string to fold.</param>
+    /// <returns>The folded string.</returns>
+    private static string FoldCase(Info info, int caseFlags, string value)
     {
         int flags = info.Flags;
+        if ((caseFlags & RegexFlags.CaseEncodings) != 0)
+        {
+            flags = (flags & ~RegexFlags.AllEncodings) | (caseFlags & RegexFlags.CaseEncodings);
+        }
+
         if ((flags & RegexFlags.AllEncodings) == 0)
         {
             flags |= info.GuessEncoding;

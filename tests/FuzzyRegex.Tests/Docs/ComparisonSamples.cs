@@ -306,6 +306,55 @@ public sealed class ComparisonSamples
         m.Success.Should().BeFalse();
     }
 
+    /// <summary>"A case-insensitive cased property under ASCII means the 52 ASCII letters".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_under_ascii_means_the_ascii_letters()
+    {
+        FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success.Should().BeFalse();
+        FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success.Should().BeTrue();
+    }
+
+    /// <summary>"A scope that names no encoding keeps the one around it".</summary>
+    [Test]
+    public void A_scope_that_names_no_encoding_keeps_the_one_around_it() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?s:\w))").Success.Should().BeFalse();
+
+    /// <summary>"A POSIX class takes the scope's encoding".</summary>
+    [Test]
+    public void A_posix_class_takes_the_scopes_encoding() =>
+        FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success.Should().BeFalse();
+
+    /// <summary>"A case-insensitive cased property answers the same bare and in a set".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_answers_the_same_bare_and_in_a_set()
+    {
+        FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success.Should().BeTrue();
+        FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success.Should().BeFalse();
+    }
+
+    /// <summary>"A case-insensitive set matches each member first, then combines them".</summary>
+    [Test]
+    public void A_case_insensitive_set_matches_each_member_first_then_combines_them()
+    {
+        FuzzyRegex.FullMatch("\u00B5", @"(?i)[\p{Greek}x]").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("a", @"(?i)[x[\w--\p{Lu}]]").Success.Should().BeFalse();
+    }
+
+    /// <summary>"An encoding named by positional flags inside a group replaces the one in force".</summary>
+    [Test]
+    public void An_encoding_named_by_positional_flags_inside_a_group_replaces_the_one_in_force() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success.Should().BeTrue();
+
+    /// <summary>
+    /// "A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern".
+    /// </summary>
+    [Test]
+    public void A_scoped_encoding_answers_exactly_as_the_same_encoding_set_for_the_whole_pattern()
+    {
+        FuzzyRegex.FullMatch("\u212A", "(?i)(?a:k)").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("\u212A", "(?ai)(?u:k)").Success.Should().BeTrue();
+    }
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()
@@ -393,5 +442,18 @@ public sealed class ComparisonSamples
         Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
 
         (m.Success ? m.Value : "no match").Should().Be("xabc");
+    }
+
+    /// <summary>"A literal under a scoped `(?i:...)` is found in text that holds only its full case folding".</summary>
+    [Test]
+    public void A_literal_under_a_scoped_ignorecase_is_found_in_text_that_holds_only_its_full_case_folding() =>
+        FuzzyRegex.Match("\u00DF", "(?i:ss)").Success.Should().BeTrue();
+
+    /// <summary>"A lazy repeat finds a full-folded literal that starts at the repeat's last position".</summary>
+    [Test]
+    public void A_lazy_repeat_finds_a_full_folded_literal_that_starts_at_the_repeats_last_position()
+    {
+        FuzzyRegex.Match("ass", "(?i)[^k]??ss").Index.Should().Be(0);
+        FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success.Should().BeTrue();
     }
 }

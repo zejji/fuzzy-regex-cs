@@ -277,85 +277,51 @@ public sealed class CaseFoldingTests
         FuzzyRegex.ReplaceFormat(_dotlessSmall, "(?i)I", "{1}").Should().Be(_dotlessSmall);
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     /// <summary>
-    /// A SET UNION reaches the case partners of its members - including partners no member reaches
-    /// on its own - but it does not reach them through a Turkic <c>T</c> row.
+    /// A case-insensitive set holding <c>\p{ASCII}</c> matches what the bare property matches,
+    /// however many members it has: neither reaches a non-ASCII character through its ASCII case
+    /// partner, Turkic or not.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The mechanism of seed 20260915 row 88716 of the 6000-row gate, isolated to one line. That row
-    /// needed a fourth Turkic oracle entry because the letter is read by a negative LOOKBEHIND, so
-    /// no match span on either side covers it; what the lookbehind holds is
-    /// <c>[a\p{ASCII}]</c>, and <b>the union reaches U+0131 where neither <c>a</c> nor
-    /// <c>\p{ASCII}</c> does</b>, because a set is expanded by its members' case partners and
-    /// <c>I</c> is ASCII.
+    /// The mechanism of seed 20260915 row 88716 of the 6000-row gate. There, upstream's
+    /// <c>[a\p{ASCII}]</c> under IGNORECASE reached U+0131 through its partner <c>I</c>. Upstream
+    /// expands a property member by case partners only once the set has a second member:
+    /// <c>\p{ASCII}</c> and <c>[\p{ASCII}]</c> reach none of U+212A, U+017F, U+0131 and U+0130,
+    /// while <c>[a\p{ASCII}]</c>, <c>[\p{ASCII}z]</c> and even <c>[\p{ASCII}\p{ASCII}]</c> reach
+    /// all four (regex 2026.9.10, <c>python tools/probes/upstream-turkic-without-spans.py</c>,
+    /// 2026-09-15). The same characters, answered two ways by the member count alone.
     /// </para>
     /// <para>
-    /// <b>What switches the expansion on is a SECOND MEMBER, which was measured after a first
-    /// draft got it wrong.</b> The draft said a set is expanded by its members' case partners;
-    /// <c>[\p{ASCII}]</c> refutes that, because its member holds <c>I</c> and it reaches nothing.
-    /// <c>[\p{ASCII}\p{ASCII}]</c> - the same member twice, so exactly the same characters - DOES
-    /// reach U+0131. A one-member set behaves like the bare property; a two-member one
-    /// case-expands the property's contents. <c>[ab]</c> reaching nothing says it is the
-    /// property's members expanding rather than sets in general.
-    /// </para>
-    /// <para>
-    /// <b>The expansion itself is not the defect, and that is what this test separates.</b> A
-    /// multi-member set holding <c>\p{ASCII}</c> reaches every character whose partner is ASCII,
-    /// and this port agrees on the ordinary <c>C</c> rows - U+212A KELVIN SIGN and U+017F LATIN
-    /// SMALL LETTER LONG S - while refusing the two <c>T</c> rows. A test that only asserted the
-    /// refusals would pass on an engine that had lost set expansion altogether.
-    /// </para>
-    /// <para>
-    /// <b>Provenance of the expected values.</b> Upstream's answers, measured 2026-09-15 on regex
-    /// 2026.9.10 by <c>python tools/probes/upstream-turkic-without-spans.py</c>, in the section
-    /// headed "the MECHANISM of the lookaround row": a multi-member set holding <c>\p{ASCII}</c>
-    /// matches U+0131, U+0130, U+212A and U+017F and answers None to U+00C5 and U+00F1, while
-    /// <c>a</c>, <c>[ab]</c>, <c>\p{ASCII}</c> and <c>[\p{ASCII}]</c> answer None to all six. The
-    /// port-side half was measured the same day with <c>pwsh -File tools/run-oracle.ps1 -Rows</c>
-    /// over the 42-cell grid of those six characters against seven spellings: <b>36 cells AGREE,
-    /// and the only six that diverge are U+0131 and U+0130 against the three multi-member
-    /// spellings.</b>
+    /// Here a property member asks the case-insensitive property of the character itself, as the
+    /// bare property does (<c>Matcher.MatchesMemberIgn</c>), so every spelling refuses all four.
+    /// Perl 5.42 answers the same for <c>\p{ASCII}</c>, <c>[\p{ASCII}]</c> and
+    /// <c>[a\p{ASCII}]</c> under <c>/i</c> (measured 2026-09-25); .NET 10 gives its three
+    /// spellings one answer too. This port had agreed with upstream on the two ordinary rows,
+    /// U+212A and U+017F, until the blind review of ledger 35.
     /// </para>
     /// </remarks>
     [Test]
-    public void A_set_union_reaches_the_case_partners_of_its_members_but_not_through_a_Turkic_row()
+    public void A_set_holding_an_ascii_property_reaches_no_partner_whatever_its_member_count()
     {
-        const string union = @"[a\p{ASCII}]";
         const FuzzyRegexOptions fold = FuzzyRegexOptions.IgnoreCase | FuzzyRegexOptions.FullCase;
 
-        // The two ordinary `C` rows, where upstream and this port agree: the union reaches a
-        // character neither of its members reaches, and that expansion is correct.
-        FuzzyRegex.MatchAtStart("K", union, fold).Success.Should().BeTrue();
-        FuzzyRegex.MatchAtStart("ſ", union, fold).Success.Should().BeTrue();
-
-        // The two `T` rows, which upstream reaches through the same expansion and this port does
-        // not. This is the whole of the divergence on row 88716.
-        FuzzyRegex.MatchAtStart(_dotlessSmall, union, fold).Success.Should().BeFalse();
-        FuzzyRegex.MatchAtStart("İ", union, fold).Success.Should().BeFalse();
-
-        // Partners that are not ASCII are out of reach for both engines, so the union is not simply
-        // matching every cased letter.
-        FuzzyRegex.MatchAtStart("Å", union, fold).Success.Should().BeFalse();
-        FuzzyRegex.MatchAtStart("ñ", union, fold).Success.Should().BeFalse();
-
-        // And no ONE-MEMBER spelling reaches any of them, on either engine. `[\p{ASCII}]` is the
-        // cell that kills the "a set expands its members" reading: same member, same characters,
-        // and nothing reached.
-        foreach (string alone in (string[])[@"a", @"[a]", @"[ab]", @"\p{ASCII}", @"[\p{ASCII}]"])
+        foreach (
+            string spelling in (string[])
+                [@"\p{ASCII}", @"[\p{ASCII}]", @"[a\p{ASCII}]", @"[\p{ASCII}z]", @"[\p{ASCII}\p{ASCII}]"]
+        )
         {
-            foreach (string subject in (string[])["K", "ſ", _dotlessSmall, "İ"])
+            foreach (string subject in (string[])["\u212A", "\u017F", _dotlessSmall, "\u0130", "\u00C5", "\u00F1"])
             {
-                FuzzyRegex.MatchAtStart(subject, alone, fold).Success.Should().BeFalse();
+                FuzzyRegex.MatchAtStart(subject, spelling, fold).Success.Should().BeFalse(spelling);
             }
-        }
 
-        // A SECOND member is the whole of the switch - the same property twice is enough, so it is
-        // not the other member contributing anything.
-        FuzzyRegex.MatchAtStart("K", @"[\p{ASCII}\p{ASCII}]", fold).Success.Should().BeTrue();
-        FuzzyRegex.MatchAtStart("K", @"[\p{ASCII}z]", fold).Success.Should().BeTrue();
-        FuzzyRegex.MatchAtStart(_dotlessSmall, @"[\p{ASCII}\p{ASCII}]", fold).Success.Should().BeFalse();
-        FuzzyRegex.MatchAtStart(_dotlessSmall, @"[\p{ASCII}z]", fold).Success.Should().BeFalse();
+            // Each spelling still matches ASCII letters of either case, so the refusals are not a
+            // set that stopped matching.
+            FuzzyRegex.MatchAtStart("K", spelling, fold).Success.Should().BeTrue(spelling);
+            FuzzyRegex.MatchAtStart("k", spelling, fold).Success.Should().BeTrue(spelling);
+        }
     }
 
     /// <summary>

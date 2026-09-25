@@ -200,6 +200,46 @@ public sealed class FuzzyEnhanceMatchTests
         m.FuzzyChanges.Insertions.Should().Equal(4);
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    [Test]
+    public void Enhancematch_improves_past_a_first_branch_to_a_repeat_of_deletions()
+    {
+        // Over 'zzzz' the first branch fits only by substituting all four characters. The second
+        // branch has no 'x' to match, so every fit it has is zero-width and spends one deletion per
+        // iteration - one iteration, one deletion, is its cheapest. ENHANCEMATCH is documented to
+        // "improve the fit (i.e. reduce the number of errors)", so its answer is that one deletion.
+        // Upstream keeps the four substitutions, and contradicts itself: every twin below has the
+        // same cheapest fit or a subset of the candidates, and improves. Measured 2026-09-25 on
+        // regex 2026.9.10 (search over 'zzzz'):
+        //
+        //   (?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)      (0, 4) counts=(4, 0, 0)   <- as drawn
+        //   (?e)(?:(?:abcd){s<=4}|(?:x){d<=1})           (0, 0) counts=(0, 0, 1)   <- once only
+        //   (?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+?)     (0, 0) counts=(0, 0, 1)   <- lazy
+        //   (?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1}){1,3})  (0, 0) counts=(0, 0, 2)
+        //   (?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1}){1,50}) (0, 4) counts=(4, 0, 0), and (0, 0) with
+        //                                                two deletions over 'zz'
+        //
+        // Upstream's improvement run is a re-run with the budget tightened, and the same pattern with
+        // that budget written in, `(?:...){e<=3}`, runs to MemoryError upstream: the repeat goes round
+        // for ever on deletions (ledger entry 33), which this port stops. Oracle pin:
+        // `enhancematch-loses-a-candidate`, ledger entry 25.
+        foreach (string subject in new[] { "zzzz", "zz" })
+        {
+            Match m = new FuzzyRegex(@"(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)").Match(subject);
+
+            m.Success.Should().BeTrue(subject);
+            (m.Index, m.Length).Should().Be((0, 0), subject);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1), subject);
+            m.FuzzyChanges.Deletions.Should().Equal([0], subject);
+        }
+
+        // The control: without the flag the first branch wins, as it does upstream.
+        new FuzzyRegex(@"(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)")
+            .Match("zzzz")
+            .FuzzyCounts.Should()
+            .Be(new FuzzyCounts(4, 0, 0));
+    }
+
     [Test]
     public void The_improvement_loop_is_not_what_stops_without_the_flag()
     {

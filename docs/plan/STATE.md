@@ -1,4 +1,9 @@
 # Current state
+**S91 is done** (e78f8d2, 5522bc3; `docs/plan/slices/done/S91-scoped-encoding-everywhere.md`). A
+scoped `(?a:...)` or `(?u:...)` now answers exactly as the same encoding set for the whole pattern:
+the 40,672-row scoped/global grid went from 1,596 disagreeing rows to 0 (upstream 2,207), and the
+oracle is GREEN at three seeds with diverge 0. Ledger entry 36.
+
 **S90 is done** (`docs/plan/slices/done/S90-partial-fold-rows.md`). The three partial rows over a
 full-folded ligature are port-right. Each is a fold repair (ledger 28, 29 or 30) stacked on ledger
 11 mechanism B, and a new oracle entry, `full-fold-fix-behind-an-innermost-count`, claims them. No
@@ -18,25 +23,37 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Waiting on the owner
 
+
 - O(1) backtracking state per repetition for a body with no alternative (DECISIONS 2026-09-24,
   OPEN). A divergence from upstream in memory only; no code until decided.
 
 ## Findings that need a slice
 
-1. Upstream `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1)
-   with one deletion. Not investigated (ledger 33).
-2. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
-3. CANDIDATE INHERITED BUG, ledger 2's family (2026-09-25 triage, not yet researched or blind-
-   reviewed). A lazy repeat before a one-character tail reports a partial that cannot complete:
-   `regex.match(r'(?r)ab??', 'c', partial=True)` is (0, 1) partial on both engines, where
-   upstream's greedy `(?r)ab?`, its repeat-free `(?r)a` and its forward mirror `b??a` are all None.
-   The port carries upstream's guard as-is at `Matcher.IsTailPartial` (`CharacterRev` arm, and
-   likely the forward `Character` arm, which S31 pinned on `([^a-f]{3,}?)x` over '__AAb').
-4. `(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)` over 'zzzz': upstream (0, 4) with four
-   substitutions, the port (0, 0) with one deletion. Predates ledger 33's change (the 2026-09-25
-   engine review measured it at b265dc3 too). Not triaged.
-5. Classifier coverage, from the same triage. `turkic-default-folding` claims only rows with spans
-   (`TurkicLettersCovered` has no arm for `sub`/`split`), so every fresh seed that draws a Turkic-I
-   substitution needs its row added to the row-keyed `-without-spans` sibling (seven on
-   2026-09-25). And `full-fold-backreference-leftovers`' doubled-guard arm claims rows with no
-   backreference, e.g. `(?b)(\p{L}){i,d}c` over '\nc', so it is wider than its name.
+0. Done: S91, scoped encodings everywhere (e78f8d2, 5522bc3). Its grid probe,
+   `tools/probes/s91-scoped-encoding-grid.py`, is cited by `ScopedEncodingGridTests` but was never
+   committed.
+0b. **The native-AOT allocation tests are flaky**: `AllocationTests` (S61) fail about one full
+   native run in three (4 of 12, 2026-09-25) with 280 B and no GC in the window, in different tests
+   (`A_warm_IsMatch_...`, `A_warm_Count_...`, and 7,744 B across two GCs in the span walk). Every test
+   passes alone, and the JIT suite never fails. CI runs this gate on three systems, so it will go red
+   intermittently. Not yet explained: not a GC trim (a forced gen-2 collection between warm-up and
+   measurement allocates nothing under JIT), not a per-call cost (the same calls are 0 B in 8 runs of
+   12). Next: an EventListener on GCAllocationTick inside the native run to name the type.
+
+1. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
+2. Classifier coverage, narrowed 2026-09-25: a fresh `sub`/`split` row over the dotless i is now
+   classified by a recorded control (the dotless i swapped for kra, `dotlessFreeOutcome`), which
+   takes all 18 such hand-judged rows on its own. A row holding the dotted capital U+0130 still
+   needs its row added to `turkic-default-folding-without-spans` by hand: no letter can stand in for
+   it (7 of the 24 listed rows).
+
+Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
+`Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
+ledger 25), and two classifier leaks (the full-fold doubled-guard arms claiming plain ledger 12
+rows, and ablation entries tallying a port timeout). DECISIONS 2026-09-25.
+
+Done 2026-09-26 on `maint/state-findings`: two upstream defects the sweep found, which this port
+does not share, pinned as port-right with DIVERGENCES rows, COMPARISON sections and draft reports
+(ledger 37, a scoped `(?i:...)` losing full folding in the required-string search; ledger 38, a
+lazy repeat missing a full-folded literal at its last position). No oracle entry yet: whether the
+generators draw them is unchecked.

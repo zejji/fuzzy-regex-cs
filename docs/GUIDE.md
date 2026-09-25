@@ -92,11 +92,19 @@ constraints over text holding characters outside the Basic Multilingual Plane, s
 `Count` and the string overloads pay the same. Slice the text out yourself:
 
 ```csharp
+using Fuzzy.Text.RegularExpressions;
+
+var regex = new FuzzyRegex(@"\w+");
+char[] buffer = "cat dog, and a stale tail".ToCharArray();
+int filled = 7; // only "cat dog" is live
+
 ReadOnlySpan<char> text = buffer.AsSpan(0, filled);
 foreach (ValueMatch match in regex.EnumerateMatches(text))
 {
-    Process(text.Slice(match.Index, match.Length));
+    Console.WriteLine(text.Slice(match.Index, match.Length).ToString());
 }
+// cat
+// dog
 ```
 
 The walk copies the span into a pooled buffer once, at the start, and a `foreach` hands it back

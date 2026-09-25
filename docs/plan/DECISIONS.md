@@ -1323,3 +1323,74 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   docs/plan/upstream-reports/ledger-reproductions.jsonl is re-asked of upstream on every run
   (`record-oracle.py --recheck`). Screening every row was rejected on measurement: 5-12x the
   time, 15.2 GB peak.
+- 2026-09-25 (owner: "don't assume upstream is correct; corroborate"): **a lazy repeat before a
+  one-character tail no longer reports a partial it cannot reach**, reversing S31's pin of
+  `([^a-f]{3,}?)x` over '__AAb'. Upstream's CHARACTER arms guard one step ahead of the repeat
+  (`pos + 1 >= text_end`), so they answer a partial when the item refuses the last character.
+  Judged on a 48,960-row grid against the README's definition (tried exhaustively with CPython's
+  `re`), PCRE2 10.47 and upstream's own greedy twins: upstream is wrong on 3,756 rows and this port,
+  after the fix, on none. `Matcher.IsTailPartial` guards at the repeat's position for every tail.
+  Ledger entry 2.
+- 2026-09-25: **`(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)` over 'zzzz' is port-right**: one deletion
+  at (0, 0), where upstream keeps four substitutions. Upstream's once-only, lazy and `{1,3}` twins
+  all improve; its improvement re-run meets ledger entry 33's endless repeat. Pinned as a judged row
+  of `enhancematch-loses-a-candidate` (ledger 25).
+- 2026-09-25: **the full-fold entries' doubled-guard arms no longer claim a row the doubled guard
+  explains alone.** Switching a fold repair off does nothing on a row without a full-folded
+  backreference, so those arms were tallying plain ledger 12 rows under a full-fold name. Such rows
+  now show red until judged into `bestmatch-loses-a-candidate`, per the owner's 2026-09-14 ruling.
+- 2026-09-25: **a fresh Turkic `sub`/`split` row over the dotless i is classified by a recorded
+  control, not by hand.** The recorder asks upstream the row again with U+0131 made U+0138 (kra),
+  which matches like it under the default tables (neither is in CaseFolding.txt), so nothing is
+  left for upstream's `T` rows to act on (`dotlessFreeOutcome`). It refuses a row where the two
+  letters could differ another way: a property upstream answers differently for them (U+0131
+  upper-cases to I, so `\p{CWU}` does), a codepoint escape, a non-ASCII range, LOCALE. `turkic-default-folding-without-spans` takes the row when this port's
+  answer is that twin swapped back. It checks the right answer, not only that a Turkic letter is
+  involved, so S52's fabricated-failure row stays red. It classifies all 18 dotless-only rows that
+  had been judged by hand. U+0130 has no stand-in (the only capital with a full folding and no
+  simple one), so those rows stay hand-judged.
+- 2026-09-25 (owner: resolve every possible bug before optimising; research outside upstream):
+  **under ASCII|IGNORECASE a cased property means the 52 ASCII letters** (ledger entry 34).
+  Upstream gave three answers to one question: `match` also accepted non-ASCII letters, `search`
+  refused 'a', and the set form gave the ASCII letters. Perl 5.42 (`/ai`) and PCRE2 10.47 without
+  UCP give the ASCII letters for `[[:upper:]]`/`[[:lower:]]` and Python's `re` documents it for
+  `[A-Z]` (both engines read `\p{...}` as always-Unicode, so for `\p` the rule is this module's
+  own design); UTS #18 allows it under either reading. `Matcher.MatchesPropertyIgn` clamps the character to the
+  encoding before the case collapse. Recorded as `ascii-ignorecase-cased-property`.
+- 2026-09-25: **the dotless-i control refuses every row where the two letters could differ another
+  way** (blind review): a property upstream answers differently for them, an escape naming any
+  non-ASCII codepoint, a class range with a non-ASCII endpoint, LOCALE. The review's 18 breaking
+  rows record no twin; all 18 hand-judged dotless rows still classify.
+- 2026-09-25: **GUIDE.md's span-walk sample runs.** S61 left it as a fragment, so
+  `check-doc-examples.ps1`, a CI gate, failed on unpushed main; it would have gone red on push.
+- 2026-09-25 (ledger entry 35, from the blind review of entry 34): **scoped encodings hold and a
+  case-insensitive property answers by one rule however it is spelt.** An inner scope keeps an
+  outer encoding (CPython's documented behaviour); a POSIX class takes the scope's encoding, as
+  `\p{...}` does; bare properties and set members share `Matcher.HasPropertyIgn`, the cased-letter
+  rule that upstream's bare form, Perl 5.42 and .NET 10's `Regex` use (upstream's sets used case
+  closure, so brackets, `x?` or an alternation changed the answer); `\p{Upper=No}` is the
+  complement. UTS #18 RL1.5 leaves the closure choice to the implementation, provided it is
+  declared; DIVERGENCES.md and COMPARISON.md declare it. This settles the owner question STATE.md
+  raised earlier the same day, on the owner's instruction to resolve ambiguities by research.
+- 2026-09-25 (ledger entry 35 E to G, from the blind review of its fix): **a case-insensitive set
+  matches each member first, then combines them.** A property member asks the case-insensitive
+  property of the character itself and a nested set recurses case-insensitively, as Perl 5.42's
+  extended sets and .NET 10's set subtraction answer. It moves one judged row's control:
+  `[a\p{ASCII}]` no longer reaches U+212A or U+017F, so `turkic-default-folding-read-by-a-lookaround`
+  keeps its row with 30 agreeing grid cells instead of 36. A set's full-folding expansions follow
+  the same rule (F, upstream's under V1 too), and an encoding named by positional flags
+  inside a group replaces the one in force (G; at the top level a clash still raises).
+- 2026-09-26 (S91, ledger entry 36): **a scoped `(?a:...)` or `(?u:...)` answers exactly as the
+  same encoding set for the whole pattern**, for every node whose answer depends on the encoding,
+  as CPython's `re` documents and Perl 5.42's `(?aa:...)` answers. The encoding rides in the case
+  flags only when a node ignores case and the scope differs from the pattern, so an unscoped
+  pattern compiles exactly as upstream's. Two things are recorded rather than changed: a fuzzy
+  constraint written outside a scoped backreference tests an inserted character with its own
+  encoding (a constraint is a set, and its scope decides; the form has no global twin), and a
+  scoped `(?u:[...])` holding U+00DF in an `(?a)` pattern compiles one 'ss' alternative where the
+  global form has three, with equal answers.
+- 2026-09-26 (ledger entries 37 and 38): **two upstream defects this port does not share are pinned
+  as port-right.** A scoped `(?i:...)` literal loses full folding in upstream's required-string
+  search, and a lazy repeat of one character misses a full-folded literal starting at its last
+  position. Perl 5.42.3 agrees with this port on both and CPython's `re` on the second. Drafts in
+  `docs/plan/upstream-reports/`, not filed.
