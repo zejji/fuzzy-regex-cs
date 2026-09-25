@@ -70,6 +70,28 @@ internal sealed class ByteStack(ArrayPool<byte>? pool = null) : IDisposable
     /// </summary>
     internal void Reset() => Count = 0;
 
+    /// <summary>
+    /// Upstream's caching of the stack's storage in <c>state_fini</c> (line 18684): empties the
+    /// stack and keeps its buffer for the next call, unless the buffer is larger than
+    /// <paramref name="limit"/> bytes, when it goes back to the pool.
+    /// </summary>
+    /// <remarks>
+    /// Upstream shrinks an oversized buffer to the limit and keeps that; a pool buffer cannot be
+    /// shrunk, so an oversized one is returned instead and the next call rents afresh.
+    /// </remarks>
+    /// <param name="limit">The largest buffer worth keeping, in bytes.</param>
+    internal void KeepUpTo(int limit)
+    {
+        if (_storage.Length > limit)
+        {
+            Dispose();
+        }
+        else
+        {
+            Count = 0;
+        }
+    }
+
     /// <summary>Upstream <c>ByteStack_fini</c> (line 2292).</summary>
     public void Dispose()
     {
