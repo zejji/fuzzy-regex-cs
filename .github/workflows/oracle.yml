@@ -106,13 +106,22 @@ jobs:
         run: python tools/record-unicode-fixtures.py --check
 
       - name: The wave recorder's guards must fire
-        # Four properties the recorder must hold rather than be trusted on: it refuses a named list
-        # whose name collides with a regex.compile parameter, it refuses a pattern that dies on
-        # CPython's recursion limit, the seed it prints beside a generator reproduces that
-        # generator's rows on its own, and it translates codepoint indices to UTF-16. Each would
-        # otherwise be a silent wrong answer, not a crash. All four were raised by the S14 blind
-        # review.
+        # Properties the recorder must hold rather than be trusted on, among them: it refuses a
+        # named list whose name collides with a regex.compile parameter, it records a pattern that
+        # dies on CPython's recursion limit as `resource`, the seed it prints beside a generator
+        # reproduces that generator's rows on its own, it translates codepoint indices to UTF-16,
+        # and its crash supervisor turns a row that kills the interpreter into a `crashed` row.
+        # Each would otherwise be a silent wrong answer, not a failure.
         run: python tools/record-oracle.py --self-check
+
+      - name: The MSan screen's parser and upstream-commit gate must hold
+        # tools/screen-undefined.py decides which rows have no ground truth because upstream read
+        # uninitialised memory on them. Its registry of known defects is pinned to the upstream
+        # commit it was last verified at, so a moved pin fails HERE, in seconds, with the command
+        # that re-verifies it - before any wave is recorded.
+        run: |
+          python tools/screen-undefined.py --self-check
+          python tools/screen-undefined.py --check-registry
 
       - name: The wave recorder must be deterministic
         # Two runs of one seed, in fresh interpreters under different PYTHONHASHSEED values, must
@@ -177,6 +186,11 @@ jobs:
           print(f"oracle {regex.__version__}, pinned upstream {pinned}")
           assert regex.__version__ == pinned, "the oracle is not the pinned upstream version"
           CHECK
+
+      - name: The MSan screen's registry must be current
+        # As in the job above: a moved pin fails in seconds, with the command that re-verifies the
+        # known-defect registry, rather than six seeds later.
+        run: python tools/screen-undefined.py --check-registry
 
       - name: Sweep fresh seeds
         # THE SEED COUNT IS THE INSTRUMENT, not the row count - S43's closing note, and the lesson

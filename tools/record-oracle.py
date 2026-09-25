@@ -208,6 +208,10 @@ def _check_version(installed: str) -> str:
 
 
 def _upstream_commit() -> str:
+    # Set by tools/screen-undefined.py, which records inside a container where a worktree's
+    # submodule `.git` points at a host path git cannot follow; measured on the host instead.
+    if os.environ.get("ORACLE_UPSTREAM_COMMIT"):
+        return os.environ["ORACLE_UPSTREAM_COMMIT"]
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT / "upstream"), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True,
@@ -6819,6 +6823,10 @@ def _run_worker(inputs: Path, start: int, output: Path) -> tuple[int, str]:
         [sys.executable, "-X", "faulthandler", str(Path(__file__).resolve()),
          "--worker-rows", str(inputs), "--worker-start", str(start), "--worker-output", str(output)],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+    # tools/screen-undefined.py reads every worker's stderr, where MemorySanitizer reports.
+    if os.environ.get("ORACLE_WORKER_LOG"):
+        with open(os.environ["ORACLE_WORKER_LOG"], "a", encoding="utf-8", errors="replace") as log:
+            log.write(process.stderr)
     return process.returncode, process.stderr
 
 
@@ -6839,8 +6847,14 @@ def _record_supervised(rows: list[dict]) -> list[dict]:
         while len(recorded) < len(rows):
             output.unlink(missing_ok=True)
             returncode, stderr = _run_worker(inputs, len(recorded), output)
-            recorded.extend(_finished_rows(output))
+            finished = _finished_rows(output)
+            recorded.extend(finished)
             if returncode == 0:
+                if len(recorded) < len(rows):
+                    # Never a retry: a worker that exits cleanly short of its rows would do the same
+                    # again, and a supervisor that restarted it would loop for ever.
+                    raise SystemExit(f"the recording worker exited 0 after {len(recorded)} of "
+                                     f"{len(rows)} rows:\n{stderr.strip()}")
                 continue
             if not _died(returncode):
                 # A refused row or a harness bug: the worker's own message, and the run stops.
@@ -6874,9 +6888,14 @@ def _worker(inputs: Path, start: int, output: Path) -> int:
     rows = [json.loads(line) for line in inputs.read_text(encoding="ascii").splitlines()]
     fault = os.environ.get(_FAULT_PATTERN_ENV)
     after_others = os.environ.get(_FAULT_AFTER_OTHERS_ENV) == "1"
+    tag = os.environ.get("ORACLE_TAG_ROWS") == "1"
     with open(output, "w", encoding="ascii", newline="") as f:
         for index in range(start, len(rows)):
             row = rows[index]
+            if tag:
+                # So tools/screen-undefined.py can tie each MemorySanitizer report to its row.
+                sys.stderr.write(f"@@SCREEN {row.get('_screenKey', index)}\n")
+                sys.stderr.flush()
             if fault is not None and row.get("pattern") == fault and (not after_others or index > start):
                 import faulthandler
                 faulthandler._sigsegv()

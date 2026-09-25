@@ -445,6 +445,25 @@ internal static class OracleWave
         return summary;
     }
 
+    /// <summary>Where the consumer lists the rows tools/screen-undefined.py should screen.</summary>
+    public static string ScreenCandidatesPath =>
+        Path.Combine(Path.GetDirectoryName(ReportPath)!, "screen-candidates.txt");
+
+    /// <summary>
+    /// Writes the numbers of the rows whose verdict rests on upstream's answer, one per line, for
+    /// tools/screen-undefined.py. Written on every run, empty when there are none, so a stale list
+    /// from an earlier wave can never be screened against this one.
+    /// </summary>
+    /// <param name="numbers">The row numbers.</param>
+    public static void WriteScreenCandidates(IEnumerable<int> numbers)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ScreenCandidatesPath)!);
+        File.WriteAllText(
+            ScreenCandidatesPath,
+            string.Concat(numbers.Select(static n => n.ToString(CultureInfo.InvariantCulture) + "\n"))
+        );
+    }
+
     /// <summary>
     /// The one-line tally: the report's first line, and what <c>tools/sweep-seeds.ps1</c> reads with
     /// <c>^agree \d</c> and <c>diverge (\d+)</c>.
@@ -617,12 +636,18 @@ internal sealed record OracleWaveFile(OracleHeader Header, IReadOnlyList<OracleR
 /// One rendered block per row the MSan screen attributed to a known upstream defect. Not compared,
 /// not failing, printed anyway.
 /// </param>
+/// <param name="ScreenCandidates">
+/// The numbers of the rows whose verdict rests on upstream's answer - fault, diverge and expected -
+/// that the MSan screen has not yet annotated. What <see cref="OracleWave.WriteScreenCandidates"/>
+/// hands tools/screen-undefined.py.
+/// </param>
 internal sealed record OracleRunSummary(
     IReadOnlyDictionary<OracleVerdict, int> Tally,
     IReadOnlyList<string> Divergences,
     IReadOnlyList<string> Expected,
     IReadOnlyList<string> Faults,
-    IReadOnlyList<string> Undefined
+    IReadOnlyList<string> Undefined,
+    IReadOnlyList<int> ScreenCandidates
 );
 
 /// <summary>Which oracle produced a wave, and how it was generated.</summary>

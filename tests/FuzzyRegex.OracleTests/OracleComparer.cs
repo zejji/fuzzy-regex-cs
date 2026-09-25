@@ -63,6 +63,7 @@ internal static class OracleComparer
         var expected = new List<string>();
         var faults = new List<string>();
         var undefined = new List<string>();
+        var candidates = new List<int>();
         foreach (OracleRow row in rows)
         {
             // Upstream crashed, or read memory it never initialised: no answer to compare against,
@@ -73,6 +74,10 @@ internal static class OracleComparer
                 if (unanswered == OracleVerdict.Fault)
                 {
                     faults.Add(OracleWave.DescribeUnanswered(row, "FAULT"));
+                    if (row.UndefinedBehaviour is null)
+                    {
+                        candidates.Add(row.Number);
+                    }
                 }
                 else
                 {
@@ -124,14 +129,16 @@ internal static class OracleComparer
             if (verdict == OracleVerdict.Diverge)
             {
                 divergences.Add(OracleWave.Describe(row, actual));
+                candidates.Add(row.Number);
             }
             else if (accounted is not null)
             {
                 expected.Add(OracleWave.Describe(row, actual, accounted));
+                candidates.Add(row.Number);
             }
         }
 
-        return new OracleRunSummary(tally, divergences, expected, faults, undefined);
+        return new OracleRunSummary(tally, divergences, expected, faults, undefined, candidates);
     }
 
     /// <summary>

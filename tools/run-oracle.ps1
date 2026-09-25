@@ -264,6 +264,12 @@
 .PARAMETER SkipRecord
     Re-run the consumer against the wave already on disk, without recording a new one.
 
+.PARAMETER Screen
+    Auto (the default) screens, under MemorySanitizer, every row whose verdict rests on upstream's
+    answer - fault, diverge and expected - whenever Docker is available, and re-runs the consumer if
+    the screen annotated any. Never skips it. See tools/screen-undefined.py for why, and for the
+    upstream-commit gate that stops the run when the known-defect registry is stale.
+
 .EXAMPLE
     tools/run-oracle.ps1
     tools/run-oracle.ps1 -Count 2000
@@ -278,7 +284,8 @@ param(
     [int]$Count = 300,
     [string]$Rows,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
-    [switch]$SkipRecord
+    [switch]$SkipRecord,
+    [ValidateSet('Auto', 'Never')][string]$Screen = 'Auto'
 )
 
 Set-StrictMode -Version Latest
@@ -356,6 +363,30 @@ foreach ($seed in $runs) {
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
         --configuration $Configuration
     $consumerExit = $LASTEXITCODE
+
+    # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
+    # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
+    # again only if it did, so a wave with nothing to screen costs nothing extra.
+    $candidates = Join-Path $repoRoot 'TestResults/oracle/screen-candidates.txt'
+    if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidates) -and (Get-Item -LiteralPath $candidates).Length -gt 0) {
+        Write-Host ''
+        Write-Host 'Screening the unsettled rows under MemorySanitizer...' -ForegroundColor Cyan
+        $before = (Get-FileHash -LiteralPath $wavePath).Hash
+        python (Join-Path $PSScriptRoot 'screen-undefined.py') --wave $wavePath --if-available
+        if ($LASTEXITCODE -ne 0) {
+            # Most often the upstream-commit gate: its message above says what to run.
+            Write-Host "Oracle: RED - the MSan screen failed (exit $LASTEXITCODE); see its message above." -ForegroundColor Red
+            $consumerExit = 1
+        }
+        elseif ((Get-FileHash -LiteralPath $wavePath).Hash -ne $before) {
+            Write-Host ''
+            Write-Host 'The screen annotated rows; running the consumer again...' -ForegroundColor Cyan
+            if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+            dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
+                --configuration $Configuration
+            $consumerExit = $LASTEXITCODE
+        }
+    }
 
     Write-Host ''
     if (Test-Path -LiteralPath $reportPath) {

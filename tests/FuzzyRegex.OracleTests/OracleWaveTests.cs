@@ -111,6 +111,7 @@ public sealed class OracleWaveTests
             run.Faults,
             run.Undefined
         );
+        OracleWave.WriteScreenCandidates(run.ScreenCandidates);
 
         // An upstream crash nobody has attributed, or uninitialised memory from an unknown origin:
         // checked first, because a wave whose ground truth is in doubt answers nothing else.
@@ -1244,6 +1245,33 @@ public sealed class OracleWaveTests
         OracleComparer.Compare(unknown, new NoMatchOutcome()).Should().Be(OracleVerdict.Fault);
         OracleRunSummary run = OracleComparer.RunWave([unknown], static _ => new NoMatchOutcome());
         run.Faults.Should().ContainSingle().Which.Should().Contain("some_other_local in try_match");
+    }
+
+    [Test]
+    public void The_rows_offered_to_the_screen_are_exactly_those_whose_verdict_rests_on_upstreams_answer()
+    {
+        // tools/screen-undefined.py re-records these under MSan. An AGREEING row is not offered: the
+        // port has no uninitialised memory, so it agrees with a garbage answer only by coincidence.
+        // A row the screen has already annotated is not offered again.
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(
+            """
+            {"generator": "literals", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "literals", "pattern": "b", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "verbs", "pattern": "c", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
+            {"generator": "verbs", "pattern": "d", "flags": 0, "namedLists": {}, "subject": "d", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}, "undefinedBehaviour": {"origins": ["new_position in basic_match"], "known": "ledger 5"}}
+            """
+        );
+
+        // Row 2 is made to diverge by an engine that answers "no match" to it alone.
+        OracleRunSummary run = OracleComparer.RunWave(
+            rows,
+            static row =>
+                string.Equals(row.Pattern, "b", StringComparison.Ordinal)
+                    ? new NoMatchOutcome()
+                    : OracleComparer.Run(row)
+        );
+
+        run.ScreenCandidates.Should().Equal(2, 3);
     }
 
     [Test]
