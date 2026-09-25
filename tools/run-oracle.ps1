@@ -373,7 +373,8 @@ foreach ($seed in $runs) {
     if (-not $recheckDone -and (Test-Path -LiteralPath $examples)) {
         Write-Host ''
         Write-Host "Re-asking upstream every known-divergence example..." -ForegroundColor Cyan
-        python (Join-Path $PSScriptRoot 'record-oracle.py') --recheck $examples
+        python (Join-Path $PSScriptRoot 'record-oracle.py') --recheck $examples `
+            (Join-Path $repoRoot 'docs/plan/upstream-reports/ledger-reproductions.jsonl')
         if ($LASTEXITCODE -ne 0) {
             Write-Host 'Oracle: RED - upstream no longer gives a stored example answer; see the message above.' -ForegroundColor Red
             $recheckFailed = $true

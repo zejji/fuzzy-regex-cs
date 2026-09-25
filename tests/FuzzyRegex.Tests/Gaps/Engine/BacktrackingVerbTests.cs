@@ -451,6 +451,52 @@ public sealed class BacktrackingVerbTests
             .AllSatisfy(static inside => inside.Should().BeTrue());
     }
 
+    // DIVERGES FROM UPSTREAM, which has no single answer here to diverge from.
+    [Test]
+    public void An_overlapped_scan_where_upstream_reads_an_uninitialised_position_answers_its_own_stepwise_walk()
+    {
+        // The 2026-09-24 CI failure, and ledger entry 5 at its most severe. When a (*SKIP) has moved
+        // the slice and a later search inherits the move, upstream's `search_start` returns success
+        // from its tail (`_regex.c:9199`) without writing `new_position`, which `basic_match` declares
+        // uninitialised (`:11820`); `:11835` copies the garbage into `state->text_pos`. So upstream's
+        // answer is whatever that stack slot held: measured 2026-09-24/25 on regex 2026.9.10, gcc -O1
+        // and above crash (a read 4 GB past the subject), gcc -O0 and MSVC answer, and the answers
+        // differ between builds. MemorySanitizer names both lines; tools/screen-undefined.py records
+        // every such wave row as `undefined` (tools/msan/known-undefined.json).
+        //
+        // What upstream CAN answer cleanly is its own stepwise walk - `match` anchored at each start,
+        // run under Valgrind with 0 errors - and that is this port's overlapped answer on all three.
+        //
+        // ONE: the minimised row. Upstream's walk, anchored at each end: (4, 8) (4, 7) (4, 6) (2, 4)
+        // (1, 3) (0, 2); its overlapped scan crashed 20 of 20 times on one Linux build and answered
+        // five or six spans on others.
+        new FuzzyRegex(@"(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\d]")
+            .Matches("bba\naAA\r", overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((4, 8), (4, 7), (4, 6), (2, 4), (1, 3), (0, 2));
+
+        // TWO: the CI row itself, seed 335764881 row 40857, with its astral subject. Upstream's walk
+        // in codepoints is (4, 6) (2, 4) (1, 3) (0, 2); Windows' scan answers (1, 2) for the last one,
+        // which is the uninitialised read. In UTF-16 each U+10400 is two units, so (0, 2) is (0, 4).
+        string deseret = char.ConvertFromUtf32(0x10400);
+        new FuzzyRegex(@"(?r)(?:[a]*+(*SKIP)" + deseret + @"|a)(?>.*?(*SKIP)[^\d])", FuzzyRegexOptions.Multiline)
+            .Matches(deseret + deseret + "a\naAA\r", overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((6, 8), (4, 6), (2, 5), (0, 4));
+
+        // THREE: forwards, which the reversed-only shapes above could suggest is safe. Seed 335764881
+        // row 39247; MSan flags it for the same `new_position`. Upstream's walk in codepoints is
+        // (0, 3) (1, 4) (2, 5) (3, 6) (4, 7) (5, 7) (6, 7); its Windows scan answered (1, 4) then
+        // (2, 4) (3, 4) (4, 7) (5, 7) (6, 7) and its MSan build (1, 5) (2, 7) (3, 7) (4, 7).
+        new FuzzyRegex(@"(?:\S(*SKIP)){1,3}")
+            .Matches("ßAAß" + deseret + "a" + deseret, overlapped: true)
+            .Select(static m => (m.Index, m.Index + m.Length))
+            .Should()
+            .Equal((0, 3), (1, 4), (2, 6), (3, 7), (4, 9), (6, 9), (7, 9));
+    }
+
     // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
     public void An_overlapped_reversed_scan_of_a_skip_stops_where_upstreams_own_extra_matches_refute_themselves()

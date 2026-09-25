@@ -797,6 +797,74 @@ this port answers (4, 7) with no errors, so the candidate the walk is supposed t
 WORSE rather than better. It is left on the gate unjudged. A row that resembles a door is not a row
 the door explains, and this report's value is that every row in it was measured through one.
 
+**The memory unsafety, traced to the line (2026-09-24/25, regex 2026.9.10, which is also the newest
+upstream commit's behaviour: `85e568c` does not touch the path).** The "memory-unsafe" paragraph
+above is an uninitialised read, and it is what failed the 2026-09-24 scheduled CI sweep on its
+first seed:
+
+1. `basic_match` declares `RE_Position new_position;` without initialising it (`:11820`).
+2. Under `(?r)`, `search_start` rejects a start below `slice_start` (`:8411`) but not one above
+   `slice_end` - which is exactly what the carried slice produces.
+3. At its tail (`:9199`), when `text_pos = start_pos + step` falls outside the slice, it takes
+   neither `try_match` nor the `else`, so `new_position->text_pos` is never written, and it returns
+   `RE_ERROR_SUCCESS`.
+4. `:11835` copies the garbage into `state->text_pos`, and the next node reads the subject there
+   (`:13876`, `bytes1_char_at` at `:764`).
+
+gdb shows the failing attempt entering with `text_pos=2, slice_end=1`, and the watchpoint on
+`new_position->text_pos` never firing inside `search_start`. MemorySanitizer reports
+`use-of-uninitialized-value` at `:13876` with the value stored at `:11835` and created by
+`new_position` at `:11820`.
+
+**What happens next depends on the stack slot, so the answer depends on the build:**
+
+| Build | The minimised row below, overlapped |
+|---|---|
+| gcc -O1, -O2, -O3 (the pip default) | slot holds 0xFFFFFFFF; the read lands about 4 GB past the subject; SIGSEGV |
+| gcc -O0 | (4,8) (4,7) (4,6) (2,4) (1,3) (0,2) |
+| `-ftrivial-auto-var-init=zero` or `=pattern` | (4,8) (4,7) (4,6) (2,4) (1,3) |
+| MSVC (Windows wheel) | answers without crashing; on the CI row it gives (1,2) where the walk gives (0,2) |
+
+```python
+>>> [m.span() for m in regex.finditer(r'(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\d]', 'bba\naAA\r', overlapped=True)]
+Segmentation fault (exit 139)                     # gcc -O2 build, Linux, python:3.12
+>>> [regex.compile(r'(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\d]').match('bba\naAA\r', 0, e) for e in (8, 7, 6, 4, 3, 2)]
+# (4,8) (4,7) (4,6) (2,4) (1,3) (0,2) - the walk, Valgrind 0 errors
+```
+
+**Not reversed-only.** The forward overlapped scan of `(?:\S(*SKIP)){1,3}` over
+`'ßAAß\U00010400a\U00010400'` reads the same uninitialised `new_position`. So does a partial
+`search` with `(*SKIP)` (`^(?:[[:alpha:]]?(*SKIP)[[:digit:]]|[[:alpha:]])\B`), which reaches it
+through the partial second pass. Across eight seeds at 2000 rows a generator, MSan traced every
+origin to this local and to nothing else. That is 22 reports across the seeds recorded with origin
+tracking, plus all 19 flagged calls from the four seeds recorded without it, each re-run alone with
+tracking on; there were no heap origins.
+
+**Detection.** ASan and Windows page heap are silent on it: it is an uninitialised stack variable,
+not a read beside an allocation. MSan and Valgrind both name it.
+
+**Proposed fix.** Either of two one-line fixes closes this door; both belong with the slice restore
+proposed above, which closes the class:
+
+- initialise `new_position` in `basic_match`, or
+- give the reversed branch of `search_start` the `slice_end` test the forward branch's partial
+  check implies.
+
+**Where this port stands.** It never had the read: C# requires the variable to be assigned, and
+`Matcher.cs` assigns the scan position on that path (the comment beside it records upstream's gap).
+S40a's slice restore also means it never reaches that path. On every flagged row it gives upstream's
+own clean walk. Pinned by
+`Gaps/Engine/BacktrackingVerbTests.An_overlapped_scan_where_upstream_reads_an_uninitialised_position_answers_its_own_stepwise_walk`.
+
+**How the oracle now handles it.**
+
+- `tools/record-oracle.py` records a crashing row as `crashed` instead of dying with it.
+- `tools/screen-undefined.py` re-records every row whose verdict rests on upstream's answer under
+  MSan, and marks this origin `undefined ledger 5` through `tools/msan/known-undefined.json`.
+- That registry is pinned to the upstream commit its reproductions last reproduced on. When the pin
+  moves, the screen refuses to attribute anything until `--reverify` shows the origin still
+  reproduces, so an upstream fix surfaces as a failing run rather than as a permanent "known".
+
 ---
 
 ## 6. `IndexError` out of `regex.compile` on a reversed, case-folded pattern

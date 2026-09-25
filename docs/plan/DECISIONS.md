@@ -1313,3 +1313,13 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   or where a change would make the code much harder to maintain, and that call is recorded in
   `docs/plan/OPTIMISATION-NOTES.md`. S86's open question is answered yes: O(1) backtracking state per
   repetition for a repeat body with no alternative, as stdlib `re` manages.
+- 2026-09-25 (owner-approved plan): an upstream crash no longer loses a wave, and a known upstream
+  defect is re-checked, never remembered. The recorder supervises a worker process and records a
+  crashing row as `crashed`. Rows whose verdict rests on upstream's answer are screened under
+  MemorySanitizer (tools/screen-undefined.py), and rows reading uninitialised memory are
+  `undefined` when tools/msan/known-undefined.json names the origin, `fault` (red) when it does not.
+  That registry is pinned to an upstream commit and refuses to attribute anything after the pin
+  moves until `--reverify` passes. Every ExpectedDivergences example and every row in
+  docs/plan/upstream-reports/ledger-reproductions.jsonl is re-asked of upstream on every run
+  (`record-oracle.py --recheck`). Screening every row was rejected on measurement: 5-12x the
+  time, 15.2 GB peak.

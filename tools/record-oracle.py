@@ -6935,14 +6935,23 @@ def _answer_changes(stored: dict, fresh: dict) -> list[str]:
     return sorted(key for key in stored if key not in ROW_INPUT_KEYS and fresh.get(key) != stored[key])
 
 
-def recheck(path: Path) -> int:
-    """Re-records every exported example and fails if upstream no longer gives its stored answer."""
+def recheck(paths: list[Path]) -> int:
+    """Re-records every stored example and fails if upstream no longer gives its stored answer.
+
+    Each file is JSONL of {"entry", "row"}: the consumer's export of every ExpectedDivergences
+    example, and docs/plan/upstream-reports/ledger-reproductions.jsonl, one row per open ledger
+    entry that no example covers.
+    """
     import regex
 
     _check_version(regex.__version__)
-    exported = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    if not exported:
-        raise SystemExit(f"{path} holds no examples; the consumer's export did not run")
+    exported = []
+    for path in paths:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("//")]
+        if not rows:
+            raise SystemExit(f"{path} holds no examples; whatever writes it did not run")
+        exported.extend(rows)
     fresh = _record_supervised([_question_of(e["row"]) for e in exported])
 
     stale = []
@@ -6967,7 +6976,7 @@ def recheck(path: Path) -> int:
               ".claude/skills/sync-upstream/SKILL.md.", file=sys.stderr)
         return 1
 
-    print(f"recheck: all {len(exported)} known-divergence examples still get their stored answer "
+    print(f"recheck: all {len(exported)} known-defect examples still get their stored answer "
           f"from upstream {commit[:12]}")
     return 0
 
@@ -7405,9 +7414,9 @@ def main(argv=None) -> int:
                         help="record one seed twice in fresh interpreters and require identical bytes")
     parser.add_argument("--self-check", action="store_true",
                         help="require the recorder's four guards to fire")
-    parser.add_argument("--recheck", type=Path, default=None,
-                        help="re-record the consumer's exported known-divergence examples and fail "
-                             "if upstream no longer gives their stored answers")
+    parser.add_argument("--recheck", type=Path, nargs="+", default=None,
+                        help="re-record stored known-defect examples (JSONL of entry and row) and "
+                             "fail if upstream no longer gives their stored answers")
     # The crash supervisor's worker half - see `_record_supervised`. Not for use by hand.
     parser.add_argument("--worker-rows", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--worker-start", type=int, default=0, help=argparse.SUPPRESS)
