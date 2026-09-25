@@ -6827,10 +6827,6 @@ def _self_check() -> int:
     for name, unrecordable, why in (
         ("a named list colliding with regex.compile's own parameters",
          row(pattern="\\L<flags>", namedLists={"flags": ["ab"]}), "collides with a parameter"),
-        # 2000 nested groups against CPython's own recursion limit. Not a pattern any generator
-        # emits today; the guard is for the generators later slices add.
-        ("an interpreter limit rather than a judgement about the pattern",
-         row(pattern="(" * 2000 + "a" + ")" * 2000), "limit of the interpreter"),
         # Added in S24. Without it a hand-written minimisation row that forgot its template would
         # record the untouched subject as upstream's answer, which every port trivially agrees with.
         ("a substitution row with no template",
@@ -6846,6 +6842,16 @@ def _self_check() -> int:
             failures.append(f"{name}: raised {type(e).__name__} instead of refusing the row")
         else:
             failures.append(f"{name}: was recorded as if it were upstream's answer")
+
+    # AN INTERPRETER LIMIT IS RECORDED AS `resource`, never as upstream's judgement about the
+    # pattern and never as a reason to stop the run. 2000 nested groups against CPython's own
+    # recursion limit - `RecursionError` on 3.12 and 3.14, measured 2026-09-25. Until then this
+    # guard still demanded S14's refusal, which S43 replaced with `resource` (see `exhausted` in
+    # `_record_row`) without updating it, so --self-check had failed on every platform since
+    # 2026-09-13 and CI had never run far enough to say so.
+    deep = _record_row(regex, row(pattern="(" * 2000 + "a" + ")" * 2000))
+    if deep["outcome"] != {"kind": "resource", "exception": "RecursionError"}:
+        failures.append(f"an interpreter limit was recorded as {deep['outcome']}, not as `resource`")
 
     # The seed the header prints beside a generator must reproduce that generator's rows on its
     # own, whatever else was recorded alongside it. Recorded with a *second* generator present,
