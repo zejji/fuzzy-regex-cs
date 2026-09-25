@@ -134,6 +134,75 @@ public sealed class ScopedEncodingGridTests
         disagreements.Should().BeEmpty();
     }
 
+    private static readonly string[] _foldAtoms = ["\u00DF", "\uFB01", "\u0149", "\u1E9E", "[^x]", "s", "k"];
+
+    private static readonly (string Scoped, string Global)[] _foldForms =
+    [
+        ("(?aif)(?u:x|{X})", "(?uif)x|{X}"),
+        ("(?aif)(?u:{X}|x)", "(?uif){X}|x"),
+        ("(?if)(?a:x|{X})", "(?aif)x|{X}"),
+        ("(?aif)(?u:(?:{X}|x)y)", "(?uif)(?:{X}|x)y"),
+        ("(?aif)(?u:(?>{X}|x))", "(?uif)(?>{X}|x)"),
+        ("(?aif)(?u:(?:{X}|x)|z)", "(?uif)(?:{X}|x)|z"),
+        ("(?r)(?aif)(?u:x|{X})", "(?r)(?uif)x|{X}"),
+        ("(?aif)(?u:({X})\\1){s<=1:[t]}", "(?uif)(?:({X})\\1){s<=1:[t]}"),
+        ("(?aif)(?u:({X}))(?u:\\1){i<=1:[t]}", "(?uif)({X})(?:\\1){i<=1:[t]}"),
+        ("(?if)(?a:({X})\\1){s<=1:[t]}", "(?aif)(?:({X})\\1){s<=1:[t]}"),
+    ];
+
+    private static readonly string[] _foldSubjects =
+    [
+        "ss",
+        "SS",
+        "\u00DF",
+        "\u1E9E",
+        "fi",
+        "\uFB01",
+        "\u02BCn",
+        "\u0149",
+        "xssy",
+        "sst",
+        "ss\uFB05",
+        "\u00DF\uFB05",
+        "\u00DFt",
+        "\u00DF\u00DF",
+        "k\u212A",
+        "\u212A\u212At",
+    ];
+
+    /// <summary>
+    /// The same rule where full case folding meets the optimiser and fuzzy matching: alternatives
+    /// merged into one set that must expand multi-character folds, and a fuzzy constraint outside
+    /// a scoped backreference (the families the blind review of S91 found).
+    /// </summary>
+    /// <param name="version">The version prefix.</param>
+    [Test]
+    [Arguments("(?V0)")]
+    [Arguments("(?V1)")]
+    public void A_scoped_encoding_answers_as_the_same_encoding_set_globally_under_full_folding(string version)
+    {
+        List<string> disagreements = [];
+        foreach (string atom in _foldAtoms)
+        {
+            foreach ((string scoped, string global) in _foldForms)
+            {
+                FuzzyRegex s = Compile(version + scoped.Replace("{X}", atom, StringComparison.Ordinal));
+                FuzzyRegex g = Compile(version + global.Replace("{X}", atom, StringComparison.Ordinal));
+                foreach (string subject in _foldSubjects)
+                {
+                    string a = Answer(s, subject);
+                    string b = Answer(g, subject);
+                    if (!string.Equals(a, b, StringComparison.Ordinal))
+                    {
+                        disagreements.Add($"{s} vs {g} over {Escape(subject)}: {a} / {b}");
+                    }
+                }
+            }
+        }
+
+        disagreements.Should().BeEmpty();
+    }
+
     private static FuzzyRegex Compile(string pattern) =>
         new(
             pattern,

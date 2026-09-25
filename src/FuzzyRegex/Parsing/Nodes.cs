@@ -2955,11 +2955,8 @@ internal abstract class SetBase(
             return 1;
         }
 
-        // Is full case-folding possible?
-        if (
-            (Info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the set's own encoding (S91).
+        if (!RegexFlags.FoldsFully(Info.Flags, CaseFlags))
         {
             return 1;
         }
@@ -3038,11 +3035,10 @@ internal abstract class SetBase(
             return this;
         }
 
-        // Is full case-folding possible?
-        if (
-            (Info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the set's own encoding (S91): alternatives that
+        // Branch.ReduceToSet merges inside (?u:...) are a set built after parsing, under the
+        // pattern's flags, so (?aif)(?u:x|\xdf) refused "ss" where (?uif)x|\xdf matches it.
+        if (!RegexFlags.FoldsFully(Info.Flags, CaseFlags))
         {
             return this;
         }

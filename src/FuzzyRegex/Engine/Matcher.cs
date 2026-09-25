@@ -86,6 +86,12 @@ internal struct FuzzyData
     internal int GfoldedLen;
 
     /// <summary>
+    /// NOT UPSTREAM (S91): the encoding the group reference folds the subject with, which the fuzzy
+    /// constraint's test must see the same folding in. See <c>Matcher.FuzzyExtMatchGroupFld</c>.
+    /// </summary>
+    internal CaseEncoding FoldEncoding;
+
+    /// <summary>
     /// NOT UPSTREAM (S85): whether a full-case-folded string's values have all been used, so a
     /// deletion has none left to delete. See <c>Matcher.TakeBackFoldedComparison</c>.
     /// </summary>
@@ -4827,9 +4833,15 @@ internal static class Matcher
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="fuzzyNode">The section, which may be <see langword="null"/>.</param>
+    /// <param name="foldEncoding">The encoding the group reference folds the subject with.</param>
     /// <param name="foldedPos">The position in the folding the error would touch.</param>
     /// <returns><see langword="true"/> if the constraint allows it.</returns>
-    private static bool FuzzyExtMatchGroupFld(MatchState state, Node? fuzzyNode, int foldedPos)
+    private static bool FuzzyExtMatchGroupFld(
+        MatchState state,
+        Node? fuzzyNode,
+        CaseEncoding foldEncoding,
+        int foldedPos
+    )
     {
         Node? testNode = fuzzyNode?.Next2.Node;
 
@@ -4854,11 +4866,8 @@ internal static class Matcher
             or Opcode.SetInter
             or Opcode.SetSymDiff
             or Opcode.SetUnion => state.TextPos < state.SliceEnd
-                && MatchesOne(
-                    testNode.Encoding,
-                    testNode,
-                    FoldedCharAt(state, testNode.Encoding, state.TextPos, foldedPos)
-                ) == testNode.Match,
+                && MatchesOne(testNode.Encoding, testNode, FoldedCharAt(state, foldEncoding, state.TextPos, foldedPos))
+                    == testNode.Match,
             Opcode.CharacterRev
             or Opcode.CharacterIgnRev
             or Opcode.PropertyRev
@@ -4868,7 +4877,7 @@ internal static class Matcher
                 && MatchesOne(
                     testNode.Encoding,
                     testNode,
-                    FoldedCharAt(state, testNode.Encoding, state.PrevPos(state.TextPos), foldedPos - 1)
+                    FoldedCharAt(state, foldEncoding, state.PrevPos(state.TextPos), foldedPos - 1)
                 ) == testNode.Match,
             _ => true,
         };
@@ -4877,9 +4886,10 @@ internal static class Matcher
     /// <summary>Upstream <c>folded_char_at</c> (line 10014).</summary>
     /// <param name="state">The match state.</param>
     /// <param name="encoding">
-    /// The encoding to fold with. Its callers pass the fuzzy test's, which is the group
-    /// reference's: the test grammar takes only a character set, parsed in the reference's own
-    /// scope and under the same <c>IGNORECASE</c>, so both carry the same encoding (S91).
+    /// The encoding to fold with: the group reference's, whose folding the error is in (S91). The
+    /// constraint's test can sit outside the reference's scope, as in
+    /// <c>(?aif)(ss)(?u:\1){i&lt;=1:[t]}</c>, so its own encoding is the wrong one; folding with it
+    /// refused 'ss\ufb05s', which <c>(?uif)(ss)(?:\1){i&lt;=1:[t]}</c> matches.
     /// </param>
     /// <param name="pos">The subject position whose character is folded.</param>
     /// <param name="foldedPos">Which character of the folding to return.</param>
@@ -4946,7 +4956,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -4963,7 +4973,7 @@ internal static class Matcher
 
                 if (newPos >= 0 && newPos <= data.FoldedLen)
                 {
-                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.NewFoldedPos))
+                    if (!FuzzyExtMatchGroupFld(state, state.FuzzyNode, data.FoldEncoding, data.NewFoldedPos))
                     {
                         return MatchStatus.Failure;
                     }
@@ -5025,6 +5035,7 @@ internal static class Matcher
         data.GfoldedLen = gfoldedLen;
         data.Step = step;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = node.Encoding;
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
         int status = MatchStatus.Failure;
@@ -5140,6 +5151,7 @@ internal static class Matcher
         data.NewGfoldedPos = newGfoldedPos;
         data.GfoldedLen = gfoldedLen;
         data.FoldChangesStart = foldChangesStart;
+        data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
         --fuzzyCounts[data.FuzzyType];
 

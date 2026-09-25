@@ -235,6 +235,17 @@ public sealed class ScopedEncodingTests
     [Arguments("(?V1)(?aif)(?u:[\u00DE-\u00DFx])", "ss", "(0,2)")]
     [Arguments("(?V1)(?aif)(?u:[\u00DE-\u00DF])", "ss", "(0,2)")]
     [Arguments("(?V1)(?aif)(?u:(?:st|sx))", "\uFB06", "(0,1)")]
+    // Alternatives merged into one set, which must expand to the letters' full foldings: upstream
+    // gives (0, 2), (0, 2), (0, 2) and (0, 3) for the (?uif) spellings, and None, None, None and
+    // (1, 3) for these (found by the blind review of S91).
+    [Arguments("(?aif)(?u:x|\u00DF)", "ss", "(0,2)")]
+    [Arguments("(?aif)(?u:\uFB01|x)", "fi", "(0,2)")]
+    [Arguments("(?r)(?aif)(?u:x|\u00DF)", "ss", "(0,2)")]
+    [Arguments("(?aif)(?u:s|\u00DF)t", "sst", "(0,3)")]
+    // A fuzzy constraint outside a scoped backreference folds the subject with the reference's
+    // encoding: upstream gives (0, 3) and (0, 4) for the (?uif) spellings, None for these.
+    [Arguments(@"(?aif)(?u:(ss)\1){s<=1:[t]}", "ss\uFB05", "(0,3)")]
+    [Arguments(@"(?aif)(ss)(?u:\1){i<=1:[t]}", "ss\uFB05s", "(0,4)")]
     // And none under a scoped ASCII. upstream (?V1)(?aif)\xdf on 'ss': None, as its scoped
     // spelling (?V1)(?if)(?a:\xdf) is.
     [Arguments("(?V1)(?if)(?a:\u00DF)", "ss", "none")]
