@@ -5636,16 +5636,32 @@ internal static class ExpectedDivergences
                 + "THE RECORDED `scanMatches` IS STILL THE EVIDENCE and the second half of `Applies`: "
                 + "upstream's own `finditer` over the row, recorded by the recorder because the "
                 + "answer has no spans, so a listed row whose scan stops touching a Turkic letter "
-                + "stops being classified rather than silently staying pinned.",
+                + "stops being classified rather than silently staying pinned.\n"
+                + "SINCE 2026-09-25 A SECOND ARM TAKES A ROW NO ONE HAS LISTED, and only one kind: "
+                + "a `sub`, `subf` or `split` over the dotless i, where this port's answer is exactly "
+                + "upstream's answer to the same row with every U+0131 made U+0138 (kra), swapped "
+                + "back. The recorder asks that as `dotlessFreeOutcome`. Kra is what the dotless i "
+                + "is under the default tables: lowercase, same block, no case partner, no folding "
+                + "(CaseFolding.txt 16.0), and this port answers 6,468 grid rows identically with "
+                + "either letter. It asks what the RIGHT answer is rather than whether the divergence "
+                + "touches a Turkic letter, so the fabricated failure above stays red. Not for "
+                + "U+0130, which no letter can stand in for (the only capital with a full folding "
+                + "and no simple one, lowercasing to a plain i): those rows are still listed by hand. "
+                + "See TheDotlessIAloneExplainsIt.",
             PinnedBy: "Gaps.Engine.CaseFoldingTests.An_answer_that_carries_no_span_diverges_on_the_"
                 + "dotless_small_as_well and .A_range_spanning_the_plain_I_does_not_reach_the_"
                 + "dotless_small, plus the whole 25-cell grid the entry above names",
             Example: _turkicWithoutSpansRows,
             Applies: static (row, ours) =>
-                _turkicWithoutSpans.TryGetValue(Question(row), out string? judged)
-                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
-                && row.ScanMatches is { } scan
-                && TurkicLettersCovered(row.Subject, scan).Any()
+                (
+                    _turkicWithoutSpans.TryGetValue(Question(row), out string? judged)
+                    && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
+                    && row.ScanMatches is { } scan
+                    && TurkicLettersCovered(row.Subject, scan).Any()
+                )
+                // ...or upstream's own answer with the dotless i swapped for a letter no `T` row
+                // touches is this port's, character for character. See TheDotlessIAloneExplainsIt.
+                || TheDotlessIAloneExplainsIt(row, ours)
         ),
         new(
             Id: "turkic-default-folding-from-the-pattern-side",
@@ -7040,6 +7056,50 @@ internal static class ExpectedDivergences
                 withoutTheGroupFoldLeftovers: false
             )
         );
+
+    /// <summary>
+    /// Whether a span-less answer is exactly upstream's answer to the same row with the dotless i
+    /// swapped for kra, swapped back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The control <c>turkic-default-folding-without-spans</c> was judged by, row by row, recorded
+    /// by the recorder as <see cref="OracleRow.DotlessFree"/>. Kra (U+0138) is what the dotless i
+    /// (U+0131) is under the DEFAULT case tables: a lowercase letter in the same block, with no case
+    /// partner and no folding. So upstream's answer to the swapped row is its answer with nothing
+    /// for its Turkic `T` rows to act on, and this port treats the two letters identically
+    /// (6,468 grid rows, 2026-09-25). When this port's answer is upstream's swapped answer with
+    /// the swap undone, the dotless i is the whole difference between the engines.
+    /// </para>
+    /// <para>
+    /// WHY THIS IS SAFE WHERE S52'S SCAN-BASED DRAFT WAS NOT. That draft asked only whether the
+    /// divergence touched a Turkic letter, so a fabricated total failure on <c>(?i)\w</c> over
+    /// 'xı' was tallied EXPECTED. This asks what the right answer is and requires this port to
+    /// give it exactly: a port with a defect on the dotless i answers something else and stays red.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer and its dotless-free twin.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the swapped-back twin is this port's answer.</returns>
+    internal static bool TheDotlessIAloneExplainsIt(OracleRow row, IOracleOutcome ours) =>
+        row.DotlessFree is { } free
+        && WithKraAsTheDotlessI(free) is { } swappedBack
+        && ours is SubOutcome or SplitOutcome
+        && string.Equals(ours.Describe(), swappedBack.Describe(), StringComparison.Ordinal);
+
+    /// <summary>A span-less answer with every U+0138 turned back into U+0131, or null for any other answer.</summary>
+    /// <param name="outcome">Upstream's answer to the swapped row.</param>
+    /// <returns>The answer in the original row's letters.</returns>
+    private static IOracleOutcome? WithKraAsTheDotlessI(IOracleOutcome outcome) =>
+        outcome switch
+        {
+            SubOutcome sub => sub with { Text = sub.Text.Replace('ĸ', 'ı') },
+            SplitOutcome split => split with
+            {
+                Parts = [.. split.Parts.Select(static part => part?.Replace('ĸ', 'ı'))],
+            },
+            _ => null,
+        };
 
     /// <summary>
     /// Whether one ablated run leaves only ledger entry 11 mechanism B between the two engines.

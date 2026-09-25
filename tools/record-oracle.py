@@ -468,6 +468,50 @@ def _with_prune_instead_of_skip(row: dict, pattern: str, flags: int) -> dict | N
     return {**row, "pattern": pattern.replace(_SKIP_VERB, _PRUNE_VERB)} if _SKIP_VERB in pattern else None
 
 
+_DOTLESS_I = "ı"
+_DOTTED_I = "İ"
+_KRA = "ĸ"
+
+
+def _row_texts(row: dict) -> list[str]:
+    """Every text a row puts to the engine: pattern, subject, template, and named-list keys and entries."""
+    texts = [row["pattern"], row["subject"], row.get("template") or ""]
+    for name, entries in (row.get("namedLists") or {}).items():
+        texts.append(name)
+        texts.extend(entries)
+    return texts
+
+
+def _with_dotless_i_as_kra(row: dict) -> dict | None:
+    """The same row with every U+0131 made U+0138, or ``None`` where the swap would not be clean.
+
+    THE CONTROL `turkic-default-folding-without-spans` WAS JUDGED BY HAND ON EVERY ROW, and this is
+    the same control recorded instead. Upstream's default tables carry CaseFolding.txt's two `T`
+    rows (ledger entry 7), so its dotless i (U+0131) pairs with I. Kra (U+0138) is what the dotless
+    i is under the DEFAULT tables: a lowercase letter in the same block, with no case partner and no
+    folding in CaseFolding.txt 16.0. So the swapped row is the same question with nothing for a `T`
+    row to act on. Measured 2026-09-25: this port answers 6,468 grid rows (search, sub, split,
+    finditer; V0 and V1; IGNORECASE with and without FULLCASE, ASCII and MULTILINE) identically
+    with either letter, up to the swap.
+
+    NOT FOR U+0130. The dotted capital is the only capital letter in CaseFolding.txt with a full
+    folding and no simple one, and its lowercase is a plain `i`, so no letter can stand in for it.
+    A row holding one records no key, and stays judged by hand. Nor where U+0138 is already in the
+    row, where the swap could not be undone.
+    """
+    texts = _row_texts(row)
+    if not any(_DOTLESS_I in t for t in texts) or any(_DOTTED_I in t or _KRA in t for t in texts):
+        return None
+
+    def swap(text):
+        return text.replace(_DOTLESS_I, _KRA) if isinstance(text, str) else text
+
+    swapped = {key: swap(value) for key, value in row.items()}
+    if row.get("namedLists"):
+        swapped["namedLists"] = {swap(n): [swap(e) for e in entries] for n, entries in row["namedLists"].items()}
+    return swapped
+
+
 # Each control's recorded key, and how to take its construct away. Every one is A SECOND FACT
 # ABOUT UPSTREAM, never compared against anything, exactly as `searchOnlyPartial` and
 # `anchoredScan` are: only the consumer's `ExpectedDivergences` reads them.
@@ -793,6 +837,14 @@ def _record_row_and_its_control_answers(regex, row: dict) -> dict:
             recorded[key] = free
 
     violations += _control_violations(recorded)
+
+    # Recorded AFTER the invariants and outside `_CONTROLS`, because the swap changes the question:
+    # a twin that answers where the row faulted is not the row contradicting itself.
+    swapped = _with_dotless_i_as_kra(row)
+    if swapped is not None:
+        free = _record_row(regex, swapped)["outcome"]
+        if free["kind"] in _ANSWERED:
+            recorded["dotlessFreeOutcome"] = free
     if violations:
         # Sorted and de-duplicated: a scan whose every match breaks one invariant is ONE candidate
         # to triage, not forty, and the field is a set of ids by contract. The detail a triage needs
@@ -7276,6 +7328,20 @@ def _self_check() -> int:
     })
     if "no-fault-where-a-twin-answers" not in real_twin:
         failures.append("a substitution twin that DID replace no longer counts as an answer")
+
+    # The dotless-i twin swaps every text the row puts to the engine, named lists included, and
+    # refuses a row it could not swap back: one holding U+0130, which kra cannot stand in for, or
+    # one already holding kra.
+    dotless = {"generator": "rows", "pattern": "ı\\L<w>", "flags": 2, "namedLists": {"wı": ["ı"]},
+               "subject": "aı", "operation": "sub", "template": "ı"}
+    swapped = _with_dotless_i_as_kra(dotless)
+    if swapped is None or any(_DOTLESS_I in text for text in _row_texts(swapped)):
+        failures.append(f"the dotless-i twin left a dotless i behind: {swapped}")
+    for blocker in (_DOTTED_I, _KRA):
+        if _with_dotless_i_as_kra({**dotless, "subject": "aı" + blocker}) is not None:
+            failures.append(f"the dotless-i twin swapped a row holding {blocker!a}")
+    if _with_dotless_i_as_kra({**dotless, "pattern": "a", "subject": "a", "template": "x", "namedLists": {}}) is not None:
+        failures.append("the dotless-i twin was recorded for a row with no dotless i")
 
     # POSIX BUYS LENGTH WITH ERRORS, so its cost limb needs the same SPAN and not merely the same
     # start - `(?p)(?:abc){e<=2}` over 'abxxyc' is (0, 4) at a cost of 2 where the flagless engine's

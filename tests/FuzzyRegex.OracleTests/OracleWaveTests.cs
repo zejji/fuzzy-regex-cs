@@ -907,6 +907,72 @@ public sealed class OracleWaveTests
         ExpectedDivergences.IsTheLiveAnswer(row, timedOut).Should().BeFalse();
     }
 
+    /// <summary>
+    /// Four span-less rows over the dotless i that no judged row of
+    /// <c>turkic-default-folding-without-spans</c> lists, each carrying upstream's answer with the dotless
+    /// i made kra. Recorded 2026-09-25 on regex 2026.9.10 from a 6,468-row grid of such rows.
+    /// </summary>
+    private const string _dotlessRowsToClassify = """
+        {"generator": "rows", "pattern": "[A-Z]", "flags": 2, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "x", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 1]}], "dotlessFreeOutcome": {"kind": "sub", "text": "\u0138", "count": 0}}
+        {"generator": "rows", "pattern": "I", "flags": 16386, "namedLists": {}, "subject": "a\u0131b", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "axb", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "sub", "text": "a\u0138b", "count": 0}}
+        {"generator": "rows", "pattern": "I", "flags": 16642, "namedLists": {}, "subject": "a\u0131b", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a", "b"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "split", "parts": ["a\u0138b"]}}
+        {"generator": "rows", "pattern": "I", "flags": 10, "namedLists": {}, "subject": "a\u0131b", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": ["a", "b"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}], "dotlessFreeOutcome": {"kind": "split", "parts": ["a\u0138b"]}}
+        """;
+
+    /// <summary>
+    /// <c>\p{Lu}</c> under ASCII and IGNORECASE over the dotless i: the engines differ there with no
+    /// Turkic letter at all (the same row over kra diverges too), so the dotless i is not the whole
+    /// difference.
+    /// </summary>
+    private const string _dotlessRowToRefuse = """
+        {"generator": "rows", "pattern": "\\p{Lu}", "flags": 130, "namedLists": {}, "subject": "\u0131", "operation": "sub", "template": "x", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\u0131", "count": 0}, "scanMatches": [], "dotlessFreeOutcome": {"kind": "sub", "text": "\u0138", "count": 0}}
+        """;
+
+    [Test]
+    public void A_dotless_i_row_whose_kra_twin_is_this_ports_answer_is_the_turkic_family()
+    {
+        // The recorded control that `turkic-default-folding-without-spans` used to need a person
+        // for: upstream's answer to the row with the dotless i made kra, swapped back, is this
+        // port's answer to the row. Each row goes through the LIVE engine.
+        foreach (OracleRow row in OracleWave.ParseRows(_dotlessRowsToClassify))
+        {
+            IOracleOutcome ours = OracleComparer.Run(row)!;
+
+            OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge, "{0}", row.Pattern);
+            ExpectedDivergences.TheDotlessIAloneExplainsIt(row, ours).Should().BeTrue(row.Pattern);
+            ExpectedDivergences
+                .For(row, ours)
+                .Should()
+                .NotBeNull(row.Pattern)
+                .And.Subject.As<ExpectedDivergence>()
+                .Id.Should()
+                .Be("turkic-default-folding-without-spans");
+
+            // A port with a defect on the dotless i answers something else, and stays red.
+            IOracleOutcome wrong = ours switch
+            {
+                SubOutcome sub => sub with { Count = sub.Count + 1 },
+                SplitOutcome split => split with { Parts = [.. split.Parts, "extra"] },
+                _ => throw new InvalidOperationException(ours.Describe()),
+            };
+            ExpectedDivergences.For(row, wrong).Should().BeNull("{0} -> {1}", row.Pattern, wrong.Describe());
+
+            // And so does a port that gave upstream's own Turkic answer's opposite: no match at all.
+            ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull(row.Pattern);
+        }
+    }
+
+    [Test]
+    public void A_dotless_i_row_that_diverges_for_another_reason_is_not_the_turkic_family()
+    {
+        OracleRow row = OracleWave.ParseRows(_dotlessRowToRefuse)[0];
+        IOracleOutcome ours = OracleComparer.Run(row)!;
+
+        OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge);
+        ExpectedDivergences.TheDotlessIAloneExplainsIt(row, ours).Should().BeFalse();
+        ExpectedDivergences.For(row, ours).Should().BeNull(ours.Describe());
+    }
+
     [Test]
     public void A_bestmatch_row_with_no_backreference_is_not_claimed_by_a_full_fold_entry()
     {

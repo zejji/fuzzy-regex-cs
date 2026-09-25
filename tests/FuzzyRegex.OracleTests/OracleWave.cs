@@ -215,6 +215,9 @@ internal static class OracleWave
         {
             SelfContradiction = ReadSelfContradiction(row),
             UndefinedBehaviour = ReadUndefinedBehaviour(row),
+            DotlessFree = row.TryGetProperty("dotlessFreeOutcome", out JsonElement dotlessFree)
+                ? ReadOutcome(dotlessFree)
+                : null,
         };
     }
 
@@ -869,6 +872,13 @@ internal sealed record OracleHeader(
 /// Absent on a row the screen did not run on or found clean. Outranks <see cref="Expected"/>, which on
 /// such a row is whatever that memory held.
 /// </param>
+/// <param name="DotlessFree">
+/// Upstream's answer to the same row with every U+0131 (dotless i) made U+0138 (kra), from the
+/// recorder's <c>dotlessFreeOutcome</c>: the same question with nothing for upstream's Turkic `T` case
+/// rows to act on. Recorded only where the row holds a dotless i and neither U+0130 nor U+0138, and
+/// only when that twin answered. A SECOND FACT ABOUT UPSTREAM, read by
+/// <c>turkic-default-folding-without-spans</c>.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -897,7 +907,8 @@ internal sealed record OracleRow(
     double? Timeout = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0,
     IReadOnlyList<string>? SelfContradiction = null,
-    UndefinedBehaviour? UndefinedBehaviour = null
+    UndefinedBehaviour? UndefinedBehaviour = null,
+    IOracleOutcome? DotlessFree = null
 );
 
 /// <summary>What a matching operation answered.</summary>

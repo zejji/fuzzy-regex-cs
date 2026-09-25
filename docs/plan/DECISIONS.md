@@ -1339,3 +1339,11 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   explains alone.** Switching a fold repair off does nothing on a row without a full-folded
   backreference, so those arms were tallying plain ledger 12 rows under a full-fold name. Such rows
   now show red until judged into `bestmatch-loses-a-candidate`, per the owner's 2026-09-14 ruling.
+- 2026-09-25: **a fresh Turkic `sub`/`split` row over the dotless i is classified by a recorded
+  control, not by hand.** The recorder asks upstream the row again with U+0131 made U+0138 (kra),
+  which has no case partner and no folding, so nothing is left for upstream's `T` rows to act on
+  (`dotlessFreeOutcome`). `turkic-default-folding-without-spans` takes the row when this port's
+  answer is that twin swapped back. It checks the right answer, not only that a Turkic letter is
+  involved, so S52's fabricated-failure row stays red. It classifies all 18 dotless-only rows that
+  had been judged by hand. U+0130 has no stand-in (the only capital with a full folding and no
+  simple one), so those rows stay hand-judged.

@@ -24,12 +24,17 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 ## Findings that need a slice
 
 1. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
-2. Classifier coverage: `turkic-default-folding` claims only rows with spans
-   (`TurkicLettersCovered` has no arm for `sub`/`split`), so every fresh seed that draws a Turkic-I
-   substitution needs its row added to the row-keyed `-without-spans` sibling (seven on
-   2026-09-25). Left as it is on purpose: S52's blind review showed that reading the recorded scan
-   instead classifies a real defect (`(?i)\w` over 'xı'), and the owner's 2026-09-14 ruling
-   is that such pins widen only by judged rows. The cost is a red sweep until someone adds the row.
+2. Classifier coverage, narrowed 2026-09-25: a fresh `sub`/`split` row over the dotless i is now
+   classified by a recorded control (the dotless i swapped for kra, `dotlessFreeOutcome`), which
+   takes all 18 such hand-judged rows on its own. A row holding the dotted capital U+0130 still
+   needs its row added to `turkic-default-folding-without-spans` by hand: no letter can stand in for
+   it (7 of the 25 listed rows).
+3. NEW, not judged: under ASCII|IGNORECASE the case properties answer differently on both engines,
+   and neither looks right. Over 'aAéÉĸ' upstream's `\p{Lu}`, `\p{Ll}`, `[[:upper:]]`
+   and `[[:lower:]]` match only the one ASCII letter of their own case, although its `[A-Z]` matches
+   'aA' under the same flags; this port matches non-ASCII letters there although with ASCII alone
+   it keeps them out. Found by the 2026-09-25 dotless-i grid (112 rows of 6,468, no Turkic letter
+   involved). Needs research against the docs and a second engine before either is called right.
 
 Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledger 2, fixed in
 `Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
