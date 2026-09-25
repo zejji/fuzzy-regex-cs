@@ -54,7 +54,7 @@ These are not upstream tests, so they do not count towards parity.
 |---|---:|---:|---:|---:|
 | Conventions | 44 | 44 | 0 | 0 |
 | Docs | 50 | 50 | 0 | 0 |
-| Gaps | 4814 | 4814 | 0 | 0 |
+| Gaps | 4862 | 4862 | 0 | 0 |
 
 ## Tests waiting on a capability
 

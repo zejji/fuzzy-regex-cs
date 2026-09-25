@@ -78,6 +78,25 @@ internal static class ParseFunctions
         return RegexModule.GetAllCases(info.Flags, (uint)ch).Length > 1;
     }
 
+    /// <summary>
+    /// <see cref="IsCasedI(Info, int)"/> under the encoding a node's case flags carry, when they
+    /// carry one (S91): <c>(?ai)(?u:\xe9)</c> must not drop the case flags of a letter that ASCII
+    /// thinks caseless.
+    /// </summary>
+    /// <param name="info">The parse state.</param>
+    /// <param name="caseFlags">The case flags of the run the character joins.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the character has other cases under that encoding.</returns>
+    internal static bool IsCasedI(Info info, int caseFlags, int ch)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        int encoding = caseFlags & RegexFlags.CaseEncodings;
+        int flags = encoding == 0 ? info.Flags : (info.Flags & ~RegexFlags.AllEncodings) | encoding;
+
+        return RegexModule.GetAllCases(flags, (uint)ch).Length > 1;
+    }
+
     /// <summary>Upstream <c>make_case_flags</c> (lines 419-427).</summary>
     /// <param name="info">The parse state.</param>
     /// <returns>The case flags a node built here should carry.</returns>
@@ -91,8 +110,30 @@ internal static class ParseFunctions
             flags &= ~RegexFlags.FullCase;
         }
 
+        // DIVERGES FROM UPSTREAM, deliberately (S91): the node folds with its scope's encoding,
+        // which RegexFlags.CaseFlagsCombination says why.
+        if ((flags & RegexFlags.IgnoreCase) != 0 && ScopedEncoding(info) != 0)
+        {
+            flags |= info.Flags & RegexFlags.CaseEncodings;
+        }
+
         return flags;
     }
+
+    /// <summary>
+    /// The encoding tag a node gets from its scope when that differs from the pattern's: one of
+    /// <see cref="RegexFlags.AsciiEncoding"/> and <see cref="RegexFlags.UnicodeEncoding"/>, or 0 for
+    /// "whatever the pattern uses". Not upstream's (S91).
+    /// </summary>
+    /// <remarks>
+    /// An encoding named outside every group is the pattern's own (<see cref="Info.OuterEncodings"/>),
+    /// so a node under it answers 0 and compiles to exactly upstream's code word. Only a scoped
+    /// <c>(?a:...)</c> or <c>(?u:...)</c> that changes the encoding puts a tag on the node.
+    /// </remarks>
+    /// <param name="info">The parse state.</param>
+    /// <returns>The encoding tag.</returns>
+    internal static int ScopedEncoding(Info info) =>
+        (info.Flags & RegexFlags.AllEncodings) == info.OuterEncodings ? 0 : PropertyEncoding(info);
 
     /// <summary>Upstream <c>make_character</c> (lines 429-435).</summary>
     /// <param name="info">The parse state.</param>
@@ -262,7 +303,7 @@ internal static class ParseFunctions
                         }
                         else if ((info.Flags & RegexFlags.Word) != 0)
                         {
-                            sequence.Add(new AnyU());
+                            sequence.Add(new AnyU(ScopedEncoding(info)));
                         }
                         else
                         {
@@ -280,7 +321,11 @@ internal static class ParseFunctions
                         // The start of a line or the string.
                         if ((info.Flags & RegexFlags.Multiline) != 0)
                         {
-                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new StartOfLineU() : new StartOfLine());
+                            sequence.Add(
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new StartOfLineU(ScopedEncoding(info))
+                                    : new StartOfLine()
+                            );
                         }
                         else
                         {
@@ -293,12 +338,18 @@ internal static class ParseFunctions
                         // The end of a line or the string.
                         if ((info.Flags & RegexFlags.Multiline) != 0)
                         {
-                            sequence.Add((info.Flags & RegexFlags.Word) != 0 ? new EndOfLineU() : new EndOfLine());
+                            sequence.Add(
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new EndOfLineU(ScopedEncoding(info))
+                                    : new EndOfLine()
+                            );
                         }
                         else
                         {
                             sequence.Add(
-                                (info.Flags & RegexFlags.Word) != 0 ? new EndOfStringLineU() : new EndOfStringLine()
+                                (info.Flags & RegexFlags.Word) != 0
+                                    ? new EndOfStringLineU(ScopedEncoding(info))
+                                    : new EndOfStringLine()
                             );
                         }
 
@@ -849,7 +900,7 @@ internal static class ParseFunctions
                         return new AnyAll();
                     }
 
-                    return (info.Flags & RegexFlags.Word) != 0 ? new AnyU() : new Any();
+                    return (info.Flags & RegexFlags.Word) != 0 ? new AnyU(ScopedEncoding(info)) : new Any();
 
                 case '[':
                     // A character set.
@@ -1730,6 +1781,10 @@ internal static class ParseFunctions
         {
             info.Flags = (info.Flags & ~RegexFlags.AllEncodings) | flagsOn;
         }
+        else if (info.FlagScopeDepth == 0)
+        {
+            info.OuterEncodings = info.Flags & RegexFlags.AllEncodings;
+        }
         source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
     }
 
@@ -1888,7 +1943,7 @@ internal static class ParseFunctions
         if (ch == 'X' && !inSet)
         {
             // A grapheme cluster.
-            return new Grapheme();
+            return new Grapheme(ScopedEncoding(info));
         }
 
         if (RegexFlags.IsAlpha(ch))
@@ -1962,11 +2017,11 @@ internal static class ParseFunctions
         return ch switch
         {
             'A' => new StartOfString(),
-            'b' => word ? new DefaultBoundary() : new Boundary(true, encoding),
-            'B' => word ? new DefaultBoundary(false) : new Boundary(false, encoding),
+            'b' => word ? new DefaultBoundary(true, ScopedEncoding(info)) : new Boundary(true, encoding),
+            'B' => word ? new DefaultBoundary(false, ScopedEncoding(info)) : new Boundary(false, encoding),
             'K' => new Keep(),
-            'm' => word ? new DefaultStartOfWord() : new StartOfWord(encoding),
-            'M' => word ? new DefaultEndOfWord() : new EndOfWord(encoding),
+            'm' => word ? new DefaultStartOfWord(ScopedEncoding(info)) : new StartOfWord(encoding),
+            'M' => word ? new DefaultEndOfWord(ScopedEncoding(info)) : new EndOfWord(encoding),
             'Z' or 'z' => new EndOfString(),
             _ => (RegexBase?)null,
         };
@@ -3069,7 +3124,20 @@ internal static class ParseFunctions
             members.Add(item.WithFlags(caseFlags: RegexFlags.NoCase));
         }
 
-        if (caseFlags == RegexFlags.FullIgnoreCase)
+        if ((caseFlags & RegexFlags.CaseFlags) == RegexFlags.FullIgnoreCase)
+        {
+            return null;
+        }
+
+        // S91: one set folds with one encoding, so members that fold with different ones - a
+        // scoped (?a:...) beside the pattern's own - get no firstset rather than a wrong one.
+        if (
+            (caseFlags & RegexFlags.CaseEncodings) != 0
+            && fs.Any(i =>
+                (i!.CaseFlags & RegexFlags.IgnoreCase) != 0
+                && (i.CaseFlags & RegexFlags.CaseEncodings) != (caseFlags & RegexFlags.CaseEncodings)
+            )
+        )
         {
             return null;
         }
@@ -3160,7 +3228,9 @@ internal static class ParseFunctions
     {
         (long reqOffset, RegexBase? required) = parsed.GetRequiredString((flags & RegexFlags.Reverse) != 0);
 
-        if (required is null)
+        // S91: a required string that folds with a scoped encoding is not offered to the engine,
+        // which builds its required-string node with the pattern's encoding.
+        if (required is null || (required.CaseFlags & RegexFlags.CaseEncodings) != 0)
         {
             return (0, [], 0);
         }

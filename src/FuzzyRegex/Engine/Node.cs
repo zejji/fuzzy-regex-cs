@@ -96,6 +96,15 @@ internal sealed class Node
     internal Opcode Op;
 
     /// <summary>
+    /// The encoding this node folds, classifies and finds line and word breaks with: its own
+    /// <see cref="NodeStatus.EncodingKind(Node)"/> if it has one, otherwise the pattern's. Not an upstream
+    /// field (S91): upstream resolves <c>ENCODING_KIND</c> per call, and only for properties; this
+    /// is resolved once, when the node is built, so every node the scope's encoding reaches reads
+    /// it for the same cost as reading the pattern's.
+    /// </summary>
+    internal Unicode.CaseEncoding Encoding { get; init; }
+
+    /// <summary>
     /// Upstream <c>match</c>: whether the node matches or rejects what it describes - a negated
     /// set, a negative lookaround.
     /// </summary>
@@ -223,7 +232,12 @@ internal static class NodeStatus
     /// <summary>Upstream <c>ENCODING_KIND</c> (line 167).</summary>
     /// <param name="node">The node.</param>
     /// <returns>0 for "whatever the pattern uses", otherwise <see cref="AsciiEncoding"/> or <see cref="UnicodeEncoding"/>.</returns>
-    internal static uint EncodingKind(Node node) => (node.Status >> EncodingShift) & 0x3;
+    internal static uint EncodingKind(Node node) => EncodingKind(node.Status);
+
+    /// <summary><see cref="EncodingKind(Node)"/> of a status word.</summary>
+    /// <param name="status">The status word.</param>
+    /// <returns>0 for "whatever the pattern uses", otherwise <see cref="AsciiEncoding"/> or <see cref="UnicodeEncoding"/>.</returns>
+    internal static uint EncodingKind(uint status) => (status >> EncodingShift) & 0x3;
 
     /// <summary>Upstream <c>RE_STATUS_ALL_ATOMIC</c>.</summary>
     internal const uint AllAtomic = 0x40000;

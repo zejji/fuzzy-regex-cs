@@ -44,7 +44,7 @@ internal abstract class RegexBase
         bool newPositive = positive ?? Positive;
         int newCaseFlags = caseFlags is null
             ? CaseFlags
-            : RegexFlags.CaseFlagsCombination(caseFlags.Value & RegexFlags.CaseFlags);
+            : RegexFlags.CaseFlagsCombination(caseFlags.Value & (RegexFlags.CaseFlags | RegexFlags.CaseEncodings));
         bool newZerowidth = zerowidth ?? Zerowidth;
 
         if (newPositive == Positive && newCaseFlags == CaseFlags && newZerowidth == Zerowidth)
@@ -241,11 +241,11 @@ internal abstract class RegexBase
 /// <c>ZeroWidthBase</c> (<c>upstream/regex/_regex_core.py</c> lines 2011-2038).
 /// </summary>
 /// <remarks>
-/// Upstream's <c>_key</c> is <c>(self.__class__, self.positive)</c>, so <c>encoding</c> is
-/// deliberately <b>not</b> part of equality: <c>Boundary()</c> and
-/// <c>Boundary(encoding=ASCII_ENCODING)</c> compare equal even though they compile to different
-/// flag words. <c>Branch</c>'s prefix and suffix splitting hoists on that equality, so the
-/// divergence would be observable in the bytecode.
+/// DIVERGES FROM UPSTREAM, deliberately (S91): <c>encoding</c> is part of equality. Upstream's
+/// <c>_key</c> is <c>(self.__class__, self.positive)</c>, so <c>Boundary()</c> and
+/// <c>Boundary(encoding=ASCII_ENCODING)</c> compare equal, and <c>Branch</c>'s prefix splitting
+/// hoisted the first in place of both: <c>(?:\b\xe9|(?a:\b)\xe9)</c> refused 'x\xe9', which
+/// CPython re 3.14 matches at (1, 2) through the second alternative (regex 2026.9.10, 2026-09-25).
 /// </remarks>
 /// <param name="positive">Whether the node asserts the position or its complement.</param>
 /// <param name="encoding">The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends.</param>
@@ -268,14 +268,22 @@ internal abstract class ZeroWidthBase(bool positive = true, int encoding = 0) : 
 
     /// <inheritdoc />
     internal override string RenderKey() =>
-        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({GetType().Name},{Positive})");
+        Encoding == 0
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({GetType().Name},{Positive})")
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({GetType().Name},{Positive},{Encoding})"
+            );
 
     /// <inheritdoc />
     public override bool Equals(object? obj) =>
-        obj is ZeroWidthBase other && GetType() == other.GetType() && Positive == other.Positive;
+        obj is ZeroWidthBase other
+        && GetType() == other.GetType()
+        && Positive == other.Positive
+        && Encoding == other.Encoding;
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(GetType(), Positive);
+    public override int GetHashCode() => HashCode.Combine(GetType(), Positive, Encoding);
 
     /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
@@ -323,8 +331,12 @@ internal sealed class DefaultBoundary : ZeroWidthBase
 {
     /// <summary>Initializes a default word-boundary assertion.</summary>
     /// <param name="positive">Whether this is <c>\b</c> or <c>\B</c>.</param>
-    internal DefaultBoundary(bool positive = true)
-        : base(positive) { }
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91). Upstream gives the
+    /// <c>DEFAULT_</c> forms none, so <c>(?w)(?a:\bx)</c> answered by the pattern's encoding.
+    /// </param>
+    internal DefaultBoundary(bool positive = true, int encoding = 0)
+        : base(positive, encoding) { }
 
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultBoundary;
@@ -333,6 +345,11 @@ internal sealed class DefaultBoundary : ZeroWidthBase
 /// <summary><c>\M</c> under the <c>WORD</c> flag. Upstream <c>DefaultEndOfWord</c> (lines 2748-2750).</summary>
 internal sealed class DefaultEndOfWord : ZeroWidthBase
 {
+    /// <summary>Initializes a default end-of-word assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="DefaultBoundary"/>.</param>
+    internal DefaultEndOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultEndOfWord;
 }
@@ -340,6 +357,11 @@ internal sealed class DefaultEndOfWord : ZeroWidthBase
 /// <summary><c>\m</c> under the <c>WORD</c> flag. Upstream <c>DefaultStartOfWord</c> (lines 2752-2754).</summary>
 internal sealed class DefaultStartOfWord : ZeroWidthBase
 {
+    /// <summary>Initializes a default start-of-word assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="DefaultBoundary"/>.</param>
+    internal DefaultStartOfWord(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.DefaultStartOfWord;
 }
@@ -347,6 +369,11 @@ internal sealed class DefaultStartOfWord : ZeroWidthBase
 /// <summary><c>$</c> under <c>MULTILINE</c>. Upstream <c>EndOfLine</c> (lines 2756-2758).</summary>
 internal class EndOfLine : ZeroWidthBase
 {
+    /// <summary>Initializes an end-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="EndOfLineU"/> reads.</param>
+    internal EndOfLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfLine;
 }
@@ -354,6 +381,14 @@ internal class EndOfLine : ZeroWidthBase
 /// <summary><c>$</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>EndOfLineU</c> (lines 2760-2762).</summary>
 internal sealed class EndOfLineU : EndOfLine
 {
+    /// <summary>Initializes a Unicode end-of-line assertion.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): the line separators are
+    /// the encoding's. Upstream gives it none.
+    /// </param>
+    internal EndOfLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfLineU;
 }
@@ -368,6 +403,11 @@ internal sealed class EndOfString : ZeroWidthBase
 /// <summary><c>$</c> outside <c>MULTILINE</c>. Upstream <c>EndOfStringLine</c> (lines 2768-2770).</summary>
 internal class EndOfStringLine : ZeroWidthBase
 {
+    /// <summary>Initializes an end-of-string-or-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="EndOfStringLineU"/> reads.</param>
+    internal EndOfStringLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLine;
 }
@@ -375,6 +415,11 @@ internal class EndOfStringLine : ZeroWidthBase
 /// <summary><c>$</c> under <c>WORD</c>. Upstream <c>EndOfStringLineU</c> (lines 2772-2774).</summary>
 internal sealed class EndOfStringLineU : EndOfStringLine
 {
+    /// <summary>Initializes a Unicode end-of-string-or-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="EndOfLineU"/>.</param>
+    internal EndOfStringLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.EndOfStringLineU;
 }
@@ -453,6 +498,11 @@ internal sealed class Skip : ZeroWidthBase
 /// <summary><c>^</c> under <c>MULTILINE</c>. Upstream <c>StartOfLine</c> (lines 3991-3993).</summary>
 internal class StartOfLine : ZeroWidthBase
 {
+    /// <summary>Initializes a start-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, which only <see cref="StartOfLineU"/> reads.</param>
+    internal StartOfLine(int encoding = 0)
+        : base(true, encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.StartOfLine;
 }
@@ -460,6 +510,11 @@ internal class StartOfLine : ZeroWidthBase
 /// <summary><c>^</c> under <c>MULTILINE</c> and <c>WORD</c>. Upstream <c>StartOfLineU</c> (lines 3995-3997).</summary>
 internal sealed class StartOfLineU : StartOfLine
 {
+    /// <summary>Initializes a Unicode start-of-line assertion.</summary>
+    /// <param name="encoding">The scope's encoding, as for <see cref="EndOfLineU"/>.</param>
+    internal StartOfLineU(int encoding = 0)
+        : base(encoding) { }
+
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.StartOfLineU;
 }
@@ -518,9 +573,11 @@ internal sealed class PrecompiledCode : RegexBase
 /// (<c>upstream/regex/_regex_core.py</c> lines 3310-3364).
 /// </summary>
 /// <remarks>
-/// <c>encoding</c> is deliberately not part of <c>_key</c> upstream, so a property is equal to the
-/// same property with a different encoding tag even though the two compile to different flag
-/// words. Kept, because <c>Branch</c>'s prefix splitting hoists on that equality.
+/// DIVERGES FROM UPSTREAM, deliberately (S91): <c>encoding</c> is part of equality. It is not
+/// part of <c>_key</c> upstream, so a property equalled the same property with a different
+/// encoding tag, and <c>Branch</c>'s prefix splitting hoisted the first in place of both:
+/// <c>(?:(?a:\w)x|\wy)</c> refused '\xe9y', which CPython re 3.14 matches at (0, 2) through the
+/// second alternative (regex 2026.9.10, 2026-09-25).
 /// </remarks>
 internal sealed class Property : RegexBase
 {
@@ -598,10 +655,15 @@ internal sealed class Property : RegexBase
 
     /// <inheritdoc />
     internal override string RenderKey() =>
-        string.Create(
-            System.Globalization.CultureInfo.InvariantCulture,
-            $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth})"
-        );
+        Encoding == 0
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth})"
+            )
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"({nameof(Property)},{Value},{Positive},{CaseFlags},{Zerowidth},{Encoding})"
+            );
 
     /// <inheritdoc />
     public override bool Equals(object? obj) =>
@@ -609,10 +671,12 @@ internal sealed class Property : RegexBase
         && Value == other.Value
         && Positive == other.Positive
         && CaseFlags == other.CaseFlags
-        && Zerowidth == other.Zerowidth;
+        && Zerowidth == other.Zerowidth
+        && Encoding == other.Encoding;
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(typeof(Property), Value, Positive, CaseFlags, Zerowidth);
+    public override int GetHashCode() =>
+        HashCode.Combine(typeof(Property), Value, Positive, CaseFlags, Zerowidth, Encoding);
 
     /// <inheritdoc />
     protected override RegexBase Rebuild(bool positive, int caseFlags, bool zerowidth) =>
@@ -641,7 +705,7 @@ internal sealed class Property : RegexBase
 
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, Value],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, Value],
         ];
     }
 }
@@ -715,11 +779,8 @@ internal sealed class Range : RegexBase
             return this;
         }
 
-        // Is full case-folding possible?
-        if (
-            (info.Flags & RegexFlags.Unicode) == 0
-            || (CaseFlags & RegexFlags.FullIgnoreCase) != RegexFlags.FullIgnoreCase
-        )
+        // Is full case-folding possible? Under the node's own encoding (S91).
+        if (!RegexFlags.FoldsFully(info.Flags, CaseFlags))
         {
             return this;
         }
@@ -799,9 +860,11 @@ internal sealed class Range : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Lower, (uint)Upper],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, (uint)Lower, (uint)Upper],
         ];
     }
 }
@@ -932,9 +995,11 @@ internal sealed class RefGroup : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         return
         [
-            [(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)GroupNumber],
+            [(uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags, (uint)GroupNumber],
         ];
     }
 }
@@ -999,8 +1064,43 @@ internal sealed class AnyAll : Any
 /// </summary>
 internal sealed class AnyU : Any
 {
+    /// <summary>Initializes a <c>.</c> under the <c>WORD</c> flag.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): the line breaks are the
+    /// encoding's. Upstream gives it none, so <c>(?w)(?a:.)</c> refused U+2028 where
+    /// <c>(?aw).</c> matches it (regex 2026.9.10, 2026-09-25).
+    /// </param>
+    internal AnyU(int encoding = 0)
+    {
+        Encoding = encoding;
+    }
+
+    /// <summary>The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends, or 0.</summary>
+    internal int Encoding { get; }
+
     /// <inheritdoc />
     protected override (Opcode Forward, Opcode Reverse) Opcodes => (Opcode.AnyU, Opcode.AnyURev);
+
+    /// <inheritdoc />
+    internal override string RenderKey() =>
+        Encoding == 0
+            ? nameof(AnyU)
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"({nameof(AnyU)},{Encoding})");
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AnyU other && Encoding == other.Encoding;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(typeof(AnyU), Encoding);
+
+    /// <inheritdoc />
+    protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
+    {
+        List<uint[]> code = base.CompileCore(reverse, fuzzy);
+        code[0][1] |= (uint)Encoding << NodeFlags.EncodingShift;
+
+        return code;
+    }
 }
 
 /// <summary>
@@ -1311,7 +1411,8 @@ internal class Branch : RegexBase
 
         int count = pos;
 
-        if ((info.Flags & RegexFlags.Unicode) != 0)
+        // S91: a scoped (?u:...) can fold fully inside a pattern that does not.
+        if ((info.Flags & RegexFlags.Unicode) != 0 || alternatives.Exists(HasScopedUnicode))
         {
             // We need to check that we're not splitting a sequence of characters which could form
             // part of full case-folding.
@@ -1363,7 +1464,7 @@ internal class Branch : RegexBase
 
         int count = back;
 
-        if ((info.Flags & RegexFlags.Unicode) != 0)
+        if ((info.Flags & RegexFlags.Unicode) != 0 || alternatives.Exists(HasScopedUnicode))
         {
             while (count > 0 && !alternatives.TrueForAll(a => CanSplitRev(a, count)))
             {
@@ -1477,6 +1578,10 @@ internal class Branch : RegexBase
 
         return true;
     }
+
+    /// <summary>Whether an alternative holds a character that folds under a scoped <c>(?u:...)</c>.</summary>
+    private static bool HasScopedUnicode(List<RegexBase> alternative) =>
+        alternative.Exists(static i => i is Character c && (c.CaseFlags & RegexFlags.Unicode) != 0);
 
     /// <summary>Upstream <c>Branch._reduce_to_set</c> (lines 2417-2443).</summary>
     private static List<RegexBase> ReduceToSet(Info info, bool reverse, List<RegexBase> branches)
@@ -1903,7 +2008,13 @@ internal sealed class Character : RegexBase
             flags |= NodeFlags.Fuzzy;
         }
 
-        RegexBase code = new PrecompiledCode([(uint)_opcodes[(CaseFlags, reverse)], flags, (uint)Value]);
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
+        RegexBase code = new PrecompiledCode([
+            (uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)],
+            flags,
+            (uint)Value,
+        ]);
 
         if (Folded.Length > 1)
         {
@@ -2196,8 +2307,10 @@ internal class String : RegexBase
             flags |= NodeFlags.Required;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         uint[] code = new uint[3 + FoldedCharacters.Length];
-        code[0] = (uint)_opcodes[(CaseFlags, reverse)];
+        code[0] = (uint)_opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)];
         code[1] = flags;
         code[2] = (uint)FoldedCharacters.Length;
         for (int i = 0; i < FoldedCharacters.Length; i++)
@@ -2387,7 +2500,7 @@ internal sealed class Sequence : RegexBase
                 // inner one has no else, so the conjunction is the same test.
                 if (
                     character.CaseFlags != caseFlags
-                    && (character.CaseFlags != 0 || ParseFunctions.IsCasedI(info, character.Value))
+                    && (character.CaseFlags != 0 || ParseFunctions.IsCasedI(info, caseFlags, character.Value))
                 )
                 {
                     FlushCharacters(info, characters, caseFlags, items);
@@ -2401,7 +2514,7 @@ internal sealed class Sequence : RegexBase
                 // As above, for a string rather than a character (lines 3543-3552).
                 if (
                     literal.CaseFlags != caseFlags
-                    && (literal.CaseFlags != 0 || characters.Exists(c => ParseFunctions.IsCasedI(info, c)))
+                    && (literal.CaseFlags != 0 || characters.Exists(c => ParseFunctions.IsCasedI(info, caseFlags, c)))
                 )
                 {
                     FlushCharacters(info, characters, caseFlags, items);
@@ -2545,14 +2658,17 @@ internal sealed class Sequence : RegexBase
         }
 
         // Disregard case_flags if all of the characters are case-less.
-        if ((caseFlags & RegexFlags.IgnoreCase) != 0 && !characters.Exists(c => ParseFunctions.IsCasedI(info, c)))
+        if (
+            (caseFlags & RegexFlags.IgnoreCase) != 0
+            && !characters.Exists(c => ParseFunctions.IsCasedI(info, caseFlags, c))
+        )
         {
             caseFlags = RegexFlags.NoCase;
         }
 
         if ((caseFlags & RegexFlags.FullIgnoreCase) == RegexFlags.FullIgnoreCase)
         {
-            foreach (Literal literal in FixFullCasefold(characters))
+            foreach (Literal literal in FixFullCasefold(characters, caseFlags & RegexFlags.CaseEncodings))
             {
                 int[] chars = literal.Characters;
 
@@ -2634,7 +2750,7 @@ internal sealed class Sequence : RegexBase
     /// test that used to pin it, <c>Gaps.Parsing.FullCaseFoldSplitTests</c>, says so too.
     /// </para>
     /// </remarks>
-    private static List<Literal> FixFullCasefold(List<int> characters)
+    private static List<Literal> FixFullCasefold(List<int> characters, int encoding)
     {
         // Get the characters which expand to multiple codepoints on folding, folded.
         List<int[]> expanded =
@@ -2697,16 +2813,16 @@ internal sealed class Sequence : RegexBase
 
             if (pos < startIndex)
             {
-                literals.Add(new Literal(PySlice(characters, pos, startIndex), RegexFlags.IgnoreCase));
+                literals.Add(new Literal(PySlice(characters, pos, startIndex), RegexFlags.IgnoreCase | encoding));
             }
 
-            literals.Add(new Literal(PySlice(characters, startIndex, end), RegexFlags.FullIgnoreCase));
+            literals.Add(new Literal(PySlice(characters, startIndex, end), RegexFlags.FullIgnoreCase | encoding));
             pos = end;
         }
 
         if (pos < characters.Count)
         {
-            literals.Add(new Literal(PySlice(characters, pos, characters.Count), RegexFlags.IgnoreCase));
+            literals.Add(new Literal(PySlice(characters, pos, characters.Count), RegexFlags.IgnoreCase | encoding));
         }
 
         return literals;
@@ -2977,9 +3093,11 @@ internal abstract class SetBase(
             flags |= NodeFlags.Fuzzy;
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         List<uint[]> code =
         [
-            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+            [(uint)Opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags],
         ];
         foreach (RegexBase m in Items)
         {
@@ -3391,9 +3509,11 @@ internal sealed class SetUnion : SetBase
             }
         }
 
+        flags |= RegexFlags.CaseEncodingTag(CaseFlags) << NodeFlags.EncodingShift;
+
         List<uint[]> code =
         [
-            [(uint)Opcodes[(CaseFlags, reverse)], flags],
+            [(uint)Opcodes[(CaseFlags & RegexFlags.CaseFlags, reverse)], flags],
         ];
 
         foreach ((bool positive, List<int> values) in characters)
@@ -4112,14 +4232,28 @@ internal sealed class Fuzzy : RegexBase
 /// </summary>
 internal sealed class Grapheme : RegexBase
 {
+    /// <summary>Initializes a grapheme cluster.</summary>
+    /// <param name="encoding">
+    /// The scope's encoding, when it differs from the pattern's (S91): under ASCII every position
+    /// is a grapheme boundary. Upstream gives it none, so <c>(?a:\X)</c> took 'e\u0301' whole where
+    /// <c>(?a)\X</c> takes 'e' (regex 2026.9.10, 2026-09-25).
+    /// </param>
+    internal Grapheme(int encoding = 0)
+    {
+        Encoding = encoding;
+    }
+
+    /// <summary>The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends, or 0.</summary>
+    internal int Encoding { get; }
+
     /// <inheritdoc />
     internal override long MaxWidth() => RegexFlags.Unlimited;
 
     /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is Grapheme;
+    public override bool Equals(object? obj) => obj is Grapheme other && Encoding == other.Encoding;
 
     /// <inheritdoc />
-    public override int GetHashCode() => typeof(Grapheme).GetHashCode();
+    public override int GetHashCode() => HashCode.Combine(typeof(Grapheme), Encoding);
 
     /// <inheritdoc />
     /// <remarks>
@@ -4128,7 +4262,9 @@ internal sealed class Grapheme : RegexBase
     /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
-        var graphemeMatcher = new Atomic(new Sequence([new LazyRepeat(new AnyAll(), 1, null), new GraphemeBoundary()]));
+        var graphemeMatcher = new Atomic(
+            new Sequence([new LazyRepeat(new AnyAll(), 1, null), new GraphemeBoundary(Encoding)])
+        );
 
         return graphemeMatcher.Compile(reverse, fuzzy);
     }
@@ -4146,6 +4282,15 @@ internal sealed class Grapheme : RegexBase
 /// </remarks>
 internal sealed class GraphemeBoundary : RegexBase
 {
+    private readonly int _encoding;
+
+    /// <summary>Initializes the boundary test.</summary>
+    /// <param name="encoding">The <see cref="Grapheme"/>'s encoding tag.</param>
+    internal GraphemeBoundary(int encoding)
+    {
+        _encoding = encoding;
+    }
+
     /// <inheritdoc />
     internal override long MaxWidth() =>
         throw new NotSupportedException(
@@ -4162,7 +4307,7 @@ internal sealed class GraphemeBoundary : RegexBase
     /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
         [
-            [(uint)Opcode.GraphemeBoundary, 1],
+            [(uint)Opcode.GraphemeBoundary, 1 | ((uint)_encoding << NodeFlags.EncodingShift)],
         ];
 }
 

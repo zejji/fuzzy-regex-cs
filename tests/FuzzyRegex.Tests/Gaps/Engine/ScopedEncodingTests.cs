@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Fuzzy.Text.RegularExpressions.Parsing;
 
 namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 
@@ -157,5 +158,222 @@ public sealed class ScopedEncodingTests
             .Should()
             .Throw<FuzzyRegexParseException>()
             .WithMessage("ASCII, LOCALE and UNICODE flags are mutually incompatible");
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// A case-insensitive node folds with the encoding of the scope it was parsed in, whatever it
+    /// is: a character, a string, a range, a set, a backreference, a named list, and anything built
+    /// of them (S91).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule is CPython's and Perl's: <c>(?i)(?a:k)</c> refuses U+212A KELVIN SIGN exactly as
+    /// <c>(?ai)k</c> does, and <c>(?ai)(?u:k)</c> accepts it exactly as <c>(?i)k</c> does. Each row
+    /// quotes what was measured on 2026-09-25 with <c>re.search</c> (CPython 3.14.7), Perl 5.42.3
+    /// (<c>/$p/</c> under <c>use utf8</c> and <c>use feature 'unicode_strings'</c>, with
+    /// <c>(?aa:...)</c> for the ASCII case rules) and <c>regex.search</c> (regex 2026.9.10). Where
+    /// neither CPython nor Perl has the construct, the row quotes upstream's answer to the same
+    /// encoding set globally, which it gets right.
+    /// </para>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">The span found, or "none".</param>
+    [Test]
+    // re: None; Perl (?i)(?aa:k): None; upstream: (0, 1).
+    [Arguments("(?i)(?a:k)", "\u212A", "none")]
+    // re: (0, 1); Perl (?aai)(?u:k): (0, 1); upstream: None.
+    [Arguments("(?ai)(?u:k)", "\u212A", "(0,1)")]
+    // A string. re: None; Perl: None; upstream: (0, 2).
+    [Arguments("(?i)(?a:kx)", "\u212Ax", "none")]
+    // Two characters packed into one literal. re: None; Perl: None; upstream: (0, 2).
+    [Arguments("(?i)k(?a:k)", "\u212A\u212A", "none")]
+    // re: (0, 2); Perl: (0, 2); upstream: (0, 2).
+    [Arguments("(?i)k(?a:k)", "\u212Ak", "(0,2)")]
+    // A range. re: None; Perl: None; upstream: (0, 1).
+    [Arguments("(?i)(?a:[a-z])", "\u212A", "none")]
+    // re: (0, 1); Perl: (0, 1); upstream: None.
+    [Arguments("(?ai)(?u:[a-z])", "\u212A", "(0,1)")]
+    // A set, and a negated one. re: None, (0, 1); Perl: None, (0, 1); upstream: (0, 1), None.
+    [Arguments("(?i)(?a:[k])", "\u212A", "none")]
+    [Arguments("(?i)(?a:[^k])", "\u212A", "(0,1)")]
+    // A set operation; neither re nor Perl's classic classes have one.
+    // upstream (?aiV1)[[k]--[x]]: None; (?iV1)(?a:[[k]--[x]]): (0, 1).
+    [Arguments("(?iV1)(?a:[[k]--[x]])", "\u212A", "none")]
+    // A backreference. re: None, (0, 2); Perl: None, (0, 2); upstream: (0, 2), None.
+    [Arguments(@"(?i)(?a:(k)\1)", "k\u212A", "none")]
+    [Arguments(@"(?ai)(?u:(k)\1)", "k\u212A", "(0,2)")]
+    // A repeat, an alternation, an atomic group and a lookahead. re: None for all four; Perl:
+    // None for all four; upstream: (0, 2), (0, 1), (0, 1), (0, 1).
+    [Arguments("(?i)(?a:k+)", "\u212A\u212A", "none")]
+    [Arguments("(?i)(?a:(?:k|x))", "\u212A", "none")]
+    [Arguments("(?i)(?a:(?>k+))", "\u212A", "none")]
+    [Arguments(@"(?i)(?a:(?=k))\w", "\u212A", "none")]
+    // A named list holding "k"; re has none. upstream (?ai)\L<w>: None; (?i)(?a:\L<w>): (0, 1).
+    [Arguments(@"(?i)(?a:\L<w>)", "\u212A", "none")]
+    // Fuzzy matching, which re and Perl lack. upstream (?ai)(?:kz){s<=1}: None, and
+    // (?b)(?ai)(?:kx){e<=1}: None; the scoped spellings: (0, 2) and (0, 2).
+    [Arguments("(?i)(?a:(?:kz){s<=1})", "\u212A\u212A", "none")]
+    [Arguments("(?i)(?a:(?b)(?:kx){e<=1})", "\u212A\u212A", "none")]
+    // The constraint's own test set folds with the scope's encoding too: re and upstream's
+    // (?ai)(?:xz){s<=1:[k]} give None; upstream's scoped spelling (0, 2).
+    [Arguments("(?i)(?a:(?:xz){s<=1:[k]})", "\u212Az", "none")]
+    // Reversed matching; re has none. upstream (?r)(?ai)k: None; (?r)(?i)(?a:k): (0, 1).
+    [Arguments("(?r)(?i)(?a:k)", "\u212A", "none")]
+    // Letters ASCII thinks caseless keep their case flags under a scoped Unicode, alone and packed
+    // into a literal. re: (0, 1) and (0, 2); Perl (?aai)(?u:\x{e9}\x{e9}): (0, 2); upstream: None
+    // and None.
+    [Arguments("(?ai)(?u:\u00E9)", "\u00C9", "(0,1)")]
+    [Arguments("(?ai)(?u:\u00E9\u00E9)", "\u00C9\u00C9", "(0,2)")]
+    // Full case folding under a scoped Unicode inside an ASCII pattern, which re lacks.
+    // Upstream answers (0, 2) for (?V1)(?uif)\xdf, (?V1)(?uif)[\xde-\xdfx] and
+    // (?V1)(?uif)[\xde-\xdf] on 'ss', and (0, 2), (0, 2) and None for their scoped spellings. It
+    // answers (0, 1) for (?V1)(?uif)(?:st|sx) on U+FB06, and None for its scoped spelling. In the
+    // set the letter comes from a range, so only the set's own expansion can match 'ss'.
+    [Arguments("(?V1)(?aif)(?u:\u00DF)", "ss", "(0,2)")]
+    [Arguments("(?V1)(?aif)(?u:[\u00DE-\u00DFx])", "ss", "(0,2)")]
+    [Arguments("(?V1)(?aif)(?u:[\u00DE-\u00DF])", "ss", "(0,2)")]
+    [Arguments("(?V1)(?aif)(?u:(?:st|sx))", "\uFB06", "(0,1)")]
+    // And none under a scoped ASCII. upstream (?V1)(?aif)\xdf on 'ss': None, as its scoped
+    // spelling (?V1)(?if)(?a:\xdf) is.
+    [Arguments("(?V1)(?if)(?a:\u00DF)", "ss", "none")]
+    public void A_case_insensitive_node_folds_with_its_scopes_encoding(
+        string pattern,
+        string subject,
+        string expected
+    ) => Search(pattern, subject).Should().Be(expected, pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// A partial match folds a string that runs off the end of the subject with the string's own
+    /// encoding (S91).
+    /// </summary>
+    /// <remarks>
+    /// <c>regex.match(pattern, '\u212ax', partial=True)</c> gives a partial (0, 2) for
+    /// <c>(?iu)kxy</c>, <c>(?iu)x?kxy</c> and <c>(?iu)(?:q|kxy)</c>, and nothing for their scoped
+    /// spellings under <c>(?ai)</c> (regex 2026.9.10, 2026-09-25). The second and third reach the
+    /// string as the test a repeat and a branch look ahead with, rather than as the next node.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="partial">Whether the subject is a partial match.</param>
+    [Test]
+    [Arguments("(?ai)(?u:kxy)", true)]
+    [Arguments("(?ai)x?(?u:kxy)", true)]
+    [Arguments("(?ai)(?:q|(?u:kxy))", true)]
+    [Arguments("(?i)(?a:kxy)", false)]
+    [Arguments("(?i)x?(?a:kxy)", false)]
+    public void A_partial_string_folds_with_its_scopes_encoding(string pattern, bool partial)
+    {
+        Match m = new FuzzyRegex(pattern).MatchAtStart("\u212Ax", partial: true);
+
+        m.Success.Should().Be(partial, pattern);
+        m.Length.Should().Be(partial ? 2 : 0, pattern);
+    }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// Word starts and ends, the <c>WORD</c> flag's boundaries and line separators, and grapheme
+    /// boundaries follow the scope's encoding (S91).
+    /// </summary>
+    /// <remarks>
+    /// CPython and Perl have none of these constructs as regex spells them, so each row quotes
+    /// upstream's answer to the same encoding set globally (regex 2026.9.10, 2026-09-25), which the
+    /// scoped spelling now gives, and upstream's answer to the scoped spelling.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">The span found, or "none".</param>
+    [Test]
+    // upstream (?a)\mx: (1, 2); (?a:\mx): None.
+    [Arguments(@"(?a:\mx)", "\u00E9x", "(1,2)")]
+    // upstream (?a)x\M: (0, 1); (?a:x\M): None.
+    [Arguments(@"(?a:x\M)", "x\u00E9", "(0,1)")]
+    // upstream (?aw)\bx: (1, 2); (?w)(?a:\bx): None.
+    [Arguments(@"(?w)(?a:\bx)", "\u00E9x", "(1,2)")]
+    // upstream (?aw).: (0, 1); (?w)(?a:.): None.
+    [Arguments("(?w)(?a:.)", "\u2028", "(0,1)")]
+    // upstream (?aw)x$: None; (?w)(?a:x$): (0, 1).
+    [Arguments("(?w)(?a:x$)", "x\u2028", "none")]
+    // upstream (?aw)(?m)x$ on 'x\u2028y': None; (?w)(?a:(?m)x$): (0, 1).
+    [Arguments("(?w)(?a:(?m)x$)", "x\u2028y", "none")]
+    // upstream (?aw)(?m)^x: None; (?w)(?a:(?m)^x): (1, 2).
+    [Arguments("(?w)(?a:(?m)^x)", "\u2028x", "none")]
+    // upstream (?a)\X: (0, 1); (?a:\X): (0, 2).
+    [Arguments(@"(?a:\X)", "e\u0301", "(0,1)")]
+    public void Word_line_and_grapheme_rules_follow_the_scopes_encoding(
+        string pattern,
+        string subject,
+        string expected
+    ) => Search(pattern, subject).Should().Be(expected, pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// Two alternatives or two characters that differ only in their encoding are never merged into
+    /// one (S91).
+    /// </summary>
+    /// <remarks>
+    /// The optimiser hoists a prefix the alternatives share, turns single characters into a set and
+    /// packs characters into one literal, each on node equality. Upstream's property and
+    /// zero-width nodes leave the encoding out of equality, so it hoisted one encoding in place of
+    /// both; the case-flag nodes would have done the same had the encoding been anywhere but in
+    /// their case flags. Measured 2026-09-25 as in
+    /// <see cref="A_case_insensitive_node_folds_with_its_scopes_encoding"/>.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">The span found, or "none".</param>
+    [Test]
+    // re: (0, 2); Perl: (0, 2); upstream: (0, 2).
+    [Arguments("(?i)(?:(?a:k)x|ky)", "\u212Ay", "(0,2)")]
+    // re: None; Perl: None; upstream: (0, 2).
+    [Arguments("(?i)(?:(?a:k)x|ky)", "\u212Ax", "none")]
+    // re: (1, 2); Perl: (1, 2); upstream: None.
+    [Arguments(@"(?:\b\u00E9|(?a:\b)\u00E9)", "x\u00E9", "(1,2)")]
+    // re: (0, 2); Perl: (0, 2); upstream: None.
+    [Arguments(@"(?:(?a:\w)x|\wy)", "\u00E9y", "(0,2)")]
+    public void Nodes_that_differ_only_in_encoding_are_not_merged(string pattern, string subject, string expected) =>
+        Search(pattern, subject).Should().Be(expected, pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// What the compiler hands the engine besides the code folds with a node's scoped encoding, or
+    /// is not handed over at all (S91).
+    /// </summary>
+    /// <remarks>
+    /// Upstream folds all three with the pattern's encoding. The firstset is a zero-width test at
+    /// the head of the code, so a wrong one refuses matches, and
+    /// <see cref="Nodes_that_differ_only_in_encoding_are_not_merged"/> shows it; the other two are
+    /// not read at match time today - the required-string search takes only a case-sensitive
+    /// string and the folded named lists are not consulted - so this pins the compiled pattern.
+    /// </remarks>
+    [Test]
+    public void The_compiled_pattern_folds_with_a_scoped_encoding_or_declines()
+    {
+        // A required string whose case folding is the scope's is not offered: the engine's
+        // required-string search would fold with the pattern's. Control: its global twin has one.
+        PatternCompiler.Compile("(?i)(?a:kx)").ReqChars.Should().BeEmpty();
+        PatternCompiler.Compile("(?ai)kx").ReqChars.Should().Equal('k', 'x');
+
+        // No firstset folds members of two encodings with one. Control: one encoding gets one.
+        ((Opcode)PatternCompiler.Compile("(?ai)(?:(?u:k)|x)y").Code[0])
+            .Should()
+            .NotBe(Opcode.SetUnionIgn);
+        ((Opcode)PatternCompiler.Compile("(?ai)(?:k|x)y").Code[0]).Should().Be(Opcode.SetUnionIgn);
+
+        // A named list folds with the encoding its reference folds with: ASCII leaves U+212A alone.
+        Dictionary<string, IReadOnlyList<string>> lists = new() { ["w"] = ["\u212A"] };
+        PatternCompiler.Compile(@"(?i)(?a:\L<w>)", namedLists: lists).NamedListIndexes[0].Should().Equal("\u212A");
+        PatternCompiler.Compile(@"(?i)\L<w>", namedLists: lists).NamedListIndexes[0].Should().Equal("k");
+    }
+
+    private static string Search(string pattern, string subject)
+    {
+        Dictionary<string, IReadOnlyCollection<string>>? lists = pattern.Contains("L<w>", StringComparison.Ordinal)
+            ? new() { ["w"] = ["k"] }
+            : null;
+        Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5), lists).Match(subject);
+
+        return m.Success ? $"({m.Index},{m.Index + m.Length})" : "none";
     }
 }
