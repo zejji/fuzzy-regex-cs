@@ -448,6 +448,20 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>capture_change</c>.</summary>
     internal long CaptureChange;
 
+    /// <summary>
+    /// NOT UPSTREAM (ledger 33): how many times a referenced group's span has changed. The part of
+    /// <see cref="CaptureChange"/> that is not a fuzzy edit, counted up and never restored, which is
+    /// why it can only make the empty-iteration stop in END_GREEDY_REPEAT more cautious.
+    /// </summary>
+    internal long GroupChange;
+
+    /// <summary>
+    /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
+    /// node index. Counted up and never restored, like <see cref="GroupChange"/>. Allocated only
+    /// for a fuzzy pattern.
+    /// </summary>
+    internal readonly long[]? SectionEdits;
+
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
 
@@ -610,6 +624,22 @@ internal sealed class MatchState : IDisposable
         {
             Repeats[r] = new RepeatData();
         }
+
+        SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+    }
+
+    /// <summary>The edits <paramref name="section"/> has charged so far, or 0 outside any section.</summary>
+    /// <param name="section">A FUZZY node, or <see langword="null"/> outside any section.</param>
+    /// <returns>The count from <see cref="SectionEdits"/>.</returns>
+    internal long EditsChargedBy(Node? section) => section is null ? 0 : SectionEdits![section.Index];
+
+    /// <summary>Counts one fuzzy edit against the section currently open, for <see cref="EditsChargedBy"/>.</summary>
+    internal void CountSectionEdit()
+    {
+        if (FuzzyNode is not null)
+        {
+            ++SectionEdits![FuzzyNode.Index];
+        }
     }
 
     /// <summary>
@@ -724,6 +754,8 @@ internal sealed class MatchState : IDisposable
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
+            repeat.GroupChange = 0;
+            repeat.SectionEdits = 0;
         }
 
         ActiveCalls.Clear();
@@ -745,6 +777,11 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
+        GroupChange = 0;
+        if (SectionEdits is not null)
+        {
+            Array.Clear(SectionEdits);
+        }
         ReqEnd = 0;
         LastIndex = 0;
         LastGroup = 0;

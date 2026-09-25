@@ -3850,15 +3850,30 @@ starts its counts at zero, and END_FUZZY adds them to the outer counts without c
 limit, so a section inside the body has a fresh budget every time round. With no maximum the
 repeat takes another deleting iteration for ever, pushing backtrack entries as it goes.
 
-**This port.** END_GREEDY_REPEAT past its minimum, with no maximum and outside any fuzzy section,
-stops at an iteration that did not move through the text, as upstream stops at the slice end.
-Inside a section the rule does not apply, because the section's own budget usually ends the loop
-and upstream's answers there must stand: `(?:\d+a0b+?){d<=2}` over `'67a0bab'` is (0, 5) with two
-deletions. It is off for a body with a capture group too, because a pass that does not move can
-set a group a later pass tests, and upstream answers those: `(?:(?(1)c|z)|()(?:x){d<=1})*$` over
-`'c'` is (0, 1) with one deletion in both. Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`.
-Not fixed, both still looping here to the 1 GB limit as upstream does to MemoryError: a repeat
-inside a section whose inner section charges nothing to it, the last line above, and a body with
-a capture group, `(?:(?(1)c|z)|()(?:x){d<=1})+d` over `'cd'` (a `SHORTCUT:` in `Matcher.cs`). Also found and not investigated:
+**This port.** END_GREEDY_REPEAT past its minimum, with no maximum, stops at an iteration that did
+not move through the text and left nothing a later iteration could see, as upstream stops at the
+slice end. "Nothing" means two things:
+
+- no referenced group changed its span, since a pass that does not move can still set a group a
+  later pass tests, and upstream answers those: `(?:(?(1)c|z)|()(?:x){d<=1})*$` over `'c'` is (0, 1)
+  with one deletion in both;
+- the fuzzy section around the repeat charged no edit, since its budget then ends the loop and
+  upstream's answers must stand: `(?:\d+a0b+?){d<=2}` over `'67a0bab'` is (0, 5) with two
+  deletions, and `(?:(?:a(?:x){d<=1})+y){d<=9}` over `'y'` is (0, 1) with eight.
+
+An iteration that meets both conditions leaves the next one exactly where it started, so upstream's
+loop there never ends, and stopping cannot change an answer upstream gives. The two counters behind
+the rule only ever count up, so a change later backtracked still counts. That can only leave
+upstream's loop in place.
+
+S88 (2026-09-23) first approximated both conditions: no enclosing section at all, and no capture
+group anywhere in the body. That left two shapes looping here to the 1 GB limit, as upstream does
+to MemoryError. **Both answer since 2026-09-25:**
+
+- `(?:(?:(?:x){d<=1})+y){e<=5}` over `'y'` is (0, 1) with two deletions, the answer upstream's own
+  end-of-slice stop gives for `(?:(?:(?:x){d<=1})+){e<=5}` over `''`;
+- `(?:(?(1)c|z)|()(?:x){d<=1})+d` over `'cd'` is (0, 2) with three deletions.
+
+Pinned by `Gaps/Engine/FuzzyEmptyIterationTests.cs`. Also found and not investigated:
 `(?b)(?:(?:x){d<=1}){1,3}y` over `'y'` gives no answer in 20 s upstream, where the same search
 without `(?b)` answers at once.

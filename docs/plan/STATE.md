@@ -23,8 +23,6 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Findings that need a slice
 
-1. Ledger 33's residuals loop to the 1 GB limit, as upstream does: `(?:(?:(?:x){d<=1})+y){e<=5}`
-   over 'y', and a body with a group, `(?:(?(1)c|z)|()(?:x){d<=1})+d` over 'cd' (`SHORTCUT:`s).
-2. Upstream `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1)
+1. Upstream `(?b)(?:(?:x){d<=1}){1,3}y` over 'y' gives no answer in 20 s; the port gives (0, 1)
    with one deletion. Not investigated (ledger 33).
-3. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).
+2. A non-fuzzy search over text outside the BMP allocates in proportion to the text (S61 notes).

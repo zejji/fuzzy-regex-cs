@@ -2534,21 +2534,35 @@ internal static class Matcher
     /// <summary>Upstream <c>push_repeat_data</c> (<c>upstream/src/_regex.c</c> line 2552).</summary>
     /// <param name="stack">The stack to push onto.</param>
     /// <param name="repeatData">The repeat to save.</param>
-    private static void PushRepeatData(ByteStack stack, RepeatData repeatData)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy)
     {
         repeatData.BodyGuardList.PushTo(stack);
         repeatData.TailGuardList.PushTo(stack);
         stack.PushSize(repeatData.Count);
         stack.PushSize(repeatData.Start);
         stack.PushSize(repeatData.CaptureChange);
+        if (fuzzy)
+        {
+            stack.PushSize(repeatData.GroupChange);
+            stack.PushSize(repeatData.SectionEdits);
+        }
     }
 
     /// <summary>Upstream <c>pop_repeat_data</c> (line 2726).</summary>
     /// <param name="stack">The stack to pop from.</param>
     /// <param name="repeatData">The repeat to restore.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData)
+    private static bool PopRepeatData(ByteStack stack, RepeatData repeatData, bool fuzzy)
     {
+        long groupChange = 0;
+        long sectionEdits = 0;
+        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        {
+            return false;
+        }
+
         if (
             !stack.PopSize(out long captureChange)
             || !stack.PopSize(out long start)
@@ -2561,6 +2575,8 @@ internal static class Matcher
         }
 
         repeatData.CaptureChange = captureChange;
+        repeatData.GroupChange = groupChange;
+        repeatData.SectionEdits = sectionEdits;
         repeatData.Start = (int)start;
         repeatData.Count = count;
         return true;
@@ -2579,7 +2595,7 @@ internal static class Matcher
     {
         foreach (RepeatData repeat in state.Repeats)
         {
-            PushRepeatData(stack, repeat);
+            PushRepeatData(stack, repeat, state.IsFuzzy);
         }
     }
 
@@ -2591,7 +2607,7 @@ internal static class Matcher
     {
         for (int r = state.Repeats.Length - 1; r >= 0; r--)
         {
-            if (!PopRepeatData(stack, state.Repeats[r]))
+            if (!PopRepeatData(stack, state.Repeats[r], state.IsFuzzy))
             {
                 return false;
             }
@@ -2757,8 +2773,17 @@ internal static class Matcher
     /// <param name="Start">Where this iteration of the body started.</param>
     /// <param name="CaptureChange">The repeat's capture-change counter before this iteration.</param>
     /// <param name="Index">The repeat index.</param>
+    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-    private readonly record struct BodyEndStateData(long Count, int Start, long CaptureChange, int Index);
+    private readonly record struct BodyEndStateData(
+        long Count,
+        int Start,
+        long CaptureChange,
+        int Index,
+        long GroupChange,
+        long SectionEdits
+    );
 
     /// <summary>
     /// Port of <c>RE_RepeatStateData</c> (lines 440-446): what <c>GREEDY_REPEAT</c> and
@@ -2770,8 +2795,18 @@ internal static class Matcher
     /// <param name="CaptureChange">The enclosing repeat's capture-change counter.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">Where the repeat was entered.</param>
+    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
-    private readonly record struct RepeatStateData(long Count, int Start, long CaptureChange, int Index, int TextPos);
+    private readonly record struct RepeatStateData(
+        long Count,
+        int Start,
+        long CaptureChange,
+        int Index,
+        int TextPos,
+        long GroupChange,
+        long SectionEdits
+    );
 
     /// <summary>
     /// Port of <c>RE_MatchBodyTailStateData</c> (lines 424-431): what a repeat parks when
@@ -2784,6 +2819,8 @@ internal static class Matcher
     /// <param name="CaptureChange">The repeat's capture-change counter to restore first.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">The position the loser is being tried at, for its own guard.</param>
+    /// <param name="GroupChange">The repeat's group-change snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct MatchBodyTailStateData(
         Position Position,
@@ -2791,7 +2828,9 @@ internal static class Matcher
         int Start,
         long CaptureChange,
         int Index,
-        int TextPos
+        int TextPos,
+        long GroupChange,
+        long SectionEdits
     );
 
     /// <summary>
@@ -2809,21 +2848,34 @@ internal static class Matcher
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_be, sizeof(data_be))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushBodyEndStateData(ByteStack stack, BodyEndStateData data, bool fuzzy)
     {
         stack.PushSize(data.Count);
         stack.PushSize(data.Start);
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
+        if (fuzzy)
+        {
+            stack.PushSize(data.GroupChange);
+            stack.PushSize(data.SectionEdits);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data)
+    private static bool PopBodyEndStateData(ByteStack stack, out BodyEndStateData data, bool fuzzy)
     {
         data = default;
+        long groupChange = 0;
+        long sectionEdits = 0;
+        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long index)
@@ -2835,29 +2887,42 @@ internal static class Matcher
             return false;
         }
 
-        data = new BodyEndStateData(count, (int)start, captureChange, (int)index);
+        data = new BodyEndStateData(count, (int)start, captureChange, (int)index, groupChange, sectionEdits);
         return true;
     }
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_r, sizeof(data_r))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushRepeatStateData(ByteStack stack, RepeatStateData data, bool fuzzy)
     {
         stack.PushSize(data.Count);
         stack.PushSize(data.Start);
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
         stack.PushSize(data.TextPos);
+        if (fuzzy)
+        {
+            stack.PushSize(data.GroupChange);
+            stack.PushSize(data.SectionEdits);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data)
+    private static bool PopRepeatStateData(ByteStack stack, out RepeatStateData data, bool fuzzy)
     {
         data = default;
+        long groupChange = 0;
+        long sectionEdits = 0;
+        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long textPos)
@@ -2870,14 +2935,23 @@ internal static class Matcher
             return false;
         }
 
-        data = new RepeatStateData(count, (int)start, captureChange, (int)index, (int)textPos);
+        data = new RepeatStateData(
+            count,
+            (int)start,
+            captureChange,
+            (int)index,
+            (int)textPos,
+            groupChange,
+            sectionEdits
+        );
         return true;
     }
 
     /// <summary>Upstream's <c>ByteStack_push_block(..., &amp;data_mbt, sizeof(data_mbt))</c>.</summary>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">What to push.</param>
-    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data)
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so carries the ledger-33 snapshot too.</param>
+    private static void PushMatchBodyTailStateData(ByteStack stack, MatchBodyTailStateData data, bool fuzzy)
     {
         stack.PushNode(data.Position.Node);
         stack.PushSize(data.Position.TextPos);
@@ -2886,20 +2960,34 @@ internal static class Matcher
         stack.PushSize(data.CaptureChange);
         stack.PushSize(data.Index);
         stack.PushSize(data.TextPos);
+        if (fuzzy)
+        {
+            stack.PushSize(data.GroupChange);
+            stack.PushSize(data.SectionEdits);
+        }
     }
 
     /// <summary>Upstream's matching <c>ByteStack_pop_block</c>.</summary>
     /// <param name="pattern">The pattern the parked node index is into.</param>
     /// <param name="stack">The backtracking stack.</param>
     /// <param name="data">Receives what was pushed.</param>
+    /// <param name="fuzzy">Whether the pattern is fuzzy, and so pushed the ledger-33 snapshot too.</param>
     /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
     private static bool PopMatchBodyTailStateData(
         PatternObject pattern,
         ByteStack stack,
-        out MatchBodyTailStateData data
+        out MatchBodyTailStateData data,
+        bool fuzzy
     )
     {
         data = default;
+
+        long groupChange = 0;
+        long sectionEdits = 0;
+        if (fuzzy && (!stack.PopSize(out sectionEdits) || !stack.PopSize(out groupChange)))
+        {
+            return false;
+        }
 
         if (
             !stack.PopSize(out long textPos)
@@ -2920,7 +3008,9 @@ internal static class Matcher
             (int)start,
             captureChange,
             (int)index,
-            (int)textPos
+            (int)textPos,
+            groupChange,
+            sectionEdits
         );
         return true;
     }
@@ -3886,6 +3976,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
@@ -3978,6 +4069,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
@@ -4069,6 +4161,7 @@ internal static class Matcher
 
         ++state.FuzzyCounts[FuzzyValue.Ins];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         node = currNode!;
 
@@ -4152,6 +4245,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -4243,6 +4337,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -4531,6 +4626,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -4635,6 +4731,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -4906,6 +5003,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         foldedPos = data.NewFoldedPos;
@@ -5031,6 +5129,7 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         ++state.CaptureChange;
+        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -6636,6 +6735,7 @@ internal static class Matcher
                         if (pattern.GroupInfoAt(privateIndex).Referenced && !SameSpanAsGroup(group, span))
                         {
                             ++state.CaptureChange;
+                            ++state.GroupChange;
                         }
 
                         state.SaveCapture(privateIndex, publicIndex, span);
@@ -6813,30 +6913,31 @@ internal static class Matcher
                         // made by a section inside the body, which starts each iteration with a fresh
                         // budget, so with no maximum upstream repeats it until MemoryError:
                         // '(?:(?:x){d<=1})+y' over 'y'. Such a repeat past its minimum stops at an
-                        // iteration that did not move through the text. A bounded repeat keeps
-                        // upstream's answer ('{1,3}' there charges three deletions), and so does one
-                        // inside a section, whose budget ends the loop: '(?:\d+a0b+?){d<=2}'. So
-                        // does a body with a capture group, where an iteration that does not move
-                        // can set a group a later one tests: '(?:(?(1)c|z)|()(?:x){d<=1})*$'. A
-                        // group call puts 'capture_change' back when it returns, and upstream
-                        // loops on '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$' too, so a call
-                        // in the body does not turn the stop off.
-                        // SHORTCUT: inside a section whose budget the inner section never draws
-                        // on, '(?:(?:(?:x){d<=1})+y){e<=5}' over 'y', the loop still runs to the
-                        // 1 GB stack limit, as upstream's does to MemoryError, because END_FUZZY
-                        // adds the inner counts to the outer ones without checking the outer limit.
-                        // The upgrade path is to record which section charged each error of an
-                        // iteration, and stop it here when the enclosing section charged none.
-                        // SHORTCUT: a body with a capture group keeps upstream's rule whole, so
-                        // '(?:(?(1)c|z)|()(?:x){d<=1})+d' over 'cd' still loops to the limit.
-                        // The upgrade path is a count of group changes kept beside
-                        // 'capture_change', so an iteration that changed no group can stop.
+                        // iteration that did not move through the text AND left nothing a later
+                        // iteration could see: no referenced group changed its span, and the section
+                        // enclosing the repeat charged no edit. Then the next iteration starts from
+                        // the same position, the same groups and the same enclosing budget, so it can
+                        // only do the same again, and upstream's loop never ends. Ledger entry 33,
+                        // completed 2026-09-25.
+                        // Each half keeps an answer upstream gives. A body that sets a group a later
+                        // pass tests goes on: '(?:(?(1)c|z)|()(?:x){d<=1})*$' over 'c'. An iteration
+                        // charged to the enclosing section goes on too, and its budget ends the loop:
+                        // '(?:\d+a0b+?){d<=2}', and '(?:(?:a(?:x){d<=1})+y){d<=5}' over 'y', which
+                        // upstream answers with four deletions. An inner section's edits are not
+                        // charged to it, because END_FUZZY adds them without checking the outer
+                        // limit - which is what made '(?:(?:(?:x){d<=1})+y){e<=5}' loop.
+                        // A bounded repeat keeps upstream's answer ('{1,3}' charges three
+                        // deletions). Both counters only count up, so an edit or a group change that
+                        // was later backtracked still counts, which can only leave upstream's loop in
+                        // place, never stop an iteration upstream would take. A group call puts
+                        // 'capture_change' back when it returns, and upstream loops on
+                        // '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$' too.
                         if (
                             changed
                             && ~node.Values[2] == 0
-                            && state.FuzzyNode is null
-                            && !pattern.RepeatInfoAt(index).BodyHasGroups
                             && state.TextPos == rpData.Start
+                            && state.GroupChange == rpData.GroupChange
+                            && state.EditsChargedBy(state.FuzzyNode) == rpData.SectionEdits
                         )
                         {
                             changed = false;
@@ -6917,7 +7018,15 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                        new BodyEndStateData(
+                            rpData.Count - 1,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            rpData.GroupChange,
+                            rpData.SectionEdits
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
@@ -6938,8 +7047,11 @@ internal static class Matcher
                                     state.TextPos,
                                     state.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    state.GroupChange,
+                                    state.EditsChargedBy(state.FuzzyNode)
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
 
@@ -6954,6 +7066,10 @@ internal static class Matcher
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
+
+                        rpData.GroupChange = state.GroupChange;
+
+                        rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -7069,7 +7185,15 @@ internal static class Matcher
                     // Record info in case we backtrack into the body.
                     PushBodyEndStateData(
                         state.Bstack,
-                        new BodyEndStateData(rpData.Count - 1, rpData.Start, rpData.CaptureChange, index)
+                        new BodyEndStateData(
+                            rpData.Count - 1,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            rpData.GroupChange,
+                            rpData.SectionEdits
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.BodyEnd);
 
@@ -7090,8 +7214,11 @@ internal static class Matcher
                                     state.TextPos,
                                     state.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    state.GroupChange,
+                                    state.EditsChargedBy(state.FuzzyNode)
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
 
@@ -7121,6 +7248,10 @@ internal static class Matcher
                         /* bstack: index text_pos BODY_START */
 
                         rpData.CaptureChange = state.CaptureChange;
+
+                        rpData.GroupChange = state.GroupChange;
+
+                        rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -7421,7 +7552,16 @@ internal static class Matcher
                     // We might need to backtrack into the head, so save the current repeat.
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                        new RepeatStateData(
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.GroupChange,
+                            rpData.SectionEdits
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.GreedyRepeat);
 
@@ -7431,6 +7571,8 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
+                    rpData.GroupChange = state.GroupChange;
+                    rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -7509,8 +7651,11 @@ internal static class Matcher
                                     rpData.Start,
                                     rpData.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    rpData.GroupChange,
+                                    rpData.SectionEdits
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchTail);
 
@@ -7807,7 +7952,16 @@ internal static class Matcher
                     // We might need to backtrack into the head, so save the current repeat.
                     PushRepeatStateData(
                         state.Bstack,
-                        new RepeatStateData(rpData.Count, rpData.Start, rpData.CaptureChange, index, state.TextPos)
+                        new RepeatStateData(
+                            rpData.Count,
+                            rpData.Start,
+                            rpData.CaptureChange,
+                            index,
+                            state.TextPos,
+                            rpData.GroupChange,
+                            rpData.SectionEdits
+                        ),
+                        state.IsFuzzy
                     );
                     state.Bstack.PushUInt8((byte)Opcode.LazyRepeat);
 
@@ -7817,6 +7971,8 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
+                    rpData.GroupChange = state.GroupChange;
+                    rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -7889,8 +8045,11 @@ internal static class Matcher
                                     rpData.Start,
                                     rpData.CaptureChange,
                                     index,
-                                    state.TextPos
-                                )
+                                    state.TextPos,
+                                    rpData.GroupChange,
+                                    rpData.SectionEdits
+                                ),
+                                state.IsFuzzy
                             );
                             state.Bstack.PushUInt8((byte)Opcode.MatchBody);
 
@@ -9971,7 +10130,7 @@ internal static class Matcher
                 {
                     /* bstack: count start capture_change index */
 
-                    if (!PopBodyEndStateData(state.Bstack, out BodyEndStateData dataBe))
+                    if (!PopBodyEndStateData(state.Bstack, out BodyEndStateData dataBe, state.IsFuzzy))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -9983,6 +10142,8 @@ internal static class Matcher
                     rpData.Count = dataBe.Count;
                     rpData.Start = dataBe.Start;
                     rpData.CaptureChange = dataBe.CaptureChange;
+                    rpData.GroupChange = dataBe.GroupChange;
+                    rpData.SectionEdits = dataBe.SectionEdits;
                     break;
                 }
                 case Opcode.BodyStart:
@@ -10203,7 +10364,7 @@ internal static class Matcher
                 {
                     /* bstack: count start capture_change index text_pos */
 
-                    if (!PopRepeatStateData(state.Bstack, out RepeatStateData dataR))
+                    if (!PopRepeatStateData(state.Bstack, out RepeatStateData dataR, state.IsFuzzy))
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10218,6 +10379,8 @@ internal static class Matcher
                     rpData.Count = dataR.Count;
                     rpData.Start = dataR.Start;
                     rpData.CaptureChange = dataR.CaptureChange;
+                    rpData.GroupChange = dataR.GroupChange;
+                    rpData.SectionEdits = dataR.SectionEdits;
                     break;
                 }
                 case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
@@ -10637,7 +10800,14 @@ internal static class Matcher
                 {
                     /* bstack: position count start capture_change index text_pos */
 
-                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    if (
+                        !PopMatchBodyTailStateData(
+                            pattern,
+                            state.Bstack,
+                            out MatchBodyTailStateData dataMbt,
+                            state.IsFuzzy
+                        )
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10649,6 +10819,8 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
+                    rpData.GroupChange = dataMbt.GroupChange;
+                    rpData.SectionEdits = dataMbt.SectionEdits;
 
                     // Record backtracking info in case the body fails to match.
                     state.Bstack.PushCode((uint)dataMbt.Index);
@@ -10666,7 +10838,14 @@ internal static class Matcher
                 {
                     /* bstack: position count start capture_change index text_pos */
 
-                    if (!PopMatchBodyTailStateData(pattern, state.Bstack, out MatchBodyTailStateData dataMbt))
+                    if (
+                        !PopMatchBodyTailStateData(
+                            pattern,
+                            state.Bstack,
+                            out MatchBodyTailStateData dataMbt,
+                            state.IsFuzzy
+                        )
+                    )
                     {
                         return MatchStatus.Illegal;
                     }
@@ -10678,6 +10857,8 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
+                    rpData.GroupChange = dataMbt.GroupChange;
+                    rpData.SectionEdits = dataMbt.SectionEdits;
 
                     // Record backtracking info in case the tail fails to match.
                     state.Bstack.PushCode((uint)dataMbt.Index);
