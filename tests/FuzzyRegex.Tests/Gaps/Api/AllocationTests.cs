@@ -27,11 +27,15 @@ public sealed class AllocationTests
     [Arguments("(?:amber lantern works){e<=2}", "nothing close to it here", FuzzyRegexOptions.IgnoreCase)]
     public void A_warm_IsMatch_allocates_nothing(string pattern, string subject, FuzzyRegexOptions options)
     {
-        FuzzyRegex regex = new(pattern, options);
-        bool expected = regex.IsMatch(subject);
+        bool expected = false;
         bool actual = false;
 
-        long allocated = AllocatedBy(() => actual = regex.IsMatch(subject));
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(pattern, options);
+            expected = regex.IsMatch(subject);
+            return () => actual = regex.IsMatch(subject);
+        });
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a predicate on a warm pattern has nothing it needs to build");
@@ -44,11 +48,15 @@ public sealed class AllocationTests
     {
         // Count walks the subject with the scanner and builds no Match, so the walk's state is
         // the only thing it could allocate, and the pattern's cache already holds one.
-        FuzzyRegex regex = new(pattern, options);
-        int expected = regex.Count(subject);
+        int expected = 0;
         int actual = 0;
 
-        long allocated = AllocatedBy(() => actual = regex.Count(subject));
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(pattern, options);
+            expected = regex.Count(subject);
+            return () => actual = regex.Count(subject);
+        });
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a count on a warm pattern has nothing it needs to build");
@@ -68,26 +76,30 @@ public sealed class AllocationTests
         // leaves the rest where any thread can take them; this does the taking on purpose. It
         // allocated 560 B here before the state kept its buffers, as upstream's state_fini keeps
         // the stack's storage on the pattern (upstream/src/_regex.c :18684).
-        FuzzyRegex regex = new(pattern, FuzzyRegexOptions.IgnoreCase);
-        bool expected = regex.IsMatch(subject);
-        Thread other = new(static () =>
-        {
-            List<byte[]> held = [];
-            for (int i = 0; i < 200; i++)
-            {
-                foreach (int size in (int[])[16, 32, 64, 128, 256, 512, 1024])
-                {
-                    held.Add(System.Buffers.ArrayPool<byte>.Shared.Rent(size));
-                }
-            }
-
-            GC.KeepAlive(held);
-        });
-        other.Start();
-        other.Join();
+        bool expected = false;
         bool actual = false;
 
-        long allocated = AllocatedBy(() => actual = regex.IsMatch(subject));
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(pattern, FuzzyRegexOptions.IgnoreCase);
+            expected = regex.IsMatch(subject);
+            Thread other = new(static () =>
+            {
+                List<byte[]> held = [];
+                for (int i = 0; i < 200; i++)
+                {
+                    foreach (int size in (int[])[16, 32, 64, 128, 256, 512, 1024])
+                    {
+                        held.Add(System.Buffers.ArrayPool<byte>.Shared.Rent(size));
+                    }
+                }
+
+                GC.KeepAlive(held);
+            });
+            other.Start();
+            other.Join();
+            return () => actual = regex.IsMatch(subject);
+        });
 
         actual.Should().Be(expected);
         allocated.Should().Be(0, "a warm pattern keeps what its state needs, whatever other threads rent");
@@ -104,16 +116,19 @@ public sealed class AllocationTests
         // One inside the slice, near its end, and one after it that must not be seen.
         "cat".CopyTo(buffer.AsSpan(16 + (1 << 20) - 10));
         "cat".CopyTo(buffer.AsSpan(buffer.Length - 20));
-        FuzzyRegex regex = new("cat");
-        _ = regex.IsMatch(slice);
-        _ = regex.Count(slice);
         bool found = false;
         int count = 0;
 
         long allocated = AllocatedBy(() =>
         {
-            found = regex.IsMatch(slice);
-            count = regex.Count(slice);
+            FuzzyRegex regex = new("cat");
+            _ = regex.IsMatch(slice);
+            _ = regex.Count(slice);
+            return () =>
+            {
+                found = regex.IsMatch(slice);
+                count = regex.Count(slice);
+            };
         });
 
         found.Should().BeTrue();
@@ -130,16 +145,19 @@ public sealed class AllocationTests
         char[] buffer = new char[1 << 20];
         buffer.AsSpan().Fill('a');
         "cat".CopyTo(buffer.AsSpan(buffer.Length - 10));
-        FuzzyRegex regex = new("cat");
-        _ = regex.IsMatch(buffer.AsSpan());
-        _ = regex.Count(buffer.AsSpan());
         bool found = false;
         int count = 0;
 
         long allocated = AllocatedBy(() =>
         {
-            found = regex.IsMatch(buffer.AsSpan());
-            count = regex.Count(buffer.AsSpan());
+            FuzzyRegex regex = new("cat");
+            _ = regex.IsMatch(buffer.AsSpan());
+            _ = regex.Count(buffer.AsSpan());
+            return () =>
+            {
+                found = regex.IsMatch(buffer.AsSpan());
+                count = regex.Count(buffer.AsSpan());
+            };
         });
 
         found.Should().BeTrue();
@@ -154,11 +172,14 @@ public sealed class AllocationTests
         // string walk builds a Match per match; this one yields an index and a length, and borrows
         // its copy and its state, so a warm walk to the end has nothing left to allocate.
         string words = string.Concat(Enumerable.Repeat("word ", 20_000));
-        FuzzyRegex regex = new(@"\w+");
-        _ = Walk(regex, words);
         int count = 0;
 
-        long allocated = AllocatedBy(() => count = Walk(regex, words));
+        long allocated = AllocatedBy(() =>
+        {
+            FuzzyRegex regex = new(@"\w+");
+            _ = Walk(regex, words);
+            return () => count = Walk(regex, words);
+        });
 
         count.Should().Be(20_000);
         allocated.Should().Be(0);
@@ -196,34 +217,75 @@ public sealed class AllocationTests
             graph[i] = new byte[16];
         }
 
-#pragma warning disable S1215 // Starting a background collection at a known moment is the test.
-        GC.Collect(); // A blocking collection first, so no background one is still running.
-        GC.Collect(2, GCCollectionMode.Forced, blocking: false);
-#pragma warning restore S1215
-        TimeSpan started = GC.GetTotalPauseDuration();
-        graph[0] = new object(); // The fresh context, nearly all of it unused.
-        bool first = true;
+        // Only the first attempt starts a collection and waits for its pause; the repeat that
+        // pause forces measures an empty call.
+        int attempt = 0;
 
         long allocated = AllocatedBy(() =>
         {
-            if (first)
+            attempt++;
+            if (attempt > 1)
             {
-                first = false;
+                return static () => { };
+            }
+
+#pragma warning disable S1215 // Starting a background collection at a known moment is the test.
+            GC.Collect(); // A blocking collection first, so no background one is still running.
+            GC.Collect(2, GCCollectionMode.Forced, blocking: false);
+#pragma warning restore S1215
+            TimeSpan started = GC.GetTotalPauseDuration();
+            graph[0] = new object(); // The fresh context, nearly all of it unused.
+            return () =>
+            {
                 long giveUp = Stopwatch.GetTimestamp() + Stopwatch.Frequency;
                 while (GC.GetTotalPauseDuration() == started && Stopwatch.GetTimestamp() < giveUp)
                 {
                     // Allocates nothing; waits at most a second for the next pause.
                 }
-            }
+            };
         });
 
         GC.KeepAlive(graph);
         allocated.Should().Be(0, "the call allocated nothing; only a collection paused it");
     }
 
+    [Test]
+    public void An_allocation_made_only_by_the_first_call_is_counted_when_a_pause_lands_in_it()
+    {
+        // The call allocates 1 KB the first time it runs after its setup, as a warm call does when
+        // it re-rents a pool buffer another thread took, and the first attempt also collects inside
+        // the call, so a pause lands in it. Repeating only the call would count 0 in the repeat.
+        int attempt = 0;
+
+        long allocated = AllocatedBy(() =>
+        {
+            attempt++;
+            bool collect = attempt == 1;
+            bool allocate = true;
+            return () =>
+            {
+                if (allocate)
+                {
+                    allocate = false;
+                    GC.KeepAlive(new byte[1024]);
+                }
+
+                if (collect)
+                {
+#pragma warning disable S1215 // A pause inside the first attempt is the test.
+                    GC.Collect();
+#pragma warning restore S1215
+                }
+            };
+        });
+
+        allocated.Should().BeGreaterThanOrEqualTo(1024, "the rebuilt scenario allocates again in the repeat");
+        attempt.Should().BeGreaterThan(1, "the collection inside the first attempt forces a repeat");
+    }
+
     /// <summary>
-    /// The bytes <paramref name="call"/> allocates on this thread, from a run of it that no garbage
-    /// collection paused.
+    /// The bytes the call that <paramref name="arrange"/> returns allocates on this thread, from a
+    /// run of it that no garbage collection paused.
     /// </summary>
     /// <remarks>
     /// <see cref="GC.GetAllocatedBytesForCurrentThread"/> counts a thread's allocation context as
@@ -234,16 +296,21 @@ public sealed class AllocationTests
     /// skips that step, so a thread that allocated nothing is charged whatever its context had left,
     /// up to about 8 KB. It happens under JIT and native AOT alike. Only a pause can cause it, and the
     /// collector adds a pause to <see cref="GC.GetTotalPauseDuration"/> before it lets the threads go
-    /// (:46874-46876), so a run that saw no pause is exact. A run that saw one is repeated; a call
-    /// that allocates shows it in the repeat too.
+    /// (:46874-46876), so a run that saw no pause is exact. A run that saw one is repeated, and the
+    /// repeat rebuilds the whole scenario, so an allocation it causes, once or every time, shows in
+    /// the repeat too. After ten attempts the last one's figure stands, pause or not.
     /// </remarks>
-    /// <param name="call">The call to measure. It may run more than once.</param>
+    /// <param name="arrange">
+    /// Builds the scenario from scratch (the pattern, its warm-up calls, anything that disturbs it)
+    /// and returns the call to measure. It may run more than once, each time before its own call.
+    /// </param>
     /// <returns>The bytes allocated.</returns>
-    private static long AllocatedBy(Action call)
+    private static long AllocatedBy(Func<Action> arrange)
     {
         long allocated = 0;
-        for (int run = 0; run < 10; run++)
+        for (int attempt = 0; attempt < 10; attempt++)
         {
+            Action call = arrange();
             TimeSpan paused = GC.GetTotalPauseDuration();
             long before = GC.GetAllocatedBytesForCurrentThread();
             call();
