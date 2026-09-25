@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import importlib.util
 import json
 import os
 import random
@@ -6961,6 +6962,21 @@ def recheck(paths: list[Path]) -> int:
             stale.append((entry, again, changes))
 
     commit = _upstream_commit()
+
+    # A CHANGED ANSWER ON A ROW WHERE UPSTREAM READS UNINITIALISED MEMORY IS NOT A CHANGE OF UPSTREAM.
+    # 38 of the 278 stored examples read ledger 5's `new_position`, so their stored answer is what
+    # MSVC's build happened to leave in that stack slot: on 2026-09-25 the same pinned upstream
+    # built by gcc crashed on 8 of them and answered 24 differently, every one MSan-flagged. Those
+    # rows are screened, and a known origin excuses them - the registry's `--reverify` is what
+    # notices upstream fixing that defect. Anything else still fails.
+    excused = []
+    if stale:
+        excused, stale = _excuse_undefined(stale)
+    for entry, _, changes in excused:
+        print(f"recheck: {entry['entry']}'s stored answer differs in {', '.join(changes)}, on a row "
+              "where upstream reads uninitialised memory from a known origin - build-dependent, not "
+              "a change of upstream", file=sys.stderr)
+
     if stale:
         for entry, again, changes in stale:
             print(f"UPSTREAM CHANGED ITS ANSWER on an example of {entry['entry']} "
@@ -6976,9 +6992,45 @@ def recheck(paths: list[Path]) -> int:
               ".claude/skills/sync-upstream/SKILL.md.", file=sys.stderr)
         return 1
 
-    print(f"recheck: all {len(exported)} known-defect examples still get their stored answer "
-          f"from upstream {commit[:12]}")
+    print(f"recheck: all {len(exported) - len(excused)} known-defect examples still get their "
+          f"stored answer from upstream {commit[:12]}"
+          + (f"; {len(excused)} more read uninitialised memory and were not compared" if excused else ""))
     return 0
+
+
+def _screen_module():
+    spec = importlib.util.spec_from_file_location("screen_undefined", REPO_ROOT / "tools" / "screen-undefined.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _excuse_undefined(stale: list, screen_rows=None) -> tuple[list, list]:
+    """Splits changed examples into (excused, still failing) by screening them under MSan.
+
+    A row is excused only when MSan finds it reading uninitialised memory AND the registry names
+    every origin; one with no finding, or an unknown origin, still fails. Without Docker nothing is
+    excused, so the run fails with the changes listed, as it would have before the screen existed.
+    `screen_rows` is injectable for `_recheck_failures`.
+    """
+    screen = _screen_module()
+    if screen_rows is None:
+        if not screen._docker_available():
+            print("recheck: stored answers changed and Docker is not available to screen them under "
+                  "MSan, so none is excused", file=sys.stderr)
+            return [], stale
+        registry = screen._load_registry()
+        screen._check_registry_current(registry)
+        screen_rows = screen.screen_rows
+    else:
+        registry = {"defects": [{"origin": "new_position in basic_match", "ledger": "ledger 5"}]}
+    findings = screen_rows([{**_question_of(entry["row"]), "_screenKey": str(i)}
+                            for i, (entry, _, _) in enumerate(stale)])
+    excused, failing = [], []
+    for i, item in enumerate(stale):
+        origins = findings.get(str(i))
+        (excused if origins and screen.attribute(origins, registry) else failing).append(item)
+    return excused, failing
 
 
 # --------------------------------------------------------------------------------------------
@@ -7324,6 +7376,16 @@ def _recheck_failures() -> list[str]:
         failures.append(f"a stored answer upstream no longer gives was reported as {changes}")
     if _answer_changes(stored, _record_row_and_its_control_answers(regex, _question_of(stored))):
         failures.append("a stored answer upstream still gives was reported as changed")
+
+    # A CHANGE IS EXCUSED ONLY ON A ROW MSAN FLAGS FROM A KNOWN ORIGIN - never on a clean row, and
+    # never on one with an unknown origin. Screened by a stub, so the rule is checked without Docker.
+    stale = [({"entry": name, "row": {"pattern": name, "subject": ""}}, {}, ["outcome"])
+             for name in ("known", "unknown", "clean")]
+    stub = {"0": ["new_position in basic_match"], "1": ["heap allocation in try_match"]}
+    excused, failing = _excuse_undefined(stale, screen_rows=lambda rows: stub)
+    if [e["entry"] for e, _, _ in excused] != ["known"] or [e["entry"] for e, _, _ in failing] != ["unknown", "clean"]:
+        failures.append(f"recheck excused {[e['entry'] for e, _, _ in excused]} and failed "
+                        f"{[e['entry'] for e, _, _ in failing]}, expected known / unknown, clean")
 
     return failures
 
