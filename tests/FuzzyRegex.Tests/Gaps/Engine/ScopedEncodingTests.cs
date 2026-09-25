@@ -61,4 +61,43 @@ public sealed class ScopedEncodingTests
         string subject,
         bool expected
     ) => FuzzyRegex.MatchAtStart(subject, pattern).Success.Should().Be(expected);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and these rows pin OUR answers rather than upstream's.
+    /// <summary>
+    /// A scope that names no encoding keeps the one around it, and a POSIX class takes the scope's
+    /// encoding as a <c>\p{...}</c> does.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's <c>parse_subpattern</c> (<c>_regex_core.py:1172</c>) resets the encoding whenever
+    /// ANY encoding flag is in force, so an inner <c>(?s:</c> or <c>(?i:</c> wiped an outer
+    /// <c>(?a:</c>; and <c>parse_posix_class</c> passes no encoding at all. Upstream answers every
+    /// row below with a match. CPython's re, which documents scoped <c>(?a:...)</c>, refuses the
+    /// first two (it has no POSIX classes); the rest follow from <c>(?a:\p{L})</c>, which upstream
+    /// itself refuses. Measured 2026-09-25 on regex 2026.9.10.
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">A non-ASCII letter.</param>
+    [Test]
+    [Arguments(@"(?a:(?s:\w))", "\u00E9")]
+    [Arguments(@"(?a:(?i:\w))", "\u00E9")]
+    [Arguments(@"(?a:(?i:\p{Lu}))", "\u00C9")]
+    [Arguments(@"(?a:(?m:\p{L}))", "\u0138")]
+    [Arguments("(?a:[[:alpha:]])", "\u00E9")]
+    [Arguments("(?a:[[:upper:]])", "\u00C9")]
+    [Arguments("(?i)(?a:[[:upper:]])", "\u00E9")]
+    [Arguments(@"(?i)(?a:[\p{Lu}x])", "\u00E9")]
+    public void An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it(string pattern, string subject) =>
+        FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeFalse(pattern);
+
+    /// <summary>The controls: the same scopes still match ASCII letters, and <c>(?u:...)</c> lifts ASCII.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    [Test]
+    [Arguments(@"(?a:(?s:\w))", "e")]
+    [Arguments(@"(?a:(?i:\p{Lu}))", "e")]
+    [Arguments("(?a:[[:alpha:]])", "e")]
+    [Arguments("(?a)(?u:[[:alpha:]])", "\u00E9")]
+    [Arguments(@"(?a:(?u:\w))", "\u00E9")]
+    public void The_scoped_encoding_controls_still_match(string pattern, string subject) =>
+        FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeTrue(pattern);
 }

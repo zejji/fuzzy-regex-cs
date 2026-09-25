@@ -1352,9 +1352,10 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
 - 2026-09-25 (owner: resolve every possible bug before optimising; research outside upstream):
   **under ASCII|IGNORECASE a cased property means the 52 ASCII letters** (ledger entry 34).
   Upstream gave three answers to one question: `match` also accepted non-ASCII letters, `search`
-  refused 'a', and the set form gave the ASCII letters. The rule is corroborated by Perl 5.42
-  (`/ai`), PCRE2 10.47 without UCP under CASELESS and Python's `re` documentation, and UTS #18
-  allows it under either reading. `Matcher.MatchesPropertyIgn` clamps the character to the
+  refused 'a', and the set form gave the ASCII letters. Perl 5.42 (`/ai`) and PCRE2 10.47 without
+  UCP give the ASCII letters for `[[:upper:]]`/`[[:lower:]]` and Python's `re` documents it for
+  `[A-Z]` (both engines read `\p{...}` as always-Unicode, so for `\p` the rule is this module's
+  own design); UTS #18 allows it under either reading. `Matcher.MatchesPropertyIgn` clamps the character to the
   encoding before the case collapse. Recorded as `ascii-ignorecase-cased-property`.
 - 2026-09-25: **the dotless-i control refuses every row where the two letters could differ another
   way** (blind review): a property upstream answers differently for them, an escape naming any
@@ -1362,3 +1363,12 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   rows record no twin; all 18 hand-judged dotless rows still classify.
 - 2026-09-25: **GUIDE.md's span-walk sample runs.** S61 left it as a fragment, so
   `check-doc-examples.ps1`, a CI gate, failed on unpushed main; it would have gone red on push.
+- 2026-09-25 (ledger entry 35, from the blind review of entry 34): **scoped encodings hold and a
+  case-insensitive property answers by one rule however it is spelt.** An inner scope keeps an
+  outer encoding (CPython's documented behaviour); a POSIX class takes the scope's encoding, as
+  `\p{...}` does; bare properties and set members share `Matcher.HasPropertyIgn`, the cased-letter
+  rule that upstream's bare form, Perl 5.42 and .NET 10's `Regex` use (upstream's sets used case
+  closure, so brackets, `x?` or an alternation changed the answer); `\p{Upper=No}` is the
+  complement. UTS #18 RL1.5 leaves the closure choice to the implementation, provided it is
+  declared; DIVERGENCES.md and COMPARISON.md declare it. This settles the owner question STATE.md
+  raised earlier the same day, on the owner's instruction to resolve ambiguities by research.

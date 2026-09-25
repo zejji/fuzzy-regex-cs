@@ -786,14 +786,51 @@ Console.WriteLine(m.Success);   // False - upstream's regex.fullmatch('aI', 'aı
 With both `(?a)` and `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}`, `\p{Lower}`, `[[:upper:]]`
 and `[[:lower:]]` match `a` to `z` and `A` to `Z`, and nothing else. Upstream answers this three
 ways: its `match` also accepts letters such as `É`, its `search` misses the lowercase `a`, and its
-set form `[\p{Lu}x]` gives the ASCII letters. Perl, PCRE2 and Python's `re` documentation all give
-the ASCII letters. Wrap the property in `(?u:...)` for the Unicode answer.
+set form `[\p{Lu}x]` gives the ASCII letters. Perl and PCRE2 give the ASCII letters for
+`[[:upper:]]` and `[[:lower:]]`, and Python's `re` documents the same rule for `[A-Z]`. Wrap the
+property in `(?u:...)` for the Unicode answer.
 
 ```csharp
 using Fuzzy.Text.RegularExpressions;
 
 Console.WriteLine(FuzzyRegex.MatchAtStart("É", @"(?ai)\p{Lu}").Success);  // False - upstream's regex.match matches
 Console.WriteLine(FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success);              // True - upstream's regex.search is None
+```
+
+### A scope that names no encoding keeps the one around it
+
+`(?a:(?s:\w))` refuses 'é' here, as Python's `re` does; upstream's inner `(?s:` drops the outer
+`(?a:` and matches it.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?s:\w))").Success);  // False - upstream matches
+```
+
+### A POSIX class takes the scope's encoding
+
+`(?a:[[:alpha:]])` refuses 'é', exactly as `(?a:\p{L})` does. Upstream reads a POSIX class with the
+pattern's tables whatever scope it sits in.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success);  // False - upstream matches
+```
+
+### A case-insensitive cased property answers the same bare and in a set
+
+Under `(?i)`, `\p{Lu}`, `\p{Ll}`, `\p{Lt}`, `\p{Upper}` and `\p{Lower}` mean "any cased letter"
+wherever they appear, which is what Perl and .NET's `Regex` do. Upstream uses that rule for a bare
+property and a different one inside a set, so wrapping a property in brackets changed its answer.
+`\p{Upper=No}` is the complement of `\p{Upper}`.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success);  // True - upstream's set form refuses
+Console.WriteLine(FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success);     // False - upstream matches
 ```
 
 ### This port's search prefilters never change the slow path's answer

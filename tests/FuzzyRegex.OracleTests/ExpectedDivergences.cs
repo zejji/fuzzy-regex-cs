@@ -826,7 +826,6 @@ internal static class ExpectedDivergences
         {"generator": "verbs", "pattern": "^(?P<g1>[A-Z]*(?<=(*SKIP)[[:alpha:]])S)", "flags": 16386, "namedLists": {}, "subject": "ııSSßßﬀ", "operation": "split", "count": 1, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}, {"number": 1, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": 1, "lastGroup": "g1", "partial": false, "codepointSpan": [0, 4]}], "pruneOutcome": {"kind": "split", "parts": ["", "ııSS", "ßßﬀ"]}}
         {"generator": "verbs", "pattern": "(?r)(?>[A-Z]++(*SKIP)[[:alpha:]])(?:[[:alpha:]](*PRUNE)){2,3}", "flags": 10, "namedLists": {}, "subject": "ıAııa ﬀ", "operation": "sub", "template": "]😀]", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "subMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}, "pruneOutcome": {"kind": "sub", "text": "]😀] ﬀ", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)(?r)\\b\\K([A-Z])(?:([^\\p{L}]+)(\\p{L}*?)(?:([a\\d])){s<=1}){1<=e<=2:[a-z]}", "flags": 2, "namedLists": {}, "subject": "ııa", "operation": "sub", "template": "\\\\", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "\\ııa", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 0, "captures": [[0, 0]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}, {"number": 2, "success": true, "index": 1, "length": 0, "captures": [[1, 0]]}, {"number": 3, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}, {"number": 4, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 2], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [1, 2]}, "codepointSpan": [0, 0]}]}
-        {"generator": "conditionals", "pattern": "(?(?=(?:ß|\\p{Lu}){3,})\\p{Lu}{1,3}?|a[A-Z])$", "flags": 16394, "namedLists": {}, "subject": "asßıS", "operation": "subf", "template": "{0[-1]}{0[0]}", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "asßıSßıS", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 3, "captures": [[2, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 5]}]}
         {"generator": "verbs", "pattern": "(?r)(?:\\S+(*PRUNE)ﬁ|ı)[A-Z]", "flags": 16394, "namedLists": {}, "subject": "ﬁﬁıı", "operation": "subf", "template": "{{", "count": 3, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": "ﬁﬁ{", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 2, "length": 2, "captures": [[2, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 4]}]}
         {"generator": "verbs", "pattern": "(?r)^(?>[A-Z]{2,4}(*PRUNE)\\p{Lu})", "flags": 16394, "namedLists": {}, "subject": "ııaaA", "operation": "sub", "template": ">\\101>", "count": 0, "oracle": "prefilter-free", "codepointSpan": null, "outcome": {"kind": "sub", "text": ">A>", "count": 1}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 5, "captures": [[0, 5]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 5]}], "atomicFreeOutcome": {"kind": "sub", "text": ">A>", "count": 1}}
         {"generator": "rows", "pattern": "(?r)(?(?=[\\p{ASCII}&&\\p{L}])[\\w\\s]|\\p{Ll})(?(?=.)[\\p{ASCII}&&\\p{L}])(?(?=[a-f])[^a-f]|[\\p{L}||\\p{N}])\\b", "flags": 16642, "namedLists": {}, "subject": "\r\u0131\u0131 \ufb01\ufb01", "operation": "split", "count": 0, "codepointSpan": null, "outcome": {"kind": "split", "parts": [" \ufb01\ufb01", ""]}, "scanMatches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [0, 3]}]}
@@ -867,6 +866,10 @@ internal static class ExpectedDivergences
     /// U+0131 by an editing tool, and the entry then matched nothing at all while every clause of it
     /// looked right. Found while writing this array.
     /// </remarks>
+    // A 25th row, `conditionals` `(?(?=(?:\u00df|\p{Lu}){3,})\p{Lu}{1,3}?|a[A-Z])$` as a sub over
+    // 'as\u00df\u0131S', left on 2026-09-25: its alternation compiles to a set, and ledger entry 35
+    // gave a set member the bare property's cased-letter rule, under which U+0131 is a cased letter
+    // without any Turkic row. Both engines now answer the same, so it is no longer a divergence.
     private static readonly string[] _turkicWithoutSpansOurs =
     [
         "sub 0 '\\u0131'",
@@ -881,7 +884,6 @@ internal static class ExpectedDivergences
         "split 1 '\\u0131\\u0131SS\\u00df\\u00df\\ufb00'",
         "sub 0 '\\u0131A\\u0131\\u0131a \\ufb00'",
         "sub 0 '\\u0131\\u0131a'",
-        "sub 0 'as\\u00df\\u0131S'",
         "sub 0 '\\ufb01\\ufb01\\u0131\\u0131'",
         "sub 0 '\\u0131\\u0131aaA'",
         // Rows 16 to 18 are S57f's, rows 74120, 76484 and 116428 of the 6000-row date-seed gate.
@@ -2671,6 +2673,36 @@ internal static class ExpectedDivergences
         .Select(static (row, i) => (Key: Question(row), Ours: _asciiIgnoreCaseCasedPropertyOurs[i]))
         .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The rows of <c>scoped-encoding-and-case-insensitive-property-rules</c>, recorded 2026-09-25 on
+    /// regex 2026.9.10: ledger entry 35's four defects, one or two rows each.
+    /// </summary>
+    private const string _scopedEncodingPropertyRulesRows = """
+        {"generator": "rows", "pattern": "(?a:(?s:\\w))", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?a:[[:alpha:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?i)[\\p{Lu}x]", "flags": 0, "namedLists": {}, "subject": "\u0138", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?i)x?\\p{Lt}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "rows", "pattern": "(?i)\\p{Upper=No}", "flags": 0, "namedLists": {}, "subject": "a", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?i)(?a:[[:upper:]])", "flags": 0, "namedLists": {}, "subject": "\u00e9", "operation": "fullmatch", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>This port's judged answer to each row of <see cref="_scopedEncodingPropertyRulesRows"/>.</summary>
+    private static readonly string[] _scopedEncodingPropertyRulesOurs =
+    [
+        "no match",
+        "no match",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "match 0:(0,1)[(0,1)] last=-1/-",
+        "no match",
+        "no match",
+    ];
+
+    /// <summary><see cref="_scopedEncodingPropertyRulesRows"/> by its question, mapped to this port's judged answer.</summary>
+    private static readonly Dictionary<string, string> _scopedEncodingPropertyRules = OracleWave
+        .ParseRows(_scopedEncodingPropertyRulesRows)
+        .Select(static (row, i) => (Key: Question(row), Ours: _scopedEncodingPropertyRulesOurs[i]))
+        .ToDictionary(static pair => pair.Key, static pair => pair.Ours, StringComparer.Ordinal);
+
     /// <summary><see cref="_atomicLeakedChangeRows"/> by its question.</summary>
     private static readonly HashSet<string> _atomicLeakedChange = OracleWave
         .ParseRows(_atomicLeakedChangeRows)
@@ -4179,6 +4211,32 @@ internal static class ExpectedDivergences
                     _groupCallLostMatchJudged.TryGetValue(Question(row), out string? judged)
                     && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
                 )
+        ),
+        new(
+            Id: "scoped-encoding-and-case-insensitive-property-rules",
+            Reason: "UPSTREAM IS WRONG IN FOUR PLACES AND THIS PORT DIVERGES ON PURPOSE - ledger entry 35. "
+                + "(A) An inner scope that names no encoding drops an outer `(?a:`: upstream's "
+                + "parse_subpattern resets the encoding whenever any encoding flag is in force "
+                + "(_regex_core.py:1172), so `(?a:(?s:\\w))` matches '\u00e9'; CPython's re, which "
+                + "documents scoped `(?a:...)`, refuses it. (B) A POSIX class ignores its scope "
+                + "(parse_posix_class passes no encoding, :1679), so `(?a:[[:alpha:]])` matches "
+                + "'\u00e9' where upstream's own `(?a:\\p{L})` refuses it. (C) A case-insensitive "
+                + "cased property answers by its spelling: bare it means any cased letter, as a set "
+                + "member it is closed under case instead and ignores the member's encoding, so "
+                + "`(?i)[\\p{Lu}x]` refuses U+0138 and `(?i)x?\\p{Lt}` refuses 'a' although the bare "
+                + "forms match; Perl 5.42 and .NET 10's Regex give the bare and the set form the "
+                + "cased-letter answer, which this port now gives everywhere. (D) `(?i)\\p{Upper=No}` "
+                + "answers as `\\p{Upper}` because the collapse ignores the value (:2981); Perl gives "
+                + "the complement, as `\\P{Upper}` is. Measured 2026-09-25 on regex 2026.9.10.\n"
+                + "KEYED ON ROWS AND ON THIS PORT'S EXACT ANSWER: the generators rarely draw scoped "
+                + "encodings or `=No` values, and the rows keep the recheck asking upstream.",
+            PinnedBy: "ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it, "
+                + "CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does "
+                + "and .A_no_value_of_a_cased_property_is_its_complement",
+            Example: _scopedEncodingPropertyRulesRows,
+            Applies: static (row, ours) =>
+                _scopedEncodingPropertyRules.TryGetValue(Question(row), out string? judged)
+                && string.Equals(ours.Describe(), judged, StringComparison.Ordinal)
         ),
         new(
             Id: "ascii-ignorecase-cased-property",

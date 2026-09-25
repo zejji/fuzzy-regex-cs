@@ -559,13 +559,17 @@ def _with_dotless_i_as_kra(regex, row: dict) -> dict | None:
         return None
     for token in set(_PROPERTY_TOKEN.findall(pattern)):
         single = f"[{token}]" if token.startswith("[:") else token
+        # Every encoding the token could be read under, not only the row's: a scoped `(?u:...)` in
+        # an ASCII row reads the property with the Unicode tables (the blind review, 2026-09-25).
         for extra in (0, regex.IGNORECASE):
-            try:
-                answers = {bool(regex.fullmatch(single, letter, (flags | extra) & ~_LOCALE_FLAG)) for letter in (_DOTLESS_I, _KRA)}
-            except Exception:
-                return None
-            if len(answers) != 1:
-                return None
+            for encoding in (regex.ASCII, 0):
+                try:
+                    token_flags = ((flags & ~regex.ASCII) | encoding | extra) & ~_LOCALE_FLAG
+                    answers = {bool(regex.fullmatch(single, letter, token_flags)) for letter in (_DOTLESS_I, _KRA)}
+                except Exception:
+                    return None
+                if len(answers) != 1:
+                    return None
 
     def swap(text):
         return text.replace(_DOTLESS_I, _KRA) if isinstance(text, str) else text
@@ -7410,7 +7414,7 @@ def _self_check() -> int:
     # same question: a case-mapping property, a codepoint escape, a non-ASCII range, LOCALE.
     for door in ({"pattern": r"\p{CWU}"}, {"pattern": r"(?i)\p{CWCM}"}, {"pattern": r"\u0131"},
                  {"pattern": r"\N{LATIN SMALL LETTER DOTLESS I}"}, {"pattern": "[a-\u0131]"},
-                 {"pattern": "[\u0131-z]"}, {"template": r"\x{131}"}, {"template": r"\461"}, {"pattern": r"\U00000138"}, {"pattern": r"[\u0130-\u0137]"}, {"flags": 4}):
+                 {"pattern": "[\u0131-z]"}, {"template": r"\x{131}"}, {"template": r"\461"}, {"pattern": r"\U00000138"}, {"pattern": r"[\u0130-\u0137]"}, {"pattern": r"(?u:\p{CWU})", "flags": 130}, {"flags": 4}):
         if _with_dotless_i_as_kra(regex, {**dotless, **door}) is not None:
             failures.append(f"the dotless-i twin swapped a row it cannot swap cleanly: {door!a}")
     if _with_dotless_i_as_kra(regex, {**dotless, "pattern": "(?i)\\p{Lu}\u0131[[:alpha:]]"}) is None:

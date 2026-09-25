@@ -1622,8 +1622,13 @@ internal static class ParseFunctions
         int savedFlags = info.Flags;
         info.Flags = (info.Flags | flagsOn) & ~flagsOff;
 
-        // Ensure that there aren't multiple encoding flags set.
-        if ((info.Flags & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
+        // Ensure that there aren't multiple encoding flags set: a scope that names an encoding
+        // replaces the one in force. DIVERGES FROM UPSTREAM, deliberately: upstream tests the
+        // combined flags (`info.flags & (ASCII | LOCALE | UNICODE)`, _regex_core.py:1172), so an
+        // outer `(?a:` alone triggers the reset and an inner scope that names no encoding wipes
+        // it - `(?a:(?s:\w))` matched '\xe9' where CPython's re, which documents scoped `(?a:...)`,
+        // refuses it (measured 2026-09-25). Testing the NEW flags is what the comment asks for.
+        if ((flagsOn & (RegexFlags.Ascii | RegexFlags.Locale | RegexFlags.Unicode)) != 0)
         {
             info.Flags = (info.Flags & ~RegexFlags.AllEncodings) | flagsOn;
         }
@@ -2461,16 +2466,21 @@ internal static class ParseFunctions
 
     /// <summary>Upstream <c>parse_posix_class</c> (lines 1679-1686).</summary>
     /// <param name="source">The scanner.</param>
-    /// <param name="info">The parse state; upstream takes it and does not use it.</param>
+    /// <param name="info">The parse state, for the encoding in force.</param>
     /// <returns>The property the class stands for.</returns>
+    /// <remarks>
+    /// DIVERGES FROM UPSTREAM, deliberately: the class takes the scope's encoding, as a <c>\p{...}</c>
+    /// does (<see cref="PropertyEncoding"/>). Upstream passes none, so <c>(?a:[[:alpha:]])</c> in a
+    /// Unicode pattern answered with the Unicode tables and matched '\xe9' - although the README
+    /// says a POSIX class is "an alternative form of <c>\p{...}</c>" and <c>(?a:\p{L})</c> refuses it
+    /// (measured 2026-09-25 on regex 2026.9.10).
+    /// </remarks>
     /// <exception cref="ParseErrorException">
     /// This is not a POSIX class after all, which <see cref="ParseSetItem"/> catches. An unknown
     /// class name raises <see cref="FuzzyRegexParseException"/> instead, which it does not.
     /// </exception>
     internal static Property ParsePosixClass(Source source, Info info)
     {
-        _ = info;
-
         bool negate = source.MatchText("^");
         (string? propName, string name) = ParsePropertyName(source);
         if (!source.MatchText(":]"))
@@ -2478,7 +2488,7 @@ internal static class ParseFunctions
             throw new ParseErrorException();
         }
 
-        return LookupProperty(propName, name, !negate, source, posix: true);
+        return LookupProperty(propName, name, !negate, source, posix: true, encoding: PropertyEncoding(info));
     }
 
     /// <summary>Upstream <c>float_to_rational</c> (lines 1688-1697).</summary>

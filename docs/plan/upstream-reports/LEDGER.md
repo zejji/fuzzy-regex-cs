@@ -3987,16 +3987,83 @@ plain `ascii_has_property` call). The set form checks each case variant through 
 | PCRE2 10.47, no UCP | `[[:upper:]]` and `[[:lower:]]` under CASELESS | a, A |
 | Python `re` docs | `[A-Z]` under ASCII and IGNORECASE | "only letters 'a' to 'z' and 'A' to 'Z' are matched" |
 
-UTS #18 (revision 25) RL1.5 leaves case closure of classes to the implementation; under either the
-closure reading or Perl's cased-letter reading the answer here is the ASCII letters. Upstream's
+Perl and PCRE2 speak only for the POSIX forms: both treat `\p{...}` as always-Unicode, whatever
+`/a` or UCP says (Perl's `\p{Lu}` under `/ai` answers a, A, é, É and ĸ; the blind review,
+2026-09-25). For `\p{...}` the rule rests on this module's own design instead: ASCII applies to a
+property (`ascii_has_property`, `:822`, and `(?a)\p{Lu}` refuses É), and the README calls a POSIX
+class "an alternative form of `\p{...}`". UTS #18 (revision 25) RL1.5 leaves case closure of classes
+to the implementation; under either the closure reading or Perl's cased-letter reading the answer
+here is the ASCII letters. Upstream's
 literals and ranges under ASCII|IGNORECASE (`k`, `[a-z]`, `(k)\1` against U+212A, U+017F, U+0130,
 U+0131) agree with CPython `re` on all 98 rows tried, so only the cased properties are affected.
 
 **This port.** It had copied the matcher's arm, so it matched É under `(?ai)\p{Lu}`.
 `Matcher.MatchesPropertyIgn` now clamps the character to the encoding first
-(`Encodings.ClampToEncoding`), and every path uses that one predicate, so `match` and `search` both
-answer the ASCII letters. **Proposed fix upstream:** clamp in the ASCII arm of
+(`Encodings.ClampToEncoding`). Bare properties and set members share that predicate since ledger
+entry 35, so `match`, `search` and the set form all answer the ASCII letters. **Proposed fix upstream:** clamp in the ASCII arm of
 `matches_PROPERTY_IGN`, and collapse in `ascii_has_property_ign`.
 
 **Tests.** `Gaps/Engine/CaseInsensitiveMatchingTests.A_cased_property_under_ascii_and_ignore_case_matches_only_ascii_letters`;
 the oracle pin is `ascii-ignorecase-cased-property`.
+
+---
+
+## 35. Scoped encodings are lost, a POSIX class ignores its scope, and a case-insensitive property answers by its spelling - FIXED HERE (2026-09-25)
+
+**Status:** not filed, per the owner's rule. Found by the blind review of ledger entry 34's fix.
+Four defects, each measured on `regex` 2026.9.10 and answered the same way by this port until the
+fix:
+
+**A. An inner scope wipes an outer encoding.** `parse_subpattern` (`_regex_core.py:1172`) resets the
+encoding when ANY encoding flag is in force, where its comment means "when the new scope names
+one", so an inner scope that names none drops an outer `(?a:`:
+
+```python
+>>> regex.fullmatch(r'(?a:(?s:\w))', '\xe9'), re.fullmatch(r'(?a:(?s:\w))', '\xe9')
+(<regex.Match object; span=(0, 1), match='é'>, None)
+```
+
+CPython's `re` documents scoped `(?a:...)` and refuses. So does `(?a:\w)` upstream.
+
+**B. A POSIX class ignores its scope.** `parse_posix_class` (`:1679`) passes no encoding to
+`lookup_property`, where `parse_property` passes the scope's: `(?a:[[:alpha:]])` matches é while
+`(?a:\p{L})` refuses it, although the README calls a POSIX class "an alternative form of `\p{...}`".
+Perl 5.42 refuses `(?a:[[:alpha:]])` over é.
+
+**C. A case-insensitive property answers by its spelling.** A bare `\p{Lu}`, `\p{Ll}`, `\p{Lt}`,
+`\p{Upper}` or `\p{Lower}` under IGNORECASE means any cased letter (`matches_PROPERTY_IGN`,
+`:2937`); the same property as a set member checks each case variant against the plain property
+instead (`matches_member_ign`, `:3085`), ignoring the member's own encoding too. Upstream:
+
+| Pattern | Subject | Answer |
+|---|---|---|
+| `(?i)\p{Lu}` | U+0138 | match |
+| `(?i)[\p{Lu}x]` | U+0138 | None |
+| `(?i)\p{Lt}` | 'a' | match |
+| `(?i)x?\p{Lt}`, `(?i)y*\p{Lt}`, `(?i)[\p{Lt}x]` | 'a' | None |
+| `(?i)(?a:[[:upper:]])` | 'é' | match |
+
+Which rule is right is the implementation's choice (UTS #18 RL1.5 asks only that it be stated), but
+one pattern cannot have two. Perl 5.42 and .NET 10's `Regex` both give the bare property and the set
+the cased-letter answer over a, A, é, É, U+0138, U+01C5 and the Kelvin sign.
+
+**D. `\p{Upper=No}` under IGNORECASE is `\p{Upper}`.** The collapse at `:2981` tests only the
+property, not the value asked for: `regex.fullmatch(r'(?i)\p{Upper=No}', 'a')` matches. `\P{Upper}`
+is the complement, and Perl answers `\p{Upper=N}` and `\p{Lowercase=No}` under `/i` as the
+complement too.
+
+**This port.** A: `ParseSubpattern` tests the new flags. B: `ParsePosixClass` passes the scope's
+encoding. C: bare properties and set members share `Matcher.HasPropertyIgn`, the cased-letter rule
+under the member's own encoding. D: the value 0 of Uppercase or Lowercase is the complement. Over
+1,056 spellings-of-one-question (bare, set, alternation, `x?`, groups, `{1}`, double negation,
+`(?r)`) under eight scopes, the port now gives one answer everywhere except the Kelvin sign and
+long s inside a scoped `(?a:...)` under IGNORECASE, which is the next defect: a case-insensitive
+literal, range or set folds with the pattern's encoding rather than its scope's
+(`(?i)(?a:k)` matches the Kelvin sign here and upstream, and CPython refuses). STATE.md holds it.
+
+**Proposed fix upstream:** the same four changes.
+
+**Tests.** `Gaps/Engine/ScopedEncodingTests.An_inner_scope_or_a_posix_class_keeps_the_ascii_scope_around_it`,
+`CaseInsensitiveMatchingTests.A_cased_property_in_a_set_answers_as_the_bare_property_does` and
+`.A_no_value_of_a_cased_property_is_its_complement`; the oracle pin is
+`scoped-encoding-and-case-insensitive-property-rules`.

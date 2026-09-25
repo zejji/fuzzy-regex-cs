@@ -432,9 +432,36 @@ internal static class Matcher
     /// <param name="node">The <c>PROPERTY_IGN</c> node.</param>
     /// <param name="ch">The codepoint.</param>
     /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
-    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch)
+    internal static bool MatchesPropertyIgn(CaseEncoding encoding, Node node, uint ch) =>
+        HasPropertyIgn(NodeEncoding(encoding, node), node.Values[0], ch);
+
+    /// <summary>
+    /// Whether a codepoint has a property, ignoring case, under an encoding: the one predicate a
+    /// bare <c>\p{...}</c> and the same property inside a set both answer through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Under IGNORECASE <c>\p{Lu}</c>, <c>\p{Ll}</c> and <c>\p{Lt}</c> mean any cased letter, and
+    /// <c>\p{Uppercase}</c> and <c>\p{Lowercase}</c> mean Cased. That is upstream's bare-property
+    /// rule and the rule Perl 5.42 and .NET 10's <c>Regex</c> apply to a bare property and a set
+    /// alike (measured 2026-09-25). UTS #18 RL1.5 lets an implementation choose, provided it says.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM in two places, deliberately. Upstream's set members check each case
+    /// variant with the plain property instead (<c>matches_member_ign</c>, <c>:3085</c>), so
+    /// <c>(?i)\p{Lu}</c> matched U+0138 and <c>(?i)[\p{Lu}x]</c> did not, and a rewrite that
+    /// turned an alternation into a set changed the answer (<c>(?i)\p{Lt}|z</c> refused 'a' where
+    /// <c>(?i)\p{Lt}</c> matched it). And upstream collapses Uppercase and Lowercase whatever the
+    /// value asked for (<c>:2981</c>), so <c>(?i)\p{Upper=No}</c> answered as <c>\p{Upper}</c>;
+    /// here the value 0, "No", is the complement, as <c>\P{Upper}</c> is and as Perl answers.
+    /// </para>
+    /// </remarks>
+    /// <param name="encoding">The encoding that applies to the node or member.</param>
+    /// <param name="property">The packed property code.</param>
+    /// <param name="ch">The codepoint.</param>
+    /// <returns><see langword="true"/> if the codepoint has the property, ignoring case.</returns>
+    internal static bool HasPropertyIgn(CaseEncoding encoding, uint property, uint ch)
     {
-        uint property = node.Values[0];
         uint prop = property >> 16;
 
         // DIVERGES FROM UPSTREAM, deliberately: under ASCII the character is clamped BEFORE the
@@ -445,10 +472,8 @@ internal static class Matcher
         // means the 52 ASCII letters: so Perl 5.42 answers for `[[:upper:]]` under /ai, PCRE2
         // 10.47 without UCP under CASELESS, and Python's re documents the same rule for [A-Z]
         // under ASCII|IGNORECASE (measured 2026-09-25; ledger entry 34).
-        ch = Encodings.ClampToEncoding(NodeEncoding(encoding, node), ch);
+        ch = Encodings.ClampToEncoding(encoding, ch);
 
-        // Upstream's Unicode and ASCII arms are the same three tests; only the fall-through
-        // differs, and Encodings.HasProperty is where that difference already lives.
         if (property is Encodings.PropGcLu or Encodings.PropGcLl or Encodings.PropGcLt)
         {
             uint value = UnicodeTables.GetGeneralCategory(ch);
@@ -458,11 +483,13 @@ internal static class Matcher
 
         if (prop is UnicodeTables.PropUppercase or UnicodeTables.PropLowercase)
         {
-            return UnicodeTables.GetCased(ch) != 0;
+            bool cased = UnicodeTables.GetCased(ch) != 0;
+
+            return (property & 0xFFFF) != 0 ? cased : !cased;
         }
 
         // The property is case-insensitive.
-        return Encodings.HasProperty(NodeEncoding(encoding, node), property, ch);
+        return Encodings.HasProperty(encoding, property, ch);
     }
 
     /// <summary>Upstream <c>matches_member</c> (line 3025).</summary>
@@ -632,7 +659,9 @@ internal static class Matcher
 
                     break;
                 case Opcode.Property:
-                    if (Encodings.HasProperty(encoding, member.Values[0], cases[i]))
+                    // The member's own encoding and the bare property's case rule: see
+                    // HasPropertyIgn. Upstream used neither (matches_member_ign, :3085).
+                    if (HasPropertyIgn(NodeEncoding(encoding, member), member.Values[0], cases[i]))
                     {
                         return true;
                     }

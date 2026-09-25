@@ -471,4 +471,61 @@ public sealed class CaseInsensitiveMatchingTests
 
         (m.Index, m.Length).Should().Be((expectedIndex, expectedLength));
     }
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// Every spelling of one case-insensitive property question gives one answer: bare, in a set,
+    /// in an alternation, after an optional item.
+    /// </summary>
+    /// <remarks>
+    /// Under IGNORECASE a cased property means any cased letter, the rule Perl 5.42 and .NET 10's
+    /// <c>Regex</c> apply to a bare property and a set alike, and upstream's for a bare property
+    /// (UTS #18 RL1.5 lets an implementation choose). Upstream's set members used case closure
+    /// instead, so its answer turned on the spelling. Upstream, measured 2026-09-25 on regex
+    /// 2026.9.10, over U+0138 and 'a':
+    /// <code>
+    /// (?i)\p{Lu}      U+0138 match      (?i)[\p{Lu}x]   U+0138 None
+    /// (?i)\p{Lt}      'a'    match      (?i)x?\p{Lt}    'a'    None     (?i)[\p{Lt}x]  'a' None
+    /// </code>
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    [Test]
+    [Arguments(@"(?i)[\p{Lu}x]", "\u0138")]
+    [Arguments(@"(?i)\p{Lu}|z", "\u0138")]
+    [Arguments(@"(?i)[\p{Lt}x]", "a")]
+    [Arguments(@"(?i)\p{Lt}|z", "a")]
+    [Arguments(@"(?i)x?\p{Lt}", "a")]
+    [Arguments(@"(?i)y*\p{Lt}", "a")]
+    [Arguments(@"(?ai)x?\p{Lt}", "a")]
+    [Arguments(@"(?ai)[\p{Lt}x]", "a")]
+    [Arguments(@"(?i)[[:upper:]x]", "\u0138")]
+    public void A_cased_property_in_a_set_answers_as_the_bare_property_does(string pattern, string subject) =>
+        FuzzyRegex.FullMatch(subject, pattern).Success.Should().BeTrue(pattern);
+
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
+    /// <summary>
+    /// <c>\p{Upper=No}</c> under IGNORECASE is the complement of <c>\p{Upper}</c>, as
+    /// <c>\P{Upper}</c> is.
+    /// </summary>
+    /// <remarks>
+    /// Upstream collapses Uppercase and Lowercase whatever value was asked for
+    /// (<c>_regex.c:2981</c>), so <c>regex.fullmatch(r'(?i)\p{Upper=No}', 'a')</c> matches.
+    /// Perl 5.42 answers <c>\p{Upper=N}</c> and <c>\p{Lowercase=No}</c> under <c>/i</c> with no
+    /// match over 'a' and 'A', and a match over '1' (measured 2026-09-25).
+    /// </remarks>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <param name="expected">Whether it matches.</param>
+    [Test]
+    [Arguments(@"(?i)\p{Upper=No}", "a", false)]
+    [Arguments(@"(?i)\p{Upper=No}", "A", false)]
+    [Arguments(@"(?i)\p{Upper=No}", "1", true)]
+    [Arguments(@"(?i)\p{Lowercase=False}", "A", false)]
+    [Arguments(@"(?i)\p{Lowercase=False}", "1", true)]
+    [Arguments(@"(?ai)\p{Upper=No}", "\u00E9", true)]
+    [Arguments(@"(?ai)\P{Upper}", "\u00E9", true)]
+    [Arguments(@"(?i)[\p{Upper=No}x]", "a", false)]
+    public void A_no_value_of_a_cased_property_is_its_complement(string pattern, string subject, bool expected) =>
+        FuzzyRegex.FullMatch(subject, pattern).Success.Should().Be(expected, pattern);
 }

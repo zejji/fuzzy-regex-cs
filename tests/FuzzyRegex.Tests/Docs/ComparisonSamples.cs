@@ -314,6 +314,24 @@ public sealed class ComparisonSamples
         FuzzyRegex.Match("a", @"(?ai)\p{Lu}").Success.Should().BeTrue();
     }
 
+    /// <summary>"A scope that names no encoding keeps the one around it".</summary>
+    [Test]
+    public void A_scope_that_names_no_encoding_keeps_the_one_around_it() =>
+        FuzzyRegex.FullMatch("\u00E9", @"(?a:(?s:\w))").Success.Should().BeFalse();
+
+    /// <summary>"A POSIX class takes the scope's encoding".</summary>
+    [Test]
+    public void A_posix_class_takes_the_scopes_encoding() =>
+        FuzzyRegex.FullMatch("\u00E9", "(?a:[[:alpha:]])").Success.Should().BeFalse();
+
+    /// <summary>"A case-insensitive cased property answers the same bare and in a set".</summary>
+    [Test]
+    public void A_case_insensitive_cased_property_answers_the_same_bare_and_in_a_set()
+    {
+        FuzzyRegex.FullMatch("\u0138", @"(?i)[\p{Lu}x]").Success.Should().BeTrue();
+        FuzzyRegex.FullMatch("a", @"(?i)\p{Upper=No}").Success.Should().BeFalse();
+    }
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()
