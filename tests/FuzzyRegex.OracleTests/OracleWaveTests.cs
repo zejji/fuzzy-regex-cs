@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AwesomeAssertions;
 
 namespace Fuzzy.Text.RegularExpressions.OracleTests;
@@ -102,7 +103,30 @@ public sealed class OracleWaveTests
         wave.Rows.Should().NotBeEmpty("an empty wave would agree with anything");
 
         OracleRunSummary run = OracleComparer.RunWave(wave.Rows, OracleComparer.Run);
-        string summary = OracleWave.WriteReport(wave.Header, wave.Rows.Count, run.Tally, run.Divergences, run.Expected);
+        string summary = OracleWave.WriteReport(
+            wave.Header,
+            wave.Rows.Count,
+            run.Tally,
+            run.Divergences,
+            run.Expected,
+            run.Faults,
+            run.Undefined
+        );
+        OracleWave.WriteScreenCandidates(run.ScreenCandidates);
+
+        // An upstream crash nobody has attributed, or uninitialised memory from an unknown origin:
+        // checked first, because a wave whose ground truth is in doubt answers nothing else.
+        run.Faults.Count.Should()
+            .Be(
+                0,
+                "{0}. Upstream gave no usable answer on these rows, and no known defect accounts for "
+                    + "them - run tools/screen-undefined.py, then triage any new origin into "
+                    + "docs/plan/upstream-reports/LEDGER.md. Full report at {1}. First:{2}{3}",
+                summary,
+                OracleWave.ReportPath,
+                Environment.NewLine,
+                run.Faults.Count > 0 ? run.Faults[0] : ""
+            );
 
         // Count, not the collection: a wave is hundreds of rows, and a failure that dumps every
         // block is unreadable. The report file holds them all.
@@ -412,6 +436,10 @@ public sealed class OracleWaveTests
         // without removing the entry, the row stops diverging and this goes red - which is what
         // Chromium's TestExpectations lacks and pytest's xfail_strict has.
         ExpectedDivergences.All.Should().NotBeEmpty();
+
+        // The other direction, and the one this test cannot check itself: upstream's half of each
+        // example is re-asked by `record-oracle.py --recheck`, which run-oracle.ps1 runs on this file.
+        OracleWave.WriteExpectedExamples(ExpectedDivergences.All);
 
         foreach (ExpectedDivergence entry in ExpectedDivergences.All)
         {
@@ -1150,6 +1178,145 @@ public sealed class OracleWaveTests
         // The whole tally, so a future edit cannot fold it back into `unsupported` and make an
         // upstream blowup read as a gap in this port's coverage.
         run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Resource] = 1 });
+    }
+
+    [Test]
+    public void A_row_upstream_crashed_on_is_never_put_to_this_port_and_fails_the_run()
+    {
+        // 2026-09-24: upstream's C engine segfaulted on a `verbs` row on Linux, and the recorder now
+        // records such a row as `crashed` instead of dying with it. It has no answer at all, so it is
+        // not compared - and until the MSan screen has explained it, it is not a known defect either,
+        // so it FAILS THE RUN: a crash nobody has attributed is exactly what must not pass quietly.
+        OracleRow crashed = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "(?r)(?:[a]*+(*SKIP)b|a).*?(*SKIP)[^\\d]", "flags": 0, "namedLists": {}, "subject": "bba\naAA\r", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
+            """
+        )[0];
+
+        crashed.Expected.Should().Be(new CrashedOutcome(-11, ReproducedAlone: true));
+        OracleComparer.Compare(crashed, new NoMatchOutcome()).Should().Be(OracleVerdict.Fault);
+
+        var asked = new List<int>();
+        OracleRunSummary run = OracleComparer.RunWave(
+            [crashed],
+            row =>
+            {
+                asked.Add(row.Number);
+                return new NoMatchOutcome();
+            }
+        );
+
+        asked.Should().BeEmpty("a row upstream never answered is asked of nothing");
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Fault] = 1 });
+        run.Divergences.Should().BeEmpty("a crash is not a disagreement between the engines");
+        run.Faults.Should().ContainSingle().Which.Should().StartWith("FAULT row 1 (verbs)");
+    }
+
+    [Test]
+    public void A_row_the_screen_attributes_to_a_known_upstream_defect_is_counted_and_not_compared()
+    {
+        // The MSan screen (tools/screen-undefined.py) annotates a row on which upstream read memory
+        // it never initialised. Its answer - crashed or not - is whatever that memory held, so it is
+        // no ground truth; a KNOWN origin is accounted for and does not fail the run.
+        OracleRow known = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "\\b(?:\\D(*SKIP))+", "flags": 0, "namedLists": {}, "subject": "ab", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": []}, "undefinedBehaviour": {"origins": ["new_position in basic_match"], "known": "ledger 5"}}
+            """
+        )[0];
+
+        known
+            .UndefinedBehaviour.Should()
+            .BeEquivalentTo(new UndefinedBehaviour(["new_position in basic_match"], "ledger 5"));
+        OracleComparer.Compare(known, new NoMatchOutcome()).Should().Be(OracleVerdict.Undefined);
+
+        OracleRunSummary run = OracleComparer.RunWave([known], static _ => new NoMatchOutcome());
+        run.Tally.Should().Equal(new Dictionary<OracleVerdict, int> { [OracleVerdict.Undefined] = 1 });
+        run.Faults.Should().BeEmpty();
+        run.Undefined.Should().ContainSingle().Which.Should().StartWith("UNDEFINED ledger 5 row 1 (verbs)");
+    }
+
+    [Test]
+    public void A_row_whose_undefined_behaviour_has_no_known_origin_fails_the_run()
+    {
+        // A NEW upstream defect: the screen found uninitialised memory it cannot attribute to any
+        // ledger entry. Not compared - the answer is garbage - and red, because it needs a ledger
+        // entry and a judgement before any wave containing it can be trusted.
+        OracleRow unknown = OracleWave.ParseRows(
+            """
+            {"generator": "verbs", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": false}, "undefinedBehaviour": {"origins": ["some_other_local in try_match"], "known": null}}
+            """
+        )[0];
+
+        OracleComparer.Compare(unknown, new NoMatchOutcome()).Should().Be(OracleVerdict.Fault);
+        OracleRunSummary run = OracleComparer.RunWave([unknown], static _ => new NoMatchOutcome());
+        run.Faults.Should().ContainSingle().Which.Should().Contain("some_other_local in try_match");
+    }
+
+    [Test]
+    public void The_rows_offered_to_the_screen_are_exactly_those_whose_verdict_rests_on_upstreams_answer()
+    {
+        // tools/screen-undefined.py re-records these under MSan. An AGREEING row is not offered: the
+        // port has no uninitialised memory, so it agrees with a garbage answer only by coincidence.
+        // A row the screen has already annotated is not offered again.
+        IReadOnlyList<OracleRow> rows = OracleWave.ParseRows(
+            """
+            {"generator": "literals", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "a", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "literals", "pattern": "b", "flags": 0, "namedLists": {}, "subject": "b", "operation": "search", "codepointSpan": [0, 1], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+            {"generator": "verbs", "pattern": "c", "flags": 0, "namedLists": {}, "subject": "c", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}}
+            {"generator": "verbs", "pattern": "d", "flags": 0, "namedLists": {}, "subject": "d", "operation": "search", "codepointSpan": null, "outcome": {"kind": "crashed", "exitCode": -11, "reproducedAlone": true}, "undefinedBehaviour": {"origins": ["new_position in basic_match"], "known": "ledger 5"}}
+            """
+        );
+
+        // Row 2 is made to diverge by an engine that answers "no match" to it alone.
+        OracleRunSummary run = OracleComparer.RunWave(
+            rows,
+            static row =>
+                string.Equals(row.Pattern, "b", StringComparison.Ordinal)
+                    ? new NoMatchOutcome()
+                    : OracleComparer.Run(row)
+        );
+
+        run.ScreenCandidates.Should().Equal(2, 3);
+    }
+
+    [Test]
+    public void Every_example_row_is_exported_with_its_entry_for_the_recorder_to_ask_upstream_again()
+    {
+        // `record-oracle.py --recheck` reads this: one line per example row, carrying the entry's
+        // id beside the row exactly as the entry stores it, answers and all - the stored answer is
+        // what is checked against upstream's answer now.
+        string exported = OracleWave.RenderExpectedExamples(ExpectedDivergences.All);
+
+        string[] lines = exported.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        int rows = ExpectedDivergences.All.Sum(static entry => OracleWave.ParseRows(entry.Example).Count);
+        lines.Should().HaveCount(rows, "every example row of every entry, and nothing else");
+
+        using var first = JsonDocument.Parse(lines[0]);
+        ExpectedDivergence entry = ExpectedDivergences.All[0];
+        first.RootElement.GetProperty("entry").GetString().Should().Be(entry.Id);
+        OracleWave
+            .ParseRows(first.RootElement.GetProperty("row").GetRawText())[0]
+            .Should()
+            .BeEquivalentTo(OracleWave.ParseRows(entry.Example)[0]);
+    }
+
+    [Test]
+    public void The_summary_line_counts_faults_and_undefined_rows_where_the_sweep_still_reads_it()
+    {
+        // tools/sweep-seeds.ps1 finds the line with `^agree \d` and reads `diverge (\d+)` off it,
+        // so the two new counts go in the middle and neither match moves.
+        var tally = new Dictionary<OracleVerdict, int>
+        {
+            [OracleVerdict.Agree] = 5,
+            [OracleVerdict.Undefined] = 2,
+            [OracleVerdict.Fault] = 1,
+        };
+        OracleWave
+            .Summary(8, tally)
+            .Should()
+            .Be(
+                "agree 5  unsupported 0  expected 0  timeout 0  resource 0  undefined 2  fault 1  diverge 0  of 8 rows"
+            );
     }
 
     [Test]

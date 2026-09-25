@@ -264,6 +264,12 @@
 .PARAMETER SkipRecord
     Re-run the consumer against the wave already on disk, without recording a new one.
 
+.PARAMETER Screen
+    Auto (the default) screens, under MemorySanitizer, every row whose verdict rests on upstream's
+    answer - fault, diverge and expected - whenever Docker is available, and re-runs the consumer if
+    the screen annotated any. Never skips it. See tools/screen-undefined.py for why, and for the
+    upstream-commit gate that stops the run when the known-defect registry is stale.
+
 .EXAMPLE
     tools/run-oracle.ps1
     tools/run-oracle.ps1 -Count 2000
@@ -278,7 +284,8 @@ param(
     [int]$Count = 300,
     [string]$Rows,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
-    [switch]$SkipRecord
+    [switch]$SkipRecord,
+    [ValidateSet('Auto', 'Never')][string]$Screen = 'Auto'
 )
 
 Set-StrictMode -Version Latest
@@ -310,6 +317,8 @@ $runs = @(
 )
 
 $failed = @()
+$recheckDone = $false
+$recheckFailed = $false
 
 foreach ($seed in $runs) {
     if ($seed -ge 0) {
@@ -329,9 +338,14 @@ foreach ($seed in $runs) {
 
         python @recorderArgs
         if ($LASTEXITCODE -ne 0) {
-            # A wave that did not record is not a wave that agreed. The most likely cause by far is
-            # the version policy: `pip install regex` on a dev machine, or a stale submodule.
-            Write-Host 'Oracle: RED - the recorder failed, so nothing was compared.' -ForegroundColor Red
+            # A wave that did not record is not a wave that agreed. The recorder's own message is
+            # above; the exit code says which kind of failure it was. Since 2026-09-25 a row that
+            # crashes upstream no longer ends here - the recorder supervises its worker and records
+            # the row as `crashed` - so a crash exit now means the supervisor itself died.
+            Write-Host "Oracle: RED - the recorder failed (exit $LASTEXITCODE), so nothing was compared." -ForegroundColor Red
+            Write-Host '  Exit 1 is a refusal with its own message above - most often the version policy:' -ForegroundColor Yellow
+            Write-Host '  `pip install regex` on a dev machine, or a stale submodule. A signal (139 is SIGSEGV)' -ForegroundColor Yellow
+            Write-Host '  or 0xC0000005 means the recording process itself was killed.' -ForegroundColor Yellow
             exit 1
         }
     }
@@ -351,6 +365,47 @@ foreach ($seed in $runs) {
     dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
         --configuration $Configuration
     $consumerExit = $LASTEXITCODE
+
+    # Upstream's half of every known-divergence example, asked again: the consumer exported them,
+    # and an answer upstream no longer gives means a bug an entry describes may have been fixed. The
+    # examples do not depend on the wave, so once per invocation is enough.
+    $examples = Join-Path $repoRoot 'TestResults/oracle/expected-examples.jsonl'
+    if (-not $recheckDone -and (Test-Path -LiteralPath $examples)) {
+        Write-Host ''
+        Write-Host "Re-asking upstream every known-divergence example..." -ForegroundColor Cyan
+        python (Join-Path $PSScriptRoot 'record-oracle.py') --recheck $examples `
+            (Join-Path $repoRoot 'docs/plan/upstream-reports/ledger-reproductions.jsonl')
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Oracle: RED - upstream no longer gives a stored example answer; see the message above.' -ForegroundColor Red
+            $recheckFailed = $true
+        }
+        $recheckDone = $true
+    }
+    if ($recheckFailed) { $consumerExit = 1 }
+
+    # The MSan screen, over the rows whose verdict rests on upstream's answer. The consumer wrote
+    # their numbers; the screen annotates any that read uninitialised memory, and the consumer is run
+    # again only if it did, so a wave with nothing to screen costs nothing extra.
+    $candidates = Join-Path $repoRoot 'TestResults/oracle/screen-candidates.txt'
+    if ($Screen -eq 'Auto' -and (Test-Path -LiteralPath $candidates) -and (Get-Item -LiteralPath $candidates).Length -gt 0) {
+        Write-Host ''
+        Write-Host 'Screening the unsettled rows under MemorySanitizer...' -ForegroundColor Cyan
+        $before = (Get-FileHash -LiteralPath $wavePath).Hash
+        python (Join-Path $PSScriptRoot 'screen-undefined.py') --wave $wavePath --if-available
+        if ($LASTEXITCODE -ne 0) {
+            # Most often the upstream-commit gate: its message above says what to run.
+            Write-Host "Oracle: RED - the MSan screen failed (exit $LASTEXITCODE); see its message above." -ForegroundColor Red
+            $consumerExit = 1
+        }
+        elseif ((Get-FileHash -LiteralPath $wavePath).Hash -ne $before) {
+            Write-Host ''
+            Write-Host 'The screen annotated rows; running the consumer again...' -ForegroundColor Cyan
+            if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+            dotnet test (Join-Path $repoRoot 'tests/FuzzyRegex.OracleTests/FuzzyRegex.OracleTests.csproj') `
+                --configuration $Configuration
+            $consumerExit = $LASTEXITCODE
+        }
+    }
 
     Write-Host ''
     if (Test-Path -LiteralPath $reportPath) {

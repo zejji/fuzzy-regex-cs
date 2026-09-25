@@ -208,6 +208,10 @@ def _check_version(installed: str) -> str:
 
 
 def _upstream_commit() -> str:
+    # Set by tools/screen-undefined.py, which records inside a container where a worktree's
+    # submodule `.git` points at a host path git cannot follow; measured on the host instead.
+    if os.environ.get("ORACLE_UPSTREAM_COMMIT"):
+        return os.environ["ORACLE_UPSTREAM_COMMIT"]
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT / "upstream"), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=True,
@@ -6753,7 +6757,7 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
             for row in _generate(name, random.Random(f"{seed}:{name}"), count)
         ]
 
-    recorded = [_record_row_and_its_control_answers(regex, row) for row in unrecorded]
+    recorded = _record_supervised(unrecorded)
 
     header = {
         "kind": "header",
@@ -6769,6 +6773,212 @@ def record(generators: list[str], seed: int, count: int, rows_path: Path | None)
         "rowCount": len(recorded),
     }
     return header, recorded
+
+
+# --------------------------------------------------------------------------------------------
+# Crash supervision
+# --------------------------------------------------------------------------------------------
+#
+# UPSTREAM CAN KILL THE INTERPRETER, and a killed recorder used to write no wave at all: one row
+# out of fifty thousand took the whole seed with it, and the 2026-09-24 scheduled sweep died on its
+# first seed with nothing to say but "the recorder failed". The row was ledger entry 5's carried
+# slice reaching an uninitialised `RE_Position new_position` in `basic_match` (`_regex.c:11820`),
+# whose garbage `text_pos` gcc -O1 and above turn into a read about 4 GB past the subject. MSVC's
+# build happens to leave a small value there, so the same row answers - wrongly - on Windows.
+#
+# So the rows are recorded by a WORKER PROCESS that writes each finished row as it goes, and this
+# side supervises it. When the worker dies the row it died on is the one after the last it wrote;
+# that row is re-run ALONE in a fresh worker to learn whether it crashes by itself, recorded as
+# `crashed` either way, and a new worker carries on from the row after it. The wave is the same
+# bytes as an in-process recording whenever nothing crashes, which `--verify-determinism` checks.
+#
+# The pattern is the fork server's and libFuzzer's `-fork` mode: the tested code runs in a process
+# the harness can lose. One worker per wave, not one per row - a process per row measured about
+# 250 ms each on Windows, which is 3.5 hours a seed.
+#
+# A crashed row is never compared: it has no answer. The consumer counts and lists it, and the MSan
+# screen (tools/screen-undefined.py) is what decides whether it is a known defect or a new one.
+
+# TEST-ONLY FAULT INJECTION for `_supervisor_failures`. A worker that meets a row whose pattern is
+# this variable's value faults itself - after at least one other row, if the second is set.
+_FAULT_PATTERN_ENV = "ORACLE_SELF_CHECK_FAULT_PATTERN"
+_FAULT_AFTER_OTHERS_ENV = "ORACLE_SELF_CHECK_FAULT_AFTER_OTHERS"
+
+
+def _died(returncode: int) -> bool:
+    """Whether a worker's exit status means the interpreter was killed rather than exited.
+
+    Measured 2026-09-25, CPython 3.12 and 3.14: a POSIX signal is a negative returncode; on Windows
+    an access violation is 0xC0000005 and `abort()` 0xC0000409 (NTSTATUS codes, all 0xC0000000 and
+    up), and a C-runtime `raise(SIGSEGV)` - what `faulthandler._sigsegv()` does there - exits 3. A
+    SystemExit, the way this recorder refuses a row, exits 1, and nothing here exits 3 by choice.
+    """
+    if returncode < 0:
+        return True
+    return os.name == "nt" and (returncode == 3 or returncode >= 0xC0000000)
+
+
+def _run_worker(inputs: Path, start: int, output: Path) -> tuple[int, str]:
+    process = subprocess.run(
+        [sys.executable, "-X", "faulthandler", str(Path(__file__).resolve()),
+         "--worker-rows", str(inputs), "--worker-start", str(start), "--worker-output", str(output)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+    # tools/screen-undefined.py reads every worker's stderr, where MemorySanitizer reports.
+    if os.environ.get("ORACLE_WORKER_LOG"):
+        with open(os.environ["ORACLE_WORKER_LOG"], "a", encoding="utf-8", errors="replace") as log:
+            log.write(process.stderr)
+    return process.returncode, process.stderr
+
+
+def _finished_rows(output: Path) -> list[dict]:
+    # Only complete lines: a worker killed part-way through writing one has not finished that row.
+    if not output.exists():
+        return []
+    text = output.read_text(encoding="ascii")
+    return [json.loads(line) for line in text.split("\n")[:-1] if line]
+
+
+def _record_supervised(rows: list[dict]) -> list[dict]:
+    recorded: list[dict] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        inputs = Path(tmp) / "rows.jsonl"
+        inputs.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="ascii", newline="")
+        output = Path(tmp) / "recorded.jsonl"
+        while len(recorded) < len(rows):
+            output.unlink(missing_ok=True)
+            returncode, stderr = _run_worker(inputs, len(recorded), output)
+            finished = _finished_rows(output)
+            recorded.extend(finished)
+            if returncode == 0:
+                if len(recorded) < len(rows):
+                    # Never a retry: a worker that exits cleanly short of its rows would do the same
+                    # again, and a supervisor that restarted it would loop for ever.
+                    raise SystemExit(f"the recording worker exited 0 after {len(recorded)} of "
+                                     f"{len(rows)} rows:\n{stderr.strip()}")
+                continue
+            if not _died(returncode):
+                # A refused row or a harness bug: the worker's own message, and the run stops.
+                raise SystemExit(stderr.strip() or f"the recording worker exited {returncode}")
+
+            index = len(recorded)
+            row = rows[index]
+            alone_inputs = Path(tmp) / "alone.jsonl"
+            alone_inputs.write_text(json.dumps(row) + "\n", encoding="ascii", newline="")
+            alone_code, alone_stderr = _run_worker(alone_inputs, 0, Path(tmp) / "alone-out.jsonl")
+            if alone_code != 0 and not _died(alone_code):
+                raise SystemExit(alone_stderr.strip() or f"the recording worker exited {alone_code}")
+            reproduced = _died(alone_code)
+
+            print(f"UPSTREAM CRASHED on row {index + 1} ({row.get('generator')}, "
+                  f"{row.get('operation')}), exit {returncode:#x}; "
+                  f"{'crashes again alone' if reproduced else 'does NOT crash alone'} - "
+                  "recorded as `crashed`, never compared", file=sys.stderr)
+            print("  pattern " + json.dumps(row.get("pattern")) + "  subject "
+                  + json.dumps(row.get("subject")), file=sys.stderr)
+            # The shape every unanswered row has - see `exhausted` in `_record_row` - so the consumer
+            # reads it without a special case: no span, and an outcome naming what happened.
+            recorded.append({**row, "codepointSpan": None, "outcome": {
+                "kind": "crashed", "exitCode": returncode, "reproducedAlone": reproduced}})
+    return recorded
+
+
+def _worker(inputs: Path, start: int, output: Path) -> int:
+    import regex
+
+    rows = [json.loads(line) for line in inputs.read_text(encoding="ascii").splitlines()]
+    fault = os.environ.get(_FAULT_PATTERN_ENV)
+    after_others = os.environ.get(_FAULT_AFTER_OTHERS_ENV) == "1"
+    tag = os.environ.get("ORACLE_TAG_ROWS") == "1"
+    with open(output, "w", encoding="ascii", newline="") as f:
+        for index in range(start, len(rows)):
+            row = rows[index]
+            if tag:
+                # So tools/screen-undefined.py can tie each MemorySanitizer report to its row.
+                sys.stderr.write(f"@@SCREEN {row.get('_screenKey', index)}\n")
+                sys.stderr.flush()
+            if fault is not None and row.get("pattern") == fault and (not after_others or index > start):
+                import faulthandler
+                faulthandler._sigsegv()
+            f.write(json.dumps(_record_row_and_its_control_answers(regex, row)) + "\n")
+            f.flush()
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
+# Re-checking known-divergence examples against the live upstream
+# --------------------------------------------------------------------------------------------
+#
+# EVERY ExpectedDivergences ENTRY CARRIES AN EXAMPLE ROW WITH UPSTREAM'S ANSWER FROZEN INTO IT.
+# `Every_expected_divergence_still_diverges` re-asks the PORT on each; nothing re-asked UPSTREAM,
+# so if a later release fixed the bug an entry describes, the stored answer would go on showing
+# the bug and every check would stay green. That is the known-failure problem pytest's
+# `xfail(strict=True)` and rustc's `known-bug` tests solve by re-checking on every run rather than
+# on a version bump, and it is solved the same way here: run-oracle.ps1 hands this recorder the
+# consumer's export of every example (`--recheck`), and any answer upstream no longer gives fails
+# the run and says what to do. 260 rows, about 20 seconds; all 260 reproduced byte for byte on
+# 2026-09-25.
+
+# What a recorded row reads as its QUESTION - everything else on it is an answer. Complete by
+# `_recheck_failures`: every generator's rows, stripped to these and recorded again, come back
+# identical. `oracle` is not here because it is derived from `generator`.
+ROW_INPUT_KEYS = ("generator", "pattern", "flags", "namedLists", "subject", "operation", "template",
+                  "count", "partial", "pos", "endpos", "timeout", "codepointSlice")
+
+
+def _question_of(row: dict) -> dict:
+    return {key: row[key] for key in ROW_INPUT_KEYS if key in row}
+
+
+def _answer_changes(stored: dict, fresh: dict) -> list[str]:
+    # Only the answers the stored row HAS: an example recorded before a field existed (S44 found
+    # three without `anchoredScan`) is not stale for lacking it.
+    return sorted(key for key in stored if key not in ROW_INPUT_KEYS and fresh.get(key) != stored[key])
+
+
+def recheck(paths: list[Path]) -> int:
+    """Re-records every stored example and fails if upstream no longer gives its stored answer.
+
+    Each file is JSONL of {"entry", "row"}: the consumer's export of every ExpectedDivergences
+    example, and docs/plan/upstream-reports/ledger-reproductions.jsonl, one row per open ledger
+    entry that no example covers.
+    """
+    import regex
+
+    _check_version(regex.__version__)
+    exported = []
+    for path in paths:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("//")]
+        if not rows:
+            raise SystemExit(f"{path} holds no examples; whatever writes it did not run")
+        exported.extend(rows)
+    fresh = _record_supervised([_question_of(e["row"]) for e in exported])
+
+    stale = []
+    for entry, again in zip(exported, fresh):
+        changes = _answer_changes(entry["row"], again)
+        if changes:
+            stale.append((entry, again, changes))
+
+    commit = _upstream_commit()
+    if stale:
+        for entry, again, changes in stale:
+            print(f"UPSTREAM CHANGED ITS ANSWER on an example of {entry['entry']} "
+                  f"(upstream {commit[:12]}), in {', '.join(changes)}", file=sys.stderr)
+            print("  pattern " + json.dumps(entry["row"]["pattern"]) + "  subject "
+                  + json.dumps(entry["row"]["subject"]), file=sys.stderr)
+            for key in changes:
+                print(f"  {key}\n    stored {json.dumps(entry['row'].get(key))[:300]}\n"
+                      f"    now    {json.dumps(again.get(key))[:300]}", file=sys.stderr)
+        print("  Re-judge before trusting any wave: if upstream fixed the bug, delete the entry, keep "
+              "its PinnedBy test as a regression test and update the ledger entry; if the shape "
+              "moved, re-minimise and replace the Example with the row recorded now. See "
+              ".claude/skills/sync-upstream/SKILL.md.", file=sys.stderr)
+        return 1
+
+    print(f"recheck: all {len(exported)} known-defect examples still get their stored answer "
+          f"from upstream {commit[:12]}")
+    return 0
 
 
 # --------------------------------------------------------------------------------------------
@@ -6827,10 +7037,6 @@ def _self_check() -> int:
     for name, unrecordable, why in (
         ("a named list colliding with regex.compile's own parameters",
          row(pattern="\\L<flags>", namedLists={"flags": ["ab"]}), "collides with a parameter"),
-        # 2000 nested groups against CPython's own recursion limit. Not a pattern any generator
-        # emits today; the guard is for the generators later slices add.
-        ("an interpreter limit rather than a judgement about the pattern",
-         row(pattern="(" * 2000 + "a" + ")" * 2000), "limit of the interpreter"),
         # Added in S24. Without it a hand-written minimisation row that forgot its template would
         # record the untouched subject as upstream's answer, which every port trivially agrees with.
         ("a substitution row with no template",
@@ -6846,6 +7052,16 @@ def _self_check() -> int:
             failures.append(f"{name}: raised {type(e).__name__} instead of refusing the row")
         else:
             failures.append(f"{name}: was recorded as if it were upstream's answer")
+
+    # AN INTERPRETER LIMIT IS RECORDED AS `resource`, never as upstream's judgement about the
+    # pattern and never as a reason to stop the run. 2000 nested groups against CPython's own
+    # recursion limit - `RecursionError` on 3.12 and 3.14, measured 2026-09-25. Until then this
+    # guard still demanded S14's refusal, which S43 replaced with `resource` (see `exhausted` in
+    # `_record_row`) without updating it, so --self-check had failed on every platform since
+    # 2026-09-13 and CI had never run far enough to say so.
+    deep = _record_row(regex, row(pattern="(" * 2000 + "a" + ")" * 2000))
+    if deep["outcome"] != {"kind": "resource", "exception": "RecursionError"}:
+        failures.append(f"an interpreter limit was recorded as {deep['outcome']}, not as `resource`")
 
     # The seed the header prints beside a generator must reproduce that generator's rows on its
     # own, whatever else was recorded alongside it. Recorded with a *second* generator present,
@@ -7061,6 +7277,9 @@ def _self_check() -> int:
     if "captures-are-the-texts-of-spans" not in lying:
         failures.append("the captures check no longer fires on a capture text that is not its span")
 
+    failures.extend(_supervisor_failures())
+    failures.extend(_recheck_failures())
+
     for failure in failures:
         print("self-check: " + failure, file=sys.stderr)
     if failures:
@@ -7068,9 +7287,114 @@ def _self_check() -> int:
 
     print(
         "self-check: the reserved-name, interpreter-limit, per-generator-seed, index-translation, "
-        "slice-round-trip and metamorphic-checker guards all fire"
+        "slice-round-trip, metamorphic-checker and crash-supervisor guards all fire"
     )
     return 0
+
+
+def _recheck_failures() -> list[str]:
+    """`--recheck` must ask the stored question again and notice a changed answer.
+
+    Two ways it could be silently wrong, and both happened by hand on 2026-09-25 before this
+    existed: a re-record that drops one of a row's inputs asks a DIFFERENT question (a hand-rolled
+    check dropped `codepointSlice` and reported four false changes), and one that keeps a stale
+    answer field in the row it re-records can never see that field change.
+    """
+    failures = []
+    import regex
+
+    # ROW_INPUT_KEYS IS COMPLETE: every generator's rows, stripped to their inputs and recorded
+    # again, come back identical. A missing input changes the question and so, in general, the row.
+    for name in GENERATORS:
+        for original in (_record_row_and_its_control_answers(regex, r)
+                         for r in _generate(name, random.Random(f"recheck:{name}"), 6)):
+            again = _record_row_and_its_control_answers(regex, _question_of(original))
+            if again != original:
+                changed = sorted(k for k in set(original) | set(again) if original.get(k) != again.get(k))
+                failures.append(f"a {name} row stripped to ROW_INPUT_KEYS records differently: {changed}")
+                break
+
+    # A CHANGED ANSWER IS REPORTED: a stored example whose answer upstream no longer gives.
+    stored = _record_row_and_its_control_answers(regex, {
+        "generator": "rows", "pattern": "a", "flags": 0, "namedLists": {}, "subject": "xa",
+        "operation": "search"})
+    tampered = {**stored, "outcome": {"kind": "nomatch"}}
+    changes = _answer_changes(tampered, _record_row_and_its_control_answers(regex, _question_of(tampered)))
+    if changes != ["outcome"]:
+        failures.append(f"a stored answer upstream no longer gives was reported as {changes}")
+    if _answer_changes(stored, _record_row_and_its_control_answers(regex, _question_of(stored))):
+        failures.append("a stored answer upstream still gives was reported as changed")
+
+    return failures
+
+
+def _supervisor_failures() -> list[str]:
+    """The crash supervisor must turn a row that kills the interpreter into a `crashed` row.
+
+    A REAL CRASH, NOT A RAISED EXCEPTION: `faulthandler._sigsegv()` faults the process the way
+    upstream's C engine does (SIGSEGV on Linux, 0xC0000005 on Windows), so the guard exercises the
+    same exit path as the 2026-09-24 CI failure rather than a Python-level imitation of it.
+    """
+    failures = []
+    fault = "(?#the self-check fault row)"
+    rows = [
+        {"pattern": "a", "subject": "xa", "operation": "search"},
+        {"pattern": fault, "subject": "x", "operation": "search"},
+        {"pattern": "b", "subject": "xb", "operation": "search"},
+    ]
+
+    def supervised(extra_env: dict[str, str], cases: list[dict]) -> list[dict]:
+        saved = {key: os.environ.get(key) for key in extra_env}
+        os.environ.update(extra_env)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "rows.jsonl"
+                path.write_text("".join(json.dumps(r) + "\n" for r in cases), encoding="ascii")
+                return record([], 0, 0, path)[1]
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    # A row that crashes wherever it runs: recorded as `crashed`, confirmed alone, and the rows
+    # either side of it still recorded - in order, none lost, none duplicated.
+    got = supervised({_FAULT_PATTERN_ENV: fault}, rows)
+    if [r["pattern"] for r in got] != [r["pattern"] for r in rows]:
+        failures.append(f"a crash lost or reordered rows: {[r['pattern'] for r in got]}")
+    else:
+        crashed = got[1]["outcome"]
+        if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not True:
+            failures.append(f"a row that crashes alone was recorded as {crashed}")
+        # Every recorded row carries `codepointSpan`, and the consumer reads it unconditionally; a
+        # crashed row without it made the first wave containing one unloadable.
+        if "codepointSpan" not in got[1] or got[1]["codepointSpan"] is not None:
+            failures.append(f"a crashed row's codepointSpan is {got[1].get('codepointSpan', 'missing')}")
+        for survivor in (got[0], got[2]):
+            if survivor["outcome"].get("kind") != "match":
+                failures.append(f"a row beside a crash was recorded as {survivor['outcome']}")
+
+    # A row that crashes only after other rows ran in the same process: still `crashed`, because
+    # the answer it gives alone is not the answer it gave in the wave, and nothing says which of
+    # the two a garbage read produced - but marked as not reproducing alone.
+    got = supervised({_FAULT_PATTERN_ENV: fault, _FAULT_AFTER_OTHERS_ENV: "1"}, rows)
+    crashed = got[1]["outcome"] if len(got) == 3 else {}
+    if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not False:
+        failures.append(f"a row that crashes only after others was recorded as {crashed}")
+
+    # A HARNESS REFUSAL IS NOT A CRASH. A worker that exits through SystemExit - here the
+    # substitution with no template the first guard above refuses - must still stop the run with
+    # its own message, or a supervisor would launder every harness bug into a `crashed` row.
+    try:
+        supervised({}, [{"pattern": "a", "subject": "a", "operation": "sub"}])
+    except SystemExit as e:
+        if "needs a 'template'" not in str(e):
+            failures.append(f"a refused row stopped the supervised run with the wrong message: {e}")
+    else:
+        failures.append("a refused row inside a supervised run was recorded instead of stopping it")
+
+    return failures
 
 
 # --------------------------------------------------------------------------------------------
@@ -7090,7 +7414,20 @@ def main(argv=None) -> int:
                         help="record one seed twice in fresh interpreters and require identical bytes")
     parser.add_argument("--self-check", action="store_true",
                         help="require the recorder's four guards to fire")
+    parser.add_argument("--recheck", type=Path, nargs="+", default=None,
+                        help="re-record stored known-defect examples (JSONL of entry and row) and "
+                             "fail if upstream no longer gives their stored answers")
+    # The crash supervisor's worker half - see `_record_supervised`. Not for use by hand.
+    parser.add_argument("--worker-rows", type=Path, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-start", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-output", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.worker_rows is not None:
+        return _worker(args.worker_rows, args.worker_start, args.worker_output)
+
+    if args.recheck is not None:
+        return recheck(args.recheck)
 
     if args.verify_determinism:
         return _verify_determinism()
