@@ -1,4 +1,9 @@
 # Current state
+**S91 is done** (e78f8d2, 5522bc3; `docs/plan/slices/done/S91-scoped-encoding-everywhere.md`). A
+scoped `(?a:...)` or `(?u:...)` now answers exactly as the same encoding set for the whole pattern:
+the 40,672-row scoped/global grid went from 1,596 disagreeing rows to 0 (upstream 2,207), and the
+oracle is GREEN at three seeds with diverge 0. Ledger entry 36.
+
 **S90 is done** (`docs/plan/slices/done/S90-partial-fold-rows.md`). The three partial rows over a
 full-folded ligature are port-right. Each is a fold repair (ledger 28, 29 or 30) stacked on ledger
 11 mechanism B, and a new oracle entry, `full-fold-fix-behind-an-innermost-count`, claims them. No
@@ -24,12 +29,9 @@ the default arm. S86 added a SUCCESS arm there: whichever merges second keeps it
 
 ## Findings that need a slice
 
-0. **FIRST, before optimisation (owner rule 2026-09-25): S91, scoped encodings everywhere**
-   (`docs/plan/slices/S91-scoped-encoding-everywhere.md`). Only property nodes and `\b` carry the
-   scope's encoding; case-insensitive literals, ranges, sets, backreferences, named lists, `\m`/`\M`,
-   `(?w)` boundaries and line separators, `\X` and FULLCASE use the pattern's. A scoped-vs-global
-   grid of 40,672 rows finds upstream contradicting itself on 2,207; CPython `re` and Perl `(?aa:)`
-   treat a scoped encoding exactly as the global one.
+0. Done: S91, scoped encodings everywhere (e78f8d2, 5522bc3). Its grid probe,
+   `tools/probes/s91-scoped-encoding-grid.py`, is cited by `ScopedEncodingGridTests` but was never
+   committed.
 0b. **The native-AOT allocation tests are flaky**: `AllocationTests` (S61) fail about one full
    native run in three (4 of 12, 2026-09-25) with 280 B and no GC in the window, in different tests
    (`A_warm_IsMatch_...`, `A_warm_Count_...`, and 7,744 B across two GCs in the span walk). Every test
@@ -49,3 +51,9 @@ Done 2026-09-25 on `maint/state-findings`: the lazy-repeat phantom partial (ledg
 `Matcher.IsTailPartial`, S31's pin reversed), the `(?e)` deletions row (judged port-right under
 ledger 25), and two classifier leaks (the full-fold doubled-guard arms claiming plain ledger 12
 rows, and ablation entries tallying a port timeout). DECISIONS 2026-09-25.
+
+Done 2026-09-26 on `maint/state-findings`: two upstream defects the sweep found, which this port
+does not share, pinned as port-right with DIVERGENCES rows, COMPARISON sections and draft reports
+(ledger 37, a scoped `(?i:...)` losing full folding in the required-string search; ledger 38, a
+lazy repeat missing a full-folded literal at its last position). No oracle entry yet: whether the
+generators draw them is unchecked.

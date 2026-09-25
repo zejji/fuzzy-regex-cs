@@ -345,6 +345,16 @@ public sealed class ComparisonSamples
     public void An_encoding_named_by_positional_flags_inside_a_group_replaces_the_one_in_force() =>
         FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success.Should().BeTrue();
 
+    /// <summary>
+    /// "A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern".
+    /// </summary>
+    [Test]
+    public void A_scoped_encoding_answers_exactly_as_the_same_encoding_set_for_the_whole_pattern()
+    {
+        FuzzyRegex.FullMatch("\u212A", "(?i)(?a:k)").Success.Should().BeFalse();
+        FuzzyRegex.FullMatch("\u212A", "(?ai)(?u:k)").Success.Should().BeTrue();
+    }
+
     /// <summary>"The search prefilters are not ported".</summary>
     [Test]
     public void Search_prefilters_are_not_ported()
@@ -432,5 +442,18 @@ public sealed class ComparisonSamples
         Match m = new FuzzyRegex("(?m)^(?:abc){i<=1}").Match("xabc");
 
         (m.Success ? m.Value : "no match").Should().Be("xabc");
+    }
+
+    /// <summary>"A literal under a scoped `(?i:...)` is found in text that holds only its full case folding".</summary>
+    [Test]
+    public void A_literal_under_a_scoped_ignorecase_is_found_in_text_that_holds_only_its_full_case_folding() =>
+        FuzzyRegex.Match("\u00DF", "(?i:ss)").Success.Should().BeTrue();
+
+    /// <summary>"A lazy repeat finds a full-folded literal that starts at the repeat's last position".</summary>
+    [Test]
+    public void A_lazy_repeat_finds_a_full_folded_literal_that_starts_at_the_repeats_last_position()
+    {
+        FuzzyRegex.Match("ass", "(?i)[^k]??ss").Index.Should().Be(0);
+        FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success.Should().BeTrue();
     }
 }

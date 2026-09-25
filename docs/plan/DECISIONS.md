@@ -1380,3 +1380,17 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   keeps its row with 30 agreeing grid cells instead of 36. A set's full-folding expansions follow
   the same rule (F, upstream's under V1 too), and an encoding named by positional flags
   inside a group replaces the one in force (G; at the top level a clash still raises).
+- 2026-09-26 (S91, ledger entry 36): **a scoped `(?a:...)` or `(?u:...)` answers exactly as the
+  same encoding set for the whole pattern**, for every node whose answer depends on the encoding,
+  as CPython's `re` documents and Perl 5.42's `(?aa:...)` answers. The encoding rides in the case
+  flags only when a node ignores case and the scope differs from the pattern, so an unscoped
+  pattern compiles exactly as upstream's. Two things are recorded rather than changed: a fuzzy
+  constraint written outside a scoped backreference tests an inserted character with its own
+  encoding (a constraint is a set, and its scope decides; the form has no global twin), and a
+  scoped `(?u:[...])` holding U+00DF in an `(?a)` pattern compiles one 'ss' alternative where the
+  global form has three, with equal answers.
+- 2026-09-26 (ledger entries 37 and 38): **two upstream defects this port does not share are pinned
+  as port-right.** A scoped `(?i:...)` literal loses full folding in upstream's required-string
+  search, and a lazy repeat of one character misses a full-folded literal starting at its last
+  position. Perl 5.42.3 agrees with this port on both and CPython's `re` on the second. Drafts in
+  `docs/plan/upstream-reports/`, not filed.

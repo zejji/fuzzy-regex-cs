@@ -419,4 +419,53 @@ public sealed class RequiredStringPrefilterTests
         // regex 2026.9.10: search(r'\w+(*SKIP)needle', 'xx needle') -> None
         Search(@"\w+(*SKIP)needle", "xx needle").Should().Be("None");
     }
+
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A required string under a scoped <c>(?i:...)</c> keeps full case folding, so it is found in
+    /// a subject that holds only a character folding to it. Ledger entry 37.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's <c>_get_required_string</c> (<c>upstream/regex/_main.py:602</c>) takes
+    /// IGNORECASE and FULLCASE from the literal's own case flags, then <c>pattern_new</c>
+    /// (<c>upstream/src/_regex.c:26125</c>) removes FULLCASE because the PATTERN's flags lack
+    /// IGNORECASE. Its prefilter looks for 'ss' with simple folding and never finds U+00DF, so it
+    /// refuses a subject its own matcher accepts: <c>(?i:ss)|q</c>, which has no required string,
+    /// matches. The README lists <c>(?i)</c> and <c>(?f)</c> among the scoped flags (README.rst:31)
+    /// and says version 1 folds fully under IGNORECASE (:74, :516), with no exception for a
+    /// scope. Perl 5.42.3 gives this port's answer on every row it can spell: (0, 1), (0, 2) and
+    /// (0, 1) for the first three, and no match for <c>(?i:s)s</c>. CPython's re folds simply, so
+    /// it cannot judge. Measured 2026-09-26 by
+    /// <c>python tools/probes/upstream-scoped-ignorecase-required-string.py</c>.
+    /// </para>
+    /// <para>
+    /// This port's locator searches only for a case-sensitive string (the folded arms are not
+    /// ported, as the class summary says), so the search answers what the matcher answers.
+    /// </para>
+    /// </remarks>
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_scoped_ignorecase_required_string_keeps_full_case_folding()
+    {
+        // regex 2026.9.10: search(r'(?V1)(?i:ss)', '\xdf') -> None
+        Search("(?V1)(?i:ss)", "\u00DF").Should().Be("(0,1)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i:ss)x', '\xdfx') -> None
+        Search("(?V1)(?i:ss)x", "\u00DFx").Should().Be("(0,2)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i:fi)', '\ufb01') -> None
+        Search("(?V1)(?i:fi)", "\uFB01").Should().Be("(0,1)");
+
+        // regex 2026.9.10: search(r'(?V0)(?f)(?i:ss)', '\xdf') -> None
+        Search("(?V0)(?f)(?i:ss)", "\u00DF").Should().Be("(0,1)");
+
+        // The controls, on which the two engines agree. regex 2026.9.10:
+        //   search(r'(?V1)(?i)ss', '\xdf')   -> (0, 1)   the same fold with a global IGNORECASE
+        //   search(r'(?V1)(?i:ss)|q', '\xdf') -> (0, 1)  no required string at all
+        //   search(r'(?V1)(?i:s)s', '\xdf')  -> None     one half of the folding is case-sensitive
+        Search("(?V1)(?i)ss", "\u00DF").Should().Be("(0,1)");
+        Search("(?V1)(?i:ss)|q", "\u00DF").Should().Be("(0,1)");
+        Search("(?V1)(?i:s)s", "\u00DF").Should().Be("None");
+    }
 }

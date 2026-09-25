@@ -860,6 +860,22 @@ using Fuzzy.Text.RegularExpressions;
 Console.WriteLine(FuzzyRegex.FullMatch("\u00E9", @"(?a:(?u)\w)").Success);  // True - upstream refuses
 ```
 
+### A scoped `(?a:...)` or `(?u:...)` answers exactly as the same encoding set for the whole pattern
+
+`(?i)(?a:k)` means exactly what `(?ai)k` means, for every construct whose answer depends on the
+encoding: case-insensitive letters, ranges, sets, backreferences and named lists, fuzzy matching,
+`\m` and `\M`, the `(?w)` word and line rules, `\X`, and full case folding. So under ASCII rules the
+Kelvin sign U+212A is not a 'k', whether ASCII is set for the whole pattern or only for a group.
+Python's `re` and Perl answer this way. Upstream applies a scoped encoding only to `\p{...}`
+properties and `\b`, and reads the pattern's encoding everywhere else.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.FullMatch("\u212A", "(?i)(?a:k)").Success);   // False - upstream matches
+Console.WriteLine(FuzzyRegex.FullMatch("\u212A", "(?ai)(?u:k)").Success);  // True - upstream refuses
+```
+
 ### This port's search prefilters never change the slow path's answer
 
 `Match`, `EnumerateMatches` and partial matching can answer differently from upstream on several
@@ -1259,6 +1275,37 @@ Upstream gives two deletions for `(?:(?:x){d<=1})+` over the empty string. A rep
 such as `{1,3}`, keeps upstream's answer, and so does a repeat whose body holds a capture group,
 since a pass that sets a group can change what the next pass matches. There is no option to
 restore the upstream behaviour.
+
+### A literal under a scoped `(?i:...)` is found in text that holds only its full case folding
+
+Version 1 folds case fully under `(?i)`, so `ss` matches 'ß', and it does so whether `(?i)` covers
+the whole pattern or only a group. Upstream first searches the subject for a string every match
+must contain, and when the only `(?i)` is scoped it searches for that string with simple folding,
+so it never finds 'ß' and reports no match. Its matcher alone gives the right answer: `(?i:ss)|q`,
+which has no such string, matches. Perl agrees with this port.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Console.WriteLine(FuzzyRegex.Match("\u00DF", "(?i:ss)").Success);  // True - upstream: no match
+```
+
+### A lazy repeat finds a full-folded literal that starts at the repeat's last position
+
+A lazy repeat such as `[^k]??` first tries to match nothing, then one character. Under `(?i)` in
+version 1 the literal after it is matched with full folding, and upstream, looking ahead for that
+literal, stops reading at the last position the repeat can reach. A literal that starts there is
+never read to its end, so the match at the start of the text is lost and the search reports a later
+one or none at all. Upstream finds the match in version 0, which folds simply, and with a greedy
+repeat. Python's `re` and Perl agree with this port.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+Match m = FuzzyRegex.Match("ass", "(?i)[^k]??ss");
+Console.WriteLine(m.Index);                                           // 0 - upstream: 1
+Console.WriteLine(FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success);  // True - upstream: no match
+```
 
 ### Inherited upstream bugs are fixed here
 

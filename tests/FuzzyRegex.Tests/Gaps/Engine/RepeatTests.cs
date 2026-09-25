@@ -215,6 +215,55 @@ public sealed class RepeatTests
         FuzzyRegex.MatchAtStart("aaab", "a{2,3}?b").Length.Should().Be(4);
     }
 
+    // DIVERGES FROM UPSTREAM 2026.9.10, and this test pins OUR answer.
+    /// <summary>
+    /// A lazy repeat of one character finds a full-folded literal that starts where the repeat
+    /// reaches its maximum. Ledger entry 38.
+    /// </summary>
+    /// <remarks>
+    /// When the repeat takes one more character, upstream's LAZY_REPEAT_ONE arm looks ahead for
+    /// the literal that follows. Its STRING arm reads up to <c>limit + length</c>
+    /// (<c>upstream/src/_regex.c:16709</c>); its STRING_FLD arm passes <c>limit</c> alone
+    /// (<c>:16764</c>), which <c>string_search_fld</c> treats as the end of the text
+    /// (<c>:6674</c>). <c>limit</c> is the last position the repeat may reach, so a literal that
+    /// starts there is never read to its end. The reversed twin is at <c>:16808</c> and
+    /// <c>:16819</c>. It is not a search skip: <c>regex.match(r'(?V1)(?i)[^k]??ss', 'ass')</c> is
+    /// None too. CPython's re gives (0, 3) for <c>(?i)[^k]??ss</c> over 'ass' and (0, 4) for
+    /// <c>(?i)a{0,2}?ss</c> over 'aass'; Perl 5.42.3 gives those and (0, 2) over U+00E9 U+1E9E 'S'
+    /// and over U+00E9 U+FB01. Measured 2026-09-26 by
+    /// <c>python tools/probes/upstream-lazy-repeat-full-fold-tail.py</c>.
+    /// </remarks>
+    [Test]
+    public void A_lazy_repeat_finds_a_full_folded_literal_at_its_maximum()
+    {
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??ss', '\xe9\u1e9eS') -> (1, 2)
+        Search("(?V1)(?i)[^k]??ss", "\u00E9\u1E9ES").Should().Be("(0,2)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??ss', 'ass') -> (1, 3)
+        Search("(?V1)(?i)[^k]??ss", "ass").Should().Be("(0,3)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)a{0,2}?ss', 'aass') -> None
+        Search("(?V1)(?i)a{0,2}?ss", "aass").Should().Be("(0,4)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)(?:a{0,2}?ss|q)', 'aass') -> (2, 4)
+        Search("(?V1)(?i)(?:a{0,2}?ss|q)", "aass").Should().Be("(0,4)");
+
+        // regex 2026.9.10: search(r'(?V1)(?i)[^k]??fi', '\xe9\ufb01') -> (1, 2)
+        Search("(?V1)(?i)[^k]??fi", "\u00E9\uFB01").Should().Be("(0,2)");
+
+        // regex 2026.9.10: search(r'(?V0)(?fi)[^k]??ss', 'ass') -> (1, 3)
+        Search("(?V0)(?fi)[^k]??ss", "ass").Should().Be("(0,3)");
+
+        // regex 2026.9.10: search(r'(?r)(?V1)(?i)ss[^k]??', 'ssa') -> (0, 2)
+        Search("(?r)(?V1)(?i)ss[^k]??", "ssa").Should().Be("(0,3)");
+
+        // The controls, on which the two engines agree: greedy, simple folding and no folding.
+        // regex 2026.9.10 gives (0, 3) for all three over 'ass'.
+        Search("(?V1)(?i)[^k]?ss", "ass").Should().Be("(0,3)");
+        Search("(?V0)(?i)[^k]??ss", "ass").Should().Be("(0,3)");
+        Search("(?V1)[^k]??ss", "ass").Should().Be("(0,3)");
+    }
+
     [Test]
     public void A_lazy_repeat_over_a_long_subject_costs_time_proportional_to_its_length()
     {
@@ -373,4 +422,14 @@ public sealed class RepeatTests
     }
 
     private static readonly Dictionary<string, IReadOnlyList<string>> _noNamedLists = new(StringComparer.Ordinal);
+
+    /// <summary>Formats the first match of a pattern as the probe prints its span.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <returns><c>(start,end)</c>, or <c>None</c> when there is no match.</returns>
+    private static string Search(string pattern, string subject)
+    {
+        Match match = new FuzzyRegex(pattern).Match(subject);
+        return match.Success ? $"({match.Index},{match.Index + match.Length})" : "None";
+    }
 }
