@@ -61,8 +61,27 @@ internal static class OracleComparer
         var tally = new Dictionary<OracleVerdict, int>();
         var divergences = new List<string>();
         var expected = new List<string>();
+        var faults = new List<string>();
+        var undefined = new List<string>();
         foreach (OracleRow row in rows)
         {
+            // Upstream crashed, or read memory it never initialised: no answer to compare against,
+            // so asked of nothing. Decided by the row alone - see `Unanswered`.
+            if (Unanswered(row) is { } unanswered)
+            {
+                tally[unanswered] = tally.GetValueOrDefault(unanswered) + 1;
+                if (unanswered == OracleVerdict.Fault)
+                {
+                    faults.Add(OracleWave.DescribeUnanswered(row, "FAULT"));
+                }
+                else
+                {
+                    undefined.Add(OracleWave.DescribeUnanswered(row, "UNDEFINED " + row.UndefinedBehaviour!.Known));
+                }
+
+                continue;
+            }
+
             // Asked of nothing, not asked and discarded. Upstream never finished this row, so there
             // is no answer to compare against - and putting the question to this port anyway would
             // spend RowTimeout on a row whose verdict is already decided, which on a wave carrying
@@ -112,8 +131,31 @@ internal static class OracleComparer
             }
         }
 
-        return new OracleRunSummary(tally, divergences, expected);
+        return new OracleRunSummary(tally, divergences, expected, faults, undefined);
     }
+
+    /// <summary>
+    /// The verdict for a row upstream gave no usable answer to, or <see langword="null"/> if it gave one.
+    /// </summary>
+    /// <param name="row">The recorded row.</param>
+    /// <returns>
+    /// <see cref="OracleVerdict.Undefined"/> where the MSan screen attributed the row to a known
+    /// defect; <see cref="OracleVerdict.Fault"/> where it found an origin no defect accounts for, or
+    /// where upstream crashed and nothing has explained it.
+    /// </returns>
+    /// <remarks>
+    /// The screen's finding outranks the recorded answer: a row that read uninitialised memory and
+    /// happened to answer is no more ground truth than one that crashed, and one that crashed from a
+    /// known origin is accounted for however it died.
+    /// </remarks>
+    private static OracleVerdict? Unanswered(OracleRow row) =>
+        row.UndefinedBehaviour switch
+        {
+            { Known: not null } => OracleVerdict.Undefined,
+            not null => OracleVerdict.Fault,
+            null when row.Expected is CrashedOutcome => OracleVerdict.Fault,
+            _ => null,
+        };
 
     /// <summary>Puts a row's question to this port.</summary>
     /// <param name="row">The row to run.</param>
@@ -559,6 +601,11 @@ internal static class OracleComparer
         // First, and before anything is read off `actual`. Upstream gave no answer at all, so no
         // answer this port gives can agree or disagree with it - including no answer, which would
         // otherwise read as `Unsupported` and say something false about the port's coverage.
+        if (Unanswered(row) is { } unanswered)
+        {
+            return unanswered;
+        }
+
         if (row.Expected is TimeoutOutcome)
         {
             return OracleVerdict.Timeout;

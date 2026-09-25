@@ -214,7 +214,25 @@ internal static class OracleWave
         )
         {
             SelfContradiction = ReadSelfContradiction(row),
+            UndefinedBehaviour = ReadUndefinedBehaviour(row),
         };
+    }
+
+    /// <summary>What the MSan screen found this row doing, if it screened the row and found anything.</summary>
+    /// <param name="row">The recorded row.</param>
+    /// <returns>The finding tools/screen-undefined.py wrote, or <see langword="null"/>.</returns>
+    private static UndefinedBehaviour? ReadUndefinedBehaviour(JsonElement row)
+    {
+        if (!row.TryGetProperty("undefinedBehaviour", out JsonElement found))
+        {
+            return null;
+        }
+
+        JsonElement known = found.GetProperty("known");
+        return new UndefinedBehaviour(
+            [.. found.GetProperty("origins").EnumerateArray().Select(static origin => origin.GetString()!)],
+            known.ValueKind == JsonValueKind.Null ? null : known.GetString()
+        );
     }
 
     /// <summary>
@@ -280,6 +298,12 @@ internal static class OracleWave
             // S43, and the same "no ground truth" case by a different route: upstream hit a limit
             // of the interpreter rather than finishing or rejecting.
             "resource" => new ResourceOutcome(outcome.GetProperty("exception").GetString()!),
+            // 2026-09-25, and no ground truth a third way: upstream killed the interpreter, so the
+            // recorder's crash supervisor recorded the row instead of an answer to it.
+            "crashed" => new CrashedOutcome(
+                outcome.GetProperty("exitCode").GetInt64(),
+                outcome.GetProperty("reproducedAlone").GetBoolean()
+            ),
             // 'whileMatching' is optional and defaults to false, which is what every wave recorded
             // before S24 means: until substitution landed, upstream's only recorded rejections came
             // out of regex.compile. A hand-written minimisation row need not carry it either.
@@ -377,24 +401,25 @@ internal static class OracleWave
     /// One rendered block per row <see cref="ExpectedDivergences"/> accounted for. Printed rather
     /// than dropped: an expected divergence nobody can see in the report is a hidden one.
     /// </param>
+    /// <param name="faults">
+    /// One rendered block per row upstream gave no usable answer to that no known defect explains.
+    /// Printed first, because each fails the run.
+    /// </param>
+    /// <param name="undefined">
+    /// One rendered block per row the MSan screen attributed to a known defect. Printed last.
+    /// </param>
     /// <returns>The single-line summary, which is also the first line of the report.</returns>
     public static string WriteReport(
         OracleHeader header,
         int rowCount,
         IReadOnlyDictionary<OracleVerdict, int> tally,
         IReadOnlyList<string> divergences,
-        IReadOnlyList<string>? expected = null
+        IReadOnlyList<string>? expected = null,
+        IReadOnlyList<string>? faults = null,
+        IReadOnlyList<string>? undefined = null
     )
     {
-        string summary = string.Create(
-            CultureInfo.InvariantCulture,
-            $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
-                + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
-                + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
-                + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
-                + $"resource {tally.GetValueOrDefault(OracleVerdict.Resource)}  "
-                + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
-        );
+        string summary = Summary(rowCount, tally);
 
         var report = new StringBuilder();
         report.AppendLine(summary);
@@ -407,13 +432,9 @@ internal static class OracleWave
             )
         );
         report.AppendLine("waves: " + header.Waves);
-        foreach (string divergence in divergences)
-        {
-            report.AppendLine();
-            report.AppendLine(divergence);
-        }
 
-        foreach (string block in expected ?? [])
+        // Faults first: each fails the run, and none of them is a question of which engine is right.
+        foreach (string block in (faults ?? []).Concat(divergences).Concat(expected ?? []).Concat(undefined ?? []))
         {
             report.AppendLine();
             report.AppendLine(block);
@@ -423,6 +444,26 @@ internal static class OracleWave
         File.WriteAllText(ReportPath, report.ToString());
         return summary;
     }
+
+    /// <summary>
+    /// The one-line tally: the report's first line, and what <c>tools/sweep-seeds.ps1</c> reads with
+    /// <c>^agree \d</c> and <c>diverge (\d+)</c>.
+    /// </summary>
+    /// <param name="rowCount">How many rows the wave held.</param>
+    /// <param name="tally">How many rows fell into each verdict.</param>
+    /// <returns>The line.</returns>
+    public static string Summary(int rowCount, IReadOnlyDictionary<OracleVerdict, int> tally) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"agree {tally.GetValueOrDefault(OracleVerdict.Agree)}  "
+                + $"unsupported {tally.GetValueOrDefault(OracleVerdict.Unsupported)}  "
+                + $"expected {tally.GetValueOrDefault(OracleVerdict.Expected)}  "
+                + $"timeout {tally.GetValueOrDefault(OracleVerdict.Timeout)}  "
+                + $"resource {tally.GetValueOrDefault(OracleVerdict.Resource)}  "
+                + $"undefined {tally.GetValueOrDefault(OracleVerdict.Undefined)}  "
+                + $"fault {tally.GetValueOrDefault(OracleVerdict.Fault)}  "
+                + $"diverge {tally.GetValueOrDefault(OracleVerdict.Diverge)}  of {rowCount} rows"
+        );
 
     /// <summary>Renders one diverging row: what was asked, what upstream said, what we said.</summary>
     /// <param name="row">The row that diverged.</param>
@@ -435,11 +476,53 @@ internal static class OracleWave
     /// <returns>The rendered block.</returns>
     public static string Describe(OracleRow row, IOracleOutcome? actual, ExpectedDivergence? accounted = null)
     {
+        StringBuilder block = DescribeQuestion(row, accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id);
+        string codepoints = row.CodepointSpan is { } span
+            ? string.Create(CultureInfo.InvariantCulture, $"   [python codepoints {span.Start},{span.End}]")
+            : "";
+        block.AppendLine("  upstream " + row.Expected.Describe() + codepoints);
+        block.Append("  port     " + (actual?.Describe() ?? "unsupported"));
+        if (actual is ErrorOutcome { Detail: { } detail })
+        {
+            block.AppendLine().Append("  " + detail.Replace("\n", "\n  ", StringComparison.Ordinal));
+        }
+
+        return block.ToString();
+    }
+
+    /// <summary>
+    /// Renders one row upstream gave no usable answer to: it crashed, or the MSan screen found it
+    /// reading memory it never initialised. Nothing was asked of this port, so there is no port line;
+    /// the screen's finding takes its place.
+    /// </summary>
+    /// <param name="row">The row.</param>
+    /// <param name="heading"><c>FAULT</c>, or <c>UNDEFINED</c> and the defect it is known as.</param>
+    /// <returns>The rendered block.</returns>
+    public static string DescribeUnanswered(OracleRow row, string heading)
+    {
+        StringBuilder block = DescribeQuestion(row, heading);
+        block.AppendLine("  upstream " + row.Expected.Describe());
+        if (row.UndefinedBehaviour is not { } found)
+        {
+            return block.Append("  screen   not screened - run tools/screen-undefined.py to attribute it").ToString();
+        }
+
+        block.Append("  screen   uninitialised memory from " + string.Join(", ", found.Origins));
+        if (found.Known is null)
+        {
+            block.Append(" - NO KNOWN DEFECT, a new one for the ledger");
+        }
+
+        return block.ToString();
+    }
+
+    private static StringBuilder DescribeQuestion(OracleRow row, string heading)
+    {
         var block = new StringBuilder();
         block.AppendLine(
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{(accounted is null ? "DIVERGE" : "EXPECTED " + accounted.Id)} row {row.Number} "
+                $"{heading} row {row.Number} "
                     + $"({row.Generator}) {row.Operation} flags=0x{row.Flags:x} "
                     // Which version a pattern naming none was resolved under, because since S50b
                     // the recorder's default and this port's are different questions.
@@ -483,17 +566,7 @@ internal static class OracleWave
             );
         }
 
-        string codepoints = row.CodepointSpan is { } span
-            ? string.Create(CultureInfo.InvariantCulture, $"   [python codepoints {span.Start},{span.End}]")
-            : "";
-        block.AppendLine("  upstream " + row.Expected.Describe() + codepoints);
-        block.Append("  port     " + (actual?.Describe() ?? "unsupported"));
-        if (actual is ErrorOutcome { Detail: { } detail })
-        {
-            block.AppendLine().Append("  " + detail.Replace("\n", "\n  ", StringComparison.Ordinal));
-        }
-
-        return block.ToString();
+        return block;
     }
 
     /// <summary>
@@ -536,10 +609,20 @@ internal sealed record OracleWaveFile(OracleHeader Header, IReadOnlyList<OracleR
 /// One rendered block per row <see cref="ExpectedDivergences"/> accounted for, in wave order. These
 /// do not fail the run and are printed anyway.
 /// </param>
+/// <param name="Faults">
+/// One rendered block per row upstream crashed on, or read uninitialised memory on, that no known
+/// defect accounts for. Each fails the run.
+/// </param>
+/// <param name="Undefined">
+/// One rendered block per row the MSan screen attributed to a known upstream defect. Not compared,
+/// not failing, printed anyway.
+/// </param>
 internal sealed record OracleRunSummary(
     IReadOnlyDictionary<OracleVerdict, int> Tally,
     IReadOnlyList<string> Divergences,
-    IReadOnlyList<string> Expected
+    IReadOnlyList<string> Expected,
+    IReadOnlyList<string> Faults,
+    IReadOnlyList<string> Undefined
 );
 
 /// <summary>Which oracle produced a wave, and how it was generated.</summary>
@@ -726,6 +809,12 @@ internal sealed record OracleHeader(
 /// What reads it is <see cref="SelfConsistency"/>'s consumer, to tell a port that breaks an
 /// invariant on its own from a port reproducing a contradiction upstream already has.
 /// </param>
+/// <param name="UndefinedBehaviour">
+/// What the MSan screen found this row doing, from the recorder's <c>undefinedBehaviour</c> field:
+/// reading memory upstream never initialised, and the ledger entry that accounts for it if any.
+/// Absent on a row the screen did not run on or found clean. Outranks <see cref="Expected"/>, which on
+/// such a row is whatever that memory held.
+/// </param>
 internal sealed record OracleRow(
     int Number,
     string Generator,
@@ -753,7 +842,8 @@ internal sealed record OracleRow(
     IOracleOutcome? CutSubject = null,
     double? Timeout = null,
     int DefaultVersion = (int)FuzzyRegexOptions.Version0,
-    IReadOnlyList<string>? SelfContradiction = null
+    IReadOnlyList<string>? SelfContradiction = null,
+    UndefinedBehaviour? UndefinedBehaviour = null
 );
 
 /// <summary>What a matching operation answered.</summary>
@@ -829,6 +919,30 @@ internal sealed record ResourceOutcome(string Exception) : IOracleOutcome
     /// <inheritdoc />
     public string Describe() => $"upstream ran out of resources ({Exception})";
 }
+
+/// <summary>Upstream killed the interpreter on this row, so the recorder's supervisor recorded the row instead.</summary>
+/// <remarks>
+/// 2026-09-25. The third "no ground truth" case, after <see cref="TimeoutOutcome"/> and
+/// <see cref="ResourceOutcome"/>, and unlike them it fails the run unless the MSan screen attributes
+/// it to a known defect: a crash is memory unsafety in upstream's C engine, and one nobody has
+/// explained may be a new defect. See <c>_record_supervised</c> in <c>tools/record-oracle.py</c>.
+/// </remarks>
+/// <param name="ExitCode">The dead worker's exit status: a negative signal number on POSIX, an NTSTATUS on Windows.</param>
+/// <param name="ReproducedAlone">Whether the row crashed again in a fresh process on its own.</param>
+internal sealed record CrashedOutcome(long ExitCode, bool ReproducedAlone) : IOracleOutcome
+{
+    /// <inheritdoc />
+    public string Describe() =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"upstream crashed (exit {ExitCode}), {(ReproducedAlone ? "again when run alone" : "but NOT when run alone")}"
+        );
+}
+
+/// <summary>What the MSan screen found a row doing: reading memory upstream never initialised.</summary>
+/// <param name="Origins">Where each uninitialised value was created, as MSan reports it - a local and its function.</param>
+/// <param name="Known">The ledger entry that accounts for every origin, or <see langword="null"/> if none does.</param>
+internal sealed record UndefinedBehaviour(IReadOnlyList<string> Origins, string? Known);
 
 /// <summary>This port compiled the pattern, and cannot match yet.</summary>
 /// <remarks>
@@ -1113,4 +1227,19 @@ internal enum OracleVerdict
     /// generator has started drawing rows upstream cannot answer.
     /// </summary>
     Resource,
+
+    /// <summary>
+    /// The MSan screen found upstream reading memory it never initialised on this row, from an
+    /// origin a ledger entry already accounts for. Upstream's answer is whatever that memory held,
+    /// so it is not compared; counted and listed, and does not fail the run.
+    /// </summary>
+    Undefined,
+
+    /// <summary>
+    /// Upstream crashed on this row with no screen finding to explain it, or the screen found
+    /// uninitialised memory from an origin no ledger entry accounts for. Not compared - there is no
+    /// answer - and it FAILS THE RUN, because an unattributed upstream fault is a new defect until
+    /// someone has judged it.
+    /// </summary>
+    Fault,
 }

@@ -329,9 +329,14 @@ foreach ($seed in $runs) {
 
         python @recorderArgs
         if ($LASTEXITCODE -ne 0) {
-            # A wave that did not record is not a wave that agreed. The most likely cause by far is
-            # the version policy: `pip install regex` on a dev machine, or a stale submodule.
-            Write-Host 'Oracle: RED - the recorder failed, so nothing was compared.' -ForegroundColor Red
+            # A wave that did not record is not a wave that agreed. The recorder's own message is
+            # above; the exit code says which kind of failure it was. Since 2026-09-25 a row that
+            # crashes upstream no longer ends here - the recorder supervises its worker and records
+            # the row as `crashed` - so a crash exit now means the supervisor itself died.
+            Write-Host "Oracle: RED - the recorder failed (exit $LASTEXITCODE), so nothing was compared." -ForegroundColor Red
+            Write-Host '  Exit 1 is a refusal with its own message above - most often the version policy:' -ForegroundColor Yellow
+            Write-Host '  `pip install regex` on a dev machine, or a stale submodule. A signal (139 is SIGSEGV)' -ForegroundColor Yellow
+            Write-Host '  or 0xC0000005 means the recording process itself was killed.' -ForegroundColor Yellow
             exit 1
         }
     }

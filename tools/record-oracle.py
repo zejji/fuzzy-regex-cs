@@ -6861,7 +6861,9 @@ def _record_supervised(rows: list[dict]) -> list[dict]:
                   "recorded as `crashed`, never compared", file=sys.stderr)
             print("  pattern " + json.dumps(row.get("pattern")) + "  subject "
                   + json.dumps(row.get("subject")), file=sys.stderr)
-            recorded.append({**row, "outcome": {
+            # The shape every unanswered row has - see `exhausted` in `_record_row` - so the consumer
+            # reads it without a special case: no span, and an outcome naming what happened.
+            recorded.append({**row, "codepointSpan": None, "outcome": {
                 "kind": "crashed", "exitCode": returncode, "reproducedAlone": reproduced}})
     return recorded
 
@@ -7232,6 +7234,10 @@ def _supervisor_failures() -> list[str]:
         crashed = got[1]["outcome"]
         if crashed.get("kind") != "crashed" or crashed.get("reproducedAlone") is not True:
             failures.append(f"a row that crashes alone was recorded as {crashed}")
+        # Every recorded row carries `codepointSpan`, and the consumer reads it unconditionally; a
+        # crashed row without it made the first wave containing one unloadable.
+        if "codepointSpan" not in got[1] or got[1]["codepointSpan"] is not None:
+            failures.append(f"a crashed row's codepointSpan is {got[1].get('codepointSpan', 'missing')}")
         for survivor in (got[0], got[2]):
             if survivor["outcome"].get("kind") != "match":
                 failures.append(f"a row beside a crash was recorded as {survivor['outcome']}")
