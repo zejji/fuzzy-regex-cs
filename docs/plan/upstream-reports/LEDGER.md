@@ -159,6 +159,47 @@ than on a position the pattern could actually have consumed.
 though #546 was in the same lazy-quantifier neighbourhood: both of those were partials that were
 *missed*, and this is a partial that is reported where none exists.
 
+**A second door, the `CHARACTER` tail's guard itself (added 2026-09-25).** The four `CHARACTER`
+arms guard one step ahead of the repeat, `pos + 1 >= text_end` (`:16546`, `:16583`) and
+`pos - 1 <= text_start` (`:16621`, `:16659`), before anything checks that the repeat can take that
+step. So a partial is reported when the repeat's item refuses the last character, with no maximum
+involved:
+
+```python
+>>> regex.match(r'(?r)ab??', 'c', partial=True)
+<regex.Match object; span=(0, 1), match='c', partial=True>
+>>> regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)
+<regex.Match object; span=(0, 5), match='__AAb', partial=True>
+>>> regex.match(r'(?r)ab?', 'c', partial=True), regex.match(r'b??a', 'c', partial=True)
+(None, None)
+```
+
+No continuation of 'c' on the left makes `(?r)ab??` match: an anchored reversed match of it must
+end the text with `a`, or with `ab`, and the text ends with 'c' whatever is added before it. The
+greedy twin and the forward mirror both answer None.
+
+**Measured over a grid, three sources against each other.** 48,960 rows (`match` and `fullmatch`,
+forward and reversed, six lazy quantifiers, three items, one- and two-character tails, with and
+without IGNORECASE, every subject of up to three characters from `acxb`), `regex` 2026.9.10:
+
+- the README's definition, evaluated exactly by trying every continuation of up to five characters
+  with CPython's own `re`, which shares no code with `regex`;
+- PCRE2 10.47 under `PCRE2_ANCHORED | PCRE2_PARTIAL_SOFT` on every forward row: it agrees with the
+  definition on every row but the 288 with an empty subject, where it declines to report a partial
+  at all (a documented PCRE2 choice, not this family);
+- upstream's greedy twin of every disputed row, which reports nothing on every one.
+
+Upstream answers 3,756 rows with a partial the definition says cannot complete, and misses none.
+Its `STRING` arms report such partials too (`a??xy` over 'xx'); this port never ported those arms
+and already answered the definition on every string-tail row.
+
+**This port (S31, reversed 2026-09-25).** S31 copied the `CHARACTER` guard as upstream spells it,
+on the strength of `([^a-f]{3,}?)x` over '__AAb' (seed 7 row 581), which pinned upstream's phantom
+partial. `Matcher.IsTailPartial` now guards where the repeat stands for every tail, and this port
+answers the definition on all 48,960 rows. The oracle's three default seeds stay green.
+**Proposed fix upstream:** the same - guard at `pos`, and let the extension loop's own tail test
+report the partial at the end of the text.
+
 ---
 
 ## 3. A reversed search reports a partial that the same pattern's `match` and `fullmatch` deny

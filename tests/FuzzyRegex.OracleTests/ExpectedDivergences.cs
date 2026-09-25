@@ -142,7 +142,7 @@ internal static class ExpectedDivergences
         """{"generator": "fuzzy", "pattern": "(?b)(?:ab|xyc){9i+1s+9d<=20}", "flags": 0, "namedLists": {}, "subject": "abc", "operation": "fullmatch", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [2], "deletions": []}}}""";
 
     /// <summary>
-    /// The thirty-two rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
+    /// The thirty-four rows of <c>bestmatch-loses-a-candidate</c>. Rows 1 to 9 were recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/bestmatch-loses-a-candidate-rows.jsonl</c>
     /// on 2026-09-14 and rows 10 and 11 on 2026-09-15; every later row names the probe that recorded
     /// it in the paragraph below that judges it.
@@ -330,6 +330,26 @@ internal static class ExpectedDivergences
     /// on 2026-09-23 as rows 3 to 6 of <c>python tools/record-oracle.py --rows
     /// tools/probes/s89-bestmatch-rows.jsonl</c>.
     /// </para>
+    /// <para>
+    /// Row 33, <c>(?b)(\p{L}){i,d}c</c> as a partial fullmatch over '\nc', came from triaging the
+    /// 2026-09-24 scheduled sweep, where <c>full-fold-backreference-leftovers</c>' doubled-guard arm
+    /// claimed it with no backreference in it (see <see cref="TheDoubledGuardAloneExplainsIt"/>).
+    /// Upstream answers a partial (0, 2) with one insertion, and without
+    /// partial it answers no match; its own flagless and <c>(?e)</c> answers are the complete (0, 2)
+    /// with one insertion and one deletion, this port's answer. Setting
+    /// <c>PatternObject.DoubleCountTrailingInsertions</c> alone makes this port answer upstream's
+    /// partial. Measured 2026-09-25 on regex 2026.9.10 with <c>python tools/record-oracle.py --rows</c>
+    /// on the one row, and the ablation by the consumer.
+    /// </para>
+    /// <para>
+    /// Row 34 is <c>fuzzy</c> row 6043 at seed 20260925, the same leak drawn by the default wave:
+    /// <c>(?b)(?e)(?fi)(?:[ab]+\s(?:0ßa){e&lt;=2,s&lt;=1}){1&lt;=e&lt;=2}</c> fullmatched against
+    /// 'BAa 0SsTA'. Full folding lets ß meet 'Ss' but there is no backreference, and before the
+    /// narrowing a full-fold arm claimed it. Upstream answers no match; its own <c>(?e)(?fi)</c> and
+    /// <c>(?fi)</c> twins answer (0, 9) with a substitution at 7 and a trailing insertion at 8, the
+    /// recorded <c>bestmatchFreeOutcome</c>, and the recorder flags <c>bestmatch-no-worse</c>. This
+    /// port answers that fit to the position. Measured 2026-09-25 on regex 2026.9.10.
+    /// </para>
     /// </remarks>
     private const string _bestmatchLostCandidateRows = """
         {"generator": "fuzzy", "pattern": "(?b)(?:x){e<=3}", "flags": 0, "namedLists": {}, "subject": "xyz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 2, 0], "fuzzyChanges": {"substitutions": [], "insertions": [1, 2], "deletions": []}}}
@@ -364,6 +384,8 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?b)(?r)(?:\\L<phrases>){e<=3}", "flags": 0, "namedLists": {"phrases": ["", "amber lantern"]}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [3, 2, 1], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "rows", "pattern": "(?b)(?:){e<=3}", "flags": 0, "namedLists": {}, "subject": "znz", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 3, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0, 1, 2], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         {"generator": "rows", "pattern": "(?b)(?r)\\m(?:\ud83d\ude00\\d\ud83d\ude00){e:[a-z]}", "flags": 0, "namedLists": {}, "subject": "b\ud83d\ude00\ud83d\ude00", "operation": "subf", "template": "<>", "count": 0, "codepointSpan": null, "outcome": {"kind": "sub", "text": "<><>\ud83d\ude00", "count": 2}, "bestmatchFreeOutcome": {"kind": "sub", "text": "<><>", "count": 2}}
+        {"generator": "rows", "pattern": "(?b)(\\p{L}){i,d}c", "flags": 0, "namedLists": {}, "subject": "\nc", "operation": "fullmatch", "partial": true, "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": 1, "lastGroup": null, "partial": true, "fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [0, 1, 0], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": []}}], "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 1, "success": true, "index": 0, "length": 1, "captures": [[0, 1]]}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 1, 1], "fuzzyChanges": {"substitutions": [], "insertions": [0], "deletions": [0]}}}
+        {"generator": "fuzzy", "pattern": "(?b)(?e)(?fi)(?:[ab]+\\s(?:0\u00dfa){e<=2,s<=1}){1<=e<=2}", "flags": 0, "namedLists": {}, "subject": "BAa 0SsTA", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "bestmatchFreeOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "fuzzyChanges": {"substitutions": [7], "insertions": [8], "deletions": []}}, "selfContradiction": ["bestmatch-no-worse"]}
         """;
 
     /// <summary>
@@ -1934,6 +1956,7 @@ internal static class ExpectedDivergences
         {"generator": "rows", "pattern": "(?e)(?r)(?p)\\b(\\d+)*(?:(?:(\\p{Lu})[A-Z]*){e<=2:[a-z]}(*PRUNE)\\s|\\S)(?:\\p{ASCII}[^a]{2,}?\ud835\udfee){s<=1,i<=1,d<=1}", "flags": 0, "namedLists": {}, "subject": "\ud835\udfee\ud83c\udffbA\ud83d\ude00\r Aaa", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 0, "length": 12, "captures": [[0, 12]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "codepointSpan": [0, 9]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 11, "captures": [[0, 11]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 1, 0], "codepointSpan": [0, 8]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "codepointSpan": [0, 4]}]}, "posixFreeOutcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 5, "length": 6, "captures": [[5, 6]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [11], "insertions": [], "deletions": []}, "codepointSpan": [3, 8]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 10, "captures": [[0, 10]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [10], "insertions": [], "deletions": []}, "codepointSpan": [0, 7]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 9, "captures": [[0, 9]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 0], "fuzzyChanges": {"substitutions": [9], "insertions": [], "deletions": []}, "codepointSpan": [0, 6]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 8, "captures": [[0, 8]]}, {"number": 1, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": 1, "lastGroup": null, "partial": false, "fuzzyCounts": [0, 0, 1], "fuzzyChanges": {"substitutions": [], "insertions": [], "deletions": [8]}, "codepointSpan": [0, 5]}, {"groups": [{"number": 0, "success": true, "index": 0, "length": 7, "captures": [[0, 7]]}, {"number": 1, "success": false, "index": 0, "length": 0, "captures": []}, {"number": 2, "success": false, "index": 0, "length": 0, "captures": []}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [1, 0, 1], "fuzzyChanges": {"substitutions": [7], "insertions": [], "deletions": [2]}, "codepointSpan": [0, 4]}]}}
         {"generator": "interactions", "pattern": "(?e)^(?:\\s(\\d)[[:alpha:]]){e<=2,s<=1}(?P<g4>(?:(\\p{Nd})(?P<g3>[\\p{L}||\\p{N}])){s<=1,i<=1,d<=1}(?P>g4)?)$", "flags": 264, "namedLists": {}, "subject": "00AA\n ", "operation": "sub", "template": "\\g<g4>\ud83d\ude00\\4\\g<0>", "count": 1, "codepointSpan": null, "outcome": {"kind": "sub", "text": "A\n \ud83d\ude00\n00AA\n ", "count": 1}}
         {"generator": "interactions", "pattern": "(?e)^(?P<g>(?:ab){s<=1,i<=1,d<=1}(?P>g)?)$", "flags": 8, "namedLists": {}, "subject": "b\n ", "operation": "search", "codepointSpan": [0, 3], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 3, "captures": [[0, 3]]}, {"number": 1, "success": true, "index": 0, "length": 3, "captures": [[2, 1], [0, 3]]}], "lastIndex": 1, "lastGroup": "g", "partial": false, "fuzzyCounts": [2, 1, 2], "fuzzyChanges": {"substitutions": [0, 2], "insertions": [1], "deletions": [2, 4]}}, "leakFreeFuzzy": [{"fuzzyCounts": [2, 1, 2], "fuzzyChanges": {"substitutions": [0, 2], "insertions": [1], "deletions": [2, 4]}}]}
+        {"generator": "rows", "pattern": "(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)", "flags": 0, "namedLists": {}, "subject": "zzzz", "operation": "search", "codepointSpan": [0, 4], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "fuzzyCounts": [4, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2, 3], "insertions": [], "deletions": []}}, "leakFreeFuzzy": [{"fuzzyCounts": [4, 0, 0], "fuzzyChanges": {"substitutions": [0, 1, 2, 3], "insertions": [], "deletions": []}}]}
         """;
 
     /// <summary>
@@ -1977,6 +2000,12 @@ internal static class ExpectedDivergences
         // 2026-09-25 against upstream's own tighter fit of the same span, (0, 1) with one deletion on the minimal row: seed 500905607 row 25852; the minimal form of A3.
         "sub 1 'A\\ud83d\\ude00A00AA\\u000a '",
         "match 0:(0,1)[(0,1)] 1:(0,1)[(0,1)] last=1/g fuzzy=(0,0,1)[s:][i:][d:0]",
+        // Found 2026-09-25 by the blind review of ledger 33's engine change, not drawn by a wave, and
+        // older than that change. Upstream keeps the first branch's four substitutions although its
+        // own once-only twin `(?e)(?:(?:abcd){s<=4}|(?:x){d<=1})`, its lazy twin `...)+?)` and its
+        // `{1,3}` twin all improve to deletions, and the only fits the second branch has are
+        // zero-width ones spending one deletion per iteration. See FuzzyEnhanceMatchTests.
+        "match 0:(0,0)[(0,0)] last=-1/- fuzzy=(0,0,1)[s:][i:][d:0]",
     ];
 
     /// <summary>
@@ -4965,7 +4994,7 @@ internal static class ExpectedDivergences
                 + ".Bestmatch_keeps_a_match_that_is_all_trailing_insertions, "
                 + ".Bestmatch_reversed_keeps_the_seven_insertion_match and "
                 + ".Bestmatch_reversed_replaces_the_whole_emoji_run",
-            // Thirty-two rows rather than one, because each is a judged member of the family and the
+            // Thirty-four rows rather than one, because each is a judged member of the family and the
             // staleness alarm should re-test each: upstream losing the match outright, upstream
             // keeping it with a different error mix at the same error count, the two aggregate
             // operations whose outcome is not a match object, a `partial=True` row upstream
@@ -6276,14 +6305,16 @@ internal static class ExpectedDivergences
             Example: _groupFoldLeftoverRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithoutTheGroupFoldLeftovers(row))
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
+                || (
+                    OnlyTheAblationExplainsIt(
                         row,
-                        withoutTheRetriedFoldSteps: false,
-                        withoutTheGroupFoldLeftovers: true
-                    )
+                        ours,
+                        OracleComparer.RunWithTheDoubledInsertionGuard(
+                            row,
+                            withoutTheRetriedFoldSteps: false,
+                            withoutTheGroupFoldLeftovers: true
+                        )
+                    ) && !TheDoubledGuardAloneExplainsIt(row, ours)
                 )
         ),
         new(
@@ -6347,23 +6378,27 @@ internal static class ExpectedDivergences
                         withoutTheGroupFoldLeftovers: true
                     )
                 )
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
-                        row,
-                        withoutTheRetriedFoldSteps: true,
-                        withoutTheGroupFoldLeftovers: false
-                    )
-                )
-                || OnlyTheAblationExplainsIt(
-                    row,
-                    ours,
-                    OracleComparer.RunWithTheDoubledInsertionGuard(
-                        row,
-                        withoutTheRetriedFoldSteps: true,
-                        withoutTheGroupFoldLeftovers: true
-                    )
+                || (
+                    (
+                        OnlyTheAblationExplainsIt(
+                            row,
+                            ours,
+                            OracleComparer.RunWithTheDoubledInsertionGuard(
+                                row,
+                                withoutTheRetriedFoldSteps: true,
+                                withoutTheGroupFoldLeftovers: false
+                            )
+                        )
+                        || OnlyTheAblationExplainsIt(
+                            row,
+                            ours,
+                            OracleComparer.RunWithTheDoubledInsertionGuard(
+                                row,
+                                withoutTheRetriedFoldSteps: true,
+                                withoutTheGroupFoldLeftovers: true
+                            )
+                        )
+                    ) && !TheDoubledGuardAloneExplainsIt(row, ours)
                 )
         ),
         new(
@@ -6866,6 +6901,33 @@ internal static class ExpectedDivergences
     }
 
     /// <summary>
+    /// Whether the answer being judged is what this port really answers now, the second run every
+    /// ablation entry makes.
+    /// </summary>
+    /// <remarks>
+    /// A timeout is never that answer. Where upstream answered, this port running out of time is a
+    /// divergence (<see cref="OracleComparer.Compare"/> says why), and a live re-run that times out
+    /// again describes itself exactly as the wave's timeout did - so without this check, an ablated
+    /// run that happened to finish in time classified a timeout. Measured 2026-09-25 on the seed-11
+    /// <c>partial-long</c> wave: rows 6398 and 7144, with no full folding in either pattern, were
+    /// tallied <c>full-fold-leftover-take-back</c> and <c>full-fold-backreference-retry</c>.
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if a live run gives the same answer and it is not a timeout.</returns>
+    internal static bool IsTheLiveAnswer(OracleRow row, IOracleOutcome ours) =>
+        !(
+            ours is ErrorOutcome { WhileMatching: true } error
+            && string.Equals(
+                error.Exception,
+                nameof(System.Text.RegularExpressions.RegexMatchTimeoutException),
+                StringComparison.Ordinal
+            )
+        )
+        && OracleComparer.Run(row) is { } live
+        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+
+    /// <summary>
     /// Whether the S57c anchor pin is the whole of the difference between the two engines on a row.
     /// </summary>
     /// <remarks>
@@ -6895,8 +6957,7 @@ internal static class ExpectedDivergences
             return false;
         }
 
-        return OracleComparer.Run(row) is { } pinned
-            && string.Equals(pinned.Describe(), ours.Describe(), StringComparison.Ordinal);
+        return IsTheLiveAnswer(row, ours);
     }
 
     /// <summary>
@@ -6921,8 +6982,7 @@ internal static class ExpectedDivergences
             return false;
         }
 
-        return OracleComparer.Run(row) is { } live
-            && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+        return IsTheLiveAnswer(row, ours);
     }
 
     /// <summary>
@@ -6940,8 +7000,32 @@ internal static class ExpectedDivergences
     private static bool OnlyTheAblationExplainsIt(OracleRow row, IOracleOutcome ours, IOracleOutcome? ablated) =>
         ablated is not null
         && OracleComparer.Compare(row, ablated) == OracleVerdict.Agree
-        && OracleComparer.Run(row) is { } live
-        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+        && IsTheLiveAnswer(row, ours);
+
+    /// <summary>
+    /// Whether upstream's doubled insertion guard ALONE, with every full-fold repair left on,
+    /// reproduces upstream's answer.
+    /// </summary>
+    /// <remarks>
+    /// The full-fold entries' doubled-guard arms switch a fold repair off as well, and on a row with
+    /// no full-folded backreference that switch does nothing, so without this test those arms
+    /// claimed plain ledger entry 12 rows under a full-fold name: `(?b)(\p{L}){i,d}c` as a partial
+    /// fullmatch over '\nc' was tallied `full-fold-backreference-leftovers` (2026-09-25). Such a row
+    /// belongs to <c>bestmatch-loses-a-candidate</c>, which is keyed on judged rows.
+    /// </remarks>
+    /// <param name="row">The row, carrying upstream's answer.</param>
+    /// <param name="ours">This port's answer, as the wave measured it.</param>
+    /// <returns><see langword="true"/> if the doubled guard alone explains the divergence.</returns>
+    private static bool TheDoubledGuardAloneExplainsIt(OracleRow row, IOracleOutcome ours) =>
+        OnlyTheAblationExplainsIt(
+            row,
+            ours,
+            OracleComparer.RunWithTheDoubledInsertionGuard(
+                row,
+                withoutTheRetriedFoldSteps: false,
+                withoutTheGroupFoldLeftovers: false
+            )
+        );
 
     /// <summary>
     /// Whether one ablated run leaves only ledger entry 11 mechanism B between the two engines.
@@ -6960,11 +7044,7 @@ internal static class ExpectedDivergences
         OracleRow row,
         IOracleOutcome ours,
         IOracleOutcome? ablated
-    ) =>
-        ablated is not null
-        && UpstreamCountedOnlyTheInnermostSection(row, ablated)
-        && OracleComparer.Run(row) is { } live
-        && string.Equals(live.Describe(), ours.Describe(), StringComparison.Ordinal);
+    ) => ablated is not null && UpstreamCountedOnlyTheInnermostSection(row, ablated) && IsTheLiveAnswer(row, ours);
 
     /// <summary>
     /// Whether the row's pattern runs right to left, by either of the two ways it can say so.

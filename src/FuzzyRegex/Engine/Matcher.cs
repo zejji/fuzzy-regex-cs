@@ -3303,10 +3303,17 @@ internal static class Matcher
     /// has run out, where a narrowed slice ends the repeat by its own <c>limit</c> - and the two are
     /// the same number anyway, because <c>text_end</c> IS the slice end. Backwards the reversed arms
     /// go through <see cref="RanOutOnTheLeft"/>, which asks <c>slice_start</c> rather than
-    /// upstream's always-zero <c>text_start</c>. A character tail is about to test the character one
-    /// step on, so it guards a step further out than a string tail, which guards at
-    /// <paramref name="pos"/> itself; upstream's <c>pos + 1</c> and <c>pos - 1</c> are codepoint
-    /// steps, hence <see cref="MatchState.NextPos"/> and <see cref="MatchState.PrevPos"/> here.
+    /// upstream's always-zero <c>text_start</c>.
+    /// </para>
+    /// <para>
+    /// DIVERGES FROM UPSTREAM for a character tail, deliberately: it guards at
+    /// <paramref name="pos"/>, as a string tail does, where upstream's four <c>CHARACTER</c> arms
+    /// guard one step further out (<c>pos + 1 &gt;= text_end</c>, <c>pos - 1 &lt;= text_start</c>).
+    /// That step is the repetition the arm has not tried yet, so upstream answers a partial when the
+    /// repeat cannot take it at all - the item refuses the last character, or the repeat is at its
+    /// maximum - and no continuation of the text can complete the match: `(?r)ab??` over 'c' and
+    /// `([^a-f]{3,}?)x` over '__AAb' (ledger entry 2). When the repeat CAN take it, the loop below
+    /// does, and the tail's own test at the end of the text answers the partial.
     /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -3316,12 +3323,14 @@ internal static class Matcher
     private static bool IsTailPartial(MatchState state, Node test, int pos) =>
         test.Op switch
         {
-            Opcode.Character or Opcode.CharacterIgn => state.NextPos(pos) >= state.TextEnd
+            Opcode.Character or Opcode.CharacterIgn or Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos
+                >= state.TextEnd
                 && state.PartialSide == MatchState.PartialRight,
-            Opcode.CharacterRev or Opcode.CharacterIgnRev => RanOutOnTheLeft(state, state.PrevPos(pos)),
-            Opcode.String or Opcode.StringIgn or Opcode.StringFld => pos >= state.TextEnd
-                && state.PartialSide == MatchState.PartialRight,
-            Opcode.StringRev or Opcode.StringIgnRev or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
+            Opcode.CharacterRev
+            or Opcode.CharacterIgnRev
+            or Opcode.StringRev
+            or Opcode.StringIgnRev
+            or Opcode.StringFldRev => RanOutOnTheLeft(state, pos),
             _ => false,
         };
 
@@ -10584,11 +10593,8 @@ internal static class Matcher
                         // loop, before it tries to extend the repeat at all (:16546, :16583,
                         // :16621, :16659 for the four CHARACTER tails; :16699, :16754, :16809,
                         // :16868, :16925, :16982 for the six STRING ones), and the default arm has
-                        // no such check. The gap is only visible when the repeat CANNOT extend: for
-                        // `regex.match(r'([^a-f]{3,}?)x', '__AAb', partial=True)` upstream answers
-                        // a partial at (0,5) from here, while this port asked MatchOne first, was
-                        // refused by the 'b', broke out of the loop and reported no match at all.
-                        // Found by the S31 oracle wave, seed 7, row 581.
+                        // no such check. Not for a CHARACTER tail as upstream spells it, which
+                        // answers a partial the repeat cannot reach - see IsTailPartial.
                         if (IsTailPartial(state, test, pos))
                         {
                             return MatchStatus.Partial;

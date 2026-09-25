@@ -1323,3 +1323,19 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   docs/plan/upstream-reports/ledger-reproductions.jsonl is re-asked of upstream on every run
   (`record-oracle.py --recheck`). Screening every row was rejected on measurement: 5-12x the
   time, 15.2 GB peak.
+- 2026-09-25 (owner: "don't assume upstream is correct; corroborate"): **a lazy repeat before a
+  one-character tail no longer reports a partial it cannot reach**, reversing S31's pin of
+  `([^a-f]{3,}?)x` over '__AAb'. Upstream's CHARACTER arms guard one step ahead of the repeat
+  (`pos + 1 >= text_end`), so they answer a partial when the item refuses the last character.
+  Judged on a 48,960-row grid against the README's definition (tried exhaustively with CPython's
+  `re`), PCRE2 10.47 and upstream's own greedy twins: upstream is wrong on 3,756 rows and this port,
+  after the fix, on none. `Matcher.IsTailPartial` guards at the repeat's position for every tail.
+  Ledger entry 2.
+- 2026-09-25: **`(?e)(?:(?:abcd){s<=4}|(?:(?:x){d<=1})+)` over 'zzzz' is port-right**: one deletion
+  at (0, 0), where upstream keeps four substitutions. Upstream's once-only, lazy and `{1,3}` twins
+  all improve; its improvement re-run meets ledger entry 33's endless repeat. Pinned as a judged row
+  of `enhancematch-loses-a-candidate` (ledger 25).
+- 2026-09-25: **the full-fold entries' doubled-guard arms no longer claim a row the doubled guard
+  explains alone.** Switching a fold repair off does nothing on a row without a full-folded
+  backreference, so those arms were tallying plain ledger 12 rows under a full-fold name. Such rows
+  now show red until judged into `bestmatch-loses-a-candidate`, per the owner's 2026-09-14 ruling.

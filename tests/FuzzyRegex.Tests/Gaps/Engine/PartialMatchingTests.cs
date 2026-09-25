@@ -235,26 +235,52 @@ public sealed class PartialMatchingTests
         (zeroFirst.Groups[1].Index, zeroFirst.Groups[1].Length).Should().Be((0, 0));
     }
 
+    // DIVERGES FROM UPSTREAM, deliberately, and this test pins OUR answer rather than upstream's.
     [Test]
-    public void A_lazy_repeat_that_cannot_extend_at_all_is_still_a_partial_match()
+    public void A_lazy_repeat_that_cannot_take_the_last_character_is_no_partial_match()
     {
-        // The wave's second finding, seed 7, row 581, minimised. '[^a-f]' matches the first four
-        // characters of '__AAb' and refuses the 'b', so the repeat cannot reach the six the tail
-        // would need. Upstream answers a partial anyway, because its specialised tail arms ask
-        // partial_side BEFORE trying to extend; this port asked MatchOne first, was refused, and
-        // reported no match at all. The fix is Matcher.IsTailPartial - see its remarks.
+        // '[^a-f]' matches the first four characters of '__AAb' and refuses the 'b', so neither the
+        // repeat nor the tail can ever get past it, and no continuation of the text completes the
+        // match. Upstream answers a partial anyway: its CHARACTER tail arms guard one step ahead
+        // (pos + 1 >= text_end, :16546) before anything checks that the repeat can take that step.
+        // S31 (seed 7, row 581) copied upstream's answer here; it was ledger entry 2's defect all
+        // along, and Matcher.IsTailPartial now guards where the repeat stands.
         //
-        // Measured 2026-09-12, .scratch/bisect7.jsonl through tools/run-oracle.ps1:
-        //   compile(r'([^a-f]{3,}?)x').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
-        //   compile(r'([^a-f]{3,}?)_').match('__AAb', partial=True) -> (0,5) partial True, 1 unset
-        //   compile(r'(.{3,}?)x').match('abcde', partial=True)      -> (0,5) partial True, 1 unset
-        foreach (string pattern in new[] { @"([^a-f]{3,}?)x", @"([^a-f]{3,}?)_", @"([^a-f]{3,}?)_\1" })
+        // Measured 2026-09-25, regex 2026.9.10 against the README's definition of a partial (checked
+        // by trying every continuation with CPython's own `re`) and PCRE2 10.47 (PCRE2_PARTIAL_SOFT):
+        //   ([^a-f]{3,}?)x    '__AAb'   upstream (0,5) partial   truth none      PCRE2 none
+        //   (?r)ab??          'c'       upstream (0,1) partial   truth none      PCRE2 none (mirror b??a)
+        //   (.{3,}?)x         'abcde'   upstream (0,5) partial   truth partial   PCRE2 partial
+        //   (?r)ab??          'b'       upstream (0,1) partial   truth partial   PCRE2 partial
+        // Upstream's own greedy twins answer none on every row of the first kind. Over 48,960 grid
+        // rows of this shape upstream reports 3,756 such partials and misses none.
+        foreach (
+            (string pattern, string subject) in new[]
+            {
+                (@"([^a-f]{3,}?)x", "__AAb"),
+                (@"([^a-f]{3,}?)_", "__AAb"),
+                (@"([^a-f]{3,}?)_\1", "__AAb"),
+                (@"(?r)ab??", "c"),
+                (@"(?ir)Xa*?", "c"),
+                (@"[^c]??x", "c"),
+            }
+        )
         {
-            Match m = new FuzzyRegex(pattern).MatchAtStart("__AAb", partial: true);
+            new FuzzyRegex(pattern)
+                .MatchAtStart(subject, partial: true)
+                .Success.Should()
+                .BeFalse($"no continuation of {subject} matches {pattern}; upstream answers a partial");
+        }
+
+        // Where the repeat CAN take the last character, the partial stays.
+        foreach (
+            (string pattern, string subject) in new[] { (@"(.{3,}?)x", "abcde"), (@"(?r)ab??", "b"), ("ba??x", "ba") }
+        )
+        {
+            Match m = new FuzzyRegex(pattern).MatchAtStart(subject, partial: true);
 
             m.PartialMatch.Should().BeTrue(pattern);
-            (m.Index, m.Index + m.Length).Should().Be((0, 5), pattern);
-            m.Groups[1].Success.Should().BeFalse(pattern);
+            (m.Index, m.Index + m.Length).Should().Be((0, subject.Length), pattern);
         }
     }
 

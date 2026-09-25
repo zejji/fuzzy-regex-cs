@@ -884,6 +884,68 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_port_timeout_is_never_the_live_answer_an_ablation_entry_judges()
+    {
+        // Before 2026-09-25 the ablation entries could tally a timeout: the wave's answer and the
+        // live re-run both timed out and described themselves identically, while the ablated run
+        // happened to finish. A budget of a microsecond makes the live run time out every time.
+        OracleRow row = OracleWave.ParseRows(
+            ExpectedDivergences
+                .All.Single(static e => string.Equals(e.Id, "full-fold-backreference-retry", StringComparison.Ordinal))
+                .Example
+        )[0] with
+        {
+            Timeout = 1e-6,
+        };
+        IOracleOutcome timedOut = OracleComparer.Run(row)!;
+
+        timedOut
+            .Should()
+            .BeOfType<ErrorOutcome>()
+            .Which.Exception.Should()
+            .Be(nameof(System.Text.RegularExpressions.RegexMatchTimeoutException));
+        ExpectedDivergences.IsTheLiveAnswer(row, timedOut).Should().BeFalse();
+    }
+
+    [Test]
+    public void A_bestmatch_row_with_no_backreference_is_not_claimed_by_a_full_fold_entry()
+    {
+        // Upstream's doubled insertion guard alone explains this row: its own (?b)-free and (?e)
+        // answers are the complete (0, 2) match this port gives, and it has no backreference and no
+        // full folding. The full-fold entries' doubled-guard arms used to claim it, because
+        // switching a fold repair off does nothing on a row without one (2026-09-25). It is ledger
+        // entry 12's, keyed on its row in `bestmatch-loses-a-candidate`.
+        OracleRow row = OracleWave
+            .ParseRows(
+                ExpectedDivergences
+                    .All.Single(static e =>
+                        string.Equals(e.Id, "bestmatch-loses-a-candidate", StringComparison.Ordinal)
+                    )
+                    .Example
+            )
+            .Single(static r => string.Equals(r.Pattern, @"(?b)(\p{L}){i,d}c", StringComparison.Ordinal));
+        IOracleOutcome ours = OracleComparer.Run(row)!;
+
+        OracleComparer.Compare(row, ours).Should().Be(OracleVerdict.Diverge);
+        ExpectedDivergences
+            .For(row, ours)
+            .Should()
+            .NotBeNull(ours.Describe())
+            .And.Subject.As<ExpectedDivergence>()
+            .Id.Should()
+            .Be("bestmatch-loses-a-candidate");
+
+        // And the full-fold entries refuse it themselves, since `bestmatch-loses-a-candidate` only
+        // wins by coming first: an unjudged row of the same shape must reach no entry at all.
+        ExpectedDivergences
+            .All.Where(static e => e.Id.StartsWith("full-fold-", StringComparison.Ordinal))
+            .Where(e => e.Applies(row, ours))
+            .Select(static e => e.Id)
+            .Should()
+            .BeEmpty();
+    }
+
+    [Test]
     public void An_answer_with_no_spans_is_classified_by_the_row_keyed_turkic_entry()
     {
         // S52. The three span-less shapes - a `sub`, a `split` and a `subf` whose template throws -
