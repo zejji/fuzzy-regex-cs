@@ -19,8 +19,10 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// </para>
 /// <para>
 /// <b>Every assertion here is an invariant of this port's own answer, not a comparison with
-/// upstream.</b> Both engines agree on C and D, so no oracle wave can see either: a bug both
-/// engines share reports as agreement. What can see it is the pair of attributes contradicting each
+/// upstream.</b> Both engines agreed on C and D when these were written, so no oracle wave could see
+/// either: a bug both engines share reports as agreement. (Since S48b fixed both here, the oracle
+/// does see them - <c>lookaround-change-left-by-a-lazy-retreat</c> is D reached without <c>(?e)</c>.) What can
+/// see it is the pair of attributes contradicting each
 /// other, which is what
 /// <c>OracleWaveTests.Our_own_answers_never_contradict_themselves</c> asserts over a
 /// whole wave and what these rows assert one at a time.
@@ -177,6 +179,54 @@ public sealed class FuzzyCountsAndChangesTests
     /// upstream's drawn answer, not with this one.
     /// </para>
     /// </remarks>
+    // DIVERGES FROM UPSTREAM, and this test pins OUR answer: upstream's own greedy twin.
+    [Test]
+    public void A_fuzzy_lookaround_beside_a_lazy_repeat_reports_the_change_where_the_winning_path_made_it()
+    {
+        // Ledger entry 11 mechanism D without `(?e)`, from seed 335764881 row 24519 of the 2026-09-24
+        // sweep. The lookahead's substitution is made against 'a' at 1 on the path that wins; upstream
+        // reports it at 0, where the abandoned attempt tried the lookahead before `c??` took the 'c'.
+        // Measured 2026-09-25 on regex 2026.9.10:
+        //   search('c??(?=b{s<=1})a', 'ca')   (0, 2) (1, 0, 0) substitutions [0]
+        //   search('c?(?=b{s<=1})a',  'ca')   (0, 2) (1, 0, 0) substitutions [1]
+        //   search('c(?=b{s<=1})a',   'ca')   (0, 2) (1, 0, 0) substitutions [1]
+        foreach (string pattern in new[] { "c??(?=b{s<=1})a", "c?(?=b{s<=1})a", "c(?=b{s<=1})a" })
+        {
+            Match m = new FuzzyRegex(pattern).Match("ca");
+
+            (m.Index, m.Length).Should().Be((0, 2), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(1, 0, 0), pattern);
+            m.FuzzyChanges.Substitutions.Should().Equal([1], pattern);
+        }
+
+        // Reversed, the lookbehind's twin: upstream answers 2 with `c??` and 1 with `c` and `c?`.
+        Match reversed = new FuzzyRegex("(?r)a(?<=b{s<=1})c??").Match("ac");
+
+        (reversed.Index, reversed.Length).Should().Be((0, 2));
+        reversed.FuzzyChanges.Substitutions.Should().Equal(1);
+    }
+
+    // DIVERGES FROM UPSTREAM, and this test pins OUR answer: upstream's own cut-free twin.
+    [Test]
+    public void A_lazy_repeat_before_an_atomic_fuzzy_group_reports_the_deletion_the_cut_free_pattern_reports()
+    {
+        // Mechanism E again, at its smallest: seed 335764881 row 24799 of the 2026-09-24 sweep,
+        // shrunk to one fuzzy item over one character. `.*?` has consumed the 'b', so the deleted 'a'
+        // sits at 1; upstream reports 0, where the first try (`.*?` empty, 'a' deleted, `$` failing)
+        // left it inside the atomic group, which a backtrack does not re-enter. Measured 2026-09-25
+        // on regex 2026.9.10:
+        //   search('.*?(?>a{d<=1})$', 'b')   (0, 1) (0, 0, 1) deletions [0]
+        //   search('.*?(?:a{d<=1})$', 'b')   (0, 1) (0, 0, 1) deletions [1]
+        foreach (string pattern in new[] { ".*?(?>a{d<=1})$", ".*?(?:a{d<=1})$" })
+        {
+            Match m = new FuzzyRegex(pattern).Match("b");
+
+            (m.Index, m.Length).Should().Be((0, 1), pattern);
+            m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1), pattern);
+            m.FuzzyChanges.Deletions.Should().Equal([1], pattern);
+        }
+    }
+
     [Test]
     public void An_atomic_group_reports_the_deletion_the_cut_free_pattern_reports()
     {

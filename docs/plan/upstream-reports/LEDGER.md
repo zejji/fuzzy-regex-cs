@@ -948,6 +948,24 @@ offsets. Nothing here rests on the answer. Probes:
 `reversed-anchor-cannot-compile-a-full-fold` and the gap test is
 `CaseFoldingTests.A_reversed_anchored_full_fold_compiles_and_matches`.
 
+**No anchor is needed either (2026-09-25).** The 2026-09-24 scheduled sweep drew seed 335764881 row
+27110, `(?r)(?:(?=(😀|aa))ß|ß)aß` under `I|M|F`, which has no anchor. It minimises to a leading
+lookahead:
+
+```python
+>>> regex.compile('(?r)(?=a)ßaß', regex.I | regex.F)      # IndexError, _regex_core.py:4035
+>>> regex.compile('(?r)(?:ß|x)aß', regex.I | regex.F)     # compiles
+>>> [m.span() for m in regex.finditer('(?=ß)ßaß', 'xßaß', regex.I | regex.F)]
+[(1, 4)]                                                   # the forward twin; this port's answer reversed
+>>> [m.span() for m in regex.finditer('ßaß', 'ssass', regex.I | regex.F)]
+[]                                                         # the silent half, with no anchor at all
+```
+
+The last line is the second, silent half of this entry, reached without an anchor. `ßaß` is two
+expansions, and forward it fails to match its own full fold `ssass`, where this port gives (0, 5).
+The new rows are in `reversed-anchor-cannot-compile-a-full-fold`, and the gap test is
+`CaseFoldingTests.A_reversed_full_fold_after_a_lookahead_compiles_and_matches`.
+
 ---
 
 ## 7. The default case-folding tables carry CaseFolding.txt's Turkic-only rows - FIXED HERE (S45)
@@ -1590,9 +1608,29 @@ over `'ﬃﬃ𐐀𐐀𐐀'`, **flags 258** (`0x102`), overlapped `finditer`, who
 is `(?e)([abz])[a\d]{0,}?(?<=(?:(\d?)[A-Z]😀){s<=1,i<=1,d<=1})\b` over `'😀\r\n😀AA'`, **flags 130**
 (`0x82`), `search`: counts `(1,0,0)` against a list holding one DELETION at 7. With no
 flags that row does not match at all. D was found by S47's own new wave property at seed 4242, on
-its first run, which is what that property is for. **Both engines agree on C and D**, so the oracle
-cannot see them; only the property can - and it cannot see C either, because a POSIX row has no
-positions to count on either side (entry 9), which is why C is written out here by hand.
+its first run, which is what that property is for. **Both engines agreed on C and D** when this was
+written, so the oracle could not see them; only the property could - and it cannot see C either,
+because a POSIX row has no positions to count on either side (entry 9), which is why C is written out
+here by hand. Since S48b fixed both here, the engines no longer agree on them, so the oracle does
+see them.
+
+**D DOES NOT NEED `(?e)`, AND IT CAN LEAVE THE COUNTS AND KINDS RIGHT (2026-09-25).** Seed 335764881
+row 24519 of the 2026-09-24 scheduled sweep is D with no flags at all. The fuzzy lookaround
+succeeds, what follows it fails, and the engine backtracks into a LAZY repeat beside it. The
+lookaround is then tried again and succeeds with the same counts, but the stale change entry
+survives, so only the position is wrong:
+
+```python
+>>> [(m.span(), m.fuzzy_counts, m.fuzzy_changes) for m in [regex.search(p, 'ca') for p in
+...  ('c??(?=b{s<=1})a', 'c?(?=b{s<=1})a', 'c(?=b{s<=1})a')]]
+[((0, 2), (1, 0, 0), ([0], [], [])),     # the 'c' the winning path matched literally
+ ((0, 2), (1, 0, 0), ([1], [], [])),     # the 'a' the lookahead read
+ ((0, 2), (1, 0, 0), ([1], [], []))]
+```
+
+Reversed, `(?r)a(?<=b{s<=1})c??` over `'ac'` gives 2, and its `c` and `c?` twins give 1. This port
+answers 1 everywhere. Classified by `lookaround-change-left-by-a-lazy-retreat` and pinned by
+`Gaps/Engine/FuzzyCountsAndChangesTests.A_fuzzy_lookaround_beside_a_lazy_repeat_reports_the_change_where_the_winning_path_made_it`.
 
 **HOW S48b FIXED C AND D, 2026-09-14, AND WHAT IT COST.** The fix is the one this entry predicted -
 the change list is saved and restored wherever the counts are - and it turned out to need **one
