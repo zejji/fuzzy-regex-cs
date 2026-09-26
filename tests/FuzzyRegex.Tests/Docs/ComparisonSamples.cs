@@ -469,4 +469,14 @@ public sealed class ComparisonSamples
         inner.MatchAtStart("cax").Success.Should().BeFalse();
         inner.MatchAtStart("xab").Success.Should().BeTrue();
     }
+
+    /// <summary>"The WORD flag's word boundary is Unicode's default one".</summary>
+    [Test]
+    public void The_WORD_flags_word_boundary_is_Unicodes_default_one()
+    {
+        var boundary = new FuzzyRegex(@"(?w)\b");
+
+        boundary.Matches("a:\u0308a").Select(static m => m.Index).Should().Equal(0, 4);
+        new FuzzyRegex(@"(?w)a\b").Match("a:\u0308a").Index.Should().Be(3);
+    }
 }

@@ -210,8 +210,9 @@ internal static class OracleComparer
     /// Applied to the compiled pattern before it is asked anything, so that a caller can take one
     /// named piece of this engine's behaviour away and see what the row answers without it. Used by
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
-    /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>
-    /// and <see cref="RunWithoutTheLeftoverTakeBack"/> and by nothing else; the wave always passes
+    /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
+    /// <see cref="RunWithoutTheLeftoverTakeBack"/> and <see cref="RunWithTheUpstreamDefaultBoundary"/>
+    /// and by nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -573,6 +574,31 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.SkipLeftoverTakeBack = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's default word-boundary rules in place of
+    /// UAX #29's.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 40 made the WORD flag's boundary follow UAX #29 revision 47, which passes all of
+    /// Unicode 17.0.0's <c>WordBreakTest.txt</c> where upstream fails 268 lines. Setting
+    /// <c>PatternObject.UpstreamDefaultBoundary</c> sends <c>Matcher.AtDefaultBoundary</c> to
+    /// <c>AtUpstreamDefaultBoundary</c>, upstream's function as it stands, at every site that reads
+    /// it. The <c>default-word-boundary-follows-uax29</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's rules, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamDefaultBoundary(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
         );
     }
 

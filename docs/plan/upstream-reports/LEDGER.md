@@ -4347,3 +4347,59 @@ and apply it only to a section with no fuzzy section around it or inside it.
 
 **Tests.** `Gaps/Engine/FuzzyZeroBudgetTests.cs`; `CompileParityTests` pins issue 306's corpus row
 as diverging; `ledger-reproductions.jsonl` re-checks upstream's answer to the issue 306 row.
+
+## 40. The WORD flag's word boundary fails 268 lines of Unicode's own conformance test - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-40-default-word-boundary.md`, for
+the owner to approve. Found 2026-09-26 by the overnight sweep, which ran `(?w)\b` over every line
+of `WordBreakTest.txt`.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26:
+
+```
+[m.start() for m in finditer(r'(?w)\b', 'a:\u0308a')]     -> [0, 1, 4]    expected [0, 4]
+[m.start() for m in finditer(r'(?w)\b', '1,\u03081')]     -> [0, 1, 4]    expected [0, 4]
+[m.start() for m in finditer(r'(?w)\b', "a'\u2060a")]     -> [0, 1, 4]    expected [0, 4]
+[m.start() for m in finditer(r'(?w)\b', '\u0300A')]       -> [0, 2]       expected [0, 1, 2]
+[m.start() for m in finditer(r'(?w)\b', '\U0001F1E6A')]   -> [0, 2]       expected [0, 1, 2]
+[m.start() for m in finditer(r'(?w)\b', "'A")]            -> [0, 2]       expected [0, 1, 2]
+search(r'(?w)a\b', 'a:\u0308a')                           -> span=(0, 1)  expected (3, 4)
+```
+
+**Why upstream is wrong.** `upstream/README.rst:1011`: "The `WORD` flag changes the definition of a
+'word boundary' to that of a default Unicode word boundary." Upstream's tables are Unicode 17.0.0
+(`RE_UNICODE_VERSION`), and that version's conformance file, `WordBreakTest-17.0.0.txt`, gives the
+expected answers above; upstream fails 268 of its 1,944 lines. Every failure is one of three
+departures from UAX #29 revision 47 (the Unicode 17.0.0 version, read 2026-09-26):
+
+- **WB4 applied on one side only.** The rule reads "Ignore Format and Extend characters, except
+  after sot, CR, LF, and Newline", `X (Extend | Format | ZWJ)* → X`. `unicode_at_default_boundary`
+  skips them leftwards from the character before the position, but WB6, WB7, WB7b, WB7c, WB11 and
+  WB12 then read the characters two away (`_regex.c:1615`, and the `left_pos - 1` reads after it)
+  without skipping, so 'a', colon, U+0308, 'a' breaks after the first 'a'. The same loop returns
+  "no break" when the run reaches the start of the text (`:1595`), where "except after sot" means
+  the run stands alone: U+0300 followed by 'A' has no break between them.
+- **WB15/WB16 applied whatever follows.** The rules are `sot (RI RI)* RI × RI` and
+  `[^RI] (RI RI)* RI × RI`; upstream counts regional indicators to the left and never checks that
+  the character on the right is one, so a lone flag letter joins a following 'A'.
+- **A "WB5a" that joins an apostrophe to a following vowel.** It came in with Hg issue 219
+  (2016.8.27). UAX #29 has no such default rule: its notes offer `apostrophe ÷ vowels` as a
+  tailoring for French and Italian, which BREAKS there, and upstream's version returns "no break".
+  It also fires only where WB6 and WB7 do not answer first, which in practice is an apostrophe at
+  the start of the text.
+
+Across the 268 failing lines that is 216 breaks missing and 52 extra (32 at WB6, 20 at WB12).
+
+**Proposed fix upstream:** in `unicode_at_default_boundary`, skip Extend, Format and ZWJ when
+finding the characters two away, as for the one to the left; let a run that reaches the start of
+the text or a line break stand for itself; test the right-hand character in WB15/WB16; and drop
+WB5a or make it the tailoring UAX #29 describes.
+
+**This port.** It answers the conformance file on every line: `(?w)\b`, `(?w)\B`, `(?w)(?r)\b`,
+and `\m` and `\M` under `(?w)`, which share the predicate. `Matcher.AtDefaultBoundary` applies WB4
+through `SkipIgnoredLeft` and `SkipIgnoredRight`, counts WB15/WB16's regional indicators through
+`CountRegionalIndicatorsLeftIgnoring`, and has no WB5a. The grapheme rules (`\X`) are untouched;
+the forward `\X` already passes all 766 lines of `GraphemeBreakTest.txt`. Pinned by
+`Gaps/Engine/DefaultWordBoundaryTests` (rows from the file, with its line numbers) and
+`Gaps/Engine/BoundaryTests.Default_word_boundary_breaks_between_an_apostrophe_and_a_vowel`;
+`ledger-reproductions.jsonl` re-checks upstream's answer to `(?w)a\b` over 'a:' U+0308 'a'.

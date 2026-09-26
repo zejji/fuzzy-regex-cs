@@ -1330,6 +1330,33 @@ still finds `dogfxod` upstream. A zero constraint with no other fuzzy section in
 before and costs nothing, since it compiles to the same code as the pattern without it. There is
 no option to restore the upstream answer; deleting the constraint from the pattern gives it.
 
+### The WORD flag's word boundary is Unicode's default one
+
+`(?w)` switches `\b`, `\B`, `\m` and `\M` to Unicode's default word boundaries, the rules of
+[UAX #29](https://www.unicode.org/reports/tr29/). Unicode publishes a conformance file for them,
+`WordBreakTest.txt`, and this port agrees with every one of its 1,944 lines for Unicode 17.0.0, the
+version of its tables. Upstream disagrees with 268, for three reasons.
+
+Combining marks and format characters, such as U+0308 COMBINING DIAERESIS or U+2060 WORD JOINER,
+are meant to be invisible to the rules that look two characters away. Those rules keep "e.g." and
+"3,456" in one word, so a mark after the punctuation should not split the word; upstream lets it.
+A mark at the very start of the text should stand on its own; upstream joins it to what follows.
+A single flag letter, a regional indicator, should join only another one. And upstream keeps an
+apostrophe at the start of the text with a following vowel, a rule Unicode offers only as a
+French and Italian adjustment that breaks there instead.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'a', colon, U+0308, 'a' is one word: the mark does not separate the colon from the second 'a'.
+var boundary = new FuzzyRegex(@"(?w)\b");
+Console.WriteLine(string.Join(" ", boundary.Matches("a:\u0308a").Select(static m => m.Index)));  // 0 4 - upstream: 0 1 4
+Console.WriteLine(new FuzzyRegex(@"(?w)a\b").Match("a:\u0308a").Index);   // 3 - upstream: 0
+```
+
+Without `(?w)`, `\b` is the simple boundary between a word character and anything else, and
+nothing changes there.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

@@ -1407,3 +1407,18 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   called copy otherwise), which costs speed on such patterns but never an answer. The sweep's
   atomic-group case (`(?:x++y){e<=1}` over 'xy' has no match though `{e<=0}` has one) is upstream's
   documented atomic semantics and is pinned as agreed, with the budget-monotone invariant narrowed.
+- 2026-09-26 (ledger entry 40): **the WORD flag's word boundary follows UAX #29 revision 47, the
+  Unicode 17.0.0 rules, and passes all 1,944 lines of `WordBreakTest.txt`**, where upstream and
+  this port both failed 268. Upstream's README promises "a default Unicode word boundary", its
+  tables are 17.0.0, and the conformance file is Unicode's own statement of the rules, so it is the
+  reference; inherited, so fixed under the no-known-bugs rule, and pinned as a divergence. Three
+  changes in `Matcher.AtDefaultBoundary`: WB4 on both sides (the characters two away skip Extend,
+  Format and ZWJ, and a run of them after the start of the text or a line break stands alone);
+  WB15/WB16 only before a regional indicator; and upstream's WB5a removed. The last is a judgement
+  on evidence: WB5a came in with upstream's Hg issue 219 in 2016, it is not a default rule, the
+  tailoring UAX #29 offers in its place breaks where upstream's joins, and keeping it would leave
+  12 lines of the file failing. It reverses the 2026-08-31 entry on `is_unicode_vowel`, whose test
+  now pins the break. The grapheme rules are unchanged. Not vendored: the file is 1,944 lines of
+  data under Unicode's terms of use, so the test pins 15 rows (12 from the file, with line numbers)
+  and the full-file count was measured with a scratch driver; vendoring it would be the upgrade if
+  the rules are touched again.
