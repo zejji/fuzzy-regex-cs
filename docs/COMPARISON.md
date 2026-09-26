@@ -519,7 +519,10 @@ using Fuzzy.Text.RegularExpressions;
 // "b" in it before matching starts. \b\B is false at every position and gives the prefilter no
 // literal to work with, so the search still has to be made, and the timeout is what stops it.
 // (a+)+b is NOT a good demonstration either, upstream's repeat guards answer it in milliseconds.
-var pattern = new FuzzyRegex(@"(a|a)*\b\B");
+// The \1 matters too. This port remembers where a repeat's body has already failed, which makes
+// (a|a)*\b\B fail at once; it does not do that in a pattern with a backreference, because what
+// follows can then depend on the captures as well as the position.
+var pattern = new FuzzyRegex(@"(a|a)*\1\b\B");
 try
 {
     pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));

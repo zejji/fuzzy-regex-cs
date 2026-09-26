@@ -1369,6 +1369,19 @@ internal sealed class MatchState : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether the body guard of repeat <paramref name="index"/> is kept as a failure memo on this
+    /// call, so the position where the body matched is not marked. <b>Not upstream</b>; see
+    /// <see cref="RepeatInfo.FailureMemo"/>.
+    /// </summary>
+    /// <remarks>
+    /// A partial match is excluded here rather than in the pattern because it is a property of the
+    /// call: a path that reaches the end of the text is neither a success nor a failure.
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <returns><see langword="true"/> if a matched body leaves no mark.</returns>
+    internal bool KeepsFailureMemo(int index) => PartialSide == PartialNone && Pattern.RepeatInfoAt(index).FailureMemo;
+
     /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
     /// <remarks>
     /// The guards are switched off outright while fuzzy matching, which is upstream's own

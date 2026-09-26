@@ -1473,3 +1473,57 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
   `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
   no match.
+- 2026-09-26: **the body guard of a safe repeat is a failure memo, so `(?:a|a)+c` and `(a|aa)+c`
+  fail in linear time per attempt instead of exponential.** Option A of
+  `docs/plan/2026-09-26-backtrack-memoisation-design.md`. Upstream already records a failure when
+  the engine backtracks past the start of a repeat's body, but `END_GREEDY_REPEAT` and
+  `END_LAZY_REPEAT` first mark every position where the body matched, and a marked position is
+  never recorded again, so the failure memo never forms. For a repeat marked
+  `RepeatInfo.FailureMemo` the success mark is skipped, and the existing guards do the rest. The
+  mark is skipped only where nothing after the body can see how the engine got there: no maximum
+  and a minimum of at most 1; not inside another repeat, an atomic group, a possessive repeat, a
+  lookaround, a conditional's lookaround test, a called group or a fuzzy section (the compiler, in
+  `BuildRepeat`); no backreference, group-exists conditional, group call, `(*PRUNE)`, `(*SKIP)`,
+  fuzzy matching or POSIX matching anywhere in the pattern (`Optimiser.KeepFailureMemosSound`);
+  and not a partial match (`MatchState.KeepsFailureMemo`). Three of those conditions have a
+  witness, an answer that changes when the condition is deleted, pinned in `FailureMemoTests`
+  and each shown red by the deletion: `(?:(a)|a)+(?(1)c|b)` over `aab` answers (0, 3), not
+  (1, 3); `a(?:.|(a)){1,}\1c` over `aabac` answers (0, 5), not no match; `^(?:a|ab|b){0,3}c`
+  over `abbbc` answers (0, 5), not no match. The rest have none: two differential grids against
+  main, 3.2 and 4.4 million rows over 12 calls each (1,607 and 2,000 patterns built around
+  overlapping branches, captures, conditionals, backreferences, nesting, lookarounds, atomic
+  groups, verbs, group calls and fuzzy sections, every subject over `abc` up to length 6 plus
+  long ones), found no answer change with any one of them deleted, and the reasons are written
+  on `RepeatInfo.FailureMemo`. They stay anyway, because each is a place where the rest of the
+  match can read more than the position and none of the arguments is a proof. With every
+  condition in place both grids have 0 answer differences from main (answers, spans, groups,
+  every capture, the partial flag; only timeouts differ). Measured, Release, best of three,
+  searching `'a' * n + 'bc'`: `(?:a|a)+c` at n=24 from 2,981 ms to 0.32 ms, and at n=40 from
+  over 20 s to 0.82 ms; `(a|aa)+c` at n=24 from 54 ms to 0.07 ms. Guards are still reset at every
+  start position, so a failing search is quadratic in the subject (54 ms at n=1000) and nested
+  repeats stay polynomial, `(a+)+c` at n=1000 from 6,235 ms to 2,186 ms. That is Option B's
+  ground. Every test and demo that needed a runaway pattern used one of these shapes, so each now
+  carries a backreference, `(a|a)*\1\b\B`, or a maximum, `^(a|aa){1,99}$`, which keeps it slow;
+  the oracle's `timeout` generator swaps seven shapes for bounded twins for the same reason, both
+  halves of `timeout-row-margin` putting all ten still running at twenty times the budget.
+- 2026-09-26: **a `\K` inside an atomic group, possessive repeat, lookaround or conditional's test
+  withdraws the failure memo from the whole pattern.** A blind review of the entry above found
+  answers the memo changed: `(?:(?=\K)b|)+.c` over `aabc` is (3, 4) upstream and was (2, 4) with
+  the memo, and `(?:(?>\K)b|)+.c` over `abc` (2, 3) against (1, 3). `\K` moves the reported start
+  and pushes an entry that moves it back if the path fails, but one of those constructs throws
+  its body's entries away as soon as it succeeds, so the moved start outlives the failing path
+  that moved it. A failing path with a lasting effect breaks the memo's premise that skipping it
+  loses nothing. It is the only such effect: every other entry a succeeding construct discards
+  restores captures, the capture-change counter or fuzzy counts, which the construct saved on
+  entry and restores itself when the engine backtracks past it, or belongs to a repeat, a group
+  call or a fuzzy section, which the memo already excludes. The rule is pattern-wide
+  (`PatternObject.KeepInSubmatch`, set by the compiler, read by `KeepFailureMemosSound`) rather
+  than limited to constructs in or after a memoised body, because the narrower rule needs
+  positions the compiler does not track and buys almost nothing. Four rows from the review are
+  witnesses in `FailureMemoTests`, red with the rule deleted. A grid of 2,419 patterns built to put
+  `\K` inside and around those constructs (5.3 million rows, 81 patterns that time out on main
+  dropped first) found 5,165 answer changes in 45 patterns on the first commit, every one with a
+  `\K` inside such a construct, and none with the rule; a second of 2,496 patterns with captures
+  but no `\K` inside them, where the memo stays on (5.5 million rows), found none. The earlier
+  grids are still clean. Two oracle wave tests also needed the treatment the entry above
+  describes: their never-finishing rows are now `(a|a)*\1b` and `(a|a){1,999}$`.
