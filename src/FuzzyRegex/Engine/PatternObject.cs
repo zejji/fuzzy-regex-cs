@@ -271,6 +271,27 @@ internal sealed class PatternObject
     internal bool NarrowExactDeletions;
 
     /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): whether some fuzzy section has a minimum that a deletion
+    /// raises, a <c>d</c> or <c>e</c> minimum. Only then can an empty iteration that spent errors be
+    /// admitted for a section minimum (<c>Matcher.RaisesUnmetDeletionMinimum</c>), and only then does
+    /// the matcher keep <c>MatchState.SectionOuter</c>. Set when the pattern is compiled.
+    /// </summary>
+    internal bool HasDeletionMinimum;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): whether the repeat memo runs (<c>Matcher.RepeatMemoHit</c>):
+    /// for a fuzzy pattern whose tested groups, the groups a backreference or conditional reads,
+    /// fit in <see cref="MemoGroups"/>. Set when the pattern is compiled.
+    /// </summary>
+    internal bool UseRepeatMemo;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the tested groups' numbers, at most two, whose spans are
+    /// part of a repeat memo key.
+    /// </summary>
+    internal int[] MemoGroups = [];
+
+    /// <summary>
     /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or
     /// <see langword="null"/>. <b>This port's own field</b> (S60b item 10); see
     /// <see cref="Engine.FuzzyLiteralFilter"/>.
@@ -546,6 +567,11 @@ internal sealed class PatternObject
 
             // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
             Node node = self.NodeList[i];
+            if (node.Op == Opcode.Fuzzy && (node.Values[FuzzyValue.MinDel] > 0 || node.Values[FuzzyValue.MinErr] > 0))
+            {
+                self.HasDeletionMinimum = true;
+            }
+
             if (
                 node.Op == Opcode.Prune
                 || (
@@ -565,6 +591,22 @@ internal sealed class PatternObject
         }
 
         self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+
+        // NOT UPSTREAM (empty-iteration rule): the groups a repeat memo key must hold. A key has
+        // room for two spans; with more tested groups the memo is off, which only costs pruning.
+        // SHORTCUT: two tested groups is the ceiling; a pattern with more would need a key that
+        // holds a variable number of spans.
+        var tested = new List<int>();
+        for (int g = 1; g <= self.GroupInfoList.Count; g++)
+        {
+            if (self.GroupInfoList[g - 1].Referenced)
+            {
+                tested.Add(g);
+            }
+        }
+
+        self.UseRepeatMemo = self.IsFuzzy && tested.Count <= 2;
+        self.MemoGroups = [.. tested];
 
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index.

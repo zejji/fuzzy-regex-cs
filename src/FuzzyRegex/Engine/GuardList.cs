@@ -357,8 +357,64 @@ internal sealed class RepeatData
     internal long CaptureChange;
 
     /// <summary>
-    /// NOT UPSTREAM: the edits the enclosing fuzzy section had charged when this iteration started
-    /// (ledger 33). See <c>MatchState.EditsChargedBy</c>.
+    /// NOT UPSTREAM (empty-iteration rule): how many fuzzy edits the path had made
+    /// (<c>MatchState.FuzzyChanges</c>) when this iteration started, so the end of the iteration
+    /// can tell whether it spent any. The list is exact along the path, because every backtrack over
+    /// an edit unrecords it, where upstream's <c>capture_change</c> also counts edits since undone.
     /// </summary>
-    internal long SectionEdits;
+    internal long ChangesAtStart;
+
+    /// <summary>
+    /// NOT UPSTREAM (empty-iteration rule): the repeat memo, the states that iterations of the
+    /// current run of this repeat have already led to. See <c>Matcher.RepeatMemoHit</c>.
+    /// </summary>
+    /// <remarks>
+    /// A run is one entry into the repeat, with its fixed continuation. The memo is emptied on
+    /// entry and whenever an outer backtrack restores the repeat's saved state, since those entries
+    /// belong to a different run; emptying is always safe, it only drops pruning.
+    /// </remarks>
+    internal HashSet<RepeatMemoKey>? Memo;
+
+    /// <summary>Empties <see cref="Memo"/>, dropping a large one rather than clearing it.</summary>
+    internal void ClearMemo()
+    {
+        if (Memo is not { Count: > 0 })
+        {
+            return;
+        }
+
+        // Clear costs the table's capacity, so a memo that grew large once would tax every later
+        // entry into the repeat; a fresh one is allocated on demand instead.
+        if (Memo.Count > 4096)
+        {
+            Memo = null;
+        }
+        else
+        {
+            Memo.Clear();
+        }
+    }
 }
+
+/// <summary>
+/// NOT UPSTREAM (empty-iteration rule): the state after an iteration of a fuzzy repeat, which is
+/// everything the rest of the match can depend on within one run of the repeat. See
+/// <c>Matcher.RepeatMemoHit</c>.
+/// </summary>
+/// <param name="TextPos">The text position.</param>
+/// <param name="Count">The repeat count, clipped to the minimum when the repeat has no maximum.</param>
+/// <param name="Sub">The open section's substitutions.</param>
+/// <param name="Ins">The open section's insertions.</param>
+/// <param name="Del">The open section's deletions.</param>
+/// <param name="Group1">The span of the first tested group, packed, or 0.</param>
+/// <param name="Group2">The span of the second tested group, packed, or 0.</param>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+internal readonly record struct RepeatMemoKey(
+    int TextPos,
+    long Count,
+    long Sub,
+    long Ins,
+    long Del,
+    long Group1,
+    long Group2
+);

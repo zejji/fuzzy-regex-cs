@@ -2950,7 +2950,7 @@ internal static class Matcher
         stack.PushSize(repeatData.CaptureChange);
         if (fuzzy)
         {
-            stack.PushSize(repeatData.SectionEdits);
+            stack.PushSize(repeatData.ChangesAtStart);
         }
     }
 
@@ -2979,7 +2979,8 @@ internal static class Matcher
         }
 
         repeatData.CaptureChange = captureChange;
-        repeatData.SectionEdits = sectionEdits;
+        repeatData.ChangesAtStart = sectionEdits;
+        repeatData.ClearMemo();
         repeatData.Start = (int)start;
         repeatData.Count = count;
         return true;
@@ -3176,14 +3177,14 @@ internal static class Matcher
     /// <param name="Start">Where this iteration of the body started.</param>
     /// <param name="CaptureChange">The repeat's capture-change counter before this iteration.</param>
     /// <param name="Index">The repeat index.</param>
-    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct BodyEndStateData(
         long Count,
         int Start,
         long CaptureChange,
         int Index,
-        long SectionEdits
+        long ChangesAtStart
     );
 
     /// <summary>
@@ -3196,7 +3197,7 @@ internal static class Matcher
     /// <param name="CaptureChange">The enclosing repeat's capture-change counter.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">Where the repeat was entered.</param>
-    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct RepeatStateData(
         long Count,
@@ -3204,7 +3205,7 @@ internal static class Matcher
         long CaptureChange,
         int Index,
         int TextPos,
-        long SectionEdits
+        long ChangesAtStart
     );
 
     /// <summary>
@@ -3218,7 +3219,7 @@ internal static class Matcher
     /// <param name="CaptureChange">The repeat's capture-change counter to restore first.</param>
     /// <param name="Index">The repeat index.</param>
     /// <param name="TextPos">The position the loser is being tried at, for its own guard.</param>
-    /// <param name="SectionEdits">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
+    /// <param name="ChangesAtStart">The repeat's section-edit snapshot (ledger 33); carried only for a fuzzy pattern.</param>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
     private readonly record struct MatchBodyTailStateData(
         Position Position,
@@ -3227,7 +3228,7 @@ internal static class Matcher
         long CaptureChange,
         int Index,
         int TextPos,
-        long SectionEdits
+        long ChangesAtStart
     );
 
     /// <summary>
@@ -3254,7 +3255,7 @@ internal static class Matcher
         stack.PushSize(data.Index);
         if (fuzzy)
         {
-            stack.PushSize(data.SectionEdits);
+            stack.PushSize(data.ChangesAtStart);
         }
     }
 
@@ -3299,7 +3300,7 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         if (fuzzy)
         {
-            stack.PushSize(data.SectionEdits);
+            stack.PushSize(data.ChangesAtStart);
         }
     }
 
@@ -3347,7 +3348,7 @@ internal static class Matcher
         stack.PushSize(data.TextPos);
         if (fuzzy)
         {
-            stack.PushSize(data.SectionEdits);
+            stack.PushSize(data.ChangesAtStart);
         }
     }
 
@@ -4323,6 +4324,138 @@ internal static class Matcher
     private const byte _exactFuzzyType = byte.MaxValue;
 
     /// <summary>
+    /// The "needed" rule: whether a repeat iteration that consumed no text and spent fuzzy edits may
+    /// stand. Otherwise it fails.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (empty-iteration rule, 2026-09-26; docs/plan/2026-09-26-empty-iteration-survey.md).
+    /// It is admitted only if something needs it: (a) the repeat is still below its minimum count;
+    /// (b) its edits raise a count that an open fuzzy section has an unmet minimum for; or (c) it
+    /// changed the span of a group a backreference or conditional tests, which is upstream's own
+    /// progress test without the fuzzy edits upstream also counts. Each admission raises the count,
+    /// a count toward a finite minimum, or a tested span (which inside an empty iteration can only
+    /// end at the current position), so a run of them ends.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration already counted.</param>
+    /// <param name="endNode">The repeat's end node; its second value is the minimum.</param>
+    /// <param name="edits">How many edits the iteration made.</param>
+    /// <param name="groupChanged">Whether it changed a tested group's span.</param>
+    /// <returns><see langword="true"/> if the iteration stands.</returns>
+    private static bool EmptyIterationAdmitted(
+        MatchState state,
+        RepeatData rpData,
+        Node endNode,
+        long edits,
+        bool groupChanged
+    ) => rpData.Count <= endNode.Values[1] || groupChanged || RaisesUnmetDeletionMinimum(state, edits);
+
+    /// <summary>
+    /// Whether <paramref name="edits"/> deletions, made since the counts stood lower by that many,
+    /// raise a count that an open fuzzy section has a minimum for and has not yet reached: a
+    /// <c>d</c> minimum or an <c>e</c> minimum. An empty iteration consumes no text, so its edits
+    /// are deletions, which never raise an <c>s</c> or <c>i</c> minimum.
+    /// </summary>
+    /// <remarks>
+    /// An enclosing section counts the errors of the sections open inside it, since END_FUZZY adds
+    /// the inner counts to the outer ones (<c>upstream/src/_regex.c</c>:12475-12481); its count is
+    /// what it had when the inner section was entered (<see cref="MatchState.OuterSection"/>) plus
+    /// the inner section's own. Pass 0 to ask about the counts as they stand.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="edits">How many of the open section's deletions to take back first.</param>
+    /// <returns><see langword="true"/> if one does.</returns>
+    private static bool RaisesUnmetDeletionMinimum(MatchState state, long edits)
+    {
+        if (!state.Pattern.HasDeletionMinimum || state.FuzzyNode is not { } section)
+        {
+            return false;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long del = counts[FuzzyValue.Del] - edits;
+        long total = TotalErrors(counts) - edits;
+        while (true)
+        {
+            if (del < section.Values[FuzzyValue.MinDel] || total < section.Values[FuzzyValue.MinErr])
+            {
+                return true;
+            }
+
+            if (state.OuterSection(section, out ReadOnlySpan<long> outerCounts) is not { } outer)
+            {
+                return false;
+            }
+
+            del += outerCounts[FuzzyValue.Del];
+            total += TotalErrors(outerCounts);
+            section = outer;
+        }
+    }
+
+    /// <summary>
+    /// The repeat memo: whether an earlier path through the current run of this repeat already
+    /// reached the state this iteration has led to; if not, records it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (empty-iteration rule). The state is everything the rest of the match can depend
+    /// on: the text position, the count (clipped to the minimum when there is no maximum, since the
+    /// counts beyond it are alike), the open section's error counts (the enclosing sections' are
+    /// fixed for a run) and the spans of the tested groups. Dropping the later path is exact: two
+    /// paths with equal states are never on one branch, because every iteration that is keyed moves
+    /// the position or raises the count, an error count or a tested span, and none of these goes
+    /// down. So the earlier path was explored to its end first, with the same future; had it held a
+    /// match the search would have returned it. It is upstream's repeat guard
+    /// (<c>guard_repeat</c>, <c>_regex.c</c>:9446), which <c>is_repeat_guarded</c> switches off for
+    /// a fuzzy pattern (:9564-9566) because a position alone is not a state, keyed by the state.
+    /// </para>
+    /// <para>
+    /// SHORTCUT: a memo stops recording at 2^20 states, after which it only answers from what it
+    /// holds: correct, and slower only on a run of the repeat that reaches that many.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="rpData">The repeat, with this iteration counted.</param>
+    /// <param name="endNode">The repeat's end node: minimum in its second value, maximum in its third.</param>
+    /// <returns><see langword="true"/> if the state was already reached.</returns>
+    private static bool RepeatMemoHit(MatchState state, RepeatData rpData, Node endNode)
+    {
+        long count = rpData.Count;
+        if (~endNode.Values[2] == 0)
+        {
+            count = Math.Min(count, endNode.Values[1]);
+        }
+
+        int[] groups = state.Pattern.MemoGroups;
+        long[] counts = state.FuzzyCounts;
+        var key = new RepeatMemoKey(
+            state.TextPos,
+            count,
+            counts[FuzzyValue.Sub],
+            counts[FuzzyValue.Ins],
+            counts[FuzzyValue.Del],
+            groups.Length > 0 ? PackedSpan(state.Groups[groups[0] - 1]) : 0,
+            groups.Length > 1 ? PackedSpan(state.Groups[groups[1] - 1]) : 0
+        );
+
+        rpData.Memo ??= [];
+        return rpData.Memo.Count < _repeatMemoCap ? !rpData.Memo.Add(key) : rpData.Memo.Contains(key);
+    }
+
+    /// <summary>The most states a repeat memo records in one run.</summary>
+    private const int _repeatMemoCap = 1 << 20;
+
+    /// <summary>A group's current span as one number, for a <see cref="RepeatMemoKey"/>.</summary>
+    /// <param name="group">The group.</param>
+    /// <returns>Start in the high half and end in the low half; unset is (-1, -1).</returns>
+    private static long PackedSpan(GroupData group)
+    {
+        GroupSpan span = group.Current >= 0 ? group.Captures[group.Current] : new GroupSpan(-1, -1);
+        return ((long)(uint)span.Start << 32) | (uint)span.End;
+    }
+
+    /// <summary>
     /// Whether deleting an item that has just matched exactly at <c>state.TextPos</c> could lead to
     /// a match that the search will not already have found by the time the choice is tried.
     /// </summary>
@@ -4437,6 +4570,23 @@ internal static class Matcher
     private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
     {
         if (!ExactDeletionMayMatch(state, 1, node.Next1.Node))
+        {
+            return;
+        }
+
+        // When the item is the whole body of a repeat and this iteration began here (no insertion
+        // before it), deleting it leaves an iteration that consumed no text and spent an edit. Past
+        // the repeat's minimum, with no unmet section minimum that the deletion would raise, the
+        // "needed" rule fails it at the repeat's end (EmptyIterationAdmitted; a lone item changes no
+        // group), and nothing runs between here and there, so the choice holds nothing.
+        if (
+            node.Next1.Node is { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
+            && ReferenceEquals(end.Next1.Node, node)
+            && state.Repeats[(int)end.Values[0]] is var repeat
+            && repeat.Start == state.TextPos
+            && repeat.Count + 1 > end.Values[1]
+            && !RaisesUnmetDeletionMinimum(state, 0)
+        )
         {
             return;
         }
@@ -4641,7 +4791,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
@@ -4742,7 +4891,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = data.NewNode!;
@@ -4834,7 +4982,6 @@ internal static class Matcher
 
         ++state.FuzzyCounts[FuzzyValue.Ins];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         node = currNode!;
 
@@ -4918,7 +5065,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -5016,7 +5162,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -5305,7 +5450,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         stringPos = data.NewStringPos;
@@ -5416,7 +5560,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -5701,7 +5844,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         foldedPos = data.NewFoldedPos;
@@ -5834,7 +5976,6 @@ internal static class Matcher
 
         ++fuzzyCounts[data.FuzzyType];
         state.CaptureChange += MatchState.FuzzyEditChange;
-        state.CountSectionEdit();
 
         state.TextPos = data.NewTextPos;
         node = newNode!;
@@ -7623,50 +7764,45 @@ internal static class Matcher
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
 
-                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
-                    // slice: a fuzzy pattern throws in do_match_2 before it gets here.
-                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+                    // since undone, so how many empty deleting iterations a loop takes depends on the
+                    // path, and where a section inside the body restarts its budget it loops until
+                    // MemoryError. Here an empty iteration is progress only when it spent edits that
+                    // something needs, or changed a tested group; then the repeat memo drops any
+                    // iteration whose state this run of the repeat has already reached.
+                    if (state.IsFuzzy)
                     {
-                        changed = !(
-                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
-                        );
-
-                        // NOT UPSTREAM (S88): a fuzzy edit bumps 'capture_change' (:10487), and the
-                        // repeat guards are off under fuzzy matching (:9596), so an iteration that
-                        // only deleted counts as progress. Outside any fuzzy section, its errors were
-                        // made by a section inside the body, which starts each iteration with a fresh
-                        // budget, so with no maximum upstream repeats it until MemoryError:
-                        // '(?:(?:x){d<=1})+y' over 'y'. Such a repeat past its minimum stops at an
-                        // iteration that did not move through the text AND left nothing a later
-                        // iteration could see: no referenced group changed its span, and the section
-                        // enclosing the repeat charged no edit. Then the next iteration starts from
-                        // the same position, the same groups and the same enclosing budget, so it can
-                        // only do the same again, and upstream's loop never ends. Ledger entry 33,
-                        // completed 2026-09-25.
-                        // Each half keeps an answer upstream gives. A body that sets a group a later
-                        // pass tests goes on: '(?:(?(1)c|z)|()(?:x){d<=1})*$' over 'c'. An iteration
-                        // charged to the enclosing section goes on too, and its budget ends the loop:
-                        // '(?:\d+a0b+?){d<=2}', and '(?:(?:a(?:x){d<=1})+y){d<=5}' over 'y', which
-                        // upstream answers with four deletions. An inner section's edits are not
-                        // charged to it, because END_FUZZY adds them without checking the outer
-                        // limit - which is what made '(?:(?:(?:x){d<=1})+y){e<=5}' loop.
-                        // A bounded repeat keeps upstream's answer ('{1,3}' charges three
-                        // deletions). The group half is the low half of 'capture_change' (see
-                        // 'MatchState.FuzzyEditChange'), so it comes back with every save and
-                        // restore upstream makes: a group call that sets a capture and puts it back
-                        // on return, '(?(DEFINE)(()))(?:(?(2)c|z)|(?1)(?:x){d<=1})*$', stops as S88
-                        // stopped it. The section half only counts up, so an edit later backtracked
-                        // still counts, which can only leave upstream's loop in place.
-                        if (
-                            changed
-                            && ~node.Values[2] == 0
-                            && state.TextPos == rpData.Start
-                            && MatchState.GroupChanges(state.CaptureChange)
-                                == MatchState.GroupChanges(rpData.CaptureChange)
-                            && state.EditsChargedBy(state.FuzzyNode) == rpData.SectionEdits
-                        )
+                        bool keyed = true;
+                        if (state.TextPos == rpData.Start)
                         {
-                            changed = false;
+                            long edits = state.FuzzyChanges.Count - rpData.ChangesAtStart;
+                            bool groupChanged =
+                                MatchState.GroupChanges(state.CaptureChange)
+                                != MatchState.GroupChanges(rpData.CaptureChange);
+                            if (edits > 0)
+                            {
+                                if (!EmptyIterationAdmitted(state, rpData, node, edits, groupChanged))
+                                {
+                                    --rpData.Count;
+                                    goto backtrack;
+                                }
+
+                                changed = true;
+                            }
+                            else
+                            {
+                                // Error-free: upstream's rule, a tested group's change is progress.
+                                changed = groupChanged;
+                                keyed = false;
+                            }
+                        }
+
+                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        {
+                            --rpData.Count;
+                            goto backtrack;
                         }
                     }
 
@@ -7749,7 +7885,7 @@ internal static class Matcher
                             rpData.Start,
                             rpData.CaptureChange,
                             index,
-                            rpData.SectionEdits
+                            rpData.ChangesAtStart
                         ),
                         state.IsFuzzy
                     );
@@ -7773,7 +7909,7 @@ internal static class Matcher
                                     state.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    state.EditsChargedBy(state.FuzzyNode)
+                                    state.FuzzyChanges.Count
                                 ),
                                 state.IsFuzzy
                             );
@@ -7791,7 +7927,7 @@ internal static class Matcher
 
                         rpData.CaptureChange = state.CaptureChange;
 
-                        rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
+                        rpData.ChangesAtStart = state.FuzzyChanges.Count;
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -7830,13 +7966,46 @@ internal static class Matcher
                     // Have we advanced through the text or has a capture group change?
                     bool changed = rpData.CaptureChange != state.CaptureChange || state.TextPos != rpData.Start;
 
-                    // Additional checks are needed if there's fuzzy matching. Unreachable in this
-                    // slice, as in END_GREEDY_REPEAT above.
-                    if (changed && state.IsFuzzy && rpData.Count >= node.Values[1])
+                    // NOT UPSTREAM (empty-iteration rule, "needed"; ledger 33's stop and upstream's
+                    // end-of-text check, :12555-12557, replaced): see EmptyIterationAdmitted. Upstream
+                    // counts every fuzzy edit as progress (:12550-12553 with :10487), including edits
+                    // since undone, so how many empty deleting iterations a loop takes depends on the
+                    // path, and where a section inside the body restarts its budget it loops until
+                    // MemoryError. Here an empty iteration is progress only when it spent edits that
+                    // something needs, or changed a tested group; then the repeat memo drops any
+                    // iteration whose state this run of the repeat has already reached.
+                    if (state.IsFuzzy)
                     {
-                        changed = !(
-                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
-                        );
+                        bool keyed = true;
+                        if (state.TextPos == rpData.Start)
+                        {
+                            long edits = state.FuzzyChanges.Count - rpData.ChangesAtStart;
+                            bool groupChanged =
+                                MatchState.GroupChanges(state.CaptureChange)
+                                != MatchState.GroupChanges(rpData.CaptureChange);
+                            if (edits > 0)
+                            {
+                                if (!EmptyIterationAdmitted(state, rpData, node, edits, groupChanged))
+                                {
+                                    --rpData.Count;
+                                    goto backtrack;
+                                }
+
+                                changed = true;
+                            }
+                            else
+                            {
+                                // Error-free: upstream's rule, a tested group's change is progress.
+                                changed = groupChanged;
+                                keyed = false;
+                            }
+                        }
+
+                        if (keyed && pattern.UseRepeatMemo && RepeatMemoHit(state, rpData, node))
+                        {
+                            --rpData.Count;
+                            goto backtrack;
+                        }
                     }
 
                     // Could the body or tail match?
@@ -7912,7 +8081,7 @@ internal static class Matcher
                             rpData.Start,
                             rpData.CaptureChange,
                             index,
-                            rpData.SectionEdits
+                            rpData.ChangesAtStart
                         ),
                         state.IsFuzzy
                     );
@@ -7936,7 +8105,7 @@ internal static class Matcher
                                     state.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    state.EditsChargedBy(state.FuzzyNode)
+                                    state.FuzzyChanges.Count
                                 ),
                                 state.IsFuzzy
                             );
@@ -7969,7 +8138,7 @@ internal static class Matcher
 
                         rpData.CaptureChange = state.CaptureChange;
 
-                        rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
+                        rpData.ChangesAtStart = state.FuzzyChanges.Count;
                         rpData.Start = state.TextPos;
 
                         // Advance into the body.
@@ -8252,6 +8421,12 @@ internal static class Matcher
                 case Opcode.Failure: // Failure.
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
+                    if (pattern.HasDeletionMinimum)
+                    {
+                        state.EnterSection(node);
+                    }
+
                     // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
                     // zero and END_FUZZY adds them back in, which is how an inner budget can be
                     // tighter than the outer one without either being ignored.
@@ -8286,7 +8461,7 @@ internal static class Matcher
                             rpData.CaptureChange,
                             index,
                             state.TextPos,
-                            rpData.SectionEdits
+                            rpData.ChangesAtStart
                         ),
                         state.IsFuzzy
                     );
@@ -8298,7 +8473,8 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
+                    rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                    rpData.ClearMemo();
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -8378,7 +8554,7 @@ internal static class Matcher
                                     rpData.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    rpData.SectionEdits
+                                    rpData.ChangesAtStart
                                 ),
                                 state.IsFuzzy
                             );
@@ -8683,7 +8859,7 @@ internal static class Matcher
                             rpData.CaptureChange,
                             index,
                             state.TextPos,
-                            rpData.SectionEdits
+                            rpData.ChangesAtStart
                         ),
                         state.IsFuzzy
                     );
@@ -8695,7 +8871,8 @@ internal static class Matcher
                     rpData.Count = 0;
                     rpData.Start = state.TextPos;
                     rpData.CaptureChange = state.CaptureChange;
-                    rpData.SectionEdits = state.EditsChargedBy(state.FuzzyNode);
+                    rpData.ChangesAtStart = state.FuzzyChanges.Count;
+                    rpData.ClearMemo();
 
                     // Could the body or tail match?
                     bool tryBody = node.Values[2] > 0 && !state.IsRepeatGuarded(index, state.TextPos, NodeStatus.Body);
@@ -8769,7 +8946,7 @@ internal static class Matcher
                                     rpData.CaptureChange,
                                     index,
                                     state.TextPos,
-                                    rpData.SectionEdits
+                                    rpData.ChangesAtStart
                                 ),
                                 state.IsFuzzy
                             );
@@ -10950,7 +11127,7 @@ internal static class Matcher
                     rpData.Count = dataBe.Count;
                     rpData.Start = dataBe.Start;
                     rpData.CaptureChange = dataBe.CaptureChange;
-                    rpData.SectionEdits = dataBe.SectionEdits;
+                    rpData.ChangesAtStart = dataBe.ChangesAtStart;
                     break;
                 }
                 case Opcode.BodyStart:
@@ -11162,6 +11339,13 @@ internal static class Matcher
                     }
 
                     state.FuzzyNode = outerFuzzyNode;
+
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
+                    if (pattern.HasDeletionMinimum && !state.LeaveSection())
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
                     break;
                 // GREEDY_REPEAT (:15778) and LAZY_REPEAT (:15779), which upstream gives one body:
                 // the repeat failed, so the enclosing repeat's state goes back and the position it
@@ -11186,7 +11370,8 @@ internal static class Matcher
                     rpData.Count = dataR.Count;
                     rpData.Start = dataR.Start;
                     rpData.CaptureChange = dataR.CaptureChange;
-                    rpData.SectionEdits = dataR.SectionEdits;
+                    rpData.ChangesAtStart = dataR.ChangesAtStart;
+                    rpData.ClearMemo();
                     break;
                 }
                 case Opcode.GreedyRepeatOne: // Greedy repeat for one character.
@@ -11622,7 +11807,7 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
-                    rpData.SectionEdits = dataMbt.SectionEdits;
+                    rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the body fails to match.
                     state.Bstack.PushCode((uint)dataMbt.Index);
@@ -11659,7 +11844,7 @@ internal static class Matcher
                     rpData.Count = dataMbt.Count;
                     rpData.Start = dataMbt.Start;
                     rpData.CaptureChange = dataMbt.CaptureChange;
-                    rpData.SectionEdits = dataMbt.SectionEdits;
+                    rpData.ChangesAtStart = dataMbt.ChangesAtStart;
 
                     // Record backtracking info in case the tail fails to match.
                     state.Bstack.PushCode((uint)dataMbt.Index);

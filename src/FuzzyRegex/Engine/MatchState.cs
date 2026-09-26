@@ -464,11 +464,17 @@ internal sealed class MatchState : IDisposable
     internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
-    /// NOT UPSTREAM (ledger 33): how many fuzzy edits each section has charged, by the section's
-    /// node index. Counted up and never restored. Allocated only
-    /// for a fuzzy pattern.
+    /// NOT UPSTREAM (empty-iteration rule): for each open fuzzy section, by its FUZZY node's index,
+    /// the enclosing section's counts when it was entered and that section's node index plus one
+    /// (0 for none), in slots of <see cref="_sectionOuterWidth"/>. Kept only for a pattern with a
+    /// deletion or error minimum (<c>PatternObject.HasDeletionMinimum</c>), whose empty iterations
+    /// need to know whether an enclosing section's minimum is still unmet
+    /// (<c>Matcher.RaisesUnmetDeletionMinimum</c>). Allocated for a fuzzy pattern.
     /// </summary>
-    internal readonly long[]? SectionEdits;
+    internal readonly long[]? SectionOuter;
+
+    /// <summary>The slot width of <see cref="SectionOuter"/>: three counts and a node.</summary>
+    private const int _sectionOuterWidth = 4;
 
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
@@ -633,21 +639,67 @@ internal sealed class MatchState : IDisposable
             Repeats[r] = new RepeatData();
         }
 
-        SectionEdits = pattern.IsFuzzy ? new long[pattern.NodeList.Count] : null;
+        SectionOuter = pattern.IsFuzzy ? new long[_sectionOuterWidth * pattern.NodeList.Count] : null;
     }
 
-    /// <summary>The edits <paramref name="section"/> has charged so far, or 0 outside any section.</summary>
-    /// <param name="section">A FUZZY node, or <see langword="null"/> outside any section.</param>
-    /// <returns>The count from <see cref="SectionEdits"/>.</returns>
-    internal long EditsChargedBy(Node? section) => section is null ? 0 : SectionEdits![section.Index];
-
-    /// <summary>Counts one fuzzy edit against the section currently open, for <see cref="EditsChargedBy"/>.</summary>
-    internal void CountSectionEdit()
+    /// <summary>
+    /// Records, as <paramref name="section"/> is entered, the section it is entered from and that
+    /// section's counts, saving the slot's old contents on the backtracking stack for
+    /// <see cref="LeaveSection"/>.
+    /// </summary>
+    /// <param name="section">The FUZZY node being entered.</param>
+    internal void EnterSection(Node section)
     {
-        if (FuzzyNode is not null)
+        long[] outer = SectionOuter!;
+        int slot = _sectionOuterWidth * section.Index;
+        for (int i = 0; i < _sectionOuterWidth; i++)
         {
-            ++SectionEdits![FuzzyNode.Index];
+            Bstack.PushSize(outer[slot + i]);
         }
+
+        Bstack.PushSize(section.Index);
+
+        FuzzyCounts.AsSpan().CopyTo(outer.AsSpan(slot, FuzzyValue.Count));
+        outer[slot + FuzzyValue.Count] = FuzzyNode is null ? 0 : FuzzyNode.Index + 1;
+    }
+
+    /// <summary>Undoes <see cref="EnterSection"/> as the matcher backtracks out of the section.</summary>
+    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
+    internal bool LeaveSection()
+    {
+        if (!Bstack.PopSize(out long index))
+        {
+            return false;
+        }
+
+        int slot = _sectionOuterWidth * (int)index;
+        for (int i = _sectionOuterWidth - 1; i >= 0; i--)
+        {
+            if (!Bstack.PopSize(out long value))
+            {
+                return false;
+            }
+
+            SectionOuter![slot + i] = value;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The section <paramref name="section"/> was entered from, and that section's counts at the
+    /// time, as <see cref="EnterSection"/> recorded them.
+    /// </summary>
+    /// <param name="section">An open FUZZY node.</param>
+    /// <param name="outerCounts">Receives the enclosing section's counts at entry.</param>
+    /// <returns>The enclosing FUZZY node, or <see langword="null"/>.</returns>
+    internal Node? OuterSection(Node section, out ReadOnlySpan<long> outerCounts)
+    {
+        long[] table = SectionOuter!;
+        int slot = _sectionOuterWidth * section.Index;
+        outerCounts = table.AsSpan(slot, FuzzyValue.Count);
+        long outer = table[slot + FuzzyValue.Count];
+        return outer == 0 ? null : Pattern.NodeList[(int)outer - 1];
     }
 
     /// <summary>
@@ -762,7 +814,8 @@ internal sealed class MatchState : IDisposable
             repeat.Count = 0;
             repeat.Start = 0;
             repeat.CaptureChange = 0;
-            repeat.SectionEdits = 0;
+            repeat.ChangesAtStart = 0;
+            repeat.ClearMemo();
         }
 
         ActiveCalls.Clear();
@@ -784,9 +837,9 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
-        if (SectionEdits is not null)
+        if (SectionOuter is not null)
         {
-            Array.Clear(SectionEdits);
+            Array.Clear(SectionOuter);
         }
         ReqEnd = 0;
         LastIndex = 0;

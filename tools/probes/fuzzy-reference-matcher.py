@@ -1,4 +1,4 @@
-"""A small reference matcher for fuzzy regex semantics (queue item 1, F-A).
+r"""A small reference matcher for fuzzy regex semantics (queue item 1, F-A).
 
 Purpose: grade the port's fuzzy engine against a search that is complete and
 ordered, so no path is skipped. It is slow on purpose: every choice is an
@@ -16,11 +16,13 @@ Result has .span, .groups (spans, (-1, -1) when unset) and .fuzzy_counts
 Command line: python fuzzy-reference-matcher.py search "(?:cats|cat){e<=1}" cat
 
 Subset: literals (letters, digits, backslash-escaped punctuation), '.',
-classes [abc] [^a] [a-c], '|', (?:...) and (...), greedy and lazy ?, *, +,
-{m}, {m,}, {m,n}, fuzzy constraints on any atom: {e<=n}, {i<=a,s<=b,d<=c},
-{d}, {1<=e<=2}, exclusive '<', cost equations {2i+2d+1s<=4}, and the verbs
-(*SKIP), (*PRUNE), (*FAIL) / (*F). No flags, anchors, lookarounds, atomic
-groups, backreferences or fuzzy tests ({s<=1:[a-z]}).
+classes [abc] [^a] [a-c] and \d, '|', (?:...) and (...), greedy and lazy ?,
+*, +, {m}, {m,}, {m,n}, fuzzy constraints on any atom: {e<=n},
+{i<=a,s<=b,d<=c}, {d}, {1<=e<=2}, exclusive '<', cost equations
+{2i+2d+1s<=4}, the anchors ^ and $ (no MULTILINE), backreferences \1-\9
+(matched item by item, so a fuzzy section can edit them), conditionals
+(?(1)yes|no), and the verbs (*SKIP), (*PRUNE), (*FAIL) / (*F). No flags,
+lookarounds, atomic groups or fuzzy tests ({s<=1:[a-z]}).
 
 Order rules (citations are to upstream/src/_regex.c and upstream/README.rst
 of mrab-regex 2026.9.10):
@@ -62,7 +64,10 @@ of mrab-regex 2026.9.10):
    lazy ones one fewer. An iteration that matches empty text is accepted and
    ends the loop once the minimum count is reached (Perl rule; iterations
    below the minimum continue). With fuzzy matching this matters when
-   deletions empty a repeat body; see EMPTY_DELETION_ITERATIONS.
+   deletions empty a repeat body; see EMPTY_DELETION_ITERATIONS, whose
+   "needed" and "unrestricted" modes also follow upstream in treating an
+   error-free empty iteration that changed a referenced group as progress
+   (_regex.c:12552).
 9. (*SKIP): when backtracking reaches it, the attempt ends and the next one
    starts where the verb was executed (README.rst:209; perlre v5.42), or one
    character later if that is not past the current start. (*PRUNE) ends the
@@ -84,7 +89,34 @@ DELETE_AFTER_EXACT = True
 # this class of difference apart. Upstream follows neither (measured
 # 2026-09-26): match "(?:b*){d<=2}" "bba" -> (0, 0, 2), two empty iterations,
 # but match "(?:b*){d<=2}" "bb" -> (0, 0, 0).
+# "minimum": such an iteration fails once the repeat's minimum is met (rule B
+# of docs/plan/2026-09-26-empty-iteration-survey.md; it loses matches).
+# "needed": such an iteration is allowed only if (a) the repeat is below its
+# minimum, or (b) its errors advance a minimum that is still unmet in an open
+# fuzzy section: a d minimum by deleting, an e minimum by any error (an empty
+# iteration consumes no text, so it can only delete and never advances an s or
+# i minimum), or (c) it changed the span of a group that a backreference or
+# conditional tests (upstream's progress rule, _regex.c:12726, without the
+# fuzzy edits that upstream also counts, :10487); otherwise it fails. Each (b)
+# iteration raises a count toward a finite minimum, so (b) allows at most the
+# sum of the minimums. An error-free empty iteration follows upstream: a
+# referenced group's span change is progress and the loop goes on, otherwise
+# the iteration is accepted and the loop ends. A capture state already seen at
+# this position in the current run of empty iterations is not a change, so (c)
+# terminates too.
+# "unrestricted": such an iteration may always go round again (error-free ones
+# as in "needed"); only the error budget stops it, so use it with finite limits.
+# It is the oracle the "needed" sweeps compare against.
 EMPTY_DELETION_ITERATIONS = "perl"
+# "unrestricted" only: the most empty iterations in a row at one position, for
+# patterns whose budget does not bound them (a fuzzy section inside the
+# repeat body restarts its counts each iteration). None = no cap.
+UNRESTRICTED_EMPTY_RUN = None
+# "needed" only: also prune an iteration that consumed text when an earlier
+# path of the same repeat invocation reached the same state (a memo of the
+# repeat; exact, like the empty-iteration check). Part of the recommended rule;
+# False leaves only the empty-iteration check, for measuring what each adds.
+NEEDED_DEDUP_ALL = True
 TYPES = ("s", "i", "d")
 
 
@@ -122,6 +154,23 @@ class Repeat:
 
 
 @dataclass(frozen=True)
+class Anchor:
+    kind: str  # ^ or $
+
+
+@dataclass(frozen=True)
+class Backref:
+    index: int
+
+
+@dataclass(frozen=True)
+class Cond:
+    index: int
+    yes: object
+    no: object
+
+
+@dataclass(frozen=True)
 class Verb:
     name: str  # SKIP, PRUNE, FAIL
 
@@ -146,6 +195,7 @@ class Fuzzy:
 class Parser:
     def __init__(self, pattern):
         self.p, self.i, self.groups = pattern, 0, 0
+        self.referenced = set()  # groups a backreference or conditional tests
 
     def peek(self, n=1):
         return self.p[self.i : self.i + n]
@@ -229,10 +279,27 @@ class Parser:
             name = self.p[self.i + 2 : end]
             self.i = end + 1
             return Verb({"F": "FAIL"}.get(name, name))
+        if self.peek(3) == "(?(":
+            self.take("(?(")
+            end = self.p.index(")", self.i)
+            index = int(self.p[self.i : end])
+            self.i = end + 1
+            yes, no = self.sequence(), Seq(())
+            if self.peek() == "|":
+                self.take("|")
+                no = self.sequence()
+            self.take(")")
+            self.referenced.add(index)
+            return Cond(index, yes, no)
+        if c in "^$":
+            self.take(c)
+            return Anchor(c)
         if c == "(":
             index = 0
             if self.peek(3) == "(?:":
                 self.take("(?:")
+            elif self.peek(2) == "(?":  # lookarounds, flags, named groups, atomic groups ...
+                raise ValueError(f"unsupported construct {self.p[self.i:self.i + 4]!r} at {self.i} in {self.p!r}")
             else:
                 self.take("(")
                 self.groups += 1
@@ -248,6 +315,11 @@ class Parser:
         if c == "\\":
             self.i += 2
             ch = self.p[self.i - 1]
+            if ch in "123456789":
+                self.referenced.add(int(ch))
+                return Backref(int(ch))
+            if ch == "d":
+                return Item(lambda x: x.isdigit(), "\\d")
             return Item(lambda x, ch=ch: x == ch, ch)
         self.i += 1
         return Item(lambda x, c=c: x == c, c)
@@ -342,8 +414,9 @@ class Prune(Exception):
 
 
 class Ctx:
-    def __init__(self, text):
+    def __init__(self, text, referenced=frozenset()):
         self.text = text
+        self.referenced = referenced
 
 
 def run(node, st, ctx, k):
@@ -361,7 +434,30 @@ def run(node, st, ctx, k):
         return repeat(node, 0, st, ctx, k)
     if kind is Fuzzy:
         return fuzzy(node, st, ctx, k)
+    if kind is Anchor:
+        return anchor(node, st, ctx, k)
+    if kind is Backref:
+        return backref(node, st, ctx, k)
+    if kind is Cond:
+        return run(node.yes if st.groups[node.index] != (-1, -1) else node.no, st, ctx, k)
     return verb(node, st, ctx, k)
+
+
+def anchor(node, st, ctx, k):
+    n = len(ctx.text)
+    if node.kind == "^":
+        ok = st.pos == 0
+    else:  # $: the end, or before a final newline
+        ok = st.pos == n or (st.pos == n - 1 and ctx.text[-1] == "\n")
+    return k(st) if ok else iter(())
+
+
+def backref(node, st, ctx, k):
+    start, end = st.groups[node.index]
+    if start < 0:  # a reference to an unset group fails
+        return iter(())
+    items = tuple(Item(lambda x, ch=ch: x == ch, ch) for ch in ctx.text[start:end])
+    return seq(items, st, ctx, k)
 
 
 def seq(parts, st, ctx, k):
@@ -388,11 +484,53 @@ def group(node, st, ctx, k):
     return run(node.body, st, ctx, close)
 
 
-def repeat(node, count, st, ctx, k):
+def repeat(node, count, st, ctx, k, seen=(), reached=None):
+    """seen: the capture states at the start of the empty iterations already
+    run at this position (modes "needed" and "unrestricted"). reached: the
+    states that error-spending empty iterations of this invocation of the
+    repeat have already led to (mode "needed"); see empty_state_key."""
+    mode = EMPTY_DELETION_ITERATIONS
+    if reached is None:
+        reached = set()
+
     def more(s):
-        if s.pos == st.pos and s.path != st.path and EMPTY_DELETION_ITERATIONS == "reject":
+        if s.pos != st.pos:
+            if mode == "needed" and NEEDED_DEDUP_ALL:
+                key = empty_state_key(node, count + 1, s, ctx, ())
+                if key in reached:
+                    return iter(())
+                reached.add(key)
+            return repeat(node, count + 1, s, ctx, k, (), reached)
+        spent = s.path != st.path  # this iteration took errors
+        if mode in ("needed", "unrestricted"):
+            now_seen = seen + (st.groups,)
+            # Upstream counts only a REFERENCED group whose span changed (_regex.c:12726).
+            refs = sorted(ctx.referenced)
+            changed = any(s.groups[g] != st.groups[g] for g in refs) and all(
+                any(s.groups[g] != old[g] for g in refs) for old in now_seen)
+            if not spent:  # upstream's rule for an error-free empty iteration
+                if changed or count + 1 < node.lo:
+                    return repeat(node, count + 1, s, ctx, k, now_seen, reached)
+                return k(s)
+            if mode == "unrestricted":
+                if UNRESTRICTED_EMPTY_RUN is not None and len(now_seen) > UNRESTRICTED_EMPTY_RUN:
+                    return iter(())
+                return repeat(node, count + 1, s, ctx, k, now_seen)
+            if not (changed or count < node.lo or advances_unmet_minimum(st, s)):
+                return iter(())
+            # Admitted. Prune it if an earlier path of this invocation already
+            # reached the same state: the future is the same, and that path
+            # was explored to the end first, so this one can add no match.
+            key = empty_state_key(node, count + 1, s, ctx, now_seen)
+            if key in reached:
+                return iter(())
+            reached.add(key)
+            return repeat(node, count + 1, s, ctx, k, now_seen, reached)
+        if spent and mode == "reject":
             return iter(())
-        if s.pos == st.pos and count + 1 >= node.lo:  # empty iteration ends the loop
+        if spent and mode == "minimum" and count + 1 > node.lo:
+            return iter(())
+        if count + 1 >= node.lo:  # empty iteration ends the loop
             return k(s)
         return repeat(node, count + 1, s, ctx, k)
 
@@ -447,6 +585,55 @@ def add_error(st, t, pos, node=None):
     return replace(st, counts=tuple(c), pos=pos, path=st.path + (step,))
 
 
+def empty_state_key(node, count, st, ctx, seen):
+    """Everything the rest of the match can depend on after an iteration of
+    this repeat invocation (whose node, continuation, open sections' limits
+    and search anchor are fixed): the text position; the count, clipped to
+    what the repeat can still tell apart; the error counts of every open
+    section; the spans of the groups the pattern tests; and the tested part
+    of the (c) cycle guard. Untested groups and the totals of closed outermost
+    sections change the reported result, never whether a match is found; and
+    two paths with equal keys are never on one branch, because each admitted
+    iteration raises the count, an error count or a tested span."""
+    refs = sorted(ctx.referenced)
+    clipped = min(count, node.lo) if node.hi == INF else count
+    return (st.pos, clipped, st.counts, tuple(saved for saved, _ in st.outer),
+            tuple(st.groups[g] for g in refs),
+            frozenset(tuple(old[g] for g in refs) for old in seen))
+
+
+def advances_unmet_minimum(before, after):
+    """True if the errors taken between the two states raise a count that an
+    open fuzzy section has a minimum for and has not yet reached: a per-type
+    minimum by errors of that type, an e minimum by any error. An enclosing
+    section counts the errors of the sections open inside it, as END_FUZZY adds
+    the inner counts to the outer ones (_regex.c:12475-12481); a section closed
+    inside the iteration has already added its errors to after.counts."""
+    if before.counts is None:
+        return False
+    return unmet_minimum_advanced_by(before, tuple(a - b for a, b in zip(after.counts, before.counts)))
+
+
+def unmet_minimum_advanced_by(st, delta):
+    """True if errors counted as delta (s, i, d) would raise a count that an
+    open section has a minimum for and has not yet reached, in state st."""
+    if st.counts is None or not any(delta):
+        return False
+    counts, lim = st.counts, st.limits
+    chain = [(counts, lim)]
+    for saved, limits in reversed(st.outer):
+        if saved is None:
+            break
+        counts = tuple(a + b for a, b in zip(saved, counts))
+        chain.append((counts, limits))
+    for counts, lim in chain:
+        if any(delta[t] and counts[t] < lim.mins[t] for t in range(3)):
+            return True
+        if sum(counts) < lim.mins[3]:
+            return True
+    return False
+
+
 def within(counts, lim):
     """fuzzy_within_constraints (_regex.c:9709): mins and maxes at section end."""
     full = counts + (sum(counts),)
@@ -483,9 +670,9 @@ class Result:
     path: tuple = ()
 
 
-def attempt(tree, ngroups, text, start, anchor, must_end):
+def attempt(tree, ngroups, text, start, anchor, must_end, referenced=frozenset()):
     st = State(start, ((-1, -1),) * (ngroups + 1), (0, 0, 0), None, None, (), anchor)
-    for final in run(tree, st, Ctx(text), lambda s: iter([s])):
+    for final in run(tree, st, Ctx(text, referenced), lambda s: iter([s])):
         if must_end and final.pos != len(text):
             continue
         return Result((start, final.pos), final.groups[1:], final.totals, final.path)
@@ -494,15 +681,16 @@ def attempt(tree, ngroups, text, start, anchor, must_end):
 
 def compile_pattern(pattern):
     p = Parser(pattern)
-    return p.parse(), p.groups
+    tree = p.parse()
+    return tree, p.groups, frozenset(p.referenced)
 
 
 def search(pattern, text, pos=0):
-    tree, ngroups = compile_pattern(pattern)
+    tree, ngroups, referenced = compile_pattern(pattern)
     start = pos
     while start <= len(text):
         try:
-            found = attempt(tree, ngroups, text, start, pos, False)
+            found = attempt(tree, ngroups, text, start, pos, False, referenced)
         except Prune as cut:
             restart = cut.restart
             start = restart if restart is not None and restart > start else start + 1
@@ -514,9 +702,9 @@ def search(pattern, text, pos=0):
 
 
 def match(pattern, text, pos=0, must_end=False):
-    tree, ngroups = compile_pattern(pattern)
+    tree, ngroups, referenced = compile_pattern(pattern)
     try:
-        return attempt(tree, ngroups, text, pos, -1, must_end)
+        return attempt(tree, ngroups, text, pos, -1, must_end, referenced)
     except Prune:
         return None
 
