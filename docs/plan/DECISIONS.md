@@ -1449,3 +1449,27 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   partial matching. On 90,000 generated rows (folded literals, all five opcodes, captures, fuzzy,
   lookarounds, partial, overlapped, slices, `BESTMATCH`/`ENHANCEMATCH`) every answer equals the one
   before it wherever the old code answered. Beyond upstream, `STRING_REV` is screened too.
+- 2026-09-26: **a `beginning` between the two halves of a surrogate pair cuts the pair into two
+  lone surrogates, and no step or read joins them again.** A grid found `(?:.)*x` fully matched
+  against `"\U00010428xc"` at (1, 3) running until its timeout, and `(?:.)*` at (1, 7) of
+  `"😀😁x😂\na"` never stopping at all, because its tail never reads the clock. Forwards the slice
+  opened with a lone low surrogate; backwards `PrevPos` joined that low half to the high half
+  before the slice and stepped from 2 to 0, one below the slice start, so a greedy repeat
+  retreating to its limit, which it tests for equality, walked past it and on. The same mismatch
+  gave answers outside the slice, for example `(?r).` at (1, 1) of `"\U00010428xc"` answered (0, 2),
+  and an index exception in a reversed fuzzy full match. The rule mirrors the 2026-09-01 one for
+  a `length` that cuts a pair, and it has an oracle: a Python `str` can hold the two halves as
+  separate codepoints, a codepoint `pos` can fall between them, and that is exactly the text a cut
+  pair denotes. `CharAt`, `NextPos` and `PrevPos` refuse to pair across `InitialSliceStart`, the
+  caller's slice start, not `SliceStart`, which lookarounds and verbs move during a match. Pinned
+  by `SliceSplitsSurrogatePairTests`, with a mutation of each of the three guards turning it red.
+  `tools/probes/surrogate-slice-sweep.cs` runs 92 patterns forwards and reversed over every slice
+  of seven subjects whose start or end splits a pair, under eleven calls. On main: 860 timeouts,
+  12 hangs no timeout stopped, 4 exceptions, and wrong or out-of-slice answers on every pattern.
+  With the fix: none, every answer equals the one for the same subject with the cut-off half
+  replaced by U+0001, and `tools/probes/surrogate-slice-oracle.py` finds upstream, over the cut
+  string, differing only where it also differs on the U+0001 text (ledger 4 and the partial
+  rules), so no remaining difference is about the cut. S52d's pin of the overrun changes answer:
+  `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
+  `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
+  no match.

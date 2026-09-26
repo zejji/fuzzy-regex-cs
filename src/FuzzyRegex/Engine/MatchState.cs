@@ -994,13 +994,23 @@ internal sealed class MatchState : IDisposable
     /// character to every opcode just as it is one to upstream's Python <c>str</c>. An unpaired
     /// surrogate reads as itself, which is what a Python <c>str</c> holding one does.
     /// </summary>
+    /// <remarks>
+    /// A pair is never read across either edge of the caller's slice: not past <see cref="TextEnd"/>,
+    /// and not across <see cref="InitialSliceStart"/> when the caller's <c>beginning</c> falls
+    /// between the two halves. See <see cref="PrevPos"/> for why.
+    /// </remarks>
     /// <param name="pos">The position, a UTF-16 code unit index.</param>
     /// <returns>The codepoint there.</returns>
     internal uint CharAt(int pos)
     {
         ReadOnlySpan<char> text = Text.Span;
         char first = text[pos];
-        if (char.IsHighSurrogate(first) && pos + 1 < TextEnd && char.IsLowSurrogate(text[pos + 1]))
+        if (
+            char.IsHighSurrogate(first)
+            && pos + 1 < TextEnd
+            && char.IsLowSurrogate(text[pos + 1])
+            && pos + 1 != InitialSliceStart
+        )
         {
             return (uint)char.ConvertToUtf32(first, text[pos + 1]);
         }
@@ -1017,7 +1027,11 @@ internal sealed class MatchState : IDisposable
     internal int NextPos(int pos)
     {
         ReadOnlySpan<char> text = Text.Span;
-        return pos + 1 < TextEnd && char.IsHighSurrogate(text[pos]) && char.IsLowSurrogate(text[pos + 1])
+        return
+            pos + 1 < TextEnd
+            && char.IsHighSurrogate(text[pos])
+            && char.IsLowSurrogate(text[pos + 1])
+            && pos + 1 != InitialSliceStart
             ? pos + 2
             : pos + 1;
     }
@@ -1044,13 +1058,32 @@ internal sealed class MatchState : IDisposable
     /// <c>str</c> holding one. See
     /// <c>MatchSpineTests.A_length_that_cuts_a_surrogate_pair_leaves_a_lone_surrogate_that_matches_as_one_character</c>.
     /// </para>
+    /// <para>
+    /// The same rule at the other edge is enforced here, in <see cref="NextPos"/> and in
+    /// <see cref="CharAt"/>: when the caller's <c>beginning</c> (<see cref="InitialSliceStart"/>)
+    /// falls between the two halves of a pair, the cut leaves two lone surrogates, and no step or
+    /// read joins them. Without it the two directions disagreed about where characters start
+    /// inside the slice: forwards the slice opens with a lone low surrogate, backwards
+    /// <c>PrevPos</c> stepped from one past it over the whole pair to one BELOW the slice start.
+    /// A greedy repeat retreating to its limit then walked past that limit, which it tests for
+    /// equality, and never stopped: <c>(?:.)*x</c> fully matched against "\U00010428xc" at (1, 3)
+    /// hung. A Python <c>str</c> holding the two halves as separate codepoints is exactly the
+    /// text a cut pair denotes, and a codepoint <c>pos</c> can fall between them, so upstream
+    /// answers the rule: see <c>SliceSplitsSurrogatePairTests</c>. It is the initial slice start
+    /// and not <see cref="SliceStart"/>, which a lookaround or a verb moves mid-match: the cut is
+    /// a property of the caller's text, and the characters must not change shape during a match.
+    /// </para>
     /// </remarks>
     /// <param name="pos">The position.</param>
     /// <returns>The previous position, which may be -1 when <paramref name="pos"/> is 0.</returns>
     internal int PrevPos(int pos)
     {
         ReadOnlySpan<char> text = Text.Span;
-        return pos >= 2 && char.IsLowSurrogate(text[pos - 1]) && char.IsHighSurrogate(text[pos - 2])
+        return
+            pos >= 2
+            && char.IsLowSurrogate(text[pos - 1])
+            && char.IsHighSurrogate(text[pos - 2])
+            && pos - 1 != InitialSliceStart
             ? pos - 2
             : pos - 1;
     }
