@@ -231,12 +231,12 @@ internal static class RequiredStringScreen
     /// </summary>
     /// <remarks>
     /// For a case-insensitive string that is the closure of the first character under
-    /// <see cref="Encodings.AllCases"/>, plus <see cref="Specials"/>:
-    /// every character with a case whose full folding is longer than one character, or whose case
-    /// data is not a plain equivalence class. Outside those, a character's cases share one
-    /// single-character folding and each is in the others' case sets, so it can take the first
-    /// required character only by being in that character's closure. An astral character
-    /// contributes both its surrogates.
+    /// <see cref="Encodings.AllCases"/>, plus those of the <see cref="Specials"/> (characters with a
+    /// case whose full folding is longer than one character, or whose case data is not a plain
+    /// equivalence class) that have a case whose folding holds the first character. Outside the
+    /// specials, a character's cases share one single-character folding and each is in the others'
+    /// case sets, so it can take the first required character only by being in that character's
+    /// closure. An astral character contributes both its surrogates.
     /// </remarks>
     /// <param name="reqString">The required-string node.</param>
     /// <returns>The code units, or <see langword="null"/> when the screen does not apply.</returns>
@@ -268,9 +268,12 @@ internal static class RequiredStringScreen
                     }
                 }
             }
+
+            CaseEncoding encoding = reqString.Encoding;
+            codepoints.UnionWith(Specials.Where(special => FoldingHolds(encoding, special, first)));
         }
 
-        var units = new HashSet<char>(reqString.Op == Opcode.StringRev ? [] : _specialUnits);
+        var units = new HashSet<char>();
         foreach (uint codepoint in codepoints)
         {
             if (codepoint is >= 0xD800 and <= 0xDFFF or > 0x10FFFF)
@@ -408,11 +411,34 @@ internal static class RequiredStringScreen
         0xFB17,
     ];
 
-    /// <summary>The code units of <see cref="Specials"/>, which every case-insensitive screen searches for.</summary>
-    private static readonly char[] _specialUnits =
-    [
-        .. Specials.SelectMany(static c => char.ConvertFromUtf32((int)c)).Distinct(),
-    ];
+    /// <summary>
+    /// Whether the full folding of any case of <paramref name="ch"/> holds a character that is
+    /// <paramref name="want"/> ignoring case.
+    /// </summary>
+    /// <param name="encoding">The encoding in force.</param>
+    /// <param name="ch">The subject character.</param>
+    /// <param name="want">The required character.</param>
+    /// <returns><see langword="true"/> if it does.</returns>
+    private static bool FoldingHolds(CaseEncoding encoding, uint ch, uint want)
+    {
+        Span<uint> cases = stackalloc uint[UnicodeTables.MaxCases];
+        Span<uint> folded = stackalloc uint[UnicodeTables.MaxFolded];
+        int count = Encodings.AllCases(encoding, ch, cases);
+
+        for (int c = 0; c < count; c++)
+        {
+            int length = Encodings.FullCaseFold(encoding, cases[c], folded);
+            for (int f = 0; f < length; f++)
+            {
+                if (Matcher.SameCharIgn(encoding, want, folded[f]))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// The same cancellation gate <c>Matcher.SimpleStringSearch</c> uses: one check per 256 steps.
