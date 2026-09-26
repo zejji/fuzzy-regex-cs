@@ -427,6 +427,31 @@ internal sealed class PatternObject
     /// </remarks>
     internal bool UpstreamDefaultBoundary;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether an item that matched exactly is never
+    /// offered as a deletion, which is upstream's rule. The oracle sets it on a pattern it compiled
+    /// for one call, to show that the ledger entry 42 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream tries errors on a fuzzy item only when it fails to match
+    /// (<c>upstream/src/_regex.c</c>:10185-10258), so <c>(?:a){d&lt;=1}a</c> finds nothing in
+    /// <c>a</c>. See <c>Matcher.ExactDeletionMayMatch</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool SkipExactDeletionRetry;
+
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether a repeat's end reads progress as
+    /// upstream does, counting any fuzzy edit, even one since undone, and stopping at the end of the
+    /// slice, instead of the "needed" rule and the repeat memo. The oracle sets it on a pattern it
+    /// compiled for one call, to show that the ledger entry 44 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream's rule is <c>upstream/src/_regex.c</c>:12550-12557; under it some patterns loop
+    /// until the backtracking stack is exhausted, which the oracle's own deadline bounds. See
+    /// <c>Matcher.EmptyIterationAdmitted</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool UpstreamEmptyIterations;
+
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
 
@@ -663,7 +688,7 @@ internal sealed class PatternObject
             }
 
             int length = 0;
-            Node? exit = SkipTextlessNodes(node);
+            Node? exit = SkipTextlessNodes(pattern, node);
             if (node is not null && IsFuzzyRunItem(node))
             {
                 length = node.FuzzyRunLength;
@@ -700,16 +725,40 @@ internal sealed class PatternObject
         node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev ? node.Values.Count : 1;
 
     /// <summary>
-    /// The first node from <paramref name="node"/> on that is not an <c>END_FUZZY</c>,
-    /// <c>START_GROUP</c> or <c>END_GROUP</c>: nodes that always succeed and read no text.
+    /// The first node from <paramref name="node"/> on that is not an <c>END_FUZZY</c>, or a
+    /// <c>START_GROUP</c> or <c>END_GROUP</c> of a group nothing tests: nodes that always succeed,
+    /// read no text and leave nothing the rest of the match reads.
     /// </summary>
+    /// <remarks>
+    /// The boundary of a group a backreference or conditional tests (<see cref="GroupInfo.Referenced"/>)
+    /// is where the walk stops. <c>Matcher.ExactDeletionMayMatch</c> uses the node found here to ask
+    /// whether the character an exact item read can be read after its run, which rests on
+    /// exchanging a trailing insertion at a section's end for the item's own match; across a tested
+    /// group's boundary that exchange moves the group's span and a later backreference can then
+    /// fail. <c>(?:(a)){e&lt;=2}b\1</c> over 'ab' matches only by deleting the fuzzy 'a', so group 1
+    /// is empty, and inserting the 'a' after the group (found by the blind review of af59be7,
+    /// 2026-09-26). A group nothing tests changes only what a match reports, and the exchanged
+    /// match, which would be reported, was found first.
+    /// </remarks>
+    /// <param name="pattern">The pattern, for which groups are tested.</param>
     /// <param name="node">The node, or <see langword="null"/>.</param>
     /// <returns>The node, or <see langword="null"/>.</returns>
-    internal static Node? SkipTextlessNodes(Node? node)
+    internal static Node? SkipTextlessNodes(PatternObject pattern, Node? node)
     {
         // A bound only against a malformed cycle; a real chain of these is short.
-        for (int i = 0; i < 64 && node is { Op: Opcode.EndFuzzy or Opcode.StartGroup or Opcode.EndGroup }; i++)
+        for (int i = 0; i < 64 && node is not null; i++)
         {
+            bool textless =
+                node.Op == Opcode.EndFuzzy
+                || (
+                    node.Op is Opcode.StartGroup or Opcode.EndGroup
+                    && !pattern.GroupInfoAt((int)node.Values[0]).Referenced
+                );
+            if (!textless)
+            {
+                break;
+            }
+
             node = node.Next1.Node;
         }
 

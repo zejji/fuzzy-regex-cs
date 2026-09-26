@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names sixty, and under the JIT this set is exactly those sixty. A floor of
+        // The allowlist names sixty-two, and under the JIT this set is exactly those sixty-two. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names sixty writable fields, so a near-empty answer means the "
+                "the allowlist names sixty-two writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -675,7 +675,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all sixty, and it is the reason they are not readonly: the engine's
+            // ONE writer for all sixty-two, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -686,7 +686,7 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all sixty
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all sixty-two
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
@@ -713,6 +713,10 @@ public sealed class ThreadSafetyTests
             // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
             // OracleComparer.RunWithTheUpstreamDefaultBoundary.
             "PatternObject.UpstreamDefaultBoundary",
+            // Ledger entries 42 and 44 added SkipExactDeletionRetry and UpstreamEmptyIterations,
+            // likewise set only by the OracleComparer ablations.
+            "PatternObject.SkipExactDeletionRetry",
+            "PatternObject.UpstreamEmptyIterations",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

@@ -220,4 +220,26 @@ public sealed class FuzzyExactDeletionTests
         new FuzzyRegex("(?:abc){e<=2}(*SKIP)x|y").PatternObject.NarrowExactDeletions.Should().BeFalse();
         new FuzzyRegex("(?:abc){e<=2}(*PRUNE)x|y").PatternObject.NarrowExactDeletions.Should().BeFalse();
     }
+
+    // The narrowing leaves out an exact item's deletion when a match that deletes it exchanges for
+    // one that keeps it and uses the character elsewhere. When the character goes to a trailing
+    // insertion past the end of a capture group, the exchange moves the group's end, and a later
+    // backreference or conditional that reads the group can then fail: in the first row the only
+    // match deletes the fuzzy 'a', so group 1 is empty, and inserts the 'a' after the group. So the
+    // run's exit is not looked for past the boundary of a tested group. Found by the blind review
+    // of af59be7 (2026-09-26); every answer is the reference matcher's, or the port's with the
+    // narrowing off.
+    [Test]
+    public void The_narrowing_does_not_cross_the_boundary_of_a_tested_group()
+    {
+        Match m = new FuzzyRegex(@"(?:(a)){e<=2}b\1").Match("ab");
+        ShouldMatch(m, 0, 2, new FuzzyCounts(0, 1, 1));
+        (m.Groups[1].Index, m.Groups[1].Length).Should().Be((0, 0));
+
+        ShouldMatch(new FuzzyRegex(@"(?:(a)){e<=2}b\1").MatchAtStart("ab"), 0, 2, new FuzzyCounts(0, 1, 1));
+        ShouldMatch(new FuzzyRegex(@"(?:(a)){i<=1,d<=1}b\1").Match("ab"), 0, 2, new FuzzyCounts(0, 1, 1));
+        ShouldMatch(new FuzzyRegex(@"(?i)a(?:(a*b)){e<=2}(a)\1").FullMatch("abA"), 0, 3, new FuzzyCounts(0, 1, 1));
+        ShouldMatch(new FuzzyRegex(@"(?be)a(?:([ab])){e<=2}(a)\1").MatchAtStart("aba"), 0, 3, new FuzzyCounts(0, 1, 1));
+        ShouldMatch(new FuzzyRegex(@"(?fi)(?:(\w)){i<=1,d<=1}a\1").Match("baa"), 0, 2, new FuzzyCounts(0, 1, 1));
+    }
 }

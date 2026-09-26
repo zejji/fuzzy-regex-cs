@@ -4360,7 +4360,7 @@ internal static class Matcher
     /// <remarks>
     /// An enclosing section counts the errors of the sections open inside it, since END_FUZZY adds
     /// the inner counts to the outer ones (<c>upstream/src/_regex.c</c>:12475-12481); its count is
-    /// what it had when the inner section was entered (<see cref="MatchState.OuterSection"/>) plus
+    /// what it had when the inner section was entered (<see cref="MatchState.TryOuterSection"/>) plus
     /// the inner section's own. Pass 0 to ask about the counts as they stand.
     /// </remarks>
     /// <param name="state">The match state.</param>
@@ -4368,7 +4368,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if one does.</returns>
     private static bool RaisesUnmetDeletionMinimum(MatchState state, long edits)
     {
-        if (!state.Pattern.HasFuzzyMinimum || state.FuzzyNode is not { } section)
+        if (!state.Pattern.HasFuzzyMinimum || state.SectionFrame < 0 || state.FuzzyNode is not { } section)
         {
             return false;
         }
@@ -4376,6 +4376,10 @@ internal static class Matcher
         long[] counts = state.FuzzyCounts;
         long del = counts[FuzzyValue.Del] - edits;
         long total = TotalErrors(counts) - edits;
+        int frame = state.SectionFrame;
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
         {
             if (del < section.Values[FuzzyValue.MinDel] || total < section.Values[FuzzyValue.MinErr])
@@ -4383,7 +4387,7 @@ internal static class Matcher
                 return true;
             }
 
-            if (state.OuterSection(section, out ReadOnlySpan<long> outerCounts) is not { } outer)
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
             {
                 return false;
             }
@@ -4402,7 +4406,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if they all do.</returns>
     private static bool AllMinimumsMet(MatchState state)
     {
-        if (state.FuzzyNode is not { } section)
+        if (state.SectionFrame < 0 || state.FuzzyNode is not { } section)
         {
             return true;
         }
@@ -4411,6 +4415,10 @@ internal static class Matcher
         long sub = counts[FuzzyValue.Sub];
         long ins = counts[FuzzyValue.Ins];
         long del = counts[FuzzyValue.Del];
+        int frame = state.SectionFrame;
+        Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
+
+        // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
         {
             List<uint> values = section.Values;
@@ -4424,7 +4432,7 @@ internal static class Matcher
                 return false;
             }
 
-            if (state.OuterSection(section, out ReadOnlySpan<long> outerCounts) is not { } outer)
+            if (state.TryOuterSection(ref frame, outerCounts) is not { } outer)
             {
                 return true;
             }
@@ -4550,6 +4558,11 @@ internal static class Matcher
     /// </returns>
     private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next, Node? item = null)
     {
+        if (state.Pattern.SkipExactDeletionRetry)
+        {
+            return false;
+        }
+
         // This runs for every exact fuzzy item, so the budget is worked out once, as a count.
         long room = DeletionRoom(state);
         if (room < 1 || !state.Pattern.NarrowExactDeletions)
@@ -4585,7 +4598,7 @@ internal static class Matcher
         }
         else
         {
-            exit = PatternObject.SkipTextlessNodes(next);
+            exit = PatternObject.SkipTextlessNodes(state.Pattern, next);
         }
 
         return count <= room && ExitCanRead(state, exit);
@@ -4701,6 +4714,7 @@ internal static class Matcher
             node.Next1.Node is { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
             && ReferenceEquals(end.Next1.Node, node)
             && state.Repeats[(int)end.Values[0]] is var repeat
+            && !state.Pattern.UpstreamEmptyIterations
             && repeat.Start == state.TextPos
             && repeat.Count + 1 > end.Values[1]
             && !RaisesUnmetDeletionMinimum(state, 0)
@@ -4733,7 +4747,7 @@ internal static class Matcher
         bool mayMatch;
         if (node.Op is Opcode.RefGroup or Opcode.RefGroupIgn or Opcode.RefGroupRev or Opcode.RefGroupIgnRev)
         {
-            mayMatch = ThisErrorPermitted(state, FuzzyValue.Del);
+            mayMatch = !state.Pattern.SkipExactDeletionRetry && ThisErrorPermitted(state, FuzzyValue.Del);
         }
         else
         {
@@ -4777,7 +4791,7 @@ internal static class Matcher
         int foldChangesStart
     )
     {
-        if (!ThisErrorPermitted(state, FuzzyValue.Del))
+        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
         {
             return;
         }
@@ -4820,7 +4834,7 @@ internal static class Matcher
         int foldChangesStart
     )
     {
-        if (!ThisErrorPermitted(state, FuzzyValue.Del))
+        if (state.Pattern.SkipExactDeletionRetry || !ThisErrorPermitted(state, FuzzyValue.Del))
         {
             return;
         }
@@ -7153,6 +7167,9 @@ internal static class Matcher
             state.FuzzyChanges.Clear();
         }
 
+        // NOT UPSTREAM (empty-iteration rule): no section entered in this attempt is open yet.
+        state.SectionFrame = -1;
+
         // NOT UPSTREAM'S, and the same shape as the clear above: a fresh attempt has no group call
         // open, and the abandoned one may have left some - a verb that cuts the backtracking drops
         // the frames that would otherwise have closed them. See MatchState.OpenCalls.
@@ -7797,6 +7814,18 @@ internal static class Matcher
                         return MatchStatus.Illegal;
                     }
 
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+                    long closedFrame = state.SectionFrame;
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        if (!state.Sstack.PopSize(out long outerFrame))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.SectionFrame = (int)outerFrame;
+                    }
+
                     /* sstack: - */
 
                     // Add the inner counts to the outer counts.
@@ -7850,8 +7879,14 @@ internal static class Matcher
                         state.TotalErrors = previousTotalErrors;
                         state.TotalCost = previousTotalCost;
 
+                        if (pattern.HasFuzzyMinimum)
+                        {
+                            state.Sstack.PushSize(state.SectionFrame);
+                        }
+
                         state.PushFuzzyCounts(state.Sstack, outerCounts);
                         state.Sstack.PushNode(outerNode);
+                        state.SectionFrame = (int)closedFrame;
 
                         /* sstack: outer_counts outer_node */
                         goto backtrack;
@@ -7904,7 +7939,7 @@ internal static class Matcher
                     // MemoryError. Here an empty iteration is progress only when it spent edits that
                     // something needs, or changed a tested group; then the repeat memo drops any
                     // iteration whose state this run of the repeat has already reached.
-                    if (state.IsFuzzy)
+                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
@@ -7936,6 +7971,14 @@ internal static class Matcher
                             --rpData.Count;
                             goto backtrack;
                         }
+                    }
+                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+                    {
+                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
+                        changed = !(
+                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
+                        );
                     }
 
                     // Could the body or tail match?
@@ -8106,7 +8149,7 @@ internal static class Matcher
                     // MemoryError. Here an empty iteration is progress only when it spent edits that
                     // something needs, or changed a tested group; then the repeat memo drops any
                     // iteration whose state this run of the repeat has already reached.
-                    if (state.IsFuzzy)
+                    if (state.IsFuzzy && !pattern.UpstreamEmptyIterations)
                     {
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
@@ -8138,6 +8181,14 @@ internal static class Matcher
                             --rpData.Count;
                             goto backtrack;
                         }
+                    }
+                    else if (state.IsFuzzy && changed && rpData.Count >= node.Values[1])
+                    {
+                        // PatternObject.UpstreamEmptyIterations, the oracle's ablation: upstream's
+                        // rule (:12555-12557), which stops a repeat only at the end of the slice.
+                        changed = !(
+                            node.Step == 1 ? state.TextPos >= state.SliceEnd : state.TextPos <= state.SliceStart
+                        );
                     }
 
                     // Could the body or tail match?
@@ -8553,10 +8604,11 @@ internal static class Matcher
                 case Opcode.Failure: // Failure.
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
-                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
+                    // NOT UPSTREAM (empty-iteration rule): the link beneath the frame, see
+                    // MatchState.SectionFrame.
                     if (pattern.HasFuzzyMinimum)
                     {
-                        state.EnterSection(node);
+                        state.Sstack.PushSize(state.SectionFrame);
                     }
 
                     // Save the outer fuzzy info. A nested fuzzy section counts its own errors from
@@ -8564,6 +8616,11 @@ internal static class Matcher
                     // tighter than the outer one without either being ignored.
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
+
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.SectionFrame = state.Sstack.Count;
+                    }
 
                     // Initialise the inner fuzzy info.
                     Array.Clear(state.FuzzyCounts);
@@ -11106,8 +11163,17 @@ internal static class Matcher
                     state.TotalCost = previousTotalCost;
 
                     // Save the outer fuzzy info.
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.Sstack.PushSize(state.SectionFrame);
+                    }
+
                     state.PushFuzzyCounts(state.Sstack, state.FuzzyCounts);
                     state.Sstack.PushNode(state.FuzzyNode);
+                    if (pattern.HasFuzzyMinimum)
+                    {
+                        state.SectionFrame = state.Sstack.Count;
+                    }
 
                     /* sstack: outer_counts outer_node
                      *
@@ -11472,10 +11538,15 @@ internal static class Matcher
 
                     state.FuzzyNode = outerFuzzyNode;
 
-                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
-                    if (pattern.HasFuzzyMinimum && !state.LeaveSection())
+                    // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionFrame.
+                    if (pattern.HasFuzzyMinimum)
                     {
-                        return MatchStatus.Illegal;
+                        if (!state.Sstack.PopSize(out long outerFrame))
+                        {
+                            return MatchStatus.Illegal;
+                        }
+
+                        state.SectionFrame = (int)outerFrame;
                     }
 
                     break;

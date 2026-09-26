@@ -464,17 +464,28 @@ internal sealed class MatchState : IDisposable
     internal static long GroupChanges(long captureChange) => captureChange & (FuzzyEditChange - 1);
 
     /// <summary>
-    /// NOT UPSTREAM (empty-iteration rule): for each open fuzzy section, by its FUZZY node's index,
-    /// the enclosing section's counts when it was entered and that section's node index plus one
-    /// (0 for none), in slots of <see cref="_sectionOuterWidth"/>. Kept only for a pattern with a
-    /// minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), whose empty iterations
-    /// need to know whether an enclosing section's minimum is still unmet
-    /// (<c>Matcher.RaisesUnmetDeletionMinimum</c>). Allocated for a fuzzy pattern.
+    /// NOT UPSTREAM (empty-iteration rule): where on <see cref="Sstack"/> the frame of the fuzzy
+    /// section now open ends, or -1 when no section entered in this attempt is open. Kept only for a
+    /// pattern with a minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), which is what
+    /// needs to know whether an enclosing section's minimum is met
+    /// (<c>Matcher.RaisesUnmetDeletionMinimum</c>, <c>Matcher.AllMinimumsMet</c>).
     /// </summary>
-    internal readonly long[]? SectionOuter;
+    /// <remarks>
+    /// FUZZY pushes the enclosing section's counts and node onto <see cref="Sstack"/>, and for such
+    /// a pattern this value beneath them, the frame of the section it was entered from. Each
+    /// section's link therefore lives in its own frame, restored with it on every path the engine
+    /// takes: a verb that drops backtracking entries leaves the structure stack alone, and a
+    /// recursive entry into a section gets a frame of its own. The value itself is set by FUZZY,
+    /// END_FUZZY and their backtrack arms, and cleared at the start of each attempt, where upstream
+    /// leaves <see cref="FuzzyNode"/> as a verb may have left it.
+    /// </remarks>
+    internal int SectionFrame = -1;
 
-    /// <summary>The slot width of <see cref="SectionOuter"/>: three counts and a node.</summary>
-    private const int _sectionOuterWidth = 4;
+    /// <summary>
+    /// The bytes a section frame spans for a pattern that keeps <see cref="SectionFrame"/>: the link,
+    /// three counts, the change count and the outer node.
+    /// </summary>
+    internal const int SectionFrameSize = 6 * sizeof(long);
 
     /// <summary>Upstream <c>req_pos</c>: where the required string matched, or -1.</summary>
     internal int ReqPos;
@@ -688,68 +699,39 @@ internal sealed class MatchState : IDisposable
         {
             Repeats[r] = new RepeatData();
         }
-
-        SectionOuter = pattern.IsFuzzy ? new long[_sectionOuterWidth * pattern.NodeList.Count] : null;
     }
 
     /// <summary>
-    /// Records, as <paramref name="section"/> is entered, the section it is entered from and that
-    /// section's counts, saving the slot's old contents on the backtracking stack for
-    /// <see cref="LeaveSection"/>.
+    /// One step out along the chain of open fuzzy sections: the section the one whose frame ends at
+    /// <paramref name="frame"/> was entered from, and that section's counts at the time.
     /// </summary>
-    /// <param name="section">The FUZZY node being entered.</param>
-    internal void EnterSection(Node section)
-    {
-        long[] outer = SectionOuter!;
-        int slot = _sectionOuterWidth * section.Index;
-        for (int i = 0; i < _sectionOuterWidth; i++)
-        {
-            Bstack.PushSize(outer[slot + i]);
-        }
-
-        Bstack.PushSize(section.Index);
-
-        FuzzyCounts.AsSpan().CopyTo(outer.AsSpan(slot, FuzzyValue.Count));
-        outer[slot + FuzzyValue.Count] = FuzzyNode is null ? 0 : FuzzyNode.Index + 1;
-    }
-
-    /// <summary>Undoes <see cref="EnterSection"/> as the matcher backtracks out of the section.</summary>
-    /// <returns><see langword="false"/> if the stack holds too few bytes.</returns>
-    internal bool LeaveSection()
-    {
-        if (!Bstack.PopSize(out long index))
-        {
-            return false;
-        }
-
-        int slot = _sectionOuterWidth * (int)index;
-        for (int i = _sectionOuterWidth - 1; i >= 0; i--)
-        {
-            if (!Bstack.PopSize(out long value))
-            {
-                return false;
-            }
-
-            SectionOuter![slot + i] = value;
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// The section <paramref name="section"/> was entered from, and that section's counts at the
-    /// time, as <see cref="EnterSection"/> recorded them.
-    /// </summary>
-    /// <param name="section">An open FUZZY node.</param>
+    /// <remarks>
+    /// Safe by construction: a link is followed only if it points below the frame it was read from,
+    /// so a walk ends after at most one step per frame on the stack, whatever the stack holds.
+    /// </remarks>
+    /// <param name="frame">The end of the current frame; on success, the end of the outer one's.</param>
     /// <param name="outerCounts">Receives the enclosing section's counts at entry.</param>
-    /// <returns>The enclosing FUZZY node, or <see langword="null"/>.</returns>
-    internal Node? OuterSection(Node section, out ReadOnlySpan<long> outerCounts)
+    /// <returns>The enclosing FUZZY node, or <see langword="null"/> when there is none.</returns>
+    internal Node? TryOuterSection(ref int frame, Span<long> outerCounts)
     {
-        long[] table = SectionOuter!;
-        int slot = _sectionOuterWidth * section.Index;
-        outerCounts = table.AsSpan(slot, FuzzyValue.Count);
-        long outer = table[slot + FuzzyValue.Count];
-        return outer == 0 ? null : Pattern.NodeList[(int)outer - 1];
+        if (frame < SectionFrameSize || frame > Sstack.Count)
+        {
+            return null;
+        }
+
+        long link = Sstack.SizeAt(frame - SectionFrameSize);
+        if (link < 0 || link > frame - SectionFrameSize)
+        {
+            return null;
+        }
+
+        int counts = frame - (5 * sizeof(long));
+        outerCounts[FuzzyValue.Sub] = Sstack.SizeAt(counts + (FuzzyValue.Sub * sizeof(long)));
+        outerCounts[FuzzyValue.Ins] = Sstack.SizeAt(counts + (FuzzyValue.Ins * sizeof(long)));
+        outerCounts[FuzzyValue.Del] = Sstack.SizeAt(counts + (FuzzyValue.Del * sizeof(long)));
+        Node? outer = Sstack.NodeAt(Pattern, frame - sizeof(long));
+        frame = (int)link;
+        return outer;
     }
 
     /// <summary>
@@ -887,10 +869,7 @@ internal sealed class MatchState : IDisposable
         TotalCost = 0;
         FewestErrors = 0;
         CaptureChange = 0;
-        if (SectionOuter is not null)
-        {
-            Array.Clear(SectionOuter);
-        }
+        SectionFrame = -1;
         ReqEnd = 0;
         LastIndex = 0;
         LastGroup = 0;

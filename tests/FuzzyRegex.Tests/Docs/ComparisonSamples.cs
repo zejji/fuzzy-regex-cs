@@ -493,4 +493,36 @@ public sealed class ComparisonSamples
         backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
         new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
     }
+
+    /// <summary>
+    /// "A fuzzy item that matched exactly can still be deleted, and that choice comes before any
+    /// earlier one".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_item_that_matched_exactly_can_still_be_deleted()
+    {
+        Match m = FuzzyRegex.MatchAtStart("a", "(?:a){d<=1}a");
+        (m.Index, m.Length, m.FuzzyCounts.Deletions).Should().Be((0, 1, 1));
+
+        Match first = FuzzyRegex.Match("abxabb", "(?:ab){d<=1}b");
+        (first.Index, first.Length).Should().Be((0, 2));
+
+        Match branch = FuzzyRegex.Match("ab", "(?:(?:a){d<=1}ab|a)");
+        (branch.Index, branch.Length).Should().Be((0, 2));
+    }
+
+    /// <summary>
+    /// "A fuzzy repeat takes an iteration that matches no text by deleting only when something
+    /// needs it".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_repeat_takes_an_empty_deleting_iteration_only_when_something_needs_it()
+    {
+        FuzzyRegex.Match("42kg", "(?:[0-9]+){d<=2}").FuzzyCounts.Deletions.Should().Be(0);
+
+        Match needed = FuzzyRegex.Match("42", "(?:[0-9]+){1<=d<=2}");
+        (needed.Index, needed.Length, needed.FuzzyCounts.Deletions).Should().Be((0, 2, 1));
+
+        FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y").FuzzyCounts.Deletions.Should().Be(1);
+    }
 }

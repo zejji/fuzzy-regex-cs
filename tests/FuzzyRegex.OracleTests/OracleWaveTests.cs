@@ -486,6 +486,58 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    public void A_row_the_exact_deletion_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-exact-item-offered-as-a-deletion`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 42, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-exact-item-offered-as-a-deletion", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
+    public void A_row_the_needed_rule_does_not_explain_is_not_accounted_for()
+    {
+        // The control for `fuzzy-empty-iteration-needed-rule`, built as the fold fix's: upstream's own answer is what
+        // this port gave before ledger entry 44, so accepting it would classify a revert of the fix as the
+        // fix; and no match stands in for an unrelated defect.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "fuzzy-empty-iteration-needed-rule", StringComparison.Ordinal)
+            )
+            .Subject;
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            ExpectedDivergences
+                .For(row, row.Expected)
+                .Should()
+                .BeNull("a port that reproduced upstream's own answer to row {0} is not this family", row.Number);
+            ExpectedDivergences
+                .For(row, new NoMatchOutcome())
+                .Should()
+                .BeNull("a total failure on row {0} is a defect, not this family", row.Number);
+        }
+    }
+
+    [Test]
     public void A_row_this_port_answers_upstreams_way_is_not_accounted_for_by_the_three_judged_entries()
     {
         // The over-classification guard for S48b's second sitting, and the control its three entries

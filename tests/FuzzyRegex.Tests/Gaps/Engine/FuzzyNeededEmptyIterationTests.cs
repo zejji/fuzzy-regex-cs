@@ -154,4 +154,48 @@ public sealed class FuzzyNeededEmptyIterationTests
         // fullmatch('(?:(?:(?:b){d<=1})*){1<=d<=1}', '')   (0, 0) (0, 0, 1), the same
         ShouldMatch(new FuzzyRegex("(?:(?:(?:b){d<=1})*){1<=d<=1}").FullMatch(""), 0, 0, new FuzzyCounts(0, 0, 1));
     }
+
+    // The walk out through the enclosing sections that rule (b) and the narrowing make read each
+    // entry from the section's own frame on the structure stack. It looped for ever, ignoring the
+    // match timeout, when a verb dropped the frames that restored a per-section record, or a
+    // recursive call entered a section inside itself (blind review of af59be7, 2026-09-26). The
+    // verb rows answer None: the second iteration's empty deletion is not needed, it fails, and
+    // backtracking into its (*PRUNE) or (*SKIP) ends the attempt at every start, which is also the
+    // reference matcher's answer. Upstream raises MemoryError on the recursion rows.
+    [Test]
+    public async Task Verbs_and_recursion_in_sections_with_a_minimum_answer_in_bounded_time()
+    {
+        foreach (
+            string pattern in new[]
+            {
+                "(?:(?:(*PRUNE)a){1<=d<=1})+",
+                "(?:(?:(*SKIP)a){1<=e<=2})+",
+                "(?:(?:(*SKIP)a){1<=e<=2}){2,}",
+            }
+        )
+        {
+            (await Answer(pattern, "c").ConfigureAwait(false)).Should().BeNull(pattern);
+        }
+
+        (await Answer("(?:b(?R)?){d<=1}(?:a){1<=d<=1}", "bb").ConfigureAwait(false)).Should().NotBeNull();
+        (await Answer("(?:b(?R)?(?:a){1<=d<=2}){e<=3}", "bb").ConfigureAwait(false)).Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Searches on a worker thread and throws <see cref="TimeoutException"/> if it does not finish in
+    /// five seconds, so a loop that ignores the match timeout turns the test red rather than hanging
+    /// the suite.
+    /// </summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <returns>The match, or <see langword="null"/> for none.</returns>
+    private static async Task<Match?> Answer(string pattern, string subject)
+    {
+        Match m = await Task.Run(() =>
+                new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(2)).Match(subject)
+            )
+            .WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        return m.Success ? m : null;
+    }
 }
