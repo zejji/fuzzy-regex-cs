@@ -490,4 +490,13 @@ public sealed class ComparisonSamples
         backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
         new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
     }
+
+    /// <summary>"A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start".</summary>
+    [Test]
+    public void Skip_acts_when_backtracking_reaches_it()
+    {
+        new FuzzyRegex(@"aa(*SKIP)x(*PRUNE)y|a").Match("aaxz").Index.Should().Be(1);
+        new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index.Should().Be(1);
+        new FuzzyRegex(@"aa(*SKIP)x|a").Match("aab").Success.Should().BeFalse();
+    }
 }

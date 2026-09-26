@@ -716,6 +716,9 @@ public sealed class ThreadSafetyTests
             // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
             // OracleComparer.RunWithTheUpstreamDefaultBoundary.
             "PatternObject.UpstreamDefaultBoundary",
+            // Ledger entry 45 added SkipMovesTheSliceWhenItRuns, likewise set only by
+            // OracleComparer.RunWithTheUpstreamSkipTiming.
+            "PatternObject.SkipMovesTheSliceWhenItRuns",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

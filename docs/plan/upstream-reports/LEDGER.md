@@ -4448,3 +4448,60 @@ The default oracle wave drew twelve rows of this shape at its three seeds on 202
 `reverse-grapheme-takes-the-whole-cluster` claims them only when compiling `\X` in upstream's order
 (`Info.UpstreamReverseGrapheme`) reproduces upstream's answer exactly. `ledger-reproductions.jsonl`
 re-checks upstream's answer to `(?r)\X{2}` over 'e' U+0301 'a'.
+
+## 45. `(*SKIP)` acts when it runs, not when backtracking reaches it, so a later `(*PRUNE)` cannot undo it - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-45-skip-acts-when-backtracked-onto.md`,
+for the owner to approve. Found 2026-09-26 by the review of ledger entry 44, whose fuzzy row
+`(?:(?:(*SKIP)a*(*PRUNE)){1<=s<=1,d<=2})*?b` over 'aab' is (2, 3) in PCRE2 and Perl.
+
+**Reproduction**, `regex` 2026.9.10, PCRE2 10.47 with `NO_START_OPTIMIZE`, Perl 5.42.3, measured
+2026-09-26 (`tools/probes/skip-then-prune-perl-pcre2.py`):
+
+```
+search(r'aa(*SKIP)x(*PRUNE)y|a', 'aaxz')             -> None   PCRE2 (1, 2)  Perl (1, 2)
+search(r'aa(*SKIP)b(*PRUNE)(*F)|a', 'aab')           -> None   PCRE2 (1, 2)  Perl (1, 2)
+search(r'(?:aa(*SKIP)b(*PRUNE)(*F)b|a)?a', 'aaaab')  -> None   PCRE2 (3, 4)  Perl (3, 4)
+search(r'(?>aa(*SKIP))x', 'aaax')                    -> None   PCRE2 (1, 4)  Perl (1, 4)
+```
+
+**Why upstream is wrong.** The verbs are PCRE's (`upstream/README.rst:204`, Hg issue 153), and
+pcre2pattern says they "do nothing when they are encountered. Matching continues with what
+follows, but if there is a subsequent match failure, causing a backtrack to the verb, a failure is
+forced" ("Verbs that act after backtracking"), and "If more than one backtracking verb is present
+in a pattern, the one that is backtracked onto first acts" ("More than one backtracking verb").
+perlre (v5.42) gives (*SKIP) its effect "on failure". A verb inside an atomic group that has
+finished is never backtracked onto, so "its effect is confined to that group"; upstream's own
+README says the same of `(*SKIP)` in an atomic group, "it won't affect the enclosing pattern"
+(`upstream/README.rst:209`), and its answer to the last row contradicts it. Upstream's
+`RE_OP_SKIP` sets `slice_start` (or `slice_end` under REVERSE) as soon as the verb runs
+(`upstream/src/_regex.c:14551-14555`), and the search loop starts the next attempt at the slice
+start. So in the first row the attempt at 0 has already committed the next start to 2 when the
+(*PRUNE) after it is backtracked onto, and position 1, where the second branch matches, is never
+tried. In the last row the (*SKIP) in the finished atomic group moves the start to 2 although
+backtracking never reaches it.
+
+**Proposed fix upstream:** have `RE_OP_SKIP` push its text position on the backtracking stack
+above the point `top_bstack` prunes to, and set `slice_start`/`slice_end` in its backtrack arm. A
+later (*PRUNE) or (*SKIP) prunes the entry away and decides for itself; the end of an atomic group
+or lookaround discards it; a successful match never pops it.
+
+**This port.** `Matcher.cs`'s `Opcode.Skip` arm does exactly that, and the new backtrack arm calls
+`MoveTheSliceForASkip`. Over two 10,000-row grids of exact patterns with (*SKIP), (*PRUNE), (*F),
+lookarounds, atomic groups, repeats, anchors, (?r), scans and partial matching
+(`tools/probes/skip-timing-grid.py`, seeds 45 and 7), the change moved 26 rows: 24 now agree with
+PCRE2 and 2 still differ for another reason; none moved away from PCRE2. Pinned by
+`Gaps/Engine/BacktrackingVerbTests` (the rows above, a reversed mirror, and three rows where a
+(*SKIP) that is reached must still act). `PatternObject.SkipMovesTheSliceWhenItRuns` restores
+upstream's timing for the oracle alone. `ledger-reproductions.jsonl` re-checks upstream's answer to
+the first row.
+
+**Not the same as** two families the same grids show, where upstream and this port both differ
+from PCRE2 and Perl before and after this change: a (*PRUNE) or (*SKIP) backtracked onto inside an
+atomic group, possessive repeat or positive lookaround that has not finished yet is confined to
+that group here, where PCRE2 fails the whole attempt (`(?>aa(*SKIP)x(*PRUNE)y)|a` over 'aaxz' is
+(0, 1) here, (1, 2) in PCRE2 and Perl), which is what upstream's README documents ("When used in an
+atomic group or a lookaround, it won't affect the enclosing pattern", `upstream/README.rst:207`,
+`:209`); and two alternatives that begin with the same verb are
+compiled as one verb in front of the branch (`(*SKIP)[ab]+|(*SKIP)\b` over 'ccb' is (0, 0) here,
+(2, 3) in PCRE2 and Perl). Neither is fixed by this entry.

@@ -1184,4 +1184,94 @@ public sealed class BacktrackingVerbTests
         pruned.Select(static m => (m.Index, m.Length)).Should().Equal((3, 6), (1, 4), (0, 3));
         pruned[1].FuzzyChanges.Substitutions.Should().Equal(5);
     }
+
+    // DIVERGES FROM UPSTREAM, deliberately (ledger entry 45). A verb acts when backtracking reaches
+    // it, not when it runs: pcre2pattern, "Verbs that act after backtracking", and "More than one
+    // backtracking verb": "the one that is backtracked onto first acts". A (*PRUNE) that runs after
+    // a (*SKIP) is backtracked onto first, so the next attempt starts one character on and the
+    // (*SKIP) never acts. Upstream moves the slice start the moment (*SKIP) runs (_regex.c:14544)
+    // and answers None on every row. PCRE2 10.47 (NO_START_OPTIMIZE) and Perl 5.42.3 give the
+    // spans below; tools/probes/skip-then-prune-perl-pcre2.py, measured 2026-09-26.
+    [Test]
+    [Arguments(@"aa(*SKIP)x(*PRUNE)y|a", "aaxz", 1, 1)]
+    [Arguments(@"aa(*SKIP)b(*PRUNE)(*F)|a", "aab", 1, 1)]
+    [Arguments(@"(?:aa(*SKIP)b(*PRUNE)(*F)b|a)?a", "aaaab", 3, 1)]
+    [Arguments(@"aa(*SKIP)(*PRUNE)x|a", "aaz", 1, 1)]
+    [Arguments(@"(aa(*SKIP)x)(*PRUNE)y|a", "aaxz", 1, 1)]
+    [Arguments(@"(?:aa(*SKIP)x(*PRUNE)y|a)+", "aaxzaa", 1, 1)]
+    public void A_prune_reached_after_a_skip_decides_the_next_start(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        Match m = new FuzzyRegex(pattern).Match(subject);
+
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((index, length));
+    }
+
+    [Test]
+    [Arguments(@"aa(*SKIP)x|a", "aab")]
+    [Arguments(@"(?:aa(*SKIP)x|a)b", "aab")]
+    [Arguments(@"(?r)x(*SKIP)aa|a", "baa")]
+    public void A_skip_that_backtracking_reaches_starts_the_next_attempt_where_it_was_reached(
+        string pattern,
+        string subject
+    )
+    {
+        // Moving the verb's effect to the backtrack arm must not lose it. At 0, 'aa' reaches the
+        // (*SKIP) at 2 and 'x' fails, so the next attempt starts at 2 and position 1, where 'a'
+        // would match, is never tried. PCRE2 10.47 and Perl 5.42.3 answer None to the two forward
+        // rows; the third is their mirror image under (?r). Upstream answers None to all three.
+        new FuzzyRegex(pattern)
+            .Match(subject)
+            .Success.Should()
+            .BeFalse();
+    }
+
+    [Test]
+    public void A_skip_that_backtracking_reaches_is_not_undercut_by_the_required_string()
+    {
+        // Ledger entry 1's row: PCRE2 10.47 gives (2, 6) with and without NO_START_OPTIMIZE.
+        Match m = new FuzzyRegex(@"..(*SKIP)xx").Match("cd xxx");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 4));
+    }
+
+    [Test]
+    public void A_skip_that_backtracking_never_reaches_does_not_move_the_next_start()
+    {
+        // The (*SKIP) sits in an atomic group that finished, so nothing backtracks onto it and the
+        // failure of 'x' bumps along by one: pcre2pattern, "its effect is confined to that group".
+        // PCRE2 10.47 and Perl 5.42.3 give (1, 4); upstream gives None, because the slice start
+        // moved to 2 when the verb ran.
+        Match m = new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 1, 3));
+    }
+
+    [Test]
+    public void A_reversed_prune_reached_after_a_skip_decides_the_next_start()
+    {
+        // The mirror of 'aa(*SKIP)x(*PRUNE)y|a' over 'aaxz', which PCRE2 and Perl answer (1, 2).
+        // Searching backwards from 4, 'aa' takes 2-4, the (*SKIP) is at 2 and the (*PRUNE) at 1,
+        // 'y' fails against 'z', and backtracking reaches the (*PRUNE) first: the next start is 3,
+        // where the second branch takes (2, 3). Upstream moves the slice end to 2 and answers None.
+        Match m = new FuzzyRegex(@"(?r)y(*PRUNE)x(*SKIP)aa|a").Match("zxaa");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 1));
+    }
+
+    [Test]
+    public void A_fuzzy_prune_reached_after_a_skip_decides_the_next_start()
+    {
+        // The row ledger entry 44's review raised. Spelt without fuzzy matching (the probe's part
+        // 1), PCRE2 10.47 and Perl 5.42.3 both give (2, 3). A guard rather than a red test here:
+        // until entry 44 refuses the empty deleting iteration this row reaches (2, 3) that way too.
+        Match m = new FuzzyRegex(@"(?:(?:(*SKIP)a*(*PRUNE)){1<=s<=1,d<=2})*?b").Match("aab");
+
+        (m.Success, m.Index, m.Length).Should().Be((true, 2, 1));
+    }
 }
