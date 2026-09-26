@@ -80,6 +80,13 @@ internal sealed class Info
     /// </summary>
     internal int GuessEncoding { get; set; }
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether <c>\X</c> compiles backwards in
+    /// upstream's order, testing the boundary before the characters. The oracle sets it to show
+    /// that the ledger entry 43 fix is the whole of a divergence; see <see cref="Grapheme"/>.
+    /// </summary>
+    internal bool UpstreamReverseGrapheme { get; init; }
+
     /// <summary>The version this pattern gets when its flags name none.</summary>
     internal int DefaultVersion { get; }
 

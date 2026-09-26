@@ -1357,6 +1357,27 @@ Console.WriteLine(new FuzzyRegex(@"(?w)a\b").Match("a:\u0308a").Index);   // 3 -
 Without `(?w)`, `\b` is the simple boundary between a word character and anything else, and
 nothing changes there.
 
+### `\X` matches the same grapheme cluster backwards as forwards
+
+`\X` matches one user-perceived character, a grapheme cluster in the sense of
+[UAX #29](https://www.unicode.org/reports/tr29/): 'e' followed by U+0301 COMBINING ACUTE ACCENT is
+one cluster, and so is CR LF. Where a cluster starts and ends is a property of the text, so a
+reversed search, `(?r)`, should find the same clusters in the opposite order. Here it does, on every
+line of Unicode's conformance file for Unicode 17.0.0. Upstream's reversed `\X` stops after one
+codepoint, so it splits the accent from its letter and loses the letter, and a lookbehind that
+holds `\X`, which also reads backwards, sees only part of a cluster.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// 'e' with its accent is one cluster in either direction.
+var backwards = new FuzzyRegex(@"(?r)\X");
+Console.WriteLine(string.Join(" ", backwards.Matches("e\u0301a").Select(static m => m.Length)));  // 1 2 - upstream: 1 1
+Console.WriteLine(new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index);                              // 2 - upstream: no match
+```
+
+Forward matching is unchanged: upstream's forward `\X` already agrees with the whole file.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,
