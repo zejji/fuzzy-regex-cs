@@ -233,7 +233,7 @@ class Parser:
                 lo, hi = {"?": (0, 1), "*": (0, INF), "+": (1, INF)}[c]
             elif c == "{" and self.brace_is_repeat():
                 lo, hi = self.repeat_bounds()
-            elif c == "{":
+            elif c == "{" and self.brace_is_constraint():
                 node = self.fuzzy(node, self.limits())
                 continue
             else:
@@ -265,6 +265,23 @@ class Parser:
         if "," not in body:
             return int(lo), int(lo)
         return int(lo or 0), (int(hi) if hi else INF)
+
+    def brace_is_constraint(self):
+        """Upstream's grammar (_regex_core.py:680-745): a term led by a digit must have a
+        minimum AND a maximum ("1<=e<=2"); "{1<=d}" is not a constraint at all, so the braces
+        are literal text (measured 2026-09-26: fullmatch "(?:b){1<=d}" "b{1<=d}" matches)."""
+        end = self.p.find("}", self.i)
+        if end < 0:
+            return False
+        for term in (t.strip() for t in self.p[self.i + 1 : end].split(",")):
+            if re.search(r"\d[sid]", term):  # a cost equation
+                continue
+            if not term or not term[0].isdigit():
+                continue
+            m = re.fullmatch(r"\d+<=?[sied]<=?\d+", term)
+            if not m:
+                return False
+        return True
 
     def limits(self):
         end = self.p.index("}", self.i)
