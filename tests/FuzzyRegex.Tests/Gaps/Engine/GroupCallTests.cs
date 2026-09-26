@@ -601,16 +601,30 @@ public sealed class GroupCallTests
         // arm runs. Anything the guard keyed on that call is then stale for the rest of the
         // attempt, and the next legitimate call of the same group at the same position is refused.
         //
-        // Upstream answers (0, 2) on all four in 0.00s (regex 2026.9.10, 2026-09-14):
+        // Upstream answers (0, 2) on all of these in 0.00s (regex 2026.9.10, 2026-09-14):
         //   regex.search(r'(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))', 'aa')
-        // The first row is the control - no wrapper, so nothing discards the frame - and it passed
-        // before the fix as well as after. The other three each wrap the leak site in one of the
-        // three constructs that restore `Sstack.Count`.
+        // and so does PCRE2 10.47 (NO_START_OPTIMIZE, 2026-09-26). The first row is the control - no
+        // wrapper, so nothing discards the frame - and it passed before the fix as well as after.
+        // The others wrap the leak site in a construct that restores `Sstack.Count`.
+        //
+        // Ledger entry 47 changed which constructs those are. S47 used `(?>(?&g))?` and
+        // `(?:(?=(?&g))|)`, but an atomic group or positive lookahead that has not finished no
+        // longer stops a verb: it ends the attempt, and those rows now answer None (pinned in
+        // VerbScopeTests). A negative lookahead and a conditional test still stop it, and the third
+        // row has the verb cross an atomic group on its way to the negative lookahead, so the
+        // unwind that skips the atomic group's own arm must leave the call closed too.
         const string Body = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*PRUNE)(?P=cap)))";
         const string SkipBody = "(?=(?P<cap>a))(?&g)(?(DEFINE)(?P<g>a(*SKIP)(?P=cap)))";
 
         foreach (
-            string pattern in new[] { Body, "(?>(?&g))?" + Body, "(?:(?=(?&g))|)" + Body, "(?>(?&g))?" + SkipBody }
+            string pattern in new[]
+            {
+                Body,
+                "(?!(?&g))" + Body,
+                "(?!(?>(?&g)))" + Body,
+                "(?(?=(?&g))|)" + Body,
+                "(?!(?>(?&g)))" + SkipBody,
+            }
         )
         {
             Match m = new FuzzyRegex(pattern, FuzzyRegexOptions.None, _budget).Match("aa");
