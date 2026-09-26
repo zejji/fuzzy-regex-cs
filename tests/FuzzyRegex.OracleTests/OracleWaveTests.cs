@@ -635,6 +635,99 @@ public sealed class OracleWaveTests
     }
 
     [Test]
+    [Arguments("partial-retry-reversed-slice")]
+    [Arguments("bestmatch-walk-truncated-by-a-skip")]
+    [Arguments("bounded-lazy-repeat-partial")]
+    [Arguments("turkic-default-folding-without-spans")]
+    [Arguments("end-of-line-reads-a-skip-moved-slice")]
+    public void A_row_keyed_entry_refuses_every_answer_but_the_judged_one(string id)
+    {
+        // The control for the row-keyed entries the 2026-09-26 triage widened by a row each. Each
+        // is keyed on the question AND on this port's exact rendered answer, so the thing to prove
+        // is that a different answer to a listed question is reported. Upstream's own answer is
+        // what a revert of the fix would give; no match, or a match at 0 on a row whose judged
+        // answer is no match, stands in for an unrelated defect. The wrong answers are put to the
+        // entry itself rather than to `For`, because another entry may own them: on some of these
+        // rows upstream's answer or no match IS another family's judged answer, which is that
+        // entry's business and not this one's.
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(e => string.Equals(e.Id, id, StringComparison.Ordinal))
+            .Subject;
+        IOracleOutcome matchAtZero = new MatchOutcome(
+            [new OracleGroup(0, Success: true, 0, 1, [new OracleSpan(0, 1)])],
+            -1,
+            null
+        );
+
+        foreach (OracleRow row in OracleWave.ParseRows(entry.Example))
+        {
+            IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+            IOracleOutcome defect = live is NoMatchOutcome ? matchAtZero : new NoMatchOutcome();
+
+            ExpectedDivergences
+                .For(row, live)
+                ?.Id.Should()
+                .Be(id, "this port's live answer to row {0} is the family", row.Number);
+            entry
+                .Applies(row, row.Expected)
+                .Should()
+                .BeFalse("{0}: upstream's own answer to row {1} is not this family", id, row.Number);
+            entry
+                .Applies(row, defect)
+                .Should()
+                .BeFalse("{0}: {1} on row {2} is a defect, not this family", id, defect.Describe(), row.Number);
+        }
+    }
+
+    [Test]
+    public void A_trailing_dollar_before_a_carriage_return_is_false_only_without_the_word_flag()
+    {
+        // The control for `EndsWhereATrailingDollarIsFalse` reading the WORD flag, added when seed
+        // 101 row 463 showed the helper refusing a match that ends before a CR in a pattern with no
+        // WORD flag. First the engine fact the helper rests on, which upstream shares (measured
+        // 2026-09-26 on regex 2026.9.10): only WORD makes a CR end a line.
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline)
+            .IsMatch("a\r")
+            .Should()
+            .BeFalse();
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline).IsMatch("a\n").Should().BeTrue();
+        new FuzzyRegex("a$", FuzzyRegexOptions.Multiline | FuzzyRegexOptions.Word).IsMatch("a\r").Should().BeTrue();
+
+        ExpectedDivergence entry = ExpectedDivergences
+            .All.Should()
+            .ContainSingle(static e =>
+                string.Equals(e.Id, "overlapped-skip-extra-match-reversed", StringComparison.Ordinal)
+            )
+            .Subject;
+        OracleRow row = OracleWave
+            .ParseRows(entry.Example)
+            .Should()
+            .ContainSingle(static r => r.Pattern.StartsWith(@"(?r)(?:.+?(*SKIP)[^\p{L}]", StringComparison.Ordinal))
+            .Subject;
+        IOracleOutcome live = OracleComparer.Run(row, TimeSpan.FromSeconds(5))!;
+
+        ExpectedDivergences
+            .For(row, live)
+            ?.Id.Should()
+            .Be(entry.Id, "the extra match ends before a CR, where `$` is false");
+
+        // Under WORD the same CR ends a line, so the extra match no longer refutes itself - whether
+        // the flag comes from the row or from the pattern.
+        ExpectedDivergences
+            .For(row with { Flags = row.Flags | 0x800 }, live)
+            .Should()
+            .BeNull("WORD makes a CR a line end");
+        ExpectedDivergences
+            .For(row with { Pattern = "(?w)" + row.Pattern }, live)
+            .Should()
+            .BeNull("an inline w makes a CR a line end");
+
+        ExpectedDivergences.For(row, row.Expected).Should().BeNull("upstream's own answer is not this family");
+        ExpectedDivergences.For(row, new NoMatchOutcome()).Should().BeNull("a total failure is a defect");
+    }
+
+    [Test]
     public void A_partial_of_the_wrong_span_is_not_accounted_for_as_a_boundary_partial()
     {
         // The control for `boundary-at-the-end-of-the-text`, named in that entry's own Reason.
