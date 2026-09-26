@@ -68,11 +68,14 @@ internal sealed class RepeatInfo
     /// a fuzzy section. <c>Optimiser.KeepFailureMemosSound</c> then clears it for every repeat if
     /// the pattern has anything that reads more than the position: a backreference, a group-exists
     /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
-    /// matching. A partial match does not use it either (<c>MatchState.KeepsFailureMemo</c>).
+    /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
+    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial match does not use it
+    /// either (<c>MatchState.KeepsFailureMemo</c>).
     /// </para>
     /// <para>
-    /// Three conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
-    /// condition is deleted: the maximum, backreferences and group-exists conditionals. The rest
+    /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
+    /// condition is deleted: the maximum, backreferences, group-exists conditionals and a
+    /// <c>\K</c> inside a construct. The rest
     /// have none. Differential grids of 7.6 million rows found no answer that changes when any one
     /// of them is deleted (2026-09-26), and for most there is a reason. Guards are reset at every
     /// start position, so a verb that ends the attempt leaves nothing behind for a later path to
@@ -302,6 +305,25 @@ internal sealed class PatternObject
     /// </para>
     /// </remarks>
     internal bool HasSkipVerb;
+
+    /// <summary>
+    /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
+    /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
+    /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which
+    /// withdraws every failure memo when it is set.
+    /// </summary>
+    /// <remarks>
+    /// <c>\K</c> moves the reported start and pushes an entry that moves it back when the path
+    /// fails. In one of those constructs the entry is thrown away as soon as the construct
+    /// succeeds, so the moved start outlives the path that moved it, and a failing path has a
+    /// lasting effect that a memo would skip: <c>(?:(?=\K)b|)+.c</c> over <c>aabc</c> is (3, 4)
+    /// upstream and was (2, 4) with the memo. It is the only such effect. The other entries a
+    /// succeeding construct throws away restore captures, the capture-change counter and fuzzy
+    /// counts, which the construct saved on entry and puts back itself when the engine
+    /// backtracks past it, or belong to repeats, group calls and fuzzy sections, which the memo
+    /// excludes already.
+    /// </remarks>
+    internal bool KeepInSubmatch;
 
     /// <summary>
     /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or

@@ -75,6 +75,31 @@ public sealed class FailureMemoTests
     }
 
     [Test]
+    [Arguments(@"(?:(?=\K)b|)+.c", "aabc", 3, 1)]
+    [Arguments(@"(?:(?=\K)b|)+.c", "abc", 2, 1)]
+    [Arguments(@"(?:(?>\K)b|)+.c", "abc", 2, 1)]
+    [Arguments(@"(?i)(?:b|((?(?=\K)(?i:A)|\b)|\b|(?:\w|a))){1,}?\w.[^a]c", "aabc", 4, 0)]
+    public void A_keep_inside_a_lookaround_or_atomic_group_keeps_the_memo_off(
+        string pattern,
+        string subject,
+        int index,
+        int length
+    )
+    {
+        // A '\K' moves the reported start and pushes an entry that moves it back when the path
+        // fails. Inside a lookaround, an atomic group or a conditional's test, that entry is thrown
+        // away as soon as the construct succeeds, so the moved start outlives the path that moved
+        // it. A failing path then has a lasting effect, and a memo that skips an equivalent failing
+        // path skips that effect too. In the first row the path that tries 'b' at 2 moves the start
+        // to 2 and fails; the path that tries it again later moves it to 3, and '.c' then matches
+        // with the start at 3. Upstream: regex.search(pattern, subject).span() is (index,
+        // index + length) in every row, regex 2026.9.10.
+        Match m = FuzzyRegex.Match(subject, pattern);
+
+        (m.Index, m.Length).Should().Be((index, length));
+    }
+
+    [Test]
     public void A_repeat_with_a_maximum_gets_no_memo()
     {
         // The count matters when there is a maximum. 'a' then 'b' reaches position 2 with two

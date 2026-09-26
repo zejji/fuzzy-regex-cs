@@ -1099,7 +1099,11 @@ public sealed class OracleWaveTests
         OracleComparer.RowTimeout.Should().BePositive();
 
         ErrorOutcome timedOut = ErrorOutcome.From(
-            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)*b", OracleComparer.RowTimeout),
+            new System.Text.RegularExpressions.RegexMatchTimeoutException(
+                "aaa",
+                @"(a|a)*\1b",
+                OracleComparer.RowTimeout
+            ),
             whileMatching: true
         );
 
@@ -1122,7 +1126,10 @@ public sealed class OracleWaveTests
         // And the deadline reaches the engine, which is the half a value assertion cannot see: this
         // row does not stop on its own, so the test returning at all is the proof. 50ms rather than
         // `RowTimeout`, so proving it costs no wall clock - upstream's own figure for this pattern
-        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve.
+        // at this length is 23 seconds (`RepeatTests`), and this port's is the same curve. The
+        // \1 is there since 2026-09-26: without it this port's failure memo
+        // (RepeatInfo.FailureMemo) answers the row in microseconds, and a pattern with a
+        // backreference gets no memo. Upstream was still running after 8 s (2026-09-26).
         //
         // What is deliberately *not* pinned: that the one-argument `Run` passes `RowTimeout` rather
         // than something else. Pinning that token needs a row that runs for the whole deadline, so
@@ -1130,7 +1137,7 @@ public sealed class OracleWaveTests
         // sitting directly under the field whose remarks explain why it exists.
         OracleRow catastrophic = OracleWave.ParseRows(
             """
-            {"generator": "rows", "pattern": "(a|a)*b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+            {"generator": "rows", "pattern": "(a|a)*\\1b", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaxb", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
             """
         )[0];
 
@@ -1213,9 +1220,12 @@ public sealed class OracleWaveTests
         // measurement of the family: `--knee` puts the shapes' knees between 24 and 36, so 32 is
         // past this pattern's (24) and short of `(?:a|aa)+$`'s (36). It is chosen to keep this test
         // cheap, and it is sound here only because the one shape it uses blows up well below it.
+        // The shape was `(a|a)+$` until 2026-09-26, when this port's failure memo made it answer
+        // at once; `(a|a){1,999}$` is the generator's bounded twin, still running after 8 s on
+        // upstream over this subject.
         OracleRow budgeted = OracleWave.ParseRows(
             """
-            {"generator": "timeout", "pattern": "(a|a)+$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.05, "outcome": {"kind": "timeout", "seconds": 0.05}}
+            {"generator": "timeout", "pattern": "(a|a){1,999}$", "flags": 0, "namedLists": {}, "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "operation": "search", "codepointSpan": null, "timeout": 0.05, "outcome": {"kind": "timeout", "seconds": 0.05}}
             """
         )[0];
 
@@ -1226,7 +1236,11 @@ public sealed class OracleWaveTests
         // `TimeoutOutcome` of our own, because that is what the engine actually produces and inventing
         // a second shape for it here would hide which of the two the port really gave.
         ErrorOutcome ranOut = ErrorOutcome.From(
-            new System.Text.RegularExpressions.RegexMatchTimeoutException("aaa", "(a|a)+$", TimeSpan.FromSeconds(0.05)),
+            new System.Text.RegularExpressions.RegexMatchTimeoutException(
+                "aaa",
+                "(a|a){1,999}$",
+                TimeSpan.FromSeconds(0.05)
+            ),
             whileMatching: true
         );
         OracleComparer.Compare(budgeted, ranOut).Should().Be(OracleVerdict.Agree);

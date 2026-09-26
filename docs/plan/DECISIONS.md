@@ -1506,3 +1506,24 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   carries a backreference, `(a|a)*\1\b\B`, or a maximum, `^(a|aa){1,99}$`, which keeps it slow;
   the oracle's `timeout` generator swaps seven shapes for bounded twins for the same reason, both
   halves of `timeout-row-margin` putting all ten still running at twenty times the budget.
+- 2026-09-26: **a `\K` inside an atomic group, possessive repeat, lookaround or conditional's test
+  withdraws the failure memo from the whole pattern.** A blind review of the entry above found
+  answers the memo changed: `(?:(?=\K)b|)+.c` over `aabc` is (3, 4) upstream and was (2, 4) with
+  the memo, and `(?:(?>\K)b|)+.c` over `abc` (2, 3) against (1, 3). `\K` moves the reported start
+  and pushes an entry that moves it back if the path fails, but one of those constructs throws
+  its body's entries away as soon as it succeeds, so the moved start outlives the failing path
+  that moved it. A failing path with a lasting effect breaks the memo's premise that skipping it
+  loses nothing. It is the only such effect: every other entry a succeeding construct discards
+  restores captures, the capture-change counter or fuzzy counts, which the construct saved on
+  entry and restores itself when the engine backtracks past it, or belongs to a repeat, a group
+  call or a fuzzy section, which the memo already excludes. The rule is pattern-wide
+  (`PatternObject.KeepInSubmatch`, set by the compiler, read by `KeepFailureMemosSound`) rather
+  than limited to constructs in or after a memoised body, because the narrower rule needs
+  positions the compiler does not track and buys almost nothing. Four rows from the review are
+  witnesses in `FailureMemoTests`, red with the rule deleted. A grid of 2,419 patterns built to put
+  `\K` inside and around those constructs (5.3 million rows, 81 patterns that time out on main
+  dropped first) found 5,165 answer changes in 45 patterns on the first commit, every one with a
+  `\K` inside such a construct, and none with the rule; a second of 2,496 patterns with captures
+  but no `\K` inside them, where the memo stays on (5.5 million rows), found none. The earlier
+  grids are still clean. Two oracle wave tests also needed the treatment the entry above
+  describes: their never-finishing rows are now `(a|a)*\1b` and `(a|a){1,999}$`.

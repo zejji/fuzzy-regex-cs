@@ -589,13 +589,16 @@ internal static class Optimiser
     /// from; <c>(*PRUNE)</c> and <c>(*SKIP)</c> cut the backtracking stack and <c>(*SKIP)</c> moves
     /// the slice; fuzzy matching can come back to a position with a different error budget; and
     /// POSIX matching goes on after a success, so a path that ended in a match is recorded as a
-    /// failure. The compiler's per-repeat half is in <c>NodeCompiler.BuildRepeat</c>.
+    /// failure; and a <c>\K</c> inside an atomic group or a lookaround leaves the moved start
+    /// behind when the path that moved it fails (<see cref="PatternObject.KeepInSubmatch"/>). The
+    /// compiler's per-repeat half is in <c>NodeCompiler.BuildRepeat</c>.
     /// </remarks>
     /// <param name="pattern">The pattern.</param>
     private static void KeepFailureMemosSound(PatternObject pattern)
     {
         bool unsafePattern =
             pattern.IsFuzzy
+            || pattern.KeepInSubmatch
             || (pattern.Flags & RegexFlags.Posix) != 0
             || pattern.NodeList.Exists(static node =>
                 node.Op

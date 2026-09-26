@@ -26,7 +26,11 @@
 //
 //     (a+)+$              len=41       42-47 ms  matched=False
 //     (a+)+$              len=61       10-14 ms  matched=False
-//     (a|aa)+$            len=33   2400-3300 ms  matched=False   <- what the smoke app uses
+//     (a|aa)+$            len=33   2400-3300 ms  matched=False   <- what the smoke app used
+//
+// Since 2026-09-26 the smoke app uses `(a|aa){1,99}$`. The failure memo (RepeatInfo.FailureMemo)
+// answers `(a|aa)+$` at once, and a repeat with a maximum gets no memo: 2,107-2,754 ms over the
+// same subject (Release, two runs, 2026-09-26). The candidate list below carries both.
 //     ^(a|a?)+$           len=31           0 ms  matched=False
 //     (x+x+)+y            len=30         1-5 ms  matched=False
 //     (?:a{0,10}){0,10}b  len=30  11500-13150 ms  matched=False
@@ -60,6 +64,7 @@ bool all = args.Contains("--all", StringComparer.Ordinal);
     (@"(a+)+$", new string('a', 40) + "b"),
     (@"(a+)+$", new string('a', 60) + "b"),
     (@"(a|aa)+$", new string('a', 32) + "b"),
+    (@"(a|aa){1,99}$", new string('a', 32) + "b"),
     (@"^(a|a?)+$", new string('a', 30) + "b"),
     (@"(x+x+)+y", new string('x', 30)),
     (@"(?:a{0,10}){0,10}b", new string('a', 30)),

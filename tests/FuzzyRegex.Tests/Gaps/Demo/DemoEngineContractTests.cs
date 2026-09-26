@@ -830,10 +830,12 @@ public sealed class DemoEngineContractTests
     [Test]
     public void Replace_mode_answers_inside_one_budget_when_the_pattern_runs_away()
     {
-        string subject = string.Concat(Enumerable.Repeat(new string('a', 18) + "c", 10)) + "aaab";
+        string subject = string.Concat(Enumerable.Repeat(new string('a', 22) + "c", 10)) + "aaab";
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-        // The optional '\1' keeps the search exponential; see the runaway test above.
+        // The optional '\1' keeps the search exponential; see the runaway test above. Twenty-two
+        // 'a's a chunk rather than eighteen since 2026-09-26: with the '\1', the eighteen-'a'
+        // subject's whole replacement pass took 1.1 s in Release, inside the two-second budget.
         Error(DemoEngine.Run(@"(a|a)*\1?b", "", subject, "replace", "X", "")).Should().Contain("timed out");
 
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(6));

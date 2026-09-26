@@ -707,6 +707,12 @@ internal static class NodeCompiler
         // Create the node.
         Node node = CreateNode(args.Pattern, op, flags, 0, 0);
 
+        // NOT UPSTREAM: see PatternObject.KeepInSubmatch.
+        if (op == Opcode.Keep && args.WithinSubmatch)
+        {
+            args.Pattern.KeepInSubmatch = true;
+        }
+
         // Append the node.
         AddNode(args.End!, node);
         args.End = node;
