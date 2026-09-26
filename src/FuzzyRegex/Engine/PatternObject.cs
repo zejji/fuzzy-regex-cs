@@ -262,21 +262,23 @@ internal sealed class PatternObject
     /// </summary>
     /// <remarks>
     /// The argument behind it (see <c>Matcher.ExactDeletionMayMatch</c>) exchanges one deletion for
-    /// another and can remove an error, so it does not hold where a section demands a minimum
-    /// number of errors, or restricts which characters an error may touch (a <c>FUZZY</c> node with a
-    /// test, which is asked at the deletion's position). And it shows only that the left-out choice holds
-    /// no match, where a <c>(*SKIP)</c> or <c>(*PRUNE)</c> reached inside it would still change
-    /// what the search does next. Any of those turns it off.
+    /// another, which can remove an error, so it does not hold where a section restricts which
+    /// characters an error may touch (a <c>FUZZY</c> node with a test, which is asked at the
+    /// deletion's position). And it shows only that the left-out choice holds no match, where a
+    /// <c>(*SKIP)</c> or <c>(*PRUNE)</c> reached inside it would still change what the search does
+    /// next. Either turns it off. A minimum error count does not; the matcher narrows there only
+    /// once every minimum is met (<c>Matcher.AllMinimumsMet</c>).
     /// </remarks>
     internal bool NarrowExactDeletions;
 
     /// <summary>
-    /// NOT UPSTREAM (empty-iteration rule): whether some fuzzy section has a minimum that a deletion
-    /// raises, a <c>d</c> or <c>e</c> minimum. Only then can an empty iteration that spent errors be
-    /// admitted for a section minimum (<c>Matcher.RaisesUnmetDeletionMinimum</c>), and only then does
-    /// the matcher keep <c>MatchState.SectionOuter</c>. Set when the pattern is compiled.
+    /// NOT UPSTREAM (empty-iteration rule, finding F-A): whether some fuzzy section has a minimum
+    /// error count. Only then can an empty iteration that spent errors be admitted for a section
+    /// minimum (<c>Matcher.RaisesUnmetDeletionMinimum</c>), only then can an exact item's deletion be
+    /// needed for one (<c>Matcher.AllMinimumsMet</c>), and only then does the matcher keep
+    /// <c>MatchState.SectionOuter</c>. Set when the pattern is compiled.
     /// </summary>
-    internal bool HasDeletionMinimum;
+    internal bool HasFuzzyMinimum;
 
     /// <summary>
     /// NOT UPSTREAM (empty-iteration rule): whether the repeat memo runs (<c>Matcher.RepeatMemoHit</c>):
@@ -567,24 +569,20 @@ internal sealed class PatternObject
 
             // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
             Node node = self.NodeList[i];
-            if (node.Op == Opcode.Fuzzy && (node.Values[FuzzyValue.MinDel] > 0 || node.Values[FuzzyValue.MinErr] > 0))
-            {
-                self.HasDeletionMinimum = true;
-            }
-
             if (
-                node.Op == Opcode.Prune
-                || (
-                    node.Op == Opcode.Fuzzy
-                    && (
-                        node.Next2.Node is not null
-                        || node.Values[FuzzyValue.MinSub] > 0
-                        || node.Values[FuzzyValue.MinIns] > 0
-                        || node.Values[FuzzyValue.MinDel] > 0
-                        || node.Values[FuzzyValue.MinErr] > 0
-                    )
+                node.Op == Opcode.Fuzzy
+                && (
+                    node.Values[FuzzyValue.MinSub] > 0
+                    || node.Values[FuzzyValue.MinIns] > 0
+                    || node.Values[FuzzyValue.MinDel] > 0
+                    || node.Values[FuzzyValue.MinErr] > 0
                 )
             )
+            {
+                self.HasFuzzyMinimum = true;
+            }
+
+            if (node.Op == Opcode.Prune || (node.Op == Opcode.Fuzzy && node.Next2.Node is not null))
             {
                 noNarrowing = true;
             }

@@ -726,7 +726,7 @@ public sealed class ThreadSafetyTests
             // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
             "PatternObject.NarrowExactDeletions",
             // The empty-iteration rule added these three, written by Compile after the node loop.
-            "PatternObject.HasDeletionMinimum",
+            "PatternObject.HasFuzzyMinimum",
             "PatternObject.MemoGroups",
             "PatternObject.UseRepeatMemo",
             "PatternObject.IsFuzzy",

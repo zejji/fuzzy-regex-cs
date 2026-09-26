@@ -4367,7 +4367,7 @@ internal static class Matcher
     /// <returns><see langword="true"/> if one does.</returns>
     private static bool RaisesUnmetDeletionMinimum(MatchState state, long edits)
     {
-        if (!state.Pattern.HasDeletionMinimum || state.FuzzyNode is not { } section)
+        if (!state.Pattern.HasFuzzyMinimum || state.FuzzyNode is not { } section)
         {
             return false;
         }
@@ -4389,6 +4389,48 @@ internal static class Matcher
 
             del += outerCounts[FuzzyValue.Del];
             total += TotalErrors(outerCounts);
+            section = outer;
+        }
+    }
+
+    /// <summary>
+    /// Whether the counts as they stand already meet every minimum of the open section and of the
+    /// sections enclosing it, each counting the errors of the sections inside it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns><see langword="true"/> if they all do.</returns>
+    private static bool AllMinimumsMet(MatchState state)
+    {
+        if (state.FuzzyNode is not { } section)
+        {
+            return true;
+        }
+
+        long[] counts = state.FuzzyCounts;
+        long sub = counts[FuzzyValue.Sub];
+        long ins = counts[FuzzyValue.Ins];
+        long del = counts[FuzzyValue.Del];
+        while (true)
+        {
+            List<uint> values = section.Values;
+            if (
+                sub < values[FuzzyValue.MinSub]
+                || ins < values[FuzzyValue.MinIns]
+                || del < values[FuzzyValue.MinDel]
+                || sub + ins + del < values[FuzzyValue.MinErr]
+            )
+            {
+                return false;
+            }
+
+            if (state.OuterSection(section, out ReadOnlySpan<long> outerCounts) is not { } outer)
+            {
+                return true;
+            }
+
+            sub += outerCounts[FuzzyValue.Sub];
+            ins += outerCounts[FuzzyValue.Ins];
+            del += outerCounts[FuzzyValue.Del];
             section = outer;
         }
     }
@@ -4481,21 +4523,56 @@ internal static class Matcher
     /// answer for two pattern characters. The budget asked is the current section's and the whole
     /// match's, not an enclosing section's, which can only keep a choice that could have gone.
     /// </para>
+    /// <para>
+    /// A one-character item followed straight away by a repeat whose whole body is the same item,
+    /// as the compiler writes <c>\w+</c> (<c>\w\w*</c>), is looked through
+    /// (<see cref="IsRepeatOfSameItem"/>). In a match that deletes the item X at p, the repeat R
+    /// either takes no iterations or its first iteration that consumes text consumes p, and it can
+    /// only do that exactly, since R's body is X's test and X matched p (an error is tried only on
+    /// a mismatch). In the second case, letting X match p and leaving that iteration out is also a
+    /// match, with one deletion fewer; if R would then fall below its minimum, that iteration
+    /// instead becomes an empty deleting iteration at p + 1, which the empty-iteration rule admits
+    /// below the minimum, with the same counts. Either way the match follows X's exact match and
+    /// was tried first. Every other empty iteration of R stands in both for the same reason (below
+    /// the minimum; with every minimum met no section minimum can admit one, and R's body holds no
+    /// group). So only R taking no iterations remains, and then the run goes on from R's tail,
+    /// which needs R's minimum to be 0.
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
     /// <param name="remaining">How many items from this one to the end of its own node.</param>
     /// <param name="next">The node after this item's own node.</param>
+    /// <param name="item">The item, when it is a one-character item; null for a string.</param>
     /// <returns>
     /// <see langword="false"/> when a deletion does not fit the budget, or the choice certainly
     /// holds no new match.
     /// </returns>
-    private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next)
+    private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next, Node? item = null)
     {
         // This runs for every exact fuzzy item, so the budget is worked out once, as a count.
         long room = DeletionRoom(state);
         if (room < 1 || !state.Pattern.NarrowExactDeletions)
         {
             return room >= 1;
+        }
+
+        // The exchange below can remove an error, so it needs every minimum already met: counts
+        // only rise along a path, so the exchanged match, which shares this path up to here, then
+        // meets them too.
+        if (state.Pattern.HasFuzzyMinimum && !AllMinimumsMet(state))
+        {
+            return true;
+        }
+
+        // An item followed by a repeat of itself: see the remarks.
+        if (item is not null && next is not null && IsRepeatOfSameItem(next, item))
+        {
+            if (next.Values[1] > 0)
+            {
+                return false;
+            }
+
+            next = next.Next2.Node;
         }
 
         long count = remaining;
@@ -4512,6 +4589,46 @@ internal static class Matcher
 
         return count <= room && ExitCanRead(state, exit);
     }
+
+    /// <summary>
+    /// The status bits the compiler's analysis sets, which say nothing about what a node matches:
+    /// the body and tail marks, the repeat, limit, reference and visit marks, the fast-init, used,
+    /// string and inner marks, and whether groups or repeats lie inside.
+    /// </summary>
+    private const uint _analysisStatus =
+        NodeStatus.Body
+        | NodeStatus.Tail
+        | NodeStatus.Repeat
+        | NodeStatus.Limited
+        | NodeStatus.Ref
+        | NodeStatus.VisitedAg
+        | NodeStatus.VisitedRep
+        | NodeStatus.FastInit
+        | NodeStatus.Used
+        | NodeStatus.String
+        | NodeStatus.Inner
+        | NodeStatus.HasGroups
+        | NodeStatus.HasRepeats;
+
+    /// <summary>
+    /// Whether <paramref name="node"/> is a greedy or lazy repeat whose whole body is one item with
+    /// exactly <paramref name="item"/>'s test, in the same fuzzy section.
+    /// </summary>
+    /// <param name="node">The node after the item.</param>
+    /// <param name="item">A fuzzy one-character item.</param>
+    /// <returns><see langword="true"/> if it is.</returns>
+    private static bool IsRepeatOfSameItem(Node node, Node item) =>
+        node.Op is Opcode.GreedyRepeat or Opcode.LazyRepeat
+        && node.Next1.Node is { } body
+        && body.Op == item.Op
+        && (body.Status & ~_analysisStatus) == (item.Status & ~_analysisStatus)
+        && body.Match == item.Match
+        && body.Step == item.Step
+        && body.Encoding == item.Encoding
+        && body.Values.SequenceEqual(item.Values)
+        && body.Next1.Node is { Op: Opcode.EndGreedyRepeat or Opcode.EndLazyRepeat } end
+        && ReferenceEquals(end.Next1.Node, body)
+        && end.Values[0] == node.Values[0];
 
     /// <summary>
     /// Whether the node a match reaches after a fuzzy run could read the character at
@@ -4569,7 +4686,7 @@ internal static class Matcher
     /// <param name="step">The item's character step, which the retry needs.</param>
     private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
     {
-        if (!ExactDeletionMayMatch(state, 1, node.Next1.Node))
+        if (!ExactDeletionMayMatch(state, 1, node.Next1.Node, node))
         {
             return;
         }
@@ -8422,7 +8539,7 @@ internal static class Matcher
                     goto backtrack;
                 case Opcode.Fuzzy: // Fuzzy matching (:13132).
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
-                    if (pattern.HasDeletionMinimum)
+                    if (pattern.HasFuzzyMinimum)
                     {
                         state.EnterSection(node);
                     }
@@ -11341,7 +11458,7 @@ internal static class Matcher
                     state.FuzzyNode = outerFuzzyNode;
 
                     // NOT UPSTREAM (empty-iteration rule): see MatchState.SectionOuter.
-                    if (pattern.HasDeletionMinimum && !state.LeaveSection())
+                    if (pattern.HasFuzzyMinimum && !state.LeaveSection())
                     {
                         return MatchStatus.Illegal;
                     }

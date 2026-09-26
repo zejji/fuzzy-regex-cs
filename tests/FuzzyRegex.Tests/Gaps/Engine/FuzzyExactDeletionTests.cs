@@ -205,13 +205,17 @@ public sealed class FuzzyExactDeletionTests
         ab.FuzzyRunExit.Op.Should().Be(Opcode.GreedyRepeat);
     }
 
-    // The narrowing is off where its exchange argument fails: a minimum error count, a test on
-    // which characters an error may touch, and a verb that a left-out choice could have reached.
+    // The narrowing is off where its exchange argument fails: a test on which characters an error
+    // may touch, and a verb that a left-out choice could have reached.
     [Test]
     public void The_narrowing_is_off_where_its_argument_fails()
     {
         new FuzzyRegex("(?:abc){e<=2}").PatternObject.NarrowExactDeletions.Should().BeTrue();
-        new FuzzyRegex("(?:abc){1<=e<=2}").PatternObject.NarrowExactDeletions.Should().BeFalse();
+        // A minimum does not turn it off: the matcher narrows once every minimum is met.
+        new FuzzyRegex("(?:abc){1<=e<=2}")
+            .PatternObject.NarrowExactDeletions.Should()
+            .BeTrue();
+        new FuzzyRegex("(?:abc){1<=e<=2}").PatternObject.HasFuzzyMinimum.Should().BeTrue();
         new FuzzyRegex("(?:abc){e<=2:[a-z]}").PatternObject.NarrowExactDeletions.Should().BeFalse();
         new FuzzyRegex("(?:abc){e<=2}(*SKIP)x|y").PatternObject.NarrowExactDeletions.Should().BeFalse();
         new FuzzyRegex("(?:abc){e<=2}(*PRUNE)x|y").PatternObject.NarrowExactDeletions.Should().BeFalse();

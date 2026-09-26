@@ -467,7 +467,7 @@ internal sealed class MatchState : IDisposable
     /// NOT UPSTREAM (empty-iteration rule): for each open fuzzy section, by its FUZZY node's index,
     /// the enclosing section's counts when it was entered and that section's node index plus one
     /// (0 for none), in slots of <see cref="_sectionOuterWidth"/>. Kept only for a pattern with a
-    /// deletion or error minimum (<c>PatternObject.HasDeletionMinimum</c>), whose empty iterations
+    /// minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), whose empty iterations
     /// need to know whether an enclosing section's minimum is still unmet
     /// (<c>Matcher.RaisesUnmetDeletionMinimum</c>). Allocated for a fuzzy pattern.
     /// </summary>
