@@ -1527,6 +1527,26 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   but no `\K` inside them, where the memo stays on (5.5 million rows), found none. The earlier
   grids are still clean. Two oracle wave tests also needed the treatment the entry above
   describes: their never-finishing rows are now `(a|a)*\1b` and `(a|a){1,999}$`.
+- 2026-09-26 (ledger entry 45): **a `(*SKIP)` moves the start of the next attempt when
+  backtracking reaches it, not when it runs**, so a `(*PRUNE)` or `(*SKIP)` that runs later, and is
+  therefore backtracked onto first, decides the next start, and a `(*SKIP)` inside an atomic group
+  or lookaround that has finished does nothing. pcre2pattern ("Verbs that act after backtracking",
+  "More than one backtracking verb") and perlre define the verbs that way, and PCRE2 10.47 and Perl
+  5.42.3 agree on every pinned row; upstream moves the slice as the verb runs
+  (`_regex.c:14551-14555`), which also contradicts its README's "won't affect the enclosing
+  pattern" for the atomic-group case. Inherited, so fixed under the no-known-bugs rule and pinned as
+  a divergence. The verb's arm now pushes its position above the pruned point and a new backtrack
+  arm moves the slice, so every rule judged earlier stands: the per-match slice reset (ledger 5,
+  S40a), the partial pass's slice restore (S40b), the `HasSkipVerb` narrowings of the prefilters
+  (S60, S60b) and the issue-613 clamp are untouched, and a verb inside an unfinished atomic group,
+  lookaround or condition is still confined to it, as upstream's README documents. Two 10,000-row
+  grids against PCRE2 (`tools/probes/skip-timing-grid.py`) moved 26 rows, 24 to PCRE2's answer and
+  none away. The same grids show two families this entry does not touch, both shared with
+  upstream: that confinement, where PCRE2 fails the whole attempt instead, and a verb that leads two
+  alternatives being compiled as one verb in front of the branch. The first needs a ruling, since
+  upstream documents it; the second is a candidate bug. The suite had no test that a reached
+  `(*SKIP)` changes an answer (deleting the verb's slice move left all 7,025 green), so three such
+  rows are pinned too.
 - 2026-09-26 (ledger entry 46): **a backtracking verb, nested branch, group call or fuzzy section
   that starts (or, reversed, ends) every alternative is no longer moved out of them**, so
   `(*SKIP)[ab]+|(*SKIP)\b` over 'ccb' is (2, 3) as in PCRE2 and Perl, not upstream's (0, 0).

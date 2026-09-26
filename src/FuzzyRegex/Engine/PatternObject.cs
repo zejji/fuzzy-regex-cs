@@ -283,8 +283,9 @@ internal sealed class PatternObject
     /// The required-string prefilter moves the FIRST attempt forward, to the position the required
     /// string implies. Skipping a position that cannot match is answer-transparent only while
     /// attempts are independent of each other, and <c>(*SKIP)</c> is the one thing in this engine
-    /// that makes them dependent: it sets <see cref="MatchState.SliceStart"/> to where it was
-    /// reached (<c>Matcher</c>'s <see cref="Opcode.Skip"/> arm, <c>:14544</c>), so the attempt that
+    /// that makes them dependent: when backtracking reaches it, it sets
+    /// <see cref="MatchState.SliceStart"/> to where it was reached (<c>Matcher</c>'s
+    /// <see cref="Opcode.Skip"/> arms; upstream does so when it runs, <c>:14544</c>), so the attempt that
     /// runs decides where the next one starts. Begin at a later position and the chain of skips is
     /// a different chain.
     /// </para>
@@ -407,6 +408,13 @@ internal sealed class PatternObject
     /// and <c>docs/DIVERGENCES.md</c>.
     /// </remarks>
     internal bool SkipLeftoverTakeBack;
+
+    /// <summary>
+    /// Oracle-only: a <c>(*SKIP)</c> moves the slice the moment it runs, as upstream's
+    /// <c>RE_OP_SKIP</c> does (<c>:14551-14555</c>), instead of when backtracking reaches it (ledger
+    /// entry 45). Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool SkipMovesTheSliceWhenItRuns;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded

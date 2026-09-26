@@ -1381,6 +1381,28 @@ Console.WriteLine(new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index);           
 
 Forward matching is unchanged: upstream's forward `\X` already agrees with the whole file.
 
+### A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start
+
+`(*SKIP)` and `(*PRUNE)` do nothing when the matcher passes them. They act only if the match then
+fails and backtracking comes back to them: `(*PRUNE)` ends the attempt, so the next one starts one
+character on, and `(*SKIP)` ends it too, but the next attempt starts where the verb was reached.
+When a path passes both, backtracking reaches the later one first, and that one decides. This is
+how PCRE2 and Perl define the verbs. Upstream moves the start of the next attempt the moment
+`(*SKIP)` runs, so a `(*PRUNE)` after it cannot take that back, and a `(*SKIP)` inside an atomic
+group that has finished still acts.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// At 0, 'aa' passes (*SKIP) at 2 and 'x' passes (*PRUNE); 'y' fails, so the (*PRUNE) acts and
+// the next attempt starts at 1, where the second branch matches.
+Console.WriteLine(new FuzzyRegex(@"aa(*SKIP)x(*PRUNE)y|a").Match("aaxz").Index);   // 1 - upstream: no match
+Console.WriteLine(new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index);          // 1 - upstream: no match
+```
+
+A `(*SKIP)` that backtracking does reach behaves as before: `aa(*SKIP)x|a` over 'aab' finds
+nothing in either library, because the attempt after the one at 0 starts at 2.
+
 ### A verb, branch, group call or fuzzy section that starts every alternative stays in each one
 
 When every alternative of a branch starts with the same item, the compiler may move that item out

@@ -2379,8 +2379,9 @@ internal static class Matcher
     /// DELIBERATE DIVERGENCE, S35: upstream bounds this one with <c>slice_end</c> where every other
     /// zero-width assertion it has bounds itself with <c>text_end</c>, and this reads
     /// <see cref="MatchState.TextEnd"/> like the rest of them. In everything the port implements
-    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (the <see cref="Opcode.Skip"/>
-    /// arm, <c>:14545</c>), and a verb moves where the next attempt starts and nothing else - PCRE2
+    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (when backtracking reaches the
+    /// verb, ledger entry 45; upstream moves it when the verb runs, <c>:14545</c>), and a verb moves
+    /// where the next attempt starts and nothing else - PCRE2
     /// pcre2pattern, "Verbs that act after backtracking" - so an assertion about the text must not
     /// read a bound a verb has moved. <b>Phase 5 gets a second mover</b>, flagged by S35's blind
     /// review: <c>do_best_fuzzy_match</c> (<c>:17802</c>) and <c>do_enhanced_fuzzy_match</c>
@@ -3085,6 +3086,26 @@ internal static class Matcher
         if (state.Pstack.TopSize(out long bstackCount))
         {
             state.Bstack.Count = (int)bstackCount;
+        }
+    }
+
+    /// <summary>Upstream's two slice lines in <c>RE_OP_SKIP</c> (<c>:14551-14555</c>).</summary>
+    /// <remarks>
+    /// Run when backtracking reaches the verb rather than when the verb runs (ledger entry 45), or
+    /// when it runs if <see cref="PatternObject.SkipMovesTheSliceWhenItRuns"/> is set.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="skipNode">The <c>(*SKIP)</c> node, whose direction says which end moves.</param>
+    /// <param name="skipPos">The text position the verb was reached at.</param>
+    private static void MoveTheSliceForASkip(MatchState state, Node skipNode, int skipPos)
+    {
+        if ((skipNode.Status & NodeStatus.Reverse) != 0)
+        {
+            state.SliceEnd = skipPos;
+        }
+        else
+        {
+            state.SliceStart = skipPos;
         }
     }
 
@@ -9259,19 +9280,36 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    if ((node.Status & NodeStatus.Reverse) != 0)
-                    {
-                        state.SliceEnd = state.TextPos;
-                    }
-                    else
-                    {
-                        state.SliceStart = state.TextPos;
-                    }
-
                     // Prune the backtracking back to an appropriate backtracking point.
                     TopBstack(state);
 
-                    /* bstack: ...
+                    // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
+                    // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
+                    // rest of the attempt has run. pcre2pattern ("Verbs that act after
+                    // backtracking") and perlre give a verb its effect only when a later failure
+                    // backtracks onto it, and "the one that is backtracked onto first acts" ("More
+                    // than one backtracking verb"). So the skip position goes on the backtracking
+                    // stack above the pruned point: a later (*PRUNE) or (*SKIP) prunes it away and
+                    // decides the next start itself; the end of an atomic group or lookaround that
+                    // finished discards it, which confines the verb to the group; and a success
+                    // never pops it. The backtrack arm below applies it.
+                    // `(?>aa(*SKIP))x` over 'aaax' is (1, 4) here, in PCRE2 10.47 and in Perl
+                    // 5.42.3, and None upstream; `aa(*SKIP)x(*PRUNE)y|a` over 'aaxz' is (1, 2) in
+                    // all three and None upstream. Pinned by BacktrackingVerbTests.
+                    // PatternObject.SkipMovesTheSliceWhenItRuns restores upstream's timing for the
+                    // oracle alone.
+                    if (state.Pattern.SkipMovesTheSliceWhenItRuns)
+                    {
+                        MoveTheSliceForASkip(state, node, state.TextPos);
+                    }
+                    else
+                    {
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushNode(node);
+                        state.Bstack.PushUInt8((byte)Opcode.Skip);
+                    }
+
+                    /* bstack: ... text_pos node SKIP
                      *
                      * pstack: bstack
                      */
@@ -11282,6 +11320,22 @@ internal static class Matcher
 
                     // The tail may have failed to match at this position.
                     state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    break;
+                }
+                case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
+                {
+                    /* bstack: text_pos node */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? skipNode) || !state.Bstack.PopSize(out long skipPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // Everything the verb's arm pruned is gone, so what backtracking reaches next is
+                    // the point the prune stopped at: FAILURE, which starts the next attempt from the
+                    // moved slice, or the start of the atomic group, lookaround or condition the verb
+                    // is in, which is upstream's confinement and is kept.
+                    MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
                     break;
                 }
                 default:
