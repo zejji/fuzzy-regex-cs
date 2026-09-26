@@ -224,7 +224,8 @@ internal static class Seam
 /// reason upstream answers <c>'(a|a)*b'</c> against a subject holding no <c>'b'</c> instantly, where
 /// this port ran the exponential search until S60 - so it was never only a speed matter. It is
 /// deliberately less than upstream's: the start-position JUMP is withheld from any pattern holding a
-/// <c>(*SKIP)</c>, and the reverse, folded and ignore-case arms of the locator are still to come.
+/// <c>(*SKIP)</c>, and the reverse, folded and ignore-case arms are not upstream's but
+/// <see cref="RequiredStringScreen"/>, which only refuses and jumps where it cannot change an answer.
 /// See <see cref="LocateRequiredString"/>.
 /// </para>
 /// <para>
@@ -5779,10 +5780,11 @@ internal static class Matcher
     /// </returns>
     /// <remarks>
     /// <para>
-    /// <b>Only the <c>STRING</c> arm is ported</b> (S60). Upstream's switch has six, and an opcode
-    /// it does not list falls through to "start matching from the current position" - so the five
-    /// unported arms take exactly the shape upstream already has for an unhandled opcode, and the
-    /// search is the one this port has always run. The reasons they are separate are in
+    /// <b>Only the <c>STRING</c> arm is ported</b> (S60). Upstream's switch has six; the other five
+    /// opcodes go to <see cref="RequiredStringScreen"/>, which refuses a subject that cannot hold the
+    /// string and otherwise starts matching from the current position, as upstream does for an
+    /// unhandled opcode (at offset 0 it starts at the nearest possible occurrence). Upstream's own
+    /// five arms are not ported, for the reasons in
     /// <c>docs/plan/OPTIMISATION-NOTES.md</c>: <c>STRING_REV</c> needs <c>string_search_rev</c> and
     /// the mirrored offset arithmetic, and the four case-insensitive arms are where S22 measured
     /// upstream's prefilter answering DIFFERENTLY from upstream's own matcher, so they are a
@@ -5894,11 +5896,24 @@ internal static class Matcher
             }
 
             default:
-                // ponytail: Phase 7 - the STRING_REV, STRING_FLD, STRING_FLD_REV, STRING_IGN and
-                // STRING_IGN_REV arms of 'locate_required_string' (:11143-11365). Falling through
-                // costs the prefilter on reverse and case-insensitive patterns only; the lift is
-                // 'string_search_rev' (:6867) and the three folding searches, and for the folding
-                // ones a judgement about the divergences S22 pinned. OPTIMISATION-NOTES.md.
+                // NOT UPSTREAM'S ARMS. The STRING_REV, STRING_FLD, STRING_FLD_REV, STRING_IGN and
+                // STRING_IGN_REV arms of 'locate_required_string' (:11143-11365) are not ported,
+                // because the folding ones are not transparent (DECISIONS 2026-08-31). In their
+                // place a screen that only refuses, with a looser comparison than any the matcher
+                // makes, so it cannot change an answer: without it '(?i)(?:ss|ß)+x' over 25
+                // U+00DF ran the exponential search where upstream refuses the subject at once.
+                // The start-position jump only at offset 0, and never a 'req_pos'. The '(*SKIP)' rule
+                // is the STRING arm's.
+                if (RequiredStringScreen.Covers(reqString.Op))
+                {
+                    bool jump = pattern.ReqOffset == 0 && !pattern.HasSkipVerb;
+                    int place = RequiredStringScreen.Locate(state, reqString, jump, out cancelled);
+                    if (place < 0 || jump)
+                    {
+                        return place;
+                    }
+                }
+
                 break;
         }
 
@@ -6590,7 +6605,7 @@ internal static class Matcher
         // Locate the required string, if there's one, unless this is a recursive call of
         // 'basic_match' (:11806-11814). S60.
         int foundPos;
-        if (state.Pattern.ReqString is null || state.TextPos < state.ReqPos)
+        if (state.Pattern.ReqString is null || state.TextPos < state.ReqPos || state.ScreenSettles())
         {
             foundPos = state.TextPos;
         }

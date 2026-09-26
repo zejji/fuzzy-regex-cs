@@ -476,6 +476,56 @@ internal sealed class MatchState : IDisposable
     /// <summary>Upstream <c>req_end</c>.</summary>
     internal int ReqEnd;
 
+    /// <summary>
+    /// NOT UPSTREAM: the slice start <see cref="RequiredStringScreen"/> last scanned, part of its
+    /// cache key.
+    /// </summary>
+    internal int ScreenSliceStart;
+
+    /// <summary>
+    /// NOT UPSTREAM: the slice end <see cref="RequiredStringScreen"/> last scanned, part of its cache
+    /// key; -1 when nothing is cached.
+    /// </summary>
+    internal int ScreenSliceEnd = -1;
+
+    /// <summary>
+    /// NOT UPSTREAM: the text position <see cref="RequiredStringScreen"/>'s last scan began from.
+    /// </summary>
+    internal int ScreenFrom;
+
+    /// <summary>
+    /// NOT UPSTREAM: what <see cref="RequiredStringScreen"/>'s last scan found - where the required
+    /// string could start (forward) or end (reverse) - or -1 for nowhere.
+    /// </summary>
+    internal int ScreenFound;
+
+    /// <summary>
+    /// NOT UPSTREAM: whether <see cref="ScreenFound"/> is the farthest possible occurrence rather
+    /// than the nearest, so that nothing lies beyond it.
+    /// </summary>
+    internal bool ScreenFoundFarthest;
+
+    /// <summary>
+    /// NOT UPSTREAM: the stretch of attempt positions <see cref="RequiredStringScreen"/> has already
+    /// cleared for a caller that does not jump, so that <c>Matcher.BasicMatch</c> can skip the call
+    /// for each of them. Empty (low above high) when there is none.
+    /// </summary>
+    internal int ScreenClearedLow = 1;
+
+    /// <inheritdoc cref="ScreenClearedLow"/>
+    internal int ScreenClearedHigh;
+
+    /// <summary>
+    /// NOT UPSTREAM: whether <see cref="RequiredStringScreen"/> has already cleared an attempt at
+    /// <see cref="TextPos"/> against the current slice, so the locator need not be asked.
+    /// </summary>
+    /// <returns><see langword="true"/> if the attempt may go ahead without asking.</returns>
+    internal bool ScreenSettles() =>
+        TextPos >= ScreenClearedLow
+        && TextPos <= ScreenClearedHigh
+        && ScreenSliceStart == SliceStart
+        && ScreenSliceEnd == SliceEnd;
+
     /// <summary>Upstream <c>lastindex</c>.</summary>
     internal int LastIndex;
 
@@ -801,6 +851,13 @@ internal sealed class MatchState : IDisposable
         VisibleCaptures = visibleCaptures;
         MatchAll = matchAll;
         ReqPos = -1;
+        ScreenSliceStart = 0;
+        ScreenSliceEnd = -1;
+        ScreenFrom = 0;
+        ScreenFound = 0;
+        ScreenFoundFarthest = false;
+        ScreenClearedLow = 1;
+        ScreenClearedHigh = 0;
         IsFuzzy = pattern.IsFuzzy;
 
         // Adjust boundaries.
