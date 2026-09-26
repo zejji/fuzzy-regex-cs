@@ -4301,6 +4301,279 @@ internal static class Matcher
     private static int FuzzyChangePos(MatchState state, in FuzzyData data) =>
         data.FuzzyType == FuzzyValue.Del ? data.NewTextPos : Step(state, data.NewTextPos, -data.Step);
 
+    /// <summary>
+    /// The fuzzy type of a frame pushed for an item that matched exactly. No error was recorded for
+    /// it, so a retry takes nothing back, and the only alternative left to try is
+    /// <see cref="FuzzyValue.Del"/>.
+    /// </summary>
+    /// <remarks>
+    /// NOT UPSTREAM (finding F-A, 2026-09-26). Upstream tries errors on an item only when it fails
+    /// to match (<c>fuzzy_match_item</c>, <c>upstream/src/_regex.c</c>:10185-10258), and an item
+    /// that matches pushes nothing (the one-character arms at :11924-11927, the string arms at
+    /// :14742-14745). So an item that matched exactly is never tried as a deletion when the rest of
+    /// the pattern then fails, and a match within the budget is lost:
+    /// <c>regex.match(r'(?:a){d&lt;=1}a', 'a')</c> is None, though deleting the fuzzy <c>a</c> is
+    /// one deletion. Upstream defines a deletion as a pattern item absent from the text
+    /// (<c>upstream/README.rst</c>:538-566), so <c>(?:a){d&lt;=1}</c> has the paths of
+    /// <c>(?:a|)</c>: the <c>a</c> first, then nothing. The port pushes the "delete it instead"
+    /// choice at the moment the item matches, so it is tried after everything that follows the
+    /// exact match has failed and before any earlier choice is retried: the place upstream tries
+    /// the errors of an item that fails (README.rst:609, <c>(?:cats|cat){e&lt;=1}</c>).
+    /// </remarks>
+    private const byte _exactFuzzyType = byte.MaxValue;
+
+    /// <summary>
+    /// Whether deleting an item that has just matched exactly at <c>state.TextPos</c> could lead to
+    /// a match that the search will not already have found by the time the choice is tried.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The choice is tried only after everything that follows the exact match has failed, and it
+    /// can be left out whenever it holds no match: the search then goes on exactly as it would
+    /// have. Call the items that follow one another directly in a fuzzy section - characters of
+    /// one string, and one-character items chained by <c>next_1</c> - a run
+    /// (<see cref="Node.FuzzyRunLength"/>). Take a match that deletes an item X which matched
+    /// exactly at position p. If some later item of the run, W, is the first after X to use the
+    /// character at p (matching it, substituting it, or inserting it just before W), then letting
+    /// X match p and deleting W instead is also a match, with no more errors of any kind and the
+    /// same span and groups, since no group boundary lies inside a run. That match follows X's
+    /// exact match, so the search has already tried it and it failed: a contradiction. So the
+    /// choice can hold a match only if the budget can delete X AND everything after it in its run,
+    /// and the first node that reads text after the run can read the character at p.
+    /// </para>
+    /// <para>
+    /// Where the argument does not hold the choice is always kept
+    /// (<see cref="PatternObject.NarrowExactDeletions"/>), as it is for the items a run does not
+    /// model: group references, and full-case-folded strings, where one subject character can
+    /// answer for two pattern characters. The budget asked is the current section's and the whole
+    /// match's, not an enclosing section's, which can only keep a choice that could have gone.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="remaining">How many items from this one to the end of its own node.</param>
+    /// <param name="next">The node after this item's own node.</param>
+    /// <returns>
+    /// <see langword="false"/> when a deletion does not fit the budget, or the choice certainly
+    /// holds no new match.
+    /// </returns>
+    private static bool ExactDeletionMayMatch(MatchState state, int remaining, Node? next)
+    {
+        // This runs for every exact fuzzy item, so the budget is worked out once, as a count.
+        long room = DeletionRoom(state);
+        if (room < 1 || !state.Pattern.NarrowExactDeletions)
+        {
+            return room >= 1;
+        }
+
+        long count = remaining;
+        Node? exit;
+        if (next is { FuzzyRunLength: > 0 })
+        {
+            count += next.FuzzyRunLength;
+            exit = next.FuzzyRunExit;
+        }
+        else
+        {
+            exit = PatternObject.SkipTextlessNodes(next);
+        }
+
+        return count <= room && ExitCanRead(state, exit);
+    }
+
+    /// <summary>
+    /// Whether the node a match reaches after a fuzzy run could read the character at
+    /// <c>state.TextPos</c>, which is where it would stand once an item and the rest of its run
+    /// were deleted.
+    /// </summary>
+    /// <remarks>
+    /// In a match <see cref="ExactDeletionMayMatch"/> cannot rule out, nothing in the run uses that
+    /// character, and a trailing insertion at the section's end that used it could be exchanged
+    /// the same way, so the first node after the run does. When that node is an exact
+    /// one-character item that does not match the character, there is no such match.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="exit">The node after the run, or <see langword="null"/>.</param>
+    /// <returns><see langword="false"/> only when it certainly cannot.</returns>
+    private static bool ExitCanRead(MatchState state, Node? exit) =>
+        exit is null
+        || (exit.Status & NodeStatus.Fuzzy) != 0
+        || !IsOneCharacterTest(exit.Op)
+        || MatchOne(state, exit, state.TextPos) != MatchStatus.Failure;
+
+    /// <summary>
+    /// How many more deletions fit the current section's budget and the whole match's:
+    /// <see cref="ThisErrorPermitted"/> for <see cref="FuzzyValue.Del"/> is this being at least 1.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <returns>The count, which may be negative.</returns>
+    private static long DeletionRoom(MatchState state)
+    {
+        long[] fuzzyCounts = state.FuzzyCounts;
+        Node fuzzyNode = state.FuzzyNode!;
+        List<uint> values = fuzzyNode.Values;
+        long errorCount = TotalErrors(fuzzyCounts);
+        long room = Math.Min(
+            values[FuzzyValue.MaxBase + FuzzyValue.Del] - fuzzyCounts[FuzzyValue.Del],
+            Math.Min(values[FuzzyValue.MaxErr], state.MaxErrors) - errorCount
+        );
+
+        long unitCost = values[FuzzyValue.CostBase + FuzzyValue.Del];
+        if (unitCost > 0)
+        {
+            long costRoom = Math.Min(values[FuzzyValue.MaxCost], state.MaxCost) - TotalCost(fuzzyCounts, fuzzyNode);
+            room = Math.Min(room, costRoom < 0 ? -1 : costRoom / unitCost);
+        }
+
+        return room;
+    }
+
+    /// <summary>
+    /// A one-character fuzzy item matched exactly at <c>state.TextPos</c>: pushes the choice of
+    /// deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item.</param>
+    /// <param name="step">The item's character step, which the retry needs.</param>
+    private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
+    {
+        if (!ExactDeletionMayMatch(state, 1, node.Next1.Node))
+        {
+            return;
+        }
+
+        /* bstack: node step text_pos fuzzy_type op, the frame fuzzy_match_item pushes */
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A character of a fuzzy string or group reference matched exactly at <c>state.TextPos</c>:
+    /// pushes the choice of deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string or group reference.</param>
+    /// <param name="stringPos">How far into the item the comparison had got.</param>
+    /// <param name="step">Which way the item travels, <c>1</c> or <c>-1</c>.</param>
+    private static void PushExactStringDeletion(MatchState state, Node node, int stringPos, sbyte step)
+    {
+        // A group reference's 'stringPos' is a subject position, and how much of the group is left
+        // is not modelled, so it keeps every choice that fits the budget.
+        bool mayMatch;
+        if (node.Op is Opcode.RefGroup or Opcode.RefGroupIgn or Opcode.RefGroupRev or Opcode.RefGroupIgnRev)
+        {
+            mayMatch = ThisErrorPermitted(state, FuzzyValue.Del);
+        }
+        else
+        {
+            int remaining = step > 0 ? node.Values.Count - stringPos : stringPos;
+            mayMatch = ExactDeletionMayMatch(state, remaining, node.Next1.Node);
+        }
+
+        if (!mayMatch)
+        {
+            return;
+        }
+
+        /* bstack: node step string_pos text_pos fuzzy_type op, the frame fuzzy_match_string pushes */
+
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A character of a full-case-folded fuzzy string matched exactly: pushes the choice of deleting
+    /// it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The string.</param>
+    /// <param name="stringPos">How far into the string the comparison had got.</param>
+    /// <param name="foldedPos">How far into the subject character's folding.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the string travels.</param>
+    /// <param name="foldChangesStart">The change count when the string began.</param>
+    private static void PushExactStringFldDeletion(
+        MatchState state,
+        Node node,
+        int stringPos,
+        int foldedPos,
+        int foldedLen,
+        sbyte step,
+        int foldChangesStart
+    )
+    {
+        if (!ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            return;
+        }
+
+        /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type op */
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(stringPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
+    /// <summary>
+    /// A folding character of a full-case-folded fuzzy group reference matched exactly: pushes the
+    /// choice of deleting it instead, if a deletion fits the budget.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The group reference.</param>
+    /// <param name="foldedPos">How far into the subject character's folding.</param>
+    /// <param name="foldedLen">The length of that folding.</param>
+    /// <param name="groupPos">The position in the group's text.</param>
+    /// <param name="gfoldedPos">How far into the group character's folding.</param>
+    /// <param name="gfoldedLen">The length of that folding.</param>
+    /// <param name="step">Which way the reference travels.</param>
+    /// <param name="foldChangesStart">The change count when the reference began.</param>
+    private static void PushExactGroupFldDeletion(
+        MatchState state,
+        Node node,
+        int foldedPos,
+        int foldedLen,
+        int groupPos,
+        int gfoldedPos,
+        int gfoldedLen,
+        sbyte step,
+        int foldChangesStart
+    )
+    {
+        if (!ThisErrorPermitted(state, FuzzyValue.Del))
+        {
+            return;
+        }
+
+        /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len
+         * text_pos fuzzy_type op
+         */
+
+        state.Bstack.PushSize(foldChangesStart);
+        state.Bstack.PushNode(node);
+        state.Bstack.PushInt8(step);
+        state.Bstack.PushSize(gfoldedPos);
+        state.Bstack.PushSize(gfoldedLen);
+        state.Bstack.PushSize(groupPos);
+        state.Bstack.PushSize(foldedPos);
+        state.Bstack.PushSize(foldedLen);
+        state.Bstack.PushSize(state.TextPos);
+        state.Bstack.PushUInt8(_exactFuzzyType);
+        state.Bstack.PushUInt8((byte)node.Op);
+    }
+
     /// <summary>Upstream <c>fuzzy_match_item</c> (line 10185): a first try at fuzzing one item.</summary>
     /// <param name="state">The match state.</param>
     /// <param name="search">Whether this is a search rather than an anchored match.</param>
@@ -4390,8 +4663,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: node step text_pos fuzzy_type */
 
         if (
@@ -4407,8 +4678,18 @@ internal static class Matcher
         state.TextPos = (int)poppedTextPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.NewNode = currNode;
+
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         // Upstream's 'data.step = step', where 'step' is what fuzzy_match_item PUSHED - so a
         // zero-width item retries with a step of 0 here where its first attempt carried 1 or -1.
@@ -4418,8 +4699,8 @@ internal static class Matcher
 
         /* bstack: - */
 
-        // Upstream guards this with 'if (data.fuzzy_type >= 0)' on an RE_UINT8, which is always true.
-        --fuzzyCounts[data.FuzzyType];
+        // Upstream guards the decrement above with 'if (data.fuzzy_type >= 0)' on an RE_UINT8, which
+        // is always true.
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
@@ -4664,8 +4945,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: node step string_pos text_pos fuzzy_type */
 
         if (
@@ -4683,12 +4962,20 @@ internal static class Matcher
         stringPos = (int)poppedStringPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.Step = step;
         data.NewStringPos = stringPos;
         data.StringPosIsText = stringPosIsText;
 
-        --fuzzyCounts[data.FuzzyType];
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         // Permit insertion except initially when searching (it's better just to start searching one
         // character later).
@@ -5048,8 +5335,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: fold_changes_start node step string_pos folded_pos folded_len text_pos fuzzy_type */
 
         if (
@@ -5073,7 +5358,6 @@ internal static class Matcher
         int currFoldedPos = (int)poppedFoldedPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewStringPos = stringPos;
@@ -5081,7 +5365,16 @@ internal static class Matcher
         data.ValuesRanOut = step > 0 ? stringPos >= newNode!.Values.Count : stringPos <= 0;
         data.FoldChangesStart = foldChangesStart;
 
-        --fuzzyCounts[data.FuzzyType];
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         data.PermitInsertion = PermitInsertionInFold(state, in data, search, state.TextPos == state.SearchAnchor);
 
@@ -5440,8 +5733,6 @@ internal static class Matcher
     {
         long[] fuzzyCounts = state.FuzzyCounts;
 
-        state.UnrecordFuzzy();
-
         /* bstack: fold_changes_start node step gfolded_pos gfolded_len group_pos folded_pos folded_len text_pos
          * fuzzy_type
          */
@@ -5471,7 +5762,6 @@ internal static class Matcher
         int newGfoldedPos = (int)poppedGfoldedPos;
 
         FuzzyData data = default;
-        data.FuzzyType = poppedType;
         data.FoldedLen = (int)poppedFoldedLen;
         data.Step = step;
         data.NewFoldedPos = newFoldedPos;
@@ -5480,7 +5770,16 @@ internal static class Matcher
         data.FoldChangesStart = foldChangesStart;
         data.FoldEncoding = newNode?.Encoding ?? state.Encoding;
 
-        --fuzzyCounts[data.FuzzyType];
+        if (poppedType == _exactFuzzyType)
+        {
+            data.FuzzyType = FuzzyValue.Del - 1;
+        }
+        else
+        {
+            state.UnrecordFuzzy();
+            data.FuzzyType = poppedType;
+            --fuzzyCounts[data.FuzzyType];
+        }
 
         // Permit insertion except initially when searching. Upstream spells the folding half of the
         // rule differently here from the three places PermitInsertionInFold covers (:11019): one
@@ -6765,6 +7064,11 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6797,6 +7101,11 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6829,6 +7138,11 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = state.NextPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -6873,6 +7187,11 @@ internal static class Matcher
 
                     if (status == MatchStatus.Success)
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, -1);
+                        }
+
                         state.TextPos = state.PrevPos(state.TextPos);
                         node = node.Next1.Node!;
                     }
@@ -7792,6 +8111,11 @@ internal static class Matcher
                         && MatchesOne(node.Encoding, node, state.CharAt(state.TextPos)) == node.Match
                     )
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, 1);
+                        }
+
                         state.TextPos = Step(state, state.TextPos, node.Step);
                         node = node.Next1.Node!;
                     }
@@ -7843,6 +8167,11 @@ internal static class Matcher
                         && MatchesOne(node.Encoding, node, state.CharBefore(state.TextPos)) == node.Match
                     )
                     {
+                        if ((node.Status & NodeStatus.Fuzzy) != 0)
+                        {
+                            PushExactItemDeletion(state, node, -1);
+                        }
+
                         state.TextPos = Step(state, state.TextPos, node.Step);
                         node = node.Next1.Node!;
                     }
@@ -8639,6 +8968,11 @@ internal static class Matcher
                             && SameChar(state.CharAt(state.TextPos), state.CharAt(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, 1);
+                            }
+
                             stringPos = state.NextPos(stringPos);
                             state.TextPos = state.NextPos(state.TextPos);
                         }
@@ -8703,6 +9037,11 @@ internal static class Matcher
                             && SameChar(state.CharBefore(state.TextPos), state.CharBefore(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, -1);
+                            }
+
                             stringPos = state.PrevPos(stringPos);
                             state.TextPos = state.PrevPos(state.TextPos);
                         }
@@ -8764,6 +9103,11 @@ internal static class Matcher
                             && SameCharIgn(node.Encoding, state.CharBefore(state.TextPos), state.CharBefore(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, -1);
+                            }
+
                             stringPos = state.PrevPos(stringPos);
                             state.TextPos = state.PrevPos(state.TextPos);
                         }
@@ -8882,6 +9226,21 @@ internal static class Matcher
 
                         if (foldedPos > 0 && SameCharIgn(node.Encoding, gfolded[gfoldedPos - 1], folded[foldedPos - 1]))
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    -1,
+                                    foldChangesStart
+                                );
+                            }
+
                             --foldedPos;
                             --gfoldedPos;
                         }
@@ -9066,6 +9425,21 @@ internal static class Matcher
 
                         if (foldedPos < foldedLen && SameCharIgn(node.Encoding, gfolded[gfoldedPos], folded[foldedPos]))
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactGroupFldDeletion(
+                                    state,
+                                    node,
+                                    foldedPos,
+                                    foldedLen,
+                                    stringPos,
+                                    gfoldedPos,
+                                    gfoldedLen,
+                                    1,
+                                    foldChangesStart
+                                );
+                            }
+
                             ++foldedPos;
                             ++gfoldedPos;
                         }
@@ -9198,6 +9572,11 @@ internal static class Matcher
                             && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), state.CharAt(stringPos))
                         )
                         {
+                            if ((node.Status & NodeStatus.Fuzzy) != 0)
+                            {
+                                PushExactStringDeletion(state, node, stringPos, 1);
+                            }
+
                             stringPos = state.NextPos(stringPos);
                             state.TextPos = state.NextPos(state.TextPos);
                         }
@@ -9287,6 +9666,11 @@ internal static class Matcher
                                 && SameChar(state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, 1);
+                                }
+
                                 ++stringPos;
                                 state.TextPos = state.NextPos(state.TextPos);
                             }
@@ -9391,6 +9775,19 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos], folded[foldedPos])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringFldDeletion(
+                                        state,
+                                        node,
+                                        stringPos,
+                                        foldedPos,
+                                        foldedLen,
+                                        1,
+                                        foldChangesStart
+                                    );
+                                }
+
                                 ++stringPos;
                                 ++foldedPos;
 
@@ -9518,6 +9915,11 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, state.CharAt(state.TextPos), node.Values[stringPos])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, 1);
+                                }
+
                                 ++stringPos;
                                 state.TextPos = state.NextPos(state.TextPos);
                             }
@@ -9585,6 +9987,11 @@ internal static class Matcher
                                 && SameChar(state.CharBefore(state.TextPos), node.Values[stringPos - 1])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, -1);
+                                }
+
                                 --stringPos;
                                 state.TextPos = state.PrevPos(state.TextPos);
                             }
@@ -9655,6 +10062,11 @@ internal static class Matcher
                                 )
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringDeletion(state, node, stringPos, -1);
+                                }
+
                                 --stringPos;
                                 state.TextPos = state.PrevPos(state.TextPos);
                             }
@@ -9759,6 +10171,19 @@ internal static class Matcher
                                 && SameCharIgn(node.Encoding, node.Values[stringPos - 1], folded[foldedPos - 1])
                             )
                             {
+                                if ((node.Status & NodeStatus.Fuzzy) != 0)
+                                {
+                                    PushExactStringFldDeletion(
+                                        state,
+                                        node,
+                                        stringPos,
+                                        foldedPos,
+                                        foldedLen,
+                                        -1,
+                                        foldChangesStart
+                                    );
+                                }
+
                                 --stringPos;
                                 --foldedPos;
 

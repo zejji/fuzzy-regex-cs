@@ -55,8 +55,12 @@ public sealed class ComparisonSamples
         Match fuzzy = FuzzyRegex.MatchAtStart("servic detection", "(?:service detection){0<e<5}");
         (fuzzy.Index, fuzzy.Length).Should().Be((0, 16));
 
+        // Not an exact match: the one error can be the last letter left out, so an exact
+        // occurrence answers (0, 16) with one deletion. Upstream answers None here, which is
+        // finding F-A (docs/DIVERGENCES.md); it finds the same match over 'service detectio'.
         Match exact = FuzzyRegex.MatchAtStart("service detection", "(?:service detection){0<e<5}");
-        exact.Success.Should().BeFalse();
+        (exact.Index, exact.Length).Should().Be((0, 16));
+        exact.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
     }
 
     /// <summary>"`{e&lt;=n:[set]}`: constrain which characters an edit may touch".</summary>

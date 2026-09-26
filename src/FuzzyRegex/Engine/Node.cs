@@ -110,6 +110,25 @@ internal sealed class Node
     /// </summary>
     internal bool Match;
 
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): how many items the fuzzy run starting at this node has, or 0 if
+    /// this node does not start one. Set by <c>PatternObject.SetFuzzyRunLengths</c> when the
+    /// pattern is compiled; read by <c>Matcher.ExactDeletionMayMatch</c>.
+    /// </summary>
+    /// <remarks>
+    /// A run is a chain, by <see cref="Next1"/>, of fuzzy one-character items and fuzzy
+    /// <c>STRING</c> and <c>STRING_IGN</c> nodes, either way round: items that each consume exactly
+    /// one subject character per pattern character when they match. Anything else ends the run.
+    /// </remarks>
+    internal int FuzzyRunLength;
+
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): the first node after the fuzzy run through this node that is not
+    /// an <c>END_FUZZY</c>, <c>START_GROUP</c> or <c>END_GROUP</c>, which read no text; null if this
+    /// node is in no run or the chain ends. Read by <c>Matcher.ExactDeletionMayMatch</c>.
+    /// </summary>
+    internal Node? FuzzyRunExit;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

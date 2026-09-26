@@ -256,6 +256,21 @@ internal sealed class PatternObject
     internal bool HasSkipVerb;
 
     /// <summary>
+    /// NOT UPSTREAM (finding F-A): whether <c>Matcher.ExactDeletionMayMatch</c> may leave out the
+    /// "delete it instead" choice of an item that matched exactly when that choice cannot lead to a
+    /// match the search has not already ruled out. Set when the pattern is compiled.
+    /// </summary>
+    /// <remarks>
+    /// The argument behind it (see <c>Matcher.ExactDeletionMayMatch</c>) exchanges one deletion for
+    /// another and can remove an error, so it does not hold where a section demands a minimum
+    /// number of errors, or restricts which characters an error may touch (a <c>FUZZY</c> node with a
+    /// test, which is asked at the deletion's position). And it shows only that the left-out choice holds
+    /// no match, where a <c>(*SKIP)</c> or <c>(*PRUNE)</c> reached inside it would still change
+    /// what the search does next. Any of those turns it off.
+    /// </remarks>
+    internal bool NarrowExactDeletions;
+
+    /// <summary>
     /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or
     /// <see langword="null"/>. <b>This port's own field</b> (S60b item 10); see
     /// <see cref="Engine.FuzzyLiteralFilter"/>.
@@ -517,6 +532,7 @@ internal sealed class PatternObject
         // Number the nodes, so the matcher can put a node reference on a byte stack where upstream
         // puts a pointer (Node.Index). Last, because the optimiser has by now removed the
         // unreachable nodes from the list and the required-string node has been added to it.
+        bool noNarrowing = false;
         for (int i = 0; i < self.NodeList.Count; i++)
         {
             self.NodeList[i].Index = i;
@@ -527,12 +543,125 @@ internal sealed class PatternObject
             {
                 self.HasSkipVerb = true;
             }
+
+            // NOT UPSTREAM (finding F-A): see NarrowExactDeletions.
+            Node node = self.NodeList[i];
+            if (
+                node.Op == Opcode.Prune
+                || (
+                    node.Op == Opcode.Fuzzy
+                    && (
+                        node.Next2.Node is not null
+                        || node.Values[FuzzyValue.MinSub] > 0
+                        || node.Values[FuzzyValue.MinIns] > 0
+                        || node.Values[FuzzyValue.MinDel] > 0
+                        || node.Values[FuzzyValue.MinErr] > 0
+                    )
+                )
+            )
+            {
+                noNarrowing = true;
+            }
         }
+
+        self.NarrowExactDeletions = !noNarrowing && !self.HasSkipVerb;
+
+        // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
+        // nodes are numbered, since the walk marks nodes by Node.Index.
+        SetFuzzyRunLengths(self);
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
 
         return self;
+    }
+
+    /// <summary>
+    /// Sets <see cref="Node.FuzzyRunLength"/> and <see cref="Node.FuzzyRunExit"/> on every node of
+    /// a compiled pattern.
+    /// </summary>
+    /// <remarks>
+    /// Each node is visited once: a run is a chain by <c>next_1</c>, so the length at a node is its
+    /// own width plus the length at the node after it, which is set first. A run cannot loop back
+    /// on itself, because a repeat's body reaches its repeat's end node, which ends the run; the
+    /// visited marks stop the walk even if it did.
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern, with its nodes numbered.</param>
+    private static void SetFuzzyRunLengths(PatternObject pattern)
+    {
+        var visited = new bool[pattern.NodeList.Count];
+        var chain = new List<Node>();
+
+        foreach (Node start in pattern.NodeList)
+        {
+            // Walk forward to the end of the run, then set the lengths on the way back.
+            chain.Clear();
+            Node? node = start;
+            while (
+                node is not null
+                && node.Index < visited.Length
+                && ReferenceEquals(pattern.NodeList[node.Index], node)
+                && !visited[node.Index]
+                && IsFuzzyRunItem(node)
+            )
+            {
+                visited[node.Index] = true;
+                chain.Add(node);
+                node = node.Next1.Node;
+            }
+
+            int length = 0;
+            Node? exit = SkipTextlessNodes(node);
+            if (node is not null && IsFuzzyRunItem(node))
+            {
+                length = node.FuzzyRunLength;
+                exit = node.FuzzyRunExit;
+            }
+
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                length += RunItemWidth(chain[i]);
+                chain[i].FuzzyRunLength = length;
+                chain[i].FuzzyRunExit = exit;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a node is a fuzzy item that consumes exactly one subject character per pattern
+    /// character when it matches: a one-character item, or a case-sensitive or simply case-folded
+    /// string, either way round.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> if the node can be part of a fuzzy run.</returns>
+    private static bool IsFuzzyRunItem(Node node) =>
+        (node.Status & NodeStatus.Fuzzy) != 0
+        && (
+            node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev
+            || NodeQueries.MatchesOneCharacter(node)
+        );
+
+    /// <summary>How many characters a fuzzy run item consumes when it matches exactly.</summary>
+    /// <param name="node">A node <see cref="IsFuzzyRunItem"/> accepts.</param>
+    /// <returns>The string's length, or 1.</returns>
+    private static int RunItemWidth(Node node) =>
+        node.Op is Opcode.String or Opcode.StringIgn or Opcode.StringRev or Opcode.StringIgnRev ? node.Values.Count : 1;
+
+    /// <summary>
+    /// The first node from <paramref name="node"/> on that is not an <c>END_FUZZY</c>,
+    /// <c>START_GROUP</c> or <c>END_GROUP</c>: nodes that always succeed and read no text.
+    /// </summary>
+    /// <param name="node">The node, or <see langword="null"/>.</param>
+    /// <returns>The node, or <see langword="null"/>.</returns>
+    internal static Node? SkipTextlessNodes(Node? node)
+    {
+        // A bound only against a malformed cycle; a real chain of these is short.
+        for (int i = 0; i < 64 && node is { Op: Opcode.EndFuzzy or Opcode.StartGroup or Opcode.EndGroup }; i++)
+        {
+            node = node.Next1.Node;
+        }
+
+        return node;
     }
 
     /// <summary>

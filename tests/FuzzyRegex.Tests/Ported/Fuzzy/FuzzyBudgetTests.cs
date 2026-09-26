@@ -95,8 +95,37 @@ public sealed class FuzzyBudgetTests
         (m.Index, m.Index + m.Length).Should().Be((0, end));
     }
 
+    /// <summary>
+    /// An exact occurrence under the two-sided form still has a match that makes one error: it can
+    /// leave out the last letter.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>DIVERGES FROM UPSTREAM, deliberately (ledger entry 42, finding F-A, 2026-09-26).</b> Upstream asserts None
+    /// here, because it tries an error on an item only when the item fails to match, so over an
+    /// exact occurrence it never deletes anything. Its own answers disagree with that None, measured
+    /// 2026-09-26 on regex 2026.9.10:
+    /// </para>
+    /// <code>
+    /// match('(?:service detection){0&lt;e&lt;5}', 'service detectio')   (0, 16) (0, 0, 1)
+    /// search('(?:service detection){0&lt;e&lt;5}', 'service detection') (1, 17) (3, 0, 1)
+    /// match('(?:service detection){0&lt;e&lt;5}', 'in service detection') (0, 20) (0, 3, 0)
+    /// </code>
+    /// <para>
+    /// So upstream finds this same one-deletion match over the shorter subject, and over this very
+    /// subject its search settles for a later start with four errors. This port answers
+    /// (0, 16) with one deletion, the first match that meets the constraint. The row is KEPT, now
+    /// asserting this port's answer: it is what upstream's <c>test_fuzzy</c> checks, and a row that
+    /// records the divergence is worth more than one that hides it. See <c>docs/DIVERGENCES.md</c>.
+    /// </para>
+    /// </remarks>
     [Test]
     [Property("Upstream", "RegexTests.test_fuzzy#71")]
-    public void A_two_sided_constraint_rejects_an_exact_match() =>
-        Upstream.MatchAtStart("service detection", "(?:service detection){0<e<5}").Success.Should().BeFalse();
+    public void A_two_sided_constraint_finds_one_error_in_an_exact_occurrence()
+    {
+        Match m = Upstream.MatchAtStart("service detection", "(?:service detection){0<e<5}");
+
+        (m.Index, m.Length).Should().Be((0, 16));
+        m.FuzzyCounts.Should().Be(new FuzzyCounts(0, 0, 1));
+    }
 }

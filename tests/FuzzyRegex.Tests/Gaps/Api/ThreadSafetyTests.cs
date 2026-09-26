@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names forty-nine, and under the JIT this set is exactly those forty-nine. A floor of
+        // The allowlist names fifty-six, and under the JIT this set is exactly those fifty-six. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names forty-nine writable fields, so a near-empty answer means the "
+                "the allowlist names fifty-six writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -675,7 +675,7 @@ public sealed class ThreadSafetyTests
     private static HashSet<string> BuildPatternGraphAllowlist() =>
         new(StringComparer.Ordinal)
         {
-            // ONE writer for all forty-six, and it is the reason they are not readonly: the engine's
+            // ONE writer for all fifty-six, and it is the reason they are not readonly: the engine's
             // graph is built by mutation, exactly as upstream's C builds RE_PatternObject and
             // RE_Node in place. Every write happens inside Engine.PatternObject.Compile
             // (src/FuzzyRegex/Engine/PatternObject.cs:217) and the NodeCompiler.CompileToNodes and
@@ -686,7 +686,7 @@ public sealed class ThreadSafetyTests
             // future sync than it buys.
             //
             // That "and by nothing afterwards" half is measured, not asserted: see
-            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all forty-six
+            // Matching_writes_nothing_reachable_from_a_compiled_pattern, which snapshots all fifty-six
             // (and everything they point at) and runs the whole workload between two readings.
 
             // PatternObject: the compiled pattern itself. Object-initialiser and Compile's later
@@ -723,6 +723,8 @@ public sealed class ThreadSafetyTests
             "PatternObject.GroupIndex",
             "PatternObject.HasSkipVerb",
             "PatternObject.HasWeightedFuzzyCosts",
+            // Finding F-A added NarrowExactDeletions, written by Compile in the node-numbering loop.
+            "PatternObject.NarrowExactDeletions",
             "PatternObject.IsFuzzy",
             "PatternObject.MaxNodes",
             "PatternObject.MinWidth",
@@ -746,6 +748,10 @@ public sealed class ThreadSafetyTests
             // Node and NextNode: the opcode graph. Nodes are emitted before their successors exist,
             // so the links are patched up afterwards - upstream's own two-pass shape.
             "Node.Index",
+            // Finding F-A: both written by PatternObject.SetFuzzyRunLengths, which Compile calls
+            // once the nodes are numbered.
+            "Node.FuzzyRunExit",
+            "Node.FuzzyRunLength",
             "Node.Match",
             "Node.Op",
             "Node.Status",
