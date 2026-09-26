@@ -1403,6 +1403,30 @@ Console.WriteLine(new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index);       
 A `(*SKIP)` that backtracking does reach behaves as before: `aa(*SKIP)x|a` over 'aab' finds
 nothing in either library, because the attempt after the one at 0 starts at 2.
 
+### A verb, branch, group call or fuzzy section that starts every alternative stays in each one
+
+When every alternative of a branch starts with the same item, the compiler may move that item out
+in front: `xab|xac` becomes `x(?:ab|ac)`, and `x` is tested once. That is safe for `x`, which
+matches in one way or not at all. It is not safe for an item that can match in more than one way,
+or that does something when the match backtracks through it. `(*SKIP)` and `(*PRUNE)` end the whole
+attempt at this start position when backtracked into, so inside the first alternative they stop the
+second from being tried; moved in front of the branch they are reached only after both alternatives
+have failed. A nested branch, a group call such as `(?1)`, and a fuzzy section can each match more
+than one way, and moving one out changes which way is tried first. Here those four kinds stay where
+the pattern put them, and the answers agree with PCRE2 and Perl. Upstream moves them, so its answer
+depends on whether two alternatives happen to start with the same verb.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// Backtracking into (*SKIP) ends the attempt, so the \b alternative is never tried at 0 or 1.
+var m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+Console.WriteLine($"({m.Index}, {m.Index + m.Length})");  // (2, 3) - upstream: (0, 0)
+```
+
+Reversed, `(?r)`, the same holds for an item that ends every alternative. Items that match in one
+way, such as literals, sets, anchors, `\K`, lookarounds and atomic groups, are still moved out.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,

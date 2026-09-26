@@ -4505,3 +4505,59 @@ atomic group or a lookaround, it won't affect the enclosing pattern", `upstream/
 `:209`); and two alternatives that begin with the same verb are
 compiled as one verb in front of the branch (`(*SKIP)[ab]+|(*SKIP)\b` over 'ccb' is (0, 0) here,
 (2, 3) in PCRE2 and Perl). Neither is fixed by this entry.
+
+## 46. A verb, branch, group call or fuzzy section is moved out of the alternatives it starts, which changes the answer - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-46-alternation-affix.md`, for the
+owner to approve. Found 2026-09-26 by a random differential over backtracking verbs against PCRE2:
+11 of 10,000 rows disagreed, and every one had two alternatives starting with the same verb.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26 (PCRE2 10.47 and Perl 5.42.3 give the
+expected answer on every row below that is neither reversed nor fuzzy):
+
+```
+search(r'(*SKIP)[ab]+|(*SKIP)\b', 'ccb')      -> span=(0, 0)   expected (2, 3)
+search(r'(*SKIP)[ab]+|(*PRUNE)\b', 'ccb')     -> span=(2, 3)   (control: the verbs differ)
+search(r'(*PRUNE)[ab]+|(*PRUNE)\b', 'ccb')    -> span=(0, 0)   expected (2, 3)
+search(r'a(*SKIP)[ab]+|a(*SKIP)\b', 'ba')     -> span=(1, 2)   expected None
+search(r'(?r)[ab]+(*SKIP)|\b(*SKIP)', 'bcc')  -> span=(3, 3)   expected (0, 1)
+search(r'(?:a\K|ab)c|(?:a\K|ab)', 'abc')      -> span=(1, 1)   expected (0, 3)
+search(r'(?:(?1)c|(?1))|(a|ab)', 'abc')       -> span=(0, 1)   expected (0, 3)
+search(r'(?:a){e<=1}c|(?:a){e<=1}', 'abc')    -> span=(0, 1), fuzzy_counts (0, 0, 0)
+                                                 expected (0, 3), (0, 1, 0), as with {e<=2} second
+```
+
+**Why upstream is wrong.** `Branch.optimise` moves the items every alternative starts with out in
+front of the branch (`Branch._split_common_prefix`, `upstream/regex/_regex_core.py:2250-2290`), or
+under REVERSE the items every alternative ends with (`_split_common_suffix`, `:2292-2331`), so
+`XA|XB` compiles as `X(?:A|B)`. That is the same pattern only when `X` matches in one way and
+backtracking through it does nothing. The guard is `can_be_affix` (`:1980`), which refuses repeats,
+groups and sequences but answers `True` for `Prune`, `Skip`, `CallGroup` and `Fuzzy`, and for a
+`Branch` whose alternatives are single items (`:2204-2205`). For those the rewrite changes the
+answer in one of two ways:
+
+- **A verb reached at a different time.** Backtracking into `(*SKIP)` or `(*PRUNE)` ends the attempt
+  at this start position. Inside the first alternative that happens before the second is tried;
+  in front of the branch it happens only after both have failed, so `\b` gets its turn and matches
+  at 0. Upstream itself gives `(2, 3)` when the two verbs differ, so nothing is factored.
+- **Paths tried in a different order.** A nested branch, a group call and a fuzzy section can each
+  match in more than one way. `XA|XB` tries every way of matching `X` with `A` before any with `B`;
+  `X(?:A|B)` tries `A` then `B` after the first way of matching `X`. So `(?:a\K|ab)c|(?:a\K|ab)`
+  takes `a\K` with the empty second alternative before `ab` with `c`.
+
+With both functions replaced by ones that factor nothing, upstream agrees with PCRE2 on 4,312 of
+4,312 forward rows over 28 node kinds (literals, sets, anchors, `\K`, `\G`, `(*FAIL)`, lookarounds
+with and without verbs inside, atomic groups, backreferences, conditionals, properties); with them it
+disagrees on 415, all of them one of the four kinds above. Inside a fuzzy section nothing is
+factored at all, because `Fuzzy` has no `optimise` of its own.
+
+**Proposed fix upstream:** `can_be_affix` returns `False` for `Prune`, `Skip`, `Branch`,
+`CallGroup` and `Fuzzy`. `StringSet` inherits `Branch`'s and loses nothing: its alternatives are
+sequences, which were never affixes.
+
+**This port.** `CanBeAffix` in `src/FuzzyRegex/Parsing/Nodes.cs` does exactly that. Pinned by
+`Gaps/Parsing/AlternationAffixTests`. A differential over 12,000 rows (half with none of the four
+kinds, half built from them) against upstream with the same five `can_be_affix` overrides agrees on
+every row, and the port before the fix agrees with unmodified upstream on every row; the two builds
+differ only on 272 rows, all in the half that uses the four kinds. `ledger-reproductions.jsonl`
+re-checks upstream's answer to the first row above.

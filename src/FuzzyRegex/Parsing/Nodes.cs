@@ -167,6 +167,13 @@ internal abstract class RegexBase
 
     /// <summary>Whether the node may be hoisted out of a branch. Upstream <c>can_be_affix</c>.</summary>
     /// <returns><see langword="true"/> if it may.</returns>
+    /// <remarks>
+    /// Moving <c>X</c> out of <c>XA|XB</c> to make <c>X(?:A|B)</c> keeps the answer only when
+    /// <c>X</c> matches in one way and backtracking through it does nothing: otherwise the two forms
+    /// try their paths in a different order, or reach a verb at a different time. Ledger entry 46
+    /// refuses the nodes upstream lets through that fail this: the verbs, nested branches, group
+    /// calls and fuzzy sections.
+    /// </remarks>
     internal virtual bool CanBeAffix() => true;
 
     /// <summary>Whether the node contains a capture group. Upstream <c>contains_group</c>.</summary>
@@ -485,6 +492,15 @@ internal sealed class Prune : ZeroWidthBase
         throw new NotSupportedException($"{nameof(Prune)} has no _opcode; upstream would raise AttributeError");
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>. Backtracking into the verb ends the attempt at this
+    /// start position, so inside the first alternative it stops the others being tried, and in
+    /// front of the branch it does not: <c>(*PRUNE)[ab]+|(*PRUNE)\b</c> over <c>'ccb'</c> is
+    /// <c>(2, 3)</c> in PCRE2 and Perl, <c>(0, 0)</c> upstream. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
+
+    /// <inheritdoc />
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy) =>
         [
             [(uint)Opcode.Prune],
@@ -507,6 +523,13 @@ internal sealed class Skip : ZeroWidthBase
 {
     /// <inheritdoc />
     protected override Opcode ZeroWidthOpcode => Opcode.Skip;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>; for why not, see <see cref="Prune.CanBeAffix"/>.
+    /// Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 }
 
 /// <summary><c>^</c> under <c>MULTILINE</c>. Upstream <c>StartOfLine</c> (lines 3991-3993).</summary>
@@ -1327,7 +1350,15 @@ internal class Branch : RegexBase
     internal override bool IsAtomic() => Branches.TrueForAll(static b => b.IsAtomic());
 
     /// <inheritdoc />
-    internal override bool CanBeAffix() => Branches.TrueForAll(static b => b.CanBeAffix());
+    /// <remarks>
+    /// Upstream answers <c>all(b.can_be_affix() for b in self.branches)</c>. A branch left after
+    /// optimising has more than one alternative, so it can match in more than one way, and moving
+    /// it out changes which way is tried first: <c>(?:a\K|ab)c|(?:a\K|ab)</c> over <c>'abc'</c> is
+    /// <c>(0, 3)</c> in PCRE2 and Perl, <c>(1, 1)</c> upstream. <see cref="StringSet"/> inherits this,
+    /// which changes nothing: its alternatives are sequences, which were never affixes. Ledger
+    /// entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Branches.Exists(static b => b.ContainsGroup());
@@ -1851,6 +1882,14 @@ internal sealed class CallGroup : RegexBase
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => obj is CallGroup other && GroupNumber == other.GroupNumber;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>, but the called group can match in more than one way:
+    /// <c>(?:(?1)c|(?1))|(a|ab)</c> over <c>'abc'</c> is <c>(0, 3)</c> in PCRE2 and Perl,
+    /// <c>(0, 1)</c> upstream. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
     /// <remarks>
@@ -4232,6 +4271,16 @@ internal sealed class Fuzzy : RegexBase
 
     /// <inheritdoc />
     internal override bool IsAtomic() => Subpattern.IsAtomic();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Upstream says <see langword="true"/>, but a fuzzy section can match in more than one way, one
+    /// per choice of errors, and moving it out changes which is tried first:
+    /// <c>(?:a){e&lt;=1}c|(?:a){e&lt;=1}</c> over <c>'abc'</c> should be <c>(0, 3)</c> with one
+    /// insertion, as it is with the second section written <c>{e&lt;=2}</c>; upstream answers
+    /// <c>(0, 1)</c> with none. Ledger entry 46.
+    /// </remarks>
+    internal override bool CanBeAffix() => false;
 
     /// <inheritdoc />
     internal override bool ContainsGroup() => Subpattern.ContainsGroup();

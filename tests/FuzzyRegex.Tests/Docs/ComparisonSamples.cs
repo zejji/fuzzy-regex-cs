@@ -499,4 +499,13 @@ public sealed class ComparisonSamples
         new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index.Should().Be(1);
         new FuzzyRegex(@"aa(*SKIP)x|a").Match("aab").Success.Should().BeFalse();
     }
+
+    /// <summary>"A verb, branch, group call or fuzzy section that starts every alternative stays in each one".</summary>
+    [Test]
+    public void A_verb_that_starts_every_alternative_stays_in_each_one()
+    {
+        Match m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 3));
+    }
 }
