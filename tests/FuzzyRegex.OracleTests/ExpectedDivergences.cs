@@ -3065,6 +3065,15 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The two rows of <c>skip-acts-when-backtracked-onto</c>, recorded 2026-09-26 from ledger entry
+    /// 45's reproduction; PCRE2 10.47 and Perl 5.42.3 give this port's answer to both.
+    /// </summary>
+    private const string _skipTimingRows = """
+        {"generator": "rows", "pattern": "aa(*SKIP)x(*PRUNE)y|a", "flags": 0, "namedLists": {}, "subject": "aaxz", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "rows", "pattern": "(?>aa(*SKIP))x", "flags": 0, "namedLists": {}, "subject": "aaax", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}, "atomicFreeOutcome": {"kind": "nomatch"}, "pruneOutcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 1, "length": 3, "captures": [[1, 3]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
     /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
     /// </summary>
@@ -3167,7 +3176,7 @@ internal static class ExpectedDivergences
                 + "deletions and over '42' none; `(?:(?:[0-9]+,){d<=3})+end` over 'end' raises "
                 + "MemoryError.\n"
                 + "THE FIX, the \"needed\" rule: such an iteration stands only if the repeat is below its "
-                + "minimum, its deletions raise an unmet d or e minimum of an open section, or it changed "
+                + "minimum, its edits raise an unmet minimum of an open section, or it changed "
                 + "a group a backreference or conditional tests; an error-free empty iteration keeps "
                 + "upstream's rule; a repeat memo drops paths that reach a state an earlier path through "
                 + "the same run of the repeat reached. Answers move to fewer errors, to an earlier start "
@@ -6841,6 +6850,32 @@ internal static class ExpectedDivergences
             Example: _reverseGraphemeRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamReverseGrapheme(row))
+        ),
+        new(
+            Id: "skip-acts-when-backtracked-onto",
+            Reason: "A (*SKIP) MOVES THE NEXT START WHEN BACKTRACKING REACHES IT HERE, AND WHEN IT RUNS "
+                + "UPSTREAM. Ledger entry 45; fixed 2026-09-26 under the owner's no-known-bugs rule and "
+                + "recorded as a deliberate divergence in `docs/DIVERGENCES.md`. pcre2pattern (\"Verbs "
+                + "that act after backtracking\", \"More than one backtracking verb\") and perlre give a "
+                + "verb its effect only when a later failure backtracks onto it, and the verb "
+                + "backtracked onto first acts; upstream's RE_OP_SKIP moves the slice as the verb runs "
+                + "(`_regex.c:14551-14555`), so a (*PRUNE) reached later cannot undo it and a (*SKIP) "
+                + "in a finished atomic group still acts, against its README's \"won't affect the "
+                + "enclosing pattern\" (`README.rst:209`).\n"
+                + "THE ROWS, measured 2026-09-26 on PCRE2 10.47 (with and without NO_START_OPTIMIZE) and "
+                + "Perl 5.42.3: aa(*SKIP)x(*PRUNE)y|a over 'aaxz' is (1, 2) in both, and "
+                + "(?>aa(*SKIP))x over 'aaax' is (1, 4) in both; upstream answers None to each.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamSkipTiming`, which sets "
+                + "`PatternObject.SkipMovesTheSliceWhenItRuns` so the verb moves the slice when it "
+                + "runs, reproduces upstream's recorded answer exactly, AND this port's live answer is "
+                + "the one being judged. A (*SKIP) row this port gets wrong for any other reason still "
+                + "diverges with upstream's timing and is reported.",
+            PinnedBy: "BacktrackingVerbTests.A_prune_reached_after_a_skip_decides_the_next_start and "
+                + "A_skip_that_backtracking_never_reaches_does_not_move_the_next_start",
+            Example: _skipTimingRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamSkipTiming(row))
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",

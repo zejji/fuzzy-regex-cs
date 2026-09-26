@@ -212,8 +212,8 @@ internal static class OracleComparer
     /// <see cref="RunWithoutTheAnchorPin"/>, <see cref="RunWithoutTheFoldFix"/>,
     /// <see cref="RunWithoutTheGroupFoldLeftovers"/>, <see cref="RunWithoutTheRetriedFoldSteps"/>,
     /// <see cref="RunWithoutTheLeftoverTakeBack"/>, <see cref="RunWithTheUpstreamDefaultBoundary"/>,
-    /// <see cref="RunWithoutTheExactDeletion"/> and <see cref="RunWithUpstreamEmptyIterations"/>
-    /// and by nothing else; the wave always passes
+    /// <see cref="RunWithoutTheExactDeletion"/>, <see cref="RunWithUpstreamEmptyIterations"/> and
+    /// <see cref="RunWithTheUpstreamSkipTiming"/> and by nothing else; the wave always passes
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
@@ -696,6 +696,31 @@ internal static class OracleComparer
             lazy: false,
             withoutTheFuzzySearchFixes: true,
             ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with upstream's <c>(*SKIP)</c> timing: the slice moves
+    /// when the verb runs, not when backtracking reaches it.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 45 moved the slice to the point where backtracking reaches the verb, as PCRE2
+    /// and Perl do, so a later <c>(*PRUNE)</c> that is backtracked onto first decides the next start
+    /// and a <c>(*SKIP)</c> in a finished atomic group does nothing. Setting
+    /// <c>PatternObject.SkipMovesTheSliceWhenItRuns</c> restores upstream's <c>RE_OP_SKIP</c>
+    /// (<c>_regex.c:14551-14555</c>). The <c>skip-acts-when-backtracked-onto</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's timing, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamSkipTiming(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            ablate: static compiled => compiled.PatternObject.SkipMovesTheSliceWhenItRuns = true
         );
     }
 

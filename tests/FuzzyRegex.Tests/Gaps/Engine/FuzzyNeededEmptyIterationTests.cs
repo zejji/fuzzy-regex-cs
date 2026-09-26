@@ -13,7 +13,7 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// with :10487), including edits since undone, and stops only at the end of the text, so how many
 /// deleting iterations a loop takes depends on what follows it, and where a section inside the body
 /// restarts its budget it loops until MemoryError. The port admits such an iteration only if the
-/// repeat is below its minimum, its deletions raise an unmet <c>d</c> or <c>e</c> minimum of an open
+/// repeat is below its minimum, its edits raise an unmet minimum of an open
 /// section, or it changed a group a backreference or conditional tests; and it drops a path whose
 /// state after an iteration an earlier path through the same run of the repeat already reached.
 /// Evidence and the four blind reviews: <c>docs/plan/2026-09-26-empty-iteration-survey.md</c>. Every
@@ -197,5 +197,50 @@ public sealed class FuzzyNeededEmptyIterationTests
             .WaitAsync(TimeSpan.FromSeconds(5))
             .ConfigureAwait(false);
         return m.Success ? m : null;
+    }
+
+    // The rule tries one more pass of a loop at the end of the text, where upstream's end-of-text
+    // stop did not, and a (*SKIP) in that pass runs. It acts only if backtracking reaches it while
+    // the attempt fails (ledger entry 45): with a (*PRUNE) after it, the (*PRUNE) is reached first
+    // and the next attempt starts one character on, so the first row matches at 2; without one, the
+    // (*SKIP) at 3 is reached and the next attempt starts at 3, so the second finds nothing. Perl
+    // 5.42.3 and PCRE2 10.47 give both answers for the same paths spelt without fuzzy matching
+    // (tools/probes/skip-then-prune-perl-pcre2.py), and so does the reference matcher. Upstream
+    // gives (2, 3) for both, the second because its end-of-text stop never runs that pass.
+    [Test]
+    public void A_skip_in_the_pass_at_the_end_of_the_text_acts_only_when_backtracking_reaches_it()
+    {
+        Match m = new FuzzyRegex("(?:(?:(*SKIP)a*(*PRUNE)){1<=s<=1,d<=2})*?b").Match("aab");
+        m.Success.Should().BeTrue();
+        (m.Index, m.Length).Should().Be((2, 1));
+
+        new FuzzyRegex("(?:(?:(*SKIP)a*){1<=s<=1,d<=2})*?b").Match("aab").Success.Should().BeFalse();
+    }
+
+    // A lookaround in the body can substitute or insert and still leave the iteration empty, so the
+    // rule asks about each kind of edit on its own. Taking the substitution for a deletion drove the
+    // deletion count below zero, below every d minimum, and admitted every further iteration until
+    // the backtracking stack reached its bound (blind review of 7277fb6, 2026-09-27). Upstream
+    // raises MemoryError on all three. The first row is main's answer; in the others the section's
+    // e minimum admits two substituting iterations, as it admits two deleting ones in
+    // (?:(?:b)*){2<=d<=2}, where main's stop answered None.
+    [Test]
+    public void An_iteration_that_substitutes_inside_a_lookaround_is_admitted_only_while_needed()
+    {
+        var watch = Stopwatch.StartNew();
+        ShouldMatch(
+            new FuzzyRegex("(?:(?=b{e<=1})*){1<=e<=2}", FuzzyRegexOptions.None, TimeSpan.FromSeconds(10)).Match("c"),
+            0,
+            0,
+            new FuzzyCounts(1, 0, 0)
+        );
+        var twoSubstitutions = new FuzzyRegex(
+            "(?:(?:(?=(?:ab){1<=e<=1}))*+){2<=e<=3}",
+            FuzzyRegexOptions.None,
+            TimeSpan.FromSeconds(10)
+        );
+        ShouldMatch(twoSubstitutions.Match("ac"), 0, 0, new FuzzyCounts(2, 0, 0));
+        ShouldMatch(twoSubstitutions.Match("bb"), 0, 0, new FuzzyCounts(2, 0, 0));
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
     }
 }

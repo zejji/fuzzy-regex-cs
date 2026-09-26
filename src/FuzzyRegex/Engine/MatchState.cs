@@ -270,7 +270,7 @@ internal sealed class MatchState : IDisposable
     /// saved stack and discards the orphan. The key would stay in the set for the rest of the
     /// attempt and refuse the next legitimate call of that group at that position - a match upstream
     /// finds, lost, and not a shape upstream blows up on. So every site that restores the saved
-    /// stack's count calls <c>Matcher.CloseCallsAbove</c>, which drops every entry whose frame that
+    /// stack's count calls <c>Matcher.CloseFramesAbove</c>, which drops every entry whose frame that
     /// restore has just discarded.
     /// </para>
     /// <para>
@@ -468,16 +468,19 @@ internal sealed class MatchState : IDisposable
     /// section now open ends, or -1 when no section entered in this attempt is open. Kept only for a
     /// pattern with a minimum error count (<c>PatternObject.HasFuzzyMinimum</c>), which is what
     /// needs to know whether an enclosing section's minimum is met
-    /// (<c>Matcher.RaisesUnmetDeletionMinimum</c>, <c>Matcher.AllMinimumsMet</c>).
+    /// (<c>Matcher.RaisesUnmetMinimum</c>, <c>Matcher.AllMinimumsMet</c>).
     /// </summary>
     /// <remarks>
     /// FUZZY pushes the enclosing section's counts and node onto <see cref="Sstack"/>, and for such
     /// a pattern this value beneath them, the frame of the section it was entered from. Each
     /// section's link therefore lives in its own frame, restored with it on every path the engine
-    /// takes: a verb that drops backtracking entries leaves the structure stack alone, and a
-    /// recursive entry into a section gets a frame of its own. The value itself is set by FUZZY,
-    /// END_FUZZY and their backtrack arms, and cleared at the start of each attempt, where upstream
-    /// leaves <see cref="FuzzyNode"/> as a verb may have left it.
+    /// takes, and a recursive entry into a section gets a frame of its own. The value itself is set
+    /// by FUZZY, END_FUZZY and their backtrack arms, and cleared at the start of each attempt, where
+    /// upstream leaves <see cref="FuzzyNode"/> as a verb may have left it. A verb that drops
+    /// backtracking entries leaves the structure stack alone, but an enclosing atomic group,
+    /// lookaround or conditional then cuts the stack back past a section whose FUZZY entry is gone,
+    /// so each such cut also steps this value out to a frame still on the stack
+    /// (<c>Matcher.CloseFramesAbove</c>).
     /// </remarks>
     internal int SectionFrame = -1;
 
@@ -1400,6 +1403,19 @@ internal sealed class MatchState : IDisposable
             loPos = guardList.GuardRange(loPos, hiPos, protect);
         }
     }
+
+    /// <summary>
+    /// Whether the body guard of repeat <paramref name="index"/> is kept as a failure memo on this
+    /// call, so the position where the body matched is not marked. <b>Not upstream</b>; see
+    /// <see cref="RepeatInfo.FailureMemo"/>.
+    /// </summary>
+    /// <remarks>
+    /// A partial match is excluded here rather than in the pattern because it is a property of the
+    /// call: a path that reaches the end of the text is neither a success nor a failure.
+    /// </remarks>
+    /// <param name="index">The repeat index.</param>
+    /// <returns><see langword="true"/> if a matched body leaves no mark.</returns>
+    internal bool KeepsFailureMemo(int index) => PartialSide == PartialNone && Pattern.RepeatInfoAt(index).FailureMemo;
 
     /// <summary>Upstream <c>is_repeat_guarded</c> (line 9559).</summary>
     /// <remarks>

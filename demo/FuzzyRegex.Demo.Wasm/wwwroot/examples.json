@@ -120,8 +120,8 @@
   {
     "key": "timeout",
     "title": "A pattern that runs out of time",
-    "note": "This pattern has to try every way of splitting 36 a's before it can answer. The engine gives up after two seconds, and the page stays responsive while it works, because the engine runs in a Web Worker.",
-    "pattern": "^(a|aa)+$",
+    "note": "This pattern has to try every way of splitting 36 a's before it can answer. The engine gives up after two seconds, and the page stays responsive while it works, because the engine runs in a Web Worker. The {1,99} is what makes it slow: written with + instead, the engine remembers where the repeat has already failed and answers at once.",
+    "pattern": "^(a|aa){1,99}$",
     "flags": "",
     "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
   },

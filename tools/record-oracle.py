@@ -6534,16 +6534,26 @@ REVERSE = 0x400
 # text - and the ambiguity has to survive compilation: `(?:ab|a)+$` and `(?:[ab]|a)+$` are both fast.
 # So is `(?i)(a|A)+$`, and so is the reversed `(?r)(a|a)+^`. This family is narrower than it looks,
 # which is why widening it means re-running the probe rather than editing the table.
+#
+# SEVEN SHAPES ARE BOUNDED, AND THAT IS THE PORT'S DOING (2026-09-26). Since the failure memo
+# (`RepeatInfo.FailureMemo`), this port fails `(a|a)+$`, `(a|a)*$`, `(?:a|aa)+$`,
+# `(?:a|aa|aaa)+$`, `((a)|(a))+$`, `(a|a)+\b\d` and `(a|a)+x` in linear time, so rows of those shapes
+# would answer here and time out upstream. Each is now written with a `{0,999}` or `{1,999}`
+# maximum instead, far above any subject the generator draws, which gives the same answers and keeps
+# the memo off (a repeat with a maximum gets none). Both halves of `timeout-row-margin` put all ten
+# still running at twenty times the budget on the day of the change. The other three keep their
+# old spelling because the memo does not reach them: a nested repeat, a repeat inside a lookahead,
+# and a pattern with a backreference.
 TIMEOUT_SHAPES = (
-    ("alt-same", r"(a|a)+$"),
-    ("alt-same-star", r"(a|a)*$"),
-    ("alt-prefix", r"(?:a|aa)+$"),
-    ("alt-prefix-3", r"(?:a|aa|aaa)+$"),
-    ("alt-groups", r"((a)|(a))+$"),
+    ("alt-same-bounded", r"(a|a){1,999}$"),
+    ("alt-same-star-bounded", r"(a|a){0,999}$"),
+    ("alt-prefix-bounded", r"(?:a|aa){1,999}$"),
+    ("alt-prefix-3-bounded", r"(?:a|aa|aaa){1,999}$"),
+    ("alt-groups-bounded", r"((a)|(a)){1,999}$"),
     ("alt-nested", r"(?:(?:a|a)+)+$"),
-    ("alt-same-word", r"(a|a)+\b\d"),
+    ("alt-same-word-bounded", r"(a|a){1,999}\b\d"),
     ("alt-same-lookahead", r"(?=(a|a)+$)a"),
-    ("alt-same-atomic-free", r"(a|a)+x"),
+    ("alt-same-atomic-free-bounded", r"(a|a){1,999}x"),
     ("alt-backref", r"(a|a)+(\1)$"),
 )
 

@@ -2379,8 +2379,9 @@ internal static class Matcher
     /// DELIBERATE DIVERGENCE, S35: upstream bounds this one with <c>slice_end</c> where every other
     /// zero-width assertion it has bounds itself with <c>text_end</c>, and this reads
     /// <see cref="MatchState.TextEnd"/> like the rest of them. In everything the port implements
-    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (the <see cref="Opcode.Skip"/>
-    /// arm, <c>:14545</c>), and a verb moves where the next attempt starts and nothing else - PCRE2
+    /// today, only a <c>(*SKIP)</c> moves the slice inside an attempt (when backtracking reaches the
+    /// verb, ledger entry 45; upstream moves it when the verb runs, <c>:14545</c>), and a verb moves
+    /// where the next attempt starts and nothing else - PCRE2
     /// pcre2pattern, "Verbs that act after backtracking" - so an assertion about the text must not
     /// read a bound a verb has moved. <b>Phase 5 gets a second mover</b>, flagged by S35's blind
     /// review: <c>do_best_fuzzy_match</c> (<c>:17802</c>) and <c>do_enhanced_fuzzy_match</c>
@@ -3050,8 +3051,8 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Closes every group call whose saved-stack frame has just been discarded by a restore of
-    /// <see cref="ByteStack.Count"/>.
+    /// Closes every group call and every fuzzy section whose saved-stack frame has just been
+    /// discarded by a restore of <see cref="ByteStack.Count"/>.
     /// </summary>
     /// <remarks>
     /// NOT UPSTREAM'S, and the reason <see cref="MatchState.OpenCalls"/> records a depth at all - see
@@ -3062,13 +3063,30 @@ internal static class Matcher
     /// constructs has returned before the construct ends; it earns its keep when a
     /// <c>(*PRUNE)</c> or <c>(*SKIP)</c> has already thrown the call's <c>GROUP_CALL</c> entry off
     /// the backtracking stack, so the arm that would have closed the call can never run.
+    /// <para>
+    /// The same verbs can throw away the <c>FUZZY</c> entry of a section opened inside the
+    /// construct, the entry whose backtrack arm would have put <see cref="MatchState.SectionFrame"/>
+    /// back. So the open-section link steps out, through the links stored in the frames themselves,
+    /// to the first frame still on the stack, which is the section that was open when the construct
+    /// was entered. Left pointing above the stack, it was read later as a frame when the stack had
+    /// grown again, and a node that is not a section was taken for an enclosing one (blind review of
+    /// 7277fb6, 2026-09-27).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    private static void CloseCallsAbove(MatchState state)
+    private static void CloseFramesAbove(MatchState state)
     {
         while (state.OpenCalls.Count > 0 && state.OpenCalls[^1].SstackDepth > state.Sstack.Count)
         {
             PopOpenCall(state);
+        }
+
+        // Ends: each step moves to a lower frame or to -1. The discarded bytes are still in the
+        // stack's storage, since nothing has been pushed since the restore.
+        while (state.SectionFrame > state.Sstack.Count)
+        {
+            long link = state.Sstack.SizeAt(state.SectionFrame - MatchState.SectionFrameSize);
+            state.SectionFrame = link >= 0 && link < state.SectionFrame ? (int)link : -1;
         }
     }
 
@@ -3086,6 +3104,26 @@ internal static class Matcher
         if (state.Pstack.TopSize(out long bstackCount))
         {
             state.Bstack.Count = (int)bstackCount;
+        }
+    }
+
+    /// <summary>Upstream's two slice lines in <c>RE_OP_SKIP</c> (<c>:14551-14555</c>).</summary>
+    /// <remarks>
+    /// Run when backtracking reaches the verb rather than when the verb runs (ledger entry 45), or
+    /// when it runs if <see cref="PatternObject.SkipMovesTheSliceWhenItRuns"/> is set.
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="skipNode">The <c>(*SKIP)</c> node, whose direction says which end moves.</param>
+    /// <param name="skipPos">The text position the verb was reached at.</param>
+    private static void MoveTheSliceForASkip(MatchState state, Node skipNode, int skipPos)
+    {
+        if ((skipNode.Status & NodeStatus.Reverse) != 0)
+        {
+            state.SliceEnd = skipPos;
+        }
+        else
+        {
+            state.SliceStart = skipPos;
         }
     }
 
@@ -4208,6 +4246,12 @@ internal static class Matcher
                     return MatchStatus.Failure;
                 }
 
+                // NOT UPSTREAM (finding F-A): see DeletionRepeatsAnEarlierAlternative.
+                if (!isString && DeletionRepeatsAnEarlierAlternative(state, data.NewNode!, step))
+                {
+                    return MatchStatus.Failure;
+                }
+
                 AdvanceItem(state, ref data, isString, step);
 
                 return MatchStatus.Success;
@@ -4340,33 +4384,58 @@ internal static class Matcher
     /// <param name="state">The match state.</param>
     /// <param name="rpData">The repeat, with this iteration already counted.</param>
     /// <param name="endNode">The repeat's end node; its second value is the minimum.</param>
-    /// <param name="edits">How many edits the iteration made.</param>
     /// <param name="groupChanged">Whether it changed a tested group's span.</param>
     /// <returns><see langword="true"/> if the iteration stands.</returns>
-    private static bool EmptyIterationAdmitted(
-        MatchState state,
-        RepeatData rpData,
-        Node endNode,
-        long edits,
-        bool groupChanged
-    ) => rpData.Count <= endNode.Values[1] || groupChanged || RaisesUnmetDeletionMinimum(state, edits);
+    private static bool EmptyIterationAdmitted(MatchState state, RepeatData rpData, Node endNode, bool groupChanged)
+    {
+        if (rpData.Count <= endNode.Values[1] || groupChanged)
+        {
+            return true;
+        }
+
+        // The iteration's edits by kind. Most are deletions, but a lookaround in the body can
+        // substitute or insert and still leave the position where the iteration began.
+        Span<long> edits = stackalloc long[FuzzyValue.Count];
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        for (int i = (int)rpData.ChangesAtStart; i < changes.Count; i++)
+        {
+            edits[changes[i].Type]++;
+        }
+
+        return RaisesUnmetMinimum(state, edits, counted: true);
+    }
 
     /// <summary>
-    /// Whether <paramref name="edits"/> deletions, made since the counts stood lower by that many,
-    /// raise a count that an open fuzzy section has a minimum for and has not yet reached: a
-    /// <c>d</c> minimum or an <c>e</c> minimum. An empty iteration consumes no text, so its edits
-    /// are deletions, which never raise an <c>s</c> or <c>i</c> minimum.
+    /// Whether <paramref name="edits"/>, counted by kind, raise a count that an open fuzzy section
+    /// has a minimum for and has not yet reached: the minimum for one of their own kinds, or an
+    /// <c>e</c> minimum.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An enclosing section counts the errors of the sections open inside it, since END_FUZZY adds
     /// the inner counts to the outer ones (<c>upstream/src/_regex.c</c>:12475-12481); its count is
     /// what it had when the inner section was entered (<see cref="MatchState.TryOuterSection"/>) plus
-    /// the inner section's own. Pass 0 to ask about the counts as they stand.
+    /// the inner section's own.
+    /// </para>
+    /// <para>
+    /// Each kind is asked about on its own. Taking every edit of an empty iteration for a deletion
+    /// took a substitution made inside a lookaround off the deletion count, which then stood below
+    /// zero and so below every <c>d</c> minimum, and every further empty iteration was admitted:
+    /// <c>(?:(?=b{e&lt;=1})*){1&lt;=e&lt;=2}</c> over <c>c</c> grew the backtracking stack to its
+    /// limit (blind review of 7277fb6, 2026-09-27).
+    /// </para>
     /// </remarks>
     /// <param name="state">The match state.</param>
-    /// <param name="edits">How many of the open section's deletions to take back first.</param>
-    /// <returns><see langword="true"/> if one does.</returns>
-    private static bool RaisesUnmetDeletionMinimum(MatchState state, long edits)
+    /// <param name="edits">
+    /// The edits, indexed by <see cref="FuzzyValue.Sub"/>, <see cref="FuzzyValue.Ins"/> and
+    /// <see cref="FuzzyValue.Del"/>.
+    /// </param>
+    /// <param name="counted">
+    /// Whether the counts already include them (an iteration that made them), rather than their
+    /// being about to be made (a deletion not yet taken).
+    /// </param>
+    /// <returns><see langword="true"/> if they do.</returns>
+    private static bool RaisesUnmetMinimum(MatchState state, ReadOnlySpan<long> edits, bool counted)
     {
         if (!state.Pattern.HasFuzzyMinimum || state.SectionFrame < 0 || state.FuzzyNode is not { } section)
         {
@@ -4374,15 +4443,23 @@ internal static class Matcher
         }
 
         long[] counts = state.FuzzyCounts;
-        long del = counts[FuzzyValue.Del] - edits;
-        long total = TotalErrors(counts) - edits;
+        long taken = counted ? 1 : 0;
+        long sub = counts[FuzzyValue.Sub] - (taken * edits[FuzzyValue.Sub]);
+        long ins = counts[FuzzyValue.Ins] - (taken * edits[FuzzyValue.Ins]);
+        long del = counts[FuzzyValue.Del] - (taken * edits[FuzzyValue.Del]);
         int frame = state.SectionFrame;
         Span<long> outerCounts = stackalloc long[FuzzyValue.Count];
 
         // Ends: MatchState.TryOuterSection only steps to a lower frame.
         while (true)
         {
-            if (del < section.Values[FuzzyValue.MinDel] || total < section.Values[FuzzyValue.MinErr])
+            List<uint> values = section.Values;
+            if (
+                (edits[FuzzyValue.Sub] > 0 && sub < values[FuzzyValue.MinSub])
+                || (edits[FuzzyValue.Ins] > 0 && ins < values[FuzzyValue.MinIns])
+                || (edits[FuzzyValue.Del] > 0 && del < values[FuzzyValue.MinDel])
+                || sub + ins + del < values[FuzzyValue.MinErr]
+            )
             {
                 return true;
             }
@@ -4392,8 +4469,9 @@ internal static class Matcher
                 return false;
             }
 
+            sub += outerCounts[FuzzyValue.Sub];
+            ins += outerCounts[FuzzyValue.Ins];
             del += outerCounts[FuzzyValue.Del];
-            total += TotalErrors(outerCounts);
             section = outer;
         }
     }
@@ -4493,6 +4571,9 @@ internal static class Matcher
         rpData.Memo ??= [];
         return rpData.Memo.Count < _repeatMemoCap ? !rpData.Memo.Add(key) : rpData.Memo.Contains(key);
     }
+
+    /// <summary>One deletion, in the form <see cref="RaisesUnmetMinimum"/> takes edits.</summary>
+    private static ReadOnlySpan<long> _oneDeletion => [0, 0, 1];
 
     /// <summary>The most states a repeat memo records in one run.</summary>
     private const int _repeatMemoCap = 1 << 20;
@@ -4692,6 +4773,53 @@ internal static class Matcher
     }
 
     /// <summary>
+    /// Whether deleting <paramref name="node"/> here leads to a state the search has already
+    /// explored in full: the state an earlier alternative of the same branch led to when it was
+    /// deleted at the same place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOT UPSTREAM (finding F-A). In <c>(?:a|b){e&lt;=1}</c> each alternative is one item, and
+    /// deleting either consumes nothing, records the same change at the same position and goes on
+    /// to the same node, with every other part of the state put back by the backtracking in
+    /// between. So the later deletion explores exactly what the earlier one did, which found no
+    /// match, or the search would have stopped there. The earlier deletion was always tried when
+    /// the later one could be: it is offered after an exact match (<see cref="PushExactItemDeletion"/>)
+    /// and after a mismatch (<see cref="FuzzyMatchItem"/>) on the same budget, and where the
+    /// narrowing leaves it out it holds no match, which is a statement about that same state. Once
+    /// every item was retried as a deletion each such branch explored the same subtree twice over,
+    /// and under a recursion that doubled at every level: 13 s on a five-character subject where
+    /// upstream takes 64 ms (blind review of 7277fb6, 2026-09-27).
+    /// </para>
+    /// <para>
+    /// It holds only where the item stands where the branch began: after its own insertions the
+    /// earlier alternative may never have reached that position, since it inserts only where it
+    /// fails. An item reached through its own insertion has that insertion as the last change, one
+    /// character back; any other last change means it was reached from the branch. It is off with
+    /// the exact-deletion retry off, where an earlier alternative that matched offers no deletion,
+    /// and wherever the narrowing is off (<see cref="PatternObject.NarrowExactDeletions"/>): a verb
+    /// makes what a search does after a failure depend on more than the state, and a fuzzy test is
+    /// asked of the item.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">The match state.</param>
+    /// <param name="node">The item about to be deleted.</param>
+    /// <param name="step">The item's character step.</param>
+    /// <returns><see langword="true"/> if the deletion can be left out.</returns>
+    private static bool DeletionRepeatsAnEarlierAlternative(MatchState state, Node node, sbyte step)
+    {
+        if (!node.HasEarlierDeletionTwin || state.Pattern.SkipExactDeletionRetry)
+        {
+            return false;
+        }
+
+        List<FuzzyChange> changes = state.FuzzyChanges;
+        return changes.Count == 0
+            || changes[^1].Type != FuzzyValue.Ins
+            || changes[^1].Pos != Step(state, state.TextPos, -step);
+    }
+
+    /// <summary>
     /// A one-character fuzzy item matched exactly at <c>state.TextPos</c>: pushes the choice of
     /// deleting it instead, if a deletion fits the budget.
     /// </summary>
@@ -4700,7 +4828,10 @@ internal static class Matcher
     /// <param name="step">The item's character step, which the retry needs.</param>
     private static void PushExactItemDeletion(MatchState state, Node node, sbyte step)
     {
-        if (!ExactDeletionMayMatch(state, 1, node.Next1.Node, node))
+        if (
+            !ExactDeletionMayMatch(state, 1, node.Next1.Node, node)
+            || DeletionRepeatsAnEarlierAlternative(state, node, step)
+        )
         {
             return;
         }
@@ -4717,7 +4848,7 @@ internal static class Matcher
             && !state.Pattern.UpstreamEmptyIterations
             && repeat.Start == state.TextPos
             && repeat.Count + 1 > end.Values[1]
-            && !RaisesUnmetDeletionMinimum(state, 0)
+            && !RaisesUnmetMinimum(state, _oneDeletion, counted: false)
         )
         {
             return;
@@ -7544,7 +7675,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
                     state.Bstack.PushUInt8((byte)Opcode.EndAtomic);
 
                     /* bstack: captures fuzzy_counts capture_change END_ATOMIC
@@ -7612,7 +7743,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endCondSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endCondData))
                     {
@@ -7923,8 +8054,12 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 
@@ -7944,13 +8079,13 @@ internal static class Matcher
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
                         {
-                            long edits = state.FuzzyChanges.Count - rpData.ChangesAtStart;
+                            bool edited = state.FuzzyChanges.Count > rpData.ChangesAtStart;
                             bool groupChanged =
                                 MatchState.GroupChanges(state.CaptureChange)
                                 != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edits > 0)
+                            if (edited)
                             {
-                                if (!EmptyIterationAdmitted(state, rpData, node, edits, groupChanged))
+                                if (!EmptyIterationAdmitted(state, rpData, node, groupChanged))
                                 {
                                     --rpData.Count;
                                     goto backtrack;
@@ -8133,8 +8268,12 @@ internal static class Matcher
                     int index = (int)node.Values[0];
                     RepeatData rpData = state.Repeats[index];
 
-                    // The body has matched successfully at this position.
-                    state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    // The body has matched successfully at this position. NOT UPSTREAM: not
+                    // marked when the body guard is a failure memo; see RepeatInfo.FailureMemo.
+                    if (!state.KeepsFailureMemo(index))
+                    {
+                        state.GuardRepeat(index, rpData.Start, NodeStatus.Body, false);
+                    }
 
                     ++rpData.Count;
 
@@ -8154,13 +8293,13 @@ internal static class Matcher
                         bool keyed = true;
                         if (state.TextPos == rpData.Start)
                         {
-                            long edits = state.FuzzyChanges.Count - rpData.ChangesAtStart;
+                            bool edited = state.FuzzyChanges.Count > rpData.ChangesAtStart;
                             bool groupChanged =
                                 MatchState.GroupChanges(state.CaptureChange)
                                 != MatchState.GroupChanges(rpData.CaptureChange);
-                            if (edits > 0)
+                            if (edited)
                             {
-                                if (!EmptyIterationAdmitted(state, rpData, node, edits, groupChanged))
+                                if (!EmptyIterationAdmitted(state, rpData, node, groupChanged))
                                 {
                                     --rpData.Count;
                                     goto backtrack;
@@ -8355,7 +8494,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)endLookSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData endLookData))
                     {
@@ -9981,19 +10120,36 @@ internal static class Matcher
                      * pstack: bstack
                      */
 
-                    if ((node.Status & NodeStatus.Reverse) != 0)
-                    {
-                        state.SliceEnd = state.TextPos;
-                    }
-                    else
-                    {
-                        state.SliceStart = state.TextPos;
-                    }
-
                     // Prune the backtracking back to an appropriate backtracking point.
                     TopBstack(state);
 
-                    /* bstack: ...
+                    // DELIBERATE DIVERGENCE, ledger entry 45: the slice moves when backtracking
+                    // reaches the verb, not now. Upstream moves it here (:14551-14555), before the
+                    // rest of the attempt has run. pcre2pattern ("Verbs that act after
+                    // backtracking") and perlre give a verb its effect only when a later failure
+                    // backtracks onto it, and "the one that is backtracked onto first acts" ("More
+                    // than one backtracking verb"). So the skip position goes on the backtracking
+                    // stack above the pruned point: a later (*PRUNE) or (*SKIP) prunes it away and
+                    // decides the next start itself; the end of an atomic group or lookaround that
+                    // finished discards it, which confines the verb to the group; and a success
+                    // never pops it. The backtrack arm below applies it.
+                    // `(?>aa(*SKIP))x` over 'aaax' is (1, 4) here, in PCRE2 10.47 and in Perl
+                    // 5.42.3, and None upstream; `aa(*SKIP)x(*PRUNE)y|a` over 'aaxz' is (1, 2) in
+                    // all three and None upstream. Pinned by BacktrackingVerbTests.
+                    // PatternObject.SkipMovesTheSliceWhenItRuns restores upstream's timing for the
+                    // oracle alone.
+                    if (state.Pattern.SkipMovesTheSliceWhenItRuns)
+                    {
+                        MoveTheSliceForASkip(state, node, state.TextPos);
+                    }
+                    else
+                    {
+                        state.Bstack.PushSize(state.TextPos);
+                        state.Bstack.PushNode(node);
+                        state.Bstack.PushUInt8((byte)Opcode.Skip);
+                    }
+
+                    /* bstack: ... text_pos node SKIP
                      *
                      * pstack: bstack
                      */
@@ -10895,7 +11051,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)atomicSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!state.Bstack.PopSize(out long atomicCaptureChange))
                     {
@@ -10959,7 +11115,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)condSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData condData))
                     {
@@ -11936,7 +12092,7 @@ internal static class Matcher
                     }
 
                     state.Sstack.Count = (int)lookSstackCount;
-                    CloseCallsAbove(state);
+                    CloseFramesAbove(state);
 
                     if (!PopLookaroundStateData(pattern, state.Sstack, out LookaroundStateData lookData))
                     {
@@ -12072,6 +12228,22 @@ internal static class Matcher
 
                     // The tail may have failed to match at this position.
                     state.GuardRepeat((int)tailIndex, (int)tailTextPos, NodeStatus.Tail, true);
+                    break;
+                }
+                case Opcode.Skip: // NOT UPSTREAM'S: backtracking has reached a (*SKIP), ledger entry 45.
+                {
+                    /* bstack: text_pos node */
+
+                    if (!state.Bstack.PopNode(pattern, out Node? skipNode) || !state.Bstack.PopSize(out long skipPos))
+                    {
+                        return MatchStatus.Illegal;
+                    }
+
+                    // Everything the verb's arm pruned is gone, so what backtracking reaches next is
+                    // the point the prune stopped at: FAILURE, which starts the next attempt from the
+                    // moved slice, or the start of the atomic group, lookaround or condition the verb
+                    // is in, which is upstream's confinement and is kept.
+                    MoveTheSliceForASkip(state, skipNode!, (int)skipPos);
                     break;
                 }
                 default:

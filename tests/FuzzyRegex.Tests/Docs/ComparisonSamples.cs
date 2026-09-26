@@ -152,8 +152,9 @@ public sealed class ComparisonSamples
         // The doc's own comment notes that (a|a)* with a tail that can never hold is exponential
         // here as in upstream, that (a+)+b would not demonstrate a timeout because this engine's
         // repeat guards answer it fast, and that since S60 a literal tail would not either -
-        // the required-string prefilter refuses the subject before the engine runs.
-        var pattern = new FuzzyRegex(@"(a|a)*\b\B");
+        // the required-string prefilter refuses the subject before the engine runs. The '\1'
+        // is there because a pattern without a backreference now gets a failure memo.
+        var pattern = new FuzzyRegex(@"(a|a)*\1\b\B");
 
         Action act = () => pattern.IsMatch(new string('a', 26), timeout: TimeSpan.FromMilliseconds(50));
 
@@ -524,5 +525,14 @@ public sealed class ComparisonSamples
         (needed.Index, needed.Length, needed.FuzzyCounts.Deletions).Should().Be((0, 2, 1));
 
         FuzzyRegex.Match("y", "(?:(?:x){d<=1})+y").FuzzyCounts.Deletions.Should().Be(1);
+    }
+
+    /// <summary>"A `(*SKIP)` acts when backtracking reaches it, so a later `(*PRUNE)` decides the next start".</summary>
+    [Test]
+    public void Skip_acts_when_backtracking_reaches_it()
+    {
+        new FuzzyRegex(@"aa(*SKIP)x(*PRUNE)y|a").Match("aaxz").Index.Should().Be(1);
+        new FuzzyRegex(@"(?>aa(*SKIP))x").Match("aaax").Index.Should().Be(1);
+        new FuzzyRegex(@"aa(*SKIP)x|a").Match("aab").Success.Should().BeFalse();
     }
 }

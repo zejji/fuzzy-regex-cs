@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AwesomeAssertions;
 using Fuzzy.Text.RegularExpressions.Engine;
 using Fuzzy.Text.RegularExpressions.Parsing;
@@ -241,5 +242,58 @@ public sealed class FuzzyExactDeletionTests
         ShouldMatch(new FuzzyRegex(@"(?i)a(?:(a*b)){e<=2}(a)\1").FullMatch("abA"), 0, 3, new FuzzyCounts(0, 1, 1));
         ShouldMatch(new FuzzyRegex(@"(?be)a(?:([ab])){e<=2}(a)\1").MatchAtStart("aba"), 0, 3, new FuzzyCounts(0, 1, 1));
         ShouldMatch(new FuzzyRegex(@"(?fi)(?:(\w)){i<=1,d<=1}a\1").Match("baa"), 0, 2, new FuzzyCounts(0, 1, 1));
+    }
+
+    // A (*PRUNE) or (*SKIP) inside a lookaround drops the backtrack entry of a fuzzy section opened
+    // inside it, the entry that would have closed the section's frame, so when the lookaround fails
+    // and the structure stack is cut back, the open-section link must be cut back with it. It was
+    // not, and a later section read a stale link and took a node that is not a section for its
+    // enclosing one. Found by the blind review of 7277fb6 (2026-09-27). The first row answers
+    // with one deletion, as the pattern's last section does on its own under the "needed" rule and
+    // in the reference matcher; upstream and main give two for both. Upstream and main answer None
+    // to the second row.
+    [Test]
+    public void A_verb_inside_a_failed_lookaround_leaves_no_stale_section_behind()
+    {
+        ShouldMatch(
+            new FuzzyRegex("(?=(?:a(*PRUNE)){e<=1}b)?(?=(?=(?=(?:y*){1<=d<=2})))").Match("c"),
+            0,
+            0,
+            new FuzzyCounts(0, 0, 1)
+        );
+        new FuzzyRegex("(|)((?=(?:(?:(x(a((*SKIP))))){1<=e<=2})?(?R)))").Match("").Success.Should().BeFalse();
+    }
+
+    // In (?:a|b) deleting either alternative leaves the same state, so once an exact 'a' could be
+    // deleted too, every such branch explored one subtree twice, and under a recursion that doubled
+    // at every level. The later deletion is left out (Matcher.DeletionRepeatsAnEarlierAlternative).
+    // The pattern took 13 s before, and upstream 64 ms; the answer, None, is upstream's and main's.
+    // A grid of 30,438 rows against the reference matcher and 213,066 more with flags, verbs and
+    // recursion gave the same answers with the deletion left out as without (2026-09-27).
+    [Test]
+    public void A_later_alternatives_deletion_that_repeats_an_earlier_one_is_left_out()
+    {
+        const string pattern = "(?:(?:(?:(?:(?<n>a|b)c(?:a*|(?:(?R)){1,2}?)){1<=d<=2}){2<=e<=3}){1,2}?){1<=s<=1,d<=2}";
+        var watch = Stopwatch.StartNew();
+        new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5))
+            .MatchAtStart("abccc")
+            .Success.Should()
+            .BeFalse();
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
+
+        // Only where the branch began: after 'b' inserts the 'a', its deletion at the end of the
+        // text is the one match, since the section's minimums are checked before any trailing
+        // insertion, and 'a', which matched, never inserted. Upstream and main give the same.
+        Match m = new FuzzyRegex("(?:(?:a|b)){1<=i<=1,1<=d<=1}").MatchAtStart("a");
+        ShouldMatch(m, 0, 1, new FuzzyCounts(0, 1, 1));
+        m.FuzzyChanges.Insertions.Should().Equal(0);
+        m.FuzzyChanges.Deletions.Should().Equal(1);
+
+        var regex = new FuzzyRegex("(?:a|b|[bc]|bc|c){e<=1}");
+        List<Node> items =
+        [
+            .. regex.PatternObject.NodeList.Where(static node => node.Next1.Node?.Op == Opcode.EndFuzzy),
+        ];
+        items.Select(static node => node.HasEarlierDeletionTwin).Should().Equal(false, true, true, false, true);
     }
 }

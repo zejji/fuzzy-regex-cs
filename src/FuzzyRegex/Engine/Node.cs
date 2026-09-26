@@ -129,6 +129,15 @@ internal sealed class Node
     /// </summary>
     internal Node? FuzzyRunExit;
 
+    /// <summary>
+    /// NOT UPSTREAM (finding F-A): whether this node is a fuzzy one-character item that is a whole
+    /// alternative of a branch, after an earlier alternative that is one too and goes on to the same
+    /// node, so that deleting either leaves the same state. Set by
+    /// <c>PatternObject.SetAlternativeDeletionTwins</c>; read by
+    /// <c>Matcher.DeletionRepeatsAnEarlierAlternative</c>.
+    /// </summary>
+    internal bool HasEarlierDeletionTwin;
+
     /// <summary>Creates a node with <paramref name="valueCount"/> zeroed values.</summary>
     /// <param name="valueCount">How many values the opcode carries.</param>
     internal Node(int valueCount)

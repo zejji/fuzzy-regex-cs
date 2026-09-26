@@ -49,6 +49,50 @@ internal sealed class RepeatInfo
     /// <see cref="NodeStatus.Tail"/> need position guards, plus <see cref="NodeStatus.Inner"/>.
     /// </summary>
     internal uint Status;
+
+    /// <summary>
+    /// Whether this repeat's body guard is a failure memo. <b>Not upstream.</b> When set,
+    /// <c>END_GREEDY_REPEAT</c> and <c>END_LAZY_REPEAT</c> do not mark the position where the body
+    /// matched, so the failure recorded when the engine later backtracks past that position is
+    /// kept, and the body is never tried there again in the same attempt. That turns
+    /// <c>(?:a|a)+c</c> from exponential to linear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upstream's success mark exists because a failure is not always a fact about the position
+    /// alone: <c>(?:(a)|a)+(?(1)c|b)</c> over <c>aab</c> fails from position 1 on the path that set
+    /// group 1 and matches from it on the path that did not. The memo is sound only when nothing
+    /// after the body can see how the engine got there. The compiler sets this flag for a repeat
+    /// with no maximum and a minimum of at most 1, that is not inside another repeat, an atomic
+    /// group, a possessive repeat, a lookaround, a conditional's lookaround test, a called group or
+    /// a fuzzy section. <c>Optimiser.KeepFailureMemosSound</c> then clears it for every repeat if
+    /// the pattern has anything that reads more than the position: a backreference, a group-exists
+    /// conditional, a group call, <c>(*PRUNE)</c> or <c>(*SKIP)</c>, fuzzy matching or POSIX
+    /// matching; or anything a failing path leaves behind, which is a <c>\K</c> inside one of those
+    /// constructs (<see cref="PatternObject.KeepInSubmatch"/>). A partial match does not use it
+    /// either (<c>MatchState.KeepsFailureMemo</c>).
+    /// </para>
+    /// <para>
+    /// Four conditions have a witness in <c>FailureMemoTests</c>, an answer that changes when the
+    /// condition is deleted: the maximum, backreferences, group-exists conditionals and a
+    /// <c>\K</c> inside a construct. The rest
+    /// have none. Differential grids of 7.6 million rows found no answer that changes when any one
+    /// of them is deleted (2026-09-26), and for most there is a reason. Guards are reset at every
+    /// start position, so a verb that ends the attempt leaves nothing behind for a later path to
+    /// misread. An atomic group, a lookaround and a conditional's test throw away the body's
+    /// backtrack entries once the body reaches its end, so a failure recorded inside one of them
+    /// only ever means "cannot reach the end of the construct from here", a fact about the
+    /// position; and a group call clears the guard lists on the way in and restores them on the
+    /// way out. A repeat inside a bounded
+    /// repeat has no active guards at all (<c>AddRepeatGuards</c> does not walk a bounded body). A
+    /// partial match returns at the first path that reaches the end of the text, POSIX matching
+    /// replaces its best match only with a longer one, and the guards are not consulted under
+    /// fuzzy matching. They stay as exclusions anyway: each is a place where the rest of the match
+    /// can read more than the position, and none of those arguments has been proved in general.
+    /// <c>docs/plan/2026-09-26-backtrack-memoisation-design.md</c> gives the full reasoning.
+    /// </para>
+    /// </remarks>
+    internal bool FailureMemo;
 }
 
 /// <summary>
@@ -239,8 +283,9 @@ internal sealed class PatternObject
     /// The required-string prefilter moves the FIRST attempt forward, to the position the required
     /// string implies. Skipping a position that cannot match is answer-transparent only while
     /// attempts are independent of each other, and <c>(*SKIP)</c> is the one thing in this engine
-    /// that makes them dependent: it sets <see cref="MatchState.SliceStart"/> to where it was
-    /// reached (<c>Matcher</c>'s <see cref="Opcode.Skip"/> arm, <c>:14544</c>), so the attempt that
+    /// that makes them dependent: when backtracking reaches it, it sets
+    /// <see cref="MatchState.SliceStart"/> to where it was reached (<c>Matcher</c>'s
+    /// <see cref="Opcode.Skip"/> arms; upstream does so when it runs, <c>:14544</c>), so the attempt that
     /// runs decides where the next one starts. Begin at a later position and the chain of skips is
     /// a different chain.
     /// </para>
@@ -281,9 +326,9 @@ internal sealed class PatternObject
     /// <summary>
     /// NOT UPSTREAM (empty-iteration rule, finding F-A): whether some fuzzy section has a minimum
     /// error count. Only then can an empty iteration that spent errors be admitted for a section
-    /// minimum (<c>Matcher.RaisesUnmetDeletionMinimum</c>), only then can an exact item's deletion be
+    /// minimum (<c>Matcher.RaisesUnmetMinimum</c>), only then can an exact item's deletion be
     /// needed for one (<c>Matcher.AllMinimumsMet</c>), and only then does the matcher keep
-    /// <c>MatchState.SectionOuter</c>. Set when the pattern is compiled.
+    /// <c>MatchState.SectionFrame</c>. Set when the pattern is compiled.
     /// </summary>
     internal bool HasFuzzyMinimum;
 
@@ -299,6 +344,25 @@ internal sealed class PatternObject
     /// part of a repeat memo key.
     /// </summary>
     internal int[] MemoGroups = [];
+
+    /// <summary>
+    /// Whether a <c>\K</c> sits inside an atomic group, a possessive repeat, a lookaround, a
+    /// conditional's lookaround test or a called group. <b>This port's own field</b>, written by
+    /// <c>NodeCompiler.BuildBoundary</c> and read by <c>Optimiser.KeepFailureMemosSound</c>, which
+    /// withdraws every failure memo when it is set.
+    /// </summary>
+    /// <remarks>
+    /// <c>\K</c> moves the reported start and pushes an entry that moves it back when the path
+    /// fails. In one of those constructs the entry is thrown away as soon as the construct
+    /// succeeds, so the moved start outlives the path that moved it, and a failing path has a
+    /// lasting effect that a memo would skip: <c>(?:(?=\K)b|)+.c</c> over <c>aabc</c> is (3, 4)
+    /// upstream and was (2, 4) with the memo. It is the only such effect. The other entries a
+    /// succeeding construct throws away restore captures, the capture-change counter and fuzzy
+    /// counts, which the construct saved on entry and puts back itself when the engine
+    /// backtracks past it, or belong to repeats, group calls and fuzzy sections, which the memo
+    /// excludes already.
+    /// </remarks>
+    internal bool KeepInSubmatch;
 
     /// <summary>
     /// The start-position prefilter for a pattern that is one fuzzy ASCII literal, or
@@ -382,6 +446,13 @@ internal sealed class PatternObject
     /// and <c>docs/DIVERGENCES.md</c>.
     /// </remarks>
     internal bool SkipLeftoverTakeBack;
+
+    /// <summary>
+    /// Oracle-only: a <c>(*SKIP)</c> moves the slice the moment it runs, as upstream's
+    /// <c>RE_OP_SKIP</c> does (<c>:14551-14555</c>), instead of when backtracking reaches it (ledger
+    /// entry 45). Set only by <c>OracleComparer</c>'s ablation; never by the library.
+    /// </summary>
+    internal bool SkipMovesTheSliceWhenItRuns;
 
     /// <summary>
     /// NOT UPSTREAM, and never set by this library: whether a retried fuzzy edit on a full-case-folded
@@ -646,6 +717,10 @@ internal sealed class PatternObject
         // NOT UPSTREAM (finding F-A): the fuzzy runs Matcher.ExactDeletionMayMatch reads, once the
         // nodes are numbered, since the walk marks nodes by Node.Index.
         SetFuzzyRunLengths(self);
+        if (self.NarrowExactDeletions)
+        {
+            SetAlternativeDeletionTwins(self);
+        }
 
         // NOT UPSTREAM'S (S60b item 10): the prefilter for a pattern that is one fuzzy literal.
         self.FuzzyLiteralFilter = FuzzyLiteralFilter.TryCreate(self);
@@ -703,6 +778,58 @@ internal sealed class PatternObject
             }
         }
     }
+
+    /// <summary>
+    /// Sets <see cref="Node.HasEarlierDeletionTwin"/> on every fuzzy one-character item that is a
+    /// whole alternative of a branch after an earlier alternative of the same kind going on to the
+    /// same node, as in <c>(?:a|b){e&lt;=1}</c>.
+    /// </summary>
+    /// <remarks>
+    /// A branch of n alternatives compiles to a chain of two-way <c>BRANCH</c> nodes, each with one
+    /// alternative on <c>next_1</c> and the rest of the chain on <c>next_2</c>, the last alternative
+    /// sitting on the last <c>next_2</c> itself. Starting from each <c>BRANCH</c> in turn marks
+    /// every later twin of its own <c>next_1</c>, which covers every pair.
+    /// </remarks>
+    /// <param name="pattern">The compiled pattern.</param>
+    private static void SetAlternativeDeletionTwins(PatternObject pattern)
+    {
+        foreach (Node branch in pattern.NodeList)
+        {
+            if (
+                branch.Op != Opcode.Branch
+                || branch.Next2.Node is null
+                || branch.Next1.Node is not { } first
+                || !IsOneCharacterFuzzyItem(first)
+            )
+            {
+                continue;
+            }
+
+            Node? rest = branch.Next2.Node;
+            while (rest is not null)
+            {
+                bool twoWay = rest.Op == Opcode.Branch && rest.Next2.Node is not null;
+                Node? alternative = twoWay ? rest.Next1.Node : rest;
+                if (
+                    alternative is not null
+                    && IsOneCharacterFuzzyItem(alternative)
+                    && alternative.Next1.Node is { } next
+                    && ReferenceEquals(next, first.Next1.Node)
+                )
+                {
+                    alternative.HasEarlierDeletionTwin = true;
+                }
+
+                rest = twoWay ? rest.Next2.Node : null;
+            }
+        }
+    }
+
+    /// <summary>Whether a node is a fuzzy item that matches exactly one character.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns><see langword="true"/> if it is.</returns>
+    private static bool IsOneCharacterFuzzyItem(Node node) =>
+        (node.Status & NodeStatus.Fuzzy) != 0 && NodeQueries.MatchesOneCharacter(node);
 
     /// <summary>
     /// Whether a node is a fuzzy item that consumes exactly one subject character per pattern
