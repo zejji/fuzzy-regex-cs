@@ -1422,3 +1422,54 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   data under Unicode's terms of use, so the test pins 15 rows (12 from the file, with line numbers)
   and the full-file count was measured with a scratch driver; vendoring it would be the upgrade if
   the rules are touched again.
+- 2026-09-26 (ledger entry 43): **a backwards `\X` takes a whole grapheme cluster, so `(?r)\X` and
+  a lookbehind holding `\X` find the same clusters as forward `\X`**, where upstream and this port
+  both stopped after one codepoint and failed 465 of the 766 lines of `GraphemeBreakTest.txt`
+  17.0.0 in reverse. The README says `\X` conforms to UAX #29 and upstream's own comment on the node
+  says the match is the same in both directions, so the conformance file, read last cluster first,
+  is the reference; inherited, so fixed under the no-known-bugs rule and pinned as a divergence.
+  The change is the order of two items in `Grapheme.CompileCore` when compiling backwards; forward
+  code, and so compile parity, is unchanged. The oracle claims the rows it draws of this shape only
+  when compiling in upstream's order reproduces upstream's answer, which needed a compile-time
+  switch (`Info.UpstreamReverseGrapheme`, threaded from `FuzzyRegex.WithDefaultVersion`) because
+  the existing ablations act on a compiled pattern and this fix changes the code itself. Not
+  vendored, as for ledger entry 40: the test pins nine rows of the file, one per rule, and the
+  full-file count was measured with a scratch driver.
+- 2026-09-26 (not a divergence): **a case-insensitive or reversed required string gets a screen
+  of this port's own, not upstream's locator arms.** The sweep found `(?i)(?:ss|ß)+x` over 25
+  U+00DF timing out at 3 s where upstream answers in microseconds: upstream refuses the subject in
+  `locate_required_string`'s `STRING_FLD` arm (`_regex.c:11143-11365`), which this port had never
+  ported, so it ran the exponential search. Upstream's arms are not transparent (entry of
+  2026-08-31: `string_search_fld` compares with `same_char_ign_turkic`, and the arms hand the
+  matcher a `req_pos` it skips without comparing), so `Engine.RequiredStringScreen` does not copy
+  them. It refuses a subject only when no window could hold the string under a rule looser than any
+  the matcher applies (a case of the subject character equal ignoring case, or the full folding of
+  a case spelling the next required characters, cut short at either end), jumps the start only at
+  offset 0, where the string is the first consuming item, never sets `req_pos`, and stands aside for
+  partial matching. On 90,000 generated rows (folded literals, all five opcodes, captures, fuzzy,
+  lookarounds, partial, overlapped, slices, `BESTMATCH`/`ENHANCEMATCH`) every answer equals the one
+  before it wherever the old code answered. Beyond upstream, `STRING_REV` is screened too.
+- 2026-09-26: **a `beginning` between the two halves of a surrogate pair cuts the pair into two
+  lone surrogates, and no step or read joins them again.** A grid found `(?:.)*x` fully matched
+  against `"\U00010428xc"` at (1, 3) running until its timeout, and `(?:.)*` at (1, 7) of
+  `"😀😁x😂\na"` never stopping at all, because its tail never reads the clock. Forwards the slice
+  opened with a lone low surrogate; backwards `PrevPos` joined that low half to the high half
+  before the slice and stepped from 2 to 0, one below the slice start, so a greedy repeat
+  retreating to its limit, which it tests for equality, walked past it and on. The same mismatch
+  gave answers outside the slice, for example `(?r).` at (1, 1) of `"\U00010428xc"` answered (0, 2),
+  and an index exception in a reversed fuzzy full match. The rule mirrors the 2026-09-01 one for
+  a `length` that cuts a pair, and it has an oracle: a Python `str` can hold the two halves as
+  separate codepoints, a codepoint `pos` can fall between them, and that is exactly the text a cut
+  pair denotes. `CharAt`, `NextPos` and `PrevPos` refuse to pair across `InitialSliceStart`, the
+  caller's slice start, not `SliceStart`, which lookarounds and verbs move during a match. Pinned
+  by `SliceSplitsSurrogatePairTests`, with a mutation of each of the three guards turning it red.
+  `tools/probes/surrogate-slice-sweep.cs` runs 92 patterns forwards and reversed over every slice
+  of seven subjects whose start or end splits a pair, under eleven calls. On main: 860 timeouts,
+  12 hangs no timeout stopped, 4 exceptions, and wrong or out-of-slice answers on every pattern.
+  With the fix: none, every answer equals the one for the same subject with the cut-off half
+  replaced by U+0001, and `tools/probes/surrogate-slice-oracle.py` finds upstream, over the cut
+  string, differing only where it also differs on the U+0001 text (ledger 4 and the partial
+  rules), so no remaining difference is about the cut. S52d's pin of the overrun changes answer:
+  `(?r)[\s\S]*` over the split slice (2, 3) of "a😀" now answers (2, 3) rather than (1, 3), and
+  `(?r)\A[\s\S]*` there a partial at (2, 3), as its whole-pair slice (1, 3) does, rather than
+  no match.

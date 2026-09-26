@@ -5,8 +5,8 @@ namespace Fuzzy.Text.RegularExpressions.Tests.Gaps.Engine;
 /// <summary>
 /// The required-string prefilter: <c>locate_required_string</c> (<c>upstream/src/_regex.c:11082</c>)
 /// and the case-sensitive FORWARD <c>string_search</c> arm it calls (<c>:6596</c>), ported by S60.
-/// <c>string_search_rev</c> and the folded arms are NOT ported - see
-/// <c>Matcher.LocateRequiredString</c>'s <c>default:</c> arm.
+/// <c>string_search_rev</c> and the folded arms are NOT ported; their opcodes go to
+/// <c>Engine.RequiredStringScreen</c> instead, whose rows are at the end of this fixture.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -467,5 +467,97 @@ public sealed class RequiredStringPrefilterTests
         Search("(?V1)(?i)ss", "\u00DF").Should().Be("(0,1)");
         Search("(?V1)(?i:ss)|q", "\u00DF").Should().Be("(0,1)");
         Search("(?V1)(?i:s)s", "\u00DF").Should().Be("None");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The folded and reversed required strings (RequiredStringScreen). Upstream refuses these
+    // subjects through the locator arms this port does not have; without a screen of its own this
+    // port ran the exponential search and timed out. Each subject below is long enough that the
+    // search without the screen runs for far longer than the budget (the ß rows took 3 s at 16
+    // characters on 2026-09-26, doubling every two), and the screen answers in microseconds, so a
+    // budget of seconds separates the two without depending on the machine.
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>Formats a search under a budget that only the exponential search can exhaust.</summary>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="subject">The subject.</param>
+    /// <returns><c>(start,end)</c>, or <c>None</c> when there is no match.</returns>
+    private static string SearchWithinBudget(string pattern, string subject)
+    {
+        Match match = new FuzzyRegex(pattern, FuzzyRegexOptions.None, TimeSpan.FromSeconds(5)).Match(subject);
+        return match.Success ? $"({match.Index},{match.Index + match.Length})" : "None";
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_subject_without_a_folded_required_string_is_refused_without_the_exponential_search()
+    {
+        // The sweep's row (2026-09-25): 'ss' and U+00DF are the same under full case folding, so each
+        // U+00DF can be taken by either branch and the loop has 2^n ways to fail before 'x'.
+        // regex 2026.9.10: search(r'(?V1i)(?:ss|\xdf)+x', '\xdf'*40) -> None, in 0.006 ms
+        SearchWithinBudget("(?i)(?:ss|ß)+x", new string('ß', 40)).Should().Be("None");
+
+        // STRING_IGN: version 0 folds simply, and 'c' is the required string.
+        // regex 2026.9.10: search(r'(?V0i)(?:A|aa)+c', 'a'*60) -> None
+        SearchWithinBudget("(?V0)(?i)(?:A|aa)+c", new string('a', 60)).Should().Be("None");
+
+        // Both required characters are present, in the wrong order: the screen compares positions,
+        // not just which characters occur.
+        // regex 2026.9.10: search(r'(?V1i)(?:ss|\xdf)+xy', '\xdf'*40 + 'yx') -> None
+        SearchWithinBudget("(?i)(?:ss|ß)+xy", new string('ß', 40) + "yx").Should().Be("None");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_reversed_subject_without_the_required_string_is_refused_without_the_exponential_search()
+    {
+        // STRING_FLD_REV. regex 2026.9.10: search(r'(?V1ri)x(?:ss|\xdf)+', '\xdf'*40) -> None
+        SearchWithinBudget("(?ri)x(?:ss|ß)+", new string('ß', 40)).Should().Be("None");
+
+        // STRING_IGN_REV. regex 2026.9.10: search(r'(?V0ri)c(?:A|aa)+', 'a'*60) -> None
+        SearchWithinBudget("(?rV0i)c(?:A|aa)+", new string('a', 60)).Should().Be("None");
+
+        // STRING_REV, case-sensitive. Without the screen: 116 ms at 24 characters, quadrupling every
+        // four. regex 2026.9.10: search(r'(?r)c(?:b|a|aa)+', 'a'*60) -> None
+        SearchWithinBudget("(?r)c(?:b|a|aa)+", new string('a', 60)).Should().Be("None");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_folded_required_string_is_still_found_in_every_spelling_the_matcher_accepts()
+    {
+        // The screen must accept every subject the matcher would. These are THIS PORT's answers,
+        // recorded before the screen existed and unchanged by it; several differ from upstream,
+        // for the reasons the pins elsewhere give (the default version is 1, ledger 37, and
+        // upstream's own folded search), and the screen was built not to take a side.
+        Search("(?i)(?:ss|ß)+X", "ßßßx").Should().Be("(0,4)");
+        Search("(?i)ssx", "aßX").Should().Be("(1,3)");
+        Search("(?i)ßx", "aSSx").Should().Be("(1,4)");
+        Search("(?i)ßx", "aẞx").Should().Be("(1,3)");
+        Search("(?i)ﬁx", "FIx").Should().Be("(0,3)");
+        Search("(?i)fix", "ﬁX").Should().Be("(0,2)");
+        Search("(?i)İx", "i̇x").Should().Be("(0,3)");
+        Search("(?i)i̇x", "İx").Should().Be("(0,2)");
+        Search("(?i)kx", "KX").Should().Be("(0,2)");
+        Search("(?V0)(?i)kx", "KX").Should().Be("(0,2)");
+        Search("(?V0)(?i)sx", "ſX").Should().Be("(0,2)");
+        Search("(?V0)(?i)ssx", "ßx").Should().Be("None");
+        Search("(?ri)ssx", "ßxa").Should().Be("(0,2)");
+        Search("(?ri)xß", "aXss").Should().Be("(1,4)");
+        Search("(?rV0i)abc", "zABC").Should().Be("(1,4)");
+        Search("(?r)cab", "zcabz").Should().Be("(1,4)");
+        Search("(?r)cab", "zcAbz").Should().Be("None");
+    }
+
+    [Test]
+    [Property("Upstream", "none - gap test")]
+    public void A_partial_search_is_not_refused_for_lacking_a_folded_required_string()
+    {
+        // A partial match can stop before its required string starts, so the screen stands aside.
+        // regex 2026.9.10: search(r'(?V1i)(?:ss|\xdf)+x', '\xdf'*8, partial=True) -> (0, 8) partial
+        Match match = new FuzzyRegex("(?i)(?:ss|ß)+x").Match(new string('ß', 8), partial: true);
+        match.Success.Should().BeTrue();
+        match.PartialMatch.Should().BeTrue();
+        (match.Index, match.Length).Should().Be((0, 8));
     }
 }

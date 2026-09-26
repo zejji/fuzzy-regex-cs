@@ -483,4 +483,14 @@ public sealed class ComparisonSamples
         boundary.Matches("a:\u0308a").Select(static m => m.Index).Should().Equal(0, 4);
         new FuzzyRegex(@"(?w)a\b").Match("a:\u0308a").Index.Should().Be(3);
     }
+
+    /// <summary>"`\X` matches the same grapheme cluster backwards as forwards".</summary>
+    [Test]
+    public void Grapheme_matches_the_same_cluster_backwards_as_forwards()
+    {
+        var backwards = new FuzzyRegex(@"(?r)\X");
+
+        backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
+        new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
+    }
 }

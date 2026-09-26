@@ -213,34 +213,36 @@ public sealed class ReversedPartialSliceStartTests
     }
 
     [Test]
-    public void A_beginning_that_splits_a_surrogate_pair_answers_what_it_did_before_the_ruling()
+    public void A_beginning_that_splits_a_surrogate_pair_runs_out_at_the_lone_low_surrogate()
     {
         // Raised by S52d's blind review. The reversed repeat walk stops at the slice start, so in
         // CODEPOINTS "arrived at the edge" and "reached or passed the edge" cannot differ - which is
         // why upstream, which indexes by codepoint, can spell the one `==` and the other `<=` and
-        // never notice. In UTF-16 they can differ: a `beginning` that splits a surrogate pair lets
-        // `PrevPos` step two code units and land one BELOW the slice start, and `<=` would report a
-        // partial there where `==` does not.
+        // never notice. In UTF-16 they could differ while a `beginning` that splits a surrogate pair
+        // let `PrevPos` step two code units and land one BELOW the slice start. S52d kept `==` and
+        // pinned the overrun's answers here as pre-existing.
         //
-        // THE RULING SAYS NOTHING ABOUT THAT, so the slice moves the bound and not the comparison,
-        // and this pins the answer it had before. There is no upstream run to cite: `regex` cannot
-        // express a `pos` inside a character at all, so this is a UTF-16-only question and the
-        // provenance is the decision itself (DECISIONS 2026-09-16, and the comment at the site).
+        // The overrun is gone (2026-09-26): a cut pair leaves two lone surrogates and no step joins
+        // them (`MatchState.PrevPos`, `SliceSplitsSurrogatePairTests`), so the walk stops ON the
+        // slice start and the ruling applies to the split slice exactly as to the whole one. The
+        // oracle is a Python str holding the two halves as separate codepoints, which a codepoint
+        // `pos` can fall between. Measured, regex 2026.9.10 with H and L the two halves:
+        //   regex.compile(r'(?r)[\s\S]*', regex.V1).match('a' + H + L, 2, 3, partial=True)   -> (2, 3)
+        //   regex.compile(r'(?r)\A[\s\S]*', regex.V1).match('a' + H + L, 2, 3, partial=True) -> None
+        // The second is ledger 24's divergence and not the cut: upstream answers None for the
+        // whole-pair slice (1, 3) and for the BMP slice 'ab' (1, 2) too.
         const string split = "a😀"; // 'a' then U+1F600, so code units 1 and 2 are a pair.
 
-        // The slice (2, 3) starts INSIDE the pair. The walk overruns it - that is pre-existing and
-        // not this slice's - and the answer stays what it was.
-        Answer(@"(?r)\A[\s\S]*", split, 2, 3).Should().Be("None");
-        Answer(@"(?r)^[\s\S]*", split, 2, 3).Should().Be("None");
+        // The slice (2, 3) starts INSIDE the pair: the repeat takes the lone low surrogate, runs
+        // out at the slice start, and `\A` could still be reached if the caller widened `beginning`.
+        Answer(@"(?r)\A[\s\S]*", split, 2, 3).Should().Be("(2, 3) partial=True");
+        Answer(@"(?r)^[\s\S]*", split, 2, 3).Should().Be("(2, 3) partial=True");
 
-        // The well-formed slice (1, 3) holds the whole pair, and there the ruling applies normally:
-        // the repeat consumes the one character, runs out at the slice start, and `\A` could still
-        // be reached if the caller widened `beginning` to 0 - which is what a partial promises.
+        // The well-formed slice (1, 3) holds the whole pair, and the ruling answers the same way.
         Answer(@"(?r)\A[\s\S]*", split, 1, 3).Should().Be("(1, 3) partial=True");
 
-        // And with nothing after the repeat there is a complete match either way, so the overrun is
-        // visible only through the partial: both slices answer the same span.
-        Answer(@"(?r)[\s\S]*", split, 2, 3).Should().Be("(1, 3) partial=False");
+        // With nothing after the repeat there is a complete match, inside each slice.
+        Answer(@"(?r)[\s\S]*", split, 2, 3).Should().Be("(2, 3) partial=False");
         Answer(@"(?r)[\s\S]*", split, 1, 3).Should().Be("(1, 3) partial=False");
     }
 

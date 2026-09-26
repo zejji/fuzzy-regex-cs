@@ -60,17 +60,21 @@ internal static class PatternCompiler
     /// its own test suite never changes; a parameter keeps that visible rather than hidden in
     /// static state.
     /// </param>
+    /// <param name="upstreamReverseGrapheme">
+    /// NOT UPSTREAM, and never set by this library: see <see cref="Info.UpstreamReverseGrapheme"/>.
+    /// </param>
     /// <exception cref="FuzzyRegexParseException">The pattern is not valid.</exception>
     internal static CompiledPattern Compile(
         string pattern,
         int flags = 0,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists = null,
-        int defaultVersion = DefaultVersion
+        int defaultVersion = DefaultVersion,
+        bool upstreamReverseGrapheme = false
     )
     {
         try
         {
-            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion);
+            return CompileUnderVersion(pattern, flags, namedLists, defaultVersion, upstreamReverseGrapheme);
         }
         catch (FuzzyRegexParseException unterminated)
             when (string.Equals(unterminated.Message, _unterminatedSet, StringComparison.Ordinal)
@@ -153,7 +157,8 @@ internal static class PatternCompiler
         string pattern,
         int flags,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? namedLists,
-        int defaultVersion
+        int defaultVersion,
+        bool upstreamReverseGrapheme = false
     )
     {
         IReadOnlyDictionary<string, IReadOnlyList<string>> kwargs =
@@ -174,7 +179,11 @@ internal static class PatternCompiler
             try
             {
                 source = new Source(pattern);
-                info = new Info(globalFlags, kwargs, defaultVersion) { GuessEncoding = guessEncoding };
+                info = new Info(globalFlags, kwargs, defaultVersion)
+                {
+                    GuessEncoding = guessEncoding,
+                    UpstreamReverseGrapheme = upstreamReverseGrapheme,
+                };
                 source.IgnoreSpace = (info.Flags & RegexFlags.Verbose) != 0;
                 parsed = ParseFunctions.ParsePattern(source, info);
                 break;

@@ -1952,7 +1952,7 @@ internal static class ParseFunctions
         if (ch == 'X' && !inSet)
         {
             // A grapheme cluster.
-            return new Grapheme(ScopedEncoding(info));
+            return new Grapheme(ScopedEncoding(info), info.UpstreamReverseGrapheme);
         }
 
         if (RegexFlags.IsAlpha(ch))

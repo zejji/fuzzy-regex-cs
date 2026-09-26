@@ -31,9 +31,9 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// <para>
 /// A rank-and-select bitmap would make the queries truly O(1) rather than O(log n) plus a bounded
 /// walk, and would cost about half as much memory. It is the upgrade path if a measurement ever asks
-/// for one, and it would be no harder to trust: like this type it is a pure function of the subject,
-/// so the same exhaustive comparison against the walk in <c>CharacterIndexTests</c> would check it
-/// just as completely. It was not chosen because it is more code doing bit arithmetic to buy
+/// for one, and it would be no harder to trust: like this type it is a pure function of the subject
+/// and the slice start, so the same exhaustive comparison against the walk in
+/// <c>CharacterIndexTests</c> would check it just as completely. It was not chosen because it is more code doing bit arithmetic to buy
 /// something nothing currently needs - the stride below is already past the point where less walking
 /// shows up on a clock.
 /// </para>
@@ -41,7 +41,8 @@ namespace Fuzzy.Text.RegularExpressions.Engine;
 /// <b>Boundaries.</b> A <i>character boundary</i> is a position the walk from 0 visits: 0, then
 /// repeatedly <see cref="MatchState.NextPos"/>, up to and including the end of the subject. Position
 /// b(k) is the k-th of them. A position that is the low half of a surrogate pair is not a boundary,
-/// which matters because the public API lets a caller start or end a search there.
+/// with one exception the public API creates: a <c>beginning</c> between the two halves cuts the
+/// pair, <see cref="MatchState.NextPos"/> steps onto it, and so it is one.
 /// </para>
 /// </remarks>
 internal sealed class CharacterIndex

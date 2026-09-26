@@ -216,12 +216,18 @@ internal static class OracleComparer
     /// <see langword="null"/>. It runs on a pattern this method compiled and drops, so nothing the
     /// caller shares is mutated.
     /// </param>
+    /// <param name="upstreamReverseGrapheme">
+    /// Compile a backwards <c>\X</c> in upstream's order. Unlike <paramref name="ablate"/> this acts
+    /// on the compile, because what ledger entry 43 changed is the code <c>\X</c> compiles to. Used
+    /// by <see cref="RunWithTheUpstreamReverseGrapheme"/> and by nothing else.
+    /// </param>
     /// <returns>This port's answer, as the overload above describes it.</returns>
     internal static IOracleOutcome? Run(
         OracleRow row,
         TimeSpan timeout,
         bool lazy = false,
-        Action<FuzzyRegex>? ablate = null
+        Action<FuzzyRegex>? ablate = null,
+        bool upstreamReverseGrapheme = false
     )
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -254,7 +260,8 @@ internal static class OracleComparer
                 // used to be because this call site was captured silently once already: S56b gave
                 // the public constructor a trailing int of its own and this row's version became a
                 // compile budget, which the waves reported as three ordinary divergences.
-                row.DefaultVersion
+                row.DefaultVersion,
+                upstreamReverseGrapheme: upstreamReverseGrapheme
             );
         }
         catch (NotImplementedException)
@@ -599,6 +606,29 @@ internal static class OracleComparer
             row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
             lazy: false,
             ablate: static compiled => compiled.PatternObject.UpstreamDefaultBoundary = true
+        );
+    }
+
+    /// <summary>
+    /// Puts a row's question to this port with <c>\X</c> compiled backwards in upstream's order.
+    /// </summary>
+    /// <remarks>
+    /// Ledger entry 43 made a backwards <c>\X</c> test its grapheme boundary where the cluster
+    /// stops rather than where it starts, so it takes a whole cluster instead of one codepoint.
+    /// <c>upstreamReverseGrapheme</c> compiles it as upstream does, boundary first. The
+    /// <c>reverse-grapheme-takes-the-whole-cluster</c> entry keys on this.
+    /// </remarks>
+    /// <param name="row">The row to run.</param>
+    /// <returns>What this port answers with upstream's order, on the row's own deadline.</returns>
+    internal static IOracleOutcome? RunWithTheUpstreamReverseGrapheme(OracleRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return Run(
+            row,
+            row.Timeout is double budget ? TimeSpan.FromSeconds(budget) : RowTimeout,
+            lazy: false,
+            upstreamReverseGrapheme: true
         );
     }
 

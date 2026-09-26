@@ -224,6 +224,13 @@ internal sealed class PatternObject
     internal string? ReqStringText;
 
     /// <summary>
+    /// NOT UPSTREAM'S: every UTF-16 code unit that could hold the first character (in reading order)
+    /// of <see cref="ReqString"/> for <c>Engine.RequiredStringScreen</c>, which searches for these
+    /// with a vectorised scan before checking a window. Null when the screen does not apply.
+    /// </summary>
+    internal System.Buffers.SearchValues<char>? ReqScreenUnits;
+
+    /// <summary>
     /// Whether the compiled graph holds a <c>(*SKIP)</c>. <b>This port's own field</b> (S60):
     /// upstream has no equivalent because upstream does not need one.
     /// </summary>
@@ -542,6 +549,11 @@ internal sealed class PatternObject
             if (self.ReqString?.Op == Opcode.String && !reqChars.Any(static c => c is >= 0xD800 and <= 0xDFFF))
             {
                 self.ReqStringText = string.Concat(reqChars.Select(static c => char.ConvertFromUtf32(c)));
+            }
+
+            if (self.ReqString is Node screened)
+            {
+                self.ReqScreenUnits = RequiredStringScreen.FirstUnits(screened);
             }
         }
 

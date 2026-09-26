@@ -4403,3 +4403,48 @@ the forward `\X` already passes all 766 lines of `GraphemeBreakTest.txt`. Pinned
 `Gaps/Engine/DefaultWordBoundaryTests` (rows from the file, with its line numbers) and
 `Gaps/Engine/BoundaryTests.Default_word_boundary_breaks_between_an_apostrophe_and_a_vowel`;
 `ledger-reproductions.jsonl` re-checks upstream's answer to `(?w)a\b` over 'a:' U+0308 'a'.
+
+## 43. A reversed `\X` takes one codepoint, not a grapheme cluster - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. **DRAFT:** `entry-43-reverse-grapheme.md`, for the
+owner to approve. Found 2026-09-26 by running `(?r)\X` over every line of `GraphemeBreakTest.txt`
+after ledger entry 40 had done the same for word boundaries.
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26:
+
+```
+findall(r'\X', 'e\u0301a')                -> ['e\u0301', 'a']
+findall(r'(?r)\X', 'e\u0301a')            -> ['a', '\u0301']      expected ['a', 'e\u0301']
+search(r'(?r)\X{2}', 'e\u0301a')          -> span=(1, 3)         expected (0, 3)
+search(r'(?r)^\X', '\r\n')                 -> None                expected (0, 2)
+fullmatch(r'(?r)\X', 'e\u0301')           -> None                expected (0, 2)
+search(r'(?<=^\X)b', '\r\nb')              -> None                expected (2, 3)
+search(r'(?<!^\X)b', '\r\nb')              -> span=(2, 3)         expected None
+search(r'(?r)^\X', 'e\u0301', partial=True) -> span=(0, 0) partial expected (0, 2), not partial
+search(r'(?r)(?:a\X){s<=1}', 'be\u0301')   -> span=(1, 3)         expected (0, 3)
+```
+
+**Why upstream is wrong.** `upstream/README.rst:991`: "The grapheme matcher is supported. It
+conforms to the Unicode specification at http://www.unicode.org/reports/tr29/." Where a grapheme
+cluster starts and ends is a property of the text, and upstream's own comment on the node agrees:
+"Match at least 1 character until a grapheme boundary is reached. Note that this is the same
+whether matching forwards or backwards" (`upstream/regex/_regex_core.py:2921-2922`). The code
+under it builds one sequence for both directions, `Atomic(Sequence([LazyRepeat(AnyAll(), 1,
+None), GraphemeBoundary()]))`, and `Sequence._compile` reverses its items when compiling backwards
+(`:3594`). So a backwards `\X` tests the boundary first, at the position the match starts from,
+then takes one codepoint, and the atomic group stops it there. Run over the 766 lines of
+`GraphemeBreakTest-17.0.0.txt`, forward `\X` agrees with every line and `(?r)\X` disagrees with
+465. A lookbehind matches backwards, so `\X` inside one has the same fault.
+
+**Proposed fix upstream:** in `Grapheme._compile`, list the items boundary first when `reverse` is
+true, `Sequence([GraphemeBoundary(), LazyRepeat(AnyAll(), 1, None)])`, so that after the reversal
+the boundary is tested where the cluster stops. Forward code is unchanged.
+
+**This port.** `Grapheme.CompileCore` in `src/FuzzyRegex/Parsing/Nodes.cs` does exactly that, and
+`(?r)\X` then agrees with all 766 lines, reading each line's clusters last first. Pinned by
+`Gaps/Engine/ReverseGraphemeTests`: nine rows of the file, one per rule (GB3, GB4 with GB9, GB6,
+GB9, GB9a, GB9b, GB9c, GB11, GB12), the lookbehind rows above, a partial row and a fuzzy row.
+The default oracle wave drew twelve rows of this shape at its three seeds on 2026-09-26; the entry
+`reverse-grapheme-takes-the-whole-cluster` claims them only when compiling `\X` in upstream's order
+(`Info.UpstreamReverseGrapheme`) reproduces upstream's answer exactly. `ledger-reproductions.jsonl`
+re-checks upstream's answer to `(?r)\X{2}` over 'e' U+0301 'a'.
