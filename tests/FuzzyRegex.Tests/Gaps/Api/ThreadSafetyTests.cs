@@ -136,14 +136,14 @@ public sealed class ThreadSafetyTests
                 .OrderBy(static name => name, StringComparer.Ordinal),
         ];
 
-        // The allowlist names forty-nine, and under the JIT this set is exactly those forty-nine. A floor of
+        // The allowlist names fifty-four, and under the JIT this set is exactly those fifty-four. A floor of
         // thirty catches a reflection surface that has stopped reporting writability without
         // pinning the count, which the two subset rules already do between them.
         mutable
             .Should()
             .HaveCountGreaterThan(
                 30,
-                "the allowlist names forty-nine writable fields, so a near-empty answer means the "
+                "the allowlist names fifty-four writable fields, so a near-empty answer means the "
                     + "reflection surface stopped reporting writability - not that the engine "
                     + "became immutable"
             );
@@ -733,6 +733,9 @@ public sealed class ThreadSafetyTests
             "PatternObject.PublicGroupCount",
             "PatternObject.RepeatCount",
             "PatternObject.ReqFlags",
+            // Written once by Compile, beside ReqStringText; SearchValues is immutable and
+            // thread-safe. The screen's per-search cache lives on the MatchState.
+            "PatternObject.ReqScreenUnits",
             "PatternObject.ReqOffset",
             "PatternObject.ReqString",
             "PatternObject.ReqStringText",

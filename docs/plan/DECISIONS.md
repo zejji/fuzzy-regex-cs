@@ -1435,3 +1435,17 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   the existing ablations act on a compiled pattern and this fix changes the code itself. Not
   vendored, as for ledger entry 40: the test pins nine rows of the file, one per rule, and the
   full-file count was measured with a scratch driver.
+- 2026-09-26 (not a divergence): **a case-insensitive or reversed required string gets a screen
+  of this port's own, not upstream's locator arms.** The sweep found `(?i)(?:ss|ß)+x` over 25
+  U+00DF timing out at 3 s where upstream answers in microseconds: upstream refuses the subject in
+  `locate_required_string`'s `STRING_FLD` arm (`_regex.c:11143-11365`), which this port had never
+  ported, so it ran the exponential search. Upstream's arms are not transparent (entry of
+  2026-08-31: `string_search_fld` compares with `same_char_ign_turkic`, and the arms hand the
+  matcher a `req_pos` it skips without comparing), so `Engine.RequiredStringScreen` does not copy
+  them. It refuses a subject only when no window could hold the string under a rule looser than any
+  the matcher applies (a case of the subject character equal ignoring case, or the full folding of
+  a case spelling the next required characters, cut short at either end), jumps the start only at
+  offset 0, where the string is the first consuming item, never sets `req_pos`, and stands aside for
+  partial matching. On 90,000 generated rows (folded literals, all five opcodes, captures, fuzzy,
+  lookarounds, partial, overlapped, slices, `BESTMATCH`/`ENHANCEMATCH`) every answer equals the one
+  before it wherever the old code answered. Beyond upstream, `STRING_REV` is screened too.
