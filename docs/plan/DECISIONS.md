@@ -1422,3 +1422,16 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   data under Unicode's terms of use, so the test pins 15 rows (12 from the file, with line numbers)
   and the full-file count was measured with a scratch driver; vendoring it would be the upgrade if
   the rules are touched again.
+- 2026-09-26 (ledger entry 43): **a backwards `\X` takes a whole grapheme cluster, so `(?r)\X` and
+  a lookbehind holding `\X` find the same clusters as forward `\X`**, where upstream and this port
+  both stopped after one codepoint and failed 465 of the 766 lines of `GraphemeBreakTest.txt`
+  17.0.0 in reverse. The README says `\X` conforms to UAX #29 and upstream's own comment on the node
+  says the match is the same in both directions, so the conformance file, read last cluster first,
+  is the reference; inherited, so fixed under the no-known-bugs rule and pinned as a divergence.
+  The change is the order of two items in `Grapheme.CompileCore` when compiling backwards; forward
+  code, and so compile parity, is unchanged. The oracle claims the rows it draws of this shape only
+  when compiling in upstream's order reproduces upstream's answer, which needed a compile-time
+  switch (`Info.UpstreamReverseGrapheme`, threaded from `FuzzyRegex.WithDefaultVersion`) because
+  the existing ablations act on a compiled pattern and this fix changes the code itself. Not
+  vendored, as for ledger entry 40: the test pins nine rows of the file, one per rule, and the
+  full-file count was measured with a scratch driver.

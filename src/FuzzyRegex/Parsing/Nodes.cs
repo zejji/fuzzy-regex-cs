@@ -4359,32 +4359,55 @@ internal sealed class Grapheme : RegexBase
     /// is a grapheme boundary. Upstream gives it none, so <c>(?a:\X)</c> took 'e\u0301' whole where
     /// <c>(?a)\X</c> takes 'e' (regex 2026.9.10, 2026-09-25).
     /// </param>
-    internal Grapheme(int encoding = 0)
+    /// <param name="upstreamReverse">
+    /// NOT UPSTREAM: compile backwards in upstream's order, for the oracle only. See
+    /// <see cref="Info.UpstreamReverseGrapheme"/>.
+    /// </param>
+    internal Grapheme(int encoding = 0, bool upstreamReverse = false)
     {
         Encoding = encoding;
+        UpstreamReverse = upstreamReverse;
     }
 
     /// <summary>The encoding tag, one of <see cref="RegexFlags.AsciiEncoding"/> and friends, or 0.</summary>
     internal int Encoding { get; }
 
+    /// <summary>Whether this compiles backwards in upstream's order; see <see cref="Info.UpstreamReverseGrapheme"/>.</summary>
+    internal bool UpstreamReverse { get; }
+
     /// <inheritdoc />
     internal override long MaxWidth() => RegexFlags.Unlimited;
 
     /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is Grapheme other && Encoding == other.Encoding;
+    public override bool Equals(object? obj) =>
+        obj is Grapheme other && Encoding == other.Encoding && UpstreamReverse == other.UpstreamReverse;
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(typeof(Grapheme), Encoding);
+    public override int GetHashCode() => HashCode.Combine(typeof(Grapheme), Encoding, UpstreamReverse);
 
     /// <inheritdoc />
     /// <remarks>
-    /// Match at least 1 character until a grapheme boundary is reached. Note that this is the same
-    /// whether matching forwards or backwards.
+    /// <para>
+    /// Match at least one character, then stop at the first grapheme boundary. Upstream's comment
+    /// says this "is the same whether matching forwards or backwards", but its code builds one
+    /// sequence, characters then boundary, for both directions. A reversed <see cref="Sequence"/>
+    /// runs its items from the right, so going backwards the boundary was tested before any
+    /// character, where the match starts, and the repeat then stopped after one codepoint:
+    /// <c>(?r)\X</c> split 'e\u0301' in two and a lookbehind holding <c>\X</c> saw one codepoint.
+    /// </para>
+    /// <para>
+    /// DELIBERATE DIVERGENCE, ledger entry 43: going backwards the items are listed boundary first,
+    /// so that after the reversal the boundary is tested at the far end, where the cluster stops.
+    /// The code compiled forwards is upstream's. Pinned by <c>Gaps/Engine/ReverseGraphemeTests</c>;
+    /// <see cref="UpstreamReverse"/> restores upstream's order for the oracle.
+    /// </para>
     /// </remarks>
     protected override List<uint[]> CompileCore(bool reverse, bool fuzzy)
     {
+        var characters = new LazyRepeat(new AnyAll(), 1, null);
+        var boundary = new GraphemeBoundary(Encoding);
         var graphemeMatcher = new Atomic(
-            new Sequence([new LazyRepeat(new AnyAll(), 1, null), new GraphemeBoundary(Encoding)])
+            new Sequence(reverse && !UpstreamReverse ? [boundary, characters] : [characters, boundary])
         );
 
         return graphemeMatcher.Compile(reverse, fuzzy);

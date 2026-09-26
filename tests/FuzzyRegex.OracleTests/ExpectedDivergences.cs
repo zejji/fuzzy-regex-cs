@@ -3008,6 +3008,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// Five of the twelve rows of <c>reverse-grapheme-takes-the-whole-cluster</c> that the default
+    /// wave drew on 2026-09-26, one per shape; the entry's reason judges each against UAX #29.
+    /// </summary>
+    private const string _reverseGraphemeRows = """
+        {"generator": "iteration", "pattern": "(?r)\\X", "flags": 0, "namedLists": {}, "subject": ":\u200da\ud83d\ude00", "operation": "finditer-overlapped", "codepointSpan": null, "outcome": {"kind": "matches", "matches": [{"groups": [{"number": 0, "success": true, "index": 3, "length": 2, "captures": [[3, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [3, 4]}, {"groups": [{"number": 0, "success": true, "index": 2, "length": 1, "captures": [[2, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [2, 3]}, {"groups": [{"number": 0, "success": true, "index": 1, "length": 1, "captures": [[1, 1]]}], "lastIndex": -1, "lastGroup": null, "partial": false, "codepointSpan": [1, 2]}]}}
+        {"generator": "reverse", "pattern": "(?r)\\X", "flags": 0, "namedLists": {}, "subject": "\ud83c\udffb\ud83c\udffb", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "reverse", "pattern": "(?r)(?w)\\X{2}", "flags": 0, "namedLists": {}, "subject": "'\u0915\u094d\u0937a\u00c0\u0300\r\n\u00c0", "operation": "search", "codepointSpan": [8, 10], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 8, "length": 2, "captures": [[8, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "reverse", "pattern": "(?r)(?V1)\\X+?", "flags": 0, "namedLists": {}, "subject": "\ud835\udd18\u2028can't\ud835\udd18\ud83c\udde7\ud83c\udffb\ud83c\udffb", "operation": "fullmatch", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "substitution", "pattern": "(?r)(\ud835\udfee*?)(\\X)+", "flags": 0, "namedLists": {}, "subject": "a\ud83c\udffbb\ud83c\udffb\ud835\udd18\ud83c\udffb\ud835\udd18", "operation": "subf", "template": "{2[-1]}-", "count": 3, "codepointSpan": null, "outcome": {"kind": "sub", "text": "a\ud83c\udffb-b\ud83c\udffb-\ud835\udd18\ud83c\udffb-", "count": 3}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s85-leftover-take-back-rows.jsonl</c> on
     /// 2026-09-23.
@@ -6671,6 +6683,40 @@ internal static class ExpectedDivergences
             Example: _upstreamDefaultBoundaryRows,
             Applies: static (row, ours) =>
                 OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamDefaultBoundary(row))
+        ),
+        new(
+            Id: "reverse-grapheme-takes-the-whole-cluster",
+            Reason: "A BACKWARDS \\X TAKES A WHOLE GRAPHEME CLUSTER HERE, AND ONE CODEPOINT UPSTREAM. "
+                + "Ledger entry 43; fixed 2026-09-26 under the owner's no-known-bugs rule and recorded "
+                + "as a deliberate divergence in `docs/DIVERGENCES.md`. `upstream/README.rst:991` says "
+                + "\\X conforms to UAX #29, and upstream's own comment says the match is \"the same "
+                + "whether matching forwards or backwards\" (`_regex_core.py:2921-2922`), but it "
+                + "compiles one sequence, characters then boundary, for both directions, and a "
+                + "reversed sequence runs from the right (`:3594`). So under (?r), and in a "
+                + "lookbehind, the boundary is tested where the cluster starts and the repeat stops "
+                + "after one codepoint. Upstream fails 465 of the 766 lines of GraphemeBreakTest.txt "
+                + "17.0.0 in reverse; this port fails none either way.\n"
+                + "THE ROWS, each judged against UAX #29 on 2026-09-26; upstream's own forward \\X "
+                + "gives the same clusters for every subject. Seed 7 row 3392, overlapped over ':' "
+                + "ZWJ 'a' U+1F600: GB9 joins the ZWJ to the colon, so from position 2 the cluster is "
+                + "(0, 2), where upstream tests a boundary at 2, finds none and skips it. Seed 4242 row "
+                + "2727, fullmatch over two U+1F3FB: an emoji modifier is Extend, so GB9 makes one "
+                + "cluster (0, 4). Seed 4242 row 2806, (?w)\\X{2} searched backwards: the last two "
+                + "clusters are CR LF (GB3) and U+00C0, (7, 3). Seed 20260926 row 2960, fullmatch of "
+                + "\\X+? over a text ending in U+1F1E7 and two U+1F3FB: every piece is a cluster, so the "
+                + "whole text matches, where upstream finds no boundary between the two modifiers. "
+                + "Seed 7 row 3020, a reversed sub whose (\\X)+ takes all four clusters in one match, "
+                + "leaving one substitution where upstream makes three.\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamReverseGrapheme`, which compiles a backwards \\X "
+                + "in upstream's order (`Info.UpstreamReverseGrapheme`), reproduces upstream's "
+                + "recorded answer exactly, AND this port's live answer is the one being judged. A row "
+                + "this port gets wrong for any other reason still diverges with upstream's order and "
+                + "is reported.",
+            PinnedBy: "ReverseGraphemeTests",
+            Example: _reverseGraphemeRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamReverseGrapheme(row))
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",
