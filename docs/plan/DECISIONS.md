@@ -1394,3 +1394,16 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   search, and a lazy repeat of one character misses a full-folded literal starting at its last
   position. Perl 5.42.3 agrees with this port on both and CPython's `re` on the second. Drafts in
   `docs/plan/upstream-reports/`, not filed.
+- 2026-09-26 (ledger entry 39): **a fuzzy constraint that allows no errors is kept wherever it can
+  matter.** Upstream drops `{e<=0}`, `{e<1}` and `{s<=0,i<=0,d<=0}` at parse time but keeps the
+  same budget spelt `{d<=0}` or `{1s+1i+1d<=0}`, so the first three neither cap a nested section's
+  errors nor protect their text from an enclosing budget, which defeats upstream issue 306. Found by
+  the overnight sweep; inherited, so fixed under the no-known-bugs rule. A zero section is removed
+  from the tree only when nothing inside it can make errors, so a pattern with no other fuzzy
+  section compiles exactly as upstream's. Two choices: `a{e<=0}{e<=1}` now applies the second
+  constraint to the zero section, as `(?:a{d<=0}){e<=1}` does, while `a{e<=1}{e<=0}` still ignores
+  the zero one, so every pattern upstream accepts still parses; and a pattern holding a group call
+  and any error budget keeps every zero section (`(ab){e<=0}x(?:(?1)){e<=1}` lost the cap on the
+  called copy otherwise), which costs speed on such patterns but never an answer. The sweep's
+  atomic-group case (`(?:x++y){e<=1}` over 'xy' has no match though `{e<=0}` has one) is upstream's
+  documented atomic semantics and is pinned as agreed, with the budget-monotone invariant narrowed.

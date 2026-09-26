@@ -307,6 +307,17 @@ over the same slice by the same call without `partial`.
 **Ground.** The looser budget's acceptable-edit set is a superset of the tighter one's. Every match
 of the tighter is a match of the looser.
 
+**NARROWED 2026-09-26: the ground is false where an atomic group or a possessive repeat sits inside
+the fuzzy section.** An atomic group fails as a whole once it has matched (README.rst:830), and a
+possessive repeat is one (`x++` is `(?>(?:x)+)`, :837). A looser budget can let the group commit to
+a path the tighter budget never reached, and it cannot give that path back, so the match the
+tighter budget found is lost. Both engines agree: `match('(?:x++y){e<=0}', 'xy')` is (0, 2),
+`{e<=1}` is None, and `{e<=2}` is (0, 2) with a substitution and a deletion (regex 2026.9.10 and
+this port, 2026-09-26, pinned by `FuzzyZeroBudgetTests`). The same happens with no fuzzy matching:
+`(?>x{0,1})x` finds nothing in 'x' where `(?>x{0,0})x` matches it. So the invariant applies only to
+a fuzzy section with no atomic group and no possessive repeat inside it; a violation in a section
+that has one is by design. No checker implements it yet.
+
 **Calibration.** Ledger 20 (upstream issue 564, which is this property named as a bug report), 19
 (`\m` before a fuzzy section does not match at position 0 - upstream issue 563).
 

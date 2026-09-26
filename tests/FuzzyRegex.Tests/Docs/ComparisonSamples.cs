@@ -456,4 +456,17 @@ public sealed class ComparisonSamples
         FuzzyRegex.Match("ass", "(?i)[^k]??ss").Index.Should().Be(0);
         FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success.Should().BeTrue();
     }
+
+    /// <summary>
+    /// "A fuzzy constraint that allows no errors limits the errors made inside it, whichever way it
+    /// is written".
+    /// </summary>
+    [Test]
+    public void A_fuzzy_constraint_that_allows_no_errors_limits_the_errors_made_inside_it()
+    {
+        var inner = new FuzzyRegex("(?:c(?:ab){e<=0}){e<=1}");
+
+        inner.MatchAtStart("cax").Success.Should().BeFalse();
+        inner.MatchAtStart("xab").Success.Should().BeTrue();
+    }
 }

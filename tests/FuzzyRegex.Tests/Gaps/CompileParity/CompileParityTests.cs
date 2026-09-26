@@ -56,7 +56,17 @@ public sealed class CompileParityTests
     /// corpus row <c>(?|(?&lt;a&gt;a)(?&lt;b&gt;b)|(?&lt;b&gt;c)(d))(e)</c>.
     /// </para>
     /// <para>
-    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a sixth
+    /// The sixth is ledger entry 39's. Upstream's parser drops a fuzzy constraint that allows no
+    /// errors, so in <c>(?e)(dogf(((oo){e&lt;1})|((00){e&lt;1}))d){e&lt;2}</c> the two inner
+    /// <c>{e&lt;1}</c> sections vanish and the outer budget reaches <c>oo</c> and <c>00</c>, which
+    /// is the very scoping upstream issue 306 asked for. This port keeps them (see
+    /// <c>Fuzzy.IsExact</c> and <c>docs/DIVERGENCES.md</c>), so each adds its <c>FUZZY</c> node and
+    /// the matching <c>END</c>: 30 more words, and nothing else moves. A zero constraint that no
+    /// error can reach is still dropped, which keeps every other corpus row identical, the
+    /// sequence-of-sections DNA pattern with its two <c>{e&lt;=0}</c> groups among them.
+    /// </para>
+    /// <para>
+    /// The assertion for a listed row is that it STILL diverges, so the list cannot rot: a seventh
     /// row that starts diverging fails the equality below, and a listed row that stops diverging
     /// fails the inequality. Re-recording the corpus against a newer <c>regex</c> gets the same
     /// alarm either way.
@@ -69,6 +79,7 @@ public sealed class CompileParityTests
         ["(?i)\\Aı\\Z"] = "S45, Turkic case data",
         ["(?iV1)[\\w--a]"] = "S45, Turkic case data",
         ["(?|(?<a>a)(?<b>b)|(c)(?<a>d))(e)"] = "S82, branch-reset group numbering",
+        ["(?e)(dogf(((oo){e<1})|((00){e<1}))d){e<2}"] = "ledger 39, zero-error sections kept",
     };
 
     [Test]

@@ -4283,3 +4283,67 @@ switch, which tries the tail at each position in turn; the string arms are not p
 slice that ports them must pass the literal's extent. No upstream issue covers it; #227 (2016) is
 the same family but a different defect, and fixed. Pinned by
 `Gaps/Engine/RepeatTests.A_lazy_repeat_finds_a_full_folded_literal_at_its_maximum`.
+## 39. A fuzzy constraint that allows no errors is dropped, so it stops limiting the sections beside it - FIXED HERE (2026-09-26)
+
+**Status:** not filed, per the owner's rule. Draft: `entry-39-zero-error-constraint.md`. Found
+2026-09-26 by the triage of the scheduled sweep's fuzzy findings (finding F-C).
+
+**Reproduction**, `regex` 2026.9.10, measured 2026-09-26:
+
+```
+match('(?:(?:ab){s<=1,d<=1}){e<=0}', 'x')            -> span=(0, 1) fuzzy_counts=(1, 0, 1)
+match('(?:(?:ab){s<=1,d<=1}){d<=0}', 'x')            -> None
+match('(?:c(?:ab){e<=0}){e<=1}', 'cax')              -> span=(0, 3) fuzzy_counts=(1, 0, 0)
+match('(?:c(?:ab){d<=0}){e<=1}', 'cax')              -> None
+search('(dogf(((oo){e<1})|((00){e<1}))d){e<2}', 'dogfxod')  -> span=(0, 7) fuzzy_counts=(1, 0, 0)
+search('(dogf(((oo){d<1})|((00){d<1}))d){e<2}', 'dogfxod')  -> None
+search('(ab){e<=0}x(?:(?1)){e<=1}', 'abxax')         -> span=(0, 5) fuzzy_counts=(1, 0, 0)
+search('(ab){d<=0}x(?:(?1)){e<=1}', 'abxax')         -> None
+```
+
+`{e<1}` and `{s<=0,i<=0,d<=0}` answer as `{e<=0}` does on every row, and `{1s+1i+1d<=0}` as
+`{d<=0}` does. (`{1e<=0}` is not a constraint at all: `e` is not a cost term, so the braces are
+literal text and the pattern needs a literal `{1e<=0}` in the subject.)
+
+**Why upstream is wrong.** README.rst:560 says "If a certain type of error is specified, then any
+type not specified will **not** be permitted", and :564 reads `{d<=3}` as "permit at most 3
+deletions, but no other types". So `{d<=0}` allows no errors, exactly as `{e<=0}` does, and two
+spellings of one budget give two answers. Upstream issue 306 (2019, "Fuzzy match parameters not
+respecting quantifier scope", closed as fixed) asked for an inner constraint to scope the errors
+made inside it, and upstream does that for `{d<=0}`. Issue 306's own pattern is
+the third row pair above: the inner `{e<1}` sections should keep `oo` and `00` exact, and the
+search finds `'dogfxod'` with the outer budget spent on the `x`. The issue's test rows in
+`test_regex.py` use `(?e)` over `'dogfood'` and `'dogfoot'`, where the answer happens not to depend
+on the inner sections, so they pass either way.
+
+**Mechanism.** `parse_sequence` (`_regex_core.py:527-533`) calls `is_actually_fuzzy` (`:548-556`)
+on the constraints as written and applies them only if it says yes. It says no when `e` is written
+as `(0, 0)`, or when all three of `s`, `i` and `d` are. The node is never built, so an outer zero
+constraint no longer caps an inner section, an inner one no longer keeps the outer budget off its
+subpattern, and a group that carries one no longer carries it into a fuzzy call. `{d<=0}` is not
+caught because the check runs before `Fuzzy.__init__` fills in the defaults.
+
+**This port.** The parser always applies the constraint and records whether it allowed no errors
+as written (`Fuzzy.IsExact`). Straight after parsing, `PatternCompiler` replaces such a section with
+its subpattern wherever no error can reach it: no fuzzy section around it, none inside it, and no
+group call in a pattern that allows errors anywhere. That leaves upstream's tree, and so its
+bytecode, for every pattern where dropping the constraint cannot change an answer, including a
+lone `a{e<=0}`, sibling sections, and the DNA pattern of the compile-parity corpus with its two
+`{e<=0}` groups. The one corpus row that moves is issue 306's, which gains the two inner `FUZZY`
+nodes and their `END`s. Parsing accepts what upstream accepts: a zero constraint with nothing
+before it, or after a quantifier or another constraint, is still ignored, and one that is applied
+adds no marker, so `a{e<=0}*` still parses. A constraint written after it then applies to it, so
+`a{e<=0}{e<=1}` over `'b'` is no match here, as `(?:a{d<=0}){e<=1}` is upstream; upstream gives
+(0, 1) with one substitution, and `a{d<=0}{e<=1}` is a parse error there.
+
+Over a grid of 77,004 rows (the three dropped spellings as an outer cap, an inner section with and
+without trailing text, a sibling, a repeat inside and outside, a called group, and bare, each over
+every subject up to four characters of `ab` with `match`, `search` and `fullmatch`), the port
+gives upstream's `{d<=0}` answer on every row: 63,249 agree with upstream outright and 13,755
+differ only where upstream's spelling-dependent answer differs from its own `{d<=0}` one.
+
+**Proposed fix upstream:** delete the `is_actually_fuzzy` check, or run it after `Fuzzy.__init__`
+and apply it only to a section with no fuzzy section around it or inside it.
+
+**Tests.** `Gaps/Engine/FuzzyZeroBudgetTests.cs`; `CompileParityTests` pins issue 306's corpus row
+as diverging; `ledger-reproductions.jsonl` re-checks upstream's answer to the issue 306 row.

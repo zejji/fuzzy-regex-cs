@@ -1307,6 +1307,29 @@ Console.WriteLine(m.Index);                                           // 0 - ups
 Console.WriteLine(FuzzyRegex.Match("aass", "(?i)a{0,2}?ss").Success);  // True - upstream: no match
 ```
 
+### A fuzzy constraint that allows no errors limits the errors made inside it, whichever way it is written
+
+`{e<=0}`, `{e<1}` and `{s<=0,i<=0,d<=0}` allow no errors, and so do `{d<=0}` and
+`{1s+1i+1d<=0}`, because naming one kind of error rules out the others. Upstream's parser throws
+the first three away and keeps the last two. On their own that makes no difference, but next to
+another fuzzy section it does: a zero constraint around a section should stop that section making
+errors, and one inside a section should keep the outer budget off its own text. Here every
+spelling does both.
+
+```csharp
+using Fuzzy.Text.RegularExpressions;
+
+// The inner (?:ab) must match exactly, so the outer budget cannot pay for the x.
+var inner = new FuzzyRegex("(?:c(?:ab){e<=0}){e<=1}");
+Console.WriteLine(inner.MatchAtStart("cax").Success);   // False - upstream: True
+Console.WriteLine(inner.MatchAtStart("xab").Success);   // True - the x for the c is outside it
+```
+
+Upstream issue 306 asked for exactly this, and its pattern `(dogf(((oo){e<1})|((00){e<1}))d){e<2}`
+still finds `dogfxod` upstream. A zero constraint with no other fuzzy section involved answers as
+before and costs nothing, since it compiles to the same code as the pattern without it. There is
+no option to restore the upstream answer; deleting the constraint from the pattern gives it.
+
 ### Inherited upstream bugs are fixed here
 
 Several bugs that exist in upstream's own C engine are fixed in this port rather than reproduced,
