@@ -2996,6 +2996,18 @@ internal static class ExpectedDivergences
         """;
 
     /// <summary>
+    /// The five rows of <c>default-word-boundary-follows-uax29</c>, from the <c>boundaries</c> wave
+    /// generator; the entry's reason judges each against UAX #29.
+    /// </summary>
+    private const string _upstreamDefaultBoundaryRows = """
+        {"generator": "boundaries", "pattern": "(?w)\ud83c\udde7\\b\ud835\udfee", "flags": 0, "namedLists": {}, "subject": "\ud83c\udde7\ud835\udfee\u0085\ud83c\udffb\u2028\u200d", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "boundaries", "pattern": "(?V1w)\u200d\\b", "flags": 0, "namedLists": {}, "subject": "\u200d\ud835\udfee\ud83c\uddec\r\ud835\udd18\ud83c\udffb\r\n", "operation": "match", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "boundaries", "pattern": "(?V1w)\u0300\\B\\ ", "flags": 0, "namedLists": {}, "subject": "\u0300 \u0131\u00e9\u0130\na'", "operation": "match", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 2, "captures": [[0, 2]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        {"generator": "boundaries", "pattern": "(?V1w)\u0300\\b\\ ", "flags": 0, "namedLists": {}, "subject": "\u0300 ", "operation": "search", "codepointSpan": null, "outcome": {"kind": "nomatch"}}
+        {"generator": "boundaries", "pattern": "(?w)\ud83c\uddec\\B\ud83d\ude00", "flags": 0, "namedLists": {}, "subject": "\ud83c\uddec\ud83d\ude00\ud83d\ude00\ud83c\uddec\ud83c\udffb", "operation": "search", "codepointSpan": [0, 2], "outcome": {"kind": "match", "groups": [{"number": 0, "success": true, "index": 0, "length": 4, "captures": [[0, 4]]}], "lastIndex": -1, "lastGroup": null, "partial": false}}
+        """;
+
+    /// <summary>
     /// The eight rows of <c>full-fold-leftover-take-back</c>, what is recorded by
     /// <c>python tools/record-oracle.py --rows tools/probes/s85-leftover-take-back-rows.jsonl</c> on
     /// 2026-09-23.
@@ -6624,6 +6636,41 @@ internal static class ExpectedDivergences
                         )
                     )
                 )
+        ),
+        new(
+            Id: "default-word-boundary-follows-uax29",
+            Reason: "THE WORD FLAG'S BOUNDARY IS UNICODE'S DEFAULT ONE HERE AND NOT UPSTREAM. Ledger "
+                + "entry 40; fixed 2026-09-26 under the owner's no-known-bugs rule and recorded as a "
+                + "deliberate divergence in `docs/DIVERGENCES.md`. `upstream/README.rst:1011` promises "
+                + "\"a default Unicode word boundary\"; this port passes all 1,944 lines of Unicode "
+                + "17.0.0's WordBreakTest.txt and upstream fails 268, for three reasons in "
+                + "`unicode_at_default_boundary`: UAX #29 WB4 is applied only to the character on the "
+                + "left, and a run of Extend, Format or ZWJ that reaches the start of the text answers "
+                + "\"no break\" (`_regex.c:1595`) where WB4's \"except after sot\" leaves it standing "
+                + "alone; WB15/WB16 keep an odd run of regional indicators with whatever follows, not "
+                + "only another regional indicator (`:1737`); and a WB5a that is no default rule joins "
+                + "an apostrophe to a vowel.\n"
+                + "THE ROWS, each judged against UAX #29 rev 47 by hand on 2026-09-26. Seed 7 row "
+                + "1820: U+1F1E7 then U+1D7EE (Numeric); WB15/WB16 need a regional indicator on the "
+                + "right, so WB999 breaks and `\\b` holds (WordBreakTest line 829 is the same pair "
+                + "with '0'). Seed 7 row 1952: ZWJ at the start, then U+1D7EE; WB3c needs an "
+                + "Extended_Pictographic on the right, and after sot WB4 does not absorb the ZWJ, so "
+                + "WB999 breaks (line 1069). Seed 4242 row 1910 and seed 20260926 row 2014: U+0300 at "
+                + "the start, then a space; WB3d needs WSegSpace on both sides, so WB999 breaks and "
+                + "`\\B` fails, `\\b` holds (line 245). Seed 20260926 row 2056: U+1F1EC then U+1F600 "
+                + "(Extended_Pictographic, word-break Other); WB999 breaks and `\\B` fails (line 843 "
+                + "is the same pair with U+00A9).\n"
+                + "KEYED ON AN ABLATION: a row belongs here only when "
+                + "`OracleComparer.RunWithTheUpstreamDefaultBoundary`, which sets "
+                + "`PatternObject.UpstreamDefaultBoundary` so the matcher runs upstream's function as "
+                + "it stands, reproduces upstream's recorded answer exactly, AND this port's live "
+                + "answer is the one being judged. A (?w) row this port gets wrong for any other "
+                + "reason still diverges with upstream's boundary and is reported.",
+            PinnedBy: "DefaultWordBoundaryTests and BoundaryTests.Default_word_boundary_breaks_between_an_"
+                + "apostrophe_and_a_vowel",
+            Example: _upstreamDefaultBoundaryRows,
+            Applies: static (row, ours) =>
+                OnlyTheAblationExplainsIt(row, ours, OracleComparer.RunWithTheUpstreamDefaultBoundary(row))
         ),
         new(
             Id: "boundary-at-the-end-of-the-text",

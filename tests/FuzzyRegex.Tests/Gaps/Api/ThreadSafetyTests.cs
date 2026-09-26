@@ -710,6 +710,9 @@ public sealed class ThreadSafetyTests
             // S89 added DoubleCountTrailingInsertions, likewise set only by
             // OracleComparer.RunWithTheDoubledInsertionGuard.
             "PatternObject.DoubleCountTrailingInsertions",
+            // Ledger entry 40 added UpstreamDefaultBoundary, likewise set only by
+            // OracleComparer.RunWithTheUpstreamDefaultBoundary.
+            "PatternObject.UpstreamDefaultBoundary",
             "PatternObject.DoSearchStart",
             "PatternObject.Flags",
             "PatternObject.FuzzyCount",

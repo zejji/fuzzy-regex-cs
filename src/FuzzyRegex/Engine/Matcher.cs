@@ -1302,6 +1302,24 @@ internal static class Matcher
     /// </summary>
     /// <remarks>
     /// <para>
+    /// DIVERGES FROM UPSTREAM, deliberately (2026-09-26, ledger entry 40): this follows UAX #29
+    /// revision 47, the Unicode 17.0.0 version the tables are, and passes all 1,944 lines of its
+    /// <c>WordBreakTest.txt</c>, where upstream fails 268. Upstream's README promises "a default
+    /// Unicode word boundary" (<c>upstream/README.rst:1011</c>). Three differences:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>WB4, "Ignore Format and Extend characters, except after sot, CR, LF, and Newline",
+    /// applies on both sides. Upstream skipped them only for the character to the left, so WB6,
+    /// WB7, WB7b, WB7c, WB11, WB12 and WB15/WB16 read an ignored character as the neighbour two away,
+    /// and a run of them at the start of the text joined what followed instead of standing alone:
+    /// <c>(?w)\b</c> over 'a:' U+0308 'a' broke after the 'a'.</item>
+    /// <item>WB15/WB16 keep regional indicators together only before another one, as
+    /// <c>sot (RI RI)* RI × RI</c> says. Upstream kept an odd run together with whatever followed.</item>
+    /// <item>Upstream's WB5a, which kept an apostrophe with a following vowel, is gone. It is not a
+    /// default rule; UAX #29 offers "apostrophe ÷ vowels" only as a tailoring for French and Italian,
+    /// and that breaks where upstream joined.</item>
+    /// </list>
+    /// <para>
     /// Upstream's <c>left_pos</c> is inclusive - the index of the character to the left - and its
     /// <c>left_pos - 1</c> and <c>right_pos + 1</c> are the characters beyond those, which in UTF-16
     /// are <see cref="MatchState.PrevPos"/> and <see cref="MatchState.NextPos"/> rather than
@@ -1318,6 +1336,313 @@ internal static class Matcher
     /// <param name="textPos">The position.</param>
     /// <returns><see langword="true"/> if a default word boundary is there.</returns>
     internal static bool AtDefaultBoundary(MatchState state, int textPos)
+    {
+        // The oracle's ablation for ledger entry 40; never set by the library.
+        if (state.Pattern.UpstreamDefaultBoundary)
+        {
+            return AtUpstreamDefaultBoundary(state, textPos);
+        }
+
+        // Break at the start and end of text, unless the text is empty.
+        // WB1 and WB2
+        if (textPos <= state.TextStart || textPos >= state.TextEnd)
+        {
+            return state.TextEnd > state.TextStart;
+        }
+
+        int leftPos = state.PrevPos(textPos);
+        int rightPos = textPos;
+        uint leftChar = state.CharAt(leftPos);
+        uint rightChar = state.CharAt(rightPos);
+
+        // Do not break within CRLF.
+        // WB3
+        uint leftProp = UnicodeTables.GetWordBreak(leftChar);
+        uint rightProp = UnicodeTables.GetWordBreak(rightChar);
+
+        if (leftProp == UnicodeTables.WbreakCr && rightProp == UnicodeTables.WbreakLf)
+        {
+            return false;
+        }
+
+        // Otherwise break before and after Newlines (including CR and LF).
+        // WB3a
+        if (IsWordBreakNewline(leftProp))
+        {
+            return true;
+        }
+
+        // WB3b
+        if (IsWordBreakNewline(rightProp))
+        {
+            return true;
+        }
+
+        // Do not break within emoji zwj sequences.
+        // WB3c
+        if (leftProp == UnicodeTables.WbreakZwj && UnicodeTables.GetExtendedPictographic(rightChar) != 0)
+        {
+            return false;
+        }
+
+        // Keep horizontal whitespace together.
+        // WB3d
+        if (leftProp == UnicodeTables.WbreakWsegspace && rightProp == UnicodeTables.WbreakWsegspace)
+        {
+            return false;
+        }
+
+        // Ignore Format and Extend characters, except after sot, CR, LF, and Newline. This also has
+        // the effect of: Any x (Format || Extend || ZWJ)
+        // WB4
+        if (IsWordBreakIgnored(rightProp))
+        {
+            return false;
+        }
+
+        // From here on every rule sees the text with the ignored characters taken out: each one
+        // belongs to the character before it, unless that is the start of the text or a line
+        // break, and then it stands alone and matches no rule below. The same goes for the
+        // characters two away that WB6, WB7, WB7b, WB7c, WB11 and WB12 look at.
+        leftPos = SkipIgnoredLeft(state, leftPos);
+        leftProp = UnicodeTables.GetWordBreak(state.CharAt(leftPos));
+
+        int leftLeftPos = SkipIgnoredLeft(state, state.PrevPos(leftPos));
+        uint leftLeftProp =
+            leftLeftPos >= state.TextStart && leftPos > state.TextStart
+                ? UnicodeTables.GetWordBreak(state.CharAt(leftLeftPos))
+                : 0;
+
+        int rightRightPos = SkipIgnoredRight(state, state.NextPos(rightPos));
+        uint rightRightProp =
+            rightRightPos < state.TextEnd ? UnicodeTables.GetWordBreak(state.CharAt(rightRightPos)) : 0;
+
+        // Do not break between most letters.
+        // WB5
+        if (IsAhLetter(leftProp) && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Do not break letters across certain punctuation.
+        // WB6
+        if (
+            IsAhLetter(leftProp)
+            && (rightProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(rightProp))
+            && IsAhLetter(rightRightProp)
+        )
+        {
+            return false;
+        }
+
+        // WB7
+        if (
+            IsAhLetter(leftLeftProp)
+            && (leftProp == UnicodeTables.WbreakMidletter || IsMidNumLetQ(leftProp))
+            && IsAhLetter(rightProp)
+        )
+        {
+            return false;
+        }
+
+        // WB7a
+        if (leftProp == UnicodeTables.WbreakHebrewletter && rightProp == UnicodeTables.WbreakSinglequote)
+        {
+            return false;
+        }
+
+        // WB7b
+        if (
+            leftProp == UnicodeTables.WbreakHebrewletter
+            && rightProp == UnicodeTables.WbreakDoublequote
+            && rightRightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // WB7c
+        if (
+            leftLeftProp == UnicodeTables.WbreakHebrewletter
+            && leftProp == UnicodeTables.WbreakDoublequote
+            && rightProp == UnicodeTables.WbreakHebrewletter
+        )
+        {
+            return false;
+        }
+
+        // Do not break within sequences of digits, or digits adjacent to letters ("3a", or "A3").
+        // WB8
+        if (leftProp == UnicodeTables.WbreakNumeric && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB9
+        if (IsAhLetter(leftProp) && rightProp == UnicodeTables.WbreakNumeric)
+        {
+            return false;
+        }
+
+        // WB10
+        if (leftProp == UnicodeTables.WbreakNumeric && IsAhLetter(rightProp))
+        {
+            return false;
+        }
+
+        // Do not break within sequences, such as "3.2" or "3,456.789".
+        // WB11
+        if (
+            leftLeftProp == UnicodeTables.WbreakNumeric
+            && (leftProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(leftProp))
+            && rightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // WB12
+        if (
+            leftProp == UnicodeTables.WbreakNumeric
+            && (rightProp == UnicodeTables.WbreakMidnum || IsMidNumLetQ(rightProp))
+            && rightRightProp == UnicodeTables.WbreakNumeric
+        )
+        {
+            return false;
+        }
+
+        // Do not break between Katakana.
+        // WB13
+        if (leftProp == UnicodeTables.WbreakKatakana && rightProp == UnicodeTables.WbreakKatakana)
+        {
+            return false;
+        }
+
+        // Do not break from extenders.
+        // WB13a
+        if (
+            (
+                IsAhLetter(leftProp)
+                || leftProp
+                    is UnicodeTables.WbreakNumeric
+                        or UnicodeTables.WbreakKatakana
+                        or UnicodeTables.WbreakExtendnumlet
+            )
+            && rightProp == UnicodeTables.WbreakExtendnumlet
+        )
+        {
+            return false;
+        }
+
+        // WB13b
+        if (
+            leftProp == UnicodeTables.WbreakExtendnumlet
+            && (IsAhLetter(rightProp) || rightProp is UnicodeTables.WbreakNumeric or UnicodeTables.WbreakKatakana)
+        )
+        {
+            return false;
+        }
+
+        // Do not break within emoji flag sequences. That is, do not break between regional indicator
+        // (RI) symbols if there is an odd number of RI characters before the break point.
+        // WB15 and WB16
+        if (
+            rightProp == UnicodeTables.WbreakRegionalindicator
+            && CountRegionalIndicatorsLeftIgnoring(state, leftPos) % 2 == 1
+        )
+        {
+            return false;
+        }
+
+        // Otherwise, break everywhere (including around ideographs).
+        // WB999
+        return true;
+    }
+
+    /// <summary>Whether a word-break property is one of UAX #29's Newline, CR and LF.</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for a line break.</returns>
+    private static bool IsWordBreakNewline(uint v) =>
+        v is UnicodeTables.WbreakNewline or UnicodeTables.WbreakCr or UnicodeTables.WbreakLf;
+
+    /// <summary>Whether a word-break property is one WB4 ignores: Extend, Format or ZWJ.</summary>
+    /// <param name="v">A word-break property value.</param>
+    /// <returns><see langword="true"/> for an ignored character.</returns>
+    private static bool IsWordBreakIgnored(uint v) =>
+        v is UnicodeTables.WbreakExtend or UnicodeTables.WbreakFormat or UnicodeTables.WbreakZwj;
+
+    /// <summary>
+    /// UAX #29 WB4 read leftwards: the character that the ignored ones ending at
+    /// <paramref name="pos"/> belong to. A run with nothing but the start of the text or a line
+    /// break before it belongs to nothing, and then its last character stands for itself.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">A character's position, which may be before the start of the text.</param>
+    /// <returns>The position of the character to use.</returns>
+    private static int SkipIgnoredLeft(MatchState state, int pos)
+    {
+        int at = pos;
+
+        while (at >= state.TextStart && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(at))))
+        {
+            at = state.PrevPos(at);
+        }
+
+        return at < state.TextStart || IsWordBreakNewline(UnicodeTables.GetWordBreak(state.CharAt(at))) ? pos : at;
+    }
+
+    /// <summary>
+    /// UAX #29 WB4 read rightwards: the first character at or after <paramref name="pos"/> that
+    /// WB4 does not ignore, or the end of the text.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="pos">A position.</param>
+    /// <returns>That character's position, or <see cref="MatchState.TextEnd"/>.</returns>
+    private static int SkipIgnoredRight(MatchState state, int pos)
+    {
+        int at = pos;
+
+        while (at < state.TextEnd && IsWordBreakIgnored(UnicodeTables.GetWordBreak(state.CharAt(at))))
+        {
+            at = state.NextPos(at);
+        }
+
+        return at;
+    }
+
+    /// <summary>
+    /// WB15/WB16's count: how many regional indicators run leftwards from
+    /// <paramref name="leftPos"/>, with the characters WB4 ignores taken out.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="leftPos">The character to the left of the break, after WB4.</param>
+    /// <returns>The number of regional indicators.</returns>
+    private static long CountRegionalIndicatorsLeftIgnoring(MatchState state, int leftPos)
+    {
+        long count = 0;
+        int pos = leftPos;
+
+        while (
+            pos >= state.TextStart
+            && UnicodeTables.GetWordBreak(state.CharAt(pos)) == UnicodeTables.WbreakRegionalindicator
+        )
+        {
+            ++count;
+            pos = SkipIgnoredLeft(state, state.PrevPos(pos));
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Upstream <c>unicode_at_default_boundary</c> (<c>upstream/src/_regex.c</c> lines 1531-1749) as
+    /// upstream writes it, kept only for the oracle's ablation: see
+    /// <see cref="PatternObject.UpstreamDefaultBoundary"/>. The library never reaches it.
+    /// </summary>
+    /// <param name="state">The match state.</param>
+    /// <param name="textPos">The position.</param>
+    /// <returns><see langword="true"/> if upstream's default word boundary is there.</returns>
+    private static bool AtUpstreamDefaultBoundary(MatchState state, int textPos)
     {
         // Break at the start and end of text, unless the text is empty.
         // WB1 and WB2
@@ -1565,8 +1890,10 @@ internal static class Matcher
     }
 
     /// <summary>
-    /// Upstream's regional-indicator walk, which WB15/WB16 (line 1737) and GB12/GB13 (line 1919)
-    /// write out identically bar the property they read.
+    /// Upstream's regional-indicator walk, which GB12/GB13 (line 1919) and WB15/WB16 (line 1737) write
+    /// out identically bar the property they read. This port's word rule uses
+    /// <see cref="CountRegionalIndicatorsLeftIgnoring"/> instead, which skips what WB4 ignores; this
+    /// walk serves it only in <see cref="AtUpstreamDefaultBoundary"/>.
     /// </summary>
     /// <param name="state">The match state.</param>
     /// <param name="leftPos">The index of the character to the left of the position being tested.</param>

@@ -78,21 +78,18 @@ public sealed class BoundaryTests
 
     [Test]
     [Property("Upstream", "none - gap test")]
-    public void Default_word_boundary_treats_a_capital_dotted_I_as_a_vowel_after_an_apostrophe()
+    public void Default_word_boundary_breaks_between_an_apostrophe_and_a_vowel()
     {
-        // WB5a does not break between an apostrophe and a vowel, and upstream decides "vowel" by
-        // simple-lowercasing the character first. U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE
-        // lowercases to 'i', so it is a vowel; U+0131 LATIN SMALL LETTER DOTLESS I lowercases to
-        // itself and is not. Nothing else in the port needs that distinction, so without this test
-        // the whole vowel rule could be deleted and every ported test would still pass. The
-        // apostrophe has to sit at the start of the subject: between two letters WB6 and WB7 answer
-        // first and WB5a never runs.
-        //
-        // regex 2026.7.19: finditer(r"(?w)\b", "'İ") starts at 0 and 2; for "'ı" it is
-        // 0, 1 and 2.
+        // DIVERGES FROM UPSTREAM, deliberately (2026-09-26, ledger entry 40). Upstream keeps an
+        // apostrophe and a following vowel together under a rule it labels WB5a, deciding "vowel"
+        // by simple-lowercasing, so U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE counted as one and
+        // U+0131 LATIN SMALL LETTER DOTLESS I did not: finditer(r"(?w)\b", "'İ") starts at 0 and 2,
+        // and for "'ı" at 0, 1 and 2 (regex 2026.7.19, 2026-08-31). UAX #29 has no such default
+        // rule, and WordBreakTest.txt 17.0.0 line 1001 breaks "'A" after the apostrophe, so both
+        // subjects break there now. See DefaultWordBoundaryTests.
         var pattern = new FuzzyRegex(@"(?w)\b");
 
-        pattern.Match("'İ", 1).Index.Should().Be(2);
+        pattern.Match("'İ", 1).Index.Should().Be(1);
         pattern.Match("'ı", 1).Index.Should().Be(1);
     }
 }

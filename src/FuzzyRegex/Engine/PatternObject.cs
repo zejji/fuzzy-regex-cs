@@ -369,6 +369,19 @@ internal sealed class PatternObject
     /// </remarks>
     internal bool DoubleCountTrailingInsertions;
 
+    /// <summary>
+    /// NOT UPSTREAM, and never set by this library: whether the WORD flag's default word boundary
+    /// uses upstream's rules rather than UAX #29's. The oracle sets it on a pattern it compiled for
+    /// one call, to show that the ledger entry 40 fix is the whole of a divergence.
+    /// </summary>
+    /// <remarks>
+    /// Upstream applies WB4 only to the character on the left, returns "no break" when a run of
+    /// Extend, Format or ZWJ reaches the start of the text, keeps an odd run of regional indicators
+    /// with whatever follows, and adds a WB5a joining an apostrophe to a vowel. See
+    /// <c>Matcher.AtUpstreamDefaultBoundary</c> and <c>docs/DIVERGENCES.md</c>.
+    /// </remarks>
+    internal bool UpstreamDefaultBoundary;
+
     /// <summary>Upstream <c>do_search_start</c>.</summary>
     internal bool DoSearchStart;
 
