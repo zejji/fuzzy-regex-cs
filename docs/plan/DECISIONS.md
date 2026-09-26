@@ -1527,3 +1527,16 @@ Never edit or delete an entry: if a decision is reversed, add a new line saying 
   but no `\K` inside them, where the memo stays on (5.5 million rows), found none. The earlier
   grids are still clean. Two oracle wave tests also needed the treatment the entry above
   describes: their never-finishing rows are now `(a|a)*\1b` and `(a|a){1,999}$`.
+- 2026-09-26 (ledger entry 46): **a backtracking verb, nested branch, group call or fuzzy section
+  that starts (or, reversed, ends) every alternative is no longer moved out of them**, so
+  `(*SKIP)[ab]+|(*SKIP)\b` over 'ccb' is (2, 3) as in PCRE2 and Perl, not upstream's (0, 0).
+  Upstream's `can_be_affix` lets these through and the rewrite to `X(?:A|B)` then changes when a
+  verb is reached or the order in which the paths are tried; inherited, so fixed under the
+  no-known-bugs rule and pinned as a divergence. PCRE2 and Perl are the reference for the verbs,
+  branches and group calls; for fuzzy sections, which they lack, the reference is the pattern as
+  written, which is also what upstream answers when the two sections differ in any way. The fix is
+  five `CanBeAffix` overrides returning false. Upstream's delegation in `Atomic`, `LookAround` and
+  the conditionals is kept, so an atomic group or lookaround holding a branch is no longer moved
+  out either: a lost optimisation, not a changed answer, and rare. A differential over 12,000 rows
+  changed only the 272 answers in the half built from the four kinds; the half without them is
+  unchanged.

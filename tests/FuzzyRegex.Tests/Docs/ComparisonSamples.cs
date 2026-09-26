@@ -490,4 +490,13 @@ public sealed class ComparisonSamples
         backwards.Matches("e\u0301a").Select(static m => m.Length).Should().Equal(1, 2);
         new FuzzyRegex(@"(?<=^\X)b").Match("\r\nb").Index.Should().Be(2);
     }
+
+    /// <summary>"A verb, branch, group call or fuzzy section that starts every alternative stays in each one".</summary>
+    [Test]
+    public void A_verb_that_starts_every_alternative_stays_in_each_one()
+    {
+        Match m = new FuzzyRegex(@"(*SKIP)[ab]+|(*SKIP)\b").Match("ccb");
+
+        (m.Index, m.Index + m.Length).Should().Be((2, 3));
+    }
 }
